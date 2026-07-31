@@ -170,6 +170,17 @@ struct RenderContext::Impl final {
         blur->resize(width, height);
     }
 
+    void release_target() {
+        context->ClearState();
+        context->Flush();
+        target.Reset();
+        target_texture.Reset();
+        width = 0U;
+        height = 0U;
+        logical_width = 0.0;
+        logical_height = 0.0;
+    }
+
     void ensure_buffer(ComPtr<ID3D11Buffer>& buffer, std::uint32_t& capacity,
                        const std::size_t required, const UINT bind) {
         if (required == 0U || required <= capacity)
@@ -382,6 +393,10 @@ void RenderContext::set_target(ID3D11Texture2D* const texture, ID3D11RenderTarge
                                const double logical_height) {
     impl_->set_target(texture, target, framebuffer_width, framebuffer_height, logical_width,
                       logical_height);
+}
+
+void RenderContext::release_target() {
+    impl_->release_target();
 }
 
 void RenderContext::declare_material(const std::string_view id,

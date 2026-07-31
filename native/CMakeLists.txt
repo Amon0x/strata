@@ -146,6 +146,7 @@ strata_target_defaults(strata_internal_data)
 add_library(
     strata_host_support
     STATIC
+        host/browser_model.cpp
         host/extensions.cpp
         host/module_path.cpp
         host/render_packet.cpp
@@ -155,7 +156,9 @@ target_include_directories(
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
+target_link_libraries(strata_host_support PUBLIC strata_internal_data)
 set_target_properties(strata_host_support PROPERTIES POSITION_INDEPENDENT_CODE ON)
 strata_target_defaults(strata_host_support)
 
@@ -453,7 +456,6 @@ if(STRATA_BUILD_TOOLS)
         strata_headless_host
         STATIC
             headless/application_host.cpp
-            headless/browser_model.cpp
             headless/capture_renderer.cpp
             headless/interactive.cpp
             headless/png.cpp
@@ -501,6 +503,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         desktop/host.cpp
         desktop/host_services.cpp
         desktop/main.cpp
+        desktop/performance.cpp
         desktop/renderer.cpp
     )
     target_link_libraries(
@@ -719,6 +722,13 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         add_test(
             NAME strata.desktop.smoke
             COMMAND strata_desktop --smoke ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
+        )
+        add_test(
+            NAME strata.desktop.performance_smoke
+            COMMAND strata_desktop
+                --performance ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/performance/smoke.json
+                --output ${CMAKE_CURRENT_BINARY_DIR}/performance-smoke
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
         )
     endif()
 endif()

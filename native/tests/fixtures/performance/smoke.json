@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "name": "desktop-performance-smoke",
+  "window": {"width": 800, "height": 600},
+  "validity": {"requireVisible": false, "requireForeground": false},
+  "spikes": {"floorMillis": 1, "baselineMultiplier": 2, "maximumReported": 4},
+  "setup": [{"key": "f7"}, {"frames": 2}],
+  "phases": [
+    {
+      "name": "idle",
+      "warmupFrames": 2,
+      "iterations": 1,
+      "steps": [{"frames": 4}]
+    },
+    {
+      "name": "interaction",
+      "iterations": 1,
+      "steps": [
+        {"click": {"key": "repro.section.editor"}},
+        {"frames": 2}
+      ]
+    }
+  ]
+}

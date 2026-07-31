@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 
 #include "d3d11/render_context.hpp"
@@ -16,6 +17,15 @@ struct RenderPacket;
 namespace strata::desktop {
 
 using RenderLayerTelemetry = d3d11::RenderLayerTelemetry;
+
+struct RendererInfo final {
+    std::string adapter;
+    std::string driver_version;
+    std::uint32_t vendor_id = 0U;
+    std::uint32_t device_id = 0U;
+    std::uint64_t dedicated_video_memory = 0U;
+    bool vsync = true;
+};
 
 /** Win32 fidelity renderer for the backend-ready native render submission protocol. */
 class Renderer final {
@@ -42,8 +52,10 @@ class Renderer final {
     void begin_frame();
     [[nodiscard]] RenderLayerTelemetry render_layer(std::string_view id,
                                                     const host::RenderPacket& packet);
-    void end_frame();
+    /** Presents and returns false when DXGI reports the window as occluded. */
+    [[nodiscard]] bool end_frame();
     void render(const host::RenderPacket& packet);
+    [[nodiscard]] RendererInfo info() const;
 
   private:
     struct Impl;

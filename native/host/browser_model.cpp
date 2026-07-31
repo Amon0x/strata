@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace strata::headless {
+namespace strata::host {
 namespace {
 
 using data::JsonValue;
@@ -342,7 +342,7 @@ BrowserModel BrowserModel::build(const JsonValue& frame, const double viewport_w
     const JsonValue* semantics_root = semantics != nullptr ? semantics->find("root") : nullptr;
     if (inspection_root == nullptr || inspection_root->object() == nullptr ||
         semantics_root == nullptr || semantics_root->object() == nullptr) {
-        throw std::runtime_error("headless frame does not contain inspectable UI roots");
+        throw std::runtime_error("host frame does not contain inspectable UI roots");
     }
 
     GeometryIndex geometry;
@@ -355,7 +355,7 @@ BrowserModel BrowserModel::build(const JsonValue& frame, const double viewport_w
 std::pair<double, double> BrowserModel::resolve(const Selector& selector) const {
     if (selector.x.has_value()) {
         if (!selector.y.has_value() || !std::isfinite(*selector.x) || !std::isfinite(*selector.y)) {
-            throw std::invalid_argument("headless selector coordinates must be finite");
+            throw std::invalid_argument("host selector coordinates must be finite");
         }
         return {*selector.x, *selector.y};
     }
@@ -383,7 +383,7 @@ std::pair<double, double> BrowserModel::resolve(const Selector& selector) const 
             matches = std::move(retained);
     }
     if (matches.empty())
-        throw std::runtime_error("headless selector matched no semantic element");
+        throw std::runtime_error("host selector matched no semantic element");
     if (matches.size() != 1U) {
         std::string detail;
         const std::size_t shown = std::min<std::size_t>(matches.size(), 4U);
@@ -393,13 +393,13 @@ std::pair<double, double> BrowserModel::resolve(const Selector& selector) const 
             detail +=
                 matches[index]->role + " '" + matches[index]->name + "' at " + matches[index]->path;
         }
-        throw std::runtime_error("headless selector is ambiguous (" +
+        throw std::runtime_error("host selector is ambiguous (" +
                                  std::to_string(matches.size()) + " semantic elements: " + detail +
                                  ")");
     }
     const BrowserElement& match = *matches.front();
     if (!match.hit_bounds.has_value()) {
-        throw std::runtime_error("headless selector matched semantic element '" + match.name +
+        throw std::runtime_error("host selector matched semantic element '" + match.name +
                                  "' without currently clickable on-screen bounds");
     }
     return {match.hit_bounds->x + match.hit_bounds->width * 0.5,
@@ -431,4 +431,4 @@ const std::vector<BrowserElement>& BrowserModel::elements() const noexcept {
     return elements_;
 }
 
-} // namespace strata::headless
+} // namespace strata::host

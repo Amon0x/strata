@@ -35,6 +35,7 @@ class RenderContext final {
     void set_target(ID3D11Texture2D* texture, ID3D11RenderTargetView* target,
                     std::uint32_t framebuffer_width, std::uint32_t framebuffer_height,
                     double logical_width, double logical_height);
+    void release_target();
     void declare_material(std::string_view id, std::string_view hlsl_source);
     void consume_resources(const host::RenderPacket& packet);
     void begin_frame(std::array<float, 4U> clear_color, float frame_seconds);

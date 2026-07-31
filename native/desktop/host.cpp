@@ -333,11 +333,11 @@ struct Host::Impl final {
         HWND window,
         std::filesystem::path resource_root,
         std::string instance_label,
-        const bool vsync
+        const HostOptions options
     )
         : window(window),
           services(window, std::move(resource_root)),
-          renderer(window, vsync),
+          renderer(window, options.vsync),
           instance_label(std::move(instance_label)) {
         if (this->instance_label.empty()) {
             throw std::invalid_argument("desktop instance label must not be empty");
@@ -354,8 +354,10 @@ struct Host::Impl final {
             logical_width(),
             logical_height()
         );
-        create_performance_hud();
-        restore_window_geometry();
+        performance_hud_enabled = options.performance_hud;
+        profile_sampling_enabled = options.profile_sampling;
+        if (options.performance_hud) create_performance_hud();
+        if (options.restore_window_geometry) restore_window_geometry();
         RECT restored_client{};
         if (GetClientRect(window, &restored_client)) {
             framebuffer_width = static_cast<std::uint32_t>(
@@ -1749,7 +1751,8 @@ struct Host::Impl final {
     [[nodiscard]] bool render_session(
         Session& session,
         const strata_surface_frame_info& info,
-        std::int64_t* const elapsed_nanos = nullptr
+        std::int64_t* const elapsed_nanos = nullptr,
+        DesktopFrameSample* const sample = nullptr
     ) {
         const auto submit_started = std::chrono::steady_clock::now();
         const std::vector<std::uint8_t> encoded = session.surface->render_packet();
@@ -1759,6 +1762,18 @@ struct Host::Impl final {
             std::chrono::steady_clock::now() - submit_started
         ).count();
         if (elapsed_nanos != nullptr) *elapsed_nanos = submit_nanos;
+        if (sample != nullptr) {
+            sample->frame_index = info.frame_index;
+            sample->frame_time_nanos = info.frame_time_nanoseconds;
+            sample->input_events = info.processed_input_event_count;
+            sample->emitted_events = info.emitted_event_count;
+            sample->render_commands = info.render_command_count;
+            sample->packet_bytes = info.render_packet_size;
+            sample->draw_calls = packet.planned_draw_count;
+            sample->batches = packet.batches.size();
+            sample->vertices = packet.vertices.size() / 88U;
+            sample->blur_passes = render_telemetry.blur_passes;
+        }
         strata_profiler_host_frame telemetry{};
         telemetry.struct_size = sizeof(strata_profiler_host_frame);
         telemetry.version = STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT;
@@ -1826,6 +1841,7 @@ struct Host::Impl final {
         bool had_draws = false;
         std::int64_t showcase_native_nanos = 0;
         std::int64_t showcase_submit_nanos = 0;
+        DesktopFrameSample sample;
         if (showcase_enabled && showcase.surface.has_value()) {
             const auto native_started = std::chrono::steady_clock::now();
             const strata_surface_frame_info info = showcase.surface->frame(frame_time);
@@ -1838,7 +1854,9 @@ struct Host::Impl final {
                 first_frame_contains_instance =
                     canonical_frame.find(instance_label) != std::string::npos;
             }
-            had_draws = render_session(showcase, info, &showcase_submit_nanos) || had_draws;
+            had_draws = render_session(
+                showcase, info, &showcase_submit_nanos, &sample
+            ) || had_draws;
         }
         if (settings_enabled && settings.surface.has_value()) {
             const strata_surface_frame_info info = settings.surface->frame(frame_time);
@@ -1865,7 +1883,7 @@ struct Host::Impl final {
             ).count();
         }
         const auto present_started = std::chrono::steady_clock::now();
-        renderer.end_frame();
+        const bool presented = renderer.end_frame();
         const std::int64_t present_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - present_started
         ).count();
@@ -1879,7 +1897,7 @@ struct Host::Impl final {
         showcase_submit_timings.add(showcase_submit_nanos);
         tooling_timings.add(tooling_nanos);
         present_timings.add(present_nanos);
-        if (frame_time >= next_profile_capture) {
+        if (profile_sampling_enabled && frame_time >= next_profile_capture) {
             capture_profile_snapshot();
             next_profile_capture = frame_time + 100'000'000;
         }
@@ -1893,6 +1911,14 @@ struct Host::Impl final {
             first_render_fingerprint = fingerprint(std::span(canonical_frame));
             first_frame_contains_instance = true;
         }
+        sample.total_nanos = total_nanos;
+        sample.core_nanos = showcase_native_nanos;
+        sample.submit_nanos = showcase_submit_nanos;
+        sample.tooling_nanos = tooling_nanos;
+        sample.present_nanos = present_nanos;
+        sample.had_draws = had_draws;
+        sample.presented = presented;
+        last_performance_sample = sample;
         ++rendered_frames;
         last_frame_had_draws = had_draws;
     }
@@ -1916,6 +1942,7 @@ struct Host::Impl final {
     TimingWindow showcase_submit_timings;
     TimingWindow tooling_timings;
     TimingWindow present_timings;
+    DesktopFrameSample last_performance_sample;
     std::optional<strata_input_event> pending_pointer_move;
     std::string data_activity = "none yet";
     std::string debug_mode = "DIAGNOSTICS";
@@ -1938,6 +1965,7 @@ struct Host::Impl final {
     bool settings_enabled = false;
     bool debug_enabled = false;
     bool performance_hud_enabled = true;
+    bool profile_sampling_enabled = true;
     bool hub_enabled = false;
     std::deque<double> frame_history;
     bool tree_snapshot_dirty = false;
@@ -1959,10 +1987,10 @@ Host::Host(
     HWND window,
     std::filesystem::path resource_root,
     std::string instance_label,
-    const bool vsync
+    const HostOptions options
 )
     : impl_(std::make_unique<Impl>(
-          window, std::move(resource_root), std::move(instance_label), vsync
+          window, std::move(resource_root), std::move(instance_label), options
       )) {}
 Host::~Host() = default;
 
@@ -2063,6 +2091,34 @@ void Host::persist_window_geometry() {
 
 void Host::frame() { impl_->frame(); }
 double Host::scale() const noexcept { return impl_->display_scale; }
+
+const DesktopFrameSample& Host::last_frame_sample() const noexcept {
+    return impl_->last_performance_sample;
+}
+
+DesktopHostInfo Host::performance_info() const {
+    const RendererInfo renderer = impl_->renderer.info();
+    return DesktopHostInfo{
+        renderer.adapter,
+        renderer.driver_version,
+        renderer.vendor_id,
+        renderer.device_id,
+        renderer.dedicated_video_memory,
+        impl_->framebuffer_width,
+        impl_->framebuffer_height,
+        impl_->logical_width(),
+        impl_->logical_height(),
+        impl_->display_scale,
+        renderer.vsync,
+    };
+}
+
+std::string Host::performance_frame_json() {
+    if (!impl_->showcase.surface.has_value()) {
+        throw std::logic_error("desktop performance selectors require an open showcase");
+    }
+    return impl_->showcase.surface->frame_json();
+}
 
 bool Host::smoke_ready() const noexcept {
     return impl_->rendered_frames >= 2U && impl_->last_frame_had_draws;

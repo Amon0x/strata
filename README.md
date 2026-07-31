@@ -64,11 +64,18 @@ D3D11/WARP target through the production texture, blur, and authored-HLSL materi
 The host supports replayable scenarios and a persistent newline-delimited JSON inspect/control loop
 for exploratory tooling. See [Headless application testing](docs/headless-testing.md).
 
+## Desktop performance testing
+
+`gradlew.bat benchmarkDesktop` runs a visible foreground, uncapped Win32/D3D11 workload and writes
+machine-readable measurements plus an HTML frame-time report. See
+[Desktop performance testing](docs/performance-testing.md).
+
 ## Embedding and authoring
 
 - [C/C++ embedding guide](docs/embedding.md)
 - [Native ABI and build notes](native/README.md)
 - [Headless application testing](docs/headless-testing.md)
+- [Desktop performance testing](docs/performance-testing.md)
 - [`.strata` authoring guide](docs/strata-authoring.md)
 - [Language syntax](docs/strata-language.md)
 - [Testing guide](docs/testing.md)

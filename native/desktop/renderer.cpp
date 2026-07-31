@@ -34,6 +34,20 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
         fail_hresult(operation, result);
 }
 
+[[nodiscard]] std::string utf8(const wchar_t* value) {
+    if (value == nullptr || *value == L'\0') return {};
+    const int length = lstrlenW(value);
+    const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, length, nullptr, 0,
+                                         nullptr, nullptr);
+    if (size <= 0) return {};
+    std::string result(static_cast<std::size_t>(size), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, length, result.data(), size,
+                            nullptr, nullptr) != size) {
+        throw std::runtime_error("DXGI adapter name is not valid Unicode");
+    }
+    return result;
+}
+
 } // namespace
 
 struct Renderer::Impl final {
@@ -46,6 +60,7 @@ struct Renderer::Impl final {
         else if (com_status != RPC_E_CHANGED_MODE)
             fail_hresult("COM initialization", com_status);
         create_device();
+        capture_adapter_info();
         renderer = std::make_unique<d3d11::RenderContext>(device.Get(), context.Get());
         RECT client{};
         if (!GetClientRect(window, &client))
@@ -83,6 +98,31 @@ struct Renderer::Impl final {
                         "D3D11 device creation");
     }
 
+    void capture_adapter_info() {
+        ComPtr<IDXGIDevice> dxgi_device;
+        require_hresult(device.As(&dxgi_device), "DXGI device query");
+        ComPtr<IDXGIAdapter> adapter;
+        require_hresult(dxgi_device->GetAdapter(&adapter), "DXGI adapter query");
+        DXGI_ADAPTER_DESC description{};
+        require_hresult(adapter->GetDesc(&description), "DXGI adapter description");
+        info.adapter = utf8(description.Description);
+        LARGE_INTEGER driver{};
+        if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &driver))) {
+            const std::uint64_t encoded = static_cast<std::uint64_t>(driver.QuadPart);
+            info.driver_version =
+                std::to_string((encoded >> 48U) & 0xFFFFU) + "." +
+                std::to_string((encoded >> 32U) & 0xFFFFU) + "." +
+                std::to_string((encoded >> 16U) & 0xFFFFU) + "." +
+                std::to_string(encoded & 0xFFFFU);
+        }
+        info.vendor_id = description.VendorId;
+        info.device_id = description.DeviceId;
+        info.dedicated_video_memory = static_cast<std::uint64_t>(
+            description.DedicatedVideoMemory
+        );
+        info.vsync = vsync;
+    }
+
     void resize(const std::uint32_t next_width, const std::uint32_t next_height,
                 const double next_logical_width, const double next_logical_height) {
         if (next_width == 0U || next_height == 0U || next_logical_width <= 0.0 ||
@@ -90,7 +130,7 @@ struct Renderer::Impl final {
             throw std::invalid_argument("desktop viewport must be positive");
         }
         if (next_width != width || next_height != height || target == nullptr) {
-            context->OMSetRenderTargets(0U, nullptr, nullptr);
+            renderer->release_target();
             target.Reset();
             back_buffer.Reset();
             require_hresult(
@@ -114,8 +154,11 @@ struct Renderer::Impl final {
         renderer->begin_frame(clear, elapsed);
     }
 
-    void end_frame() {
-        require_hresult(swap_chain->Present(vsync ? 1U : 0U, 0U), "swap-chain presentation");
+    [[nodiscard]] bool end_frame() {
+        const HRESULT result = swap_chain->Present(vsync ? 1U : 0U, 0U);
+        if (result == DXGI_STATUS_OCCLUDED) return false;
+        require_hresult(result, "swap-chain presentation");
+        return true;
     }
 
     HWND window = nullptr;
@@ -129,6 +172,7 @@ struct Renderer::Impl final {
     ComPtr<ID3D11Texture2D> back_buffer;
     ComPtr<ID3D11RenderTargetView> target;
     std::unique_ptr<d3d11::RenderContext> renderer;
+    RendererInfo info;
     std::chrono::steady_clock::time_point started_at = std::chrono::steady_clock::now();
 };
 
@@ -159,14 +203,16 @@ RenderLayerTelemetry Renderer::render_layer(const std::string_view id,
     return impl_->renderer->render_layer(id, packet);
 }
 
-void Renderer::end_frame() {
-    impl_->end_frame();
+bool Renderer::end_frame() {
+    return impl_->end_frame();
 }
 
 void Renderer::render(const host::RenderPacket& packet) {
     begin_frame();
     static_cast<void>(render_layer("default", packet));
-    end_frame();
+    static_cast<void>(end_frame());
 }
+
+RendererInfo Renderer::info() const { return impl_->info; }
 
 } // namespace strata::desktop

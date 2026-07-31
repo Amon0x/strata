@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "name": "showcase-desktop",
+  "window": {"width": 1280, "height": 800},
+  "validity": {"requireForeground": true},
+  "spikes": {
+    "floorMillis": 2.0,
+    "baselineMultiplier": 2.5,
+    "maximumReported": 32
+  },
+  "regression": {
+    "maximumAveragePercent": 10.0,
+    "maximumP95Percent": 15.0,
+    "maximumP99Percent": 20.0,
+    "minimumAbsoluteMillis": 0.1
+  },
+  "setup": [
+    {"key": "f7"},
+    {"frames": 3}
+  ],
+  "phases": [
+    {
+      "name": "warm-idle",
+      "warmupFrames": 120,
+      "iterations": 1,
+      "steps": [{"frames": 360}]
+    },
+    {
+      "name": "tab-switching",
+      "warmupFrames": 30,
+      "warmupIterations": 2,
+      "iterations": 20,
+      "steps": [
+        {"click": {"role": "tab", "name": "FORMS"}},
+        {"frames": 4},
+        {"click": {"role": "tab", "name": "SHELL"}},
+        {"frames": 4},
+        {"click": {"role": "tab", "name": "EXTEND"}},
+        {"frames": 4}
+      ]
+    },
+    {
+      "name": "scrolling-clipped-content",
+      "warmupFrames": 30,
+      "warmupIterations": 2,
+      "iterations": 60,
+      "steps": [
+        {"scroll": {"key": "targets.page.scroll.extend", "deltaY": -4}},
+        {"frames": 2},
+        {"scroll": {"key": "targets.page.scroll.extend", "deltaY": 4}},
+        {"frames": 2}
+      ]
+    },
+    {
+      "name": "ordinary-interactions",
+      "warmupFrames": 20,
+      "iterations": 30,
+      "steps": [
+        {"click": {"key": "repro.section.editor"}},
+        {"frames": 2},
+        {"click": {"key": "repro.section"}},
+        {"frames": 3},
+        {"click": {"key": "repro.section"}},
+        {"frames": 3}
+      ]
+    }
+  ]
+}

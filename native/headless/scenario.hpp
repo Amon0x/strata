@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "data/json.hpp"
+#include "host/browser_model.hpp"
 
 namespace strata::headless {
 
@@ -28,14 +29,7 @@ struct SnapshotConfig final {
     data::JsonValue values;
 };
 
-struct Selector final {
-    std::optional<std::string> path;
-    std::optional<std::string> key;
-    std::optional<std::string> name;
-    std::optional<std::string> role;
-    std::optional<double> x;
-    std::optional<double> y;
-};
+using Selector = host::Selector;
 
 struct AdvanceStep final {
     std::int64_t duration_nanoseconds = 0;

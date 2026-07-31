@@ -104,6 +104,28 @@ val buildNative = tasks.register<Exec>("buildNative") {
     }
 }
 
+val benchmarkDesktop = tasks.register<Exec>("benchmarkDesktop") {
+    group = "benchmark"
+    description = "Runs the visible uncapped Win32/D3D11 showcase performance scenario."
+    dependsOn(buildNative)
+    doFirst {
+        val output = layout.buildDirectory.dir("performance/showcase-desktop").get().asFile
+        output.deleteRecursively()
+        val arguments = mutableListOf(
+            nativeBuildDirectory.get().file("RelWithDebInfo/strata_desktop.exe").asFile.absolutePath,
+            "--performance",
+            layout.projectDirectory.file("native/tests/fixtures/performance/showcase.json").asFile.absolutePath,
+            "--output",
+            output.absolutePath,
+        )
+        providers.gradleProperty("performanceBaseline").orNull?.let {
+            arguments += listOf("--baseline", file(it).absolutePath)
+        }
+        arguments += layout.projectDirectory.dir("src/main/resources").asFile.absolutePath
+        commandLine(arguments)
+    }
+}
+
 val checkNative = tasks.register<Exec>("checkNative") {
     group = "verification"
     description = "Runs native unit, ABI, regression, and C/C++ embedding tests through CTest."

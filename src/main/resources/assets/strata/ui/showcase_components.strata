@@ -812,7 +812,7 @@ component ExtendPage() {
         semantics: { label: "Target 11 selectable document", description: "Rich text containing an action link" }
       )
       Text(
-        text: "F8 → Semantics shows the text node and its link child; pointer or keyboard activation emits the probe action.",
+        text: "F8 then Semantics shows the text node and its link child; pointer or keyboard activation emits the probe action.",
         wrapMode: "WORD",
         selectionContainer: "semantic-document"
       )
