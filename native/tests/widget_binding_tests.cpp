@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include "compiler/source.hpp"
 #include "data/json.hpp"
@@ -522,6 +523,95 @@ overlay Main { root ControlDefaults() }
     );
 }
 
+void test_scrolled_clipped_subtree_render_cache(
+    const std::filesystem::path& registry_path,
+    const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
+) {
+    constexpr std::string_view source = R"(
+overlay Main {
+  root Scroll(
+    key: "cache.scroll",
+    vertical: true,
+    horizontal: false,
+    layout: { kind: "SCROLL", width: 280, height: 120 }
+  ) {
+    Panel(key: "cache.top", layout: { width: 240, height: 160, clip: true }) {
+      Text(text: "Top clipped content")
+    }
+    Panel(key: "cache.bottom", layout: { width: 240, height: 160, clip: true }) {
+      Text(text: "Bottom clipped content")
+    }
+  }
+}
+)";
+
+    strata::runtime::ApplicationContext application("scroll-clip-cache", bundle);
+    const strata::runtime::ActivationResult activation = application.compile_and_activate(
+        strata::compiler::ModuleSource{"scroll-clip-cache.strata", std::string(source)},
+        no_imports(),
+        0U
+    );
+    check(activation.activated(), "scroll clip-cache fixture did not activate");
+
+    strata::ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 180;
+    environment.logical_width = 320.0;
+    environment.logical_height = 180.0;
+    environment.reduced_motion = true;
+    environment.input = strata::ui::SurfaceInputCapabilities{
+        true,
+        strata::ui::PointerPrecision::fine,
+        true,
+        false,
+        true,
+        true,
+        false,
+    };
+    const std::filesystem::path resources = registry_path.parent_path().parent_path();
+    strata::ui::Surface surface(
+        "scroll-clip-cache",
+        application,
+        strata::runtime::LayerRole::overlay,
+        "Main",
+        environment,
+        strata::ui::TextEngine::load_control_font(
+            resources,
+            strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        )
+    );
+    static_cast<void>(surface.frame(1'000'000));
+    check(
+        surface.animate_scroll_to(strata::ui::ScrollAnimationRequest{
+            "cache.scroll", std::nullopt, 160.0, "standard", std::nullopt,
+        }),
+        "scroll clip-cache fixture did not accept a scroll offset"
+    );
+    static_cast<void>(surface.frame(2'000'000));
+
+    const strata::ui::RetainedNode* bottom = surface.tree().find_key("cache.bottom");
+    const strata::ui::LayoutRecord* bottom_layout = bottom != nullptr
+        ? surface.layout().find(bottom->identity())
+        : nullptr;
+    check(
+        bottom_layout != nullptr && bottom_layout->clip.has_value() &&
+            !bottom_layout->clip->empty(),
+        "scrolled clipped subtree did not enter the viewport"
+    );
+    bool emitted_current_clip = false;
+    for (const strata::ui::RenderCommand& command : surface.render_commands().commands()) {
+        const auto* clip = std::get_if<strata::ui::ClipPushRenderCommand>(&command);
+        if (clip != nullptr && clip->rect == *bottom_layout->clip) {
+            emitted_current_clip = true;
+            break;
+        }
+    }
+    check(
+        emitted_current_clip,
+        "retained subtree translation reused a stale pre-scroll clip"
+    );
+}
+
 void test_typed_host_keys_and_derived_collection_metadata(
     const std::filesystem::path& registry_path
 ) {
@@ -641,6 +731,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_binding_initial_value_and_round_trip(registry_path, bundle);
         test_section_content_and_activation_contract(registry_path, bundle);
         test_range_and_choice_control_defaults(registry_path, bundle);
+        test_scrolled_clipped_subtree_render_cache(registry_path, bundle);
         test_typed_host_keys_and_derived_collection_metadata(registry_path);
         std::cout << "strata_widget_binding_tests: OK\n";
         return 0;

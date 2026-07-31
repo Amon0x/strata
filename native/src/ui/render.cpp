@@ -826,6 +826,7 @@ RenderOperationCounters RenderEngine::render(
         composition.subtree_translation_safe =
             record->kind != LayoutKind::scroll &&
             record->kind != LayoutKind::portal &&
+            !record->local_clip.has_value() &&
             !record->virtual_axis.has_value() &&
             !record->virtual_item_extents.has_value() &&
             !record->visible_range.has_value();
