@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -994,6 +995,57 @@ void test_static_text_container_owner_transition(InputFixture& fixture) {
     });
 }
 
+void test_slider_pointer_matches_rendered_track(InputFixture& fixture) {
+    ui::DescriptionNode::Properties properties;
+    properties.emplace("defaultValue", runtime::ExpressionValue(runtime::Value(40.0)));
+    properties.emplace("min", runtime::ExpressionValue(runtime::Value(0.0)));
+    properties.emplace("max", runtime::ExpressionValue(runtime::Value(100.0)));
+    properties.emplace("step", runtime::ExpressionValue(runtime::Value(1.0)));
+    properties.emplace("$layout", runtime::ExpressionValue(object({
+        {"height", runtime::Value(24.0)},
+        {"indicatorInset", runtime::Value(12.0)},
+        {"kind", runtime::Value("PANEL")},
+        {"width", runtime::Value(240.0)},
+    })));
+    fixture.adopt(node("Slider", "slider.geometry", {}, std::move(properties)));
+
+    const ui::Rect bounds = fixture.bounds("slider.geometry").bounds;
+    const double track_width = bounds.width - 24.0;
+    const auto click_fraction = [&fixture, &bounds, track_width](
+                                    const double fraction,
+                                    const std::int32_t pointer_id
+                                ) {
+        const ui::Point point{
+            bounds.x + 12.0 + track_width * fraction,
+            bounds.y + bounds.height * 0.5,
+        };
+        static_cast<void>(fixture.pointer({
+            ui::PointerInputEvent{point, ui::PointerEventType::press, pointer_id, 0},
+            ui::PointerInputEvent{point, ui::PointerEventType::release, pointer_id, 0},
+        }));
+    };
+    const auto value = [&fixture]() -> double {
+        const ui::RetainedNode* slider = fixture.tree_.find_key("slider.geometry");
+        const runtime::Value* retained = slider != nullptr
+            ? slider->retained_value("$value")
+            : nullptr;
+        return retained != nullptr && retained->number() != nullptr
+            ? *retained->number()
+            : -1.0;
+    };
+
+    click_fraction(0.4, 40);
+    check(
+        std::abs(value() - 40.0) <= 0.0001,
+        "clicking the rendered Slider thumb changed its value"
+    );
+    click_fraction(0.556, 41);
+    check(
+        std::abs(value() - 56.0) <= 0.0001,
+        "Slider pointer input ignored its rendered track or authored step"
+    );
+}
+
 void test_choice_semantics(InputFixture& fixture) {
     ui::DescriptionNode::Properties controlled = sized(240.0, 32.0);
     controlled.emplace("tabs", runtime::ExpressionValue(choices()));
@@ -1708,6 +1760,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_wrapped_static_text_navigation(fixture);
         test_wrapped_editor_pointer_navigation(fixture);
         test_static_text_container_owner_transition(fixture);
+        test_slider_pointer_matches_rendered_track(fixture);
         test_choice_semantics(fixture);
         test_tooltip_disclosure(fixture);
         test_manipulation_slop(fixture);

@@ -11,6 +11,7 @@
 #include "data/json.hpp"
 #include "resource/resource.hpp"
 #include "runtime/application.hpp"
+#include "ui/frame_snapshot.hpp"
 #include "ui/surface.hpp"
 #include "ui/text.hpp"
 
@@ -396,6 +397,131 @@ overlay Main { root SectionFixture() }
     );
 }
 
+void test_range_and_choice_control_defaults(
+    const std::filesystem::path& registry_path,
+    const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
+) {
+    constexpr std::string_view source = R"(
+component ControlDefaults() {
+  state quality = "balanced";
+  state mode = "windowed";
+  Panel(layout: { kind: "COLUMN", width: 420, height: "content", gap: 8 }) {
+    Select(
+      key: "defaults.select",
+      options: [
+        { id: "fast", label: "Fast" },
+        { id: "balanced", label: "Balanced" },
+        { id: "quality", label: "High quality" }
+      ],
+      bind: quality
+    )
+    RadioGroup(
+      key: "defaults.radio",
+      options: [
+        { id: "windowed", label: "Windowed" },
+        { id: "borderless", label: "Borderless" },
+        { id: "fullscreen", label: "Fullscreen" }
+      ],
+      bind: mode
+    )
+  }
+}
+overlay Main { root ControlDefaults() }
+)";
+
+    strata::runtime::ApplicationContext application("control-defaults", bundle);
+    const strata::runtime::ActivationResult activation = application.compile_and_activate(
+        strata::compiler::ModuleSource{"control-defaults.strata", std::string(source)},
+        no_imports(),
+        0U
+    );
+    check(activation.activated(), "range/choice defaults fixture did not activate");
+
+    strata::ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 520;
+    environment.framebuffer_height = 320;
+    environment.logical_width = 520.0;
+    environment.logical_height = 320.0;
+    environment.reduced_motion = true;
+    environment.input = strata::ui::SurfaceInputCapabilities{
+        true,
+        strata::ui::PointerPrecision::fine,
+        true,
+        false,
+        true,
+        true,
+        false,
+    };
+    const std::filesystem::path resources = registry_path.parent_path().parent_path();
+    strata::ui::Surface surface(
+        "control-defaults",
+        application,
+        strata::runtime::LayerRole::overlay,
+        "Main",
+        environment,
+        strata::ui::TextEngine::load_control_font(
+            resources,
+            strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        )
+    );
+    const strata::ui::SurfaceFrame frame = surface.frame(1'000'000);
+
+    const strata::ui::RetainedNode* select = surface.tree().find_key("defaults.select");
+    const strata::ui::RetainedNode* radio = surface.tree().find_key("defaults.radio");
+    const strata::ui::LayoutRecord* select_layout = select != nullptr
+        ? surface.layout().find(select->identity())
+        : nullptr;
+    const strata::ui::LayoutRecord* radio_layout = radio != nullptr
+        ? surface.layout().find(radio->identity())
+        : nullptr;
+    check(
+        select_layout != nullptr && select_layout->bounds.height == 32.0 &&
+            radio_layout != nullptr && radio != nullptr && radio->children().size() == 3U,
+        "range/choice defaults lost their standard control geometry"
+    );
+    for (const auto& child : radio->children()) {
+        const strata::ui::LayoutRecord* row = surface.layout().find(child->identity());
+        const auto style = child->description().properties.find("$layout");
+        const strata::runtime::Value* layout = style != child->description().properties.end()
+            ? style->second.value()
+            : nullptr;
+        check(
+            row != nullptr && row->bounds.width == radio_layout->bounds.width &&
+                layout != nullptr && layout->field("background") != nullptr &&
+                layout->field("background")->kind() == strata::runtime::ValueKind::null_value &&
+                layout->field("border") != nullptr &&
+                layout->field("border")->kind() == strata::runtime::ValueKind::null_value,
+            "RadioGroup option rows did not remain full-width transparent internals"
+        );
+    }
+    const strata::data::JsonValue* radio_semantics = surface.semantics().find(radio->identity());
+    const strata::data::JsonValue* semantic_children = radio_semantics != nullptr
+        ? radio_semantics->find("children")
+        : nullptr;
+    check(
+        semantic_children != nullptr && semantic_children->array() != nullptr &&
+            semantic_children->array()->size() == 3U,
+        "RadioGroup synthesized rows duplicated its virtual radio semantics"
+    );
+
+    const strata::data::JsonValue snapshot = strata::ui::surface_frame_snapshot(surface, frame);
+    const strata::data::JsonValue* commands = snapshot.find("renderCommands");
+    bool found_chevron = false;
+    bool found_image = false;
+    if (commands != nullptr && commands->array() != nullptr) {
+        for (const strata::data::JsonValue& command : *commands->array()) {
+            const strata::data::JsonValue* kind = command.find("kind");
+            if (kind == nullptr || kind->string() == nullptr) continue;
+            found_chevron = found_chevron || *kind->string() == "path";
+            found_image = found_image || *kind->string() == "image";
+        }
+    }
+    check(
+        found_chevron && !found_image,
+        "Select default indicator still depended on a host-provided image"
+    );
+}
+
 void test_typed_host_keys_and_derived_collection_metadata(
     const std::filesystem::path& registry_path
 ) {
@@ -514,6 +640,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_semantic_binding_rejections(bundle);
         test_binding_initial_value_and_round_trip(registry_path, bundle);
         test_section_content_and_activation_contract(registry_path, bundle);
+        test_range_and_choice_control_defaults(registry_path, bundle);
         test_typed_host_keys_and_derived_collection_metadata(registry_path);
         std::cout << "strata_widget_binding_tests: OK\n";
         return 0;

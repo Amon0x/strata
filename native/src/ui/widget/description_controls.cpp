@@ -88,7 +88,7 @@ void tabs_defaults(WidgetLayoutDefaultsScope& scope) {
 }
 
 void select_defaults(WidgetLayoutDefaultsScope& scope) {
-    scope.set("height", runtime::Value(24.0));
+    scope.set("height", runtime::Value(32.0));
     scope.set("width", runtime::Value(180.0));
     scope.padding(10.0, 6.0, 10.0, 6.0);
 }
@@ -97,7 +97,7 @@ void radio_group_defaults(WidgetLayoutDefaultsScope& scope) {
     scope.set("gap", runtime::Value(4.0));
     scope.set("height", runtime::Value("content"));
     scope.set("kind", runtime::Value("COLUMN"));
-    scope.set("width", runtime::Value("content"));
+    scope.set("width", widget_fill());
 }
 
 void combo_box_defaults(WidgetLayoutDefaultsScope& scope) {
@@ -116,25 +116,18 @@ void radio_group_expand(WidgetDescriptionScope& scope) {
     if (!description.properties.contains("onChange")) {
         description.properties.emplace("onChange", scope.action("RadioGroup"));
     }
-    const bool group_enabled = scope.boolean("enabled", true);
     for (const runtime::Value* option : scope.list("options")) {
         const std::string* id = widget_description_string(option->field("id"));
         const std::string* label = widget_description_string(option->field("label"));
         if (id == nullptr || id->empty() || label == nullptr) continue;
-        DescriptionNode::Properties label_properties = widget_text_properties(*label);
-        scope.set_layout(label_properties, "alignSelf", runtime::Value("CENTER"));
-        scope.set_layout(label_properties, "justifySelf", runtime::Value("START"));
-        const runtime::Value* item_enabled = option->field("enabled");
-        if (!group_enabled || (item_enabled != nullptr && item_enabled->boolean() != nullptr &&
-                               !*item_enabled->boolean())) {
-            label_properties.emplace(
-                "color",
-                runtime::ExpressionValue(runtime::Value(runtime::ColorValue{160U, 168U, 178U, 220U}))
-            );
-        }
-        DescriptionNode::Properties item_properties = widget_transparent_properties();
+        DescriptionNode::Properties item_properties;
+        item_properties.emplace("semantics", runtime::ExpressionValue(widget_object({
+            {"decorative", runtime::Value(true)},
+        })));
         item_properties.emplace("$layout", runtime::ExpressionValue(widget_object({
             {"alignItems", runtime::Value("CENTER")},
+            {"background", runtime::Value{}},
+            {"border", runtime::Value{}},
             {"height", runtime::Value(28.0)},
             {"kind", runtime::Value("PANEL")},
             {"padding", widget_object({
@@ -143,15 +136,14 @@ void radio_group_expand(WidgetDescriptionScope& scope) {
                 {"right", runtime::Value(8.0)},
                 {"top", runtime::Value(5.0)},
             })},
-            {"width", runtime::Value(180.0)},
+            {"width", widget_fill()},
         })));
         description.children.push_back(scope.node(
             "Panel",
             *description.key + "." + *id,
-            std::move(item_properties),
-            {scope.node("Text", std::nullopt, std::move(label_properties))}
+            std::move(item_properties)
         ));
-        scope.synthesized(2U);
+        scope.synthesized(1U);
     }
 }
 

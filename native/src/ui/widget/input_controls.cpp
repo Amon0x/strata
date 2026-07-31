@@ -35,14 +35,36 @@ bool slider_change_at_pointer(WidgetInputScope& scope) {
     const bool vertical = scope.property("axis") != nullptr &&
                           scope.property("axis")->string() != nullptr &&
                           *scope.property("axis")->string() == "VERTICAL";
+    const runtime::Value* authored_style = scope.property("$layout");
+    const runtime::Value* authored_inset = authored_style != nullptr
+        ? authored_style->field("indicatorInset")
+        : nullptr;
+    const double available = layout == nullptr
+        ? 0.0
+        : vertical ? layout->bounds.height : layout->bounds.width;
+    const double inset = std::clamp(
+        authored_inset != nullptr && authored_inset->number() != nullptr
+            ? *authored_inset->number()
+            : 7.0,
+        0.0,
+        available * 0.5
+    );
+    const double track_extent = std::max(available - inset * 2.0, 1.0);
     const double fraction = layout == nullptr
-                                ? 0.5
-                                : vertical
-                                      ? 1.0 - (position.y - layout->bounds.y) /
-                                                  std::max(layout->bounds.height, 1.0)
-                                      : (position.x - layout->bounds.x) /
-                                            std::max(layout->bounds.width, 1.0);
-    const double next = minimum + (maximum - minimum) * std::clamp(fraction, 0.0, 1.0);
+        ? 0.5
+        : vertical
+            ? 1.0 - (position.y - layout->bounds.y - inset) / track_extent
+            : (position.x - layout->bounds.x - inset) / track_extent;
+    const double raw = minimum +
+        (maximum - minimum) * std::clamp(fraction, 0.0, 1.0);
+    const runtime::Value* step_value = scope.property("step");
+    const double step = step_value != nullptr && step_value->number() != nullptr
+        ? std::max(0.0, *step_value->number())
+        : 0.0;
+    const double snapped = step > 0.0
+        ? minimum + std::round((raw - minimum) / step) * step
+        : raw;
+    const double next = std::clamp(snapped, minimum, maximum);
     scope.set_retained("$value", runtime::Value(next), DirtyReason::properties);
     scope.number_changed("onChange", next);
     return true;

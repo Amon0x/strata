@@ -694,6 +694,9 @@ component DataPage() {
 component ExtendPage() {
   state materialEnabled = false;
   state motionDetailed = false;
+  state basicLevel = 40;
+  state basicQuality = "balanced";
+  state basicMode = "windowed";
   Panel(style: PageColumn) {
     Card(title: "SECTION CONTENT + CHILD INPUT") {
       Section(key: "repro.section", label: "Expanded section containing an editor", defaultExpanded: true) {
@@ -720,6 +723,29 @@ component ExtendPage() {
         motions: [{ id: "extension.hover", interaction: "HOVER", animation: ExtensionHoverMotion }]
       )
       Text(text: "Hover adds a full-surface tint. Click increments the visible count and the thin progress strip, then opens the native popup. The two cues never compete for the same geometry.", wrapMode: "WORD")
+    }
+    Card(title: "BASIC RANGE + CHOICE DEFAULTS") {
+      Text(text: format("Level: {0}", basicLevel))
+      Slider(key: "basic.level", min: 0, max: 100, step: 1, bind: basicLevel)
+      Select(
+        key: "basic.quality",
+        options: [
+          { id: "fast", label: "Fast" },
+          { id: "balanced", label: "Balanced" },
+          { id: "quality", label: "High quality" }
+        ],
+        bind: basicQuality
+      )
+      RadioGroup(
+        key: "basic.mode",
+        options: [
+          { id: "windowed", label: "Windowed" },
+          { id: "borderless", label: "Borderless" },
+          { id: "fullscreen", label: "Fullscreen" }
+        ],
+        bind: basicMode
+      )
+      Text(text: format("{0} · {1}", basicQuality, basicMode), style: TelemetryText)
     }
     Card(title: "COMPOSABLE BEHAVIORS") {
       Panel(

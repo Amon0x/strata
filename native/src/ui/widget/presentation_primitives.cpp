@@ -6,6 +6,7 @@
 #include "ui/status.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
+#include "ui/widget/icon_geometry.hpp"
 #include "ui/widget/menu_model.hpp"
 
 namespace strata::ui {
@@ -89,16 +90,6 @@ void section_content(WidgetRenderScope& scope) {
         std::max(0.0, header.height - 12.0)
     );
     if (indicator_size > 0.0) {
-        Path indicator;
-        if (expanded) {
-            indicator.move_to(Point{0.12, 0.32});
-            indicator.line_to(Point{0.5, 0.68});
-            indicator.line_to(Point{0.88, 0.32});
-        } else {
-            indicator.move_to(Point{0.32, 0.12});
-            indicator.line_to(Point{0.68, 0.5});
-            indicator.line_to(Point{0.32, 0.88});
-        }
         scope.shape(
             Rect{
                 header.x + 10.0,
@@ -106,12 +97,10 @@ void section_content(WidgetRenderScope& scope) {
                 indicator_size,
                 indicator_size,
             },
-            PathShape{
-                std::move(indicator),
-                std::nullopt,
-                Paint(scope.visual().foreground),
-                StrokeStyle{1.5, PathCap::round, PathJoin::round},
-            }
+            widget_chevron(
+                expanded ? WidgetChevronDirection::down : WidgetChevronDirection::right,
+                scope.visual().foreground
+            )
         );
     }
 

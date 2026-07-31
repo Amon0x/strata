@@ -10,6 +10,7 @@
 #include "ui/text.hpp"
 #include "ui/widget/editor_geometry.hpp"
 #include "ui/widget/choice_model.hpp"
+#include "ui/widget/icon_geometry.hpp"
 
 namespace strata::ui {
 namespace {
@@ -464,16 +465,15 @@ void select_content(WidgetRenderScope& scope) {
             scope.visual().foreground
         );
     }
-    const double icon_size = std::min(cap.width, cap.height) * 0.55;
-    scope.image(
+    const double icon_size = std::min(cap.width, cap.height) * 0.45;
+    scope.shape(
         Rect{
             cap.x + (cap.width - icon_size) * 0.5,
             cap.y + (cap.height - icon_size) * 0.5,
             icon_size,
             icon_size,
         },
-        "strata:ui/icons/chevron-down",
-        scope.visual().foreground
+        widget_chevron(WidgetChevronDirection::down, scope.visual().foreground)
     );
     scope.interaction(scope.layout().bounds, "$control");
     scope.focus(scope.layout().bounds);
@@ -514,6 +514,7 @@ void select_overlay(WidgetRenderScope& scope) {
 void radio_foreground(WidgetRenderScope& scope) {
     const runtime::ValueList* options = scope.list("options");
     if (options == nullptr) return;
+    const bool group_enabled = scope.boolean("enabled", true);
     const std::optional<EffectiveChoice> selected = effective_choice(scope.node());
     for (std::size_t index = 0U;
          index < options->values.size() && index < scope.node().children().size();
@@ -522,6 +523,8 @@ void radio_foreground(WidgetRenderScope& scope) {
             scope.node().children()[index]->identity()
         );
         if (child == nullptr) continue;
+        const runtime::Value& option = options->values[index];
+        const bool enabled = group_enabled && choice_option_enabled(option);
         const Rect ring{
             child->bounds.x + 6.0,
             child->bounds.y + child->bounds.height * 0.5 - 6.0,
@@ -529,13 +532,25 @@ void radio_foreground(WidgetRenderScope& scope) {
             12.0,
         };
         scope.border(ring, RenderBorder{1.0, scope.visual().track.representative(), true}, 6.0);
-        const std::string* id = widget_string_value(options->values[index].field("id"));
+        const std::string* id = widget_string_value(option.field("id"));
         if (id != nullptr && selected.has_value() && index == selected->index) {
             scope.rounded_rect(
                 Rect{ring.x + 3.0, ring.y + 3.0, 6.0, 6.0},
                 scope.visual().fill,
                 std::nullopt,
                 3.0
+            );
+        }
+        const std::string* label = widget_string_value(option.field("label"));
+        if (scope.text_engine() != nullptr && label != nullptr) {
+            const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), *label);
+            scope.text(
+                *label,
+                Point{
+                    child->bounds.x + 28.0,
+                    child->bounds.y + (child->bounds.height - shaped.metrics.height) * 0.5,
+                },
+                enabled ? scope.visual().foreground : RenderColor{160U, 168U, 178U, 220U}
             );
         }
         if (id != nullptr) scope.interaction(child->bounds, *id);
