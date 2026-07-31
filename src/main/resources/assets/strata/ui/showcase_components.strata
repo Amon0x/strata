@@ -919,6 +919,7 @@ component PushedScreen() {
 }
 
 component FormsPage() {
+  state amount = 5;
   Panel(style: PageColumn) {
     Form(key: "forms.main", onSubmit: action("demo.form.completed")) {
       Field(name: "account", label: "Account name", inputKey: "forms.account", required: true, minLength: 3) {
@@ -927,8 +928,8 @@ component FormsPage() {
       Field(name: "password", label: "Password", inputKey: "forms.password", required: true, minLength: 6) {
         TextBox(key: "forms.password", text: "", hint: "masked, max 16", password: true, maxLength: 16)
       }
-      Field(name: "amount", label: "Amount", inputKey: "forms.amount", min: 0, max: 10) {
-        NumberField(key: "forms.amount", defaultValue: 5, min: 0, max: 10, step: 0.5)
+      Field(name: "amount", label: "Amount", inputKey: "forms.amount", min: 0, max: 10, help: format("Bound numeric state: {0}", amount)) {
+        NumberField(key: "forms.amount", min: 0, max: 10, step: 0.5, bind: amount)
       }
       Field(name: "serverId", label: "Server id", inputKey: "forms.server-id", help: "Read-only values remain selectable but do not accept edits.", readOnly: true) {
         TextBox(key: "forms.server-id", text: "host-owned-42", readOnly: true)

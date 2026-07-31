@@ -372,6 +372,18 @@ TextEditorMutation TextEditor::reconcile_controlled(const std::string_view sourc
     return TextEditorMutation{true, true, composition_changed};
 }
 
+TextEditorMutation TextEditor::restore_controlled(const std::string_view source) {
+    if (!core::valid_utf8(source)) throw std::invalid_argument("controlled editor text must be valid UTF-8");
+    const bool text_changed = source != text_;
+    const bool composition_changed = composition_.has_value();
+    text_.assign(source);
+    controlled_text_.assign(source);
+    user_edited_ = false;
+    clear_composition();
+    clamp_offsets();
+    return TextEditorMutation{text_changed, text_changed, composition_changed};
+}
+
 TextEditorMutation TextEditor::insert(
     const std::string_view value,
     const TextEditorConfig& config,

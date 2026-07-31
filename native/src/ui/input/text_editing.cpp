@@ -1,6 +1,7 @@
 #include "ui/input.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -73,6 +74,55 @@ namespace {
     return config;
 }
 
+[[nodiscard]] std::optional<double> number_field_value(
+    const RetainedNode& node,
+    const std::string_view text
+) {
+    if (text.empty()) return std::nullopt;
+    std::string normalized(text);
+    std::ranges::replace(normalized, ',', '.');
+    if (normalized == "+" || normalized == "-" || normalized == "." ||
+        normalized == "+." || normalized == "-.") {
+        return std::nullopt;
+    }
+    if (normalized.front() == '.') normalized.insert(normalized.begin(), '0');
+    else if (normalized.size() >= 2U &&
+             (normalized.front() == '+' || normalized.front() == '-') &&
+             normalized[1] == '.') {
+        normalized.insert(normalized.begin() + 1, '0');
+    }
+    if (normalized.back() == '.') normalized.push_back('0');
+
+    double parsed = 0.0;
+    const auto result = std::from_chars(
+        normalized.data(), normalized.data() + normalized.size(), parsed
+    );
+    if (result.ec != std::errc{} || result.ptr != normalized.data() + normalized.size() ||
+        !std::isfinite(parsed)) {
+        return std::nullopt;
+    }
+    const runtime::Value* minimum = scalar_property(node, "min");
+    const runtime::Value* maximum = scalar_property(node, "max");
+    if (minimum != nullptr && minimum->number() != nullptr) {
+        parsed = std::max(parsed, *minimum->number());
+    }
+    if (maximum != nullptr && maximum->number() != nullptr) {
+        parsed = std::min(parsed, *maximum->number());
+    }
+    return parsed;
+}
+
+[[nodiscard]] const runtime::Value* effective_number_field_value(
+    const RetainedNode& node
+) noexcept {
+    const runtime::Value* retained = node.retained_value("$value");
+    if (retained != nullptr && retained->number() != nullptr) return retained;
+    const runtime::Value* controlled = scalar_property(node, "value");
+    if (controlled != nullptr && controlled->number() != nullptr) return controlled;
+    const runtime::Value* authored = scalar_property(node, "defaultValue");
+    return authored != nullptr && authored->number() != nullptr ? authored : nullptr;
+}
+
 [[nodiscard]] bool command_key(const KeyModifiers modifiers) noexcept {
     return modifiers.control || modifiers.super_key;
 }
@@ -114,8 +164,12 @@ void InputRouter::record_editor_mutation(
         property_action->second.action() != nullptr && *property_action->second.action() != nullptr) {
         action = *property_action->second.action();
     }
+    const bool numeric = lifecycle != nullptr &&
+        lifecycle->input.text_edit_mode == WidgetTextEditMode::numeric;
     if (action == nullptr) {
-        const auto contract = application_.bundle()->action_registry().contract("text-edit");
+        const auto contract = application_.bundle()->action_registry().contract(
+            numeric ? "NumberField" : "text-edit"
+        );
         if (contract != nullptr) {
             action = std::make_shared<const runtime::ActionValue>(runtime::ActionValue{
                 std::make_shared<const runtime::Action>(contract),
@@ -125,6 +179,29 @@ void InputRouter::record_editor_mutation(
         }
     }
     const std::string& text = editor->second.text();
+    if (numeric) {
+        const std::optional<double> parsed = number_field_value(node, text);
+        if (!parsed.has_value()) return;
+        const runtime::Value* current = effective_number_field_value(node);
+        if (current != nullptr && current->number() != nullptr && *current->number() == *parsed) {
+            return;
+        }
+        if (tree_ != nullptr) {
+            static_cast<void>(tree_->set_retained_value(
+                node.identity(), "$value", runtime::Value(*parsed), DirtyReason::properties
+            ));
+        }
+        JsonValue event = object({
+            {"action", action != nullptr ? canonical_action(*action, node) : JsonValue{}},
+            {"source", source(node)},
+            {"type", JsonValue("number-changed")},
+            {"value", JsonValue(*parsed)},
+        });
+        note_field_change(node);
+        emit(std::move(event), action, node, runtime::Value(*parsed), result);
+        return;
+    }
+
     JsonValue event = object({
         {"action", action != nullptr ? canonical_action(*action, node) : JsonValue{}},
         {"source", source(node)},
@@ -185,11 +262,22 @@ void InputRouter::commit_editor(RetainedNode& node, InputOperationResult& result
     const auto editor = editors_.find(node.identity());
     if (editor == editors_.end()) return;
     const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
-    const TextEditorMutation mutation = text_read_only(node)
-                                            ? editor->second.cancel_preedit()
-                                            : editor->second.commit_format(
-                                                  editor_config(node, lifecycle).commit_format
-                                              );
+    TextEditorMutation mutation;
+    if (text_read_only(node)) {
+        mutation = editor->second.cancel_preedit();
+    } else if (lifecycle != nullptr &&
+               lifecycle->input.text_edit_mode == WidgetTextEditMode::numeric) {
+        const std::optional<double> parsed = number_field_value(node, editor->second.text());
+        const runtime::Value* current = effective_number_field_value(node);
+        const double committed = parsed.value_or(
+            current != nullptr && current->number() != nullptr ? *current->number() : 0.0
+        );
+        mutation = editor->second.restore_controlled(
+            runtime::display_string(runtime::Value(committed))
+        );
+    } else {
+        mutation = editor->second.commit_format(editor_config(node, lifecycle).commit_format);
+    }
     if (mutation.text_changed || mutation.selection_changed) {
         text_navigation_.erase(node.identity());
     }

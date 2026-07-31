@@ -60,6 +60,17 @@ void check(const bool condition, const std::string_view message) {
         : nullptr;
 }
 
+[[nodiscard]] const double* scalar_number(
+    const strata::ui::RetainedNode* node,
+    const std::string_view name
+) {
+    if (node == nullptr) return nullptr;
+    const auto found = node->description().properties.find(name);
+    return found != node->description().properties.end() && found->second.value() != nullptr
+        ? found->second.value()->number()
+        : nullptr;
+}
+
 [[nodiscard]] bool has_direct_text(
     const strata::ui::RetainedNode* node,
     const std::string_view expected
@@ -290,6 +301,30 @@ overlay Main { root ValidationFixture() }
         "NumberField ArrowUp did not apply its step and place the caret after the value"
     );
 
+    static_cast<void>(surface.input().key(
+        "a",
+        strata::ui::KeyModifiers{false, true, false, false}
+    ));
+    const strata::ui::InputOperationResult typed_number = surface.input().text("7.5");
+    check(
+        outcomes_contain(typed_number, "state.setFromEvent"),
+        "typed NumberField value did not dispatch its numeric binding"
+    );
+    static_cast<void>(surface.frame(1'750'000));
+    amount_input = surface.tree().find_key("validation.amount");
+    const std::optional<strata::ui::TextEditorSnapshot> typed_number_editor =
+        amount_input != nullptr
+            ? surface.input().editor_snapshot(amount_input->identity())
+            : std::nullopt;
+    check(
+        scalar_number(amount_input, "value") != nullptr &&
+            *scalar_number(amount_input, "value") == 7.5 &&
+            typed_number_editor.has_value() && typed_number_editor->text == "7.5",
+        "typed NumberField text did not round-trip through numeric state"
+    );
+    static_cast<void>(surface.input().key("up"));
+    static_cast<void>(surface.frame(1'900'000));
+
     const strata::ui::InputOperationResult validation = surface.input().click(
         "validation.submit"
     );
@@ -350,6 +385,33 @@ overlay Main { root ValidationFixture() }
         has_direct_text(name_field, "Public display name.") &&
             !has_direct_text(name_field, "Use at least three characters."),
         "Field did not restore help after its validation error cleared"
+    );
+
+    static_cast<void>(surface.input().click("validation.amount"));
+    static_cast<void>(surface.input().key(
+        "a",
+        strata::ui::KeyModifiers{false, true, false, false}
+    ));
+    static_cast<void>(surface.input().text("-"));
+    amount_input = surface.tree().find_key("validation.amount");
+    check(
+        amount_input != nullptr &&
+            surface.input().editor_snapshot(amount_input->identity()).has_value() &&
+            surface.input().editor_snapshot(amount_input->identity())->text == "-",
+        "NumberField rejected an intermediate numeric edit before commit"
+    );
+    static_cast<void>(surface.input().click("validation.name"));
+    static_cast<void>(surface.frame(3'200'000));
+    amount_input = surface.tree().find_key("validation.amount");
+    const std::optional<strata::ui::TextEditorSnapshot> reverted_number =
+        amount_input != nullptr
+            ? surface.input().editor_snapshot(amount_input->identity())
+            : std::nullopt;
+    check(
+        scalar_number(amount_input, "value") != nullptr &&
+            *scalar_number(amount_input, "value") == 9.0 &&
+            reverted_number.has_value() && reverted_number->text == "9",
+        "invalid intermediate NumberField text did not restore its accepted value on blur"
     );
 }
 

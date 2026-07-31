@@ -57,6 +57,8 @@ public:
     [[nodiscard]] std::string visual_text() const;
 
     [[nodiscard]] TextEditorMutation reconcile_controlled(std::string_view source);
+    /** Discards an in-progress edit and adopts a canonical committed value unconditionally. */
+    [[nodiscard]] TextEditorMutation restore_controlled(std::string_view source);
     [[nodiscard]] TextEditorMutation insert(
         std::string_view value,
         const TextEditorConfig& config,
