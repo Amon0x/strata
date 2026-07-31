@@ -41,6 +41,13 @@ namespace {
     return value != nullptr && value->boolean() != nullptr ? *value->boolean() : fallback;
 }
 
+[[nodiscard]] std::string menu_bar_category(const CommandSnapshot& command) {
+    if (command.category.empty()) return "Commands";
+    const std::size_t separator = command.category.find('/');
+    const std::string root = command.category.substr(0U, separator);
+    return root.empty() ? "Commands" : root;
+}
+
 [[nodiscard]] bool effective_boolean(
     const RetainedNode& node,
     const std::string_view controlled,
@@ -386,7 +393,7 @@ std::vector<WidgetSubtarget> widget_subtargets(
         const std::vector<const CommandSnapshot*> values = referenced(node, commands);
         std::vector<std::string> categories;
         for (const CommandSnapshot* command : values) {
-            const std::string category = command->category.empty() ? "Commands" : command->category;
+            const std::string category = menu_bar_category(*command);
             if (std::ranges::find(categories, category) == categories.end()) categories.push_back(category);
         }
         if (categories.empty()) return result;
@@ -402,8 +409,7 @@ std::vector<WidgetSubtarget> widget_subtargets(
         if (open == nullptr || open->empty()) return result;
         std::vector<const CommandSnapshot*> category_commands;
         for (const CommandSnapshot* command : values) {
-            const std::string category = command->category.empty() ? "Commands" : command->category;
-            if (category == *open) category_commands.push_back(command);
+            if (menu_bar_category(*command) == *open) category_commands.push_back(command);
         }
         const auto category = std::ranges::find(categories, *open);
         if (category == categories.end()) return result;

@@ -33,4 +33,20 @@ enum class WidgetChevronDirection { right, down };
     };
 }
 
+[[nodiscard]] inline PathShape widget_checkmark(
+    const RenderColor color,
+    const double stroke_width = 1.6
+) {
+    Path path;
+    path.move_to(Point{0.1, 0.52});
+    path.line_to(Point{0.4, 0.8});
+    path.line_to(Point{0.9, 0.2});
+    return PathShape{
+        std::move(path),
+        std::nullopt,
+        Paint(color),
+        StrokeStyle{stroke_width, PathCap::round, PathJoin::round},
+    };
+}
+
 } // namespace strata::ui

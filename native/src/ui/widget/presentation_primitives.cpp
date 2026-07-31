@@ -242,14 +242,32 @@ void menu_overlay(WidgetRenderScope& scope) {
             );
         }
         scope.interaction(row.bounds, identity);
-        if (scope.text_engine() == nullptr) continue;
         const RenderColor foreground = item.enabled
             ? scope.visual().foreground
             : RenderColor{160U, 168U, 178U, 135U};
-        if (item.has_checked) {
-            const std::string check = item.checked ? "✓" : "";
-            scope.text(check, Point{row.bounds.x + 8.0, row.bounds.y + 5.0}, foreground);
+        if (item.has_checked && item.checked) {
+            scope.shape(
+                Rect{
+                    row.bounds.x + 8.0,
+                    row.bounds.y + (row.bounds.height - 12.0) * 0.5,
+                    12.0,
+                    12.0,
+                },
+                widget_checkmark(foreground)
+            );
         }
+        if (item.shortcut.empty() && !item.children.empty()) {
+            scope.shape(
+                Rect{
+                    row.bounds.right() - 18.0,
+                    row.bounds.y + (row.bounds.height - 10.0) * 0.5,
+                    10.0,
+                    10.0,
+                },
+                widget_chevron(WidgetChevronDirection::right, foreground)
+            );
+        }
+        if (scope.text_engine() == nullptr) continue;
         const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), item.label);
         scope.text(
             item.label,
@@ -264,14 +282,6 @@ void menu_overlay(WidgetRenderScope& scope) {
                 Point{row.bounds.x + 8.0, row.bounds.y + 5.0},
                 foreground,
                 std::max(0.0, row.bounds.width - 24.0),
-                WidgetTextAlignment::end
-            );
-        } else if (!item.children.empty()) {
-            scope.text(
-                "›",
-                Point{row.bounds.x + 8.0, row.bounds.y + 5.0},
-                foreground,
-                std::max(0.0, row.bounds.width - 20.0),
                 WidgetTextAlignment::end
             );
         }

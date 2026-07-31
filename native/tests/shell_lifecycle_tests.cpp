@@ -202,8 +202,8 @@ component ShellFixture() {
       action: action("notification.raise", message: "default")
     )
     Command(
-      id: "shell.disabled", label: "Disabled command", enabled: false,
-      action: action("notification.raise", message: "disabled")
+      id: "shell.disabled", label: "Disabled command", category: "File/Disabled",
+      enabled: false, action: action("notification.raise", message: "disabled")
     )
     Command(
       id: "shell.unicode", label: "😀Äpfel",
@@ -527,8 +527,11 @@ overlay Main { root ShellFixture() }
         }
     }
     check(
-        menu_categories.size() == 3U && focused_border_at(menu_categories[0]->bounds),
-        "MenuBar did not render focus around its initial category"
+        menu_categories.size() == 3U && focused_border_at(menu_categories[0]->bounds) &&
+            std::ranges::none_of(menu_categories, [](const ui::WidgetSubtarget* target) {
+                return target->label.contains('/');
+            }),
+        "MenuBar did not collapse category paths into usable top-level menus"
     );
     static_cast<void>(surface.input().key("right"));
     static_cast<void>(surface.frame(1'420'000));
