@@ -1,0 +1,22 @@
+* text=auto
+
+*.bat text eol=crlf
+*.cmake text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.json text eol=lf
+*.kts text eol=lf
+*.md text eol=lf
+*.ps1 text eol=crlf
+*.py text eol=lf
+*.sh text eol=lf
+*.strata text eol=lf
+
+*.bin binary
+*.gif binary
+*.jar binary
+*.jpg binary
+*.png binary
+*.ttf binary
+*.webp binary

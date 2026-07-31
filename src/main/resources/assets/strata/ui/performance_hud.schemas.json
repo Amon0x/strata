@@ -1,0 +1,58 @@
+{
+  "widgets": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "behaviors": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "actions": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "host": [
+    {
+      "path": "performance",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "passive performance HUD snapshot",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          { "name": "fps", "type": { "kind": "string" }, "required": true, "nullable": false },
+          { "name": "totalMillis", "type": { "kind": "string" }, "required": true, "nullable": false },
+          { "name": "nativeMillis", "type": { "kind": "string" }, "required": true, "nullable": false },
+          {
+            "name": "samples",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 60,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "performance graph sample",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  { "name": "key", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "totalHeight", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "nativeHeight", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "severe", "type": { "kind": "boolean" }, "required": true, "nullable": false },
+                  { "name": "slow", "type": { "kind": "boolean" }, "required": true, "nullable": false }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

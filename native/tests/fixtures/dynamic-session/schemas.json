@@ -1,0 +1,82 @@
+{
+  "widgets": {
+    "registry": "strata.builtins+native-tests.v1",
+    "required": ["Button", "Modal", "Panel", "SemanticProbe", "Text", "TextBox"],
+    "definitions": [
+      {
+        "name": "SemanticProbe",
+        "fixture": "semantic-invalid",
+        "allowsChildren": false,
+        "parameters": [],
+        "events": [],
+        "retainedState": [],
+        "bindings": []
+      }
+    ]
+  },
+  "behaviors": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "actions": {
+    "registry": "strata.builtins+native-tests.v1",
+    "required": [
+      "command.execute",
+      "reveal.request",
+      "state.adjust",
+      "state.set",
+      "accept.required",
+      "probe.decode"
+    ],
+    "definitions": [
+      {
+        "id": "accept.required",
+        "dispatchPolicy": "required",
+        "summary": "Required host validation fixture",
+        "payloadContract": "strata.action-payload/accept.required@1",
+        "arguments": []
+      },
+      {
+        "id": "probe.decode",
+        "dispatchPolicy": "optional",
+        "summary": "Rejecting action decoder fixture",
+        "payloadContract": "strata.action-payload/probe.decode@1",
+        "decoder": "reject",
+        "arguments": []
+      }
+    ]
+  },
+  "host": [
+    {
+      "path": "app",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "dynamic application snapshot",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          {
+            "name": "title",
+            "type": { "kind": "string" },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "generation",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "editor",
+            "type": { "kind": "string" },
+            "required": true,
+            "nullable": false
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "source": "third_party/icons/lucide/icons",
+  "output": "src/main/resources/assets/strata/textures/ui/icons",
+  "size": 32,
+  "stroke_width": 3,
+  "icons": [
+    "chevron-down",
+    "chevron-up"
+  ]
+}

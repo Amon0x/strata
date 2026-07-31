@@ -1,0 +1,87 @@
+# Operating systems and editors
+.DS_Store
+Thumbs.db
+/.idea/
+/.vscode/
+/.run/
+*.iml
+
+# Local build systems and caches
+.gradle/
+.gradle-user-home/
+.kotlin/
+build/
+out/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+gradle/local/
+
+# Compiled and packaged artifacts
+*.class
+*.dll
+*.dmp
+*.exe
+*.exp
+*.ilk
+*.jar
+*.lib
+*.log
+*.obj
+*.pdb
+*.so
+*.vsix
+*.zip
+!gradle/wrapper/gradle-wrapper.jar
+
+# Runtime/client state
+run/
+logs/
+crash-reports/
+saves/
+screenshots/
+mods/
+resourcepacks/
+
+# Private host adapters and local reference sources
+/minecraft/
+/host-protocol/
+/native/src/jni/
+/gameoutput/
+/kotlincore/
+/desktop/
+/conformance/
+/tracy/
+/third_party/icons/lucide/
+
+# Local profiling and diagnostics
+*.etl
+*.jfr
+*.tracy
+context-snapshot.json
+
+# Local project notes
+/state.md
+/session-log.md
+/targets*.md
+/latertargets.md
+/dslcheck-init.gradle
+/docs/plans/
+/docs/specs/
+/docs/port-audit/
+/docs/target*.md
+
+# Secrets and machine-local configuration
+.env
+.env.*
+*.jks
+*.p12
+*.pem
+*.pfx
+
+# Python tooling
+__pycache__/
+*.py[cod]

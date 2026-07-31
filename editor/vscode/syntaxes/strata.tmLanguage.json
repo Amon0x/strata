@@ -1,0 +1,67 @@
+{
+  "fileTypes": [
+    "strata"
+  ],
+  "name": "Strata UI",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "begin": "\\\"",
+      "end": "\\\"",
+      "name": "string.quoted.double.strata",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.strata"
+        }
+      ]
+    },
+    {
+      "match": "#(?:\\[0\\-9A\\-Fa\\-f\\]\\{3\\}|\\[0\\-9A\\-Fa\\-f\\]\\{4\\}|\\[0\\-9A\\-Fa\\-f\\]\\{6\\}|\\[0\\-9A\\-Fa\\-f\\]\\{8\\})\\b",
+      "name": "constant.other.color.strata"
+    },
+    {
+      "match": "\\b[0-9](?:_?[0-9])*(?:\\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9](?:_?[0-9])*)?(?:ms|s)?\\b",
+      "name": "constant.numeric.strata"
+    },
+    {
+      "match": "\\b(?:animation|component|derived|else|extends|false|for|from|if|import|in|null|overlay|root|screen|state|style|to|true|when|where)\\b",
+      "name": "keyword.control.strata"
+    },
+    {
+      "match": "\\b[A-Z][A-Za-z0-9_]*\\b",
+      "name": "entity.name.type.widget.strata"
+    },
+    {
+      "match": "(?:!=|&&|\\->|<=|==|>=|\\?\\?|\\|\\||!|%|\\*|\\+|\\-|/|<|=|>)",
+      "name": "keyword.operator.strata"
+    },
+    {
+      "match": "(?:\\(|\\)|,|\\.|:|;|\\?|\\[|\\]|\\{|\\})",
+      "name": "punctuation.strata"
+    },
+    {
+      "match": "\\b[_\\p{L}][_\\p{L}\\p{N}]*\\b",
+      "name": "variable.other.strata"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "begin": "//",
+          "end": "$",
+          "name": "comment.line.double-slash.strata"
+        },
+        {
+          "begin": "/\\*",
+          "end": "\\*/",
+          "name": "comment.block.strata"
+        }
+      ]
+    }
+  },
+  "scopeName": "source.strata"
+}

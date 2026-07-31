@@ -1,0 +1,208 @@
+{
+  "widgets": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "actions": {
+    "registry": "strata.builtins+hub.v1",
+    "required": [
+      "hub.launch"
+    ],
+    "definitions": [
+      {
+        "id": "hub.launch",
+        "dispatchPolicy": "required",
+        "summary": "Open, close, or dismiss one Strata surface from the hub",
+        "payloadContract": "strata.action-payload/hub.launch@1",
+        "arguments": [
+          {
+            "name": "target",
+            "type": {
+              "kind": "key"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ]
+      }
+    ]
+  },
+  "host": [
+    {
+      "path": "hub",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "hub view",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          {
+            "name": "frameSummary",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "frameMillis",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "frameHistory",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 64,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "sparkline point",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  {
+                    "name": "x",
+                    "type": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "y",
+                    "type": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "nullable": false
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "frameArea",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 66,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "sparkline point",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  {
+                    "name": "x",
+                    "type": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "y",
+                    "type": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "nullable": false
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "frameScale",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "status",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "surfaces",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 16,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "hub surface entry",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": {
+                      "kind": "key"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "name",
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "detail",
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "shortcut",
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "active",
+                    "type": {
+                      "kind": "boolean"
+                    },
+                    "required": true,
+                    "nullable": false
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

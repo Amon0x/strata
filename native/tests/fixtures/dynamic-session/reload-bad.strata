@@ -1,0 +1,4 @@
+overlay Main {
+  root Panel(key: "dynamic.broken") {
+    Text(text: "This source is deliberately unterminated")
+}

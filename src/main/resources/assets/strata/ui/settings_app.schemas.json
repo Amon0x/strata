@@ -1,0 +1,121 @@
+{
+  "widgets": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "behaviors": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "actions": {
+    "registry": "strata.builtins+settings.v1",
+    "required": [
+      "settings.save"
+    ],
+    "definitions": [
+      {
+        "id": "settings.save",
+        "dispatchPolicy": "required",
+        "summary": "Persist the settings form through the host",
+        "payloadContract": "strata.action-payload/settings.save@1",
+        "arguments": [
+          {
+            "name": "displayName",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "telemetry",
+            "type": {
+              "kind": "boolean"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ]
+      }
+    ]
+  },
+  "host": [
+    {
+      "path": "settings",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "settings view",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          {
+            "name": "savedMessage",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "profileTree",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 32,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "settings profile tree item",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": {
+                      "kind": "key"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "label",
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "mayHaveChildren",
+                    "type": {
+                      "kind": "boolean"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "childrenLoaded",
+                    "type": {
+                      "kind": "boolean"
+                    },
+                    "required": true,
+                    "nullable": false
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

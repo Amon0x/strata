@@ -1,0 +1,128 @@
+// Passive F9 telemetry. Hosts render this surface but never route input to it.
+
+style PerformanceRoot {
+  kind: "OVERLAY";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 10;
+  alignItems: "END";
+  justifyContent: "START";
+  background: null;
+  border: null;
+}
+
+style PerformanceShell {
+  kind: "COLUMN";
+  width: 284;
+  height: 118;
+  padding: 9;
+  gap: 6;
+  radius: 8;
+  background: #0C111AEF;
+  border: { width: 1, color: #50627DB3 };
+}
+
+style PerformanceHeader {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 19;
+  gap: 8;
+  alignItems: "CENTER";
+  background: null;
+  border: null;
+}
+
+style PerformanceGraph {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 60;
+  gap: 1;
+  alignItems: "END";
+  background: #151D29FF;
+  border: { width: 1, color: #34445B99 };
+}
+
+style PerformanceSample {
+  kind: "OVERLAY";
+  width: 3;
+  height: 58;
+  alignItems: "END";
+  justifyContent: "END";
+  background: null;
+  border: null;
+}
+
+style TotalBar {
+  background: #53A3C9D9;
+  border: null;
+}
+
+style SlowTotalBar {
+  background: #E5A750E6;
+  border: null;
+}
+
+style SevereTotalBar {
+  background: #F0646FFF;
+  border: null;
+}
+
+style NativeBar {
+  background: #9DE1FFFF;
+  border: null;
+}
+
+style PerformanceTitle {
+  font: "strata:fonts/default-medium";
+  pixelSize: 12;
+  color: #F1F5FBFF;
+}
+
+style PerformanceMetric {
+  font: "strata:fonts/mono";
+  pixelSize: 10;
+  color: #B8C5D8FF;
+}
+
+style PerformanceLegend {
+  font: "strata:fonts/mono";
+  pixelSize: 9;
+  color: #8292A8FF;
+}
+
+component FrameGraph() {
+  Panel(style: PerformanceGraph) {
+    for sample in performance.samples {
+      Panel(key: sample.key, style: PerformanceSample) {
+        Panel(
+          style: sample.severe ? SevereTotalBar : sample.slow ? SlowTotalBar : TotalBar,
+          layout: { width: 3, height: sample.totalHeight }
+        )
+        Panel(style: NativeBar, layout: { width: 1, height: sample.nativeHeight })
+      }
+    }
+  }
+}
+
+component PerformanceHudView() {
+  Panel(style: PerformanceRoot) {
+    Panel(key: "strata.performance.hud", style: PerformanceShell) {
+      Panel(style: PerformanceHeader) {
+        Text(text: format("{0} FPS", performance.fps), style: PerformanceTitle, maxLines: 1)
+        Text(
+          text: format("frame {0} ms  native {1} ms", performance.totalMillis, performance.nativeMillis),
+          style: PerformanceMetric,
+          layout: { width: { weight: 1 } },
+          maxLines: 1,
+          overflow: "ELLIPSIS"
+        )
+      }
+      FrameGraph()
+      Text(text: "30 s / 0.5 s buckets / worst frame / log 1-500 ms", style: PerformanceLegend, maxLines: 1)
+    }
+  }
+}
+
+overlay PerformanceHud {
+  root PerformanceHudView()
+}

@@ -1,0 +1,18 @@
+style Root {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 12;
+  gap: 8;
+}
+
+overlay Main {
+  state count = 0;
+  root Panel(key: "dynamic.root", style: Root, semantics: { role: "APPLICATION", label: "Dynamic session reloaded" }) {
+    Text(key: "dynamic.title", text: format("Reloaded: {0}", app.title))
+    Text(key: "dynamic.generation", text: format("Host generation {0}", app.generation))
+    TextBox(key: "dynamic.editor", text: app.editor)
+    Button(key: "dynamic.increment", label: "Increment", onClick: action("state.adjust", name: "count", amount: 1))
+    Text(key: "dynamic.count", text: format("Count {0}", count))
+  }
+}

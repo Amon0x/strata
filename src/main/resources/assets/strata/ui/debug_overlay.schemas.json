@@ -1,0 +1,319 @@
+{
+  "widgets": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "behaviors": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "actions": {
+    "registry": "strata.builtins+debug-overlay.v1",
+    "required": [
+      "strata.debug.clear-diagnostics",
+      "strata.debug.close",
+      "strata.debug.copy-profile",
+      "strata.debug.select-mode"
+    ],
+    "definitions": [
+      {
+        "id": "strata.debug.clear-diagnostics",
+        "dispatchPolicy": "required",
+        "summary": "strata.debug.clear-diagnostics",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "strata.debug.copy-profile",
+        "dispatchPolicy": "required",
+        "summary": "Copy the complete profiler snapshot to the host clipboard",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "strata.debug.close",
+        "dispatchPolicy": "required",
+        "summary": "strata.debug.close",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "strata.debug.select-mode",
+        "dispatchPolicy": "required",
+        "summary": "Select an F8 debug page",
+        "payloadContract": "ProfilerOverlayMode",
+        "arguments": [
+          {
+            "name": "mode",
+            "type": {
+              "kind": "enum",
+              "label": "debug overlay mode",
+              "values": ["DIAGNOSTICS", "HOT_TREE", "MOTION", "SEMANTICS", "SPIKES", "SUMMARY"]
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ]
+      }
+    ]
+  },
+  "host": [
+    {
+      "path": "debug",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "debug overlay snapshot",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          { "name": "mode", "type": { "kind": "string" }, "required": true, "nullable": false },
+          { "name": "frame", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "errors", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "warnings", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "infos", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "diagnosticCount", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "droppedDiagnostics", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "hotPathCount", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "spikeCount", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "motionCount", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "runningMotionCount", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "semanticCount", "type": { "kind": "number" }, "required": true, "nullable": false },
+          { "name": "collectionCount", "type": { "kind": "number" }, "required": true, "nullable": false },
+          {
+            "name": "summaryMetrics",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 32,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "debug metric",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  { "name": "label", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "value", "type": { "kind": "string" }, "required": true, "nullable": false }
+                ]
+              }
+            }
+          },
+          {
+            "name": "counters",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 32,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "debug counter",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  { "name": "label", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "value", "type": { "kind": "string" }, "required": true, "nullable": false }
+                ]
+              }
+            }
+          },
+          {
+            "name": "hotPaths",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 24,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "debug hot path",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  { "name": "path", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "lastMillis", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "p95Millis", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "p99Millis", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "maxMillis", "type": { "kind": "number" }, "required": true, "nullable": false }
+                ]
+              }
+            }
+          },
+          {
+            "name": "spikes",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 24,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "debug spike",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  { "name": "frame", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "stack", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "durationMillis", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "thresholdMillis", "type": { "kind": "number" }, "required": true, "nullable": false }
+                ]
+              }
+            }
+          },
+          {
+            "name": "diagnostics",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 32,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "debug diagnostic",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  { "name": "sequence", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "frame", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "occurrenceCount", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "severity", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "code", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "message", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "source", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "componentPath", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "expected", "type": { "kind": "string" }, "required": true, "nullable": false }
+                ]
+              }
+            }
+          },
+          {
+            "name": "motions",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 24,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "debug motion",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  { "name": "surface", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "node", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "channel", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "source", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "direction", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "progress", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "currentValue", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "targetValue", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "properties", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "status", "type": { "kind": "string" }, "required": true, "nullable": false }
+                ]
+              }
+            }
+          },
+          {
+            "name": "semantics",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 100000,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "debug semantic node",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  { "name": "rowKey", "type": { "kind": "key" }, "required": true, "nullable": false },
+                  { "name": "sourceKey", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "surface", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "node", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "path", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "indent", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "role", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "name", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "stateSummary", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "actions", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "selected", "type": { "kind": "boolean" }, "required": true, "nullable": false }
+                ]
+              }
+            }
+          },
+          {
+            "name": "collections",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 10000,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "debug collection",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  { "name": "key", "type": { "kind": "key" }, "required": true, "nullable": false },
+                  { "name": "surface", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "node", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "operation", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "sourceCount", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "matchCount", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "derivedRange", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "materializedRange", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "cacheHits", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "rebuilds", "type": { "kind": "number" }, "required": true, "nullable": false },
+                  { "name": "activeAnchor", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "pendingNavigation", "type": { "kind": "string" }, "required": true, "nullable": false }
+                ]
+              }
+            }
+          },
+          {
+            "name": "reloadMetrics",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 32,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "debug reload metric",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  { "name": "label", "type": { "kind": "string" }, "required": true, "nullable": false },
+                  { "name": "value", "type": { "kind": "string" }, "required": true, "nullable": false }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

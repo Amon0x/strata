@@ -1,0 +1,898 @@
+{
+  "extensionPackages": [
+    "strata.demo.v1"
+  ],
+  "widgets": {
+    "registry": "strata.builtins+demo-extensions.v1",
+    "required": [],
+    "definitions": []
+  },
+  "actions": {
+    "registry": "strata.builtins+demo.v1",
+    "required": [
+      "control.alpha.action",
+      "control.beta.action",
+      "control.gamma.action",
+      "demo.behavior.activate",
+      "demo.behavior.disabled",
+      "demo.combo.query",
+      "demo.combo.select",
+      "demo.command.global",
+      "demo.command.scoped",
+      "demo.data.collection",
+      "demo.drop.target",
+      "demo.events.clear",
+      "demo.focus.scope",
+      "demo.form.completed",
+      "demo.host.bump",
+      "demo.host.message",
+      "demo.inspect.arm",
+      "demo.inspect.clear",
+      "demo.inspect.coalesce",
+      "demo.inspect.driver",
+      "demo.inspect.dynamic-probe",
+      "demo.inspect.select",
+      "demo.nav.right",
+      "demo.reorder",
+      "demo.split.controlled",
+      "demo.state.restore",
+      "demo.state.snapshot"
+    ],
+    "definitions": [
+      {
+        "id": "control.alpha.action",
+        "dispatchPolicy": "optional",
+        "summary": "control.alpha.action",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "control.beta.action",
+        "dispatchPolicy": "optional",
+        "summary": "control.beta.action",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "control.gamma.action",
+        "dispatchPolicy": "optional",
+        "summary": "control.gamma.action",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.behavior.activate",
+        "dispatchPolicy": "optional",
+        "summary": "demo.behavior.activate",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.behavior.disabled",
+        "dispatchPolicy": "optional",
+        "summary": "demo.behavior.disabled",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.combo.query",
+        "dispatchPolicy": "required",
+        "summary": "demo.combo.query",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.combo.select",
+        "dispatchPolicy": "required",
+        "summary": "demo.combo.select",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.command.global",
+        "dispatchPolicy": "required",
+        "summary": "demo.command.global",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.command.scoped",
+        "dispatchPolicy": "required",
+        "summary": "demo.command.scoped",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.data.collection",
+        "dispatchPolicy": "required",
+        "summary": "demo.data.collection",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.drop.target",
+        "dispatchPolicy": "optional",
+        "summary": "demo.drop.target",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.events.clear",
+        "dispatchPolicy": "required",
+        "summary": "demo.events.clear",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.focus.scope",
+        "dispatchPolicy": "required",
+        "summary": "demo.focus.scope",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.form.completed",
+        "dispatchPolicy": "optional",
+        "summary": "demo.form.completed",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.host.bump",
+        "dispatchPolicy": "required",
+        "summary": "demo.host.bump",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.host.message",
+        "dispatchPolicy": "required",
+        "summary": "Deliver a typed message from .strata to the demo host",
+        "payloadContract": "DemoHostMessage",
+        "arguments": [
+          {
+            "name": "message",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "priority",
+            "type": {
+              "kind": "number"
+            },
+            "required": false,
+            "nullable": false,
+            "aliases": [],
+            "default": {
+              "kind": "number",
+              "value": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "demo.inspect.arm",
+        "dispatchPolicy": "required",
+        "summary": "demo.inspect.arm",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.inspect.clear",
+        "dispatchPolicy": "required",
+        "summary": "demo.inspect.clear",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.inspect.coalesce",
+        "dispatchPolicy": "required",
+        "summary": "demo.inspect.coalesce",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.inspect.driver",
+        "dispatchPolicy": "required",
+        "summary": "demo.inspect.driver",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.inspect.dynamic-probe",
+        "dispatchPolicy": "required",
+        "summary": "demo.inspect.dynamic-probe",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.inspect.select",
+        "dispatchPolicy": "required",
+        "summary": "demo.inspect.select",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.nav.right",
+        "dispatchPolicy": "required",
+        "summary": "demo.nav.right",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.reorder",
+        "dispatchPolicy": "required",
+        "summary": "demo.reorder",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.split.controlled",
+        "dispatchPolicy": "required",
+        "summary": "demo.split.controlled",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.state.restore",
+        "dispatchPolicy": "required",
+        "summary": "demo.state.restore",
+        "payloadContract": "no payload",
+        "arguments": []
+      },
+      {
+        "id": "demo.state.snapshot",
+        "dispatchPolicy": "required",
+        "summary": "demo.state.snapshot",
+        "payloadContract": "no payload",
+        "arguments": []
+      }
+    ]
+  },
+  "host": [
+    {
+      "path": "demo",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "demo view",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          {
+            "name": "eventTotal",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "retainedEventCount",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "events",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 48,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "demo event",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": {
+                      "kind": "key"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "sequence",
+                    "type": {
+                      "kind": "number"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "description",
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "nullable": false
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "coalescingResult",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "deterministicResult",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "focusContained",
+            "type": {
+              "kind": "boolean"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "inspectorPickArmed",
+            "type": {
+              "kind": "boolean"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "reorderItems",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 32,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "demo reorder item",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  {
+                    "name": "id",
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "key",
+                    "type": {
+                      "kind": "key"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "label",
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "nullable": false
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "controlledSplitRatio",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "hostValue",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "hostMessage",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "dataActivity",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "formValid",
+            "type": {
+              "kind": "boolean"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "formDirty",
+            "type": {
+              "kind": "boolean"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "formTouched",
+            "type": {
+              "kind": "boolean"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "comboQuery",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "comboSelection",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "union",
+              "label": "nullable string",
+              "options": [
+                {
+                  "kind": "string"
+                },
+                {
+                  "kind": "null"
+                }
+              ]
+            }
+          },
+          {
+            "name": "inspectorNodeCount",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "inspectorSelectedKey",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "inspectorSelectedType",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "inspectorBounds",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "inspectorActions",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "inspectorHandlerOwners",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "inspectorMotion",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "measuredNodes",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "reusedNodes",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "arrangedNodes",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false
+          }
+        ]
+      }
+    },
+    {
+      "path": "data",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "demo data",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          {
+            "name": "treeItems",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 100101,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "demo tree item",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": {
+                      "kind": "key"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "label",
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "parentKey",
+                    "required": true,
+                    "nullable": false,
+                    "type": {
+                      "kind": "union",
+                      "label": "nullable key",
+                      "options": [
+                        {
+                          "kind": "key"
+                        },
+                        {
+                          "kind": "null"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "name": "mayHaveChildren",
+                    "type": {
+                      "kind": "boolean"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "childrenLoaded",
+                    "type": {
+                      "kind": "boolean"
+                    },
+                    "required": true,
+                    "nullable": false
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "tableRows",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 5000,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "demo table row",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": {
+                      "kind": "key"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "cells",
+                    "required": true,
+                    "nullable": false,
+                    "type": {
+                      "kind": "object",
+                      "label": "demo table cells",
+                      "allowUnknownFields": false,
+                      "valueNullable": false,
+                      "fields": [
+                        {
+                          "name": "name",
+                          "type": {
+                            "kind": "string"
+                          },
+                          "required": true,
+                          "nullable": false
+                        },
+                        {
+                          "name": "status",
+                          "type": {
+                            "kind": "string"
+                          },
+                          "required": true,
+                          "nullable": false
+                        },
+                        {
+                          "name": "progress",
+                          "type": {
+                            "kind": "number"
+                          },
+                          "required": true,
+                          "nullable": false
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "gridEntries",
+            "required": true,
+            "nullable": false,
+            "type": {
+              "kind": "list",
+              "maximumItems": 2000,
+              "minimumItems": 0,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "demo grid entry",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  {
+                    "name": "kind",
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "key",
+                    "type": {
+                      "kind": "key"
+                    },
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "label",
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true,
+                    "nullable": false
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "path": "asyncResults",
+      "nullable": false,
+      "type": {
+        "kind": "async",
+        "label": "showcase async results",
+        "value": {
+          "kind": "list",
+          "minimumItems": 0,
+          "maximumItems": 100,
+          "elementNullable": false,
+          "element": {
+            "kind": "object",
+            "label": "async result",
+            "allowUnknownFields": false,
+            "valueNullable": false,
+            "fields": [
+              {
+                "name": "key",
+                "type": {
+                  "kind": "string"
+                },
+                "required": true,
+                "nullable": false
+              },
+              {
+                "name": "label",
+                "type": {
+                  "kind": "string"
+                },
+                "required": true,
+                "nullable": false
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "path": "asyncTreeChildren",
+      "nullable": false,
+      "type": {
+        "kind": "async",
+        "label": "lazy tree children",
+        "value": {
+          "kind": "list",
+          "maximumItems": 100101,
+          "minimumItems": 0,
+          "elementNullable": false,
+          "element": {
+            "kind": "object",
+            "label": "demo tree item",
+            "allowUnknownFields": false,
+            "valueNullable": false,
+            "fields": [
+              {
+                "name": "key",
+                "type": {
+                  "kind": "key"
+                },
+                "required": true,
+                "nullable": false
+              },
+              {
+                "name": "label",
+                "type": {
+                  "kind": "string"
+                },
+                "required": true,
+                "nullable": false
+              },
+              {
+                "name": "parentKey",
+                "required": true,
+                "nullable": false,
+                "type": {
+                  "kind": "union",
+                  "label": "nullable key",
+                  "options": [
+                    {
+                      "kind": "key"
+                    },
+                    {
+                      "kind": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "mayHaveChildren",
+                "type": {
+                  "kind": "boolean"
+                },
+                "required": true,
+                "nullable": false
+              },
+              {
+                "name": "childrenLoaded",
+                "type": {
+                  "kind": "boolean"
+                },
+                "required": true,
+                "nullable": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "materials": {
+    "definitions": [
+      {
+        "id": "demo:aurora",
+        "blendMode": "straight_alpha",
+        "fallback": "strata:rounded_rect",
+        "parameters": [
+          {
+            "name": "intensity",
+            "materialType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "tint",
+            "materialType": "COLOR",
+            "type": {
+              "kind": "color"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "shaders": {
+          "hlsl": "assets/strata/shaders/materials/aurora.hlsl"
+        }
+      }
+    ]
+  }
+}

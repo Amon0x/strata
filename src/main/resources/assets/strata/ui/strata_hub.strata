@@ -1,0 +1,728 @@
+// Morrow is a complete product workspace, not a framework showcase or host control panel.
+// F10 merely gives the host a convenient way to present it. Everything visible below is ordinary
+// portable .strata UI: responsive composition, local state, vector artwork, motion and controls.
+
+style Clear { background: null; border: null; }
+
+style AppBackdrop {
+  kind: "OVERLAY"; width: { weight: 1 }; height: { weight: 1 };
+  padding: 18; alignItems: "CENTER"; justifyContent: "CENTER";
+  background: {
+    kind: "radial", center: { x: 0.72, y: 0.08 }, radiusX: 1.0, radiusY: 1.25,
+    stops: [
+      { color: #24344BE8, offset: 0 },
+      { color: #111823F5, offset: 0.48 },
+      { color: #090D14FC, offset: 1 }
+    ]
+  };
+  effect: effect("blur", radius: 8, downsample: 2);
+}
+
+style AppShell {
+  kind: "ROW"; width: { weight: 1 }; height: { weight: 1 };
+  radius: 20; gap: 0; clip: true;
+  background: #F5F2EBFF;
+  border: { width: 1, color: #FFFFFF2E };
+}
+
+style CompactShell extends AppShell { kind: "COLUMN"; }
+
+style Sidebar {
+  kind: "COLUMN"; width: 226; height: { weight: 1 };
+  padding: { horizontal: 16, vertical: 18 }; gap: 8;
+  background: {
+    kind: "linear", angle: 165,
+    stops: [
+      { color: #18251FFF, offset: 0 },
+      { color: #101915FF, offset: 1 }
+    ]
+  };
+  border: null;
+}
+
+style CompactNav {
+  kind: "ROW"; width: { weight: 1 }; height: 66;
+  padding: { horizontal: 14, vertical: 10 }; gap: 8; alignItems: "CENTER";
+  background: #142019FF; border: null;
+}
+
+style BrandRow extends Clear {
+  kind: "ROW"; width: { weight: 1 }; height: 44; gap: 10; alignItems: "CENTER";
+}
+
+style BrandMark {
+  kind: "PANEL"; width: 34; height: 34; radius: 11;
+  alignItems: "CENTER"; justifyContent: "CENTER";
+  background: {
+    kind: "linear", angle: 145,
+    stops: [ { color: #D6FF8CFF }, { color: #A7E25FFF } ]
+  };
+  border: { width: 1, color: #ECFFC7A6 };
+}
+
+style BrandGlyph { width: 21; height: 21; background: null; border: null; }
+style BrandName { font: "strata:fonts/default-medium"; pixelSize: 19; color: #F3F8F1FF; }
+style BrandMeta { pixelSize: 12; color: #8D9C92FF; }
+style SidebarLabel { pixelSize: 12; color: #718078FF; }
+
+style WorkspacePicker {
+  kind: "ROW"; width: { weight: 1 }; height: 50;
+  padding: { horizontal: 10, vertical: 8 }; gap: 9; radius: 11; alignItems: "CENTER";
+  background: #FFFFFF0A; border: { width: 1, color: #FFFFFF12 };
+}
+
+style WorkspaceIcon {
+  kind: "PANEL"; width: 30; height: 30; radius: 8;
+  alignItems: "CENTER"; justifyContent: "CENTER";
+  background: #D8F79DFF; border: null;
+}
+
+style WorkspaceTitle { font: "strata:fonts/default-medium"; pixelSize: 14; color: #EFF5ECFF; }
+style WorkspaceMeta { pixelSize: 12; color: #839087FF; }
+
+style NavStack extends Clear {
+  kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 4;
+  padding: { top: 8 };
+}
+
+style NavItem {
+  kind: "ROW"; width: { weight: 1 }; height: 38;
+  padding: { horizontal: 10 }; gap: 10; radius: 10; alignItems: "CENTER";
+  background: #FFFFFF00; border: { width: 1, color: #FFFFFF00 };
+  animateChanges: { properties: ["background", "border"], policy: "standard" };
+}
+
+style NavItemSelected extends NavItem {
+  background: #D8F79D14; border: { width: 1, color: #D8F79D1F };
+}
+
+style NavDot {
+  kind: "PANEL"; width: 7; height: 7; radius: 4;
+  background: #536159FF; border: null;
+}
+style NavDotSelected extends NavDot { background: #C8F17CFF; }
+style NavText { pixelSize: 14; color: #93A097FF; }
+style NavTextSelected { font: "strata:fonts/default-medium"; pixelSize: 14; color: #F1F7EEFF; }
+style NavCount { font: "strata:fonts/mono"; pixelSize: 12; color: #718078FF; }
+
+style SidebarBottom extends Clear {
+  kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 10;
+}
+
+style InviteCard {
+  kind: "COLUMN"; width: { weight: 1 }; height: "content";
+  padding: 12; gap: 7; radius: 12;
+  background: {
+    kind: "linear", angle: 150,
+    stops: [ { color: #27382DFF }, { color: #1C2921FF } ]
+  };
+  border: { width: 1, color: #D8F79D1A };
+}
+style InviteTitle { font: "strata:fonts/default-medium"; pixelSize: 13; color: #EAF5E5FF; }
+style InviteCopy { pixelSize: 12; color: #8FA096FF; }
+
+style ProfileRow extends Clear {
+  kind: "ROW"; width: { weight: 1 }; height: 42; gap: 9; alignItems: "CENTER";
+}
+
+style MainSurface {
+  kind: "COLUMN"; width: { weight: 1 }; height: { weight: 1 };
+  background: #F5F2EBFF; border: null;
+}
+
+style Topbar {
+  kind: "ROW"; width: { weight: 1 }; height: 72;
+  padding: { horizontal: 24 }; gap: 12; alignItems: "CENTER";
+  background: #F8F6F0FF; border: { width: 1, color: #DCD8CEFF };
+}
+style CompactTopbar extends Topbar { height: 62; padding: { horizontal: 14 }; }
+
+style PageTitle { font: "strata:fonts/default-medium"; pixelSize: 22; color: #18221DFF; }
+style PageEyebrow { pixelSize: 12; color: #687169FF; }
+style SearchStyle {
+  radius: 10; background: #EBE8E0FF; border: { width: 1, color: #DEDBD3FF };
+  pixelSize: 14; color: #243029FF; hintColor: #929990FF;
+  focusRing: { width: 2, color: #5E8124FF };
+}
+style GreenFocus { pixelSize: 14; focusRing: { width: 2, color: #5E8124FF }; }
+style DarkSurfaceGreenFocus { pixelSize: 14; focusRing: { width: 2, color: #B7E36EFF }; }
+style CompactDarkSurfaceGreenFocus extends DarkSurfaceGreenFocus { pixelSize: 13; }
+
+style IconCircle {
+  kind: "PANEL"; width: 34; height: 34; radius: 17;
+  alignItems: "CENTER"; justifyContent: "CENTER";
+  background: #E9E6DDFF; border: { width: 1, color: #DAD6CCFF };
+}
+style AvatarGreen extends IconCircle { background: #CBEA8FFF; border: { width: 1, color: #B5D979FF }; }
+style AvatarPeach extends IconCircle { background: #F1BFA6FF; border: { width: 1, color: #DFA88DFF }; }
+style AvatarLavender extends IconCircle { background: #C9C2E8FF; border: { width: 1, color: #B4ABD9FF }; }
+style AvatarText { font: "strata:fonts/default-medium"; pixelSize: 12; color: #263129FF; }
+
+style PageScroll {
+  kind: "SCROLL"; width: { weight: 1 }; height: { weight: 1 };
+  background: #F5F2EBFF; border: null;
+}
+style PageContent extends Clear {
+  kind: "COLUMN"; width: { weight: 1 }; height: "content";
+  padding: 24; gap: 18;
+}
+style CompactPageContent extends PageContent { padding: 14; gap: 12; }
+
+style WelcomeRow extends Clear {
+  kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 14; alignItems: "END";
+}
+style HeroTitle { font: "strata:fonts/default-medium"; pixelSize: 30; color: #16211BFF; }
+style HeroSubtitle { pixelSize: 13; color: #778078FF; }
+
+style FeatureCard {
+  kind: "ROW"; width: { weight: 1 }; height: 188;
+  padding: 22; gap: 18; radius: 18; clip: true;
+  alignItems: "CENTER";
+  background: {
+    kind: "linear", angle: 150,
+    stops: [
+      { color: #314735FF, offset: 0 },
+      { color: #203229FF, offset: 0.55 },
+      { color: #15231CFF, offset: 1 }
+    ]
+  };
+  border: { width: 1, color: #FFFFFF1A };
+}
+style CompactFeatureCard extends FeatureCard { height: "content"; padding: 17; }
+style FeatureCopy extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 8; }
+style FeatureEyebrow { pixelSize: 12; color: #B8D881FF; }
+style FeatureTitle { font: "strata:fonts/default-medium"; pixelSize: 25; color: #F4F8F1FF; }
+style FeatureBody { pixelSize: 12; color: #A7B4AAFF; }
+style FeatureMetaRow extends Clear { kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 12; alignItems: "CENTER"; }
+style ProgressTrack {
+  kind: "PANEL"; width: { weight: 1 }; height: 5; radius: 3;
+  background: #FFFFFF14; border: null;
+}
+style ProgressFill {
+  kind: "PANEL"; width: { weight: 0.72 }; height: 5; radius: 3;
+  background: #C8F17CFF; border: null;
+}
+style FeatureVisual { width: 190; height: 150; background: null; border: null; }
+
+style MetricsGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 10; }
+style MetricCard {
+  kind: "COLUMN"; width: { weight: 1 }; height: 92;
+  padding: 13; gap: 5; radius: 13;
+  background: #FAF8F3FF; border: { width: 1, color: #E1DED5FF };
+}
+style MetricLabel { pixelSize: 12; color: #687169FF; }
+style MetricValue { font: "strata:fonts/default-medium"; pixelSize: 23; color: #1E2A23FF; }
+style MetricGood { pixelSize: 12; color: #527626FF; }
+style MetricQuiet { pixelSize: 12; color: #687169FF; }
+
+style ContentColumns extends Clear {
+  kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 14; alignItems: "START";
+}
+style ContentStack extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 14; }
+
+style PaperCard {
+  kind: "COLUMN"; width: { weight: 1 }; height: "content";
+  padding: 16; gap: 11; radius: 15;
+  background: #FBF9F4FF; border: { width: 1, color: #E0DDD4FF };
+}
+style CardHeader extends Clear {
+  kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 10; alignItems: "CENTER";
+}
+style CardTitle { font: "strata:fonts/default-medium"; pixelSize: 16; color: #202B25FF; }
+style CardMeta { pixelSize: 12; color: #687169FF; }
+
+style TaskRow {
+  kind: "ROW"; width: { weight: 1 }; height: 46;
+  gap: 10; alignItems: "CENTER";
+  background: null; border: { width: 1, color: #E7E3DBFF };
+}
+style TaskText extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 2; }
+style TaskName { pixelSize: 14; color: #2E3832FF; }
+style TaskNameDone { pixelSize: 14; color: #858D86FF; }
+style TaskMeta { pixelSize: 12; color: #687169FF; }
+style CheckStyle {
+  radius: 5; indicatorSize: 18; indicatorInset: 4;
+  track: #F2EFE8FF; fill: #8DB64EFF;
+  focusRing: { width: 2, color: #5E8124FF };
+}
+
+style TagGreen {
+  kind: "PANEL"; width: "content"; height: 21; padding: { horizontal: 7, vertical: 3 };
+  radius: 6; background: #DDEBC8FF; border: null;
+}
+style TagPeach extends TagGreen { background: #F3DFD3FF; }
+style TagLavender extends TagGreen { background: #E2DDF0FF; }
+style TagText { pixelSize: 12; color: #53604FFF; }
+
+style ScheduleRow extends Clear {
+  kind: "ROW"; width: { weight: 1 }; height: 54; gap: 10; alignItems: "CENTER";
+}
+style TimeText { font: "strata:fonts/mono"; pixelSize: 12; color: #687169FF; }
+style ScheduleRule { kind: "PANEL"; width: 3; height: 34; radius: 2; background: #A8CE69FF; border: null; }
+style ScheduleRulePeach extends ScheduleRule { background: #E5A989FF; }
+style ScheduleTitle { pixelSize: 12; color: #2C3730FF; }
+
+style ProjectGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 12; }
+style ProjectCard {
+  kind: "COLUMN"; width: { weight: 1 }; height: 176;
+  padding: 15; gap: 10; radius: 15;
+  background: #FBF9F4FF; border: { width: 1, color: #DFDCD3FF };
+}
+style ProjectCover {
+  kind: "PANEL"; width: { weight: 1 }; height: 72; radius: 10; clip: true;
+  alignItems: "END"; justifyContent: "END";
+  background: { kind: "linear", angle: 140, stops: [ { color: #CBE79BFF }, { color: #42644BFF } ] };
+  border: null;
+}
+style ProjectCoverPeach extends ProjectCover {
+  background: { kind: "linear", angle: 140, stops: [ { color: #F2C6AFFF }, { color: #A65E51FF } ] };
+}
+style ProjectCoverLilac extends ProjectCover {
+  background: { kind: "linear", angle: 140, stops: [ { color: #D4CDEFFF }, { color: #6B628EFF } ] };
+}
+style ProjectTitle { font: "strata:fonts/default-medium"; pixelSize: 15; color: #27322CFF; }
+
+style LibraryTile {
+  kind: "COLUMN"; width: { weight: 1 }; height: 166; padding: 10; gap: 8; radius: 14;
+  background: #FBF9F4FF; border: { width: 1, color: #E0DDD4FF };
+}
+style LibraryPreview {
+  kind: "PANEL"; width: { weight: 1 }; height: 98; radius: 10;
+  alignItems: "CENTER"; justifyContent: "CENTER";
+  background: #E4EAD8FF; border: null;
+}
+style LibraryPreviewDark extends LibraryPreview { background: #233129FF; }
+style LibraryPreviewRose extends LibraryPreview { background: #E9D1C8FF; }
+style LibraryGlyph { font: "strata:fonts/default-medium"; pixelSize: 30; color: #52634EFF; }
+style LibraryGlyphLight { font: "strata:fonts/default-medium"; pixelSize: 30; color: #D9EDB8FF; }
+
+style ModalScrim {
+  kind: "OVERLAY"; width: { weight: 1 }; height: { weight: 1 };
+  alignItems: "CENTER"; justifyContent: "CENTER";
+  background: #07100AB8; border: null;
+}
+style ComposeModal {
+  kind: "COLUMN"; width: 390; height: "content"; padding: 20; gap: 13; radius: 17;
+  background: #FBF9F4FF; border: { width: 1, color: #FFFFFF66 };
+}
+style ModalActions extends Clear { kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 8; justifyContent: "END"; }
+
+animation AppEnter {
+  from { opacity: 0, translateY: 12, scale: 0.985 }
+  to { opacity: 1, translateY: 0, scale: 1 }
+  duration: 230ms; easing: "cubic-out"; fillMode: "FORWARDS";
+}
+animation PageEnter {
+  from { opacity: 0, translateY: 8 }
+  to { opacity: 1, translateY: 0 }
+  duration: 170ms; easing: "cubic-out"; fillMode: "FORWARDS";
+}
+animation ItemEnter {
+  from { opacity: 0, translateY: 5 }
+  to { opacity: 1, translateY: 0 }
+  duration: 140ms; easing: "cubic-out"; fillMode: "FORWARDS";
+}
+animation HoverLift {
+  from { translateY: 0 }
+  to { translateY: -2 }
+  duration: 110ms; easing: "cubic-out";
+}
+animation ModalEnter {
+  from { opacity: 0, scale: 0.97, translateY: 8 }
+  to { opacity: 1, scale: 1, translateY: 0 }
+  duration: 170ms; easing: "cubic-out"; fillMode: "FORWARDS";
+}
+
+component Logo() {
+  Panel(style: BrandRow) {
+    Panel(style: BrandMark) {
+      Draw(style: BrandGlyph, shapes: [
+        { kind: "path", commands: "M 0.18 0.72 C 0.34 0.20 0.65 0.20 0.82 0.72 C 0.62 0.58 0.38 0.58 0.18 0.72 Z", fill: #203126FF },
+        { kind: "path", commands: "M 0.50 0.24 L 0.50 0.78", stroke: #203126FF, strokeStyle: { width: 1.5, cap: "round" } }
+      ])
+    }
+    Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 1 }) {
+      Text(text: "morrow", style: BrandName)
+      Text(text: "STUDIO WORKSPACE", style: BrandMeta)
+    }
+  }
+}
+
+component NavItemView(id: string, label: string, count: string, selected: boolean, select: action) {
+  Panel(
+    key: id,
+    style: selected ? NavItemSelected : NavItem,
+    visualStyle: DarkSurfaceGreenFocus,
+    motions: [{ id: "nav.hover", interaction: "HOVER", animation: HoverLift }],
+    behaviors: [
+      { id: "strata.focusable" },
+      { id: "strata.hoverable" },
+      { id: "strata.activate", action: select }
+    ]
+  ) {
+    Panel(style: selected ? NavDotSelected : NavDot)
+    Text(text: label, style: selected ? NavTextSelected : NavText, layout: { width: { weight: 1 } })
+    if !isEmpty(count) { Text(text: count, style: NavCount) }
+  }
+}
+
+component SidebarView(section: string, setSection: action) {
+  Panel(style: Sidebar) {
+    Logo()
+    Text(text: "WORKSPACE", style: SidebarLabel, layout: { margin: { top: 8, bottom: 2 } })
+    Panel(style: WorkspacePicker) {
+      Panel(style: WorkspaceIcon) { Text(text: "N", style: AvatarText) }
+      Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 2 }) {
+        Text(text: "Northstar Studio", style: WorkspaceTitle)
+        Text(text: "Product & brand", style: WorkspaceMeta)
+      }
+      Text(text: "⌄", style: WorkspaceMeta)
+    }
+    Panel(style: NavStack) {
+      NavItemView(id: "HOME", label: "Overview", count: "", selected: section == "HOME", select: action("state.set", name: "section", value: "HOME"))
+      NavItemView(id: "PROJECTS", label: "Projects", count: "7", selected: section == "PROJECTS", select: action("state.set", name: "section", value: "PROJECTS"))
+      NavItemView(id: "CALENDAR", label: "Calendar", count: "3", selected: section == "CALENDAR", select: action("state.set", name: "section", value: "CALENDAR"))
+      NavItemView(id: "LIBRARY", label: "Library", count: "24", selected: section == "LIBRARY", select: action("state.set", name: "section", value: "LIBRARY"))
+    }
+    Panel(style: Clear, layout: { width: { weight: 1 }, height: { weight: 1 } })
+    Panel(style: SidebarBottom) {
+      Panel(style: InviteCard) {
+        Text(text: "Bring the room together", style: InviteTitle)
+        Text(text: "Invite your team to review work and leave decisions in context.", style: InviteCopy, wrapMode: "WORD")
+        Button(key: "sidebar.invite", label: "Invite people", variant: "compact", visualStyle: CompactDarkSurfaceGreenFocus)
+      }
+      Panel(style: ProfileRow) {
+        Panel(style: AvatarPeach) { Text(text: "AM", style: AvatarText) }
+        Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 1 }) {
+          Text(text: "Avery Morgan", style: WorkspaceTitle)
+          Text(text: "Creative director", style: WorkspaceMeta)
+        }
+        Text(text: "•••", style: WorkspaceMeta)
+      }
+    }
+  }
+}
+
+component CompactNavigation(section: string) {
+  Panel(style: CompactNav) {
+    Panel(style: BrandMark) { Text(text: "m", style: AvatarText) }
+    NavItemView(id: "compact.home", label: "Overview", count: "", selected: section == "HOME", select: action("state.set", name: "section", value: "HOME"))
+    NavItemView(id: "compact.projects", label: "Projects", count: "", selected: section == "PROJECTS", select: action("state.set", name: "section", value: "PROJECTS"))
+    NavItemView(id: "compact.library", label: "Library", count: "", selected: section == "LIBRARY", select: action("state.set", name: "section", value: "LIBRARY"))
+  }
+}
+
+component TopbarView(section: string, query: string, close: action) {
+  Panel(style: env.compact ? CompactTopbar : Topbar) {
+    Panel(style: Clear, layout: { kind: "COLUMN", width: 170, height: "content", gap: 2 }) {
+      Text(text: section == "HOME" ? "Overview" : title(lower(section)), style: PageTitle)
+      if !env.compact { Text(text: "Wednesday, 24 July", style: PageEyebrow) }
+    }
+    TextBox(
+      key: "workspace.search", text: query, hint: "Search projects, files, people…",
+      onChange: action("state.setFromEvent", name: "query"), visualStyle: SearchStyle,
+      layout: { width: { weight: 1 }, height: 36 }
+    )
+    if !env.compact {
+      Panel(style: IconCircle) { Text(text: "?", style: AvatarText) }
+      Panel(style: AvatarGreen) { Text(text: "AM", style: AvatarText) }
+    }
+    Button(key: "workspace.close", label: "Close · F10", variant: "subtle", visualStyle: GreenFocus, onClick: close)
+  }
+}
+
+component MetricCardView(label: string, value: string, note: string, good: boolean) {
+  Panel(style: MetricCard, transition: ItemEnter, stagger: 22ms) {
+    Text(text: label, style: MetricLabel)
+    Text(text: value, style: MetricValue)
+    Text(text: note, style: good ? MetricGood : MetricQuiet)
+  }
+}
+
+component TaskRowView(id: key, titleText: string, meta: string, done: boolean, change: action) {
+  Panel(key: id, style: TaskRow, transition: ItemEnter, stagger: 24ms) {
+    Checkbox(key: format("{0}.check", id), checked: done, onChange: change, visualStyle: CheckStyle)
+    Panel(style: TaskText) {
+      Text(text: titleText, style: done ? TaskNameDone : TaskName, maxLines: 1, overflow: "ELLIPSIS")
+      Text(text: meta, style: TaskMeta, maxLines: 1)
+    }
+  }
+}
+
+component ScheduleItem(time: string, titleText: string, meta: string, peach: boolean) {
+  Panel(style: ScheduleRow, transition: ItemEnter, stagger: 25ms) {
+    Text(text: time, style: TimeText, layout: { width: 39 })
+    Panel(style: peach ? ScheduleRulePeach : ScheduleRule)
+    Panel(style: TaskText) {
+      Text(text: titleText, style: ScheduleTitle, maxLines: 1)
+      Text(text: meta, style: TaskMeta, maxLines: 1, overflow: "ELLIPSIS")
+    }
+  }
+}
+
+component OverviewPage(taskOne: boolean, taskTwo: boolean, taskThree: boolean, openCompose: action) {
+  Panel(style: env.compact ? CompactPageContent : PageContent, transition: PageEnter) {
+    Panel(style: WelcomeRow) {
+      Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 4 }) {
+        Text(text: "Good morning, Avery.", style: HeroTitle)
+        Text(text: "Here’s what is moving across the studio today.", style: HeroSubtitle)
+      }
+      Button(key: "overview.new", label: "+  New project", variant: "primary", visualStyle: GreenFocus, onClick: openCompose)
+    }
+
+    Panel(style: env.compact ? CompactFeatureCard : FeatureCard, effect: effect("shadow", color: #20312633, radius: 20, spread: 1)) {
+      Panel(style: FeatureCopy) {
+        Text(text: "FEATURED PROJECT", style: FeatureEyebrow)
+        Text(text: "Northstar brand system", style: FeatureTitle)
+        Text(text: "The final identity review is ready. Three decisions remain before the handoff on Friday.", style: FeatureBody, wrapMode: "WORD")
+        Panel(style: FeatureMetaRow) {
+          Panel(style: ProgressTrack) { Panel(style: ProgressFill) }
+          Text(text: "72%", style: FeatureEyebrow)
+        }
+        Panel(style: FeatureMetaRow) {
+          Panel(style: AvatarGreen, layout: { width: 26, height: 26 }) { Text(text: "AM", style: AvatarText) }
+          Panel(style: AvatarPeach, layout: { width: 26, height: 26, margin: { left: -17 } }) { Text(text: "SL", style: AvatarText) }
+          Panel(style: AvatarLavender, layout: { width: 26, height: 26, margin: { left: -17 } }) { Text(text: "JT", style: AvatarText) }
+          Text(text: "5 collaborators  ·  updated 12 min ago", style: FeatureBody)
+        }
+      }
+      if !env.compact {
+        Draw(style: FeatureVisual, shapes: [
+          { kind: "ellipse", center: { x: 0.54, y: 0.50 }, radiusX: 0.40, radiusY: 0.40, fill: #D8F79D18, stroke: #D8F79D2B, strokeStyle: { width: 1 } },
+          { kind: "ellipse", center: { x: 0.54, y: 0.50 }, radiusX: 0.29, radiusY: 0.29, fill: #D8F79D20, stroke: #D8F79D47, strokeStyle: { width: 1 } },
+          { kind: "path", commands: "M 0.20 0.64 C 0.34 0.14 0.65 0.12 0.85 0.57 C 0.63 0.46 0.40 0.47 0.20 0.64 Z", fill: { kind: "linear", angle: 150, stops: [ { color: #D8F79DFF }, { color: #7CA94BFF } ] } },
+          { kind: "path", commands: "M 0.53 0.20 C 0.49 0.42 0.49 0.61 0.54 0.80", stroke: #F1FFD8CC, strokeStyle: { width: 2, cap: "round" } },
+          { kind: "ellipse", center: { x: 0.78, y: 0.25 }, radiusX: 0.025, radiusY: 0.025, fill: #F3FFDFFF }
+        ])
+      }
+    }
+
+    Grid(columns: [{ weight: 1 }, { weight: 1 }, { weight: 1 }, { weight: 1 }], style: MetricsGrid) {
+      MetricCardView(label: "ACTIVE PROJECTS", value: "07", note: "+2 this month", good: true)
+      MetricCardView(label: "OPEN TASKS", value: "18", note: "6 due this week", good: false)
+      MetricCardView(label: "IN REVIEW", value: "04", note: "2 need your input", good: false)
+      MetricCardView(label: "MOMENTUM", value: "94%", note: "+8% from last week", good: true)
+    }
+
+    if env.compact {
+      Panel(style: ContentStack) {
+        TodayTasks(taskOne: taskOne, taskTwo: taskTwo, taskThree: taskThree)
+        TodaySchedule()
+      }
+    } else {
+      Panel(style: ContentColumns) {
+        TodayTasks(taskOne: taskOne, taskTwo: taskTwo, taskThree: taskThree)
+        Panel(style: Clear, layout: { kind: "COLUMN", width: 310, height: "content" }) { TodaySchedule() }
+      }
+    }
+  }
+}
+
+component TodayTasks(taskOne: boolean, taskTwo: boolean, taskThree: boolean) {
+  Panel(style: PaperCard) {
+    Panel(style: CardHeader) {
+      Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 2 }) {
+        Text(text: "Today’s focus", style: CardTitle)
+        Text(text: "3 priorities chosen for a quieter day", style: CardMeta)
+      }
+      Panel(style: TagGreen) { Text(text: "3 OF 5", style: TagText) }
+    }
+    TaskRowView(id: "task.identity", titleText: "Approve identity lockups", meta: "Northstar · due at 11:00", done: taskOne, change: action("state.toggle", name: "taskOne"))
+    TaskRowView(id: "task.copy", titleText: "Review launch page copy", meta: "Website refresh · 8 comments", done: taskTwo, change: action("state.toggle", name: "taskTwo"))
+    TaskRowView(id: "task.tokens", titleText: "Publish motion tokens", meta: "Design system · assigned to you", done: taskThree, change: action("state.toggle", name: "taskThree"))
+    Button(key: "tasks.all", label: "View all tasks  →", variant: "subtle", visualStyle: GreenFocus)
+  }
+}
+
+component TodaySchedule() {
+  Panel(style: PaperCard) {
+    Panel(style: CardHeader) {
+      Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 2 }) {
+        Text(text: "Up next", style: CardTitle)
+        Text(text: "Wednesday · 3 sessions", style: CardMeta)
+      }
+      Panel(style: TagPeach) { Text(text: "TODAY", style: TagText) }
+    }
+    ScheduleItem(time: "10:30", titleText: "Identity review", meta: "with Sofia, Jules +2", peach: false)
+    ScheduleItem(time: "13:00", titleText: "Deep work block", meta: "Launch narrative", peach: true)
+    ScheduleItem(time: "15:30", titleText: "Studio weekly", meta: "All hands · Loft room", peach: false)
+  }
+}
+
+component ProjectCardView(titleText: string, category: string, progress: number, cover: string) {
+  Panel(
+    style: ProjectCard, transition: ItemEnter, stagger: 35ms,
+    motions: [{ id: "project.hover", interaction: "HOVER", animation: HoverLift }],
+    behaviors: [{ id: "strata.hoverable" }]
+  ) {
+    Panel(style: cover == "PEACH" ? ProjectCoverPeach : cover == "LILAC" ? ProjectCoverLilac : ProjectCover) {
+      Text(text: format("{0}%", progress), style: FeatureEyebrow, layout: { margin: 9 })
+    }
+    Text(text: titleText, style: ProjectTitle, maxLines: 1)
+    Panel(style: CardHeader) {
+      Text(text: category, style: CardMeta, layout: { width: { weight: 1 } })
+      Text(text: "•••", style: CardMeta)
+    }
+  }
+}
+
+component ProjectsPage(openCompose: action) {
+  Panel(style: env.compact ? CompactPageContent : PageContent, transition: PageEnter) {
+    Panel(style: WelcomeRow) {
+      Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 4 }) {
+        Text(text: "Projects", style: HeroTitle)
+        Text(text: "Everything the studio is shaping, in one place.", style: HeroSubtitle)
+      }
+      Button(key: "projects.new", label: "+  New project", variant: "primary", visualStyle: GreenFocus, onClick: openCompose)
+    }
+    Grid(columns: env.compact ? [{ weight: 1 }, { weight: 1 }] : [{ weight: 1 }, { weight: 1 }, { weight: 1 }], style: ProjectGrid) {
+      ProjectCardView(titleText: "Northstar identity", category: "Brand system · 5 people", progress: 72, cover: "GREEN")
+      ProjectCardView(titleText: "Field notes", category: "Editorial · 3 people", progress: 48, cover: "PEACH")
+      ProjectCardView(titleText: "Morrow web", category: "Digital · 4 people", progress: 86, cover: "LILAC")
+      ProjectCardView(titleText: "Studio handbook", category: "Internal · 8 people", progress: 31, cover: "GREEN")
+      ProjectCardView(titleText: "Autumn campaign", category: "Campaign · 6 people", progress: 64, cover: "PEACH")
+      ProjectCardView(titleText: "Motion language", category: "Design system · 2 people", progress: 55, cover: "LILAC")
+    }
+  }
+}
+
+component CalendarPage() {
+  Panel(style: env.compact ? CompactPageContent : PageContent, transition: PageEnter) {
+    Text(text: "Studio calendar", style: HeroTitle)
+    Text(text: "A calm view of reviews, focus time and delivery windows.", style: HeroSubtitle)
+    Panel(style: FeatureCard) {
+      Panel(style: FeatureCopy) {
+        Text(text: "WEDNESDAY · JULY 24", style: FeatureEyebrow)
+        Text(text: "Three meetings.\nFive hours to make.", style: FeatureTitle, wrapMode: "WORD")
+        Text(text: "Your first session begins at 10:30. Notifications are paused until then.", style: FeatureBody, wrapMode: "WORD")
+      }
+      if !env.compact {
+        Draw(style: FeatureVisual, shapes: [
+          { kind: "ellipse", center: { x: 0.5, y: 0.5 }, radiusX: 0.34, radiusY: 0.34, fill: #D8F79D19, stroke: #D8F79D70, strokeStyle: { width: 1.5 } },
+          { kind: "path", commands: "M 0.50 0.50 L 0.50 0.27 M 0.50 0.50 L 0.68 0.59", stroke: #E9FFD0FF, strokeStyle: { width: 2, cap: "round" } }
+        ])
+      }
+    }
+    Panel(style: ContentColumns) {
+      TodaySchedule()
+      Panel(style: PaperCard) {
+        Text(text: "Protected time", style: CardTitle)
+        Text(text: "Your team can see these blocks as unavailable.", style: CardMeta)
+        Toggle(key: "calendar.mornings", label: "Quiet mornings", defaultChecked: true, visualStyle: GreenFocus)
+        Toggle(key: "calendar.lunch", label: "Keep lunch clear", defaultChecked: true, visualStyle: GreenFocus)
+        Toggle(key: "calendar.friday", label: "No-meeting Friday", visualStyle: GreenFocus)
+      }
+    }
+  }
+}
+
+component LibraryTileView(name: string, meta: string, kind: string, glyph: string) {
+  Panel(style: LibraryTile, transition: ItemEnter, stagger: 28ms, motions: [{ id: "library.hover", interaction: "HOVER", animation: HoverLift }], behaviors: [{ id: "strata.hoverable" }]) {
+    Panel(style: kind == "DARK" ? LibraryPreviewDark : kind == "ROSE" ? LibraryPreviewRose : LibraryPreview) {
+      Text(text: glyph, style: kind == "DARK" ? LibraryGlyphLight : LibraryGlyph)
+    }
+    Text(text: name, style: TaskName, maxLines: 1)
+    Text(text: meta, style: TaskMeta, maxLines: 1)
+  }
+}
+
+component LibraryPage() {
+  Panel(style: env.compact ? CompactPageContent : PageContent, transition: PageEnter) {
+    Panel(style: WelcomeRow) {
+      Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 4 }) {
+        Text(text: "Library", style: HeroTitle)
+        Text(text: "Shared ingredients, ready when the work needs them.", style: HeroSubtitle)
+      }
+      Button(key: "library.upload", label: "↑  Upload", variant: "primary", visualStyle: GreenFocus)
+    }
+    Grid(columns: env.compact ? [{ weight: 1 }, { weight: 1 }] : [{ weight: 1 }, { weight: 1 }, { weight: 1 }, { weight: 1 }], style: ProjectGrid) {
+      LibraryTileView(name: "Northstar marks", meta: "12 SVG · updated today", kind: "GREEN", glyph: "N✦")
+      LibraryTileView(name: "Campaign portraits", meta: "48 photos · 214 MB", kind: "ROSE", glyph: "◉")
+      LibraryTileView(name: "Motion presets", meta: "8 curves · shared", kind: "DARK", glyph: "↝")
+      LibraryTileView(name: "Type specimens", meta: "6 sheets · approved", kind: "GREEN", glyph: "Aa")
+      LibraryTileView(name: "Launch film", meta: "4K video · 01:24", kind: "DARK", glyph: "▶")
+      LibraryTileView(name: "Color studies", meta: "24 palettes · draft", kind: "ROSE", glyph: "✣")
+      LibraryTileView(name: "Field textures", meta: "18 images · licensed", kind: "GREEN", glyph: "≈")
+      LibraryTileView(name: "Press kit", meta: "9 files · final", kind: "DARK", glyph: "↗")
+    }
+  }
+}
+
+component CurrentPage(section: string, taskOne: boolean, taskTwo: boolean, taskThree: boolean, openCompose: action) {
+  Scroll(key: format("workspace.page.{0}", section), vertical: true, horizontal: false, style: PageScroll) {
+    if section == "PROJECTS" {
+      ProjectsPage(openCompose: openCompose)
+    } else if section == "CALENDAR" {
+      CalendarPage()
+    } else if section == "LIBRARY" {
+      LibraryPage()
+    } else {
+      OverviewPage(taskOne: taskOne, taskTwo: taskTwo, taskThree: taskThree, openCompose: openCompose)
+    }
+  }
+}
+
+component NewProjectModal(closeModal: action) {
+  Panel(style: ModalScrim) {
+    Panel(style: ComposeModal, transition: ModalEnter, effect: effect("shadow", color: #07100A80, radius: 28, spread: 2)) {
+      Panel(style: CardHeader) {
+        Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 3 }) {
+          Text(text: "Start something new", style: PageTitle)
+          Text(text: "Give the work a clear home. You can invite people next.", style: CardMeta)
+        }
+      }
+      Text(text: "PROJECT NAME", style: MetricLabel)
+      TextBox(key: "project.name", text: "", hint: "e.g. Winter field guide", visualStyle: SearchStyle)
+      Text(text: "DESCRIPTION", style: MetricLabel)
+      TextArea(key: "project.description", text: "", hint: "What are you hoping to make?", visualStyle: SearchStyle, layout: { height: 78 })
+      Select(
+        key: "project.type", options: [
+          { id: "brand", label: "Brand identity" },
+          { id: "digital", label: "Digital product" },
+          { id: "campaign", label: "Campaign" },
+          { id: "editorial", label: "Editorial" }
+        ],
+        selectedId: "brand", visualStyle: GreenFocus
+      )
+      Panel(style: ModalActions) {
+        Button(key: "project.cancel", label: "Cancel", variant: "subtle", visualStyle: GreenFocus, onClick: closeModal)
+        Button(
+          key: "project.create", label: "Create project", variant: "primary", visualStyle: GreenFocus,
+          onClick: action("state.set", name: "composeOpen", value: false)
+        )
+      }
+    }
+  }
+}
+
+component WorkspaceApp() {
+  state section = "HOME";
+  state query = "";
+  state composeOpen = false;
+  state taskOne = true;
+  state taskTwo = false;
+  state taskThree = false;
+
+  Panel(key: "morrow.backdrop", style: AppBackdrop) {
+    Panel(key: "morrow.shell", style: env.compact ? CompactShell : AppShell, transition: AppEnter, effect: effect("shadow", color: #03070A99, radius: 34, spread: 3)) {
+      if env.compact { CompactNavigation(section: section) }
+      else { SidebarView(section: section, setSection: action("state.setFromEvent", name: "section")) }
+      Panel(style: MainSurface) {
+        TopbarView(section: section, query: query, close: action("hub.launch", target: "hub.self"))
+        CurrentPage(
+          section: section,
+          taskOne: taskOne,
+          taskTwo: taskTwo,
+          taskThree: taskThree,
+          openCompose: action("state.set", name: "composeOpen", value: true)
+        )
+      }
+    }
+    if composeOpen { NewProjectModal(closeModal: action("state.set", name: "composeOpen", value: false)) }
+    ToastRegion(key: "workspace.toasts", maxVisible: 3)
+  }
+}
+
+overlay StrataHub {
+  root WorkspaceApp()
+}

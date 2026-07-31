@@ -1,0 +1,1136 @@
+// Complete .strata-first showcase. Components own presentation and local state; the `demo.*`
+// binding/action bridge is reserved for native effects and observable host data.
+
+style Transparent {
+  background: null;
+  border: null;
+}
+
+style Root extends Transparent {
+  kind: "OVERLAY";
+  width: { weight: 1 };
+  height: { weight: 1 };
+}
+
+style ContentRoot extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+}
+
+style Header {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 58;
+  padding: { horizontal: 14, vertical: 9 };
+  gap: 14;
+  alignItems: "CENTER";
+}
+
+style BodyRow extends Transparent {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 12;
+  gap: 12;
+}
+
+style BodyColumn extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 12;
+  gap: 12;
+}
+
+style PageScroll {
+  kind: "SCROLL";
+  width: { weight: 1 };
+  height: { weight: 1 };
+}
+
+style PageHost extends Transparent {
+  kind: "OVERLAY";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  clip: true;
+}
+
+style PageColumn extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 11;
+}
+
+style CardStyle {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: 13;
+  gap: 8;
+  radius: 7;
+  border: { width: 1, color: #61708ACC };
+}
+
+style ContentSlot extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 8;
+}
+
+style ActionRow extends Transparent {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: "content";
+  gap: 7;
+  wrap: true;
+}
+
+style TitleText {
+  pixelSize: 18;
+  color: #F4F7FBFF;
+}
+
+style SectionText {
+  pixelSize: 14;
+  color: #E8EDF5FF;
+}
+
+style TelemetryText {
+  font: "strata:fonts/mono";
+  pixelSize: 12;
+}
+
+style SquareCheckbox {
+  radius: 2;
+  indicatorSize: 17;
+  indicatorInset: 4;
+  track: #202735FF;
+  fill: #5EC9A8FF;
+  focusRing: { width: 2, color: #74C2FFFF };
+}
+
+style MaterialBoolean {
+  trackWidth: 42;
+  trackHeight: 24;
+  trackRadius: 12;
+  thumbSize: 20;
+  thumbRadius: 10;
+  indicatorInset: 4;
+  track: #5F6368FF;
+  thumb: #F1F3F4FF;
+  focusRing: { width: 2, color: #8AB4F8FF };
+  indicatorPosition: 0;
+  animateChanges: { properties: ["track", "thumb", "indicatorPosition"], policy: "standard" };
+}
+
+style MaterialBooleanOn extends MaterialBoolean {
+  track: #1A73E8FF;
+  thumb: #FFFFFFFF;
+  indicatorPosition: 1;
+}
+
+animation ContentMotion {
+  from { opacity: 0, translateY: 10 }
+  to { opacity: 1, translateY: 0 }
+  duration: 180ms;
+  easing: "cubic-out";
+  fillMode: "FORWARDS";
+}
+
+animation ExtensionHoverMotion {
+  from { opacity: 0.82 }
+  to { opacity: 1 }
+  duration: 80ms;
+  easing: "cubic-out";
+}
+
+component Card(title: string) {
+  defaults: { Button: { variant: "compact" } }
+  Panel(style: CardStyle, transition: ContentMotion) {
+    Slot(name: "header") {
+      Text(text: title, style: SectionText, maxLines: 1)
+    }
+    Slot(name: "content", required: true, style: ContentSlot)
+    Slot(name: "footer")
+  }
+}
+
+component ButtonRow() {
+  Panel(style: ActionRow) {
+    Slot(name: "content", style: ActionRow)
+  }
+}
+
+component CompactButton(label: string, buttonKey: key, click: action) {
+  Button(key: buttonKey, label: label, variant: "compact", onClick: click)
+}
+
+component Pane(label: string) {
+  Panel(
+    variant: "secondary",
+    layout: { kind: "PANEL", width: { weight: 1 }, height: { weight: 1 }, padding: 10 }
+  ) {
+    Text(text: label, style: TelemetryText)
+  }
+}
+
+component DataTreeRow(key: key, label: string, expanded: boolean, selected: boolean, loading: boolean) {
+  Panel(
+    key: key,
+    style: Transparent,
+    layout: { kind: "ROW", width: { weight: 1 }, height: { weight: 1 }, alignItems: "CENTER", gap: 7 }
+  ) {
+    Text(text: label, maxLines: 1, overflow: "ELLIPSIS")
+  }
+}
+
+component AsyncListRow(item: record, key: key, index: number) {
+  Text(key: key, text: item.label, maxLines: 1, overflow: "ELLIPSIS")
+}
+
+component DataProgressCell(key: key, value: number, selected: boolean) {
+  Panel(key: key, style: Transparent, layout: { kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 }, padding: { horizontal: 7, vertical: 3 }, gap: 2 }) {
+    Progress(value: value / 100, layout: { width: { weight: 1 }, height: 6 })
+    Text(text: format("{0}%", value), style: TelemetryText, maxLines: 1)
+  }
+}
+
+component DataPinnedNameCell(key: key, value: string, selected: boolean) {
+  Button(
+    key: key,
+    label: value,
+    variant: selected ? "primary" : "subtle",
+    layout: { width: { weight: 1 }, height: { weight: 1 } },
+    onClick: action("demo.data.collection")
+  )
+}
+
+component DataGridItem(key: key, label: string, selected: boolean) {
+  Panel(
+    key: key,
+    variant: selected ? "primary" : "secondary",
+    layout: { kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 }, padding: 8, gap: 5, alignItems: "CENTER" },
+    behaviors: [
+      {
+        id: "strata.drag-source",
+        action: action("demo.data.collection"),
+        options: { payloadType: "demo.data-grid-item", payload: key, allowedOperations: ["MOVE"] }
+      },
+      {
+        id: "strata.drop-target",
+        action: action("demo.data.collection"),
+        options: { acceptedTypes: ["demo.data-grid-item"], allowedOperations: ["MOVE"], insertionAxis: "HORIZONTAL" }
+      }
+    ]
+  ) {
+    Text(text: "◆", style: SectionText)
+    Text(text: label, maxLines: 1, overflow: "ELLIPSIS")
+  }
+}
+
+component ShellPage() {
+  state destructiveEnabled = true;
+
+  Panel(style: PageColumn) {
+    Command(
+      id: "shell.palette",
+      label: "Open command palette",
+      category: "View",
+      shortcut: "Ctrl+Shift+P",
+      allowedWhileModal: true,
+      action: action("palette.set", key: "shell.palette", open: true)
+    )
+    Command(
+      id: "shell.save",
+      label: "Save workspace",
+      category: "File",
+      shortcut: "Ctrl+S",
+      action: action("notification.raise", message: "Workspace saved", severity: "SUCCESS")
+    )
+    Command(
+      id: "shell.export",
+      label: "Export selection",
+      category: "File/Export",
+      shortcut: "Ctrl+E",
+      icon: "strata:ui/icons/chevron-down",
+      action: action("notification.raise", message: "Selection exported", severity: "INFO")
+    )
+    Command(
+      id: "shell.destructive",
+      label: "Delete selected item",
+      category: "Edit",
+      shortcut: "Delete",
+      enabled: destructiveEnabled,
+      action: action("notification.raise", message: "Delete command executed", severity: "WARNING")
+    )
+    Command(
+      id: "shell.toggleDelete",
+      label: "Allow destructive commands",
+      category: "Edit/Preferences",
+      checked: destructiveEnabled,
+      action: action("state.toggle", name: "destructiveEnabled")
+    )
+    Command(
+      id: "shell.notifyInfo",
+      label: "Raise information toast",
+      category: "Test/Notifications",
+      action: action("notification.raise", message: "Information notification", severity: "INFO")
+    )
+    Command(
+      id: "shell.notifySuccess",
+      label: "Raise success toast",
+      category: "Test/Notifications",
+      action: action("notification.raise", message: "Operation completed", severity: "SUCCESS")
+    )
+    Command(
+      id: "shell.notifyWarning",
+      label: "Raise warning toast",
+      category: "Test/Notifications",
+      action: action("notification.raise", message: "Review this warning", severity: "WARNING")
+    )
+    Command(
+      id: "shell.notifyError",
+      label: "Raise error toast",
+      category: "Test/Notifications",
+      action: action("notification.raise", message: "Example failure", severity: "ERROR")
+    )
+
+    Card(title: "ONE COMMAND SOURCE") {
+      MenuBar(
+        key: "shell.menu",
+        commands: [
+          "shell.save", "shell.export", "-", "shell.destructive", "shell.toggleDelete",
+          "shell.palette", "shell.notifyInfo", "shell.notifySuccess", "shell.notifyWarning", "shell.notifyError"
+        ]
+      )
+      Toolbar(
+        key: "shell.toolbar",
+        commands: [
+          "shell.save", "shell.export", "shell.destructive", "shell.toggleDelete",
+          "shell.palette", "shell.notifyInfo", "shell.notifySuccess", "shell.notifyWarning", "shell.notifyError"
+        ]
+      )
+      ButtonRow() {
+        CompactButton(
+          label: destructiveEnabled ? "Disable Delete" : "Enable Delete",
+          buttonKey: "shell.enablement",
+          click: action("state.toggle", name: "destructiveEnabled")
+        )
+        Button(key: "shell.bound-save", label: "Command-bound Save", command: "shell.save", variant: "compact")
+        Button(key: "shell.open-palette", label: "Open Palette", command: "shell.palette", variant: "compact")
+      }
+      Text(
+        text: "Disable Delete, then inspect Edit, the toolbar, and the palette: the same command must become disabled everywhere. Narrow the window to force toolbar overflow without losing order.",
+        wrapMode: "WORD"
+      )
+    }
+
+    Card(title: "PASSIVE CHROME") {
+      Breadcrumbs(
+        key: "shell.breadcrumbs",
+        items: [
+          { id: "workspace", label: "Workspace" },
+          { id: "assets", label: "Assets" },
+          { id: "current", label: "Current" }
+        ],
+        onSelect: action("demo.data.collection")
+      )
+      Banner(
+        key: "shell.banner",
+        message: "This persistent notice participates in layout; toasts do not.",
+        severity: "INFO",
+        actionLabel: "Notify",
+        action: action("notification.raise", message: "Banner action completed", severity: "SUCCESS")
+      )
+      Section(key: "shell.section", label: "Collapsible details", defaultExpanded: true, onChange: action("demo.data.collection")) {
+        Text(text: "Disclosure state is retained and its content is clipped throughout the transition.", wrapMode: "WORD")
+        ChipInput(
+          key: "shell.chips",
+          defaultValues: ["alpha", "beta"],
+          placeholder: "Type a tag and press Enter",
+          onChange: action("demo.data.collection")
+        )
+      }
+      StatusBar(key: "shell.status") {
+        Text(text: "SHELL acceptance surface", style: TelemetryText)
+      }
+    }
+
+    Card(title: "TOAST QUEUE") {
+      Text(text: "Run all four commands quickly. Three toast cards remain visible and the overflow count reports the queued remainder.", wrapMode: "WORD")
+      Toolbar(
+        key: "shell.notification-toolbar",
+        commands: ["shell.notifyInfo", "shell.notifySuccess", "shell.notifyWarning", "shell.notifyError"]
+      )
+    }
+  }
+}
+
+component Showcase() {
+  state selectedPage = "EXTEND";
+  state controlModalOpen = false;
+
+  Panel(
+    key: "targets.root",
+    style: Root,
+    behaviors: [
+      { id: "demo.inspector-pick", enabled: demo.inspectorPickArmed }
+    ]
+  ) {
+    Panel(key: "targets.content", style: ContentRoot) {
+      ShowcaseHeader(selectedPage: selectedPage)
+      EventConsole()
+      if env.compact {
+        Panel(style: BodyColumn) {
+          PageViewport(selectedPage: selectedPage)
+          ExpectedPanel(selectedPage: selectedPage, width: { weight: 1 }, height: "content")
+        }
+      } else {
+        Panel(style: BodyRow) {
+          PageViewport(selectedPage: selectedPage)
+          ExpectedPanel(selectedPage: selectedPage, width: 310, height: { weight: 1 })
+        }
+      }
+    }
+    if controlModalOpen {
+      ControlModal()
+    }
+    CommandPalette(key: "shell.palette", maxVisibleRows: 9)
+    ToastRegion(key: "shell.toasts", maxVisible: 3)
+  }
+}
+
+component PageViewport(selectedPage: string) {
+  Panel(
+    key: "targets.page.host",
+    style: PageHost,
+    contentKey: selectedPage,
+    contentTransition: ContentMotion,
+    contentTransitionMode: "TOGETHER"
+  ) {
+    if selectedPage == "STATE" {
+      Scroll(key: "targets.page.scroll.state", persistenceKey: "showcase.page.scroll.state", vertical: true, horizontal: false, style: PageScroll) { StatePage() }
+    } else if selectedPage == "CONTROL" {
+      Scroll(key: "targets.page.scroll.control", persistenceKey: "showcase.page.scroll.control", vertical: true, horizontal: false, style: PageScroll) { ControlPage() }
+    } else if selectedPage == "FORMS" {
+      Scroll(key: "targets.page.scroll.forms", persistenceKey: "showcase.page.scroll.forms", vertical: true, horizontal: false, style: PageScroll) { FormsPage() }
+    } else if selectedPage == "MANIPULATE" {
+      Scroll(key: "targets.page.scroll.manipulate", persistenceKey: "showcase.page.scroll.manipulate", vertical: true, horizontal: false, style: PageScroll) { ManipulatePage() }
+    } else if selectedPage == "ADAPT" {
+      Scroll(key: "targets.page.scroll.adapt", persistenceKey: "showcase.page.scroll.adapt", vertical: true, horizontal: false, style: PageScroll) { AdaptPage() }
+    } else if selectedPage == "INSPECT" {
+      Scroll(key: "targets.page.scroll.inspect", persistenceKey: "showcase.page.scroll.inspect", vertical: true, horizontal: false, style: PageScroll) { InspectPage() }
+    } else if selectedPage == "DATA" {
+      Scroll(key: "targets.page.scroll.data", persistenceKey: "showcase.page.scroll.data", vertical: true, horizontal: false, style: PageScroll) { DataPage() }
+    } else if selectedPage == "SHELL" {
+      Scroll(key: "targets.page.scroll.shell", persistenceKey: "showcase.page.scroll.shell", vertical: true, horizontal: false, style: PageScroll) { ShellPage() }
+    } else {
+      Scroll(key: "targets.page.scroll.extend", persistenceKey: "showcase.page.scroll.extend", vertical: true, horizontal: false, style: PageScroll) { ExtendPage() }
+    }
+  }
+}
+
+component ShowcaseHeader(selectedPage: string) {
+  Panel(
+    style: Header,
+    material: material("demo:aurora", intensity: 0.85, tint: #7C6BFFFF)
+  ) {
+    Text(text: format("STRATA / {0}", selectedPage), style: TitleText, layout: { width: 175 })
+    Tabs(
+      key: "targets.navigation",
+      tabs: [
+        { id: "EXTEND", label: "EXTEND" },
+        { id: "STATE", label: "STATE" },
+        { id: "CONTROL", label: "CONTROL" },
+        { id: "FORMS", label: "FORMS" },
+        { id: "MANIPULATE", label: "MANIPULATE" },
+        { id: "ADAPT", label: "ADAPT" },
+        { id: "INSPECT", label: "INSPECT" },
+        { id: "DATA", label: "DATA" },
+        { id: "SHELL", label: "SHELL" }
+      ],
+      selectedId: selectedPage,
+      layout: { width: { weight: 1 }, height: 34 },
+      onChange: action("state.setFromEvent", name: "selectedPage")
+    )
+    Text(text: env.viewport, style: TelemetryText)
+  }
+}
+
+component EventConsole() {
+  Panel(
+    variant: "secondary",
+    layout: { kind: "COLUMN", width: { weight: 1 }, height: 132, padding: { horizontal: 8, vertical: 6 }, gap: 4 }
+  ) {
+    Panel(layout: { kind: "ROW", width: { weight: 1 }, height: 24, gap: 8, alignItems: "CENTER" }, style: Transparent) {
+      Text(
+        text: format("EVENT CONSOLE — total={0} retained={1}/48 — newest first", demo.eventTotal, demo.retainedEventCount),
+        style: TelemetryText,
+        layout: { width: { weight: 1 } },
+        maxLines: 1,
+        overflow: "ELLIPSIS"
+      )
+      CompactButton(label: "Clear", buttonKey: "events.clear", click: action("demo.events.clear"))
+    }
+    Scroll(
+      key: "targets.event.console",
+      vertical: true,
+      horizontal: false,
+      contentPadding: { horizontal: 6, vertical: 4 },
+      layout: { kind: "SCROLL", width: { weight: 1 }, height: { weight: 1 } }
+    ) {
+      Panel(layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 2 }, style: Transparent) {
+        if demo.retainedEventCount == 0 {
+          Text(text: "No events yet", style: TelemetryText)
+        } else {
+          for event, eventIndex in demo.events where eventIndex < 64 {
+            Text(
+              key: event.key,
+              text: format("#{0}  {1}", event.sequence, event.description),
+              style: TelemetryText,
+              layout: { width: { weight: 1 } },
+              selectionContainer: "event-log",
+              maxLines: 1,
+              overflow: "ELLIPSIS"
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+component DataTreeCard() {
+  Card(title: "VIRTUAL TREE — 100,000 ASSETS") {
+    TreeView(
+      key: "data.tree",
+      persistenceKey: "showcase.data.tree.view",
+      items: data.treeItems,
+      selectionMode: "MULTIPLE",
+      defaultExpandedKeys: ["data.tree.root"],
+      rowTemplate: DataTreeRow,
+      onSelect: action("demo.data.collection"),
+      onActivate: action("demo.data.collection"),
+      onContext: action("demo.data.collection"),
+      onExpand: action("demo.data.collection"),
+      onLoadChildren: action("async.query", binding: "asyncTreeChildren", fromEvent: true),
+      onDrop: action("demo.data.collection"),
+      rowHeight: 28,
+      overscan: 3,
+      layout: { kind: "SCROLL", width: { weight: 1 }, height: 280 }
+    )
+    when asyncTreeChildren.status {
+      "IDLE" -> { Text(text: "No lazy child request is active") }
+      "LOADING" -> { Text(text: "Loading lazy tree children through typed async state…") }
+      "READY" -> { Text(text: format("Latest lazy tree snapshot contains {0} records", count(asyncTreeChildren.value))) }
+      "FAILED" -> { Text(text: asyncTreeChildren.error.message) }
+    }
+    Text(text: "Expand folders to request their 1,000 children from the host. The request now uses typed async ownership/cancellation before publishing the next immutable tree generation. Arrows/Left/Right/Home/End/Page keys, Shift ranges, Ctrl/Cmd toggles, typeahead, Enter, right-click, and row drag/drop operate on stable keys while only the visible window is materialized.", wrapMode: "WORD")
+  }
+}
+
+component DataTableCard() {
+  state tableSort = { columnId: "", direction: "NONE" };
+  derived orderedTableRows = tableSort.direction == "NONE" ? data.tableRows : sortBy(
+    data.tableRows,
+    row -> tableSort.columnId == "status" ? row.cells.status : (tableSort.columnId == "progress" ? row.cells.progress : row.cells.name),
+    tableSort.direction == "DESCENDING"
+  );
+
+  Card(title: "VIRTUAL TABLE — 5,000 HOST ROWS") {
+    Table(
+      key: "data.table",
+      persistenceKey: "showcase.data.table.view",
+      columns: [
+        { id: "name", header: "NAME", size: "FIXED", width: 320, minWidth: 100, pinned: true },
+        { id: "status", header: "STATUS", size: "FIXED", width: 220 },
+        { id: "progress", header: "PROGRESS", size: "FIXED", width: 360 }
+      ],
+      rows: orderedTableRows,
+      sortColumn: tableSort.direction == "NONE" ? null : tableSort.columnId,
+      sortDirection: tableSort.direction == "DESCENDING" ? "DESCENDING" : (tableSort.direction == "ASCENDING" ? "ASCENDING" : null),
+      selectionMode: "MULTIPLE",
+      onSelect: action("demo.data.collection"),
+      onActivate: action("demo.data.collection"),
+      onContext: action("demo.data.collection"),
+      onSort: action("state.setFromEvent", name: "tableSort"),
+      onColumnResize: action("demo.data.collection"),
+      onColumnReorder: action("demo.data.collection"),
+      rowHeight: 34,
+      headerHeight: 32,
+      focusMode: "CELL",
+      cellTemplates: [
+        { columnId: "name", template: DataPinnedNameCell },
+        { columnId: "progress", template: DataProgressCell }
+      ],
+      layout: { kind: "SCROLL", width: { weight: 1 }, height: 260 }
+    )
+    Text(text: "Click a header to sort, drag header boundaries to resize, drag a header to reorder, and scroll both axes. NAME is a real templated Button cell pinned with its focus and activation intact while the header stays sticky.", wrapMode: "WORD")
+  }
+}
+
+component DataGridCard() {
+  Card(title: "ITEM GRID — MARQUEE + STICKY GROUPS") {
+    ItemGrid(
+      key: "data.grid",
+      persistenceKey: "showcase.data.grid.view",
+      entries: data.gridEntries,
+      selectionMode: "MULTIPLE",
+      onSelect: action("demo.data.collection"),
+      onActivate: action("demo.data.collection"),
+      onContext: action("demo.data.collection"),
+      columns: 5,
+      cellWidth: 118,
+      cellHeight: 78,
+      gap: 7,
+      itemTemplate: DataGridItem,
+      layout: { kind: "SCROLL", width: { weight: 1 }, height: 280 }
+    )
+    Text(text: "Click selects. During an icon drag, the target's left/right insertion marker shows whether the item lands before or after it—including after the last icon in a row. Drag empty space for marquee selection and hold near an edge for stationary auto-scroll.", wrapMode: "WORD")
+  }
+}
+
+component DataPage() {
+  state asyncQuery: string = persisted("showcase.data.asyncQuery", "sample");
+  state edits: List<string> = persisted("showcase.data.edits", ["alpha", "beta"]);
+
+  Panel(style: PageColumn) {
+    Text(text: format("LAST DATA EVENT — {0}", demo.dataActivity), style: TelemetryText, maxLines: 1, overflow: "ELLIPSIS")
+    Card(title: "ASYNC HOST DATA — DEBOUNCE + LATEST WINS") {
+      TextBox(
+        key: "data.async.query", bind: asyncQuery,
+        undoLabel: "Edit async query", undoCoalesce: "showcase.asyncQuery.edit",
+        hint: "sample, empty, or fail"
+      )
+      Panel(style: Transparent, layout: { kind: "ROW", width: { weight: 1 }, height: "content", gap: 8, wrap: true }) {
+        CompactButton(
+          label: "Query",
+          buttonKey: "data.async.start",
+          click: action("async.query", binding: "asyncResults", payload: asyncQuery, debounceMillis: 250)
+        )
+        CompactButton(
+          label: "Add edit",
+          buttonKey: "data.undo.add",
+          click: action("state.listAppend", name: "edits", value: format("edit-{0}", count(edits)), undoLabel: "Add data edit")
+        )
+        CompactButton(
+          label: "Remove edit",
+          buttonKey: "data.undo.remove",
+          click: action("state.listRemoveAt", name: "edits", index: count(edits) - 1, undoLabel: "Remove data edit")
+        )
+      }
+      Text(text: format("Undoable edits: {0}", join(edits, ", ")), wrapMode: "WORD")
+      when asyncResults.status {
+        "IDLE" -> { Text(text: "Idle — start a query") }
+        "LOADING" -> {
+          Progress(
+            indeterminate: asyncResults.progress == null,
+            value: asyncResults.progress == null || asyncResults.progress.total == null ? 0 : asyncResults.progress.completed / asyncResults.progress.total,
+            layout: { width: { weight: 1 }, height: 8 }
+          )
+          Text(text: asyncResults.progress == null ? "Waiting for host…" : asyncResults.progress.message)
+        }
+        "READY" -> {
+          if asyncResults.value.isEmpty {
+            Text(text: "The host returned an empty result")
+          } else {
+            Repeater(
+              key: "data.async.results",
+              estimatedItemExtent: 28,
+              layout: { kind: "SCROLL", width: { weight: 1 }, height: 120 }
+            ) {
+              for item in asyncResults.value {
+                Text(key: format("data.async.authored.{0}", item.key), text: item.label)
+              }
+            }
+          }
+        }
+        "FAILED" -> { Text(text: format("Failed ({0}): {1}", asyncResults.error.code, asyncResults.error.message)) }
+      }
+      TreeView(
+        key: "data.async.contract",
+        items: asyncResults,
+        rowTemplate: DataTreeRow,
+        loadingText: "TreeView is loading through its typed async-source contract…",
+        errorText: "TreeView received the typed host failure",
+        emptyText: "TreeView received an empty ready list",
+        rowHeight: 28,
+        layout: { kind: "SCROLL", width: { weight: 1 }, height: 120 }
+      )
+      VirtualList(
+        key: "data.async.virtual-list",
+        items: asyncResults,
+        itemTemplate: AsyncListRow,
+        itemExtent: 28,
+        loadingText: "VirtualList is loading through its typed async-source contract…",
+        errorText: "VirtualList received the typed host failure",
+        emptyText: "VirtualList received an empty ready list",
+        layout: { kind: "SCROLL", width: { weight: 1 }, height: 120 }
+      )
+      Text(text: "Try rapid queries to prove debounce/latest-wins; Ctrl+Z/Ctrl+Y undo the collection buttons while a focused editor keeps local undo.", wrapMode: "WORD")
+    }
+    DataTreeCard()
+    DataTableCard()
+    DataGridCard()
+    Card(title: "EXPLICIT TRACK GRID LAYOUT") {
+      Grid(
+        key: "data.layout.grid",
+        columns: [160, { weight: 1 }, 120],
+        rows: [52, 70],
+        layout: { kind: "GRID", width: { weight: 1 }, height: "content", gap: 8 }
+      ) {
+        Panel(variant: "secondary", layout: { gridColumn: 0, gridRow: 0, rowSpan: 2, padding: 8 }) { Text(text: "Fixed sidebar\nspans two rows", wrapMode: "WORD") }
+        Panel(variant: "secondary", layout: { gridColumn: 1, gridRow: 0, columnSpan: 2, padding: 8 }) { Text(text: "Weighted main track spans two columns") }
+        Panel(variant: "secondary", layout: { gridColumn: 1, gridRow: 1, padding: 8 }) { Text(text: "Content") }
+        Panel(variant: "secondary", layout: { gridColumn: 2, gridRow: 1, padding: 8 }) { Text(text: "Fixed 120") }
+      }
+    }
+  }
+}
+
+component ExtendPage() {
+  state materialEnabled = false;
+  state motionDetailed = false;
+  Panel(style: PageColumn) {
+    Card(title: "NATIVE DISCLOSURE EXTENSION") {
+      DemoDisclosure(
+        key: "extend.custom.disclosure",
+        layout: { kind: "COLUMN", width: { weight: 1 }, height: "content" }
+      ) {
+        Panel(style: Transparent, layout: { kind: "COLUMN", width: { weight: 1 }, height: 72, padding: 10, gap: 4 }) {
+          Text(text: "Shared disclosure body", maxLines: 1)
+          Text(text: "The extension supplies no clock, measured height, clip, or input gating.", wrapMode: "WORD", maxLines: 2)
+        }
+      }
+      Text(text: "Click the labeled native header itself. Its extension calls one disclosure toggle; the framework owns measurement, clipping, input eligibility, timing, and reduced motion.", wrapMode: "WORD")
+    }
+    Card(title: "NATIVE MOTION CHANNEL EXTENSION") {
+      DemoPulse(
+        key: "extend.custom.pulse",
+        layout: { width: { weight: 1 }, height: 54 },
+        motions: [{ id: "extension.hover", interaction: "HOVER", animation: ExtensionHoverMotion }]
+      )
+      Text(text: "Hover adds a full-surface tint. Click increments the visible count and the thin progress strip, then opens the native popup. The two cues never compete for the same geometry.", wrapMode: "WORD")
+    }
+    Card(title: "COMPOSABLE BEHAVIORS") {
+      Panel(
+        key: "extend.behavior.canvas",
+        variant: "secondary",
+        layout: { kind: "PANEL", width: { weight: 1 }, height: 132, padding: 8, alignItems: "START", justifyContent: "START" }
+      ) {
+        Panel(
+          key: "extend.behavior.panel",
+          variant: "primary",
+          layout: { kind: "PANEL", width: 260, height: 48, padding: 8, alignItems: "CENTER", justifyContent: "CENTER" },
+          behaviors: [
+            { id: "strata.focusable" },
+            { id: "strata.hoverable" },
+            { id: "strata.activate", action: action("demo.behavior.activate") },
+            { id: "strata.movable", options: { bounds: "parent" } }
+          ]
+        ) {
+          Text(text: "DRAG THIS BOX — bounded to canvas")
+        }
+      }
+      Panel(
+        key: "extend.behavior.disabled",
+        layout: { kind: "PANEL", width: 230, height: 42, padding: 8, alignItems: "CENTER", justifyContent: "CENTER" },
+        behaviors: [
+          { id: "strata.activate", action: action("demo.behavior.disabled") },
+          { id: "strata.disabled" }
+        ]
+      ) {
+        Text(text: "Disabled behavior: no event")
+      }
+      Text(text: "Focus, activation, hover, bounded movement, and disabled policy attach to ordinary Panels; no Panel-specific event branch is involved.", wrapMode: "WORD")
+    }
+    Card(title: "TYPED HOST BRIDGE") {
+      CompactButton(
+        label: "Send typed host message",
+        buttonKey: "extend.typed-host",
+        click: action("demo.host.message", message: "Hello from .strata", priority: 2)
+      )
+      Text(text: format("Host received: {0}", demo.hostMessage), style: TelemetryText)
+      Text(text: "The compiler validates the required string and optional numeric payload before this screen can run.", wrapMode: "WORD")
+    }
+    Card(title: ".STRATA DESIGN-SYSTEM SKINS") {
+      Checkbox(key: "extend.square-check", label: "Square checkbox", style: SquareCheckbox)
+      Toggle(
+        key: "extend.material-boolean",
+        label: "Material-style animated boolean",
+        checked: materialEnabled,
+        style: materialEnabled ? MaterialBooleanOn : MaterialBoolean,
+        onChange: action("state.setFromEvent", name: "materialEnabled")
+      )
+      Text(text: "Both retain built-in boolean semantics. Shape, named visual parts, checked colors, and thumb motion are authored here; no native widget is involved.", wrapMode: "WORD")
+    }
+    Card(title: "SELECTABLE DOCUMENT + LINK SEMANTICS") {
+      RichText(
+        key: "extend.semantic.document",
+        spans: [
+          { text: "Select and copy this rich document. " },
+          { text: "Run semantic probe", color: #64A5FFFF, action: action("demo.host.message", message: "Semantic rich-text link activated", priority: 1) },
+          { text: " is an action-backed link." }
+        ],
+        selectionContainer: "semantic-document",
+        wrapMode: "WORD",
+        semantics: { label: "Target 11 selectable document", description: "Rich text containing an action link" }
+      )
+      Text(
+        text: "F8 → Semantics shows the text node and its link child; pointer or keyboard activation emits the probe action.",
+        wrapMode: "WORD",
+        selectionContainer: "semantic-document"
+      )
+    }
+    Card(title: "STATE-DRIVEN MOTION") {
+      CompactButton(
+        label: "Retarget values and replace content",
+        buttonKey: "extend.motion.retarget",
+        click: action("state.toggle", name: "motionDetailed")
+      )
+      Panel(
+        key: "extend.motion.value",
+        layout: { width: { weight: 1 }, height: 42, padding: 8 },
+        motions: [
+          { id: "value.radius", property: "radius", target: motionDetailed ? 16 : 3, policy: "standard" },
+          { id: "value.background", property: "background", target: motionDetailed ? #7C3AEDFF : #0F766EFF, policy: "standard" }
+        ]
+      ) {
+        Text(text: "Numeric + color targets retarget from the displayed value")
+      }
+      Panel(
+        key: "extend.motion.content",
+        layout: { kind: "COLUMN", width: { weight: 1 }, height: "content" },
+        contentKey: motionDetailed ? "motion-details" : "motion-summary",
+        contentTransition: ContentMotion
+      ) {
+        when motionDetailed {
+          true -> {
+            Text(text: "Detailed replacement content")
+            Text(text: "The outgoing item is retained, clipped, and replaced while the measured container follows its new height.", wrapMode: "WORD")
+          }
+          else -> { Text(text: "Compact replacement content") }
+        }
+      }
+    }
+  }
+}
+
+component StatePage() {
+  state count = 0;
+  state enabled = false;
+
+  Panel(style: PageColumn) {
+    Card(title: ".STRATA RETAINED STATE") {
+      Text(text: format("counter={0}  derived={1}  toggle={2}  host={3}", count, count * 2, enabled, demo.hostValue), style: TelemetryText)
+      ButtonRow() {
+        CompactButton(label: "+1", buttonKey: "state.increment", click: action("state.adjust", name: "count", amount: 1))
+        CompactButton(label: "Toggle", buttonKey: "state.toggle", click: action("state.toggle", name: "enabled"))
+        CompactButton(label: "Reset count", buttonKey: "state.reset.count", click: action("state.reset", name: "count"))
+        CompactButton(label: "Reset toggle", buttonKey: "state.reset.toggle", click: action("state.reset", name: "enabled"))
+        CompactButton(label: "Snapshot", buttonKey: "state.snapshot", click: action("demo.state.snapshot"))
+        CompactButton(label: "Restore", buttonKey: "state.restore", click: action("demo.state.restore"))
+        CompactButton(label: "Host generation", buttonKey: "state.host.bump", click: action("demo.host.bump"))
+      }
+      Text(text: "Local counter/toggle state belongs to this component and survives compatible recompiles. Snapshot/Restore is a legitimate host effect over the surface state; host generation arrives through a typed binding.", wrapMode: "WORD")
+    }
+  }
+}
+
+component ControlPage() {
+  Panel(style: PageColumn) {
+    Card(title: "FOCUS, COMMANDS, SPATIAL NAV") {
+      Panel(key: "control.scope", layout: { kind: "ROW", width: { weight: 1 }, height: "content", padding: 10, gap: 8 }) {
+        CompactButton(label: "Alpha", buttonKey: "control.alpha", click: action("control.alpha.action"))
+        CompactButton(label: "Beta", buttonKey: "control.beta", click: action("control.beta.action"))
+        CompactButton(label: "Gamma", buttonKey: "control.gamma", click: action("control.gamma.action"))
+      }
+      ButtonRow() {
+        CompactButton(label: "Focus Alpha", buttonKey: "control.focus.alpha", click: action("focus.request", key: "control.alpha"))
+        if demo.focusContained {
+          CompactButton(label: "Restore focus", buttonKey: "control.scope.toggle", click: action("demo.focus.scope"))
+        } else {
+          CompactButton(label: "Contain focus", buttonKey: "control.scope.toggle", click: action("demo.focus.scope"))
+        }
+        CompactButton(label: "Inject controller Right", buttonKey: "control.nav.right", click: action("demo.nav.right"))
+        CompactButton(label: "Open modal", buttonKey: "control.modal.open", click: action("state.set", name: "controlModalOpen", value: true))
+        CompactButton(label: "Push test screen", buttonKey: "control.screen.push", click: action("layer.push", name: "PushedShowcase", transition: ContentMotion))
+      }
+      Text(text: "Ctrl+K emits the scoped command while focus is inside Alpha–Gamma, otherwise the global command wins. Containment limits keyboard traversal; the modal traps focus and commands. Page tabs use automatic Left/Right activation.", wrapMode: "WORD")
+    }
+  }
+}
+
+component ControlModal() {
+  Modal(
+    key: "control.modal",
+    open: true,
+    onDismiss: action("state.set", name: "controlModalOpen", value: false),
+    layout: { kind: "OVERLAY", width: { weight: 1 }, height: { weight: 1 }, alignItems: "CENTER", justifyContent: "CENTER", zIndex: 10000 }
+  ) {
+    Panel(layout: { kind: "COLUMN", width: 320, height: 130, padding: 14, gap: 10 }) {
+      Text(text: "Modal focus trap — Ctrl+K must not reach commands below it")
+      CompactButton(label: "Close and restore focus", buttonKey: "control.modal.close", click: action("state.set", name: "controlModalOpen", value: false))
+    }
+  }
+}
+
+component PushedScreen() {
+  Panel(key: "control.pushed.root", layout: { kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 }, padding: 24, gap: 12 }) {
+    Text(text: "PUSHED TEST SCREEN", style: TitleText)
+    Text(text: "Activate Pop; the main screen returns and restores the key that had focus before this screen was pushed.", wrapMode: "WORD")
+    CompactButton(label: "Pop and restore", buttonKey: "control.pushed.pop", click: action("layer.pop"))
+  }
+}
+
+component FormsPage() {
+  Panel(style: PageColumn) {
+    Form(key: "forms.main", onSubmit: action("demo.form.completed")) {
+      Field(name: "account", label: "Account name", inputKey: "forms.account", required: true, minLength: 3) {
+        TextBox(key: "forms.account", text: "", hint: "required / letters only / uppercase on commit", maxLength: 12, filter: "LETTERS", commitFormat: "UPPERCASE")
+      }
+      Field(name: "password", label: "Password", inputKey: "forms.password", required: true, minLength: 6) {
+        TextBox(key: "forms.password", text: "", hint: "masked, max 16", password: true, maxLength: 16)
+      }
+      Field(name: "amount", label: "Amount", inputKey: "forms.amount", min: 0, max: 10) {
+        NumberField(key: "forms.amount", defaultValue: 5, min: 0, max: 10, step: 0.5)
+      }
+      Field(name: "serverId", label: "Server id", inputKey: "forms.server-id", help: "Read-only values remain selectable but do not accept edits.", readOnly: true) {
+        TextBox(key: "forms.server-id", text: "host-owned-42", readOnly: true)
+      }
+      Field(name: "unavailable", label: "Unavailable setting", inputKey: "forms.disabled", help: "Disabled fields and descendants do not focus or mutate.", enabled: false) {
+        TextBox(key: "forms.disabled", text: "Host-disabled")
+      }
+      Field(name: "color", label: "Color", inputKey: "forms.radio") {
+        RadioGroup(
+          key: "forms.radio",
+          options: [{ id: "red", label: "Red" }, { id: "green", label: "Green" }, { id: "blue", label: "Blue" }],
+          defaultSelectedId: "red"
+        )
+      }
+      Field(name: "tree", label: "Searchable tree", inputKey: "forms.combo") {
+        ComboBox(
+          key: "forms.combo",
+          query: demo.comboQuery,
+          selectedId: demo.comboSelection,
+          options: [
+            { id: "oak", label: "Oak" }, { id: "birch", label: "Birch" },
+            { id: "spruce", label: "Spruce" }, { id: "mangrove", label: "Mangrove" },
+            { id: "acacia", label: "Acacia" }, { id: "cherry", label: "Cherry" },
+            { id: "jungle", label: "Jungle" }, { id: "dark-oak", label: "Dark oak" }
+          ],
+          maxVisibleRows: 5,
+          onQuery: action("demo.combo.query"),
+          onChange: action("demo.combo.select")
+        )
+      }
+      ButtonRow() {
+        CompactButton(label: "Validate", buttonKey: "forms.validate", click: action("form.validate", key: "forms.main"))
+        CompactButton(label: "Submit", buttonKey: "forms.submit", click: action("form.submit", key: "forms.main"))
+      }
+    }
+    Card(title: "DSL VALIDATION PARITY") {
+      Form(key: "targets.dsl.form", onSubmit: action("form-submit")) {
+        Field(key: "targets.dsl.form.name.field", name: "dsl-name", label: "DSL required name", inputKey: "targets.dsl.form.name", required: true, requiredMessage: "DSL name is required.") {
+          TextBox(key: "targets.dsl.form.name", text: "", hint: "Type a DSL value", maxLength: 18)
+        }
+        Field(key: "targets.dsl.form.amount.field", name: "dsl-amount", label: "DSL bounded amount", inputKey: "targets.dsl.form.amount", min: 2, max: 8, rangeMessage: "DSL amount must be between 2 and 8.") {
+          NumberField(key: "targets.dsl.form.amount", defaultValue: 1, min: 0, max: 10, step: 1)
+        }
+        Button(key: "targets.dsl.form.submit", label: "Submit DSL form", onClick: action("form-submit"))
+      }
+    }
+  }
+}
+
+component ReorderChip(itemId: string, itemKey: key, label: string) {
+  Panel(
+    key: itemKey,
+    transition: ContentMotion,
+    move: ContentMotion,
+    stagger: 24ms,
+    layout: { kind: "PANEL", width: { weight: 1 }, height: 48, padding: 9 },
+    behaviors: [
+      { id: "strata.drag-source", action: action("demo.reorder"), options: { payloadType: "demo.reorder", payload: itemId, slop: 4, allowedOperations: ["MOVE"] } }
+    ]
+  ) {
+    Text(text: label, style: TelemetryText)
+  }
+}
+
+component DropTarget(index: number) {
+  Panel(
+    key: format("manipulate.autoscroll.target.{0}", index),
+    layout: { kind: "PANEL", width: { weight: 1 }, height: 30, padding: 5 },
+    behaviors: [
+      { id: "strata.drop-target", action: action("demo.drop.target"), options: { acceptedTypes: ["demo.reorder"], allowedOperations: ["MOVE"] } }
+    ]
+  ) {
+    Text(text: format("auto-scroll drop target {0}", index))
+  }
+}
+
+component ManipulatePage() {
+  Panel(style: PageColumn) {
+    Card(title: "DRAG / DROP / REORDER") {
+      Panel(
+        key: "manipulate.reorder.container",
+        style: ActionRow,
+        behaviors: [
+          { id: "strata.reorder-target", action: action("demo.drop.target"), options: { payloadType: "demo.reorder", axis: "HORIZONTAL" } }
+        ]
+      ) {
+        for item in demo.reorderItems {
+          ReorderChip(itemId: item.id, itemKey: item.key, label: item.label)
+        }
+      }
+      Scroll(key: "manipulate.autoscroll", vertical: true, horizontal: false, layout: { kind: "SCROLL", width: { weight: 1 }, height: 96 }) {
+        Panel(layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 4 }, style: Transparent) {
+          DropTarget(index: 1)
+          DropTarget(index: 2)
+          DropTarget(index: 3)
+          DropTarget(index: 4)
+          DropTarget(index: 5)
+          DropTarget(index: 6)
+          DropTarget(index: 7)
+          DropTarget(index: 8)
+        }
+      }
+      Text(text: "Drag a stable-key chip across centers or gaps. The green insertion bar is the exact destination; edge auto-scroll follows targets even while the pointer stays still. Escape cancels.", wrapMode: "WORD")
+    }
+    Card(title: "RESIZE") {
+      Panel(
+        key: "manipulate.resize",
+        layout: { kind: "PANEL", width: 220, height: 90, padding: 10 },
+        behaviors: [
+          { id: "strata.resize", options: { minWidth: 140, minHeight: 70, maxWidth: 420, maxHeight: 180 } }
+        ]
+      ) {
+        Text(text: "Drag anywhere on this surface, or focus it and use arrows.", wrapMode: "WORD")
+      }
+    }
+    Card(title: "SPLIT PANES") {
+      SplitPane(key: "manipulate.split", layout: { kind: "ROW", width: { weight: 1 }, height: 170 }) {
+        Pane(label: "LEFT / TOP")
+        Pane(label: "RIGHT / BOTTOM")
+      }
+      SplitPane(
+        key: "manipulate.split.vertical",
+        axis: "VERTICAL",
+        ratio: demo.controlledSplitRatio,
+        onChange: action("demo.split.controlled"),
+        layout: { kind: "COLUMN", width: { weight: 1 }, height: 170 }
+      ) {
+        Pane(label: "TOP / CONTROLLED")
+        Pane(label: "BOTTOM / CONTROLLED")
+      }
+      Text(text: "Drag either divider or focus it and press its axis arrows. The first ratio is retained locally; the second is controlled by typed host state.", wrapMode: "WORD")
+    }
+  }
+}
+
+component AdaptPage() {
+  Panel(style: PageColumn) {
+    Card(title: "LIVE ENVIRONMENT") {
+      Text(text: format("logical={0}x{1} framebuffer={2}x{3} scale={4}", env.width, env.height, env.framebufferWidth, env.framebufferHeight, env.scale), style: TelemetryText)
+      Text(text: format("class={0} orientation={1} density={2} reducedMotion={3}", env.viewport, env.orientation, env.density, env.reducedMotion))
+      Text(text: format("safeInsets={0},{1},{2},{3} controller={4} touch={5}", env.safeLeft, env.safeTop, env.safeRight, env.safeBottom, env.controller, env.touch))
+      ButtonRow() {
+        CompactButton(label: "Toggle density", buttonKey: "adapt.density", click: action("environment.set", density: env.density == "COMPACT" ? "COMFORTABLE" : "COMPACT"))
+        CompactButton(label: "Toggle reduced motion", buttonKey: "adapt.motion", click: action("environment.set", reducedMotion: !env.reducedMotion))
+        CompactButton(label: "Toggle safe insets", buttonKey: "adapt.insets", click: action("environment.set", safeLeft: env.safeLeft == 0 ? 24 : 0, safeTop: env.safeTop == 0 ? 18 : 0, safeRight: env.safeRight == 0 ? 24 : 0, safeBottom: env.safeBottom == 0 ? 18 : 0))
+      }
+      Panel(
+        variant: "secondary",
+        layout: { kind: "ROW", width: { weight: 1 }, height: env.controlHeight, padding: env.contentPadding, gap: env.itemGap, alignItems: "CENTER" }
+      ) {
+        Text(text: "DENSITY SAMPLE", style: TelemetryText)
+        Text(text: format("height={0} pad={1} gap={2}", env.controlHeight, env.contentPadding, env.itemGap))
+      }
+      Progress(key: "adapt.motion.sample", indeterminate: true, layout: { width: { weight: 1 }, height: 10 })
+      Text(text: "Density metrics drive the explicit sample. The progress highlight moves normally and pauses at its current position under reduced motion.", wrapMode: "WORD")
+    }
+    Card(title: "ADAPTIVE BRANCH") {
+      if env.compact {
+        Pane(label: "compact: column / secondary=false / items=1")
+      } else if env.wide {
+        Pane(label: "wide: row / secondary=true / items=3")
+      } else {
+        Pane(label: "regular: row / secondary=true / items=2")
+      }
+      Text(text: "Resize across 520 and 900 logical pixels. Keyed state, focus, scroll, form edits, and split ratio should remain intact.", wrapMode: "WORD")
+    }
+  }
+}
+
+component InspectPage() {
+  Panel(style: PageColumn) {
+    Card(title: "PICK / SNAPSHOT") {
+      Panel(
+        key: "inspect.target",
+        layout: { kind: "PANEL", width: { weight: 1 }, height: 64, padding: 10 },
+        behaviors: [{ id: "strata.focusable" }]
+      ) {
+        Text(text: "Known inspector target")
+      }
+      ButtonRow() {
+        CompactButton(label: "Select target", buttonKey: "inspect.select", click: action("demo.inspect.select"))
+        if demo.inspectorPickArmed {
+          CompactButton(label: "Click a node…", buttonKey: "inspect.arm", click: action("demo.inspect.arm"))
+        } else {
+          CompactButton(label: "Pick next click", buttonKey: "inspect.arm", click: action("demo.inspect.arm"))
+        }
+        CompactButton(label: "Clear", buttonKey: "inspect.clear", click: action("demo.inspect.clear"))
+      }
+      Text(text: format("nodes={0} selected={1} type={2}", demo.inspectorNodeCount, demo.inspectorSelectedKey, demo.inspectorSelectedType), style: TelemetryText)
+      Text(text: format("bounds={0}", demo.inspectorBounds), style: TelemetryText)
+      Text(text: format("actions={0}", demo.inspectorActions), style: TelemetryText)
+      Text(text: format("handlers={0}", demo.inspectorHandlerOwners), style: TelemetryText)
+      Text(text: format("motion={0}", demo.inspectorMotion), style: TelemetryText, wrapMode: "WORD")
+    }
+    Card(title: "INCREMENTAL WORK") {
+      CompactButton(label: "Coalesce 24 moves (expect +23)", buttonKey: "inspect.coalesce", click: action("demo.inspect.coalesce"))
+      CompactButton(label: "Run no-GPU probe (expect PASS)", buttonKey: "inspect.driver", click: action("demo.inspect.driver"))
+      CompactButton(label: "Emit unhandled dynamic action", buttonKey: "inspect.dynamic", click: action("demo.inspect.dynamic-probe"))
+      Text(text: format("driver={0}", demo.deterministicResult), style: TelemetryText)
+      Text(text: format("measured={0} reused={1} arranged={2}", demo.measuredNodes, demo.reusedNodes, demo.arrangedNodes), style: TelemetryText)
+      Text(text: format("coalescing={0}", demo.coalescingResult), style: TelemetryText)
+      Text(text: "Twenty-four adjacent pointer moves become one queued move, so the coalesced counter increases by 23. Movement and scrolling mark ARRANGE; resize and split constraints mark LAYOUT.", wrapMode: "WORD")
+    }
+  }
+}
+
+component ExpectedPanel(selectedPage: string, width: layoutSize, height: layoutSize) {
+  Panel(
+    variant: "secondary",
+    layout: { kind: "COLUMN", width: width, height: height, padding: 13, gap: 8 }
+  ) {
+    Text(text: "EXPECTED BEHAVIOR", style: SectionText)
+    ExpectedText(selectedPage: selectedPage)
+  }
+}
+
+component ExpectedText(selectedPage: string) {
+  if selectedPage == "STATE" {
+    Text(text: "Each click mutates local count/toggle exactly once. State survives tabs and compatible live recompiles. Snapshot, mutate, then Restore returns local values. Host generation updates without polling.", wrapMode: "WORD")
+  } else if selectedPage == "CONTROL" {
+    Text(text: "Focus Alpha never recurses. Spatial arrows prefer aligned neighbors. Contain limits traversal to Alpha–Gamma. Modal close stays closed; Push/Pop restores focus and leaves F7 usable.", wrapMode: "WORD")
+  } else if selectedPage == "FORMS" {
+    Text(text: "Dirty updates while typing; touched updates on blur/validation. Errors synchronize after first validation. Account filtering/commit, masked password, stable half-step numbers, selectable read-only text, disabled descendants, radio focus, and searchable combo all work.", wrapMode: "WORD")
+  } else if selectedPage == "MANIPULATE" {
+    Text(text: "Drag after slop emits source/target lifecycle with MOVE negotiation. The insertion bar is the exact boundary and gaps work. Stationary edge drag keeps scrolling and target highlight current. Escape cancels. Split keyboard movement follows only its axis.", wrapMode: "WORD")
+  } else if selectedPage == "ADAPT" {
+    Text(text: "Resize across breakpoints without losing keyed state. Safe insets reserve host space. Density changes the sample. Reduced motion pauses the highlight where it stands.", wrapMode: "WORD")
+  } else if selectedPage == "INSPECT" {
+    Text(text: "Selection and pick update outlines/metadata without activating the underlying target. Coalesce shows PASS with +23. The no-GPU probe reports two frames, one activation, and one node. Dynamic probe reports UNHANDLED with a source-aware diagnostic.", wrapMode: "WORD")
+  } else if selectedPage == "DATA" {
+    Text(text: "Tree expansion never reconciles collapsed descendants; keyboard/range/typeahead and drag positions emit stable keys. Table sort is a host request, widths/order persist, and sticky/pinned regions align. Grid marquee, 2D arrows, stationary edge scroll, and sticky push-off stay current.", wrapMode: "WORD")
+  } else if selectedPage == "SHELL" {
+    Text(text: "Menus, toolbars, command-bound controls, shortcut tooltips, and the palette resolve one live command definition. Disabled and checked states update everywhere. Palette search ranks prefix and word-boundary matches, Enter executes, Escape restores focus. Toasts stack without blocking input; breadcrumbs, disclosure, and chips emit typed events.", wrapMode: "WORD")
+  } else {
+    Text(text: "The native widget activates from its glyphs or empty interior, owns its popup, and exposes a focus ring. Behaviors compose on Panels. The square checkbox and animated Material boolean are pure .strata skins. The typed host payload compiles and arrives intact.", wrapMode: "WORD")
+  }
+}

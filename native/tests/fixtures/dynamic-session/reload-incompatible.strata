@@ -1,0 +1,6 @@
+overlay Main {
+  root Panel(key: "dynamic.root", layout: { kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 } }) {
+    Text(key: "dynamic.title", text: app.title)
+    Button(key: "dynamic.required", label: "Required host action", onClick: action("accept.required"))
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "strata-language",
+  "displayName": "Strata UI Language",
+  "description": "Syntax highlighting for registry-validated .strata UI modules.",
+  "version": "0.1.1",
+  "publisher": "strata",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "strata",
+        "aliases": ["Strata", "strata"],
+        "extensions": [".strata"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "strata",
+        "scopeName": "source.strata",
+        "path": "./syntaxes/strata.tmLanguage.json"
+      }
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+style Root {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 12;
+  gap: 8;
+}
+
+style MissingFont {
+  font: "fixture:missing-font";
+}
+
+overlay Main {
+  state count = 0;
+  state modalOpen = true;
+
+  root Panel(key: "dynamic.root", style: Root, semantics: { role: "APPLICATION", label: "Dynamic session" }) {
+    Text(key: "dynamic.title", text: app.title)
+    Text(key: "dynamic.generation", text: format("Host generation {0}", app.generation))
+    Text(key: "dynamic.missing-font", text: "Missing font diagnostic", style: MissingFont)
+    TextBox(key: "dynamic.editor", text: app.editor)
+    Button(key: "dynamic.increment", label: "Increment", onClick: action("state.adjust", name: "count", amount: 1))
+    Text(key: "dynamic.count", text: format("Count {0}", count))
+    Button(key: "dynamic.reveal-missing", label: "Reveal missing", onClick: action("reveal.request", key: "dynamic.absent", focus: true))
+    Button(key: "dynamic.command-missing", label: "Unknown command", onClick: action("command.execute", id: "dynamic.absent"))
+    Button(key: "dynamic.close-modal", label: "Close modal", onClick: action("state.set", name: "modalOpen", value: false))
+    BrokenActionButton()
+    SemanticProbe(key: "dynamic.semantic-invalid", layout: { width: 80, height: 24 }, semantics: { decorative: true })
+    Panel(
+      key: "dynamic.fixed-content-motion",
+      layout: { kind: "COLUMN", width: { weight: 1 }, height: 28 },
+      animateContentSize: { width: false, height: true, clip: true, policy: "standard" }
+    ) { Text(text: "Fixed motion axis") }
+    Modal(key: "dynamic.modal", open: modalOpen, dismissible: false) {
+      Text(text: "Background activation is blocked while this modal is open.")
+      Button(key: "dynamic.modal.close", label: "Continue", onClick: action("state.set", name: "modalOpen", value: false))
+    }
+  }
+}
+
+component BrokenActionButton() {
+  root Button(key: "dynamic.decode", label: "Broken decoder", onClick: action("probe.decode"))
+}

@@ -1,0 +1,582 @@
+// F8 runtime tooling. Kotlin supplies typed snapshots; all presentation and responsive layout live here.
+
+style DebugRoot {
+  kind: "OVERLAY";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 12;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  background: null;
+  border: null;
+}
+
+style DebugShell {
+  kind: "COLUMN";
+  width: { preferred: { weight: 1 }, max: 920 };
+  height: { preferred: { weight: 1 }, max: 560 };
+  padding: 16;
+  gap: 12;
+  radius: 12;
+  background: #111722F7;
+  border: { width: 1, color: #667895D9 };
+}
+
+style ClearRow {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: "content";
+  gap: 8;
+  alignItems: "CENTER";
+  background: null;
+  border: null;
+}
+
+style HeaderColumn {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 3;
+  background: null;
+  border: null;
+}
+
+style TabRow {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 32;
+  gap: 7;
+  background: null;
+  border: null;
+}
+
+style ActiveTab {
+  kind: "PANEL";
+  width: { weight: 1 };
+  height: 32;
+  padding: { horizontal: 10, vertical: 7 };
+  radius: 6;
+  background: #426ABF73;
+  color: #F3F6FBFF;
+  border: { width: 1, color: #7199EDB8 };
+}
+
+style IdleTab {
+  kind: "PANEL";
+  width: { weight: 1 };
+  height: 32;
+  padding: { horizontal: 10, vertical: 7 };
+  radius: 6;
+  background: #1C2533E6;
+  color: #AAB7C9FF;
+  border: { width: 1, color: #46566E99 };
+}
+
+style HeaderButton {
+  kind: "PANEL";
+  width: "content";
+  height: 28;
+  padding: { horizontal: 9, vertical: 6 };
+  radius: 5;
+  background: #202B3BEF;
+  color: #DDE5F1FF;
+  border: { width: 1, color: #52647EB3 };
+}
+
+style Page {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  gap: 10;
+  background: null;
+  border: null;
+}
+
+style CardRow {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: "content";
+  gap: 8;
+  background: null;
+  border: null;
+}
+
+style StatCard {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: 58;
+  padding: 10;
+  gap: 4;
+  radius: 7;
+  background: #1D2736F0;
+  border: { width: 1, color: #46566E99 };
+}
+
+style ContentCard {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 12;
+  gap: 8;
+  radius: 8;
+  background: #192230F0;
+  border: { width: 1, color: #46566E99 };
+}
+
+style AutoCard {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: 11;
+  gap: 5;
+  radius: 7;
+  background: #1B2533F0;
+  border: { width: 1, color: #46566E99 };
+}
+
+style ErrorCard {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: 11;
+  gap: 5;
+  radius: 7;
+  background: #3B2027F0;
+  border: { width: 1, color: #F07178CC };
+}
+
+style WarningCard {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: 11;
+  gap: 5;
+  radius: 7;
+  background: #372E20F0;
+  border: { width: 1, color: #E5B25FCC };
+}
+
+style DebugScroll {
+  kind: "SCROLL";
+  width: { weight: 1 };
+  height: { weight: 1 };
+}
+
+style ScrollColumn {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 7;
+  background: null;
+  border: null;
+}
+
+style MetricStrip {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: "content";
+  gap: 6;
+  wrap: true;
+  background: null;
+  border: null;
+}
+
+style MiniMetric {
+  kind: "ROW";
+  width: 138;
+  height: 27;
+  padding: { horizontal: 7, vertical: 5 };
+  gap: 5;
+  radius: 5;
+  background: #202B3BE6;
+  border: { width: 1, color: #46566E80 };
+}
+
+style TitleText {
+  pixelSize: 17;
+  color: #F3F6FBFF;
+}
+
+style SectionText {
+  pixelSize: 12;
+  color: #DDE5F1FF;
+}
+
+style MutedText {
+  pixelSize: 10;
+  color: #9AA9BEFF;
+}
+
+style MonoText {
+  font: "strata:fonts/mono";
+  pixelSize: 11;
+  color: #C8D3E2FF;
+}
+
+style ErrorText {
+  font: "strata:fonts/mono";
+  pixelSize: 11;
+  color: #FF8D91FF;
+}
+
+style WarningText {
+  font: "strata:fonts/mono";
+  pixelSize: 11;
+  color: #F5C66FFF;
+}
+
+style InfoText {
+  font: "strata:fonts/mono";
+  pixelSize: 11;
+  color: #8DD5F7FF;
+}
+
+component ModeTab(label: string, active: boolean, count: number, tabKey: key, click: action) {
+  if active {
+    Button(key: tabKey, label: count > 0 ? format("{0} ({1})", label, count) : label, style: ActiveTab, onClick: click)
+  } else {
+    Button(key: tabKey, label: count > 0 ? format("{0} ({1})", label, count) : label, style: IdleTab, onClick: click)
+  }
+}
+
+component Stat(label: string, value: string) {
+  Panel(style: StatCard) {
+    Text(text: label, style: MutedText, maxLines: 1)
+    Text(text: value, style: MonoText, maxLines: 1)
+  }
+}
+
+component DiagnosticCard(
+  severity: string,
+  code: string,
+  message: string,
+  source: string,
+  componentPath: string,
+  expected: string,
+  frame: number,
+  sequence: number,
+  occurrenceCount: number
+) {
+  Panel(style: severity == "ERROR" ? ErrorCard : severity == "WARNING" ? WarningCard : AutoCard) {
+    Text(
+      text: format("{0}  {1}  x{2}  frame={3} seq={4}", severity, code, occurrenceCount, frame, sequence),
+      style: severity == "ERROR" ? ErrorText : severity == "WARNING" ? WarningText : InfoText,
+      maxLines: 1
+    )
+    Text(text: message, maxLines: 4, wrapMode: "WORD")
+    Text(text: format("source: {0}", source), style: MonoText, maxLines: 2, wrapMode: "WORD")
+    Text(text: format("component: {0}", componentPath), style: MutedText, maxLines: 2, wrapMode: "WORD")
+    Text(text: format("expected: {0}", expected), style: MutedText, maxLines: 2, wrapMode: "WORD")
+  }
+}
+
+component OverviewPage() {
+  Panel(style: Page) {
+    Panel(style: CardRow) {
+      Stat(label: "FRAME", value: format("{0}", debug.frame))
+      Stat(label: "ERRORS", value: format("{0}", debug.errors))
+      Stat(label: "WARNINGS", value: format("{0}", debug.warnings))
+      Stat(label: "DIAGNOSTICS", value: format("{0}", debug.diagnosticCount))
+    }
+    Panel(style: CardRow, layout: { height: { weight: 1 } }) {
+      Panel(style: ContentCard) {
+        Text(text: "FRAME METRICS", style: SectionText, maxLines: 1)
+        Scroll(key: "strata.debug.overview.metrics.scroll", vertical: true, horizontal: false, style: DebugScroll) {
+          Panel(style: ScrollColumn) {
+            for metric in debug.summaryMetrics {
+              Panel(style: ClearRow) {
+                Text(text: metric.label, layout: { width: { weight: 1 } }, style: MutedText, maxLines: 1)
+                Text(text: metric.value, style: MonoText, maxLines: 1)
+              }
+            }
+          }
+        }
+      }
+      Panel(style: ContentCard) {
+        Text(text: "ACTIVE COUNTERS", style: SectionText, maxLines: 1)
+        Scroll(key: "strata.debug.overview.counters.scroll", vertical: true, horizontal: false, style: DebugScroll) {
+          Panel(style: ScrollColumn) {
+            for metric in debug.counters {
+              Panel(style: ClearRow) {
+                Text(text: metric.label, layout: { width: { weight: 1 } }, style: MutedText, maxLines: 1)
+                Text(text: metric.value, style: MonoText, maxLines: 1)
+              }
+            }
+          }
+        }
+      }
+    }
+    if debug.diagnosticCount > 0 {
+      Panel(style: ErrorCard) {
+        Text(text: "LATEST DIAGNOSTIC", style: SectionText, maxLines: 1)
+        Text(text: format("{0}  {1}", debug.diagnostics[0].severity, debug.diagnostics[0].code), style: ErrorText, maxLines: 1)
+        Text(text: debug.diagnostics[0].message, maxLines: 3, wrapMode: "WORD")
+      }
+    } else {
+      Panel(style: AutoCard) {
+        Text(text: "No diagnostics captured", style: SectionText)
+        Text(text: "Runtime and action-dispatch failures will be retained here.", style: MutedText)
+      }
+    }
+  }
+}
+
+component DiagnosticsPage() {
+  Panel(style: Page) {
+    Panel(style: CardRow) {
+      Stat(label: "ERRORS", value: format("{0}", debug.errors))
+      Stat(label: "WARNINGS", value: format("{0}", debug.warnings))
+      Stat(label: "INFO", value: format("{0}", debug.infos))
+      Stat(label: "DROPPED", value: format("{0}", debug.droppedDiagnostics))
+    }
+    Panel(style: AutoCard) {
+      Text(text: "HOT RELOAD", style: SectionText, maxLines: 1)
+      Panel(style: MetricStrip) {
+        for metric in debug.reloadMetrics {
+          Panel(style: MiniMetric) {
+            Text(text: metric.label, layout: { width: { weight: 1 } }, style: MutedText, maxLines: 1)
+            Text(text: metric.value, style: MonoText, maxLines: 1)
+          }
+        }
+      }
+    }
+    Scroll(key: "strata.debug.diagnostics.scroll", vertical: true, horizontal: false, style: DebugScroll) {
+      Panel(style: ScrollColumn) {
+        if debug.diagnosticCount == 0 {
+          Panel(style: AutoCard) {
+            Text(text: "No diagnostics captured", style: SectionText)
+          }
+        } else {
+          for diagnostic in debug.diagnostics {
+            DiagnosticCard(
+              severity: diagnostic.severity,
+              code: diagnostic.code,
+              message: diagnostic.message,
+              source: diagnostic.source,
+              componentPath: diagnostic.componentPath,
+              expected: diagnostic.expected,
+              frame: diagnostic.frame,
+              sequence: diagnostic.sequence,
+              occurrenceCount: diagnostic.occurrenceCount
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+component HotPathsPage() {
+  Panel(style: Page) {
+    Text(text: "HOT PATHS - last / recent p95 peak / max milliseconds", style: SectionText)
+    Scroll(key: "strata.debug.hot.scroll", vertical: true, horizontal: false, style: DebugScroll) {
+      Panel(style: ScrollColumn) {
+        if debug.hotPathCount == 0 {
+          Panel(style: AutoCard) { Text(text: "No profiler samples yet", style: MutedText) }
+        } else {
+          for path in debug.hotPaths {
+            Panel(style: AutoCard) {
+              Text(text: path.path, style: MonoText, maxLines: 2, wrapMode: "WORD")
+              Text(text: format("last={0}  p95={1}  max={2}", path.lastMillis, path.p95Millis, path.maxMillis), style: MutedText, maxLines: 1)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+component MotionPage() {
+  Panel(style: Page) {
+    Panel(style: CardRow) {
+      Stat(label: "DECLARED CHANNELS", value: format("{0}", debug.motionCount))
+      Stat(label: "RUNNING", value: format("{0}", debug.runningMotionCount))
+    }
+    Scroll(key: "strata.debug.motion.scroll", vertical: true, horizontal: false, style: DebugScroll) {
+      Panel(style: ScrollColumn) {
+        if debug.motionCount == 0 {
+          Panel(style: AutoCard) {
+            Text(text: "No motion channels are declared on registered application surfaces.", style: MutedText, wrapMode: "WORD")
+          }
+        } else {
+          for motion in debug.motions {
+            Panel(style: AutoCard) {
+              Text(text: format("{0} / {1} / {2}", motion.surface, motion.node, motion.channel), style: MonoText, maxLines: 2, wrapMode: "WORD")
+              Text(text: format("{0}  {1}  {2}  progress={3}", motion.source, motion.direction, motion.status, motion.progress), style: motion.status == "running" ? InfoText : MutedText, maxLines: 2, wrapMode: "WORD")
+              Text(text: format("current={0}  target={1}", motion.currentValue, motion.targetValue), style: MutedText, maxLines: 2, wrapMode: "WORD")
+              Text(text: format("properties: {0}", motion.properties), style: MutedText, maxLines: 2, wrapMode: "WORD")
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+component SemanticResultLine(value: string, lineKey: key, lineStyle: style) {
+  Text(
+    key: lineKey,
+    text: value,
+    style: lineStyle,
+    maxLines: 2,
+    wrapMode: "WORD"
+  )
+}
+
+component SemanticsPage() {
+  state semanticQuery = "";
+  derived normalizedQuery = lower(trim(semanticQuery));
+  derived semanticMatches = filter(
+    debug.semantics,
+    semantic -> isEmpty(normalizedQuery) || contains(
+      lower(format("{0} {1} {2} {3} {4} {5} {6} {7}", semantic.surface, semantic.sourceKey, semantic.node, semantic.path, semantic.role, semantic.name, semantic.stateSummary, semantic.actions)),
+      normalizedQuery
+    )
+  );
+
+  Panel(style: Page) {
+    Panel(style: CardRow) {
+      Stat(label: "SEMANTIC NODES", value: format("{0}", debug.semanticCount))
+      Stat(label: "MATCHES", value: format("{0}", semanticMatches.matched))
+      Stat(label: "VISIBLE", value: format("{0}-{1}", semanticMatches.rangeStart, semanticMatches.rangeEnd))
+      Stat(label: "CACHE", value: format("{0}/{1}", semanticMatches.cacheHits, semanticMatches.rebuilds))
+      Stat(label: "DERIVED VIEWS", value: format("{0}", debug.collectionCount))
+    }
+    Panel(style: CardRow) {
+      TextBox(
+        key: "strata.debug.semantics.query",
+        bind: semanticQuery,
+        hint: "Search role, name, key, state, action, or surface",
+        layout: { width: { weight: 1 }, height: 32 }
+      )
+      Button(
+        key: "strata.debug.semantics.clear",
+        label: "Clear",
+        enabled: !isEmpty(semanticQuery),
+        style: HeaderButton,
+        onClick: action("state.set", name: "semanticQuery", value: "")
+      )
+    }
+    Text(text: "Double-click any result to clear the filter and reveal that same keyed node in the complete tree.", style: MutedText, wrapMode: "WORD")
+    if debug.collectionCount > 0 {
+      Panel(style: AutoCard) {
+        Text(text: "LIVE DERIVATION / REPEATER INSPECTION", style: SectionText)
+        for collection in window(debug.collections, 0, 4) {
+          Panel(key: collection.key, style: CardRow) {
+            Text(text: format("{0} / {1}  {2}", collection.surface, collection.node, collection.operation), style: MonoText, wrapMode: "WORD")
+            Text(
+              text: format("source {0}  match {1}  derived {2}  materialized {3}  cache {4}/{5}", collection.sourceCount, collection.matchCount, collection.derivedRange, collection.materializedRange, collection.cacheHits, collection.rebuilds),
+              style: MutedText,
+              wrapMode: "WORD"
+            )
+            Text(text: format("anchor {0}  pending navigation {1}", collection.activeAnchor, collection.pendingNavigation), style: MutedText, wrapMode: "WORD")
+          }
+        }
+      }
+    }
+    if debug.semanticCount == 0 {
+      Panel(style: AutoCard) {
+        Text(text: "No semantic nodes are published by registered application surfaces.", style: MutedText, wrapMode: "WORD")
+      }
+    } else if semanticMatches.matched == 0 {
+      Panel(style: AutoCard) {
+        Text(text: "No semantic node matches this search.", style: MutedText, wrapMode: "WORD")
+      }
+    } else {
+      Repeater(key: "strata.debug.semantics.scroll", estimatedItemExtent: 94, overscan: 3, style: DebugScroll) {
+        for semantic in semanticMatches {
+          Panel(
+            key: semantic.rowKey,
+            style: semantic.selected ? WarningCard : AutoCard,
+            layout: { margin: { bottom: 7 } },
+            behaviors: [{
+              id: "strata.activate",
+              action: sequence(
+                action("state.set", name: "semanticQuery", value: ""),
+                action("reveal.request", key: semantic.rowKey, scroll: "strata.debug.semantics.scroll", focus: true, padding: 10)
+              ),
+              options: { clickCount: 2, includeDescendants: true }
+            }]
+          ) {
+            SemanticResultLine(
+              value: format("{0}{1}  {2}", semantic.indent, semantic.role, semantic.name),
+              lineKey: format("{0}.heading", semantic.rowKey),
+              lineStyle: semantic.selected ? WarningText : MonoText
+            )
+            SemanticResultLine(
+              value: format("{0} / {1} / {2} @ {3}", semantic.surface, semantic.sourceKey, semantic.node, semantic.path),
+              lineKey: format("{0}.identity", semantic.rowKey),
+              lineStyle: MutedText
+            )
+            SemanticResultLine(
+              value: format("state: {0}  actions: {1}", semantic.stateSummary, semantic.actions),
+              lineKey: format("{0}.state", semantic.rowKey),
+              lineStyle: MutedText
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+component SpikesPage() {
+  Panel(style: Page) {
+    Text(text: "CAPTURED SPIKES", style: SectionText)
+    Scroll(key: "strata.debug.spikes.scroll", vertical: true, horizontal: false, style: DebugScroll) {
+      Panel(style: ScrollColumn) {
+        if debug.spikeCount == 0 {
+          Panel(style: AutoCard) { Text(text: "No spikes captured", style: MutedText) }
+        } else {
+          for spike in debug.spikes {
+            Panel(style: WarningCard) {
+              Text(text: format("frame={0}  duration={1}ms  threshold={2}ms", spike.frame, spike.durationMillis, spike.thresholdMillis), style: WarningText, maxLines: 1)
+              Text(text: spike.stack, style: MonoText, maxLines: 3, wrapMode: "WORD")
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+component DebugOverlay() {
+  Panel(style: DebugRoot) {
+    Panel(key: "strata.debug.shell", style: DebugShell) {
+      Panel(style: ClearRow) {
+        Panel(style: HeaderColumn) {
+          Text(text: "STRATA DEBUG", style: TitleText, maxLines: 1)
+          Text(text: format("Runtime profiler and diagnostics - frame {0}", debug.frame), style: MutedText, maxLines: 1)
+        }
+        Button(key: "strata.debug.copy-profile", label: "Copy all", style: HeaderButton, onClick: action("strata.debug.copy-profile"))
+        Button(key: "strata.debug.clear", label: "Clear", style: HeaderButton, onClick: action("strata.debug.clear-diagnostics"))
+        Button(key: "strata.debug.close", label: "Close", style: HeaderButton, onClick: action("strata.debug.close"))
+      }
+      Panel(style: TabRow) {
+        ModeTab(label: "Diagnostics", active: debug.mode == "DIAGNOSTICS", count: debug.diagnosticCount, tabKey: "strata.debug.tab.diagnostics", click: action("strata.debug.select-mode", mode: "DIAGNOSTICS"))
+        ModeTab(label: "Overview", active: debug.mode == "SUMMARY", count: 0, tabKey: "strata.debug.tab.overview", click: action("strata.debug.select-mode", mode: "SUMMARY"))
+        ModeTab(label: "Motion", active: debug.mode == "MOTION", count: debug.motionCount, tabKey: "strata.debug.tab.motion", click: action("strata.debug.select-mode", mode: "MOTION"))
+        ModeTab(label: "Semantics", active: debug.mode == "SEMANTICS", count: debug.semanticCount, tabKey: "strata.debug.tab.semantics", click: action("strata.debug.select-mode", mode: "SEMANTICS"))
+        ModeTab(label: "Hot paths", active: debug.mode == "HOT_TREE", count: 0, tabKey: "strata.debug.tab.hot", click: action("strata.debug.select-mode", mode: "HOT_TREE"))
+        ModeTab(label: "Spikes", active: debug.mode == "SPIKES", count: 0, tabKey: "strata.debug.tab.spikes", click: action("strata.debug.select-mode", mode: "SPIKES"))
+      }
+      if debug.mode == "SUMMARY" {
+        OverviewPage()
+      } else if debug.mode == "MOTION" {
+        MotionPage()
+      } else if debug.mode == "SEMANTICS" {
+        SemanticsPage()
+      } else if debug.mode == "HOT_TREE" {
+        HotPathsPage()
+      } else if debug.mode == "SPIKES" {
+        SpikesPage()
+      } else {
+        DiagnosticsPage()
+      }
+    }
+  }
+}
+
+overlay ProfilerOverlay {
+  root DebugOverlay()
+}

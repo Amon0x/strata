@@ -1,0 +1,198 @@
+style Transparent { background: null; border: null; }
+
+style Root extends Transparent {
+  kind: "COLUMN"; width: { weight: 1 }; height: { weight: 1 };
+  padding: 18; gap: 12;
+  background: theme.surface;
+}
+
+style Header extends Transparent {
+  kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 4;
+}
+
+style Columns extends Transparent {
+  kind: "ROW"; width: { weight: 1 }; height: { weight: 1 }; gap: 12;
+}
+
+style Stack extends Transparent {
+  kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 10;
+}
+
+style InlineRow extends Transparent {
+  kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 6; wrap: true;
+}
+
+style Card {
+  kind: "COLUMN"; width: { weight: 1 }; height: "content";
+  padding: 14; gap: 9; radius: 8;
+  border: { width: 1, color: #536078CC };
+}
+
+style Title { pixelSize: 22; fontRasterization: "MSDF"; color: theme.foreground; }
+style Muted { pixelSize: 12; color: theme.mutedForeground; }
+style ProfileTitle { pixelSize: 14; color: theme.foreground; }
+style GoldFocus { focusRing: { width: 2, color: #FACC15FF }; }
+
+animation ContentMotion {
+  from { opacity: 0, translateY: 10 }
+  to { opacity: 1, translateY: 0 }
+  duration: 180ms; easing: "cubic-out"; fillMode: "FORWARDS";
+}
+
+component SettingsCard(title: string) {
+  defaults: {
+    Button: { variant: "compact", style: GoldFocus },
+    Text: { style: Muted }
+  }
+  Panel(style: Card, transition: ContentMotion) {
+    Slot(name: "header") { Text(text: title, style: ProfileTitle) }
+    Slot(name: "body", required: true, style: style(Transparent, kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 9))
+    Slot(name: "footer")
+  }
+}
+
+component ProfileTreeRow(key: key, label: string, selected: boolean) {
+  Panel(
+    key: key,
+    variant: selected ? "primary" : "secondary",
+    visualStyle: GoldFocus,
+    layout: { kind: "ROW", width: { weight: 1 }, height: { weight: 1 }, padding: { horizontal: 8 }, alignItems: "CENTER" }
+  ) {
+    Text(text: label, style: ProfileTitle, maxLines: 1, overflow: "ELLIPSIS")
+  }
+}
+
+component SettingsForm() {
+  state displayName: string = persisted("settings.displayName", "Player One");
+  state telemetry: boolean = persisted("settings.telemetry", false);
+  state recentTags: List<string> = persisted("settings.recentTags", ["account", "privacy"]);
+  derived recentSummary = join(recentTags, " · ");
+
+  SettingsCard(title: "Account and privacy") {
+    Slot(name: "body") {
+      Command(
+        id: "settings.save", label: "Save settings", category: "File", shortcut: "Ctrl+S",
+        action: action("form.submit", key: "settings.form")
+      )
+      Command(
+        id: "settings.validate", label: "Validate form", category: "File",
+        action: action("form.validate", key: "settings.form", notify: true)
+      )
+      Command(
+        id: "settings.toggleTelemetry", label: "Share telemetry", category: "Edit/Preferences", checked: telemetry,
+        action: action("state.toggle", name: "telemetry", undoLabel: "Share telemetry")
+      )
+
+      Form(key: "settings.form", onSubmit: action("settings.save", displayName: displayName, telemetry: telemetry)) {
+        Field(name: "displayName", label: "Display name", inputKey: "settings.display-name", required: true, minLength: 3) {
+          TextBox(
+            key: "settings.display-name", visualStyle: GoldFocus, bind: displayName,
+            undoLabel: "Edit display name", undoCoalesce: "settings.displayName.edit",
+            hint: "At least three characters", maxLength: 28
+          )
+        }
+        Toggle(
+          key: "settings.telemetry", visualStyle: GoldFocus,
+          label: "Share anonymous performance telemetry", bind: telemetry,
+          undoLabel: "Share telemetry"
+        )
+        Button(key: "settings.save", label: "Save settings", command: "settings.save")
+      }
+      Panel(style: InlineRow) {
+        Button(key: "settings.tags.toggle", label: "Toggle advanced", onClick: action("state.listToggle", name: "recentTags", value: "advanced", undoLabel: "Toggle advanced section"))
+        Button(key: "settings.tags.clear", label: "Clear", onClick: action("state.listClear", name: "recentTags", undoLabel: "Clear recent sections"))
+      }
+      Text(text: "Recent sections (numbered list)")
+      Panel(style: InlineRow) {
+        for tag, tagIndex in recentTags where !isEmpty(tag) {
+          Text(key: tag, text: format("{0}: {1}", tagIndex + 1, title(tag)), transition: ContentMotion, move: ContentMotion, stagger: 24ms)
+        }
+      }
+      when recentTags.isEmpty {
+        true -> { Text(text: "No recent sections") }
+        else -> { Text(text: format("Derived summary: {0}", recentSummary)) }
+      }
+    }
+    Slot(name: "footer") {
+      Text(text: settings.savedMessage, style: Muted, wrapMode: "WORD")
+    }
+  }
+}
+
+component ProfileList() {
+  SettingsCard(title: "Available profiles") {
+    Slot(name: "body") {
+      TreeView(
+        key: "settings.profile-tree",
+        persistenceKey: "settings.profileTree.view",
+        visualStyle: GoldFocus,
+        items: settings.profileTree,
+        selectionMode: "SINGLE",
+        rowTemplate: ProfileTreeRow,
+        rowHeight: 44,
+        layout: { kind: "SCROLL", width: { weight: 1 }, height: 156 }
+      )
+    }
+    Slot(name: "footer") {
+      Text(text: "Arrow keys, Home/End, and typeahead select a profile; the application still owns the profile data.", style: Muted, wrapMode: "WORD")
+    }
+  }
+}
+
+overlay SettingsApp {
+  root Panel(key: "settings.root", style: Root) {
+    MenuBar(
+      key: "settings.menu",
+      visualStyle: GoldFocus,
+      commands: ["settings.save", "settings.validate", "application.undo", "application.redo", "settings.toggleTelemetry", "settings.reloadProof", "settings.palette", "settings.about"]
+    ) {
+      Command(
+        id: "settings.palette", label: "Command palette", category: "View",
+        shortcut: "Ctrl+Shift+P", allowedWhileModal: true,
+        action: action("palette.set", key: "settings.palette", open: true)
+      )
+      Command(
+        id: "settings.reloadProof", label: "Live reload proof", category: "View/Development",
+        action: action("notification.raise", message: "This command, its toolbar control, and this toast were installed by live .strata reload.", severity: "SUCCESS")
+      )
+      Command(
+        id: "settings.about", label: "About Strata settings", category: "Help",
+        action: action("notification.raise", message: "Strata settings is authored in .strata and backed by typed host persistence.", severity: "INFO")
+      )
+    }
+    Toolbar(
+      key: "settings.toolbar",
+      visualStyle: GoldFocus,
+      commands: ["settings.save", "settings.validate", "application.undo", "application.redo", "settings.toggleTelemetry", "settings.reloadProof", "settings.about"]
+    )
+    Panel(style: Header) {
+      Text(text: "STRATA SETTINGS stinky kitty kitty", style: Title)
+      Text(text: "A copyable .strata-first application using typed durability and host-backed lists.", style: Muted)
+    }
+    Banner(
+      visualStyle: GoldFocus,
+      message: "Changes stay local until you run Save settings.",
+      severity: "WARNING",
+      actionLabel: "Validate",
+      action: action("form.validate", key: "settings.form", notify: true)
+    )
+    Scroll(key: "settings.scroll", persistenceKey: "settings.scroll.view", vertical: true, horizontal: false, layout: { kind: "SCROLL", width: { weight: 1 }, height: { weight: 1 } }) {
+      if env.compact {
+        Panel(style: Stack) {
+          SettingsForm()
+          ProfileList()
+        }
+      } else {
+        Panel(style: Columns) {
+          SettingsForm()
+          ProfileList()
+        }
+      }
+    }
+    StatusBar(key: "settings.status") {
+      Text(text: "Ready", style: Muted)
+    }
+    CommandPalette(key: "settings.palette", visualStyle: GoldFocus)
+    ToastRegion(key: "settings.toasts", maxVisible: 3)
+  }
+}

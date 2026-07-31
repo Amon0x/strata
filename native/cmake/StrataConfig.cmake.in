@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/StrataTargets.cmake")
+
+set_and_check(Strata_REGISTRY "${PACKAGE_PREFIX_DIR}/share/strata/registry-v1.json")
+
+check_required_components(Strata)

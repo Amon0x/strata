@@ -1,0 +1,10 @@
+import "showcase_components.strata";
+
+// The visible demo is rooted here. Kotlin hosts the surface and effects; it does not rebuild this tree.
+overlay MainShowcase {
+  root Showcase()
+}
+
+overlay PushedShowcase {
+  root PushedScreen()
+}
