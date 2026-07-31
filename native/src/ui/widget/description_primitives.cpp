@@ -1,5 +1,6 @@
 #include "ui/widget/description.hpp"
 
+#include <algorithm>
 #include <utility>
 
 namespace strata::ui {
@@ -39,19 +40,75 @@ void status_bar_defaults(WidgetLayoutDefaultsScope& scope) {
 
 void section_defaults(WidgetLayoutDefaultsScope& scope) {
     scope.set("clip", runtime::Value(true));
-    scope.set("gap", runtime::Value(6.0));
+    scope.set("gap", runtime::Value(0.0));
     scope.set("height", runtime::Value("content"));
     scope.set("kind", runtime::Value("COLUMN"));
     scope.set("width", widget_fill());
-    scope.padding(0.0, 32.0, 0.0, 0.0);
+    scope.padding(0.0, 0.0, 0.0, 0.0);
 }
 
-void section_motion(WidgetDescriptionScope& scope) {
+void section_expand(WidgetDescriptionScope& scope) {
     WidgetDescriptionExpansion& description = scope.description();
+    const double header_height = std::max(24.0, scope.number("headerHeight", 36.0));
+    const runtime::Value* authored_padding = scope.property("contentPadding");
+    const runtime::Value content_padding = authored_padding != nullptr
+        ? *authored_padding
+        : widget_object({
+              {"bottom", runtime::Value(10.0)},
+              {"left", runtime::Value(10.0)},
+              {"right", runtime::Value(10.0)},
+              {"top", runtime::Value(8.0)},
+          });
+    const runtime::Value* authored_gap = scope.property("contentGap");
+    const runtime::Value content_gap = authored_gap != nullptr
+        ? *authored_gap
+        : runtime::Value(8.0);
+
+    DescriptionNode::Properties header = widget_transparent_properties();
+    header.emplace(
+        "$inputTransparent",
+        runtime::ExpressionValue(runtime::Value(true))
+    );
+    header.emplace(
+        "semantics",
+        runtime::ExpressionValue(widget_object({{"decorative", runtime::Value(true)}}))
+    );
+    scope.set_layout(header, "background", runtime::Value{});
+    scope.set_layout(header, "border", runtime::Value{});
+    scope.set_layout(header, "height", runtime::Value(header_height));
+    scope.set_layout(header, "kind", runtime::Value("PANEL"));
+    scope.set_layout(header, "width", widget_fill());
+
+    DescriptionNode::Properties content = widget_transparent_properties();
+    content.emplace(
+        "$semanticTransparent",
+        runtime::ExpressionValue(runtime::Value(true))
+    );
+    scope.set_layout(content, "alignItems", runtime::Value("STRETCH"));
+    scope.set_layout(content, "background", runtime::Value{});
+    scope.set_layout(content, "border", runtime::Value{});
+    scope.set_layout(content, "gap", content_gap);
+    scope.set_layout(content, "height", runtime::Value("content"));
+    scope.set_layout(content, "kind", runtime::Value("COLUMN"));
+    scope.set_layout(content, "padding", content_padding);
+    scope.set_layout(content, "width", widget_fill());
+
+    std::vector<std::shared_ptr<const DescriptionNode>> authored_children =
+        std::move(description.children);
+    description.children.clear();
+    description.children.push_back(scope.node("Panel", std::nullopt, std::move(header)));
+    description.children.push_back(scope.node(
+        "Panel",
+        std::nullopt,
+        std::move(content),
+        std::move(authored_children)
+    ));
+    scope.synthesized(2U);
+
     description.properties.insert_or_assign(
         "$disclosureDefaults",
         runtime::ExpressionValue(widget_object({
-            {"collapsedExtent", runtime::Value(32.0)},
+            {"collapsedExtent", runtime::Value(header_height)},
             {"controlled", runtime::Value("expanded")},
             {"durationNanos", runtime::Value(180'000'000.0)},
             {"initial", runtime::Value("defaultExpanded")},
@@ -120,7 +177,7 @@ void register_primitive_widget_descriptions(WidgetRegistry& registry) {
     // inherit trigger padding before canonicalization.
     add(registry, "ContextMenu", nullptr, nullptr, "Menu", "ContextMenu");
     add(registry, "StatusBar", &status_bar_defaults);
-    add(registry, "Section", &section_defaults, &section_motion);
+    add(registry, "Section", &section_defaults, &section_expand);
     add(registry, "List", &list_defaults, nullptr, {}, "List");
     add(registry, "RichText", nullptr, &rich_text_expand);
 

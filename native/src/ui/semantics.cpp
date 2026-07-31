@@ -22,6 +22,14 @@ using data::JsonValue;
     return found != node.description().properties.end() && found->second.value() != nullptr;
 }
 
+[[nodiscard]] bool semantic_transparent(const RetainedNode& node) {
+    const auto found = node.description().properties.find("$semanticTransparent");
+    const runtime::Value* value = found != node.description().properties.end()
+                                      ? found->second.value()
+                                      : nullptr;
+    return value != nullptr && value->boolean() != nullptr && *value->boolean();
+}
+
 [[nodiscard]] bool participates(
     const RetainedNode& node,
     const WidgetRegistry& widgets
@@ -113,12 +121,13 @@ void SemanticsEngine::append_children(
                             (lifecycle != nullptr && lifecycle->semantics.hidden) ||
                             !participates(*child, widgets_);
         if (hidden) continue;
-        const bool transparent = lifecycle != nullptr &&
-                                 lifecycle->semantics.transparent_when_single_child &&
-                                 !child->description().key.has_value() &&
-                                 child->description().behaviors.empty() &&
-                                 child->children().size() == 1U &&
-                                 !has_semantics_property(*child);
+        const bool transparent = semantic_transparent(*child) ||
+            (lifecycle != nullptr &&
+             lifecycle->semantics.transparent_when_single_child &&
+             !child->description().key.has_value() &&
+             child->description().behaviors.empty() &&
+             child->children().size() == 1U &&
+             !has_semantics_property(*child));
         if (transparent) append_children(*child, children);
         else children.push_back(build(*child));
     }

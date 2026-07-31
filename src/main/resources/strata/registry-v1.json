@@ -16758,6 +16758,36 @@
         {
           "aliases": [],
           "default": null,
+          "name": "headerHeight",
+          "nullable": false,
+          "required": false,
+          "type": {
+            "ref": "t3"
+          }
+        },
+        {
+          "aliases": [],
+          "default": null,
+          "name": "contentPadding",
+          "nullable": false,
+          "required": false,
+          "type": {
+            "ref": "t61"
+          }
+        },
+        {
+          "aliases": [],
+          "default": null,
+          "name": "contentGap",
+          "nullable": false,
+          "required": false,
+          "type": {
+            "ref": "t61"
+          }
+        },
+        {
+          "aliases": [],
+          "default": null,
           "name": "layout",
           "nullable": false,
           "required": false,

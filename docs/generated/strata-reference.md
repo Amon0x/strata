@@ -1064,6 +1064,9 @@ Children: `true`
 | `key` | key | false | false | — |
 | `expanded` | boolean | false | true | — |
 | `defaultExpanded` | boolean | false | false | — |
+| `headerHeight` | number | false | false | — |
+| `contentPadding` | one of (number, map of any) | false | false | — |
+| `contentGap` | one of (number, map of any) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |

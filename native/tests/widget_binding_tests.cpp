@@ -1,3 +1,4 @@
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -253,6 +254,148 @@ overlay Main { root BoundControls() }
     );
 }
 
+void test_section_content_and_activation_contract(
+    const std::filesystem::path& registry_path,
+    const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
+) {
+    constexpr std::string_view source = R"(
+component SectionFixture() {
+  state name = "Guest";
+  Section(key: "section.main", label: "Profile", defaultExpanded: true) {
+    TextBox(key: "section.editor", bind: name)
+    Button(key: "section.button", label: "Apply")
+    Text(key: "section.copy", text: name)
+  }
+}
+overlay Main { root SectionFixture() }
+)";
+
+    strata::runtime::ApplicationContext application("section-contract", bundle);
+    const strata::runtime::ActivationResult activation = application.compile_and_activate(
+        strata::compiler::ModuleSource{"section-contract.strata", std::string(source)},
+        no_imports(),
+        0U
+    );
+    check(activation.activated(), "Section content contract fixture did not activate");
+
+    strata::ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 520;
+    environment.framebuffer_height = 320;
+    environment.logical_width = 520.0;
+    environment.logical_height = 320.0;
+    environment.reduced_motion = true;
+    environment.input = strata::ui::SurfaceInputCapabilities{
+        true,
+        strata::ui::PointerPrecision::fine,
+        true,
+        false,
+        true,
+        true,
+        false,
+    };
+    const std::filesystem::path resources = registry_path.parent_path().parent_path();
+    strata::ui::Surface surface(
+        "section-contract",
+        application,
+        strata::runtime::LayerRole::overlay,
+        "Main",
+        environment,
+        strata::ui::TextEngine::load_control_font(
+            resources,
+            strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        )
+    );
+    static_cast<void>(surface.frame(1'000'000));
+
+    const auto near = [](const double left, const double right) {
+        return std::abs(left - right) <= 0.001;
+    };
+    const strata::ui::RetainedNode* section = surface.tree().find_key("section.main");
+    const strata::ui::RetainedNode* editor = surface.tree().find_key("section.editor");
+    const strata::ui::RetainedNode* button = surface.tree().find_key("section.button");
+    const strata::ui::RetainedNode* copy = surface.tree().find_key("section.copy");
+    check(
+        section != nullptr && editor != nullptr && button != nullptr && copy != nullptr &&
+            section->children().size() == 2U,
+        "Section did not retain its header/content structure"
+    );
+    const strata::ui::LayoutRecord* section_layout = surface.layout().find(section->identity());
+    const strata::ui::LayoutRecord* header_layout = surface.layout().find(
+        section->children().front()->identity()
+    );
+    const strata::ui::LayoutRecord* editor_layout = surface.layout().find(editor->identity());
+    const strata::ui::LayoutRecord* button_layout = surface.layout().find(button->identity());
+    const strata::ui::LayoutRecord* copy_layout = surface.layout().find(copy->identity());
+    check(
+        section_layout != nullptr && header_layout != nullptr && editor_layout != nullptr &&
+            button_layout != nullptr && copy_layout != nullptr,
+        "Section content contract lost layout records"
+    );
+    check(
+        near(header_layout->bounds.height, 36.0) &&
+            near(editor_layout->bounds.x, section_layout->bounds.x + 10.0) &&
+            near(editor_layout->bounds.width, section_layout->bounds.width - 20.0) &&
+            near(button_layout->bounds.width, section_layout->bounds.width - 20.0) &&
+            near(button_layout->bounds.y - editor_layout->bounds.bottom(), 8.0) &&
+            near(copy_layout->bounds.y - button_layout->bounds.bottom(), 8.0) &&
+            near(section_layout->bounds.bottom() - copy_layout->bounds.bottom(), 10.0),
+        "Section defaults did not provide a distinct padded, stretched content region"
+    );
+    const strata::data::JsonValue* section_semantics = surface.semantics().find(
+        section->identity()
+    );
+    const strata::data::JsonValue* semantic_children = section_semantics != nullptr
+        ? section_semantics->find("children")
+        : nullptr;
+    check(
+        semantic_children != nullptr && semantic_children->array() != nullptr &&
+            semantic_children->array()->size() == 3U,
+        "Section internal layout wrappers leaked into its semantic children"
+    );
+
+    static_cast<void>(surface.input().click("section.editor"));
+    static_cast<void>(surface.frame(2'000'000));
+    section = surface.tree().find_key("section.main");
+    editor = surface.tree().find_key("section.editor");
+    const strata::runtime::Value* expanded = section != nullptr
+        ? section->retained_value("$expanded")
+        : nullptr;
+    check(
+        section != nullptr && editor != nullptr && surface.input().focused(editor->identity()) &&
+            (expanded == nullptr || (expanded->boolean() != nullptr && *expanded->boolean())),
+        "clicking a Section child collapsed the parent instead of focusing the child"
+    );
+
+    static_cast<void>(surface.input().key(
+        "a",
+        strata::ui::KeyModifiers{false, true, false, false}
+    ));
+    static_cast<void>(surface.input().text("Alice"));
+    static_cast<void>(surface.frame(3'000'000));
+    check(
+        string_property(surface.tree().find_key("section.copy"), "text") != nullptr &&
+            *string_property(surface.tree().find_key("section.copy"), "text") == "Alice",
+        "Section child editor did not remain usable after pointer focus"
+    );
+
+    static_cast<void>(surface.input().click("section.main"));
+    static_cast<void>(surface.frame(4'000'000));
+    section = surface.tree().find_key("section.main");
+    expanded = section != nullptr ? section->retained_value("$expanded") : nullptr;
+    check(
+        expanded != nullptr && expanded->boolean() != nullptr && !*expanded->boolean(),
+        "Section header did not collapse its content"
+    );
+    static_cast<void>(surface.input().click("section.main"));
+    static_cast<void>(surface.frame(5'000'000));
+    section = surface.tree().find_key("section.main");
+    expanded = section != nullptr ? section->retained_value("$expanded") : nullptr;
+    check(
+        expanded != nullptr && expanded->boolean() != nullptr && *expanded->boolean(),
+        "collapsed Section header could not be reopened"
+    );
+}
+
 void test_typed_host_keys_and_derived_collection_metadata(
     const std::filesystem::path& registry_path
 ) {
@@ -370,6 +513,7 @@ int main(const int argument_count, const char* const* const arguments) {
         const auto bundle = load_bundle(registry_path);
         test_semantic_binding_rejections(bundle);
         test_binding_initial_value_and_round_trip(registry_path, bundle);
+        test_section_content_and_activation_contract(registry_path, bundle);
         test_typed_host_keys_and_derived_collection_metadata(registry_path);
         std::cout << "strata_widget_binding_tests: OK\n";
         return 0;

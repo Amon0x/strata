@@ -67,6 +67,7 @@ bool activate(WidgetInputScope& scope) {
 }
 
 bool section_toggle(WidgetInputScope& scope) {
+    if (scope.pointer() != nullptr && scope.pointer_target() != &scope.node()) return false;
     const bool next = !scope.effective_boolean(
         "expanded", "$expanded", "defaultExpanded", false
     );

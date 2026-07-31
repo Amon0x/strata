@@ -695,6 +695,12 @@ component ExtendPage() {
   state materialEnabled = false;
   state motionDetailed = false;
   Panel(style: PageColumn) {
+    Card(title: "SECTION CONTENT + CHILD INPUT") {
+      Section(key: "repro.section", label: "Expanded section containing an editor", defaultExpanded: true) {
+        TextBox(key: "repro.section.editor", text: "Click and type here")
+        Text(text: "The editor receives focus without toggling its parent; only the disclosure header collapses this section.", wrapMode: "WORD")
+      }
+    }
     Card(title: "NATIVE DISCLOSURE EXTENSION") {
       DemoDisclosure(
         key: "extend.custom.disclosure",

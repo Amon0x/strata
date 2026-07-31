@@ -10165,6 +10165,30 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "headerHeight",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentPadding",
+          "nullable": false,
+          "required": false,
+          "type": "one of (number, map of any)"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentGap",
+          "nullable": false,
+          "required": false,
+          "type": "one of (number, map of any)"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "layout",
           "nullable": false,
           "required": false,

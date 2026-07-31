@@ -55,27 +55,79 @@ void section_content(WidgetRenderScope& scope) {
             scope.visual().border
         );
     }
-    const bool expanded = scope.effective_boolean(
-        "expanded", "$expanded", "defaultExpanded", false
-    );
-    const std::string label = (expanded ? "▾  " : "▸  ") + scope.string("label");
-    if (scope.text_engine() == nullptr || label.empty()) return;
-    const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), label);
-    scope.text(
-        label,
-        Point{
-            scope.layout().bounds.x + 8.0,
-            scope.layout().bounds.y +
-                (std::min(32.0, scope.layout().bounds.height) - shaped.metrics.height) * 0.5,
-        },
-        scope.visual().foreground
-    );
-    scope.focus(Rect{
+
+    Rect header{
         scope.layout().bounds.x,
         scope.layout().bounds.y,
         scope.layout().bounds.width,
-        std::min(32.0, scope.layout().bounds.height),
-    });
+        std::min(std::max(24.0, scope.number("headerHeight", 36.0)),
+                 scope.layout().bounds.height),
+    };
+    for (const auto& child : scope.node().children()) {
+        const auto marker = child->description().properties.find("$inputTransparent");
+        const runtime::Value* value = marker != child->description().properties.end()
+                                          ? marker->second.value()
+                                          : nullptr;
+        if (value == nullptr || value->boolean() == nullptr || !*value->boolean()) continue;
+        if (const LayoutRecord* record = scope.layout_result().find(child->identity());
+            record != nullptr) {
+            header = record->bounds;
+        }
+        break;
+    }
+
+    bool descendant_hovered = false;
+    for (const auto& child : scope.node().children()) {
+        descendant_hovered = descendant_hovered || scope.input().hovered(child->identity());
+    }
+    if (!descendant_hovered) scope.interaction(header);
+    const bool expanded = scope.effective_boolean(
+        "expanded", "$expanded", "defaultExpanded", false
+    );
+    const double indicator_size = std::min(
+        scope.visual().indicator_size.value_or(10.0),
+        std::max(0.0, header.height - 12.0)
+    );
+    if (indicator_size > 0.0) {
+        Path indicator;
+        if (expanded) {
+            indicator.move_to(Point{0.12, 0.32});
+            indicator.line_to(Point{0.5, 0.68});
+            indicator.line_to(Point{0.88, 0.32});
+        } else {
+            indicator.move_to(Point{0.32, 0.12});
+            indicator.line_to(Point{0.68, 0.5});
+            indicator.line_to(Point{0.32, 0.88});
+        }
+        scope.shape(
+            Rect{
+                header.x + 10.0,
+                header.y + (header.height - indicator_size) * 0.5,
+                indicator_size,
+                indicator_size,
+            },
+            PathShape{
+                std::move(indicator),
+                std::nullopt,
+                Paint(scope.visual().foreground),
+                StrokeStyle{1.5, PathCap::round, PathJoin::round},
+            }
+        );
+    }
+
+    const std::string label = scope.string("label");
+    if (scope.text_engine() != nullptr && !label.empty()) {
+        const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), label);
+        scope.text(
+            label,
+            Point{
+                header.x + 10.0 + indicator_size + 7.0,
+                header.y + (header.height - shaped.metrics.height) * 0.5,
+            },
+            scope.visual().foreground
+        );
+    }
+    scope.focus(header);
 }
 
 void text_content(WidgetRenderScope& scope) {

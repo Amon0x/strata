@@ -50,6 +50,11 @@ Named slot content evaluates in the caller's scope; component parameters and sta
 encapsulated. Dynamic children use model-provided stable keys. Static leaves do not need ceremonial
 keys.
 
+`Section` owns a distinct disclosure header and padded, vertically spaced content region. Its
+children stretch across that content region by default; use child `alignSelf`/`width` when a compact
+control is intentional. `headerHeight`, `contentPadding`, and `contentGap` tune those regions without
+replacing the Section's outer layout or interfering with header hit testing.
+
 ### Collections and virtualization
 
 Derive bounded presentation data in the language:
