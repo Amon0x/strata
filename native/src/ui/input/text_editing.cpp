@@ -512,6 +512,10 @@ InputOperationResult InputRouter::key(
             // Single-line editors commit first, then let an ancestor lifecycle (for example Form)
             // consume Enter. Multiline editors retain Enter as text input.
             editor_handled = config.multiline;
+        } else if (editor_reserves_key(key, modifiers)) {
+            // Printable keys mutate through the later committed-text event. The key event is still
+            // owned by this editor and must not activate a focused/ancestor control.
+            editor_handled = true;
         }
         if (mutation.changed() && !visual_navigation && key != "left" && key != "right") {
             text_navigation_.erase(node->identity());

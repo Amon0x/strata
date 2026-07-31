@@ -995,6 +995,49 @@ void test_static_text_container_owner_transition(InputFixture& fixture) {
     });
 }
 
+void test_nested_editor_does_not_activate_section(InputFixture& fixture) {
+    ui::DescriptionNode::Properties chip = sized(260.0, 34.0);
+    chip.emplace("defaultValues", runtime::ExpressionValue(runtime::Value(
+        std::vector<runtime::Value>{runtime::Value("alpha"), runtime::Value("beta")}
+    )));
+    chip.emplace("placeholder", runtime::ExpressionValue(runtime::Value("Type a tag")));
+    ui::DescriptionNode::Properties section = sized(300.0, 100.0, "COLUMN");
+    section.emplace("label", runtime::ExpressionValue(runtime::Value("Details")));
+    section.emplace("defaultExpanded", runtime::ExpressionValue(runtime::Value(true)));
+    fixture.adopt(node(
+        "Section", "nested.section", {
+            node("ChipInput", "nested.editor", {}, std::move(chip)),
+        }, std::move(section)
+    ));
+
+    const ui::Point editor = center(fixture.bounds("nested.editor").bounds);
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{editor, ui::PointerEventType::press, 39, 0},
+        ui::PointerInputEvent{editor, ui::PointerEventType::release, 39, 0},
+    }));
+    const ui::RetainedNode* retained_section = fixture.tree_.find_key("nested.section");
+    check(
+        fixture.input_.focused_key() == std::optional<std::string_view>{"nested.editor"},
+        "nested editor press did not retain editor focus"
+    );
+    check(
+        retained_section != nullptr && retained_section->retained_value("$expanded") == nullptr,
+        "nested editor click escaped into its Section ancestor"
+    );
+
+    static_cast<void>(fixture.input_.key("space"));
+    static_cast<void>(fixture.input_.text(" "));
+    const ui::RetainedNode* retained_editor = fixture.tree_.find_key("nested.editor");
+    const std::string* draft = retained_editor != nullptr
+        ? fixture.input_.edited_text(retained_editor->identity())
+        : nullptr;
+    check(
+        retained_section->retained_value("$expanded") == nullptr,
+        "nested editor Space escaped into its Section ancestor"
+    );
+    check(draft != nullptr && *draft == " ", "nested editor did not accept Space text input");
+}
+
 void test_slider_pointer_matches_rendered_track(InputFixture& fixture) {
     ui::DescriptionNode::Properties properties;
     properties.emplace("defaultValue", runtime::ExpressionValue(runtime::Value(40.0)));
@@ -1043,6 +1086,30 @@ void test_slider_pointer_matches_rendered_track(InputFixture& fixture) {
     check(
         std::abs(value() - 56.0) <= 0.0001,
         "Slider pointer input ignored its rendered track or authored step"
+    );
+
+    const auto point_at = [&bounds, track_width](const double fraction) {
+        return ui::Point{
+            bounds.x + 12.0 + track_width * fraction,
+            bounds.y + bounds.height * 0.5,
+        };
+    };
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{point_at(0.85), ui::PointerEventType::move, 42, 0},
+    }));
+    check(
+        std::abs(value() - 56.0) <= 0.0001,
+        "hovering across a Slider changed its value without an active press"
+    );
+
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{point_at(0.25), ui::PointerEventType::press, 43, 0},
+        ui::PointerInputEvent{point_at(0.75), ui::PointerEventType::move, 43, 0},
+        ui::PointerInputEvent{point_at(0.75), ui::PointerEventType::release, 43, 0},
+    }));
+    check(
+        std::abs(value() - 75.0) <= 0.0001,
+        "dragging an actively pressed Slider did not update its value"
     );
 }
 
@@ -1760,6 +1827,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_wrapped_static_text_navigation(fixture);
         test_wrapped_editor_pointer_navigation(fixture);
         test_static_text_container_owner_transition(fixture);
+        test_nested_editor_does_not_activate_section(fixture);
         test_slider_pointer_matches_rendered_track(fixture);
         test_choice_semantics(fixture);
         test_tooltip_disclosure(fixture);

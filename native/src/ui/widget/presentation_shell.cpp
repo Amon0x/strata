@@ -416,7 +416,9 @@ void command_palette_overlay(WidgetRenderScope& scope) {
         RenderBorder{1.0, RenderColor{91U, 141U, 239U, 175U}, true},
         5.0
     );
-    scope.interaction(scope.root_bounds(), "$scrim");
+    // The scrim owns dismissal hit testing, not hover chrome. Painting the widget's generic
+    // hover overlay across the root washes over the detached palette whenever the pointer leaves
+    // the panel; the dedicated scrim above already provides the intended modal dimming.
     scope.interaction(projection.input_bounds, "$editor");
     const std::vector<WidgetSubtarget> subtargets =
         scope.input().subtargets(scope.node().identity());

@@ -621,6 +621,12 @@ void WidgetRenderScope::text(
         x_offset = std::max(0.0, alignment_width - shaped.metrics.width);
     }
     const bool clipped = layout_value.clipped && layout_value.wrap_width.has_value();
+    const Rect text_cull_bounds{
+        origin.x,
+        origin.y,
+        std::max(shaped.metrics.width, alignment_width),
+        shaped.metrics.height,
+    };
     if (clipped) {
         push_clip(Rect{
             origin.x,
@@ -660,7 +666,7 @@ void WidgetRenderScope::text(
                 resolved_run.pixel_size,
                 std::move(glyphs),
                 resolved_run.font_rasterization,
-                layout_.bounds,
+                text_cull_bounds,
             });
         }
     }
@@ -680,6 +686,9 @@ void WidgetRenderScope::rich_text(const Point origin, const RenderColor fallback
     }
     const TextLayout layout_value = text_->layout(node_, *combined);
     const font::ShapedText& shaped = layout_value.shaped;
+    const Rect text_cull_bounds{
+        origin.x, origin.y, shaped.metrics.width, shaped.metrics.height,
+    };
     for (const TextResolvedRun& resolved_run : layout_value.resolved_runs) {
         RenderColor color = widget_opacity(
             resolved_run.color.has_value()
@@ -723,7 +732,7 @@ void WidgetRenderScope::rich_text(const Point origin, const RenderColor fallback
                 resolved_run.pixel_size,
                 std::move(glyphs),
                 resolved_run.font_rasterization,
-                layout_.bounds,
+                text_cull_bounds,
             });
         }
     }

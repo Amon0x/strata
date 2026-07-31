@@ -193,6 +193,9 @@ void InputRouter::activate(
         focus(*focus_target, "pointer", result);
     }
     for (RetainedNode* current = target; current != nullptr; current = current->parent()) {
+        // Keyboard activation belongs to the focused control. Ancestors that intentionally own a
+        // descendant key (such as Form/Enter) do so through their key lifecycle instead.
+        if (pointer == nullptr && current != target) break;
         const WidgetLifecycle* lifecycle = widgets_.find(current->description().type);
         if (lifecycle == nullptr || lifecycle->input.click == nullptr) continue;
         WidgetInputScope scope(

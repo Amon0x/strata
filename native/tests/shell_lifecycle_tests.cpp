@@ -735,9 +735,10 @@ overlay Main { root ShellFixture() }
     static_cast<void>(surface.input().text("save"));
     const std::vector<ui::WidgetSubtarget> palette_targets =
         surface.input().subtargets(palette->identity());
+    const ui::WidgetSubtarget* palette_editor = target(palette_targets, "$editor");
     check(
         target(palette_targets, "$scrim") != nullptr &&
-            target(palette_targets, "$editor") != nullptr &&
+            palette_editor != nullptr &&
             target(palette_targets, "$palette/shell.save") != nullptr,
         "command palette did not project its scrim, editor, and filtered command"
     );
@@ -752,6 +753,47 @@ overlay Main { root ShellFixture() }
             open_value->string() != nullptr && *open_value->string() == "true" &&
             semantic_command_ids(open_palette_semantics) == closed_palette_command_ids,
         "open palette semantics changed its frozen command projection"
+    );
+    check(
+        std::ranges::any_of(surface.render_commands().commands(), [palette_editor](
+            const ui::RenderCommand& command
+        ) {
+            const auto* text = std::get_if<ui::TextRunRenderCommand>(&command);
+            if (text == nullptr || text->color.alpha == 0U ||
+                !text->cull_bounds.has_value() || text->cull_bounds->empty()) {
+                return false;
+            }
+            std::string value;
+            for (const ui::LogicalGlyph& glyph : text->glyphs) {
+                if (glyph.code_point > 0x7FU) return false;
+                value.push_back(static_cast<char>(glyph.code_point));
+            }
+            return value == "save" && palette_editor != nullptr &&
+                text->cull_bounds->right() > palette_editor->bounds.x &&
+                text->cull_bounds->x < palette_editor->bounds.right();
+        }),
+        "command palette did not paint its editor query"
+    );
+    const ui::WidgetSubtarget* scrim_target = target(palette_targets, "$scrim");
+    check(scrim_target != nullptr, "command palette scrim target disappeared");
+    static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
+        ui::Point{scrim_target->bounds.x + 1.0, scrim_target->bounds.y + 1.0},
+        ui::PointerEventType::move, 17, 0,
+    }));
+    static_cast<void>(surface.input().process_queued());
+    static_cast<void>(surface.frame(1'600'000));
+    check(
+        std::ranges::none_of(surface.render_commands().commands(), [&scrim_target](
+            const ui::RenderCommand& command
+        ) {
+            const auto* rectangle = std::get_if<ui::SolidRectRenderCommand>(&command);
+            const runtime::ColorValue* color = rectangle != nullptr
+                ? rectangle->fill.color()
+                : nullptr;
+            return rectangle != nullptr && rectangle->bounds == scrim_target->bounds &&
+                color != nullptr && *color == runtime::ColorValue{255U, 255U, 255U, 18U};
+        }),
+        "hovering the command palette scrim painted a full-screen white overlay"
     );
 
     const std::string long_message =

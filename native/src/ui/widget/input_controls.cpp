@@ -72,12 +72,18 @@ bool slider_change_at_pointer(WidgetInputScope& scope) {
 
 bool slider_pointer(WidgetInputScope& scope) {
     const PointerInputEvent* pointer = scope.pointer();
-    if (pointer == nullptr || pointer->button != 0 ||
-        pointer->type == PointerEventType::cancel) return false;
-    if (pointer->type == PointerEventType::press || pointer->type == PointerEventType::move) {
+    if (pointer == nullptr || pointer->button != 0) return false;
+    if (pointer->type == PointerEventType::press) {
         return slider_change_at_pointer(scope);
     }
-    return pointer->type == PointerEventType::release;
+    const InputDispatchContext* dispatch = scope.dispatch();
+    const bool active_press = dispatch != nullptr && dispatch->press_origin().has_value();
+    if (!active_press) return false;
+    if (pointer->type == PointerEventType::move) {
+        return slider_change_at_pointer(scope);
+    }
+    return pointer->type == PointerEventType::release ||
+        pointer->type == PointerEventType::cancel;
 }
 
 bool choose(WidgetInputScope& scope) {
