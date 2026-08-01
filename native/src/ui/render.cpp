@@ -368,6 +368,15 @@ RenderOperationCounters RenderEngine::render(
                 append_retained_subtree(retained);
                 return;
             }
+            // Clip rectangles are inverse-adjusted to cancel presentation transforms. A cached
+            // translation beneath an inherited scale would therefore move drawing by the scaled
+            // delta but move the logical clip by that same scaled delta instead of its layout
+            // delta. The combined cached stream therefore cannot translate clipped subtrees
+            // beneath a non-unit inherited scale.
+            const bool clip_translation_context_safe =
+                !retained.subtree_contains_clip ||
+                (inherited_transform.scale_x == 1.0 &&
+                 inherited_transform.scale_y == 1.0);
             const bool translation_candidate =
                 retained.subtree_commands.has_value() &&
                 record->translated_subtree.has_value() &&
@@ -377,6 +386,7 @@ RenderOperationCounters RenderEngine::render(
                 !record->virtual_item_extents.has_value() &&
                 !record->visible_range.has_value() &&
                 retained.subtree_translation_safe &&
+                clip_translation_context_safe &&
                 subtree_generations_match && subtree_node_matches &&
                 subtree_presentation_matches && subtree_status_matches &&
                 subtree_context_matches;
@@ -590,28 +600,29 @@ RenderOperationCounters RenderEngine::render(
         const std::optional<Rect> lifecycle_clip = widget_descendant_clip(
             widgets, node, *record, layout, input, commands, text, &motion, inherited_opacity
         );
-        std::optional<Rect> descendant_clip = lifecycle_clip;
+        std::optional<Rect> descendant_local_clip = lifecycle_clip;
         if (record->local_clip.has_value()) {
-            descendant_clip = descendant_clip.has_value()
-                                  ? std::optional<Rect>(
-                                        descendant_clip->clip_intersection(*record->local_clip)
-                                    )
-                                  : record->local_clip;
+            descendant_local_clip = descendant_local_clip.has_value()
+                                        ? std::optional<Rect>(
+                                              descendant_local_clip->clip_intersection(
+                                                  *record->local_clip
+                                              )
+                                          )
+                                        : record->local_clip;
         }
-        if (descendant_clip.has_value()) {
-            descendant_clip = intersect_clip(scope_clip_rect, descendant_clip);
-        }
-        const bool descendant_clip_changed =
-            descendant_clip.has_value() && descendant_clip != scope_clip_rect;
-        if (descendant_clip_changed) {
+        const std::optional<Rect> child_render_clip = descendant_local_clip.has_value()
+            ? intersect_clip(scope_clip_rect, descendant_local_clip)
+            : scope_clip_rect;
+        // Retain the local clip rather than its current intersection with an outer viewport.
+        // A translated cached subtree then moves this raw clip while the live outer clip stack
+        // recomputes their intersection. Retaining the pre-intersected rectangle can preserve an
+        // empty/offscreen clip after scrolling and blank newly visible content.
+        if (descendant_local_clip.has_value()) {
             output.append(ClipPushRenderCommand{
-                inverse_presentation_bounds(*descendant_clip, effective_transform),
+                inverse_presentation_bounds(*descendant_local_clip, effective_transform),
             });
             ++counters.commands_emitted;
         }
-        const std::optional<Rect> child_render_clip = descendant_clip.has_value()
-                                                          ? descendant_clip
-                                                          : scope_clip_rect;
         const std::size_t composition_prefix_end = output.size();
         const auto child_z_index = [&layout](const RetainedNode& child) {
             const LayoutRecord* child_layout = layout.find(child.identity());
@@ -656,7 +667,7 @@ RenderOperationCounters RenderEngine::render(
             );
         }
         const std::size_t composition_suffix_begin = output.size();
-        if (descendant_clip_changed) {
+        if (descendant_local_clip.has_value()) {
             output.append(ClipPopRenderCommand{});
             ++counters.commands_emitted;
         }
@@ -826,10 +837,11 @@ RenderOperationCounters RenderEngine::render(
         composition.subtree_translation_safe =
             record->kind != LayoutKind::scroll &&
             record->kind != LayoutKind::portal &&
-            !record->local_clip.has_value() &&
             !record->virtual_axis.has_value() &&
             !record->virtual_item_extents.has_value() &&
             !record->visible_range.has_value();
+        composition.subtree_contains_clip =
+            scope_clip_changed || descendant_local_clip.has_value();
         for (const RetainedNode* child : composition.ordered_children) {
             const auto child_fragment = implementation_->fragments.find(child->identity());
             if (child_fragment == implementation_->fragments.end() ||
@@ -840,6 +852,9 @@ RenderOperationCounters RenderEngine::render(
             composition.subtree_translation_safe =
                 composition.subtree_translation_safe &&
                 child_fragment->second.composition->subtree_translation_safe;
+            composition.subtree_contains_clip =
+                composition.subtree_contains_clip ||
+                child_fragment->second.composition->subtree_contains_clip;
             composition.subtree_node_count +=
                 child_fragment->second.composition->subtree_node_count;
             composition.subtree_overlay_count +=

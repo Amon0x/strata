@@ -94,6 +94,7 @@ struct RenderEngine::Impl final {
             LayoutSnapshot subtree_layout;
             Point subtree_translation;
             bool subtree_translation_safe = false;
+            bool subtree_contains_clip = false;
         };
 
         /**

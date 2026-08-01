@@ -598,17 +598,138 @@ overlay Main {
             !bottom_layout->clip->empty(),
         "scrolled clipped subtree did not enter the viewport"
     );
+    check(
+        bottom_layout->local_clip.has_value(),
+        "scrolled clipped subtree lost its raw local clip"
+    );
+    strata::ui::Point translation;
+    strata::ui::Rect effective_clip{0.0, 0.0, 320.0, 180.0};
+    std::vector<strata::ui::Point> translation_stack;
+    std::vector<strata::ui::Rect> clip_stack;
     bool emitted_current_clip = false;
+    bool reused_translated_clip = false;
     for (const strata::ui::RenderCommand& command : surface.render_commands().commands()) {
-        const auto* clip = std::get_if<strata::ui::ClipPushRenderCommand>(&command);
-        if (clip != nullptr && clip->rect == *bottom_layout->clip) {
-            emitted_current_clip = true;
-            break;
+        if (const auto* transform_push =
+                std::get_if<strata::ui::TransformPushRenderCommand>(&command);
+            transform_push != nullptr) {
+            check(
+                transform_push->m00 == 1.0 && transform_push->m01 == 0.0 &&
+                    transform_push->m10 == 0.0 && transform_push->m11 == 1.0,
+                "scroll clip-cache fixture unexpectedly emitted a non-translation transform"
+            );
+            translation_stack.push_back(translation);
+            translation.x += transform_push->m02;
+            translation.y += transform_push->m12;
+        } else if (std::holds_alternative<strata::ui::TransformPopRenderCommand>(command)) {
+            check(!translation_stack.empty(), "scroll clip-cache transform stack underflow");
+            translation = translation_stack.back();
+            translation_stack.pop_back();
+        } else if (const auto* clip_push =
+                       std::get_if<strata::ui::ClipPushRenderCommand>(&command);
+                   clip_push != nullptr) {
+            clip_stack.push_back(effective_clip);
+            const strata::ui::Rect translated{
+                clip_push->rect.x + translation.x,
+                clip_push->rect.y + translation.y,
+                clip_push->rect.width,
+                clip_push->rect.height,
+            };
+            effective_clip = effective_clip.clip_intersection(translated);
+            if (translated == *bottom_layout->local_clip) {
+                emitted_current_clip = effective_clip == *bottom_layout->clip;
+                reused_translated_clip = translation != strata::ui::Point{};
+            }
+        } else if (std::holds_alternative<strata::ui::ClipPopRenderCommand>(command)) {
+            check(!clip_stack.empty(), "scroll clip-cache clip stack underflow");
+            effective_clip = clip_stack.back();
+            clip_stack.pop_back();
         }
     }
     check(
+        translation_stack.empty() && clip_stack.empty(),
+        "scroll clip-cache fixture left render state unbalanced"
+    );
+    check(
         emitted_current_clip,
-        "retained subtree translation reused a stale pre-scroll clip"
+        "retained subtree translation did not recompute the visible clip intersection"
+    );
+    check(
+        reused_translated_clip,
+        "clip-cache regression recomposed instead of exercising subtree translation reuse"
+    );
+
+    constexpr std::string_view scaled_source = R"(
+overlay Main {
+  root Scroll(
+    key: "scaled.scroll",
+    vertical: true,
+    horizontal: false,
+    layout: { kind: "SCROLL", width: 280, height: 120 },
+    style: { scale: 2 }
+  ) {
+    Panel(key: "scaled.top", layout: { width: 240, height: 160, clip: true }) {
+      Text(text: "Scaled top clipped content")
+    }
+    Panel(key: "scaled.bottom", layout: { width: 220, height: 160, clip: true }) {
+      Text(text: "Scaled bottom clipped content")
+    }
+  }
+}
+)";
+    strata::runtime::ApplicationContext scaled_application("scaled-scroll-clip-cache", bundle);
+    const strata::runtime::ActivationResult scaled_activation =
+        scaled_application.compile_and_activate(
+            strata::compiler::ModuleSource{
+                "scaled-scroll-clip-cache.strata", std::string(scaled_source),
+            },
+            no_imports(),
+            0U
+        );
+    check(scaled_activation.activated(), "scaled scroll clip-cache fixture did not activate");
+    strata::ui::Surface scaled_surface(
+        "scaled-scroll-clip-cache",
+        scaled_application,
+        strata::runtime::LayerRole::overlay,
+        "Main",
+        environment,
+        strata::ui::TextEngine::load_control_font(
+            resources,
+            strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        )
+    );
+    static_cast<void>(scaled_surface.frame(1'000'000));
+    check(
+        scaled_surface.animate_scroll_to(strata::ui::ScrollAnimationRequest{
+            "scaled.scroll", std::nullopt, 160.0, "standard", std::nullopt,
+        }),
+        "scaled scroll clip-cache fixture did not accept a scroll offset"
+    );
+    static_cast<void>(scaled_surface.frame(2'000'000));
+    const strata::ui::RetainedNode* scaled_bottom =
+        scaled_surface.tree().find_key("scaled.bottom");
+    const strata::ui::LayoutRecord* scaled_bottom_layout = scaled_bottom != nullptr
+        ? scaled_surface.layout().find(scaled_bottom->identity())
+        : nullptr;
+    check(
+        scaled_bottom_layout != nullptr && scaled_bottom_layout->local_clip.has_value(),
+        "scaled clipped subtree lost its raw local clip"
+    );
+    const strata::ui::Rect expected_scaled_clip{
+        scaled_bottom_layout->local_clip->x / 2.0,
+        scaled_bottom_layout->local_clip->y / 2.0,
+        scaled_bottom_layout->local_clip->width / 2.0,
+        scaled_bottom_layout->local_clip->height / 2.0,
+    };
+    const bool emitted_recomposed_scaled_clip = std::ranges::any_of(
+        scaled_surface.render_commands().commands(),
+        [&expected_scaled_clip](const strata::ui::RenderCommand& command) {
+            const auto* clip = std::get_if<strata::ui::ClipPushRenderCommand>(&command);
+            return clip != nullptr && clip->rect == expected_scaled_clip;
+        }
+    );
+    check(
+        emitted_recomposed_scaled_clip,
+        "scaled clipped subtree incorrectly reused a clip with scaled translation"
     );
 }
 
