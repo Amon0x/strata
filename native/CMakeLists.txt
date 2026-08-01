@@ -143,6 +143,21 @@ target_include_directories(
 set_target_properties(strata_internal_data PROPERTIES POSITION_INDEPENDENT_CODE ON)
 strata_target_defaults(strata_internal_data)
 
+# Standalone static-SVG parsing and drawing. This deliberately does not link Strata::core or any
+# UI/runtime/host target so it can remain a portable integration boundary.
+add_library(
+    strata_svg
+    STATIC
+        src/svg/svg.cpp
+        src/svg/rasterizer.cpp
+)
+target_include_directories(
+    strata_svg
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+)
+set_target_properties(strata_svg PROPERTIES POSITION_INDEPENDENT_CODE ON)
+strata_target_defaults(strata_svg)
+
 add_library(
     strata_host_support
     STATIC
@@ -409,6 +424,10 @@ if(WIN32 AND (STRATA_BUILD_DESKTOP OR STRATA_BUILD_TOOLS))
 endif()
 
 if(STRATA_BUILD_TOOLS)
+    add_executable(strata_svg_render tools/svg_render.cpp)
+    target_link_libraries(strata_svg_render PRIVATE strata_svg)
+    strata_target_defaults(strata_svg_render)
+
     add_executable(
         strata_compile
         tools/compiler_main.cpp
@@ -536,6 +555,14 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     target_include_directories(strata_data_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     strata_target_defaults(strata_data_tests)
     add_test(NAME strata.data COMMAND strata_data_tests)
+
+    add_executable(strata_svg_tests tests/svg_tests.cpp)
+    target_link_libraries(strata_svg_tests PRIVATE strata_svg)
+    strata_target_defaults(strata_svg_tests)
+    add_test(
+        NAME strata.svg
+        COMMAND strata_svg_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/svg
+    )
 
     add_executable(strata_compiler_tests tests/compiler_tests.cpp)
     target_link_libraries(strata_compiler_tests PRIVATE Strata::core)

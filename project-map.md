@@ -22,6 +22,7 @@
   semantics/inspection, text, render planning, and packet encoding.
 - `native/src/font` — OpenType reading, shaping/fallback, rasterization, and glyph atlas ownership.
 - `native/src/resource` — encoded image and resource handling.
+- `native/src/svg` — standalone static SVG parsing, display-list ownership, and CPU rasterization.
 - `native/host` — reusable packet decoding, extension selection, and safe module-path resolution.
 - `native/d3d11` — target-independent packet-v4 pipeline, textures, blur, and HLSL materials shared
   by windowed and offscreen hosts.
