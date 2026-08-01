@@ -898,7 +898,8 @@ struct Host::Impl final {
     void activate(
         Session& session,
         const std::string_view source_resource,
-        const std::string_view root_name
+        const std::string_view root_name,
+        const std::span<const strata_surface_image_resource> images = {}
     ) {
         if (!source_resource.ends_with(".strata")) {
             throw std::invalid_argument("desktop bundled module must use a .strata resource id");
@@ -931,32 +932,6 @@ struct Host::Impl final {
                 strata::view("assets/strata/fonts/mono.ttf"),
             },
         };
-        constexpr std::array images{
-            strata_surface_image_resource{
-                strata::view("strata:brand/mark"),
-                strata::view("assets/strata/images/brand/strata-mark.svg"),
-                STRATA_IMAGE_SAMPLING_LINEAR,
-                0U,
-            },
-            strata_surface_image_resource{
-                strata::view("strata:brand/northstar-hero"),
-                strata::view("assets/strata/images/brand/northstar-hero.svg"),
-                STRATA_IMAGE_SAMPLING_LINEAR,
-                0U,
-            },
-            strata_surface_image_resource{
-                strata::view("strata:ui/icons/chevron-down"),
-                strata::view("assets/strata/images/ui/icons/chevron-down.svg"),
-                STRATA_IMAGE_SAMPLING_LINEAR,
-                0U,
-            },
-            strata_surface_image_resource{
-                strata::view("strata:ui/icons/chevron-up"),
-                strata::view("assets/strata/images/ui/icons/chevron-up.svg"),
-                STRATA_IMAGE_SAMPLING_LINEAR,
-                0U,
-            },
-        };
         strata_surface_config surface_config{};
         surface_config.struct_size = sizeof(surface_config);
         surface_config.id = strata::view(session.id);
@@ -966,7 +941,7 @@ struct Host::Impl final {
         surface_config.fonts = fonts.data();
         surface_config.font_count = fonts.size();
         surface_config.extensions = session.extensions.pointer();
-        surface_config.images = images.data();
+        surface_config.images = images.empty() ? nullptr : images.data();
         surface_config.image_count = images.size();
         session.surface.emplace(session.runtime->create_surface(surface_config));
     }
@@ -1065,10 +1040,19 @@ struct Host::Impl final {
             [this] { return showcase_model.demo_snapshot(); }
         );
         showcase.bindings->synchronize();
+        static constexpr std::array showcase_images{
+            strata_surface_image_resource{
+                strata::view("strata:ui/icons/chevron-down"),
+                strata::view("assets/strata/images/ui/icons/chevron-down.svg"),
+                STRATA_IMAGE_SAMPLING_LINEAR,
+                0U,
+            },
+        };
         activate(
             showcase,
             "assets/strata/ui/demo_surface.strata",
-            "MainShowcase"
+            "MainShowcase",
+            showcase_images
         );
         strata::require_ok(
             strata_surface_set_profiler_capture(showcase.surface->native_handle(), 1U),
@@ -1512,7 +1496,26 @@ struct Host::Impl final {
             }
         );
         publish(hub, "hub.desktop", hub_json());
-        activate(hub, "assets/strata/ui/strata_hub.strata", "StrataHub");
+        static constexpr std::array hub_images{
+            strata_surface_image_resource{
+                strata::view("strata:brand/mark"),
+                strata::view("assets/strata/images/brand/strata-mark.svg"),
+                STRATA_IMAGE_SAMPLING_LINEAR,
+                0U,
+            },
+            strata_surface_image_resource{
+                strata::view("strata:brand/northstar-hero"),
+                strata::view("assets/strata/images/brand/northstar-hero.svg"),
+                STRATA_IMAGE_SAMPLING_LINEAR,
+                0U,
+            },
+        };
+        activate(
+            hub,
+            "assets/strata/ui/strata_hub.strata",
+            "StrataHub",
+            hub_images
+        );
     }
 
     void toggle_hub() {
