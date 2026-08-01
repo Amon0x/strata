@@ -44,17 +44,25 @@ misspellings, or incompatible payloads reject activation and leave the last-good
 
 ## Register and own handlers
 
-Hosts register handlers per runtime through `strata_runtime_register_action_handler`. A registration
-has an explicit release handle and owner label. The callback receives:
+C++ applications register typed handlers through `strata::host::Bindings`:
 
-- the action id;
-- canonical payload JSON;
-- event kind and concrete event-value JSON;
-- the stable source key when present.
+```cpp
+host.on("project.rename", [&](const strata::host::ActionEvent& event) {
+    project.rename(event.payload.require_string("id"), event.value.require_string("name"));
+    project_revision.changed();
+    return strata::host::ActionResult::handled;
+});
+```
 
-All views are borrowed only for the callback. Return handled, forwarded, or ignored. Dispatch
-aggregates handlers into handled, forwarded, ignored, unhandled, or failed outcomes; callback
-failure is contained at the ABI and appears in diagnostics/canonical frames.
+`ActionEvent` owns its action id, structured payload, event kind, optional stable source key, and
+structured concrete value. Shared lifecycle projections such as `DragEvent` decode once in the
+framework-facing layer rather than being reparsed by every application model.
+
+C hosts register handlers per runtime through `strata_runtime_register_action_handler`. A
+registration has an explicit release handle and owner label. Its callback receives borrowed
+canonical JSON for the same fields and returns handled, forwarded, or ignored. Dispatch aggregates
+handlers into handled, forwarded, ignored, unhandled, or failed outcomes. Exceptions from a C++
+handler are contained inside the callback and rethrown by the next `Bindings::synchronize()` call.
 
 The C ABI does not require hosts to duplicate presentation action handlers. Runtime-owned framework
 actions execute inside the same native state/focus/layer/form systems that render the result.

@@ -1630,6 +1630,12 @@ STRATA_API strata_result strata_runtime_get_host_snapshot_info(
     const strata_runtime* runtime,
     strata_host_snapshot_info* out_info
 );
+/* Reads the retained generation for one snapshot producer id. */
+STRATA_API strata_result strata_runtime_get_host_snapshot_generation(
+    const strata_runtime* runtime,
+    strata_string_view id,
+    uint64_t* out_generation
+);
 /* Reads the canonical bounded runtime diagnostic history without materializing frame JSON. */
 STRATA_API strata_result strata_runtime_read_diagnostics(
     const strata_runtime* runtime,

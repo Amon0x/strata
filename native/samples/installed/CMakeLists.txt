@@ -23,5 +23,5 @@ strata_installed_smoke(strata_installed_c c_smoke.c)
 set_target_properties(strata_installed_c PROPERTIES C_STANDARD 17 C_STANDARD_REQUIRED YES)
 
 strata_installed_smoke(strata_installed_cpp cpp_smoke.cpp)
-target_compile_features(strata_installed_cpp PRIVATE cxx_std_23)
+target_link_libraries(strata_installed_cpp PRIVATE Strata::host)
 set_target_properties(strata_installed_cpp PROPERTIES CXX_EXTENSIONS OFF)

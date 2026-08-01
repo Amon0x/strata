@@ -1,4 +1,4 @@
-#include <strata/strata.hpp>
+#include <strata/host.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -50,6 +50,7 @@ int main(const int argument_count, const char* const* const arguments) {
             STRATA_CAPABILITY_COMPILER_ACTIVATION |
             STRATA_CAPABILITY_SURFACE_RUNTIME |
             STRATA_CAPABILITY_SURFACE_RENDER_PACKET |
+            STRATA_CAPABILITY_HOST_SNAPSHOTS |
             STRATA_CAPABILITY_ALLOCATOR_TELEMETRY |
             STRATA_CAPABILITY_SURFACE_RESOURCE_RELOAD;
         runtime_config.clock = strata_clock{sizeof(strata_clock), &now, &smoke_clock};
@@ -63,6 +64,18 @@ int main(const int argument_count, const char* const* const arguments) {
                 {},
             };
             runtime.configure_application(application);
+            strata::host::Revision model_revision;
+            strata::host::Bindings bindings(runtime, "installed.cpp.host");
+            bindings.snapshot(
+                "installed.cpp.model",
+                [&model_revision] { return model_revision.value(); },
+                [] {
+                    return strata::host::Value::object({
+                        {"model", strata::host::Value::object({{"title", "Typed host model"}})},
+                    });
+                }
+            );
+            bindings.synchronize();
             const strata_activation_config activation{
                 sizeof(strata_activation_config),
                 1U,

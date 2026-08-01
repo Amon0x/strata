@@ -372,6 +372,34 @@ set_target_properties(
 )
 strata_target_defaults(strata_c)
 
+# Pleasant typed C++ host bindings over the stable C ABI. This is static by design: STL model
+# types never become part of strata_c's compiler-independent DLL boundary.
+add_library(
+    strata_host_cpp
+    STATIC
+        src/host.cpp
+        src/core/utf8.cpp
+        src/data/json.cpp
+        src/data/json_view.cpp
+)
+add_library(Strata::host ALIAS strata_host_cpp)
+target_link_libraries(strata_host_cpp PUBLIC Strata::c)
+target_include_directories(
+    strata_host_cpp
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+set_target_properties(
+    strata_host_cpp
+    PROPERTIES
+        EXPORT_NAME host
+        POSITION_INDEPENDENT_CODE ON
+)
+target_compile_features(strata_host_cpp PUBLIC cxx_std_23)
+strata_target_defaults(strata_host_cpp)
+
 add_library(
     strata_extensions
     STATIC
@@ -493,7 +521,7 @@ if(STRATA_BUILD_SAMPLES)
     strata_target_defaults(strata_c_smoke)
 
     add_executable(strata_cpp_smoke samples/cpp_smoke.cpp)
-    target_link_libraries(strata_cpp_smoke PRIVATE Strata::c)
+    target_link_libraries(strata_cpp_smoke PRIVATE Strata::host)
     strata_target_defaults(strata_cpp_smoke)
 endif()
 
@@ -505,11 +533,12 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         desktop/main.cpp
         desktop/performance.cpp
         desktop/renderer.cpp
+        desktop/showcase.cpp
     )
     target_link_libraries(
         strata_desktop
         PRIVATE
-            Strata::c
+            Strata::host
             strata_extensions
             strata_host_support
             strata_d3d11
@@ -522,6 +551,25 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
 endif()
 
 if(BUILD_TESTING AND STRATA_BUILD_TESTS)
+    add_executable(strata_host_tests tests/host_tests.cpp)
+    target_link_libraries(strata_host_tests PRIVATE Strata::host)
+    strata_target_defaults(strata_host_tests)
+    add_test(
+        NAME strata.host
+        COMMAND strata_host_tests
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+    )
+
+    add_executable(
+        strata_showcase_model_tests
+        tests/showcase_model_tests.cpp
+        desktop/showcase.cpp
+    )
+    target_link_libraries(strata_showcase_model_tests PRIVATE Strata::host)
+    target_include_directories(strata_showcase_model_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop)
+    strata_target_defaults(strata_showcase_model_tests)
+    add_test(NAME strata.showcase.model COMMAND strata_showcase_model_tests)
+
     add_executable(strata_core_tests tests/core_tests.cpp)
     target_link_libraries(strata_core_tests PRIVATE Strata::core)
     target_include_directories(strata_core_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -734,7 +782,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
 endif()
 
 install(
-    TARGETS strata_c strata_extensions
+    TARGETS strata_c strata_host_cpp strata_extensions
     EXPORT StrataTargets
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib

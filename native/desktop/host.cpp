@@ -35,11 +35,13 @@
 #include <Windows.h>
 
 #include <strata/extension.hpp>
+#include <strata/host.hpp>
 #include <strata/strata.hpp>
 
 #include "host_services.hpp"
 #include "host/render_packet.hpp"
 #include "renderer.hpp"
+#include "showcase.hpp"
 
 namespace strata::desktop {
 
@@ -128,11 +130,6 @@ template <typename Byte>
 } // namespace
 
 struct Host::Impl final {
-    using ActionRegistration = std::unique_ptr<
-        strata_action_registration,
-        decltype(&strata_action_registration_release)
-    >;
-
     struct ProfileSection final {
         std::string path;
         std::uint64_t last_sample_frame_index = 0U;
@@ -324,7 +321,7 @@ struct Host::Impl final {
         std::string id;
         std::unique_ptr<strata::Runtime> runtime;
         std::unique_ptr<AsyncBridge> async;
-        std::vector<ActionRegistration> action_registrations;
+        std::unique_ptr<strata::host::Bindings> bindings;
         std::optional<strata::Surface> surface;
         RenderPacketDecoder decoder;
     };
@@ -338,7 +335,8 @@ struct Host::Impl final {
         : window(window),
           services(window, std::move(resource_root)),
           renderer(window, options.vsync),
-          instance_label(std::move(instance_label)) {
+          instance_label(std::move(instance_label)),
+          showcase_model(this->instance_label) {
         if (this->instance_label.empty()) {
             throw std::invalid_argument("desktop instance label must not be empty");
         }
@@ -506,8 +504,7 @@ struct Host::Impl final {
                 false,
             });
             if (binding_value == "asyncResults") {
-                bridge.owner->data_activity = "query " + query_text(payload);
-                bridge.owner->demo_snapshot_dirty = true;
+                bridge.owner->showcase_model.data_activity("query " + query_text(payload));
             }
             return STRATA_STATUS_OK;
         } catch (...) {
@@ -672,13 +669,11 @@ struct Host::Impl final {
             strata_result result;
             const std::string query = query_text(request.payload);
             if (tree_children) {
-                static_cast<void>(load_tree_children(request.payload));
-                const std::string tree = tree_json();
-                const std::size_t start = tree.find('[');
-                const std::size_t end = tree.rfind(']');
-                const std::string items = start != std::string::npos && end != std::string::npos
-                    ? tree.substr(start, end - start + 1U)
-                    : std::string("[]");
+                const strata::host::Value event = strata::host::Value::parse(request.payload);
+                if (event.string() != nullptr) {
+                    static_cast<void>(showcase_model.load_tree_children(*event.string()));
+                }
+                const std::string items = showcase_model.tree_items().json();
                 result = strata_runtime_async_succeed_json(
                     session.runtime->native_handle(), id, strata::view(items)
                 );
@@ -721,77 +716,6 @@ struct Host::Impl final {
             std::cerr << "strata desktop: " << copy(value->code) << ": "
                       << copy(value->message) << '\n';
         } catch (...) {
-        }
-    }
-
-    bool load_tree_children(const std::string_view value) {
-        constexpr std::string_view prefix = "data.tree.folder.";
-        const std::size_t begin = value.find(prefix);
-        if (begin == std::string_view::npos) return false;
-        std::size_t group = 0U;
-        const char* first = value.data() + begin + prefix.size();
-        const char* last = first;
-        while (last != value.data() + value.size() && *last >= '0' && *last <= '9') {
-            ++last;
-        }
-        if (std::from_chars(first, last, group).ec != std::errc{} || group >= 100U ||
-            !loaded_tree_groups.insert(group).second) {
-            return false;
-        }
-        tree_snapshot_dirty = true;
-        data_activity = "load children data.tree.folder." + std::to_string(group);
-        demo_snapshot_dirty = true;
-        return true;
-    }
-
-    static strata_action_handler_result action(
-        void* const user_data,
-        const strata_action_call* const call
-    ) noexcept {
-        if (call == nullptr) return STRATA_ACTION_HANDLER_IGNORED;
-        try {
-            auto& self = *static_cast<Impl*>(user_data);
-            const std::string id = copy(call->action_id);
-            if (id == "strata.debug.close") {
-                self.debug_enabled = false;
-                return STRATA_ACTION_HANDLER_HANDLED;
-            }
-            if (id == "strata.debug.clear-diagnostics") {
-                self.clear_diagnostics_pending = true;
-                return STRATA_ACTION_HANDLER_HANDLED;
-            }
-            if (id == "strata.debug.copy-profile") {
-                static_cast<void>(self.services.write_clipboard(self.debug_export_text()));
-                return STRATA_ACTION_HANDLER_HANDLED;
-            }
-            if (id == "strata.debug.select-mode") {
-                const std::string payload = copy(call->payload_json);
-                for (const std::string_view mode : debug_modes) {
-                    if (payload.find(mode) != std::string::npos) {
-                        self.debug_mode = std::string(mode);
-                        self.debug_snapshot_dirty = true;
-                        break;
-                    }
-                }
-                return STRATA_ACTION_HANDLER_HANDLED;
-            }
-            if (id == "settings.save") {
-                ++self.settings_save_count;
-                self.settings_snapshot_dirty = true;
-                return STRATA_ACTION_HANDLER_HANDLED;
-            }
-            if (id == "hub.launch") {
-                const std::string payload = copy(call->payload_json);
-                self.launch_from_hub(payload);
-                return STRATA_ACTION_HANDLER_HANDLED;
-            }
-            if (id == "demo.data.collection" &&
-                copy(call->event_kind) == "tree-children-requested") {
-                static_cast<void>(self.load_tree_children(copy(call->event_value_json)));
-            }
-            return STRATA_ACTION_HANDLER_HANDLED;
-        } catch (...) {
-            return STRATA_ACTION_HANDLER_IGNORED;
         }
     }
 
@@ -842,114 +766,8 @@ struct Host::Impl final {
         }
     }
 
-    [[nodiscard]] std::string tree_json() const {
-        std::ostringstream output;
-        output << "{\"data\":{\"treeItems\":["
-               << "{\"key\":\"data.tree.root\",\"label\":\"Workspace (100,000 assets)\","
-                  "\"parentKey\":null,\"mayHaveChildren\":true,\"childrenLoaded\":true}";
-        for (std::size_t group = 0U; group < 100U; ++group) {
-            output << ",{\"key\":\"data.tree.folder." << group
-                   << "\",\"label\":\"Folder " << (group < 10U ? "00" : group < 100U ? "0" : "")
-                   << group << " (1,000)\",\"parentKey\":\"data.tree.root\","
-                      "\"mayHaveChildren\":true,\"childrenLoaded\":"
-                   << (loaded_tree_groups.contains(group) ? "true" : "false") << '}';
-        }
-        for (const std::size_t group : loaded_tree_groups) {
-            for (std::size_t item = 0U; item < 1'000U; ++item) {
-                const std::size_t index = group * 1'000U + item;
-                output << ",{\"key\":\"data.tree.item." << index << "\",\"label\":\"Asset ";
-                output.width(6);
-                output.fill('0');
-                output << index;
-                output.fill(' ');
-                output << "\",\"parentKey\":\"data.tree.folder." << group
-                       << "\",\"mayHaveChildren\":false,\"childrenLoaded\":true}";
-            }
-        }
-        output << "]}}";
-        return output.str();
-    }
-
-    [[nodiscard]] static std::string table_json() {
-        std::ostringstream output;
-        output << "{\"data\":{\"tableRows\":[";
-        for (std::size_t index = 0U; index < 5'000U; ++index) {
-            if (index != 0U) output << ',';
-            output << "{\"key\":\"data.table.row." << index
-                   << "\",\"cells\":{\"name\":\"Entity ";
-            output.width(4);
-            output.fill('0');
-            output << index;
-            output.fill(' ');
-            output << "\",\"status\":\"" << (index % 3U == 0U ? "Active" : "Idle")
-                   << "\",\"progress\":" << index % 101U << "}}";
-        }
-        output << "]}}";
-        return output.str();
-    }
-
-    [[nodiscard]] static std::string grid_json() {
-        std::ostringstream output;
-        output << "{\"data\":{\"gridEntries\":[";
-        bool first = true;
-        for (std::size_t group = 0U; group < 15U; ++group) {
-            if (!first) output << ',';
-            first = false;
-            output << "{\"kind\":\"HEADER\",\"key\":\"data.grid.header." << group
-                   << "\",\"label\":\"Group " << group + 1U << "\"}";
-            for (std::size_t item = 0U; item < 100U; ++item) {
-                const std::size_t index = group * 100U + item;
-                output << ",{\"kind\":\"ITEM\",\"key\":\"data.grid.item." << index
-                       << "\",\"label\":\"Icon " << index << "\"}";
-            }
-        }
-        output << "]}}";
-        return output.str();
-    }
-
-    [[nodiscard]] std::string settings_json() const {
-        const std::string saved = settings_save_count == 0U
-            ? "No changes saved yet"
-            : "Saved " + std::to_string(settings_save_count) +
-                " time" + (settings_save_count == 1U ? std::string{} : std::string("s"));
-        return std::string{"{\"settings\":{"} +
-            "\"savedMessage\":" + json_string(saved) +
-            ",\"profileTree\":[" +
-            "{\"key\":\"settings.profile.balanced\",\"label\":\"Balanced — Recommended visual and input defaults\",\"mayHaveChildren\":false,\"childrenLoaded\":true}," +
-            "{\"key\":\"settings.profile.performance\",\"label\":\"Performance — Reduced effects and tighter layout\",\"mayHaveChildren\":false,\"childrenLoaded\":true}," +
-            "{\"key\":\"settings.profile.cinematic\",\"label\":\"Cinematic — High-fidelity effects and comfortable spacing\",\"mayHaveChildren\":false,\"childrenLoaded\":true}]}}";
-    }
-
-    [[nodiscard]] std::string demo_json() const {
-        return std::string{"{\"demo\":{"}
-            + "\"eventTotal\":0,\"retainedEventCount\":0,\"events\":[],"
-              "\"coalescingResult\":\"not run yet\",\"deterministicResult\":\"not run yet\","
-              "\"focusContained\":false,\"inspectorPickArmed\":false,"
-              "\"reorderItems\":["
-              "{\"id\":\"alpha\",\"key\":\"manipulate.reorder.alpha\",\"label\":\"Alpha\"},"
-              "{\"id\":\"beta\",\"key\":\"manipulate.reorder.beta\",\"label\":\"Beta\"},"
-              "{\"id\":\"gamma\",\"key\":\"manipulate.reorder.gamma\",\"label\":\"Gamma\"},"
-              "{\"id\":\"delta\",\"key\":\"manipulate.reorder.delta\",\"label\":\"Delta\"}],"
-              "\"controlledSplitRatio\":0.35,\"hostValue\":\"desktop-v0\",\"hostMessage\":"
-            + json_string(instance_label) +
-            ",\"dataActivity\":\"" + data_activity +
-            "\",\"comboQuery\":\"\",\"comboSelection\":null,"
-              "\"inspectorNodeCount\":0,\"inspectorSelectedKey\":\"none\","
-              "\"inspectorSelectedType\":\"none\",\"inspectorBounds\":\"none\","
-              "\"inspectorActions\":\"none\",\"inspectorHandlerOwners\":\"none\","
-              "\"inspectorMotion\":\"none\",\"measuredNodes\":0,\"reusedNodes\":0,"
-              "\"arrangedNodes\":0}}";
-    }
-
     void publish(Session& session, const std::string_view id, const std::string& json) {
-        const strata_host_snapshot_config snapshot{
-            sizeof(strata_host_snapshot_config), strata::view(id), next_snapshot_generation++,
-            strata::view(json),
-        };
-        strata::require_ok(
-            strata_runtime_publish_host_snapshot(session.runtime->native_handle(), &snapshot),
-            "desktop host snapshot publication"
-        );
+        static_cast<void>(session.runtime->publish_host_snapshot(id, json));
     }
 
     /**
@@ -971,7 +789,6 @@ struct Host::Impl final {
     [[nodiscard]] Session create_session(
         std::string id,
         const std::string_view schemas_resource,
-        const std::span<const std::string_view> action_ids,
         const std::span<const std::string_view> extension_packages = {}
     ) {
         frame_time = now();
@@ -1048,23 +865,10 @@ struct Host::Impl final {
             &Impl::async_cancel,
         };
         result.runtime->set_async_host(async);
+        result.bindings = std::make_unique<strata::host::Bindings>(
+            *result.runtime, "strata.desktop." + result.id
+        );
         declare_materials(*result.runtime);
-        for (const std::string_view action_id : action_ids) {
-            strata_action_registration* registered = nullptr;
-            const strata_action_handler_config handler{
-                sizeof(strata_action_handler_config), strata::view(action_id),
-                strata::view("strata.desktop"), this, &Impl::action,
-            };
-            strata::require_ok(
-                strata_runtime_register_action_handler(
-                    result.runtime->native_handle(), &handler, &registered
-                ),
-                "desktop action registration"
-            );
-            result.action_registrations.emplace_back(
-                registered, &strata_action_registration_release
-            );
-        }
         return result;
     }
 
@@ -1134,13 +938,44 @@ struct Host::Impl final {
     }
 
     void create_settings() {
-        static constexpr std::array action_ids{std::string_view("settings.save")};
         settings = create_session(
             "settings.desktop",
-            "assets/strata/ui/settings_app.schemas.json",
-            action_ids
+            "assets/strata/ui/settings_app.schemas.json"
         );
-        publish(settings, "settings.desktop", settings_json());
+        settings.bindings->on("settings.save", [this](const strata::host::ActionEvent&) {
+            ++settings_save_count;
+            settings_revision.changed();
+            return strata::host::ActionResult::handled;
+        });
+        settings.bindings->snapshot(
+            "settings.desktop",
+            [this] { return settings_revision.value(); },
+            [this] {
+                const std::string saved = settings_save_count == 0U
+                    ? "No changes saved yet"
+                    : "Saved " + std::to_string(settings_save_count) + " time" +
+                        (settings_save_count == 1U ? std::string{} : std::string("s"));
+                const auto profile = [](const std::string_view id, const std::string_view label) {
+                    return strata::host::Value::object({
+                        {"key", std::string("settings.profile.") + std::string(id)},
+                        {"label", label},
+                        {"mayHaveChildren", false},
+                        {"childrenLoaded", true},
+                    });
+                };
+                return strata::host::Value::object({
+                    {"settings", strata::host::Value::object({
+                        {"savedMessage", saved},
+                        {"profileTree", strata::host::Value::array({
+                            profile("balanced", "Balanced — Recommended visual and input defaults"),
+                            profile("performance", "Performance — Reduced effects and tighter layout"),
+                            profile("cinematic", "Cinematic — High-fidelity effects and comfortable spacing"),
+                        })},
+                    })},
+                });
+            }
+        );
+        settings.bindings->synchronize();
         activate(
             settings,
             "assets/strata/ui/settings_app.strata",
@@ -1171,13 +1006,36 @@ struct Host::Impl final {
         showcase = create_session(
             "demo.desktop",
             "assets/strata/ui/demo_surface.schemas.json",
-            action_ids,
             extension_packages
         );
-        publish(showcase, "demo.desktop.data.tree", tree_json());
-        publish(showcase, "demo.desktop.data.table", table_json());
-        publish(showcase, "demo.desktop.data.grid", grid_json());
-        publish(showcase, "demo.desktop.state", demo_json());
+        for (const std::string_view action_id : action_ids) {
+            showcase.bindings->on(std::string(action_id), [this](
+                                                        const strata::host::ActionEvent& event
+                                                    ) {
+                return showcase_model.handle(event);
+            });
+        }
+        showcase.bindings->snapshot(
+            "demo.desktop.data.tree",
+            [this] { return showcase_model.tree_revision().value(); },
+            [this] { return showcase_model.tree_snapshot(); }
+        );
+        showcase.bindings->snapshot(
+            "demo.desktop.data.table",
+            [this] { return showcase_model.table_revision().value(); },
+            [this] { return showcase_model.table_snapshot(); }
+        );
+        showcase.bindings->snapshot(
+            "demo.desktop.data.grid",
+            [this] { return showcase_model.grid_revision().value(); },
+            [this] { return showcase_model.grid_snapshot(); }
+        );
+        showcase.bindings->snapshot(
+            "demo.desktop.state",
+            [this] { return showcase_model.demo_revision().value(); },
+            [this] { return showcase_model.demo_snapshot(); }
+        );
+        showcase.bindings->synchronize();
         activate(
             showcase,
             "assets/strata/ui/demo_surface.strata",
@@ -1409,14 +1267,37 @@ struct Host::Impl final {
 
     void create_debug() {
         if (debug.surface.has_value()) return;
-        static constexpr std::array action_ids{
-            std::string_view("strata.debug.select-mode"),
-            std::string_view("strata.debug.clear-diagnostics"),
-            std::string_view("strata.debug.copy-profile"),
-            std::string_view("strata.debug.close"),
-        };
         debug = create_session(
-            "profiler.desktop", "assets/strata/ui/debug_overlay.schemas.json", action_ids
+            "profiler.desktop", "assets/strata/ui/debug_overlay.schemas.json"
+        );
+        debug.bindings->on("strata.debug.close", [this](const strata::host::ActionEvent&) {
+            debug_enabled = false;
+            return strata::host::ActionResult::handled;
+        });
+        debug.bindings->on(
+            "strata.debug.clear-diagnostics",
+            [this](const strata::host::ActionEvent&) {
+                clear_diagnostics_pending = true;
+                return strata::host::ActionResult::handled;
+            }
+        );
+        debug.bindings->on(
+            "strata.debug.copy-profile",
+            [this](const strata::host::ActionEvent&) {
+                static_cast<void>(services.write_clipboard(debug_export_text()));
+                return strata::host::ActionResult::handled;
+            }
+        );
+        debug.bindings->on(
+            "strata.debug.select-mode",
+            [this](const strata::host::ActionEvent& event) {
+                const std::string mode(event.payload.require_string("mode"));
+                if (std::ranges::contains(debug_modes, mode)) {
+                    debug_mode = mode;
+                    debug_snapshot_dirty = true;
+                }
+                return strata::host::ActionResult::handled;
+            }
         );
         publish(debug, "profiler.desktop", debug_json());
         activate(
@@ -1558,8 +1439,11 @@ struct Host::Impl final {
 
     void create_hub() {
         if (hub.surface.has_value()) return;
-        static constexpr std::array action_ids{std::string_view("hub.launch")};
-        hub = create_session("hub.desktop", "assets/strata/ui/strata_hub.schemas.json", action_ids);
+        hub = create_session("hub.desktop", "assets/strata/ui/strata_hub.schemas.json");
+        hub.bindings->on("hub.launch", [this](const strata::host::ActionEvent& event) {
+            launch_from_hub(std::string(event.payload.require_string("target")));
+            return strata::host::ActionResult::handled;
+        });
         publish(hub, "hub.desktop", hub_json());
         activate(hub, "assets/strata/ui/strata_hub.strata", "StrataHub", nullptr);
     }
@@ -1574,9 +1458,8 @@ struct Host::Impl final {
 
     void create_performance_hud() {
         if (performance_hud.surface.has_value()) return;
-        static constexpr std::array<std::string_view, 0U> action_ids{};
         performance_hud = create_session(
-            "performance.desktop", "assets/strata/ui/performance_hud.schemas.json", action_ids
+            "performance.desktop", "assets/strata/ui/performance_hud.schemas.json"
         );
         publish(performance_hud, "performance.desktop", performance_json());
         activate(
@@ -1633,7 +1516,7 @@ struct Host::Impl final {
             }
         }
         session.surface.reset();
-        session.action_registrations.clear();
+        session.bindings.reset();
         session.runtime.reset();
         session.decoder.reset();
     }
@@ -1804,17 +1687,8 @@ struct Host::Impl final {
             );
             debug_snapshot_dirty = true;
         }
-        if (tree_snapshot_dirty) {
-            tree_snapshot_dirty = false;
-            publish(showcase, "demo.desktop.data.tree", tree_json());
-        }
-        if (demo_snapshot_dirty) {
-            demo_snapshot_dirty = false;
-            publish(showcase, "demo.desktop.state", demo_json());
-        }
-        if (settings_snapshot_dirty && settings.runtime != nullptr) {
-            settings_snapshot_dirty = false;
-            publish(settings, "settings.desktop", settings_json());
+        for (Session* session : {&showcase, &settings, &debug, &performance_hud, &hub}) {
+            if (session->bindings != nullptr) session->bindings->synchronize();
         }
         frame_time = now();
         advance_async(showcase);
@@ -1927,6 +1801,7 @@ struct Host::Impl final {
     HostServices services;
     Renderer renderer;
     std::string instance_label;
+    ShowcaseModel showcase_model;
     DurableWriter durable_writer;
     std::string durable_read_buffer;
     Session showcase;
@@ -1934,7 +1809,6 @@ struct Host::Impl final {
     Session debug;
     Session performance_hud;
     Session hub;
-    std::set<std::size_t> loaded_tree_groups;
     std::deque<FrameBucket> frame_buckets;
     std::deque<ProfileCapture> profile_history;
     TimingWindow host_total_timings;
@@ -1944,7 +1818,6 @@ struct Host::Impl final {
     TimingWindow present_timings;
     DesktopFrameSample last_performance_sample;
     std::optional<strata_input_event> pending_pointer_move;
-    std::string data_activity = "none yet";
     std::string debug_mode = "DIAGNOSTICS";
     std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
     std::int64_t frame_time = 0;
@@ -1954,9 +1827,9 @@ struct Host::Impl final {
     std::int64_t next_performance_snapshot = 0;
     std::int64_t next_profile_capture = 0;
     std::uint64_t environment_generation = 1U;
-    std::uint64_t next_snapshot_generation = 1U;
     std::uint64_t rendered_frames = 0U;
     std::uint64_t settings_save_count = 0U;
+    strata::host::Revision settings_revision;
     std::uint64_t first_render_fingerprint = 0U;
     std::uint32_t framebuffer_width = 1U;
     std::uint32_t framebuffer_height = 1U;
@@ -1968,9 +1841,6 @@ struct Host::Impl final {
     bool profile_sampling_enabled = true;
     bool hub_enabled = false;
     std::deque<double> frame_history;
-    bool tree_snapshot_dirty = false;
-    bool demo_snapshot_dirty = false;
-    bool settings_snapshot_dirty = false;
     bool debug_snapshot_dirty = true;
     bool performance_snapshot_dirty = true;
     bool clear_diagnostics_pending = false;

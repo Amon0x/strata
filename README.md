@@ -72,6 +72,9 @@ machine-readable measurements plus an HTML frame-time report. See
 
 ## Embedding and authoring
 
+C++ application hosts can use `strata/host.hpp` (`Strata::host`) for structured values, typed action
+handlers, and revision-watched snapshots; JSON remains confined to the stable C ABI.
+
 - [C/C++ embedding guide](docs/embedding.md)
 - [Native ABI and build notes](native/README.md)
 - [Headless application testing](docs/headless-testing.md)

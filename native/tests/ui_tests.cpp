@@ -4188,6 +4188,7 @@ overlay Collections {
         { key: "tree.child", label: "Child", parentKey: "tree.root", mayHaveChildren: false, childrenLoaded: true }
       ],
       selectionMode: "MULTIPLE", rowTemplate: CollectionTreeRow,
+      onDrop: action("focus.request", key: "tree.root"),
       hoverExpandDelay: 50ms,
       layout: { kind: "SCROLL", width: { weight: 1 }, height: 100 }
     )
@@ -4357,6 +4358,16 @@ overlay Collections {
             surface.tree().find_key("tree.child") == nullptr,
         "tree component template or collapsed materialization was not native"
     );
+    const auto initial_drop_behavior = std::ranges::find(
+        initial_root->description().behaviors,
+        std::string_view("strata.drop-target"),
+        &ui::DescriptionBehavior::id
+    );
+    check(
+        initial_drop_behavior != initial_root->description().behaviors.end() &&
+            initial_drop_behavior->action != nullptr,
+        "TreeView onDrop was not projected onto its generated row targets"
+    );
     const data::JsonValue* initial_tree_semantics =
         surface.semantics().find(initial_tree->identity());
     check(
@@ -4424,6 +4435,20 @@ overlay Collections {
     );
     check(surface.tree().find_key("tree.child") != nullptr,
           "retained tree expansion did not materialize the child template");
+    const ui::RetainedNode* leaf = surface.tree().find_key("tree.child");
+    const auto leaf_drop_behavior = std::ranges::find(
+        leaf->description().behaviors,
+        std::string_view("strata.drop-target"),
+        &ui::DescriptionBehavior::id
+    );
+    const runtime::Value* leaf_axis = leaf_drop_behavior != leaf->description().behaviors.end()
+        ? leaf_drop_behavior->options.field("insertionAxis")
+        : nullptr;
+    check(
+        leaf_axis != nullptr && leaf_axis->string() != nullptr &&
+            *leaf_axis->string() == "VERTICAL",
+        "tree leaf target advertised an invalid on-placement drop"
+    );
     const ui::LayoutRecord* expanded_root_layout = surface.layout().find(
         surface.tree().find_key("tree.root")->identity()
     );

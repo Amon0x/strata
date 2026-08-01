@@ -407,6 +407,13 @@ bool HostStore::adopt(std::shared_ptr<const HostSnapshot> snapshot) {
 
 const std::shared_ptr<const HostSnapshot>& HostStore::snapshot() const noexcept { return snapshot_; }
 
+std::optional<std::uint64_t> HostStore::generation(const std::string_view id) const noexcept {
+    const auto found = snapshots_.find(id);
+    return found != snapshots_.end()
+        ? std::optional<std::uint64_t>(found->second->generation())
+        : std::nullopt;
+}
+
 std::vector<std::shared_ptr<const HostSnapshot>> HostStore::snapshots() const {
     std::vector<std::shared_ptr<const HostSnapshot>> result;
     result.reserve(adoption_order_.size());

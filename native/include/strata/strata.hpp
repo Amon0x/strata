@@ -1,8 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <exception>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -13,6 +16,10 @@
 #include <strata/strata.h>
 
 namespace strata {
+
+namespace host {
+class Bindings;
+}
 
 class AbiError final : public std::runtime_error {
 public:
@@ -195,7 +202,52 @@ struct RuntimeControl final {
     RuntimeControl(const RuntimeControl&) = delete;
     RuntimeControl& operator=(const RuntimeControl&) = delete;
     strata_runtime* value;
+    std::mutex host_snapshot_mutex;
+    std::uint64_t next_host_snapshot_generation = 1U;
 };
+
+[[nodiscard]] inline std::uint64_t publish_host_snapshot(
+    const std::shared_ptr<RuntimeControl>& control,
+    const std::string_view id,
+    const std::string_view value_json
+) {
+    if (control == nullptr || control->value == nullptr) {
+        throw std::logic_error("host snapshot publication requires a live runtime");
+    }
+    const std::scoped_lock lock(control->host_snapshot_mutex);
+    std::uint64_t retained_generation = 0U;
+    const strata_result retained = strata_runtime_get_host_snapshot_generation(
+        control->value,
+        strata_string_view{id.data(), id.size()},
+        &retained_generation
+    );
+    if (retained.status != STRATA_STATUS_NOT_FOUND) {
+        require_ok(retained, "host snapshot generation read");
+        if (retained_generation == std::numeric_limits<std::uint64_t>::max()) {
+            throw std::overflow_error("host snapshot generation exhausted");
+        }
+        control->next_host_snapshot_generation = std::max(
+            control->next_host_snapshot_generation,
+            retained_generation + 1U
+        );
+    }
+    const std::uint64_t generation = control->next_host_snapshot_generation;
+    if (generation == 0U || generation == std::numeric_limits<std::uint64_t>::max()) {
+        throw std::overflow_error("host snapshot generation exhausted");
+    }
+    const strata_host_snapshot_config snapshot{
+        sizeof(strata_host_snapshot_config),
+        strata_string_view{id.data(), id.size()},
+        generation,
+        strata_string_view{value_json.data(), value_json.size()},
+    };
+    require_ok(
+        strata_runtime_publish_host_snapshot(control->value, &snapshot),
+        "host snapshot publication"
+    );
+    control->next_host_snapshot_generation = generation + 1U;
+    return generation;
+}
 
 struct ByteCapture final {
     std::vector<std::uint8_t> value;
@@ -371,6 +423,14 @@ public:
         );
     }
 
+    /** Publishes one immutable host root with a runtime-owned monotonic generation. */
+    [[nodiscard]] std::uint64_t publish_host_snapshot(
+        const std::string_view id,
+        const std::string_view value_json
+    ) {
+        return detail::publish_host_snapshot(control_, id, value_json);
+    }
+
     [[nodiscard]] strata_activation_info activate(const strata_activation_config& config) {
         strata_activation_info info{sizeof(strata_activation_info)};
         require_ok(
@@ -402,6 +462,7 @@ public:
     }
 
 private:
+    friend class host::Bindings;
     std::shared_ptr<detail::RuntimeControl> control_;
 };
 

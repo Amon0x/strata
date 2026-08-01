@@ -321,6 +321,13 @@ void test_lazy_host_snapshot_abi() {
             info.has_snapshot == 0U,
         "empty host snapshot info changed"
     );
+    std::uint64_t producer_generation = UINT64_MAX;
+    check(
+        strata_runtime_get_host_snapshot_generation(
+            runtime, view("initial"), &producer_generation
+        ).status == STRATA_STATUS_NOT_FOUND && producer_generation == 0U,
+        "missing host snapshot producer generation changed"
+    );
 
     const std::string id = "initial";
     const std::string values = R"({"app":{"generation":10,"title":"Initial"},"unused":{"value":"cold"}})";
@@ -338,6 +345,12 @@ void test_lazy_host_snapshot_abi() {
         strata_runtime_get_host_snapshot_info(runtime, &info).status == STRATA_STATUS_OK &&
             info.has_snapshot == 1U && info.generation == 10U && info.evaluated_scalar_count == 0U,
         "host snapshot was not lazy at the ABI boundary"
+    );
+    check(
+        strata_runtime_get_host_snapshot_generation(
+            runtime, view("initial"), &producer_generation
+        ).status == STRATA_STATUS_OK && producer_generation == 10U,
+        "host snapshot producer generation was not queryable"
     );
 
     std::string encoded;

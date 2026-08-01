@@ -183,6 +183,22 @@ strata_result strata_runtime_get_host_snapshot_info(
     return strata::core::result(STRATA_STATUS_OK);
 }
 
+strata_result strata_runtime_get_host_snapshot_generation(
+    const strata_runtime* const runtime,
+    const strata_string_view id,
+    std::uint64_t* const out_generation
+) {
+    if (runtime == nullptr || out_generation == nullptr || !valid_view(id, false)) {
+        return invalid_argument();
+    }
+    const std::optional<std::uint64_t> generation =
+        runtime->core.host_snapshot_generation(copied_string(id));
+    *out_generation = generation.value_or(0U);
+    return strata::core::result(
+        generation.has_value() ? STRATA_STATUS_OK : STRATA_STATUS_NOT_FOUND
+    );
+}
+
 strata_result strata_runtime_read_diagnostics(
     const strata_runtime* const runtime,
     const strata_diagnostics_snapshot_sink* const sink

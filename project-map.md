@@ -11,7 +11,7 @@
 
 ## Native source ownership
 
-- `native/include/strata` — installed C ABI and C++ RAII facade.
+- `native/include/strata` — installed C ABI, low-level C++ RAII facade, and typed C++ host-model/action bindings.
 - `native/src/core` — allocator telemetry, arenas, clocks, UTF-8, identities, and base lifetime
   machinery.
 - `native/src/data` — strict JSON model, views, parsing, and canonical encoding.

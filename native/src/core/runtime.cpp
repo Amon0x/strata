@@ -99,6 +99,12 @@ const std::shared_ptr<const runtime::HostSnapshot>& Runtime::host_snapshot() con
     return host_store_.snapshot();
 }
 
+std::optional<std::uint64_t> Runtime::host_snapshot_generation(
+    const std::string_view id
+) const noexcept {
+    return host_store_.generation(id);
+}
+
 std::optional<runtime::Value> Runtime::read_host_value(const std::string_view path) const {
     return host_store_.resolve(path);
 }

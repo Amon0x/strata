@@ -47,6 +47,9 @@ public:
         const data::JsonValue& values
     );
     [[nodiscard]] const std::shared_ptr<const runtime::HostSnapshot>& host_snapshot() const noexcept;
+    [[nodiscard]] std::optional<std::uint64_t> host_snapshot_generation(
+        std::string_view id
+    ) const noexcept;
     [[nodiscard]] std::optional<runtime::Value> read_host_value(std::string_view path) const;
     void configure_application(
         std::string id,

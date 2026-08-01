@@ -154,6 +154,7 @@ public:
 
     [[nodiscard]] bool adopt(std::shared_ptr<const HostSnapshot> snapshot);
     [[nodiscard]] const std::shared_ptr<const HostSnapshot>& snapshot() const noexcept;
+    [[nodiscard]] std::optional<std::uint64_t> generation(std::string_view id) const noexcept;
     /** Immutable roots in adoption order; later snapshots shadow duplicate root names. */
     [[nodiscard]] std::vector<std::shared_ptr<const HostSnapshot>> snapshots() const;
     [[nodiscard]] std::optional<Value> resolve(std::string_view dotted_path) const;

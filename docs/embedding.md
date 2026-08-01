@@ -71,12 +71,54 @@ A C++ `Surface` retains shared runtime ownership, so moving it out of the runtim
 safe. See [cpp_smoke.cpp](../native/samples/cpp_smoke.cpp) for activation, resource reload, canonical
 frame reading, and telemetry.
 
-## Host data, actions, and services
+## Typed C++ host models
+
+C hosts use the JSON ABI directly. Ordinary C++ application code should instead include
+`strata/host.hpp` and link `Strata::host`. `strata::host::Bindings` owns handler registrations,
+decodes action calls into structured values, watches model revisions, and publishes changed
+snapshots with runtime-owned monotonic generations:
+
+```cpp
+strata::host::Revision revision;
+std::vector<Item> items = load_items();
+strata::host::Bindings host(runtime, "my.application");
+
+host.snapshot(
+    "my.application.model",
+    [&] { return revision.value(); },
+    [&] {
+        return strata::host::object({
+            {"app", strata::host::object({
+                {"items", strata::host::Value::array(items, [](const Item& item) {
+                    return strata::host::object({{"key", item.key}, {"label", item.label}});
+                })},
+            })},
+        });
+    }
+);
+
+host.on("app.save", [&](const strata::host::ActionEvent& event) {
+    save(event.payload.require_string("path"));
+    return strata::host::ActionResult::handled;
+});
+
+// Once per host tick, before framing surfaces:
+host.synchronize();
+```
+
+Model code never assembles or parses JSON. `synchronize()` republishes only changed revisions and
+rethrows any application exception that had to be contained at the C callback boundary. For small
+standalone values, `strata::host::Observable<T>` owns the revision automatically.
+
+## Low-level host data, actions, and services
 
 - Publish immutable host snapshots with strictly increasing generations. Schemas define their typed
-  paths; missing required data rejects activation without replacing the last-good unit.
-- Register action handlers per runtime. Payloads and event values are canonical JSON borrowed only
-  for the callback. Handler registrations have explicit release handles.
+  paths; missing required data rejects activation without replacing the last-good unit. The C++
+  `Runtime::publish_host_snapshot` method owns generation allocation when a custom publication
+  strategy is needed.
+- Register action handlers per runtime. At the C boundary, payloads and event values are canonical
+  JSON borrowed only for the callback and registrations have explicit release handles. The C++
+  binding layer owns those details.
 - Resource adapters return borrowed bytes; Strata copies any data it retains before returning.
   Resource adapter generations are nonzero and strictly increasing. A null, repeated, or stale
   replacement is rejected without mutating the active loader or gating live Surfaces.

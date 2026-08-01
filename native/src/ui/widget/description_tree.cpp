@@ -4,6 +4,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <utility>
 
 namespace strata::ui::collection_description {
 namespace {
@@ -232,6 +233,7 @@ void expand(WidgetDescriptionScope& scope) {
     const double indent = scope.number("indent", 18.0);
     const std::string row_template = scope.string("rowTemplate");
     const double disclosure = scope.number("disclosureSize", 10.0);
+    const std::shared_ptr<const runtime::ActionValue> drop_action = scope.bound_action("onDrop");
     struct Row final {
         runtime::Value item;
         std::string key;
@@ -295,7 +297,7 @@ void expand(WidgetDescriptionScope& scope) {
     scope.set_generated_children(
         row_count,
         [rows = std::move(rows), topology = std::move(topology), row_template, row_height,
-         indent, disclosure](
+         indent, disclosure, drop_action](
             WidgetDescriptionScope& item_scope,
             const std::size_t index
         ) {
@@ -339,16 +341,24 @@ void expand(WidgetDescriptionScope& scope) {
             {"selected", runtime::Value(row_source.selected)},
         }));
         if (row_source.enabled) {
+            runtime::Value drop_options = row_source.expandable
+                ? widget_object({
+                    {"acceptedTypes", runtime::Value(std::vector<runtime::Value>{runtime::Value("strata.tree-row")})},
+                    {"allowedOperations", runtime::Value(std::vector<runtime::Value>{runtime::Value("MOVE")})},
+                    {"placementMode", runtime::Value("TREE")},
+                })
+                : widget_object({
+                    {"acceptedTypes", runtime::Value(std::vector<runtime::Value>{runtime::Value("strata.tree-row")})},
+                    {"allowedOperations", runtime::Value(std::vector<runtime::Value>{runtime::Value("MOVE")})},
+                    {"placementMode", runtime::Value("TREE")},
+                    {"insertionAxis", runtime::Value("VERTICAL")},
+                });
             row = with_behaviors(row, {
                 DescriptionBehavior{
                     "strata.drop-target",
                     true,
-                    widget_object({
-                        {"acceptedTypes", runtime::Value(std::vector<runtime::Value>{runtime::Value("strata.tree-row")})},
-                        {"allowedOperations", runtime::Value(std::vector<runtime::Value>{runtime::Value("MOVE")})},
-                        {"placementMode", runtime::Value("TREE")},
-                    }),
-                    nullptr,
+                    std::move(drop_options),
+                    drop_action,
                 },
             });
         }
