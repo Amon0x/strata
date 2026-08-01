@@ -71,6 +71,12 @@ A C++ `Surface` retains shared runtime ownership, so moving it out of the runtim
 safe. See [cpp_smoke.cpp](../native/samples/cpp_smoke.cpp) for activation, resource reload, canonical
 frame reading, and telemetry.
 
+Applications that need an ordinary Win32 window should not manually consume render packets. Link
+`Strata::desktop` and use `<strata/desktop.hpp>`; it owns the production packet decoder, D3D11
+renderer, resource/clipboard services, input translation boundary, and teardown barrier. The
+installed `desktop_app.cpp` sample is a complete window loop. See
+[Win32 desktop hosting](desktop-hosting.md).
+
 ## Typed C++ host models
 
 C hosts use the JSON ABI directly. Ordinary C++ application code should instead include
@@ -146,7 +152,7 @@ standalone values, `strata::host::Observable<T>` owns the revision automatically
 
 Adopt a complete Surface environment generation atomically: framebuffer and logical sizes, scale,
 safe insets, snapping, density, reduced-motion preference, and input capabilities. Enqueue input in
-ordered batches, call `strata_surface_frame`, then read packet v3 through a bytes sink.
+ordered batches, call `strata_surface_frame`, then read packet v4 through a bytes sink.
 
 The packet bytes are borrowed only during the sink callback. Copy them if the backend submits later;
 consume them directly if submission is synchronous. Packet v3 already contains native geometry,
@@ -181,6 +187,6 @@ storage is intentionally outside those routed counters.
 ## Installed acceptance
 
 The CMake install includes an independent sample project under `share/strata/samples`. The repository
-gate configures that project against the install prefix and runs its C/C++ applications plus the
-installed compiler/Surface corpus through CTest. This catches accidental dependencies on repository
-paths, Kotlin classes, Gradle, demo registries, or private C++ headers.
+gate configures that project against the install prefix and runs its C, C++, and Win32 desktop
+applications plus the installed compiler/Surface corpus through CTest. This catches accidental
+dependencies on repository paths, Gradle, demo registries, or private C++ headers.

@@ -413,6 +413,7 @@ target_include_directories(
     strata_extensions
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
+set_target_properties(strata_extensions PROPERTIES EXPORT_NAME extensions)
 strata_target_defaults(strata_extensions)
 # Extension selection is host plumbing, but its descriptors are projected by the package library.
 target_link_libraries(strata_host_support PUBLIC strata_extensions)
@@ -437,6 +438,50 @@ if(WIN32 AND (STRATA_BUILD_DESKTOP OR STRATA_BUILD_TOOLS))
         strata_d3d11 PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     )
     strata_target_defaults(strata_d3d11)
+endif()
+
+if(WIN32 AND STRATA_BUILD_DESKTOP)
+    # Complete consumer-facing Win32 host. Its backend implementation is deliberately contained in
+    # this archive so the installed target does not depend on repository-private host libraries.
+    add_library(
+        strata_desktop_host
+        STATIC
+            desktop/application.cpp
+            desktop/host_services.cpp
+            desktop/renderer.cpp
+            host/extensions.cpp
+            host/module_path.cpp
+            host/render_packet.cpp
+            d3d11/blur_pass.cpp
+            d3d11/render_context.cpp
+            d3d11/texture_store.cpp
+    )
+    add_library(Strata::desktop ALIAS strata_desktop_host)
+    target_link_libraries(
+        strata_desktop_host
+        PUBLIC Strata::host
+        PRIVATE
+            strata_extensions
+            d3d11
+            d3dcompiler
+            ole32
+            user32
+            windowscodecs
+    )
+    target_include_directories(
+        strata_desktop_host
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_target_properties(
+        strata_desktop_host
+        PROPERTIES
+            EXPORT_NAME desktop
+            POSITION_INDEPENDENT_CODE ON
+    )
+    strata_target_defaults(strata_desktop_host)
 endif()
 
 if(STRATA_BUILD_TOOLS)
@@ -523,22 +568,28 @@ if(STRATA_BUILD_SAMPLES)
     add_executable(strata_cpp_smoke samples/cpp_smoke.cpp)
     target_link_libraries(strata_cpp_smoke PRIVATE Strata::host)
     strata_target_defaults(strata_cpp_smoke)
+
+    if(WIN32 AND STRATA_BUILD_DESKTOP)
+        add_executable(strata_desktop_sample samples/desktop_app.cpp)
+        target_link_libraries(strata_desktop_sample PRIVATE Strata::desktop)
+        strata_target_defaults(strata_desktop_sample)
+    endif()
 endif()
 
 if(WIN32 AND STRATA_BUILD_DESKTOP)
     add_executable(
         strata_desktop
         desktop/host.cpp
-        desktop/host_services.cpp
         desktop/main.cpp
         desktop/performance.cpp
-        desktop/renderer.cpp
         desktop/showcase.cpp
+        headless/scenario.cpp
     )
     target_link_libraries(
         strata_desktop
         PRIVATE
             Strata::host
+            Strata::desktop
             strata_extensions
             strata_host_support
             strata_d3d11
@@ -745,6 +796,13 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             COMMAND strata_cpp_smoke
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
         )
+        if(WIN32 AND STRATA_BUILD_DESKTOP)
+            add_test(
+                NAME strata.embed.desktop
+                COMMAND strata_desktop_sample --smoke
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
+            )
+        endif()
     endif()
     if(STRATA_BUILD_TOOLS)
         add_test(
@@ -772,6 +830,13 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             COMMAND strata_desktop --smoke ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
         )
         add_test(
+            NAME strata.desktop.application
+            COMMAND strata_desktop
+                --application ${CMAKE_CURRENT_SOURCE_DIR}/samples/desktop_app.json
+                --resources ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
+                --smoke
+        )
+        add_test(
             NAME strata.desktop.performance_smoke
             COMMAND strata_desktop
                 --performance ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/performance/smoke.json
@@ -789,6 +854,11 @@ install(
     ARCHIVE DESTINATION lib
 )
 if(WIN32 AND STRATA_BUILD_DESKTOP)
+    install(
+        TARGETS strata_desktop_host
+        EXPORT StrataTargets
+        ARCHIVE DESTINATION lib
+    )
     install(TARGETS strata_desktop RUNTIME DESTINATION bin)
 endif()
 if(STRATA_BUILD_TOOLS)
@@ -805,6 +875,7 @@ install(
 )
 install(
     FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/META-INF/licenses/FreeType-FTL.txt
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/META-INF/licenses/Lucide-ISC.txt
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/META-INF/licenses/Roboto-OFL.txt
@@ -820,6 +891,8 @@ install(
         samples/installed/CMakeLists.txt
         samples/c_smoke.c
         samples/cpp_smoke.cpp
+        samples/desktop_app.cpp
+        samples/desktop_app.json
     DESTINATION share/strata/samples
 )
 install(

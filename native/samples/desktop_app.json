@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "application": {
+    "id": "example.desktop.runner",
+    "module": "assets/strata/samples/desktop_app.strata",
+    "root": "DesktopExample",
+    "packages": [],
+    "actions": []
+  },
+  "surface": {
+    "id": "example.desktop.runner",
+    "role": "overlay",
+    "backend": "d3d11",
+    "width": 900,
+    "height": 560,
+    "scale": 1,
+    "reducedMotion": false,
+    "fonts": [
+      {
+        "id": "strata:fonts/default-medium",
+        "resource": "assets/strata/fonts/medium.ttf"
+      },
+      {
+        "id": "strata:fonts/default",
+        "resource": "assets/strata/fonts/default.ttf"
+      },
+      {
+        "id": "strata:fonts/mono",
+        "resource": "assets/strata/fonts/mono.ttf"
+      }
+    ],
+    "textures": [
+      {
+        "id": "strata:ui/icons/chevron-down",
+        "resource": "assets/strata/textures/ui/icons/chevron-down.png",
+        "sampling": "linear"
+      },
+      {
+        "id": "strata:ui/icons/chevron-up",
+        "resource": "assets/strata/textures/ui/icons/chevron-up.png",
+        "sampling": "linear"
+      }
+    ]
+  },
+  "snapshots": []
+}

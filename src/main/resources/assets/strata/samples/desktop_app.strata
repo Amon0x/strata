@@ -1,0 +1,36 @@
+style Root {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 24;
+  gap: 12;
+  background: theme.surface;
+}
+
+style Title {
+  font: "strata:fonts/default-medium";
+  pixelSize: 24;
+  color: theme.foreground;
+}
+
+style Body {
+  pixelSize: 14;
+  color: theme.mutedForeground;
+}
+
+overlay DesktopExample {
+  state count = 0;
+
+  root Panel(key: "example.root", style: Root) {
+    Text(text: "Strata desktop application", style: Title)
+    Text(
+      text: "This window is hosted through the installed Strata::desktop target.",
+      style: Body
+    )
+    Button(
+      key: "example.increment",
+      label: format("Clicked {0} times", count),
+      onClick: action("state.adjust", name: "count", amount: 1)
+    )
+  }
+}

@@ -43,6 +43,17 @@ To build only the native targets:
 gradlew.bat buildNative
 ```
 
+To create the standalone CMake SDK used by another project:
+
+```bat
+gradlew.bat installNative
+```
+
+The package is written to `build/native/install/windows-x64` and exports `Strata::c`,
+`Strata::host`, `Strata::desktop`, and `Strata::extensions`. See
+[Win32 desktop hosting](docs/desktop-hosting.md) for `find_package`, DLL/resource deployment, the
+buildable desktop consumer, and the configurable application runner.
+
 ## Native desktop
 
 After `buildNative`:
@@ -54,6 +65,18 @@ build\native\windows-x64\RelWithDebInfo\strata_desktop.exe src\main\resources
 `F6` toggles durable settings, `F7` toggles the application showcase, `F8` cycles the diagnostics
 surface, and `F9` toggles the passive frame-time HUD. `--multi-window` opens two independent hosts in
 one process; `--uncapped` disables VSync and the message-loop frame cap.
+
+Run an arbitrary application from a launch document instead of opening the bundled showcase:
+
+```bat
+build\native\windows-x64\RelWithDebInfo\strata_desktop.exe ^
+  --application path\to\application.json ^
+  --resources path\to\resource-root
+```
+
+Applications embedded in another executable link the installed `Strata::desktop` target. The
+complete Win32 window/input example is
+[`native/samples/desktop_app.cpp`](native/samples/desktop_app.cpp).
 
 ## Headless application testing
 
@@ -76,6 +99,7 @@ C++ application hosts can use `strata/host.hpp` (`Strata::host`) for structured 
 handlers, and revision-watched snapshots; JSON remains confined to the stable C ABI.
 
 - [C/C++ embedding guide](docs/embedding.md)
+- [Win32 desktop hosting and SDK consumption](docs/desktop-hosting.md)
 - [Native ABI and build notes](native/README.md)
 - [Headless application testing](docs/headless-testing.md)
 - [Desktop performance testing](docs/performance-testing.md)
@@ -92,6 +116,5 @@ repository.
 
 ## License
 
-Copyright (c) 2026 Strata contributors. All rights reserved; see [LICENSE.txt](LICENSE.txt).
-Third-party notices are documented in [`native/THIRD_PARTY.md`](native/THIRD_PARTY.md) and packaged
-license files.
+Strata is available under the permissive [MIT License](LICENSE.txt). Third-party notices are
+documented in [`native/THIRD_PARTY.md`](native/THIRD_PARTY.md) and packaged license files.

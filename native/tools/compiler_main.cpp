@@ -36,6 +36,6 @@ int main(const int argument_count, const char* const* const arguments) {
                  "  strata_compile --check-module <entry.strata> "
                  "<registry.json> [application-schemas.json]\n"
                  "  strata_compile --emit-artifact|--check-artifact <entry.strata> "
-                 "<registry.json> <application-schemas.json> <resource-root> <artifact.json>\n";
+                 "<registry.json> <application-schemas.json> <resource-root> <artifact.bin>\n";
     return 1;
 }

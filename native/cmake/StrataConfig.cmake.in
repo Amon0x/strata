@@ -3,5 +3,7 @@
 include("${CMAKE_CURRENT_LIST_DIR}/StrataTargets.cmake")
 
 set_and_check(Strata_REGISTRY "${PACKAGE_PREFIX_DIR}/share/strata/registry-v1.json")
+set_and_check(Strata_RESOURCES "${PACKAGE_PREFIX_DIR}/share")
+set(Strata_DESKTOP_RUNNER "${PACKAGE_PREFIX_DIR}/bin/strata_desktop.exe")
 
 check_required_components(Strata)

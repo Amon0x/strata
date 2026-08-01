@@ -37,7 +37,8 @@ verifies isolated host snapshots, packet submission, and lifecycle cleanup throu
 D3D11 path.
 
 The installed-package smoke configures a separate CMake consumer against only the installation
-prefix, then builds and runs both C and C++ applications.
+prefix, then builds and runs the C and C++ ABI applications plus a hidden one-frame Win32 program
+linked through the exported `Strata::desktop` target.
 
 ## Full gate
 

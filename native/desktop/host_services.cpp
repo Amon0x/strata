@@ -99,15 +99,29 @@ struct HostServices::Impl final {
         }
     }
 
+    [[nodiscard]] std::filesystem::path resource_path(
+        const std::filesystem::path& relative
+    ) const {
+        if (relative.empty() || relative.is_absolute()) {
+            throw std::invalid_argument("desktop resource id must be relative");
+        }
+        for (const std::filesystem::path& component : relative) {
+            if (component == "..") {
+                throw std::invalid_argument("desktop resource id escapes its root");
+            }
+        }
+        return root / relative;
+    }
+
     [[nodiscard]] std::string text(const std::filesystem::path& relative) const {
-        const std::vector<std::uint8_t> bytes = read_bytes(root / relative);
+        const std::vector<std::uint8_t> bytes = read_bytes(resource_path(relative));
         return std::string(bytes.begin(), bytes.end());
     }
 
     [[nodiscard]] std::vector<std::uint8_t> bytes(
         const std::filesystem::path& relative
     ) const {
-        return read_bytes(root / relative);
+        return read_bytes(resource_path(relative));
     }
 
     static strata_status load_resource(
@@ -120,12 +134,8 @@ struct HostServices::Impl final {
             auto& self = *static_cast<Impl*>(user_data);
             const std::string resource_id = copy(id);
             const std::filesystem::path relative(resource_id);
-            if (resource_id.empty() || relative.is_absolute()) return STRATA_STATUS_INVALID_ARGUMENT;
-            for (const auto& component : relative) {
-                if (component == "..") return STRATA_STATUS_INVALID_ARGUMENT;
-            }
             auto [found, inserted] = self.resource_cache.try_emplace(resource_id);
-            if (inserted) found->second = read_bytes(self.root / relative);
+            if (inserted) found->second = read_bytes(self.resource_path(relative));
             output->data = found->second.data();
             output->size = found->second.size();
             return output->size == 0U ? STRATA_STATUS_NOT_FOUND : STRATA_STATUS_OK;

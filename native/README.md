@@ -93,8 +93,14 @@ packet/geometry checks. Its protocols are documented in
 
 ## Installed package
 
-Installation exports `Strata::c`, public headers, the neutral registry, tools, and samples.
+`gradlew.bat installNative` creates `build/native/install/windows-x64`. Installation exports
+`Strata::c`, `Strata::host`, `Strata::desktop`, `Strata::extensions`, public headers, the neutral
+registry, runtime assets, tools, and samples. `Strata_RESOURCES` names the installed `share`
+directory so consumers do not reconstruct package paths.
+
 The installed sample project configures against only the install prefix. Its C and C++ programs
 configure an application, activate `.strata`, create/frame a Surface, validate packet v4, exercise
-resource reload, inspect allocator telemetry, and release every handle without Gradle or repository
-source includes.
+resource reload, inspect allocator telemetry, and release every handle. Its Win32 program links
+`Strata::desktop`, opens the sample `.strata` application through the production D3D11 backend, and
+runs as a hidden one-frame CTest smoke without repository includes. See
+[`docs/desktop-hosting.md`](../docs/desktop-hosting.md) for package consumption and deployment.

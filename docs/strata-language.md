@@ -299,7 +299,7 @@ Button(
 ```
 
 The action ID must be a static registered string. Payload fields are named and checked against the
-same typed contract dispatched by the host. See [Actions](actions.md) for the Kotlin boundary.
+same typed contract dispatched by the host. See [Actions](actions.md) for the native host boundary.
 
 UI-local actions compose without a host callback: `sequence(first, ...)`, `parallel(first, ...)`,
 and `chooseAction(condition, whenTrue, whenFalse)`. `state.setFromEvent` adapts the canonical event
@@ -393,9 +393,10 @@ Run the standalone production compiler without launching a window or game:
 gradlew.bat validateSettingsStrata
 gradlew.bat validateShowcaseStrata
 gradlew.bat validateDebugStrata
-gradlew.bat validateStrata -PstrataFile=path/to/module.strata -PstrataProfile=builtin
+gradlew.bat validateStrata -PstrataFile=path/to/module.strata -PstrataSchemas=path/to/module.schemas.json
 ```
 
-Diagnostics include `file:line:column`, the source line, a caret range, component path, and expected
-value. The bundled profiles compose their real extension/action/host registries. Custom applications
-should expose the same compiler API with their own composed registries.
+Command-line diagnostics include the diagnostic code, `file:line:column`, and message. Runtime
+diagnostic callbacks additionally carry the full source range, component path, expected value, and
+occurrence metadata. Custom applications provide their application schema document with
+`-PstrataSchemas` or directly to `strata_compile`.

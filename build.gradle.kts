@@ -188,6 +188,8 @@ val configureInstalledNativeSmoke = tasks.register<Exec>("configureInstalledNati
         "native/samples/installed/CMakeLists.txt",
         "native/samples/c_smoke.c",
         "native/samples/cpp_smoke.cpp",
+        "native/samples/desktop_app.cpp",
+        "native/samples/desktop_app.json",
         "native/cmake/StrataConfig.cmake.in",
     )
     inputs.files(fileTree("native/include"))
