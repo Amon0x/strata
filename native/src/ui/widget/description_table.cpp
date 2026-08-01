@@ -1,6 +1,7 @@
 #include "ui/widget/description_collection_common.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <optional>
 
@@ -25,8 +26,9 @@ public:
         keys_(std::move(keys)) {
         generation_ = UINT64_C(14695981039346656037);
         for (const std::string& key : keys_) {
-            for (const unsigned char byte : key) {
-                generation_ = (generation_ ^ byte) * UINT64_C(1099511628211);
+            for (const char character : key) {
+                generation_ = (generation_ ^ static_cast<unsigned char>(character)) *
+                    UINT64_C(1099511628211);
             }
             generation_ = (generation_ ^ UINT64_C(0xFF)) * UINT64_C(1099511628211);
         }

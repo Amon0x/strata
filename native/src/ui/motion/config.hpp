@@ -20,8 +20,8 @@ struct TriggerBinding final {
 struct TimelineBinding final {
     std::string id;
     const CompiledMotion* animation = nullptr;
-    std::optional<MotionInteraction> interaction;
-    std::optional<bool> state_target;
+    std::optional<MotionInteraction> interaction = std::nullopt;
+    std::optional<bool> state_target = std::nullopt;
 };
 
 struct MotionTimelineBinding final {

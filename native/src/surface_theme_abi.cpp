@@ -340,7 +340,7 @@ private:
         (source.justify_self != STRATA_THEME_ALIGN_UNSPECIFIED && source.justify_self > STRATA_THEME_ALIGN_STRETCH)) {
         throw std::invalid_argument("theme layout-style header is invalid");
     }
-    for (const auto [value, label] : {
+    for (const auto& [value, label] : {
              std::pair{source.participates, std::string_view("theme participates")},
              std::pair{source.wrap, std::string_view("theme wrap")},
              std::pair{source.clip, std::string_view("theme clip")},

@@ -80,7 +80,7 @@ struct MotionEasing final {
     [[nodiscard]] static MotionEasing cubic_bezier(double x1, double y1, double x2, double y2);
     void validate() const;
     [[nodiscard]] friend bool operator==(const MotionEasing&, const MotionEasing&) = default;
-    [[nodiscard]] friend bool operator==(const MotionEasing& value, std::string_view name) noexcept;
+    friend bool operator==(const MotionEasing& value, std::string_view name) noexcept;
 };
 
 struct MotionRepeat final {

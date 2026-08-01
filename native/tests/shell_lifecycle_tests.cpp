@@ -365,11 +365,13 @@ overlay Main { root ShellFixture() }
     const auto overflow = std::ranges::find(
         toolbar_targets, std::string_view("$overflow"), &ui::WidgetSubtarget::id
     );
-    const std::size_t visible_toolbar_commands = std::ranges::count_if(
-        toolbar_targets,
-        [](const ui::WidgetSubtarget& target) {
-            return !target.detached && target.kind == ui::WidgetSubtargetKind::command;
-        }
+    const std::size_t visible_toolbar_commands = static_cast<std::size_t>(
+        std::ranges::count_if(
+            toolbar_targets,
+            [](const ui::WidgetSubtarget& target) {
+                return !target.detached && target.kind == ui::WidgetSubtargetKind::command;
+            }
+        )
     );
     check(
         overflow != toolbar_targets.end() && !overflow->detached &&

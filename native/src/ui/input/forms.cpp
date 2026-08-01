@@ -94,7 +94,7 @@ bool InputRouter::validate_field(RetainedNode& field, const bool mark_touched) {
     std::optional<std::string> error;
     const runtime::Value* required_value = scalar_property(field, "required");
     if (required_value != nullptr && required_value->boolean() != nullptr && *required_value->boolean() &&
-        (!text.has_value() && !number.has_value() ||
+        ((!text.has_value() && !number.has_value()) ||
          (text.has_value() && (text->empty() || blank(*text))))) {
         error = validation_message(field, "requiredMessage", "This field is required.");
     }

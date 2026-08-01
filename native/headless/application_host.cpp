@@ -22,7 +22,7 @@
 #include "capture_renderer.hpp"
 #include "host/extensions.hpp"
 #include "host/module_path.hpp"
-#include "host/render_packet.hpp"
+#include <strata/render_packet.hpp>
 
 namespace strata::headless {
 namespace {
@@ -506,7 +506,8 @@ struct ApplicationHost::Impl final {
     }
 
     void enqueue(const std::span<const strata_input_event> events) {
-        strata_surface_input_batch_info info{sizeof(strata_surface_input_batch_info)};
+        strata_surface_input_batch_info info{};
+        info.struct_size = sizeof(info);
         strata::require_ok(strata_surface_enqueue_input(surface->native_handle(), events.data(),
                                                         events.size(), &info),
                            "headless input enqueue");

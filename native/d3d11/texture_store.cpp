@@ -17,7 +17,7 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
-#include "host/render_packet.hpp"
+#include <strata/render_packet.hpp>
 
 namespace strata::d3d11 {
 

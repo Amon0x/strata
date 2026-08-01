@@ -88,7 +88,7 @@ public:
     [[nodiscard]] const LogicalGlyph& operator[](std::size_t index) const noexcept;
     [[nodiscard]] const_iterator begin() const noexcept;
     [[nodiscard]] const_iterator end() const noexcept;
-    [[nodiscard]] friend bool operator==(
+    friend bool operator==(
         const LogicalGlyphRun& left,
         const LogicalGlyphRun& right
     ) noexcept;
@@ -107,7 +107,7 @@ struct MaterialState final {
     std::string id;
     std::string blend_mode = "straight_alpha";
     double opacity = 1.0;
-    std::vector<MaterialParameter> parameters;
+    std::vector<MaterialParameter> parameters{};
     [[nodiscard]] friend bool operator==(const MaterialState&, const MaterialState&) = default;
 };
 
@@ -153,7 +153,7 @@ struct TextRunRenderCommand final {
     LogicalGlyphRun glyphs;
     FontRasterization font_rasterization = FontRasterization::grayscale;
     /** Conservative local-space bounds used to reject clipped runs before atlas warmup. */
-    std::optional<Rect> cull_bounds;
+    std::optional<Rect> cull_bounds = std::nullopt;
     [[nodiscard]] friend bool operator==(const TextRunRenderCommand&, const TextRunRenderCommand&) = default;
 };
 

@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -75,6 +76,17 @@ struct ExpressionHostDependency final {
 enum class ActionCompositionMode { sequence, parallel };
 
 struct ActionValue final {
+    ActionValue() = default;
+    ActionValue(
+        std::shared_ptr<const Action> action,
+        std::optional<ActionCompositionMode> composition,
+        std::vector<std::shared_ptr<const ActionValue>> children,
+        std::optional<LexicalStateBinding> lexical_state_binding = std::nullopt
+    ) : action(std::move(action)),
+        composition(composition),
+        children(std::move(children)),
+        lexical_state_binding(std::move(lexical_state_binding)) {}
+
     std::shared_ptr<const Action> action;
     std::optional<ActionCompositionMode> composition;
     std::vector<std::shared_ptr<const ActionValue>> children;

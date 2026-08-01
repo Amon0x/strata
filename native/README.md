@@ -66,41 +66,51 @@ live Surfaces. `strata_surface_abandon` is an explicit delivery-impossible fallb
 host GPU resources alive. The C++ facade requires explicit `Surface::close()` or `abandon()`; a live
 Surface reaching its destructor is a fatal ownership invariant violation.
 
-## Windows build
+## Platform builds
 
-From a Visual Studio developer command prompt:
+The root presets are the supported build interface:
 
 ```bat
-cmake -S native -B build\native\windows-x64 ^
-  -G "Visual Studio 18 2026" -A x64 -T version=14.52 ^
-  -DSTRATA_BUILD_TESTS=ON -DSTRATA_BUILD_TOOLS=ON ^
-  -DSTRATA_BUILD_SAMPLES=ON -DSTRATA_WARNINGS_AS_ERRORS=ON
-cmake --build build\native\windows-x64 --config RelWithDebInfo --parallel
-ctest --test-dir build\native\windows-x64 --build-config RelWithDebInfo --output-on-failure
+cmake --workflow --preset windows-x64
 ```
 
-The ordinary repository gate configures/builds this automatically. ASan uses a separate build with
+```sh
+cmake --workflow --preset linux-x64
+```
+
+The Windows preset pins Visual Studio 18 2026, x64, and preview toolset 14.52. The Linux preset uses
+GCC, Ninja, and a RelWithDebInfo single-configuration tree. Both enable tools, samples, tests, strict
+warnings, and installed-package acceptance. ASan uses a separate build with
 `-DSTRATA_ENABLE_ASAN=ON`; MSVC does not claim UBSan support.
 
 `strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v4
-boundary as other hosts, but supplies a deterministic clock, scripted input/services, canonical
-frame capture, and offscreen D3D11/WARP rendering through the desktop host's shared production
-texture, blur, and HLSL material pipeline. It supports both replayable scenarios and a persistent
-newline-delimited JSON inspect/control session whose semantic browser includes exact retained and
-virtual-subtarget hit geometry. An explicit CPU reference backend remains available for portable
-packet/geometry checks. Its protocols are documented in
+boundary as other hosts, but supplies a deterministic clock, scripted input/services, and canonical
+frame capture. On Windows it can use offscreen D3D11/WARP through the desktop host's shared
+production texture, blur, and HLSL material pipeline. Linux builds only the CPU reference backend;
+no Linux window or GPU backend is provided. The replay and JSON-lines protocols are documented in
 [`docs/headless-testing.md`](../docs/headless-testing.md).
 
 ## Installed package
 
-`gradlew.bat installNative` creates `build/native/install/windows-x64`. Installation exports
-`Strata::c`, `Strata::host`, `Strata::desktop`, `Strata::extensions`, public headers, the neutral
-registry, runtime assets, tools, and samples. `Strata_RESOURCES` names the installed `share`
-directory so consumers do not reconstruct package paths.
+Install an already-built root preset with:
 
-The installed sample project configures against only the install prefix. Its C and C++ programs
-configure an application, activate `.strata`, create/frame a Surface, validate packet v4, exercise
-resource reload, inspect allocator telemetry, and release every handle. Its Win32 program links
-`Strata::desktop`, opens the sample `.strata` application through the production D3D11 backend, and
-runs as a hidden one-frame CTest smoke without repository includes. See
-[`docs/desktop-hosting.md`](../docs/desktop-hosting.md) for package consumption and deployment.
+```bat
+cmake --install build\cmake\windows-x64 --config RelWithDebInfo
+```
+
+```sh
+cmake --install build/cmake/linux-x64
+```
+
+The default prefixes are `build/install/windows-x64` and `build/install/linux-x64`. Every package
+exports `Strata::c`, `Strata::host`, `Strata::extensions`, and `Strata::render_host`, plus public
+headers, the neutral registry, runtime assets, tools, and samples. Windows also exports
+`Strata::desktop`. `Strata_RESOURCES` names the installed `share` directory so consumers do not
+reconstruct package paths; `Strata_DESKTOP_RUNNER` exists only when the desktop runner was installed.
+
+The installed sample project configures against only the install prefix. Its portable C and C++
+programs configure an application, activate `.strata`, create/frame a Surface, decode packet v4,
+exercise resource reload, inspect allocator telemetry, and release every handle. On Windows it also
+builds a hidden one-frame program linked through `Strata::desktop`. See
+[`docs/embedding.md`](../docs/embedding.md) for portable package and custom-renderer consumption, and
+[`docs/desktop-hosting.md`](../docs/desktop-hosting.md) for Win32 deployment.

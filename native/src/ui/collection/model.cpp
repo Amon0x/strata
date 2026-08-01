@@ -52,7 +52,9 @@ bool KeySet::insert(std::string key) {
 }
 
 bool KeySet::erase(const std::string_view key) {
-    if (index_.erase(key) == 0U) return false;
+    const auto indexed = index_.find(key);
+    if (indexed == index_.end()) return false;
+    index_.erase(indexed);
     const auto found = std::ranges::find(values_, key);
     if (found != values_.end()) values_.erase(found);
     return true;

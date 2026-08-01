@@ -31,9 +31,9 @@ using WidgetGeneratedChildHook = std::function<std::shared_ptr<const Description
 )>;
 
 struct WidgetGeneratedVirtualization final {
-    std::shared_ptr<const runtime::IndexableSequence> sequence;
-    std::shared_ptr<const VirtualItemMembers> item_members;
-    std::shared_ptr<const collection::VirtualItemExtents> item_extents;
+    std::shared_ptr<const runtime::IndexableSequence> sequence{};
+    std::shared_ptr<const VirtualItemMembers> item_members{};
+    std::shared_ptr<const collection::VirtualItemExtents> item_extents{};
 };
 
 struct WidgetGeneratedChildren final {
@@ -89,7 +89,7 @@ struct WidgetDescribePhase final {
     /** Static no-payload fallback; use default_action_factory when retained identity is required. */
     std::string default_action;
     bool layout_participates = true;
-    std::string implicit_key_prefix;
+    std::string implicit_key_prefix{};
     bool starts_unmaterialized = false;
     WidgetDefaultActionFactory default_action_factory = nullptr;
 };
@@ -176,7 +176,7 @@ struct WidgetPresentPhase final {
     WidgetClipHook descendant_clip = nullptr;
     bool detached_overlay = false;
     bool depends_on_status_feedback = false;
-    WidgetVisualProfile visual;
+    WidgetVisualProfile visual{};
     bool depends_on_motion_progress = false;
 };
 

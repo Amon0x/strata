@@ -9,29 +9,39 @@ Each capture contains both views needed by automated testing:
 
 - `<name>.json` is the canonical Surface frame snapshot: retained inspection, semantics, state,
   focus/layers, events, action outcomes, diagnostics, render commands, and operation counters.
-- `<name>.png` is produced from a windowless D3D11/WARP render target. It consumes the same packet
-  v4 and shares the production texture store, glyph atlases, coverage/MSDF text, clipping, blending,
-  backdrop blur, HLSL compiler, and authored-material pipeline with the desktop host.
+- `<name>.png` is produced by the selected render backend. The portable CPU reference backend runs
+  on Linux and Windows. Windows can instead use a windowless D3D11/WARP target sharing the desktop
+  texture store, glyph atlases, text, clipping, blending, blur, and authored-HLSL material pipeline.
 - `result.json` summarizes the selected backend, every frame, captured host action/effect, async
   request, diagnostic, capture name, and any material that genuinely lacked a backend source.
 
 This makes the system useful for visual regression, interaction tests, conformance investigation,
 and automated tooling without putting an automation-only interface into the core.
 
-## Running the bundled showcase scenario
+## Running a scenario
 
-After `buildNative`, from a Windows command shell:
+After building the Windows preset, the production-renderer showcase scenario is:
 
 ```bat
-build\native\windows-x64\RelWithDebInfo\strata_headless.exe ^
+build\cmake\windows-x64\native\RelWithDebInfo\strata_headless.exe ^
   --resources src\main\resources ^
   --scenario native\tests\fixtures\headless\showcase.json ^
   --output build\headless\showcase
 ```
 
-The native CTest gate runs this scenario as `strata.headless.smoke`. It checks that both captures and
-frame snapshots are written, the offscreen D3D11 backend compiled `demo:aurora` without a fallback,
-and clicking `extend.custom.pulse` traverses ordinary action dispatch as `demo.custom.pulse`.
+On Linux, run the portable reference scenario:
+
+```sh
+build/cmake/linux-x64/native/strata_headless \
+  --resources src/main/resources \
+  --scenario native/tests/fixtures/headless/portable.json \
+  --output build/headless/portable
+```
+
+CTest registers the portable batch/interactive scenarios as `strata.headless.portable` and
+`strata.headless.portable.interactive`. Windows additionally registers
+`strata.headless.d3d11` and `strata.headless.d3d11.interactive`, which verify authored shader
+compilation and the shared production renderer.
 
 ## Persistent interactive control
 
@@ -39,7 +49,7 @@ Pass `--interactive` to start the application once and control the live Surface 
 newline-delimited JSON on standard input and output:
 
 ```bat
-build\native\windows-x64\RelWithDebInfo\strata_headless.exe ^
+build\cmake\windows-x64\native\RelWithDebInfo\strata_headless.exe ^
   --resources src\main\resources ^
   --scenario native\tests\fixtures\headless\showcase.json ^
   --output build\headless\interactive ^
@@ -76,9 +86,9 @@ screen, discover `Folder 0`, and click that folder without reading the `.strata`
 coordinates. Selector clicks still enqueue ordinary pointer move/press/release events.
 
 A failed request returns `{"ok":false,"event":"error",...}` without terminating the session, so a
-controller can inspect again and recover. The CTest `strata.headless.interactive` verifies one
-persistent session navigating to `DATA`, selecting `data.tree.folder.0`, mutating the page, and
-observing the retained result.
+controller can inspect again and recover. The platform-specific interactive CTest scenarios verify
+that one persistent process can navigate, select generated content, mutate the page, and expose the
+retained result.
 
 ## Launch/scenario document
 
@@ -179,7 +189,8 @@ ordinary hit testing.
 
 ## Render backends and fidelity boundary
 
-`surface.backend` is `d3d11` by default on Windows. It creates no window or swap chain: a WARP
+`surface.backend` is `d3d11` by default on Windows and `reference` on Linux. D3D11 creates no window
+or swap chain: a WARP
 software device renders into an RGBA texture, using the shared production D3D11 pipeline, and the
 host reads that texture back for PNG encoding. Application HLSL is loaded from its ordinary material
 declarations and compiled exactly as it is for desktop. The deterministic scenario clock is also

@@ -211,7 +211,7 @@ private:
         std::string overflow;
         std::optional<std::size_t> max_lines;
         std::string alignment;
-        std::vector<StyleRun> style_runs;
+        std::vector<StyleRun> style_runs{};
         [[nodiscard]] friend auto operator<=>(const CacheKey&, const CacheKey&) = default;
     };
 

@@ -67,6 +67,29 @@ enum class PointerEventType { move, press, release, cancel };
 enum class KeyEventType { press, release, repeat };
 
 struct PointerInputEvent final {
+    PointerInputEvent() = default;
+    PointerInputEvent(
+        Point position,
+        PointerEventType type,
+        std::int32_t pointer_id = 0,
+        std::int32_t button = 0,
+        KeyModifiers modifiers = {},
+        Point delta = {},
+        std::int64_t timestamp_nanos = 0,
+        Point coalesced_origin = {},
+        bool has_coalesced_origin = false,
+        bool coalesced_moved_beyond_slop = false
+    ) : position(position),
+        type(type),
+        pointer_id(pointer_id),
+        button(button),
+        modifiers(modifiers),
+        delta(delta),
+        timestamp_nanos(timestamp_nanos),
+        coalesced_origin(coalesced_origin),
+        has_coalesced_origin(has_coalesced_origin),
+        coalesced_moved_beyond_slop(coalesced_moved_beyond_slop) {}
+
     Point position;
     PointerEventType type = PointerEventType::move;
     std::int32_t pointer_id = 0;
@@ -83,7 +106,7 @@ struct ScrollInputEvent final {
     Point position;
     double delta_x = 0.0;
     double delta_y = 0.0;
-    KeyModifiers modifiers;
+    KeyModifiers modifiers{};
     std::int64_t timestamp_nanos = 0;
 };
 
@@ -109,7 +132,7 @@ struct ImePreeditInputEvent final {
 struct NavigationInputEvent final {
     std::string direction;
     KeyEventType type = KeyEventType::press;
-    KeyModifiers modifiers;
+    KeyModifiers modifiers{};
     std::int64_t timestamp_nanos = 0;
 };
 
@@ -832,7 +855,7 @@ private:
         bool moved_beyond_slop = false;
         bool long_press_emitted = false;
         GestureClaimState gesture = GestureClaimState::unclaimed;
-        std::optional<std::uint64_t> gesture_owner;
+        std::optional<std::uint64_t> gesture_owner = std::nullopt;
         std::string subtarget_id;
     };
 

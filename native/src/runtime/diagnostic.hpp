@@ -38,7 +38,7 @@ struct RuntimeDiagnostic final {
     std::string path;
     std::optional<std::string> expected;
     DiagnosticSeverity severity = DiagnosticSeverity::error;
-    std::optional<DiagnosticRange> range;
+    std::optional<DiagnosticRange> range = std::nullopt;
 
     [[nodiscard]] friend bool operator==(
         const RuntimeDiagnostic&,

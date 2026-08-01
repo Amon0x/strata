@@ -16,7 +16,7 @@ enum class LayerRole { screen, overlay };
 struct LayerSnapshot final {
     std::string id;
     LayerRole role;
-    std::optional<std::string> transition;
+    std::optional<std::string> transition = std::nullopt;
 
     [[nodiscard]] friend bool operator==(const LayerSnapshot&, const LayerSnapshot&) = default;
 };

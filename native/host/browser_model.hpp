@@ -10,12 +10,12 @@
 namespace strata::host {
 
 struct Selector final {
-    std::optional<std::string> path;
-    std::optional<std::string> key;
-    std::optional<std::string> name;
-    std::optional<std::string> role;
-    std::optional<double> x;
-    std::optional<double> y;
+    std::optional<std::string> path = std::nullopt;
+    std::optional<std::string> key = std::nullopt;
+    std::optional<std::string> name = std::nullopt;
+    std::optional<std::string> role = std::nullopt;
+    std::optional<double> x = std::nullopt;
+    std::optional<double> y = std::nullopt;
 };
 
 struct BrowserBounds final {

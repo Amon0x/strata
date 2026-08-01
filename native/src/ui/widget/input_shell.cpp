@@ -681,23 +681,6 @@ bool indexed_key(WidgetInputScope& scope) {
     return true;
 }
 
-void focusable(
-    WidgetRegistry& registry,
-    std::string type,
-    std::string action_property = {},
-    std::string fallback_action = {},
-    const bool requires_binding = false,
-    std::string focusable_when = {}
-) {
-    WidgetInputPhase phase;
-    phase.action_property = std::move(action_property);
-    phase.fallback_action = std::move(fallback_action);
-    phase.action_capability_requires_binding = requires_binding;
-    phase.focusable = true;
-    phase.focusable_when = std::move(focusable_when);
-    registry.register_input_phase(std::move(type), std::move(phase));
-}
-
 } // namespace
 
 void register_shell_widget_inputs(WidgetRegistry& registry) {

@@ -694,7 +694,15 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_layer(
     const std::string declaration_scope =
         std::string(role == runtime::LayerRole::screen ? "screen " : "overlay ") + std::string(name);
     Scope scope{
-        runtime::ExpressionScope{{}, {}, contextual_host_roots_, declaration_scope, {}},
+        runtime::ExpressionScope{
+            .values = {},
+            .executable_values = {},
+            .contextual_host_roots = contextual_host_roots_,
+            .component_path = declaration_scope,
+            .state_bindings = {},
+            .host_dependency_overrides = {},
+            .lexical_dependency_overrides = {},
+        },
         declaration_scope,
         declaration_scope,
         declaration_scope,
@@ -1459,13 +1467,14 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
     }
     WidgetDescriptionExpansion expansion = widgets_.expand_description(
         WidgetDescriptionExpansion{
-            std::move(type),
-            std::move(key),
-            std::move(properties),
-            std::move(child_nodes),
-            std::move(behaviors),
-            0U,
-            repeater_children.source,
+            .type = std::move(type),
+            .key = std::move(key),
+            .properties = std::move(properties),
+            .children = std::move(child_nodes),
+            .behaviors = std::move(behaviors),
+            .synthesized_nodes = 0U,
+            .generated_children = repeater_children.source,
+            .generated_widget_children = nullptr,
         },
         scope.runtime_state_scope,
         application_.bundle()->action_registry(),
@@ -2072,12 +2081,13 @@ runtime::Value DescriptionBuilder::resolve_named_style(
     std::set<std::string, std::less<>>& resolving
 ) {
     if (const auto cached = resolved_styles_.find(name); cached != resolved_styles_.end()) return cached->second;
-    if (!resolving.emplace(name).second) {
+    const auto [resolving_entry, inserted] = resolving.emplace(name);
+    if (!inserted) {
         throw std::logic_error("validated portable IR contains a cyclic style inheritance chain");
     }
     const JsonValue declaration = application_.active_unit()->style(name);
     if (!declaration) {
-        resolving.erase(name);
+        resolving.erase(resolving_entry);
         return runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{});
     }
     std::map<std::string, runtime::Value, std::less<>> merged;
@@ -2092,7 +2102,7 @@ runtime::Value DescriptionBuilder::resolve_named_style(
             require_value(evaluate(expression, scope), expression)
         );
     }
-    resolving.erase(name);
+    resolving.erase(resolving_entry);
     runtime::Value result = map_value(std::move(merged));
     resolved_styles_.emplace(std::string(name), result);
     return result;

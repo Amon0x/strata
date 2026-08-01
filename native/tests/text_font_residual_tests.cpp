@@ -257,7 +257,7 @@ void replace_table(
     Bytes result;
     append_u16(result, 2U);
     append_u16(result, static_cast<std::uint16_t>(glyph_classes.size()));
-    for (const auto [glyph, glyph_class] : glyph_classes) {
+    for (const auto& [glyph, glyph_class] : glyph_classes) {
         append_u16(result, glyph);
         append_u16(result, glyph);
         append_u16(result, glyph_class);
@@ -554,12 +554,12 @@ void replace_table(
     );
 }
 
-[[nodiscard]] const strata::ui::RetainedNode& retain(
+[[nodiscard]] const strata::ui::RetainedNode* retain(
     strata::ui::RetainedTree& tree,
     std::shared_ptr<const strata::ui::DescriptionNode> description
 ) {
     static_cast<void>(tree.reconcile(std::move(description)));
-    return *tree.root();
+    return tree.root();
 }
 
 void test_optional_tables_and_generic_positioning(const std::filesystem::path& resources) {
@@ -608,7 +608,7 @@ void test_optional_tables_and_generic_positioning(const std::filesystem::path& r
         {"strata:fonts/default-medium", original},
     });
     strata::ui::RetainedTree positioned_tree;
-    const strata::ui::RetainedNode& positioned_node = retain(
+    const strata::ui::RetainedNode& positioned_node = *retain(
         positioned_tree,
         text_node("Text", object({
             {"font", strata::runtime::Value("positioned")},
@@ -694,7 +694,7 @@ void test_optional_tables_and_generic_positioning(const std::filesystem::path& r
 
     const auto styled_attachment_layout = [&](const std::uint32_t style_flags) {
         strata::ui::RetainedTree tree;
-        const strata::ui::RetainedNode& node = retain(
+        const strata::ui::RetainedNode& node = *retain(
             tree,
             text_node("Text", object({
                 {"font", strata::runtime::Value("positioned")},
@@ -955,7 +955,7 @@ void test_optional_tables_and_generic_positioning(const std::filesystem::path& r
         {"strata:fonts/default-medium", original},
     });
     strata::ui::RetainedTree live_tree;
-    const strata::ui::RetainedNode& live_node = retain(
+    const strata::ui::RetainedNode& live_node = *retain(
         live_tree,
         text_node("Text", object({
             {"font", strata::runtime::Value("live")},
@@ -984,7 +984,7 @@ void test_optional_tables_and_generic_positioning(const std::filesystem::path& r
           "live ligature shaping damaged cluster or resolved-run output");
 
     strata::ui::RetainedTree styled_live_tree;
-    const strata::ui::RetainedNode& styled_live_node = retain(
+    const strata::ui::RetainedNode& styled_live_node = *retain(
         styled_live_tree,
         text_node("Text", object({
             {"font", strata::runtime::Value("live")},
@@ -1182,7 +1182,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
     });
 
     ui::RetainedTree default_tree;
-    const ui::RetainedNode& default_node = retain(
+    const ui::RetainedNode& default_node = *retain(
         default_tree,
         text_node("Text", object({{"pixelSize", runtime::Value(12.0)}}))
     );
@@ -1191,7 +1191,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
           "unstyled text did not resolve to the Regular default face");
 
     ui::RetainedTree fallback_tree;
-    const ui::RetainedNode& fallback_node = retain(fallback_tree, text_node("Text", object({
+    const ui::RetainedNode& fallback_node = *retain(fallback_tree, text_node("Text", object({
         {"fallbackFonts", runtime::Value(std::vector<runtime::Value>{runtime::Value("explicit")})},
         {"font", runtime::Value("missing-primary")},
         {"pixelSize", runtime::Value(12.0)},
@@ -1204,7 +1204,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
           "default text did not retain fallback resolution and grayscale rasterization");
 
     ui::RetainedTree primary_tree;
-    const ui::RetainedNode& primary_node = retain(primary_tree, text_node("Text", object({
+    const ui::RetainedNode& primary_node = *retain(primary_tree, text_node("Text", object({
         {"fallbackFonts", runtime::Value(std::vector<runtime::Value>{runtime::Value("explicit")})},
         {"font", runtime::Value("primary")},
         {"pixelSize", runtime::Value(12.0)},
@@ -1251,7 +1251,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
         }),
     });
     ui::RetainedTree rich_tree;
-    const ui::RetainedNode& rich_node = retain(
+    const ui::RetainedNode& rich_node = *retain(
         rich_tree, text_node("RichText", object({}), spans)
     );
     const ui::TextLayout rich = engine.layout(rich_node, "\xF0\x9F\x98\x80" "AV");
@@ -1289,7 +1289,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
         }),
     });
     ui::RetainedTree flag_tree;
-    const ui::RetainedNode& flag_node = retain(
+    const ui::RetainedNode& flag_node = *retain(
         flag_tree, text_node("RichText", object({}), flag_spans)
     );
     const ui::TextLayout flagged = engine.layout(flag_node, "AA");
@@ -1301,7 +1301,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
           "bold/italic-only rich spans collapsed into one resolved run");
 
     ui::RetainedTree family_style_tree;
-    const ui::RetainedNode& family_style_node = retain(
+    const ui::RetainedNode& family_style_node = *retain(
         family_style_tree,
         text_node("Text", object({
             {"fallbackFonts", runtime::Value(std::vector<runtime::Value>{
@@ -1328,7 +1328,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
     );
 
     ui::RetainedTree synthetic_plain_tree;
-    const ui::RetainedNode& synthetic_plain_node = retain(
+    const ui::RetainedNode& synthetic_plain_node = *retain(
         synthetic_plain_tree,
         text_node("Text", object({
             {"font", runtime::Value("primary")},
@@ -1336,7 +1336,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
         }))
     );
     ui::RetainedTree synthetic_bold_tree;
-    const ui::RetainedNode& synthetic_bold_node = retain(
+    const ui::RetainedNode& synthetic_bold_node = *retain(
         synthetic_bold_tree,
         text_node("Text", object({
             {"font", runtime::Value("primary")},
@@ -1345,7 +1345,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
         }))
     );
     ui::RetainedTree synthetic_italic_tree;
-    const ui::RetainedNode& synthetic_italic_node = retain(
+    const ui::RetainedNode& synthetic_italic_node = *retain(
         synthetic_italic_tree,
         text_node("Text", object({
             {"font", runtime::Value("primary")},
@@ -1386,7 +1386,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
         }),
     });
     ui::RetainedTree newline_tree;
-    const ui::RetainedNode& newline_node = retain(
+    const ui::RetainedNode& newline_node = *retain(
         newline_tree, text_node("RichText", object({}), newline_spans)
     );
     const ui::TextLayout blank_lines = engine.layout(newline_node, "\n\n");
@@ -1398,12 +1398,12 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
                "second styled newline used node-default line metrics");
 
     ui::RetainedTree cache_tree_one;
-    const ui::RetainedNode& cache_node_one = retain(
+    const ui::RetainedNode& cache_node_one = *retain(
         cache_tree_one,
         text_node("Text", object({{"fontStyleFlags", runtime::Value(64.0)}}))
     );
     ui::RetainedTree cache_tree_two;
-    const ui::RetainedNode& cache_node_two = retain(
+    const ui::RetainedNode& cache_node_two = *retain(
         cache_tree_two,
         text_node("Text", object({{"fontStyleFlags", runtime::Value(128.0)}}))
     );
@@ -1491,7 +1491,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
           "intrinsic bold face duplicated an already-realized atlas entry");
 
     ui::RetainedTree measure_tree;
-    const ui::RetainedNode& measure_node = retain(measure_tree, text_node("Text", object({
+    const ui::RetainedNode& measure_node = *retain(measure_tree, text_node("Text", object({
         {"font", runtime::Value("primary")}, {"pixelSize", runtime::Value(12.0)},
     })));
     const double word_width = engine.layout(measure_node, "AA").shaped.metrics.width;
@@ -1499,7 +1499,7 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
     const double wrap_width = word_width + space_width * 2.0;
     for (const std::string& alignment : {std::string("CENTER"), std::string("END")}) {
         ui::RetainedTree wrap_tree;
-        const ui::RetainedNode& wrap_node = retain(wrap_tree, text_node("Text", object({
+        const ui::RetainedNode& wrap_node = *retain(wrap_tree, text_node("Text", object({
             {"alignment", runtime::Value(alignment)},
             {"font", runtime::Value("primary")},
             {"pixelSize", runtime::Value(12.0)},

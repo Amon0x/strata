@@ -88,7 +88,7 @@ class Value final {
     [[nodiscard]] std::string json() const;
 
     /** JSON numbers compare by numeric value even when one side parsed as an integer. */
-    [[nodiscard]] friend bool operator==(const Value& left, const Value& right) noexcept;
+    friend bool operator==(const Value& left, const Value& right) noexcept;
 
   private:
     Storage storage_;

@@ -192,7 +192,9 @@ void DurableState::set_application_value(std::string key, Value value) {
 }
 
 bool DurableState::erase_application_value(const std::string_view key) {
-    if (application_values_.erase(key) == 0U) return false;
+    const auto found = application_values_.find(key);
+    if (found == application_values_.end()) return false;
+    application_values_.erase(found);
     changed();
     return true;
 }
@@ -226,7 +228,10 @@ bool DurableState::erase_widget_value(
     const std::string_view field
 ) {
     const auto widget = widget_values_.find(persistence_key);
-    if (widget == widget_values_.end() || widget->second.erase(field) == 0U) return false;
+    if (widget == widget_values_.end()) return false;
+    const auto value = widget->second.find(field);
+    if (value == widget->second.end()) return false;
+    widget->second.erase(value);
     if (widget->second.empty()) widget_values_.erase(widget);
     changed();
     return true;

@@ -1,4 +1,5 @@
 #include <strata/host.hpp>
+#include <strata/render_packet.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -62,6 +63,8 @@ int main(const int argument_count, const char* const* const arguments) {
                 strata::view("installed.cpp.application"),
                 strata::view(registry),
                 {},
+                nullptr,
+                0U,
             };
             runtime.configure_application(application);
             strata::host::Revision model_revision;
@@ -123,15 +126,17 @@ int main(const int argument_count, const char* const* const arguments) {
         ++now;
         const strata_surface_frame_info frame = surface.frame(now);
         const std::vector<std::uint8_t> packet = surface.render_packet();
+        strata::host::RenderPacketDecoder decoder;
+        const strata::host::RenderPacket& decoded = decoder.decode(packet);
         const std::string json = surface.frame_json();
         if (frame.frame_index != 2U || frame.render_command_count == 0U || packet.size() < 12U ||
-            std::string_view(reinterpret_cast<const char*>(packet.data()), 8U) != "STRATARP" ||
+            decoded.frame_index != frame.frame_index || decoded.batches.empty() ||
             json.find("embedded.panel") == std::string::npos) {
             throw std::runtime_error("installed C++ frame or packet was invalid");
         }
         const std::vector<std::uint8_t> release_packet = surface.prepare_release_packet();
-        if (release_packet.size() < 12U ||
-            std::string_view(reinterpret_cast<const char*>(release_packet.data()), 8U) != "STRATARP") {
+        static_cast<void>(decoder.decode(release_packet));
+        if (release_packet.size() < 12U) {
             throw std::runtime_error("installed C++ release packet was invalid");
         }
         surface.acknowledge_release_packet();

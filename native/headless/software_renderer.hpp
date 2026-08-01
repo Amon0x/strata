@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "capture_renderer.hpp"
-#include "host/render_packet.hpp"
+#include <strata/render_packet.hpp>
 #include "image_codec.hpp"
 
 namespace strata::headless {

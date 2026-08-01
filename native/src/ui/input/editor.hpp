@@ -26,7 +26,7 @@ struct TextEditorMutation final {
     bool composition_changed = false;
 
     [[nodiscard]] bool changed() const noexcept;
-    [[nodiscard]] friend TextEditorMutation operator+(
+    friend TextEditorMutation operator+(
         const TextEditorMutation& left,
         const TextEditorMutation& right
     ) noexcept;

@@ -522,11 +522,21 @@ RenderOperationCounters RenderEngine::render(
             found->second.hovered == hovered && found->second.active == active;
         const bool retained_layout_matches = retained_state_matches &&
             Impl::matches(found->second.layout, node, *record, layout);
-        const std::optional<Point> fragment_translation =
-            retained_state_matches && !retained_layout_matches
-            ? Impl::uniform_translation(found->second.layout, node, *record, layout)
-            : std::nullopt;
-        const bool rebuild = !retained_layout_matches && !fragment_translation.has_value();
+        Point fragment_translation{};
+        bool has_fragment_translation = false;
+        if (retained_state_matches && !retained_layout_matches) {
+            const std::optional<Point> translation = Impl::uniform_translation(
+                found->second.layout,
+                node,
+                *record,
+                layout
+            );
+            if (translation.has_value()) {
+                fragment_translation = *translation;
+                has_fragment_translation = true;
+            }
+        }
+        const bool rebuild = !retained_layout_matches && !has_fragment_translation;
         if (rebuild) {
             std::vector<RenderCommand> fragment = build_widget_fragment(
                 widgets, node, *record, layout, input, commands, text, &motion, 1.0, false
@@ -548,7 +558,7 @@ RenderOperationCounters RenderEngine::render(
             found = implementation_->fragments.insert_or_assign(node.identity(), std::move(next)).first;
             ++counters.fragments_built;
         } else {
-            found->second.presentation_translation = fragment_translation.value_or(Point{});
+            found->second.presentation_translation = fragment_translation;
             found->second.visited = true;
             ++counters.fragments_reused;
         }
@@ -576,19 +586,19 @@ RenderOperationCounters RenderEngine::render(
             output.append(MaterialPushRenderCommand{*local_material});
             ++counters.commands_emitted;
         }
-        if (fragment_translation.has_value()) {
+        if (has_fragment_translation) {
             output.append(TransformPushRenderCommand{
                 1.0,
                 0.0,
-                fragment_translation->x,
+                fragment_translation.x,
                 0.0,
                 1.0,
-                fragment_translation->y,
+                fragment_translation.y,
             });
             ++counters.commands_emitted;
         }
         append_fragment(output, found->second.commands, counters, descendant_opacity);
-        if (fragment_translation.has_value()) {
+        if (has_fragment_translation) {
             output.append(TransformPopRenderCommand{});
             ++counters.commands_emitted;
         }

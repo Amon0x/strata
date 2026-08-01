@@ -1547,8 +1547,7 @@ struct OpenTypeFont::Impl final {
             std::uint16_t glyph = 0U;
             if (cmap4->range_offsets[index] == 0U) {
                 glyph = static_cast<std::uint16_t>(
-                    static_cast<std::uint32_t>(character) +
-                    static_cast<std::int32_t>(cmap4->deltas[index])
+                    static_cast<std::int32_t>(character) + cmap4->deltas[index]
                 );
             } else {
                 const Reader cmap_reader(std::span<const std::uint8_t>(cmap4->bytes));
@@ -1559,8 +1558,7 @@ struct OpenTypeFont::Impl final {
                 glyph = cmap_reader.u16(word);
                 if (glyph != 0U) {
                     glyph = static_cast<std::uint16_t>(
-                        static_cast<std::uint32_t>(glyph) +
-                        static_cast<std::int32_t>(cmap4->deltas[index])
+                        static_cast<std::int32_t>(glyph) + cmap4->deltas[index]
                     );
                 }
             }

@@ -991,7 +991,8 @@ strata_result strata_surface_frame(
             "Surface framing requires a complete output structure."
         );
     }
-    *out_info = strata_surface_frame_info{sizeof(strata_surface_frame_info)};
+    *out_info = {};
+    out_info->struct_size = sizeof(strata_surface_frame_info);
     try {
         const strata::ui::SurfaceFrame frame = surface->core.frame(frame_time_nanoseconds);
         const auto packet_started = std::chrono::steady_clock::now();

@@ -162,6 +162,9 @@ using ValueFields = std::map<std::string, Value, std::less<>>;
     case strata::ui::BehaviorInputEventPhase::capture: return STRATA_BEHAVIOR_EVENT_CAPTURE;
     case strata::ui::BehaviorInputEventPhase::target: return STRATA_BEHAVIOR_EVENT_TARGET;
     case strata::ui::BehaviorInputEventPhase::bubble: return STRATA_BEHAVIOR_EVENT_BUBBLE;
+    case strata::ui::BehaviorInputEventPhase::advance:
+    case strata::ui::BehaviorInputEventPhase::after_layout:
+        return STRATA_BEHAVIOR_EVENT_TARGET;
     }
     return STRATA_BEHAVIOR_EVENT_TARGET;
 }

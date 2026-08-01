@@ -125,7 +125,8 @@ namespace {
 [[nodiscard]] std::string normalized_semantic_name(const std::string_view value) {
     std::string normalized;
     normalized.reserve(value.size());
-    for (const unsigned char character : value) {
+    for (const char byte : value) {
+        const auto character = static_cast<unsigned char>(byte);
         if (character == '-' || character == '_') continue;
         normalized.push_back(static_cast<char>(std::tolower(character)));
     }

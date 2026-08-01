@@ -9,6 +9,17 @@
 
 namespace strata::host {
 
+inline constexpr std::uint32_t resource_create = 0U;
+inline constexpr std::uint32_t resource_upload = 1U;
+inline constexpr std::uint32_t resource_release = 2U;
+inline constexpr std::uint32_t resource_encoded_image = 3U;
+
+inline constexpr std::uint32_t texture_format_r8 = 0U;
+inline constexpr std::uint32_t texture_format_rgba8 = 1U;
+inline constexpr std::uint32_t texture_sampling_nearest = 0U;
+inline constexpr std::uint32_t texture_sampling_linear = 1U;
+
+/** One ordered GPU-resource mutation decoded from packet v4. */
 struct ResourceOperation final {
     std::uint32_t kind = 0U;
     std::string texture;
@@ -28,6 +39,7 @@ struct Scissor final {
     std::uint32_t height = 0U;
 };
 
+/** Indexed geometry submission. Vertex records are packet-v4's fixed 88-byte layout. */
 struct DrawBatch final {
     std::uint32_t source_order = 0U;
     Scissor scissor;
@@ -52,6 +64,7 @@ struct BlurBatch final {
 
 using SubmissionBatch = std::variant<DrawBatch, BlurBatch>;
 
+/** Backend-ready render plan. Geometry is retained when a packet repeats its geometry epoch. */
 struct RenderPacket final {
     std::uint64_t frame_index = 0U;
     std::uint64_t geometry_epoch = 0U;
@@ -63,12 +76,13 @@ struct RenderPacket final {
     std::vector<SubmissionBatch> batches;
 };
 
+/** Stateful packet-v4 decoder shared by custom, desktop, and headless render backends. */
 class RenderPacketDecoder final {
-public:
+  public:
     [[nodiscard]] const RenderPacket& decode(std::span<const std::uint8_t> bytes);
     void reset() noexcept;
 
-private:
+  private:
     std::optional<RenderPacket> retained_;
 };
 

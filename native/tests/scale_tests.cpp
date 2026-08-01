@@ -61,13 +61,15 @@ void test_portable_policies() {
 }
 
 void test_c_abi_policy_boundary() {
-    strata_scale_policy_config policy{sizeof(strata_scale_policy_config)};
+    strata_scale_policy_config policy{};
+    policy.struct_size = sizeof(policy);
     check(
         strata_scale_policy_defaults(STRATA_SCALE_POLICY_AUTO_FIT, &policy).status ==
             STRATA_STATUS_OK,
         "C ABI did not produce AutoFit defaults"
     );
-    strata_scale_context context{sizeof(strata_scale_context)};
+    strata_scale_context context{};
+    context.struct_size = sizeof(context);
     check(
         strata_resolve_scale_context(&policy, 2576, 1408, &context).status ==
             STRATA_STATUS_OK,

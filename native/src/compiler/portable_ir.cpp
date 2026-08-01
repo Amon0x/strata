@@ -255,7 +255,8 @@ using data::JsonValue;
         std::ranges::sort(fields, {}, [](const JsonValue& value) {
             return *value.find("name")->string();
         });
-        const SemanticType fallback{SemanticTypeKind::any};
+        SemanticType fallback;
+        fallback.kind = SemanticTypeKind::any;
         return type_base("map", {
             {"allowUnknownFields", JsonValue(type.allow_unknown_fields)},
             {"fields", array(std::move(fields))},
@@ -350,11 +351,13 @@ public:
                                                ? resolve_type(*parameter.type_reference)
                                                : type_of(SemanticTypeKind::unknown);
                     schema.parameters.push_back(SchemaParameter{
-                        parameter.name,
-                        std::move(type),
-                        parameter.default_value == nullptr,
-                        parameter.type_reference.has_value() && parameter.type_reference->nullable,
-                        {},
+                        .name = parameter.name,
+                        .type = std::move(type),
+                        .required = parameter.default_value == nullptr,
+                        .nullable = parameter.type_reference.has_value() &&
+                            parameter.type_reference->nullable,
+                        .aliases = {},
+                        .material_type = std::nullopt,
                     });
                 }
                 components_.emplace(component->name, std::move(schema));

@@ -129,8 +129,8 @@ ContentSizeMotionSample ContentSizeTransitions::retarget(
 ) {
     if (!finite_non_negative(target.width) || !finite_non_negative(target.height) ||
         spec.timing.duration_nanos <= 0 || spec.timing.delay_nanos < 0 ||
-        spec.timing.repeat.kind == MotionRepeatKind::count &&
-            spec.timing.repeat.iterations == 0U) {
+        (spec.timing.repeat.kind == MotionRepeatKind::count &&
+         spec.timing.repeat.iterations == 0U)) {
         throw std::invalid_argument("content-size motion requires finite target geometry and positive duration");
     }
     const auto active = active_.find(identity);

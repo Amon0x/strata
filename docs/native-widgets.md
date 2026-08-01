@@ -171,7 +171,7 @@ only, so a package projects its behavior ids and their option objects are not ty
 
 ## Testing
 
-`native/tests/extension_tests.cpp` (`ctest -R strata.extension`, and part of `gradlew.bat check`) is
+`native/tests/extension_tests.cpp` (`ctest --preset <platform> -R strata.extension`) is
 the harness. It builds a package covering every supported phase, then checks registration, duplicate
 rejection, schema and compile parity, retained identity and rejection of undeclared fields,
 activation, key input, semantics, hit bounds, detached overlay painting, behavior dispatch, and

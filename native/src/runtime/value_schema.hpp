@@ -67,7 +67,7 @@ public:
     [[nodiscard]] const std::vector<ValueSchemaPtr>& options() const noexcept;
     [[nodiscard]] const ValueSchemaField* field(std::string_view name) const noexcept;
 
-    [[nodiscard]] friend bool operator==(const ValueSchema& left, const ValueSchema& right);
+    friend bool operator==(const ValueSchema& left, const ValueSchema& right);
 
 private:
     explicit ValueSchema(ValueSchemaKind kind);

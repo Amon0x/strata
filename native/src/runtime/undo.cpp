@@ -168,7 +168,10 @@ void UndoManager::invalidate_other_scopes(
 }
 
 void UndoManager::clear(const std::string_view scope) {
-    if (stacks_.erase(scope) != 0U) ++generation_;
+    const auto found = stacks_.find(scope);
+    if (found == stacks_.end()) return;
+    stacks_.erase(found);
+    ++generation_;
 }
 void UndoManager::clear_all() noexcept {
     if (!stacks_.empty()) ++generation_;

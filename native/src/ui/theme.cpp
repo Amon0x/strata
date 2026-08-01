@@ -776,7 +776,8 @@ void report_unknown_timings(
                  "animateContentSize",
              }) {
             if (property(*source, motion_field) != nullptr) {
-                resolved.erase(motion_field);
+                const auto inherited_motion = resolved.find(motion_field);
+                if (inherited_motion != resolved.end()) resolved.erase(inherited_motion);
                 if (motion_field == "animateContentSize" || motion_field == "disclosure") {
                     resolved.erase("$themeAnimationSet");
                 }
@@ -1619,7 +1620,9 @@ bool ThemeCatalog::clear_scoped_theme(const std::string_view node_key) {
     if (blank(node_key) || !core::valid_utf8(node_key)) {
         throw std::invalid_argument("theme scope node keys must be non-blank valid UTF-8");
     }
-    if (scoped_themes_.erase(node_key) == 0U) return false;
+    const auto found = scoped_themes_.find(node_key);
+    if (found == scoped_themes_.end()) return false;
+    scoped_themes_.erase(found);
     advance_generation();
     return true;
 }

@@ -22,7 +22,7 @@
 #include <wrl/client.h>
 
 #include "blur_pass.hpp"
-#include "host/render_packet.hpp"
+#include <strata/render_packet.hpp>
 #include "shaders.hpp"
 #include "texture_store.hpp"
 

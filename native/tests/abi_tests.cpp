@@ -240,7 +240,8 @@ void test_lifecycle_identity_snapshot_and_clock() {
         "runtime creation failed"
     );
 
-    strata_runtime_memory_info memory_info{sizeof(strata_runtime_memory_info)};
+    strata_runtime_memory_info memory_info{};
+    memory_info.struct_size = sizeof(memory_info);
     check(
         strata_runtime_get_memory_info(runtime, &memory_info).status == STRATA_STATUS_OK,
         "runtime memory telemetry failed"
@@ -260,7 +261,8 @@ void test_lifecycle_identity_snapshot_and_clock() {
         strata_runtime_create_snapshot(runtime, &first).status == STRATA_STATUS_OK && first != nullptr,
         "first snapshot failed"
     );
-    memory_info = strata_runtime_memory_info{sizeof(strata_runtime_memory_info)};
+    memory_info = {};
+    memory_info.struct_size = sizeof(memory_info);
     check(
         strata_runtime_get_memory_info(runtime, &memory_info).status == STRATA_STATUS_OK,
         "snapshot memory telemetry failed"
@@ -524,6 +526,8 @@ void test_application_activation_and_action_abi(const std::filesystem::path& reg
         view("abi-application"),
         view(registry),
         view(schemas),
+        nullptr,
+        0U,
     };
     check(
         strata_runtime_configure_application(runtime, &application).status == STRATA_STATUS_OK,
@@ -560,14 +564,16 @@ screen Main {
         nullptr,
         nullptr,
     };
-    strata_activation_info activation_info{sizeof(strata_activation_info)};
+    strata_activation_info activation_info{};
+    activation_info.struct_size = sizeof(activation_info);
     check(
         strata_runtime_compile_and_activate(runtime, &activation, &activation_info).status == STRATA_STATUS_OK &&
             activation_info.status == STRATA_ACTIVATION_ACTIVATED &&
             activation_info.has_active_generation == 1U && activation_info.active_generation == 1U,
         "application source did not activate through the C ABI"
     );
-    strata_runtime_memory_info activation_memory{sizeof(strata_runtime_memory_info)};
+    strata_runtime_memory_info activation_memory{};
+    activation_memory.struct_size = sizeof(activation_memory);
     check(
         strata_runtime_get_memory_info(runtime, &activation_memory).status == STRATA_STATUS_OK &&
             activation_memory.arena_peak_bytes > 0U &&
@@ -610,7 +616,8 @@ screen Main {
             activation_info.active_generation == 1U,
         "failed ABI reload replaced the last-good unit"
     );
-    activation_memory = strata_runtime_memory_info{sizeof(strata_runtime_memory_info)};
+    activation_memory = {};
+    activation_memory.struct_size = sizeof(activation_memory);
     check(
         strata_runtime_get_memory_info(runtime, &activation_memory).status == STRATA_STATUS_OK &&
             activation_memory.arena_current_bytes == 0U,
@@ -661,7 +668,8 @@ screen Main {
         0U,
         0U,
     };
-    strata_action_dispatch_info dispatch_info{sizeof(strata_action_dispatch_info)};
+    strata_action_dispatch_info dispatch_info{};
+    dispatch_info.struct_size = sizeof(dispatch_info);
     check(
         strata_runtime_dispatch_action_json(runtime, &dispatch, &dispatch_info).status ==
                 STRATA_STATUS_OK &&
@@ -769,7 +777,8 @@ screen Main {
         strata_surface_read_frame_json(surface, &frame_sink).status == STRATA_STATUS_NOT_FOUND,
         "unframed Surface exposed a stale output snapshot"
     );
-    strata_surface_frame_info frame_info{sizeof(strata_surface_frame_info)};
+    strata_surface_frame_info frame_info{};
+    frame_info.struct_size = sizeof(frame_info);
     check(
         strata_surface_frame(surface, 8'000, &frame_info).status == STRATA_STATUS_OK &&
             frame_info.frame_index == 1U && frame_info.render_command_count >= 2U &&
@@ -777,7 +786,8 @@ screen Main {
         "portable Surface did not execute its first complete frame"
     );
     check(extension_capture.presentations != 0U, "C ABI widget presentation hook did not run");
-    strata_theme_tokens theme_tokens{sizeof(strata_theme_tokens)};
+    strata_theme_tokens theme_tokens{};
+    theme_tokens.struct_size = sizeof(theme_tokens);
     check(
         strata_theme_tokens_defaults(&theme_tokens).status == STRATA_STATUS_OK,
         "typed theme token defaults failed"
@@ -794,7 +804,8 @@ screen Main {
             nullptr, nullptr, nullptr,
         };
     };
-    strata_theme_visual_style theme_visual{sizeof(strata_theme_visual_style)};
+    strata_theme_visual_style theme_visual{};
+    theme_visual.struct_size = sizeof(theme_visual);
     check(
         strata_theme_visual_style_defaults(&theme_visual).status == STRATA_STATUS_OK,
         "typed theme visual defaults failed"
@@ -825,7 +836,8 @@ screen Main {
     theme_visual.thumb_radius = nullable_number(STRATA_THEME_VALUE_NONE);
     theme_visual.indicator_position = nullable_number(STRATA_THEME_VALUE_NONE);
     const strata_string_view fallback_fonts[]{view("strata:fonts/mono")};
-    strata_theme_text_layout_style theme_text{sizeof(strata_theme_text_layout_style)};
+    strata_theme_text_layout_style theme_text{};
+    theme_text.struct_size = sizeof(theme_text);
     check(
         strata_theme_text_layout_style_defaults(&theme_text).status == STRATA_STATUS_OK,
         "typed theme text-layout defaults failed"
@@ -843,7 +855,8 @@ screen Main {
     theme_text.line_height = nullable_number(STRATA_THEME_VALUE_NONE);
     theme_text.line_height_multiplier = 1.2;
     theme_text.letter_spacing = 0.25;
-    strata_theme_layout_style theme_layout{sizeof(strata_theme_layout_style)};
+    strata_theme_layout_style theme_layout{};
+    theme_layout.struct_size = sizeof(theme_layout);
     check(
         strata_theme_layout_style_defaults(&theme_layout).status == STRATA_STATUS_OK,
         "typed theme layout defaults failed"
@@ -874,7 +887,8 @@ screen Main {
     theme_layout.scroll_viewport_insets_from_inside_border = 1U;
     theme_layout.portal_target = view("root");
     theme_layout.detach_from_parent_clip = 1U;
-    strata_theme_animation_set empty_motion{sizeof(strata_theme_animation_set)};
+    strata_theme_animation_set empty_motion{};
+    empty_motion.struct_size = sizeof(empty_motion);
     check(
         strata_theme_animation_set_defaults(&empty_motion).status == STRATA_STATUS_OK,
         "typed theme animation-set defaults failed"
@@ -1079,7 +1093,8 @@ screen Main {
         1U,
         0U,
     };
-    strata_action_dispatch_info dynamic_info{sizeof(strata_action_dispatch_info)};
+    strata_action_dispatch_info dynamic_info{};
+    dynamic_info.struct_size = sizeof(dynamic_info);
     const strata_result dynamic_result =
         strata_surface_dispatch_action_json(surface, &dynamic_dispatch, &dynamic_info);
     const strata_result dynamic_frame_result = strata_surface_frame(surface, 8'500, &frame_info);
@@ -1209,7 +1224,8 @@ screen Main {
     click[0].y = 5.0;
     click[1] = click[0];
     click[1].kind = STRATA_INPUT_POINTER_RELEASE;
-    strata_surface_input_batch_info batch_info{sizeof(strata_surface_input_batch_info)};
+    strata_surface_input_batch_info batch_info{};
+    batch_info.struct_size = sizeof(batch_info);
     check(
         strata_surface_enqueue_input(surface, click, 2U, &batch_info).status ==
                 STRATA_STATUS_OK &&

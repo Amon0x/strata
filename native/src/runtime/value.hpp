@@ -115,7 +115,7 @@ public:
     [[nodiscard]] const Value* field(std::string_view name) const noexcept;
     [[nodiscard]] std::string_view state_type_id() const noexcept;
 
-    [[nodiscard]] friend bool operator==(const Value& left, const Value& right);
+    friend bool operator==(const Value& left, const Value& right);
 
 private:
     Storage storage_;

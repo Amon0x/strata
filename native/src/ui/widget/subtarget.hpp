@@ -95,12 +95,12 @@ struct WidgetSubtarget final {
     bool enabled = true;
     bool detached = false;
     int z_index = 0;
-    std::vector<std::size_t> path;
-    std::string detail;
+    std::vector<std::size_t> path{};
+    std::string detail{};
     bool separator = false;
     bool has_children = false;
-    std::optional<bool> checked;
-    std::optional<std::uint64_t> notification_id;
+    std::optional<bool> checked = std::nullopt;
+    std::optional<std::uint64_t> notification_id = std::nullopt;
 };
 
 /** True when this widget type can project presenter-owned pointer regions. */

@@ -1,8 +1,7 @@
 # Embedding a Strata application
 
 The stable embedding boundary is `strata/strata.h`. A C++ host may include `strata/strata.hpp` for
-typed ownership and result exceptions, but both paths use the same ABI and capability model. No JVM
-or Gradle runtime is involved.
+typed ownership and result exceptions, but both paths use the same ABI and capability model. No language VM or external build runtime is involved.
 
 ## Lifecycle
 
@@ -76,6 +75,30 @@ Applications that need an ordinary Win32 window should not manually consume rend
 renderer, resource/clipboard services, input translation boundary, and teardown barrier. The
 installed `desktop_app.cpp` sample is a complete window loop. See
 [Win32 desktop hosting](desktop-hosting.md).
+
+Linux deliberately has no bundled GUI backend. A Vulkan, OpenGL, or other renderer links
+`Strata::render_host` and includes `<strata/render_packet.hpp>` instead of duplicating packet-v4
+parsing:
+
+```cpp
+strata::host::RenderPacketDecoder decoder;
+const strata::host::RenderPacket& plan = decoder.decode(surface.render_packet());
+
+for (const strata::host::ResourceOperation& resource : plan.resources) {
+    backend.apply(resource);
+}
+backend.upload_geometry(plan.vertices, plan.indices, plan.geometry_epoch);
+for (const strata::host::SubmissionBatch& batch : plan.batches) {
+    backend.submit(batch);
+}
+```
+
+The decoder is stateful because settled packets can retain an earlier geometry epoch while updating
+the frame index and resource operations. Keep one decoder per Surface/backend stream and call
+`reset()` when discarding that stream. `RenderPacket` exposes ordered texture mutations, fixed-layout
+vertex bytes, indices, scissors, material/blend/texture bindings, draw batches, and blur batches;
+the consumer remains responsible for GPU resources, shader/material implementation, presentation,
+and the Surface release-packet barrier.
 
 ## Typed C++ host models
 
@@ -189,4 +212,4 @@ storage is intentionally outside those routed counters.
 The CMake install includes an independent sample project under `share/strata/samples`. The repository
 gate configures that project against the install prefix and runs its C, C++, and Win32 desktop
 applications plus the installed compiler/Surface corpus through CTest. This catches accidental
-dependencies on repository paths, Gradle, demo registries, or private C++ headers.
+dependencies on repository paths, build-tree state, demo registries, or private C++ headers.

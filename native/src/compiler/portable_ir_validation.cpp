@@ -29,12 +29,6 @@ using JsonObject = data::JsonObjectView;
     return result;
 }
 
-[[nodiscard]] std::string operator+(const std::string_view left, const char* const right) {
-    std::string result(left);
-    result.append(right);
-    return result;
-}
-
 [[nodiscard]] JsonValue required(const JsonValue value, const std::string_view field) {
     const JsonValue child_value = value.find(field);
     if (!child_value) throw std::runtime_error("portable IR is missing field '" + std::string(field) + "'");
@@ -310,7 +304,8 @@ private:
         validate_span(call, context);
         const JsonValue arguments = required(call, "arguments");
         require_object(arguments, context + "/arguments");
-        for (const auto& [name, expression] : *arguments.object()) {
+        const JsonObject object = *arguments.object();
+        for (const auto& [name, expression] : object) {
             if (name.empty()) fail(context, "call argument names must not be empty");
             validate_expression(expression, context + "/argument " + name);
         }
@@ -352,7 +347,8 @@ private:
         } else if (kind == "map") {
             const JsonValue entries = required(expression, "entries");
             require_object(entries, context + "/map entries");
-            for (const auto& [name, value] : *entries.object()) {
+            const JsonObject object = *entries.object();
+            for (const auto& [name, value] : object) {
                 if (name.empty()) fail(context, "map entry names must not be empty");
                 validate_expression(value, context + "/map entry " + name);
             }
@@ -467,7 +463,8 @@ private:
             }
             const JsonValue properties = required(style, "properties");
             require_object(properties, "style properties");
-            for (const auto& [property, expression] : *properties.object()) {
+            const JsonObject object = *properties.object();
+            for (const auto& [property, expression] : object) {
                 validate_expression(expression, "style " + name + "." + property);
             }
         }

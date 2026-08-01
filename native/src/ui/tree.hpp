@@ -140,8 +140,8 @@ struct DescriptionNode final {
     std::shared_ptr<const runtime::IndexableSequence> virtual_sequence;
     std::optional<DescriptionSequenceGeneration> virtual_sequence_generation;
     /** Immutable domain metadata shared directly with layout and input without Value reparsing. */
-    std::shared_ptr<const VirtualItemMembers> virtual_item_members;
-    std::shared_ptr<const collection::VirtualItemExtents> virtual_item_extents;
+    std::shared_ptr<const VirtualItemMembers> virtual_item_members{};
+    std::shared_ptr<const collection::VirtualItemExtents> virtual_item_extents{};
 
     static std::shared_ptr<const DescriptionNode> create(
         std::string type,

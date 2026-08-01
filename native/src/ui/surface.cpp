@@ -577,7 +577,10 @@ Surface::Surface(
                 : TextLayout{};
         },
         [this](const std::string_view key) {
-            if (!advancing_scroll_animation_) scroll_animations_.erase(key);
+            if (!advancing_scroll_animation_) {
+                const auto animation = scroll_animations_.find(key);
+                if (animation != scroll_animations_.end()) scroll_animations_.erase(animation);
+            }
         },
         [this] { invalidate_frame(); }
     ),

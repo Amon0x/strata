@@ -113,7 +113,7 @@ struct LayoutSize final {
         LayoutSize preferred,
         std::optional<LayoutSize> maximum
     );
-    [[nodiscard]] friend bool operator==(const LayoutSize& left, const LayoutSize& right);
+    friend bool operator==(const LayoutSize& left, const LayoutSize& right);
 };
 
 struct VirtualListSpec final {

@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -76,6 +77,11 @@ struct PreparedDraw final {
 };
 
 struct PlannedItem final {
+    explicit PlannedItem(PreparedDraw draw)
+        : value(std::in_place_type<PreparedDraw>, std::move(draw)) {}
+    explicit PlannedItem(SubmissionBatch batch)
+        : value(std::in_place_type<SubmissionBatch>, std::move(batch)) {}
+
     std::variant<PreparedDraw, SubmissionBatch> value;
 };
 

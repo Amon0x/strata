@@ -391,8 +391,8 @@ PerformanceScenario load_performance_scenario(const std::filesystem::path& path)
     require_object(document, "performance scenario");
     PerformanceScenario result;
     std::uint64_t fingerprint = 14695981039346656037ULL;
-    for (const unsigned char byte : source) {
-        fingerprint ^= byte;
+    for (const char character : source) {
+        fingerprint ^= static_cast<unsigned char>(character);
         fingerprint *= 1099511628211ULL;
     }
     std::ostringstream fingerprint_text;

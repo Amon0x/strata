@@ -62,7 +62,7 @@ struct ActionEvent final {
     std::optional<std::string> source_key;
     Value value;
     /** Optional retained lifecycle suffix selected by the UI event producer. */
-    std::optional<std::string> lifecycle_owner;
+    std::optional<std::string> lifecycle_owner = std::nullopt;
 };
 
 enum class ActionHandlerResult { handled, forwarded, ignored };

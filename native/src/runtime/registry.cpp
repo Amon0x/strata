@@ -24,6 +24,7 @@ ValueSchemaPtr runtime_schema(const compiler::SemanticType& type) {
         return ValueSchema::scalar(ValueSchemaKind::null_value);
     case SemanticTypeKind::string:
     case SemanticTypeKind::string_literal:
+    case SemanticTypeKind::path:
     case SemanticTypeKind::enumeration:
         return ValueSchema::scalar(ValueSchemaKind::string);
     case SemanticTypeKind::number:

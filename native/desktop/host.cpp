@@ -39,7 +39,7 @@
 #include <strata/strata.hpp>
 
 #include "host_services.hpp"
-#include "host/render_packet.hpp"
+#include <strata/render_packet.hpp>
 #include "renderer.hpp"
 #include "showcase.hpp"
 
@@ -122,7 +122,8 @@ namespace {
     result.reserve(value.size() + 2U);
     result.push_back('"');
     constexpr char hexadecimal[] = "0123456789abcdef";
-    for (const unsigned char character : value) {
+    for (const char byte : value) {
+        const auto character = static_cast<unsigned char>(byte);
         switch (character) {
         case '"': result += "\\\""; break;
         case '\\': result += "\\\\"; break;

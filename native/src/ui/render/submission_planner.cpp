@@ -323,7 +323,7 @@ void append_draw(
     }
     MaterialState material = merged_material(command, material_override);
     std::optional<std::string> texture = command_texture(command, context);
-    output.push_back(PlannedItem{PreparedDraw{
+    output.emplace_back(PreparedDraw{
         source_order,
         std::move(command),
         local_bounds,
@@ -332,7 +332,7 @@ void append_draw(
         std::move(texture),
         resolved_scissor,
         false,
-    }});
+    });
 }
 
 } // namespace
@@ -581,7 +581,7 @@ std::vector<PlannedItem> plan(
                     ++skipped_draws;
                     return;
                 }
-                output.push_back(PlannedItem{SubmissionBatch{
+                output.emplace_back(SubmissionBatch{
                     SubmissionBatchKind::blur,
                     "strata:blur_region",
                     "straight_alpha",
@@ -593,7 +593,7 @@ std::vector<PlannedItem> plan(
                     static_cast<std::uint32_t>(std::min<std::size_t>(
                         value.downsample, std::numeric_limits<std::uint32_t>::max()
                     )),
-                }});
+                });
             } else if constexpr (std::is_same_v<Type, TextRunRenderCommand>) {
                 if (!visible_text[index]) {
                     ++skipped_draws;

@@ -389,14 +389,18 @@ explicit sibling keys are invalid.
 
 Run the standalone production compiler without launching a window or game:
 
-```bat
-gradlew.bat validateSettingsStrata
-gradlew.bat validateShowcaseStrata
-gradlew.bat validateDebugStrata
-gradlew.bat validateStrata -PstrataFile=path/to/module.strata -PstrataSchemas=path/to/module.schemas.json
+Validate all bundled applications through the configured CMake build:
+
+```sh
+cmake --build --preset linux-x64 --target strata_validate_modules
 ```
 
-Command-line diagnostics include the diagnostic code, `file:line:column`, and message. Runtime
-diagnostic callbacks additionally carry the full source range, component path, expected value, and
-occurrence metadata. Custom applications provide their application schema document with
-`-PstrataSchemas` or directly to `strata_compile`.
+Use `windows-x64` on Windows. For one custom module, invoke the installed compiler directly:
+
+```sh
+strata_compile --check-module path/to/module.strata path/to/registry-v1.json path/to/module.schemas.json
+```
+
+The schema argument is optional. Command-line diagnostics include the diagnostic code,
+`file:line:column`, and message. Runtime diagnostic callbacks additionally carry the full source
+range, component path, expected value, and occurrence metadata.

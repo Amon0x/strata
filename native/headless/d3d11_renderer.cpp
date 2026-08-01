@@ -20,7 +20,7 @@
 #include <wrl/client.h>
 
 #include "d3d11/render_context.hpp"
-#include "host/render_packet.hpp"
+#include <strata/render_packet.hpp>
 
 namespace strata::headless {
 namespace {

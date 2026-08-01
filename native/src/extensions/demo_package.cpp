@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <format>
 #include <string_view>
+#include <utility>
 
 namespace strata::extension {
 namespace {
@@ -29,7 +31,7 @@ template <std::size_t Capacity, typename... Arguments>
 ) {
     const auto result = std::format_to_n(
         buffer.data(),
-        buffer.size(),
+        static_cast<std::ptrdiff_t>(buffer.size()),
         pattern,
         std::forward<Arguments>(arguments)...
     );

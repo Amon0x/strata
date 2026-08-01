@@ -9,13 +9,13 @@ uses the Win32 window, D3D11 device, swap chain, render-packet decoder, GPU subm
 From the repository root on Windows:
 
 ```bat
-gradlew.bat benchmarkDesktop
+cmake --build --preset windows-x64 --target strata_benchmark_desktop
 ```
 
-The task opens a 1280×800 foreground window and writes:
+The target opens a 1280×800 foreground window and writes:
 
-- `build/performance/showcase-desktop/performance.json` — versioned machine-readable measurements
-- `build/performance/showcase-desktop/performance.html` — phase table and frame-time timeline
+- `build/cmake/windows-x64/performance/showcase-desktop/performance.json` — versioned machine-readable measurements
+- `build/cmake/windows-x64/performance/showcase-desktop/performance.html` — phase table and frame-time timeline
 
 Do not interact with another window while a foreground-required run is active. Focus loss,
 minimization, a hidden window, interrupted message processing, or an occluded DXGI present marks
@@ -60,7 +60,8 @@ The canonical workload currently measures:
 Keep a known-good `performance.json` outside the task output directory, then run:
 
 ```bat
-gradlew.bat benchmarkDesktop -PperformanceBaseline=C:\benchmarks\strata-good.json
+cmake --preset windows-x64 -DSTRATA_PERFORMANCE_BASELINE=C:\benchmarks\strata-good.json
+cmake --build --preset windows-x64 --target strata_benchmark_desktop
 ```
 
 Comparison is refused when the workload fingerprint/report schema, GPU and driver, client
@@ -127,7 +128,7 @@ pointer targeting does not serialize frame JSON.
 Run a custom scenario directly:
 
 ```bat
-build\native\windows-x64\RelWithDebInfo\strata_desktop.exe ^
+build\cmake\windows-x64\native\RelWithDebInfo\strata_desktop.exe ^
   --performance path\to\scenario.json ^
   --output build\performance\custom ^
   src\main\resources

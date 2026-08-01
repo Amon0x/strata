@@ -24,7 +24,7 @@
 #include "host_services.hpp"
 #include "host/extensions.hpp"
 #include "host/module_path.hpp"
-#include "host/render_packet.hpp"
+#include <strata/render_packet.hpp>
 #include "renderer.hpp"
 
 namespace strata::desktop {

@@ -461,7 +461,8 @@ screen Main {
         nullptr,
         nullptr,
     };
-    strata_activation_info activation_info{sizeof(strata_activation_info)};
+    strata_activation_info activation_info{};
+    activation_info.struct_size = sizeof(activation_info);
     check(
         strata_runtime_compile_and_activate(runtime, &activation, &activation_info).status ==
                 STRATA_STATUS_OK &&
@@ -511,7 +512,8 @@ screen Main {
         "the projected extension bundle was rejected by surface creation"
     );
 
-    strata_surface_frame_info frame_info{sizeof(strata_surface_frame_info)};
+    strata_surface_frame_info frame_info{};
+    frame_info.struct_size = sizeof(frame_info);
     const strata_result first_frame = strata_surface_frame(surface, 8'000, &frame_info);
     check(
         first_frame.status == STRATA_STATUS_OK && frame_info.render_command_count >= 2U &&
@@ -554,7 +556,8 @@ screen Main {
     click[0].y = 8.0;
     click[1] = click[0];
     click[1].kind = STRATA_INPUT_POINTER_RELEASE;
-    strata_surface_input_batch_info batch{sizeof(strata_surface_input_batch_info)};
+    strata_surface_input_batch_info batch{};
+    batch.struct_size = sizeof(batch);
     check(
         strata_surface_enqueue_input(surface, click, 2U, &batch).status == STRATA_STATUS_OK &&
             strata_surface_frame(surface, 9'000, &frame_info).status == STRATA_STATUS_OK,

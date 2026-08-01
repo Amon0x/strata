@@ -257,11 +257,13 @@ public:
                                                ? resolve_type(*parameter.type_reference)
                                                : simple(SemanticTypeKind::unsafe_component_parameter);
                     schema.parameters.push_back(SchemaParameter{
-                        parameter.name,
-                        std::move(type),
-                        parameter.default_value == nullptr,
-                        parameter.type_reference.has_value() && parameter.type_reference->nullable,
-                        {},
+                        .name = parameter.name,
+                        .type = std::move(type),
+                        .required = parameter.default_value == nullptr,
+                        .nullable = parameter.type_reference.has_value() &&
+                            parameter.type_reference->nullable,
+                        .aliases = {},
+                        .material_type = std::nullopt,
                     });
                 }
                 std::function<void(const Block&)> scan_slots;
@@ -2754,7 +2756,7 @@ private:
      * the authored keys select it: the one shape that declares every key present. No match means
      * the object fits nothing the type allows; several matches stay unchecked rather than guessed.
      */
-    [[nodiscard]] static void collect_object_options(
+    static void collect_object_options(
         const SemanticType& expected,
         std::vector<const SemanticType*>& output
     ) {

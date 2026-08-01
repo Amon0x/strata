@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "application": {
+    "id": "portable.headless",
+    "module": "assets/strata/samples/desktop_app.strata",
+    "root": "DesktopExample",
+    "packages": [],
+    "actions": []
+  },
+  "surface": {
+    "id": "portable.headless",
+    "role": "overlay",
+    "backend": "reference",
+    "width": 900,
+    "height": 560,
+    "scale": 1,
+    "reducedMotion": false,
+    "clearColor": "#090b0fff",
+    "fonts": [
+      {
+        "id": "strata:fonts/default-medium",
+        "resource": "assets/strata/fonts/medium.ttf"
+      },
+      {
+        "id": "strata:fonts/default",
+        "resource": "assets/strata/fonts/default.ttf"
+      },
+      {
+        "id": "strata:fonts/mono",
+        "resource": "assets/strata/fonts/mono.ttf"
+      }
+    ],
+    "textures": []
+  },
+  "snapshots": [],
+  "steps": [
+    {"advance": {"milliseconds": 0, "frames": 1}},
+    {"capture": "initial"},
+    {"click": {"key": "example.increment"}},
+    {"advance": {"milliseconds": 32, "frames": 2}},
+    {"capture": "after_click"}
+  ]
+}

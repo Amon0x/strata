@@ -88,11 +88,11 @@ struct RenderEngine::Impl final {
             std::uint64_t subtree_presentation_generation = 0U;
             std::uint64_t subtree_layout_render_generation = 0U;
             std::uint64_t subtree_status_generation = 0U;
-            std::optional<std::vector<RenderCommand>> subtree_commands;
+            std::optional<std::vector<RenderCommand>> subtree_commands = std::nullopt;
             std::size_t subtree_node_count = 1U;
             std::size_t subtree_overlay_count = 0U;
-            LayoutSnapshot subtree_layout;
-            Point subtree_translation;
+            LayoutSnapshot subtree_layout{};
+            Point subtree_translation{};
             bool subtree_translation_safe = false;
             bool subtree_contains_clip = false;
         };
@@ -131,8 +131,8 @@ struct RenderEngine::Impl final {
         std::vector<RenderCommand> commands;
         Point presentation_translation;
         bool visited = false;
-        std::optional<PresentationPlan> presentation;
-        std::optional<CompositionPlan> composition;
+        std::optional<PresentationPlan> presentation = std::nullopt;
+        std::optional<CompositionPlan> composition = std::nullopt;
     };
 
     std::unordered_map<std::uint64_t, CachedFragment> fragments;

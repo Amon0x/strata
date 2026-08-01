@@ -165,7 +165,10 @@ std::int64_t Profiler::RollingWindow::percentile(const double fraction) const {
         fraction * static_cast<double>(sorted.size())
     ));
     const std::size_t index = std::clamp(rank, std::size_t{1U}, sorted.size()) - 1U;
-    std::ranges::nth_element(sorted, sorted.begin() + index);
+    std::ranges::nth_element(
+        sorted,
+        sorted.begin() + static_cast<std::ptrdiff_t>(index)
+    );
     return sorted[index];
 }
 

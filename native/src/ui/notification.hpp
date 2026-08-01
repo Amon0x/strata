@@ -19,9 +19,9 @@ struct NotificationRequest final {
     std::string message;
     NotificationSeverity severity = NotificationSeverity::info;
     bool persistent = false;
-    std::optional<std::int64_t> timeout_millis;
-    std::string action_label;
-    std::shared_ptr<const runtime::ActionValue> action;
+    std::optional<std::int64_t> timeout_millis = std::nullopt;
+    std::string action_label{};
+    std::shared_ptr<const runtime::ActionValue> action{};
 };
 
 struct Notification final {

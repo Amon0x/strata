@@ -61,7 +61,7 @@ class JsonValue final {
     [[nodiscard]] const Object* object() const noexcept;
     [[nodiscard]] const JsonValue* find(std::string_view key) const noexcept;
 
-    [[nodiscard]] friend bool operator==(const JsonValue& left, const JsonValue& right);
+    friend bool operator==(const JsonValue& left, const JsonValue& right);
 
   private:
     Storage storage_;

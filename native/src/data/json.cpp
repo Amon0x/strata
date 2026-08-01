@@ -349,7 +349,8 @@ void append_indent(std::string& output, const std::size_t depth) {
 void append_quoted(std::string& output, const std::string_view value) {
     output.push_back('"');
     constexpr char hexadecimal[] = "0123456789abcdef";
-    for (const unsigned char byte : value) {
+    for (const char character : value) {
+        const auto byte = static_cast<unsigned char>(character);
         switch (byte) {
         case '"':
             output.append("\\\"");

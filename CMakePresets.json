@@ -1,0 +1,97 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "cacheVariables": {
+        "STRATA_BUILD_TESTS": "ON",
+        "STRATA_BUILD_TOOLS": "ON",
+        "STRATA_BUILD_SAMPLES": "ON",
+        "STRATA_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "windows-x64",
+      "displayName": "Windows x64 / Visual Studio 18 2026 / MSVC 14.52",
+      "inherits": "base",
+      "generator": "Visual Studio 18 2026",
+      "binaryDir": "${sourceDir}/build/cmake/windows-x64",
+      "architecture": "x64",
+      "toolset": "version=14.52",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install/windows-x64",
+        "STRATA_BUILD_DESKTOP": "ON"
+      }
+    },
+    {
+      "name": "linux-x64",
+      "displayName": "Linux x64 / GCC / Ninja",
+      "inherits": "base",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/cmake/linux-x64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install/linux-x64",
+        "STRATA_BUILD_DESKTOP": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-x64",
+      "configurePreset": "windows-x64",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "linux-x64",
+      "configurePreset": "linux-x64"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-x64",
+      "configurePreset": "windows-x64",
+      "configuration": "RelWithDebInfo",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-x64",
+      "configurePreset": "linux-x64",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "windows-x64",
+      "steps": [
+        {"type": "configure", "name": "windows-x64"},
+        {"type": "build", "name": "windows-x64"},
+        {"type": "test", "name": "windows-x64"}
+      ]
+    },
+    {
+      "name": "linux-x64",
+      "steps": [
+        {"type": "configure", "name": "linux-x64"},
+        {"type": "build", "name": "linux-x64"},
+        {"type": "test", "name": "linux-x64"}
+      ]
+    }
+  ]
+}

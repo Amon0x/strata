@@ -21,11 +21,6 @@ using JsonValue = data::JsonView;
 using JsonArray = data::JsonArrayView;
 using JsonObject = data::JsonObjectView;
 
-[[nodiscard]] std::string operator+(std::string left, const std::string_view right) {
-    left.append(right);
-    return left;
-}
-
 [[nodiscard]] std::string operator+(const char* const left, const std::string_view right) {
     std::string result(left);
     result.append(right);
@@ -1573,7 +1568,9 @@ std::shared_ptr<const ActionValue> ExpressionRuntime::composed_action(
         action_origin(helper, scope)
     );
     return std::make_shared<const ActionValue>(ActionValue{
-        std::move(action), mode, std::move(children),
+        std::move(action),
+        mode,
+        std::move(children),
     });
 }
 

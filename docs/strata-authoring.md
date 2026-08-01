@@ -175,9 +175,10 @@ previous usable set.
 
 Regenerate registry-derived authoring files explicitly:
 
-```bat
-gradlew.bat generateStrataAuthoring
+```sh
+cmake --build --preset linux-x64 --target strata_generate_authoring
 ```
 
-The ordinary build runs `checkStrataAuthoring` and fails if reference, diagnostic, completion,
-grammar, registry, or lexical artifacts are stale.
+Use the `windows-x64` preset on Windows. The ordinary CTest gate runs the equivalent
+`strata_check_authoring` check and fails if reference, diagnostic, completion, grammar, registry, or
+lexical artifacts are stale.

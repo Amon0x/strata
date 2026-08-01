@@ -78,7 +78,7 @@ int check_authoring(const std::filesystem::path& project_root) {
         current = false;
     }
     if (!current) {
-        std::cerr << "Run gradlew.bat generateStrataAuthoring.\n";
+        std::cerr << "Run the strata_generate_authoring CMake target.\n";
         return 10;
     }
     std::cout << "Strata native authoring artifacts are current.\n";

@@ -55,7 +55,8 @@ constexpr std::array property_names{
 [[nodiscard]] std::string normalized(const std::string_view value) {
     std::string result;
     result.reserve(value.size());
-    for (const unsigned char character : value) {
+    for (const char byte : value) {
+        const auto character = static_cast<unsigned char>(byte);
         if (character == '-' || character == '_') continue;
         result.push_back(static_cast<char>(
             character >= 'A' && character <= 'Z' ? character + ('a' - 'A') : character

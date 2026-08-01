@@ -65,7 +65,12 @@ struct ReorderInsertion final {
                 ? end(children.back().bounds)
                 : (end(children[index - 1U].bounds) + start(children[index].bounds)) * 0.5;
 
-    ReorderInsertion result{index, coordinate};
+    ReorderInsertion result{
+        .index = index,
+        .coordinate = coordinate,
+        .before_key = std::nullopt,
+        .after_key = std::nullopt,
+    };
     if (index < children.size() && children[index].node->description().key.has_value()) {
         result.before_key = *children[index].node->description().key;
     }

@@ -46,7 +46,8 @@ inline void require_ok(const strata_result result, const std::string_view operat
 [[nodiscard]] inline strata_scale_policy_config scale_policy_defaults(
     const strata_scale_policy_kind kind
 ) {
-    strata_scale_policy_config policy{sizeof(strata_scale_policy_config)};
+    strata_scale_policy_config policy{};
+    policy.struct_size = sizeof(policy);
     require_ok(strata_scale_policy_defaults(kind, &policy), "scale policy defaults");
     return policy;
 }
@@ -56,7 +57,8 @@ inline void require_ok(const strata_result result, const std::string_view operat
     const std::int64_t framebuffer_width,
     const std::int64_t framebuffer_height
 ) {
-    strata_scale_context context{sizeof(strata_scale_context)};
+    strata_scale_context context{};
+    context.struct_size = sizeof(context);
     require_ok(
         strata_resolve_scale_context(
             &policy,
@@ -70,7 +72,8 @@ inline void require_ok(const strata_result result, const std::string_view operat
 }
 
 [[nodiscard]] inline strata_theme_tokens theme_tokens_defaults() {
-    strata_theme_tokens tokens{sizeof(strata_theme_tokens)};
+    strata_theme_tokens tokens{};
+    tokens.struct_size = sizeof(tokens);
     require_ok(strata_theme_tokens_defaults(&tokens), "theme token defaults");
     return tokens;
 }
@@ -304,7 +307,8 @@ public:
     }
 
     [[nodiscard]] strata_runtime_memory_info memory_info() const {
-        strata_runtime_memory_info info{sizeof(strata_runtime_memory_info)};
+        strata_runtime_memory_info info{};
+        info.struct_size = sizeof(info);
         require_ok(
             strata_runtime_get_memory_info(native_handle(), &info),
             "runtime memory telemetry"
@@ -432,7 +436,8 @@ public:
     }
 
     [[nodiscard]] strata_activation_info activate(const strata_activation_config& config) {
-        strata_activation_info info{sizeof(strata_activation_info)};
+        strata_activation_info info{};
+        info.struct_size = sizeof(info);
         require_ok(
             strata_runtime_compile_and_activate(native_handle(), &config, &info),
             "application activation"
@@ -443,7 +448,8 @@ public:
     [[nodiscard]] strata_activation_info activate(
         const strata_compiled_activation_config& config
     ) {
-        strata_activation_info info{sizeof(strata_activation_info)};
+        strata_activation_info info{};
+        info.struct_size = sizeof(info);
         require_ok(
             strata_runtime_activate_compiled_module(native_handle(), &config, &info),
             "compiled application activation"
@@ -490,7 +496,8 @@ public:
     [[nodiscard]] strata_surface* native_handle() const noexcept { return value_; }
 
     [[nodiscard]] strata_surface_frame_info frame(const std::int64_t time_nanoseconds) {
-        strata_surface_frame_info info{sizeof(strata_surface_frame_info)};
+        strata_surface_frame_info info{};
+        info.struct_size = sizeof(info);
         require_ok(strata_surface_frame(value_, time_nanoseconds, &info), "surface frame");
         return info;
     }

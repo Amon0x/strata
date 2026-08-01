@@ -8,6 +8,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "compiler/compile.hpp"
@@ -77,12 +78,28 @@ enum class ActivationStatus {
 };
 
 struct ActivationDiagnostic final {
+    ActivationDiagnostic(
+        std::string code,
+        std::string message,
+        std::optional<std::string> source_id = std::nullopt,
+        std::optional<std::string> component_path = std::nullopt,
+        std::optional<std::string> expected = std::nullopt,
+        DiagnosticSeverity severity = DiagnosticSeverity::error,
+        std::optional<DiagnosticRange> range = std::nullopt
+    ) : code(std::move(code)),
+        message(std::move(message)),
+        source_id(std::move(source_id)),
+        component_path(std::move(component_path)),
+        expected(std::move(expected)),
+        severity(severity),
+        range(std::move(range)) {}
+
     std::string code;
     std::string message;
     std::optional<std::string> source_id;
     std::optional<std::string> component_path;
     std::optional<std::string> expected;
-    DiagnosticSeverity severity = DiagnosticSeverity::error;
+    DiagnosticSeverity severity;
     std::optional<DiagnosticRange> range;
 };
 

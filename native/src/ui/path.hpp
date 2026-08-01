@@ -103,7 +103,7 @@ struct StrokeStyle final {
     PathCap cap = PathCap::butt;
     PathJoin join = PathJoin::miter;
     double miter_limit = 4.0;
-    std::vector<double> dash;
+    std::vector<double> dash{};
     double dash_offset = 0.0;
 
     void validate() const;

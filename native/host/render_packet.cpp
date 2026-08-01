@@ -1,4 +1,4 @@
-#include "render_packet.hpp"
+#include <strata/render_packet.hpp>
 
 #include <bit>
 #include <cstddef>

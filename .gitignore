@@ -7,8 +7,6 @@ Thumbs.db
 *.iml
 
 # Local build systems and caches
-.gradle/
-.gradle-user-home/
 .kotlin/
 build/
 out/
@@ -18,7 +16,6 @@ CMakeFiles/
 cmake_install.cmake
 CTestTestfile.cmake
 Testing/
-gradle/local/
 
 # Compiled and packaged artifacts
 *.class
@@ -35,7 +32,6 @@ gradle/local/
 *.so
 *.vsix
 *.zip
-!gradle/wrapper/gradle-wrapper.jar
 
 # Runtime/client state
 run/
@@ -68,7 +64,6 @@ context-snapshot.json
 /session-log.md
 /targets*.md
 /latertargets.md
-/dslcheck-init.gradle
 /docs/plans/
 /docs/specs/
 /docs/port-audit/

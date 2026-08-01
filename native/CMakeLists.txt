@@ -48,8 +48,8 @@ set(FT_DISABLE_BROTLI TRUE CACHE BOOL "" FORCE)
 set(SKIP_INSTALL_ALL TRUE CACHE BOOL "" FORCE)
 FetchContent_Declare(
     freetype
-    URL https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz
-    URL_HASH SHA256=0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289
+    URL https://github.com/freetype/freetype/archive/refs/tags/VER-2-13-3.tar.gz
+    URL_HASH SHA256=bc5c898e4756d373e0d991bab053036c5eb2aa7c0d5c67e8662ddc6da40c4103
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(freetype)
@@ -144,12 +144,31 @@ set_target_properties(strata_internal_data PROPERTIES POSITION_INDEPENDENT_CODE 
 strata_target_defaults(strata_internal_data)
 
 add_library(
+    strata_render_host
+    STATIC
+        host/render_packet.cpp
+)
+add_library(Strata::render_host ALIAS strata_render_host)
+target_include_directories(
+    strata_render_host
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+set_target_properties(
+    strata_render_host
+    PROPERTIES
+        EXPORT_NAME render_host
+        POSITION_INDEPENDENT_CODE ON
+)
+strata_target_defaults(strata_render_host)
+
+add_library(
     strata_host_support
     STATIC
         host/browser_model.cpp
         host/extensions.cpp
         host/module_path.cpp
-        host/render_packet.cpp
 )
 target_include_directories(
     strata_host_support
@@ -158,7 +177,7 @@ target_include_directories(
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
-target_link_libraries(strata_host_support PUBLIC strata_internal_data)
+target_link_libraries(strata_host_support PUBLIC strata_internal_data Strata::render_host)
 set_target_properties(strata_host_support PROPERTIES POSITION_INDEPENDENT_CODE ON)
 strata_target_defaults(strata_host_support)
 
@@ -428,6 +447,8 @@ if(WIN32 AND (STRATA_BUILD_DESKTOP OR STRATA_BUILD_TOOLS))
     )
     target_link_libraries(
         strata_d3d11
+        PRIVATE
+            Strata::render_host
         PUBLIC
             d3d11
             d3dcompiler
@@ -451,7 +472,6 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             desktop/renderer.cpp
             host/extensions.cpp
             host/module_path.cpp
-            host/render_packet.cpp
             d3d11/blur_pass.cpp
             d3d11/render_context.cpp
             d3d11/texture_store.cpp
@@ -462,6 +482,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         PUBLIC Strata::host
         PRIVATE
             strata_extensions
+            Strata::render_host
             d3d11
             d3dcompiler
             ole32
@@ -566,7 +587,7 @@ if(STRATA_BUILD_SAMPLES)
     strata_target_defaults(strata_c_smoke)
 
     add_executable(strata_cpp_smoke samples/cpp_smoke.cpp)
-    target_link_libraries(strata_cpp_smoke PRIVATE Strata::host)
+    target_link_libraries(strata_cpp_smoke PRIVATE Strata::host Strata::render_host)
     strata_target_defaults(strata_cpp_smoke)
 
     if(WIN32 AND STRATA_BUILD_DESKTOP)
@@ -601,7 +622,148 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
     strata_target_defaults(strata_desktop)
 endif()
 
+if(STRATA_BUILD_TOOLS)
+    set(STRATA_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
+    set(STRATA_RESOURCE_ROOT "${STRATA_REPOSITORY_ROOT}/src/main/resources")
+    set(STRATA_REGISTRY "${STRATA_RESOURCE_ROOT}/strata/registry-v1.json")
+
+    add_custom_target(
+        strata_generate_authoring
+        COMMAND strata_authoring --write "${STRATA_REPOSITORY_ROOT}"
+        DEPENDS strata_authoring
+        COMMENT "Regenerating registry-derived Strata authoring files"
+        VERBATIM
+    )
+    add_custom_target(
+        strata_check_authoring
+        COMMAND strata_authoring --check "${STRATA_REPOSITORY_ROOT}"
+        DEPENDS strata_authoring
+        COMMENT "Checking registry-derived Strata authoring files"
+        VERBATIM
+    )
+    add_custom_target(strata_validate_modules COMMENT "Validating bundled Strata modules")
+    add_custom_target(strata_generate_artifacts COMMENT "Regenerating bundled Strata artifacts")
+    add_custom_target(strata_check_artifacts COMMENT "Checking bundled Strata artifacts")
+    add_dependencies(strata_validate_modules strata_compile)
+    add_dependencies(strata_generate_artifacts strata_compile)
+    add_dependencies(strata_check_artifacts strata_compile)
+
+    function(strata_register_bundled_module name source schemas artifact)
+        add_custom_command(
+            TARGET strata_validate_modules
+            POST_BUILD
+            COMMAND strata_compile --check-module
+                "${STRATA_REPOSITORY_ROOT}/${source}"
+                "${STRATA_REGISTRY}"
+                "${STRATA_REPOSITORY_ROOT}/${schemas}"
+            VERBATIM
+        )
+        if(NOT artifact STREQUAL "")
+            add_custom_command(
+                TARGET strata_generate_artifacts
+                POST_BUILD
+                COMMAND strata_compile --emit-artifact
+                    "${STRATA_REPOSITORY_ROOT}/${source}"
+                    "${STRATA_REGISTRY}"
+                    "${STRATA_REPOSITORY_ROOT}/${schemas}"
+                    "${STRATA_RESOURCE_ROOT}"
+                    "${STRATA_REPOSITORY_ROOT}/${artifact}"
+                VERBATIM
+            )
+            add_custom_command(
+                TARGET strata_check_artifacts
+                POST_BUILD
+                COMMAND strata_compile --check-artifact
+                    "${STRATA_REPOSITORY_ROOT}/${source}"
+                    "${STRATA_REGISTRY}"
+                    "${STRATA_REPOSITORY_ROOT}/${schemas}"
+                    "${STRATA_RESOURCE_ROOT}"
+                    "${STRATA_REPOSITORY_ROOT}/${artifact}"
+                VERBATIM
+            )
+        endif()
+        if(BUILD_TESTING AND STRATA_BUILD_TESTS)
+            add_test(
+                NAME "strata.module.${name}"
+                COMMAND strata_compile --check-module
+                    "${STRATA_REPOSITORY_ROOT}/${source}"
+                    "${STRATA_REGISTRY}"
+                    "${STRATA_REPOSITORY_ROOT}/${schemas}"
+            )
+            if(NOT artifact STREQUAL "")
+                add_test(
+                    NAME "strata.artifact.${name}"
+                    COMMAND strata_compile --check-artifact
+                        "${STRATA_REPOSITORY_ROOT}/${source}"
+                        "${STRATA_REGISTRY}"
+                        "${STRATA_REPOSITORY_ROOT}/${schemas}"
+                        "${STRATA_RESOURCE_ROOT}"
+                        "${STRATA_REPOSITORY_ROOT}/${artifact}"
+                )
+            endif()
+        endif()
+    endfunction()
+
+    strata_register_bundled_module(
+        showcase
+        "src/main/resources/assets/strata/ui/demo_surface.strata"
+        "src/main/resources/assets/strata/ui/demo_surface.schemas.json"
+        "src/main/resources/assets/strata/ui/demo_surface.compiled.bin"
+    )
+    strata_register_bundled_module(
+        settings
+        "src/main/resources/assets/strata/ui/settings_app.strata"
+        "src/main/resources/assets/strata/ui/settings_app.schemas.json"
+        "src/main/resources/assets/strata/ui/settings_app.compiled.bin"
+    )
+    strata_register_bundled_module(
+        debug
+        "src/main/resources/assets/strata/ui/debug_overlay.strata"
+        "src/main/resources/assets/strata/ui/debug_overlay.schemas.json"
+        "src/main/resources/assets/strata/ui/debug_overlay.compiled.bin"
+    )
+    strata_register_bundled_module(
+        performance_hud
+        "src/main/resources/assets/strata/ui/performance_hud.strata"
+        "src/main/resources/assets/strata/ui/performance_hud.schemas.json"
+        "src/main/resources/assets/strata/ui/performance_hud.compiled.bin"
+    )
+    strata_register_bundled_module(
+        hub
+        "src/main/resources/assets/strata/ui/strata_hub.strata"
+        "src/main/resources/assets/strata/ui/strata_hub.schemas.json"
+        "src/main/resources/assets/strata/ui/strata_hub.compiled.bin"
+    )
+endif()
+
+if(WIN32 AND STRATA_BUILD_DESKTOP)
+    set(STRATA_PERFORMANCE_BASELINE "" CACHE FILEPATH "Optional desktop performance baseline")
+    set(strata_performance_arguments
+        --performance "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/performance/showcase.json"
+        --output "${CMAKE_BINARY_DIR}/performance/showcase-desktop"
+    )
+    if(NOT STRATA_PERFORMANCE_BASELINE STREQUAL "")
+        list(APPEND strata_performance_arguments --baseline "${STRATA_PERFORMANCE_BASELINE}")
+    endif()
+    list(APPEND strata_performance_arguments "${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources")
+    add_custom_target(
+        strata_benchmark_desktop
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/performance/showcase-desktop"
+        COMMAND strata_desktop ${strata_performance_arguments}
+        DEPENDS strata_desktop
+        COMMENT "Running the visible uncapped desktop performance scenario"
+        VERBATIM
+    )
+endif()
+
 if(BUILD_TESTING AND STRATA_BUILD_TESTS)
+    if(STRATA_BUILD_TOOLS)
+        add_test(
+            NAME strata.authoring.generated
+            COMMAND strata_authoring --check "${CMAKE_CURRENT_SOURCE_DIR}/.."
+        )
+    endif()
+
     add_executable(strata_host_tests tests/host_tests.cpp)
     target_link_libraries(strata_host_tests PRIVATE Strata::host)
     strata_target_defaults(strata_host_tests)
@@ -806,23 +968,43 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     endif()
     if(STRATA_BUILD_TOOLS)
         add_test(
-            NAME strata.headless.smoke
+            NAME strata.headless.portable
             COMMAND ${CMAKE_COMMAND}
                 -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>
                 -DSTRATA_RESOURCES=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
-                -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/showcase.json
-                -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-smoke
-                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_smoke.cmake
+                -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/portable.json
+                -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-portable
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_portable.cmake
         )
         add_test(
-            NAME strata.headless.interactive
+            NAME strata.headless.portable.interactive
             COMMAND ${CMAKE_COMMAND}
                 -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>
                 -DSTRATA_RESOURCES=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
-                -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/showcase.json
-                -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-interactive
-                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_interactive.cmake
+                -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/portable.json
+                -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-portable-interactive
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_portable_interactive.cmake
         )
+        if(WIN32)
+            add_test(
+                NAME strata.headless.d3d11
+                COMMAND ${CMAKE_COMMAND}
+                    -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>
+                    -DSTRATA_RESOURCES=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
+                    -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/showcase.json
+                    -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-d3d11
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_smoke.cmake
+            )
+            add_test(
+                NAME strata.headless.d3d11.interactive
+                COMMAND ${CMAKE_COMMAND}
+                    -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>
+                    -DSTRATA_RESOURCES=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
+                    -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/showcase.json
+                    -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-d3d11-interactive
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_interactive.cmake
+            )
+        endif()
     endif()
     if(WIN32 AND STRATA_BUILD_DESKTOP)
         add_test(
@@ -844,10 +1026,32 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                 ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
         )
     endif()
+
+    add_test(
+        NAME strata.release.dependencies
+        COMMAND ${CMAKE_COMMAND}
+            -DSTRATA_C_LIBRARY=$<TARGET_FILE:strata_c>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/release_dependencies.cmake
+    )
+    add_test(
+        NAME strata.install.consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DSTRATA_BUILD_DIR=${CMAKE_BINARY_DIR}
+            -DSTRATA_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/installed-test/prefix
+            -DSTRATA_SMOKE_BUILD_DIR=${CMAKE_BINARY_DIR}/installed-test/consumer
+            -DSTRATA_GENERATOR=${CMAKE_GENERATOR}
+            -DSTRATA_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
+            -DSTRATA_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}
+            -DSTRATA_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DSTRATA_CONFIG=$<CONFIG>
+            -DSTRATA_CTEST_COMMAND=${CMAKE_CTEST_COMMAND}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/installed_package.cmake
+    )
+    set_tests_properties(strata.install.consumer PROPERTIES RUN_SERIAL TRUE)
 endif()
 
 install(
-    TARGETS strata_c strata_host_cpp strata_extensions
+    TARGETS strata_c strata_host_cpp strata_extensions strata_render_host
     EXPORT StrataTargets
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib

@@ -15,13 +15,14 @@ adapter, source-import resolver, and ordered GPU-resource release barrier.
 From a Windows command shell at the repository root:
 
 ```bat
-gradlew.bat installNative
+cmake --workflow --preset windows-x64
+cmake --install build\cmake\windows-x64 --config RelWithDebInfo
 ```
 
 The default prefix is:
 
 ```text
-build/native/install/windows-x64/
+build/install/windows-x64/
   bin/                         strata_c.dll and executable tools
   include/strata/              public C and C++ headers
   lib/                         import/static libraries
@@ -36,7 +37,7 @@ A consumer configures against that prefix:
 ```bat
 cmake -S . -B build ^
   -G "Visual Studio 18 2026" -A x64 -T version=14.52 ^
-  -DCMAKE_PREFIX_PATH=C:\path\to\strata\build\native\install\windows-x64
+  -DCMAKE_PREFIX_PATH=C:\path\to\strata\build\install\windows-x64
 cmake --build build --config RelWithDebInfo
 ```
 
@@ -64,6 +65,7 @@ Installed targets are:
 | `Strata::host` | C++ ownership and structured host-data/action bindings. |
 | `Strata::desktop` | Complete reusable Win32/D3D11 application host. |
 | `Strata::extensions` | Native extension package authoring implementation. |
+| `Strata::render_host` | Public stateful packet-v4 decoder used by custom render backends. |
 
 The package also defines:
 

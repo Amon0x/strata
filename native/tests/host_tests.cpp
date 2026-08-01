@@ -114,6 +114,8 @@ void action_bindings_decode_at_the_boundary(const std::filesystem::path& registr
         strata::view("host-tests.actions"),
         strata::view(registry),
         strata::view(schemas),
+        nullptr,
+        0U,
     };
     runtime.configure_application(application);
 
@@ -136,7 +138,8 @@ void action_bindings_decode_at_the_boundary(const std::filesystem::path& registr
         0U,
         0U,
     };
-    strata_action_dispatch_info info{sizeof(strata_action_dispatch_info)};
+    strata_action_dispatch_info info{};
+    info.struct_size = sizeof(info);
     strata::require_ok(
         strata_runtime_dispatch_action_json(active_runtime.native_handle(), &dispatch, &info),
         "typed host test action dispatch");
@@ -180,7 +183,8 @@ void snapshot_bindings_publish_only_changed_revisions() {
                        "host test direct snapshot publication");
     strata::Runtime active_runtime = std::move(runtime);
     bindings.synchronize();
-    strata_host_snapshot_info info{sizeof(strata_host_snapshot_info)};
+    strata_host_snapshot_info info{};
+    info.struct_size = sizeof(info);
     strata::require_ok(strata_runtime_get_host_snapshot_info(active_runtime.native_handle(), &info),
                        "host test snapshot info");
     check(info.has_snapshot != 0U && info.generation == 41U,

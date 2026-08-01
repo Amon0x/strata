@@ -141,7 +141,7 @@ struct StateMutation final {
     ValueSchemaPtr declared_schema;
     StateMutationKind kind;
     std::vector<std::pair<std::string, Value>> arguments;
-    std::string declaration_scope;
+    std::string declaration_scope{};
 
     [[nodiscard]] StateMutationResult apply(StateStore& state) const;
 };

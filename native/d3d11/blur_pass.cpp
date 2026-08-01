@@ -24,7 +24,7 @@
 #include <wrl/client.h>
 
 #include "blur_shaders.hpp"
-#include "host/render_packet.hpp"
+#include <strata/render_packet.hpp>
 
 namespace strata::d3d11 {
 
