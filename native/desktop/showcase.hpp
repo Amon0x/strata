@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include <strata/contracts/demo_surface.hpp>
 #include <strata/host.hpp>
 
 namespace strata::desktop {
@@ -25,7 +26,7 @@ class ShowcaseModel final {
     [[nodiscard]] strata::host::Value tree_snapshot() const;
     [[nodiscard]] strata::host::Value table_snapshot() const;
     [[nodiscard]] strata::host::Value grid_snapshot() const;
-    [[nodiscard]] strata::host::Value tree_items() const;
+    [[nodiscard]] std::vector<contracts::demo_surface::DataTreeItemsItem> tree_items() const;
 
     [[nodiscard]] strata::host::ActionResult handle(const strata::host::ActionEvent& event);
     [[nodiscard]] bool load_tree_children(std::string_view key);

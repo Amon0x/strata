@@ -34,6 +34,11 @@
 #define NOMINMAX
 #include <Windows.h>
 
+#include <strata/contracts/debug_overlay.hpp>
+#include <strata/contracts/demo_surface.hpp>
+#include <strata/contracts/performance_hud.hpp>
+#include <strata/contracts/settings_app.hpp>
+#include <strata/contracts/strata_hub.hpp>
 #include <strata/extension.hpp>
 #include <strata/host.hpp>
 #include <strata/strata.hpp>
@@ -115,35 +120,6 @@ namespace {
         if (key >= '0' && key <= '9') return std::string(1U, static_cast<char>(key));
         return "win32:" + std::to_string(key);
     }
-}
-
-[[nodiscard]] std::string json_string(const std::string_view value) {
-    std::string result;
-    result.reserve(value.size() + 2U);
-    result.push_back('"');
-    constexpr char hexadecimal[] = "0123456789abcdef";
-    for (const char byte : value) {
-        const auto character = static_cast<unsigned char>(byte);
-        switch (character) {
-        case '"': result += "\\\""; break;
-        case '\\': result += "\\\\"; break;
-        case '\b': result += "\\b"; break;
-        case '\f': result += "\\f"; break;
-        case '\n': result += "\\n"; break;
-        case '\r': result += "\\r"; break;
-        case '\t': result += "\\t"; break;
-        default:
-            if (character < 0x20U) {
-                result += "\\u00";
-                result.push_back(hexadecimal[character >> 4U]);
-                result.push_back(hexadecimal[character & 0x0FU]);
-            } else {
-                result.push_back(static_cast<char>(character));
-            }
-        }
-    }
-    result.push_back('"');
-    return result;
 }
 
 template <typename Byte>
@@ -658,19 +634,15 @@ struct Host::Impl final {
         if (!GetWindowPlacement(window, &placement)) return;
         const RECT& normal = placement.rcNormalPosition;
         const bool maximized = placement.showCmd == SW_SHOWMAXIMIZED;
-        const std::string json =
-            "{\"height\":" + std::to_string(normal.bottom - normal.top) +
-            ",\"maximized\":" + (maximized ? std::string("true") : std::string("false")) +
-            ",\"width\":" + std::to_string(normal.right - normal.left) +
-            ",\"x\":" + std::to_string(normal.left) +
-            ",\"y\":" + std::to_string(normal.top) + "}";
-        strata::require_ok(
-            strata_runtime_write_durable_shell_value_json(
-                performance_hud.runtime->native_handle(),
-                strata::view("desktop.window.geometry"),
-                strata::view(json)
-            ),
-            "desktop window geometry persistence"
+        const std::string json = strata::host::Value::object({
+            {"height", normal.bottom - normal.top},
+            {"maximized", maximized},
+            {"width", normal.right - normal.left},
+            {"x", normal.left},
+            {"y", normal.top},
+        }).json();
+        performance_hud.runtime->write_durable_shell_value_json(
+            "desktop.window.geometry", json
         );
         strata::require_ok(
             strata_runtime_flush_durable_state(performance_hud.runtime->native_handle()),
@@ -708,7 +680,18 @@ struct Host::Impl final {
                 if (event.string() != nullptr) {
                     static_cast<void>(showcase_model.load_tree_children(*event.string()));
                 }
-                const std::string items = showcase_model.tree_items().json();
+                std::vector<contracts::demo_surface::AsyncTreeChildrenValueItem> children;
+                for (const contracts::demo_surface::DataTreeItemsItem& item :
+                     showcase_model.tree_items()) {
+                    children.push_back(contracts::demo_surface::AsyncTreeChildrenValueItem{
+                        .key = item.key,
+                        .label = item.label,
+                        .parent_key = item.parent_key,
+                        .may_have_children = item.may_have_children,
+                        .children_loaded = item.children_loaded,
+                    });
+                }
+                const std::string items = contracts::demo_surface::to_value(children).json();
                 result = strata_runtime_async_succeed_json(
                     session.runtime->native_handle(), id, strata::view(items)
                 );
@@ -718,20 +701,21 @@ struct Host::Impl final {
                     strata::view("The simulated source rejected the query."),
                     strata::view("SIMULATED_FAILURE")
                 );
-            } else if (query == "empty") {
-                result = strata_runtime_async_succeed_json(
-                    session.runtime->native_handle(), id, strata::view("[]")
-                );
             } else {
-                std::string values = "[";
-                for (std::size_t index = 0U; index < 12U; ++index) {
-                    if (index != 0U) values.push_back(',');
-                    values += "{\"key\":\"async." + std::to_string(index) +
-                        "\",\"label\":\"Simulated result " + std::to_string(index) + "\"}";
+                std::vector<contracts::demo_surface::AsyncResultsValueItem> values;
+                if (query != "empty") {
+                    values.reserve(12U);
+                    for (std::size_t index = 0U; index < 12U; ++index) {
+                        values.push_back(contracts::demo_surface::AsyncResultsValueItem{
+                            .key = "async." + std::to_string(index),
+                            .label = "Simulated result " + std::to_string(index),
+                        });
+                    }
                 }
-                values.push_back(']');
+                const std::string value_json =
+                    contracts::demo_surface::to_value(values).json();
                 result = strata_runtime_async_succeed_json(
-                    session.runtime->native_handle(), id, strata::view(values)
+                    session.runtime->native_handle(), id, strata::view(value_json)
                 );
             }
             if (result.status != STRATA_STATUS_NOT_FOUND) {
@@ -974,11 +958,15 @@ struct Host::Impl final {
             "settings.desktop",
             "assets/strata/ui/settings_app.schemas.json"
         );
-        settings.bindings->on("settings.save", [this](const strata::host::ActionEvent&) {
-            ++settings_save_count;
-            settings_revision.changed();
-            return strata::host::ActionResult::handled;
-        });
+        settings.bindings->on(
+            contracts::settings_app::SettingsSaveAction::id,
+            [this](const strata::host::ActionEvent& event) {
+                static_cast<void>(contracts::settings_app::SettingsSaveAction::decode(event));
+                ++settings_save_count;
+                settings_revision.changed();
+                return strata::host::ActionResult::handled;
+            }
+        );
         settings.bindings->snapshot(
             "settings.desktop",
             [this] { return settings_revision.value(); },
@@ -988,23 +976,23 @@ struct Host::Impl final {
                     : "Saved " + std::to_string(settings_save_count) + " time" +
                         (settings_save_count == 1U ? std::string{} : std::string("s"));
                 const auto profile = [](const std::string_view id, const std::string_view label) {
-                    return strata::host::Value::object({
-                        {"key", std::string("settings.profile.") + std::string(id)},
-                        {"label", label},
-                        {"mayHaveChildren", false},
-                        {"childrenLoaded", true},
-                    });
+                    return contracts::settings_app::SettingsProfileTreeItem{
+                        .key = std::string("settings.profile.") + std::string(id),
+                        .label = std::string(label),
+                        .may_have_children = false,
+                        .children_loaded = true,
+                    };
                 };
-                return strata::host::Value::object({
-                    {"settings", strata::host::Value::object({
-                        {"savedMessage", saved},
-                        {"profileTree", strata::host::Value::array({
+                return contracts::settings_app::encode_settings(
+                    contracts::settings_app::Settings{
+                        .saved_message = saved,
+                        .profile_tree = {
                             profile("balanced", "Balanced — Recommended visual and input defaults"),
                             profile("performance", "Performance — Reduced effects and tighter layout"),
                             profile("cinematic", "Cinematic — High-fidelity effects and comfortable spacing"),
-                        })},
-                    })},
-                });
+                        },
+                    }
+                );
             }
         );
         settings.bindings->synchronize();
@@ -1017,22 +1005,9 @@ struct Host::Impl final {
     }
 
     void create_showcase() {
-        static constexpr std::array action_ids{
-            std::string_view("control.alpha.action"), std::string_view("control.beta.action"),
-            std::string_view("control.gamma.action"), std::string_view("demo.behavior.activate"),
-            std::string_view("demo.behavior.disabled"), std::string_view("demo.combo.query"),
-            std::string_view("demo.combo.select"), std::string_view("demo.command.global"),
-            std::string_view("demo.command.scoped"), std::string_view("demo.custom.pulse"),
-            std::string_view("demo.data.collection"), std::string_view("demo.drop.target"),
-            std::string_view("demo.events.clear"), std::string_view("demo.focus.scope"),
-            std::string_view("demo.form.completed"), std::string_view("demo.host.bump"),
-            std::string_view("demo.host.message"), std::string_view("demo.inspect.arm"),
-            std::string_view("demo.inspect.clear"), std::string_view("demo.inspect.coalesce"),
-            std::string_view("demo.inspect.driver"), std::string_view("demo.inspect.dynamic-probe"),
-            std::string_view("demo.inspect.pointer"), std::string_view("demo.inspect.select"),
-            std::string_view("demo.nav.right"), std::string_view("demo.reorder"),
-            std::string_view("demo.split.controlled"), std::string_view("demo.state.restore"),
-            std::string_view("demo.state.snapshot"),
+        static constexpr std::array extension_action_ids{
+            std::string_view("demo.custom.pulse"),
+            std::string_view("demo.inspect.pointer"),
         };
         static constexpr std::array extension_packages{std::string_view("strata.demo.v1")};
         showcase = create_session(
@@ -1040,10 +1015,15 @@ struct Host::Impl final {
             "assets/strata/ui/demo_surface.schemas.json",
             extension_packages
         );
-        for (const std::string_view action_id : action_ids) {
-            showcase.bindings->on(std::string(action_id), [this](
+        for (const std::string_view action_id : contracts::demo_surface::action_ids) {
+            showcase.bindings->on(action_id, [this](
                                                         const strata::host::ActionEvent& event
                                                     ) {
+                return showcase_model.handle(event);
+            });
+        }
+        for (const std::string_view action_id : extension_action_ids) {
+            showcase.bindings->on(action_id, [this](const strata::host::ActionEvent& event) {
                 return showcase_model.handle(event);
             });
         }
@@ -1190,65 +1170,89 @@ struct Host::Impl final {
             return left.p99_nanos > right.p99_nanos;
         });
         if (hot_paths.size() > 24U) hot_paths.resize(24U);
-        static constexpr std::size_t host_path_count = 5U;
-        std::ostringstream output;
-        output << "{\"debug\":{\"mode\":" << json_string(debug_mode)
-               << ",\"frame\":" << profile_snapshot.frame_index
-               << ",\"errors\":0,\"warnings\":0,\"infos\":0,"
-                  "\"diagnosticCount\":0,\"droppedDiagnostics\":0,"
-                  "\"hotPathCount\":" << hot_paths.size() + host_path_count
-               << ",\"spikeCount\":0,\"motionCount\":0,\"runningMotionCount\":0,"
-                  "\"semanticCount\":0,\"collectionCount\":0,\"summaryMetrics\":[";
         std::int64_t last_frame = 0;
         for (const ProfileSection& section : profile_snapshot.sections) {
             if (section.path == "frame") last_frame = std::max(last_frame, section.last_nanos);
         }
-        output << "{\"label\":\"Active native surfaces\",\"value\":\"1\"},"
-               << "{\"label\":\"Latest native frame\",\"value\":\""
-               << profile_snapshot.frame_index << "\"},"
-               << "{\"label\":\"Last native frame\",\"value\":\""
-               << static_cast<double>(last_frame) / 1'000'000.0 << " ms\"},"
-               << "{\"label\":\"Last complete host frame\",\"value\":\""
-               << static_cast<double>(last_total_nanos) / 1'000'000.0 << " ms\"},"
-               << "{\"label\":\"Last showcase core frame\",\"value\":\""
-               << static_cast<double>(last_native_nanos) / 1'000'000.0 << " ms\"}],\"counters\":[";
-        const std::size_t counter_count = profile_snapshot.counters.size();
-        for (std::size_t index = 0U; index < counter_count; ++index) {
-            if (index != 0U) output << ',';
-            output << "{\"label\":" << json_string(profile_snapshot.counters[index].name)
-                   << ",\"value\":\"" << profile_snapshot.counters[index].value << "\"}";
-        }
-        output << "],\"hotPaths\":[";
-        const auto emit_host_path = [&output](
-                                        const std::string_view path,
-                                        const TimingSummary& timings,
-                                        const bool first
-                                    ) {
-            if (!first) output << ',';
-            output << "{\"path\":" << json_string(path)
-                   << ",\"lastMillis\":" << static_cast<double>(timings.last_nanos) / 1'000'000.0
-                   << ",\"p95Millis\":" << static_cast<double>(timings.p95_nanos) / 1'000'000.0
-                   << ",\"p99Millis\":" << static_cast<double>(timings.maximum_nanos) / 1'000'000.0
-                   << ",\"maxMillis\":" << static_cast<double>(timings.maximum_nanos) / 1'000'000.0
-                   << '}';
+        const auto metric_text = [](const double value, const std::string_view suffix = {}) {
+            std::ostringstream output;
+            output << value << suffix;
+            return output.str();
         };
-        emit_host_path("demo.desktop/host/total", host_timings[0U], true);
-        emit_host_path("demo.desktop/host/showcase-core", host_timings[1U], false);
-        emit_host_path("demo.desktop/host/showcase-submit", host_timings[2U], false);
-        emit_host_path("demo.desktop/host/tooling", host_timings[3U], false);
-        emit_host_path("demo.desktop/host/present", host_timings[4U], false);
-        for (std::size_t index = 0U; index < hot_paths.size(); ++index) {
-            output << ',';
-            const ProfileSection& section = hot_paths[index];
-            output << "{\"path\":" << json_string(full_profile_path(profile_snapshot.scope_id, section.path))
-                   << ",\"lastMillis\":" << static_cast<double>(section.last_nanos) / 1'000'000.0
-                   << ",\"p95Millis\":" << static_cast<double>(section.p95_nanos) / 1'000'000.0
-                   << ",\"p99Millis\":" << static_cast<double>(section.p99_nanos) / 1'000'000.0
-                   << ",\"maxMillis\":" << static_cast<double>(section.maximum_nanos) / 1'000'000.0 << '}';
+        std::vector<contracts::debug_overlay::DebugSummaryMetricsItem> summary_metrics{
+            {"Active native surfaces", "1"},
+            {"Latest native frame", std::to_string(profile_snapshot.frame_index)},
+            {
+                "Last native frame",
+                metric_text(static_cast<double>(last_frame) / 1'000'000.0, " ms"),
+            },
+            {
+                "Last complete host frame",
+                metric_text(static_cast<double>(last_total_nanos) / 1'000'000.0, " ms"),
+            },
+            {
+                "Last showcase core frame",
+                metric_text(static_cast<double>(last_native_nanos) / 1'000'000.0, " ms"),
+            },
+        };
+        std::vector<contracts::debug_overlay::DebugCountersItem> counters;
+        counters.reserve(profile_snapshot.counters.size());
+        for (const ProfileCounter& counter : profile_snapshot.counters) {
+            counters.push_back({counter.name, std::to_string(counter.value)});
         }
-        output << "],\"spikes\":[],\"diagnostics\":[],\"motions\":[],"
-                  "\"semantics\":[],\"collections\":[],\"reloadMetrics\":[]}}";
-        return output.str();
+
+        std::vector<contracts::debug_overlay::DebugHotPathsItem> typed_hot_paths;
+        typed_hot_paths.reserve(hot_paths.size() + host_timings.size());
+        const auto append_host_path = [&typed_hot_paths](
+                                          const std::string_view path,
+                                          const TimingSummary& timings
+                                      ) {
+            typed_hot_paths.push_back(contracts::debug_overlay::DebugHotPathsItem{
+                .path = std::string(path),
+                .last_millis = static_cast<double>(timings.last_nanos) / 1'000'000.0,
+                .p95_millis = static_cast<double>(timings.p95_nanos) / 1'000'000.0,
+                .p99_millis = static_cast<double>(timings.maximum_nanos) / 1'000'000.0,
+                .max_millis = static_cast<double>(timings.maximum_nanos) / 1'000'000.0,
+            });
+        };
+        append_host_path("demo.desktop/host/total", host_timings[0U]);
+        append_host_path("demo.desktop/host/showcase-core", host_timings[1U]);
+        append_host_path("demo.desktop/host/showcase-submit", host_timings[2U]);
+        append_host_path("demo.desktop/host/tooling", host_timings[3U]);
+        append_host_path("demo.desktop/host/present", host_timings[4U]);
+        for (const ProfileSection& section : hot_paths) {
+            typed_hot_paths.push_back(contracts::debug_overlay::DebugHotPathsItem{
+                .path = full_profile_path(profile_snapshot.scope_id, section.path),
+                .last_millis = static_cast<double>(section.last_nanos) / 1'000'000.0,
+                .p95_millis = static_cast<double>(section.p95_nanos) / 1'000'000.0,
+                .p99_millis = static_cast<double>(section.p99_nanos) / 1'000'000.0,
+                .max_millis = static_cast<double>(section.maximum_nanos) / 1'000'000.0,
+            });
+        }
+        return contracts::debug_overlay::encode_debug(contracts::debug_overlay::Debug{
+            .mode = std::string(contracts::debug_overlay::wire_name(debug_mode)),
+            .frame = static_cast<double>(profile_snapshot.frame_index),
+            .errors = 0.0,
+            .warnings = 0.0,
+            .infos = 0.0,
+            .diagnostic_count = 0.0,
+            .dropped_diagnostics = 0.0,
+            .hot_path_count = static_cast<double>(typed_hot_paths.size()),
+            .spike_count = 0.0,
+            .motion_count = 0.0,
+            .running_motion_count = 0.0,
+            .semantic_count = 0.0,
+            .collection_count = 0.0,
+            .summary_metrics = std::move(summary_metrics),
+            .counters = std::move(counters),
+            .hot_paths = std::move(typed_hot_paths),
+            .spikes = {},
+            .diagnostics = {},
+            .motions = {},
+            .semantics = {},
+            .collections = {},
+            .reload_metrics = {},
+        }).json();
     }
 
     [[nodiscard]] std::string debug_export_text() const {
@@ -1302,32 +1306,34 @@ struct Host::Impl final {
         debug = create_session(
             "profiler.desktop", "assets/strata/ui/debug_overlay.schemas.json"
         );
-        debug.bindings->on("strata.debug.close", [this](const strata::host::ActionEvent&) {
-            debug_enabled = false;
-            return strata::host::ActionResult::handled;
-        });
         debug.bindings->on(
-            "strata.debug.clear-diagnostics",
+            contracts::debug_overlay::StrataDebugCloseAction::id,
+            [this](const strata::host::ActionEvent&) {
+                debug_enabled = false;
+                return strata::host::ActionResult::handled;
+            }
+        );
+        debug.bindings->on(
+            contracts::debug_overlay::StrataDebugClearDiagnosticsAction::id,
             [this](const strata::host::ActionEvent&) {
                 clear_diagnostics_pending = true;
                 return strata::host::ActionResult::handled;
             }
         );
         debug.bindings->on(
-            "strata.debug.copy-profile",
+            contracts::debug_overlay::StrataDebugCopyProfileAction::id,
             [this](const strata::host::ActionEvent&) {
                 static_cast<void>(services.write_clipboard(debug_export_text()));
                 return strata::host::ActionResult::handled;
             }
         );
         debug.bindings->on(
-            "strata.debug.select-mode",
+            contracts::debug_overlay::StrataDebugSelectModeAction::id,
             [this](const strata::host::ActionEvent& event) {
-                const std::string mode(event.payload.require_string("mode"));
-                if (std::ranges::contains(debug_modes, mode)) {
-                    debug_mode = mode;
-                    debug_snapshot_dirty = true;
-                }
+                const contracts::debug_overlay::StrataDebugSelectModeAction action =
+                    contracts::debug_overlay::StrataDebugSelectModeAction::decode(event);
+                debug_mode = action.mode;
+                debug_snapshot_dirty = true;
                 return strata::host::ActionResult::handled;
             }
         );
@@ -1363,15 +1369,9 @@ struct Host::Impl final {
             return text.str();
         };
 
-        std::ostringstream output;
-        output << "{\"performance\":{\"fps\":" << json_string(decimal(fps))
-               << ",\"totalMillis\":" << json_string(decimal(total_millis))
-               << ",\"nativeMillis\":" << json_string(decimal(native_millis))
-               << ",\"samples\":[";
-        bool first = true;
+        std::vector<contracts::performance_hud::PerformanceSamplesItem> samples;
+        samples.reserve(frame_buckets.size());
         for (const FrameBucket& bucket : frame_buckets) {
-            if (!first) output << ',';
-            first = false;
             const auto graph_height = [](const std::int64_t nanos) {
                 if (nanos <= 0) return 0.0;
                 const double millis = static_cast<double>(nanos) / 1'000'000.0;
@@ -1379,59 +1379,61 @@ struct Host::Impl final {
                     std::log1p(millis) / std::log1p(500.0) * 58.0, 1.0, 58.0
                 );
             };
-            const double total_height = graph_height(bucket.maximum_total_nanos);
-            const double native_height = graph_height(bucket.maximum_native_nanos);
-            output << "{\"key\":\"bucket." << bucket.index
-                   << "\",\"totalHeight\":" << total_height
-                   << ",\"nativeHeight\":" << native_height
-                   << ",\"slow\":"
-                   << (bucket.maximum_total_nanos > 16'666'667 ? "true" : "false")
-                   << ",\"severe\":"
-                   << (bucket.maximum_total_nanos > 100'000'000 ? "true" : "false")
-                   << '}';
+            samples.push_back(contracts::performance_hud::PerformanceSamplesItem{
+                .key = "bucket." + std::to_string(bucket.index),
+                .total_height = graph_height(bucket.maximum_total_nanos),
+                .native_height = graph_height(bucket.maximum_native_nanos),
+                .severe = bucket.maximum_total_nanos > 100'000'000,
+                .slow = bucket.maximum_total_nanos > 16'666'667,
+            });
         }
-        output << "]}}";
-        return output.str();
+        return contracts::performance_hud::encode_performance(
+            contracts::performance_hud::Performance{
+                .fps = decimal(fps),
+                .total_millis = decimal(total_millis),
+                .native_millis = decimal(native_millis),
+                .samples = std::move(samples),
+            }
+        ).json();
     }
 
     /** Hub view over the surfaces this host owns, in the shape the hub module declares. */
     [[nodiscard]] std::string hub_json() const {
-        std::ostringstream output;
-        output << std::fixed << std::setprecision(3);
         const double millis = static_cast<double>(host_total_timings.last()) / 1'000'000.0;
-        output << "{\"hub\":{\"frameMillis\":" << millis << ",\"frameSummary\":\"";
-        output << std::setprecision(1) << millis << " ms  \\u00b7  "
-               << std::setprecision(0) << (millis > 0.0 ? 1'000.0 / millis : 0.0) << " fps\",";
+        std::ostringstream summary;
+        summary << std::fixed << std::setprecision(1) << millis << " ms  ·  "
+                << std::setprecision(0) << (millis > 0.0 ? 1'000.0 / millis : 0.0)
+                << " fps";
+
         // The chart reads against the window's own peak rather than a fixed budget: a host holding
         // 1 ms frames would otherwise draw a flat line along the floor and say nothing at all.
         double scale = 8.0;
         for (const double sample : frame_history) scale = std::max(scale, sample);
-        const std::size_t samples = frame_history.size();
-        const auto emit_line = [&] {
-            for (std::size_t index = 0U; index < samples; ++index) {
-                if (index != 0U) output << ',';
-                const double x = samples < 2U
-                    ? 0.0
-                    : static_cast<double>(index) / static_cast<double>(samples - 1U);
-                const double cost = std::clamp(frame_history[index] / scale, 0.0, 1.0);
-                output << "{\"x\":" << x << ",\"y\":" << (1.0 - cost) << '}';
-            }
-        };
-        output << std::setprecision(4) << "\"frameHistory\":[";
-        emit_line();
-        // The filled area is that same curve closed along the floor, which is the one thing the
-        // drawing layer cannot derive from the line by itself.
-        output << "],\"frameArea\":[";
-        emit_line();
-        if (samples != 0U) output << ",{\"x\":1,\"y\":1},{\"x\":0,\"y\":1}";
-        output << "],\"frameScale\":\"full scale " << std::setprecision(1) << scale << " ms\",";
+        const std::size_t sample_count = frame_history.size();
+        std::vector<contracts::strata_hub::HubFrameHistoryItem> history;
+        std::vector<contracts::strata_hub::HubFrameAreaItem> area;
+        history.reserve(sample_count);
+        area.reserve(sample_count + (sample_count == 0U ? 0U : 2U));
+        for (std::size_t index = 0U; index < sample_count; ++index) {
+            const double x = sample_count < 2U
+                ? 0.0
+                : static_cast<double>(index) / static_cast<double>(sample_count - 1U);
+            const double y = 1.0 - std::clamp(frame_history[index] / scale, 0.0, 1.0);
+            history.push_back(contracts::strata_hub::HubFrameHistoryItem{x, y});
+            area.push_back(contracts::strata_hub::HubFrameAreaItem{x, y});
+        }
+        if (sample_count != 0U) {
+            area.push_back(contracts::strata_hub::HubFrameAreaItem{1.0, 1.0});
+            area.push_back(contracts::strata_hub::HubFrameAreaItem{0.0, 1.0});
+        }
+
         const int open_count = (settings_enabled ? 1 : 0) + (showcase_enabled ? 1 : 0) +
             (debug_enabled ? 1 : 0) + (performance_hud_enabled ? 1 : 0);
-        output << "\"status\":\"";
-        if (open_count == 0) output << "No surface open";
-        else if (open_count == 1) output << "1 surface open \\u00b7 shortcuts stay live";
-        else output << open_count << " surfaces open \\u00b7 shortcuts stay live";
-        output << "\",\"surfaces\":[";
+        std::string status;
+        if (open_count == 0) status = "No surface open";
+        else if (open_count == 1) status = "1 surface open · shortcuts stay live";
+        else status = std::to_string(open_count) + " surfaces open · shortcuts stay live";
+
         const std::array<std::array<std::string_view, 4U>, 4U> entries{{
             {"hub.settings", "Settings", "Durable application state", "F6"},
             {"hub.showcase", "Component showcase", "Widgets and extensions", "F7"},
@@ -1441,30 +1443,43 @@ struct Host::Impl final {
         const std::array<bool, 4U> active{
             settings_enabled, showcase_enabled, debug_enabled, performance_hud_enabled,
         };
+        std::vector<contracts::strata_hub::HubSurfacesItem> surfaces;
+        surfaces.reserve(entries.size());
         for (std::size_t index = 0U; index < entries.size(); ++index) {
-            if (index != 0U) output << ',';
-            output << "{\"key\":\"" << entries[index][0] << "\",\"name\":\"" << entries[index][1]
-                   << "\",\"detail\":\"" << entries[index][2] << "\",\"shortcut\":\""
-                   << entries[index][3] << "\",\"active\":"
-                   << (active[index] ? "true" : "false") << '}';
+            surfaces.push_back(contracts::strata_hub::HubSurfacesItem{
+                .key = std::string(entries[index][0]),
+                .name = std::string(entries[index][1]),
+                .detail = std::string(entries[index][2]),
+                .shortcut = std::string(entries[index][3]),
+                .active = active[index],
+            });
         }
-        output << "]}}";
-        return output.str();
+        std::ostringstream frame_scale;
+        frame_scale << std::fixed << std::setprecision(1) << "full scale " << scale << " ms";
+        return contracts::strata_hub::encode_hub(contracts::strata_hub::Hub{
+            .frame_summary = summary.str(),
+            .frame_millis = millis,
+            .frame_history = std::move(history),
+            .frame_area = std::move(area),
+            .frame_scale = frame_scale.str(),
+            .status = std::move(status),
+            .surfaces = std::move(surfaces),
+        }).json();
     }
 
-    void launch_from_hub(const std::string& payload) {
-        if (payload.find("hub.self") != std::string::npos) {
+    void launch_from_hub(const std::string_view target) {
+        if (target == "hub.self") {
             hub_enabled = false;
             if (hub.surface.has_value()) {
                 static_cast<void>(strata_surface_cancel_interactions(hub.surface->native_handle()));
             }
-        } else if (payload.find("hub.settings") != std::string::npos) {
+        } else if (target == "hub.settings") {
             toggle_settings();
-        } else if (payload.find("hub.showcase") != std::string::npos) {
+        } else if (target == "hub.showcase") {
             toggle_showcase();
-        } else if (payload.find("hub.profiler") != std::string::npos) {
+        } else if (target == "hub.profiler") {
             cycle_debug(false);
-        } else if (payload.find("hub.performance") != std::string::npos) {
+        } else if (target == "hub.performance") {
             toggle_performance_hud();
         }
     }
@@ -1472,10 +1487,15 @@ struct Host::Impl final {
     void create_hub() {
         if (hub.surface.has_value()) return;
         hub = create_session("hub.desktop", "assets/strata/ui/strata_hub.schemas.json");
-        hub.bindings->on("hub.launch", [this](const strata::host::ActionEvent& event) {
-            launch_from_hub(std::string(event.payload.require_string("target")));
-            return strata::host::ActionResult::handled;
-        });
+        hub.bindings->on(
+            contracts::strata_hub::HubLaunchAction::id,
+            [this](const strata::host::ActionEvent& event) {
+                const contracts::strata_hub::HubLaunchAction action =
+                    contracts::strata_hub::HubLaunchAction::decode(event);
+                launch_from_hub(action.target);
+                return strata::host::ActionResult::handled;
+            }
+        );
         publish(hub, "hub.desktop", hub_json());
         activate(hub, "assets/strata/ui/strata_hub.strata", "StrataHub", nullptr);
     }
@@ -1575,7 +1595,7 @@ struct Host::Impl final {
 
     void cycle_debug(const bool reverse) {
         if (!debug_enabled) {
-            debug_mode = std::string(reverse ? debug_modes.back() : debug_modes.front());
+            debug_mode = reverse ? debug_modes.back() : debug_modes.front();
             create_debug();
             debug_enabled = true;
         } else {
@@ -1593,7 +1613,7 @@ struct Host::Impl final {
                 }
                 return;
             }
-            debug_mode = std::string(debug_modes[static_cast<std::size_t>(next)]);
+            debug_mode = debug_modes[static_cast<std::size_t>(next)];
         }
         debug_snapshot_dirty = true;
         next_debug_snapshot = 0;
@@ -1850,7 +1870,8 @@ struct Host::Impl final {
     TimingWindow present_timings;
     DesktopFrameSample last_performance_sample;
     std::optional<strata_input_event> pending_pointer_move;
-    std::string debug_mode = "DIAGNOSTICS";
+    contracts::debug_overlay::StrataDebugSelectModeActionMode debug_mode =
+        contracts::debug_overlay::StrataDebugSelectModeActionMode::diagnostics;
     std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
     std::int64_t frame_time = 0;
     std::int64_t last_total_nanos = 0;
@@ -1879,9 +1900,12 @@ struct Host::Impl final {
     bool last_frame_had_draws = false;
     bool first_frame_contains_instance = false;
     static constexpr std::array debug_modes{
-        std::string_view("DIAGNOSTICS"), std::string_view("SUMMARY"),
-        std::string_view("MOTION"), std::string_view("SEMANTICS"),
-        std::string_view("HOT_TREE"), std::string_view("SPIKES"),
+        contracts::debug_overlay::StrataDebugSelectModeActionMode::diagnostics,
+        contracts::debug_overlay::StrataDebugSelectModeActionMode::summary,
+        contracts::debug_overlay::StrataDebugSelectModeActionMode::motion,
+        contracts::debug_overlay::StrataDebugSelectModeActionMode::semantics,
+        contracts::debug_overlay::StrataDebugSelectModeActionMode::hot_tree,
+        contracts::debug_overlay::StrataDebugSelectModeActionMode::spikes,
     };
 };
 

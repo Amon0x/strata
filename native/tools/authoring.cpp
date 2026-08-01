@@ -10,6 +10,7 @@
 #include <string_view>
 #include <system_error>
 
+#include "authoring_contract.hpp"
 #include "authoring_grammar.hpp"
 #include "authoring_registry.hpp"
 #include "core/utf8.hpp"
@@ -46,12 +47,35 @@ namespace {
     const data::JsonValue lexical = load_json(
         project_root / "src/main/resources/strata/lexical-v1.json"
     );
-    return {
+    std::map<std::filesystem::path, std::string> result{
         {"docs/generated/diagnostics.md", render_diagnostic_catalog(project_root)},
         {"docs/generated/strata-reference.md", render_reference(registry)},
         {"editor/strata-completions.json", render_completions(registry)},
         {"editor/vscode/syntaxes/strata.tmLanguage.json", render_grammar(lexical)},
     };
+    constexpr std::pair<std::string_view, std::string_view> contracts[]{
+        {"debug_overlay", "debug_overlay"},
+        {"demo_surface", "demo_surface"},
+        {"performance_hud", "performance_hud"},
+        {"settings_app", "settings_app"},
+        {"strata_hub", "strata_hub"},
+    };
+    for (const auto& [file_stem, namespace_name] : contracts) {
+        const std::filesystem::path schema_path =
+            project_root / "src/main/resources/assets/strata/ui" /
+            (std::string(file_stem) + ".schemas.json");
+        result.emplace(
+            std::filesystem::path("native/generated/strata/contracts") /
+                (std::string(file_stem) + ".hpp"),
+            render_cpp_contract(
+                registry,
+                load_json(schema_path),
+                "strata::contracts::" + std::string(namespace_name),
+                schema_path.lexically_relative(project_root).generic_string()
+            )
+        );
+    }
+    return result;
 }
 
 void write_text(const std::filesystem::path& destination, const std::string_view text) {

@@ -42,21 +42,34 @@ The native compiler resolves that id against the composed registry/schema, check
 optional fields, validates types, and retains the source range and component path. Unknown ids,
 misspellings, or incompatible payloads reject activation and leave the last-good unit active.
 
-## Register and own handlers
+## Generate and own C++ handlers
 
-C++ applications register typed handlers through `strata::host::Bindings`:
+The language-neutral application schema is also the source of truth for C++ host code. Generate a
+header with the installed authoring tool (CMake packages expose its path as `Strata_AUTHORING`):
+
+```sh
+strata_authoring --write-cpp-contract \
+  registry-v1.json application.schemas.json my::contracts generated/application_contract.hpp
+```
+
+The header contains owned model structures, encoders for complete and per-field host snapshots,
+action IDs, typed action payload decoders, enums, and an application action variant. It uses
+`strata::host::Value` only at the ABI boundary:
 
 ```cpp
-host.on("project.rename", [&](const strata::host::ActionEvent& event) {
-    project.rename(event.payload.require_string("id"), event.value.require_string("name"));
+host.on(my::contracts::ProjectRenameAction::id,
+        [&](const strata::host::ActionEvent& event) {
+    const auto action = my::contracts::ProjectRenameAction::decode(event);
+    project.rename(action.id, event.value.require_string("name"));
     project_revision.changed();
     return strata::host::ActionResult::handled;
 });
 ```
 
-`ActionEvent` owns its action id, structured payload, event kind, optional stable source key, and
-structured concrete value. Shared lifecycle projections such as `DragEvent` decode once in the
-framework-facing layer rather than being reparsed by every application model.
+Changing an action field or host model shape now makes generated C++ consumers fail at compile time
+instead of leaving duplicated field names in application code. `ActionEvent` still owns the concrete
+widget event because its shape depends on the event kind rather than the application action payload.
+Shared lifecycle projections such as `DragEvent` decode that framework event once.
 
 C hosts register handlers per runtime through `strata_runtime_register_action_handler`. A
 registration has an explicit release handle and owner label. Its callback receives borrowed

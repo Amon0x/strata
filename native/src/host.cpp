@@ -374,7 +374,7 @@ Bindings::~Bindings() = default;
 Bindings::Bindings(Bindings&&) noexcept = default;
 Bindings& Bindings::operator=(Bindings&&) noexcept = default;
 
-void Bindings::on(std::string action_id, Handler handler) {
+void Bindings::on(const std::string_view action_id, Handler handler) {
     if (impl_ == nullptr)
         throw std::logic_error("cannot use moved host bindings");
     if (action_id.empty() || !handler) {

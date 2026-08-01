@@ -140,8 +140,9 @@ frame-time report. See [Desktop performance testing](docs/performance-testing.md
 
 ## Embedding and authoring
 
-C++ application hosts can use `strata/host.hpp` (`Strata::host`) for structured values, typed action
-handlers, and revision-watched snapshots; JSON remains confined to the stable C ABI.
+C++ application hosts use `strata/host.hpp` (`Strata::host`) plus schema-generated model/action
+headers. The package exposes `Strata_AUTHORING` for contract generation, so application schemas stay
+the single source of truth and JSON remains confined to the stable C ABI.
 
 - [C/C++ embedding and custom renderer guide](docs/embedding.md)
 - [Win32 desktop hosting and SDK consumption](docs/desktop-hosting.md)

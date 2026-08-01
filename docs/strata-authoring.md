@@ -180,5 +180,6 @@ cmake --build --preset linux-x64 --target strata_generate_authoring
 ```
 
 Use the `windows-x64` preset on Windows. The ordinary CTest gate runs the equivalent
-`strata_check_authoring` check and fails if reference, diagnostic, completion, grammar, registry, or
-lexical artifacts are stale.
+`strata_check_authoring` check and fails if reference, diagnostic, completion, grammar, generated
+C++ host-contract, registry, or lexical artifacts are stale. External projects invoke the installed
+`Strata_AUTHORING` tool directly for their own application schema.

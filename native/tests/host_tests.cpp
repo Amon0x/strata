@@ -1,3 +1,6 @@
+#include <strata/contracts/debug_overlay.hpp>
+#include <strata/contracts/demo_surface.hpp>
+#include <strata/contracts/settings_app.hpp>
 #include <strata/host.hpp>
 
 #include <algorithm>
@@ -30,6 +33,52 @@ std::int64_t clock(void* const user_data) noexcept {
     if (!input)
         throw std::runtime_error("could not open host test registry");
     return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
+void generated_contracts_round_trip() {
+    namespace settings = strata::contracts::settings_app;
+    const settings::Settings source{
+        .saved_message = "generated",
+        .profile_tree = {
+            settings::SettingsProfileTreeItem{
+                .key = "profile.generated",
+                .label = "Generated profile",
+                .may_have_children = false,
+                .children_loaded = true,
+            },
+        },
+    };
+    const strata::host::Value snapshot = settings::encode_settings(source);
+    const settings::Settings decoded = settings::decode_settings(snapshot.require("settings"));
+    check(decoded.saved_message == "generated" && decoded.profile_tree.size() == 1U &&
+              decoded.profile_tree.front().key == "profile.generated",
+          "generated host snapshot contract did not round-trip");
+
+    namespace demo = strata::contracts::demo_surface;
+    const demo::DemoHostMessageAction action = demo::DemoHostMessageAction::decode(
+        strata::host::ActionEvent{
+            std::string(demo::DemoHostMessageAction::id),
+            strata::host::Value::object({{"message", "typed"}}),
+            "activate",
+            std::nullopt,
+            {},
+        }
+    );
+    check(action.message == "typed" && action.priority == 0.0,
+          "generated action decoder did not apply its schema default");
+
+    namespace debug = strata::contracts::debug_overlay;
+    const auto mode = debug::StrataDebugSelectModeAction::decode(
+        strata::host::ActionEvent{
+            std::string(debug::StrataDebugSelectModeAction::id),
+            strata::host::Value::object({{"mode", "HOT_TREE"}}),
+            "activate",
+            std::nullopt,
+            {},
+        }
+    );
+    check(debug::wire_name(mode.mode) == "HOT_TREE",
+          "generated enum action contract changed its wire value");
 }
 
 void structured_values_round_trip() {
@@ -342,6 +391,7 @@ int main(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count != 2)
             throw std::runtime_error("host tests require the registry path");
+        generated_contracts_round_trip();
         structured_values_round_trip();
         drag_events_are_typed_once();
         list_reorder_uses_stable_neighbors();

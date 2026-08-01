@@ -136,32 +136,29 @@ and the Surface release-packet barrier.
 
 ## Typed C++ host models
 
-C hosts use the JSON ABI directly. Ordinary C++ application code should instead include
-`strata/host.hpp` and link `Strata::host`. `strata::host::Bindings` owns handler registrations,
-decodes action calls into structured values, watches model revisions, and publishes changed
-snapshots with runtime-owned monotonic generations:
+C hosts use the JSON ABI directly. Ordinary C++ application code should generate its contract from
+the same application schema consumed by the compiler, include `strata/host.hpp`, and link
+`Strata::host`. The installed CMake package exposes `Strata_AUTHORING`; invoke it with
+`--write-cpp-contract <registry> <schema> <namespace> <output.hpp>` from a custom command.
+
+The generated header provides model structures, complete/per-field snapshot encoders, action IDs,
+typed payload decoders, enums, maps/unions, and an action variant:
 
 ```cpp
+namespace contract = my::application::contract;
 strata::host::Revision revision;
-std::vector<Item> items = load_items();
+std::vector<contract::AppItemsItem> items = load_items();
 strata::host::Bindings host(runtime, "my.application");
 
 host.snapshot(
     "my.application.model",
     [&] { return revision.value(); },
-    [&] {
-        return strata::host::object({
-            {"app", strata::host::object({
-                {"items", strata::host::Value::array(items, [](const Item& item) {
-                    return strata::host::object({{"key", item.key}, {"label", item.label}});
-                })},
-            })},
-        });
-    }
+    [&] { return contract::encode_app_items(items); }
 );
 
-host.on("app.save", [&](const strata::host::ActionEvent& event) {
-    save(event.payload.require_string("path"));
+host.on(contract::AppSaveAction::id, [&](const strata::host::ActionEvent& event) {
+    const contract::AppSaveAction action = contract::AppSaveAction::decode(event);
+    save(action.path);
     return strata::host::ActionResult::handled;
 });
 
@@ -169,9 +166,12 @@ host.on("app.save", [&](const strata::host::ActionEvent& event) {
 host.synchronize();
 ```
 
-Model code never assembles or parses JSON. `synchronize()` republishes only changed revisions and
-rethrows any application exception that had to be contained at the C callback boundary. For small
-standalone values, `strata::host::Observable<T>` owns the revision automatically.
+Model code never assembles or parses JSON, and schema drift becomes a C++ compile failure.
+`Bindings::synchronize()` republishes only changed revisions and rethrows any application exception
+that had to be contained at the C callback boundary. For small standalone values,
+`strata::host::Observable<T>` owns the revision automatically. The dynamic `Value` API remains the
+intentional escape hatch for scenario runners and remote protocols whose schema is selected only at
+runtime.
 
 ## Low-level host data, actions, and services
 

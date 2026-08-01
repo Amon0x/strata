@@ -419,6 +419,15 @@ set_target_properties(
 target_compile_features(strata_host_cpp PUBLIC cxx_std_23)
 strata_target_defaults(strata_host_cpp)
 
+# Generated application contracts are repository-internal consumers of the public host API. The
+# installed generator emits equivalent headers for external application schemas.
+add_library(strata_application_contracts INTERFACE)
+target_link_libraries(strata_application_contracts INTERFACE Strata::host)
+target_include_directories(
+    strata_application_contracts
+    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/generated>
+)
+
 add_library(
     strata_extensions
     STATIC
@@ -524,6 +533,8 @@ if(STRATA_BUILD_TOOLS)
         tools/authoring_main.cpp
         tools/authoring.cpp
         tools/authoring.hpp
+        tools/authoring_contract.cpp
+        tools/authoring_contract.hpp
         tools/authoring_grammar.cpp
         tools/authoring_grammar.hpp
         tools/authoring_registry.cpp
@@ -611,6 +622,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         PRIVATE
             Strata::host
             Strata::desktop
+            strata_application_contracts
             strata_extensions
             strata_host_support
             strata_d3d11
@@ -765,7 +777,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     endif()
 
     add_executable(strata_host_tests tests/host_tests.cpp)
-    target_link_libraries(strata_host_tests PRIVATE Strata::host)
+    target_link_libraries(strata_host_tests PRIVATE Strata::host strata_application_contracts)
     strata_target_defaults(strata_host_tests)
     add_test(
         NAME strata.host
@@ -778,7 +790,9 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         tests/showcase_model_tests.cpp
         desktop/showcase.cpp
     )
-    target_link_libraries(strata_showcase_model_tests PRIVATE Strata::host)
+    target_link_libraries(
+        strata_showcase_model_tests PRIVATE Strata::host strata_application_contracts
+    )
     target_include_directories(strata_showcase_model_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop)
     strata_target_defaults(strata_showcase_model_tests)
     add_test(NAME strata.showcase.model COMMAND strata_showcase_model_tests)
@@ -1095,6 +1109,8 @@ install(
         samples/installed/CMakeLists.txt
         samples/c_smoke.c
         samples/cpp_smoke.cpp
+        samples/installed/contract.schemas.json
+        samples/installed/contract_smoke.cpp
         samples/desktop_app.cpp
         samples/desktop_app.json
     DESTINATION share/strata/samples

@@ -1,0 +1,113 @@
+{
+  "widgets": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "actions": {
+    "registry": "strata.builtins+installed-contract.v1",
+    "required": ["installed.rename"],
+    "definitions": [
+      {
+        "id": "installed.rename",
+        "dispatchPolicy": "required",
+        "summary": "Exercise installed C++ contract generation",
+        "payloadContract": "strata.action-payload/installed.rename@1",
+        "arguments": [
+          {
+            "name": "name",
+            "type": {"kind": "string"},
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "priority",
+            "type": {"kind": "number"},
+            "required": false,
+            "nullable": false,
+            "aliases": [],
+            "default": {"kind": "number", "value": 2}
+          }
+        ]
+      }
+    ]
+  },
+  "host": [
+    {
+      "path": "installed",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "installed generated host model",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          {
+            "name": "title",
+            "type": {"kind": "string"},
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "metadata",
+            "type": {
+              "kind": "map",
+              "label": "installed metadata",
+              "valueNullable": false,
+              "value": {"kind": "string"}
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "selection",
+            "type": {
+              "kind": "union",
+              "label": "installed selection",
+              "options": [
+                {"kind": "string"},
+                {"kind": "number"},
+                {"kind": "boolean"}
+              ]
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "items",
+            "type": {
+              "kind": "list",
+              "minimumItems": 0,
+              "maximumItems": 8,
+              "elementNullable": false,
+              "element": {
+                "kind": "object",
+                "label": "installed generated item",
+                "allowUnknownFields": false,
+                "valueNullable": false,
+                "fields": [
+                  {
+                    "name": "key",
+                    "type": {"kind": "key"},
+                    "required": true,
+                    "nullable": false
+                  },
+                  {
+                    "name": "enabled",
+                    "type": {"kind": "boolean"},
+                    "required": true,
+                    "nullable": false
+                  }
+                ]
+              }
+            },
+            "required": true,
+            "nullable": false
+          }
+        ]
+      }
+    }
+  ]
+}

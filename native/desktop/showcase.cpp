@@ -18,6 +18,7 @@ using strata::host::ActionResult;
 using strata::host::DragEvent;
 using strata::host::DropPlacement;
 using strata::host::Value;
+namespace contract = strata::contracts::demo_surface;
 
 [[nodiscard]] std::optional<double> scalar_number(const Value& value) noexcept {
     if (value.number() != nullptr)
@@ -91,113 +92,108 @@ void ShowcaseModel::initialize_grid() {
     }
 }
 
-Value ShowcaseModel::tree_items() const {
-    Value::Array values;
+std::vector<contract::DataTreeItemsItem> ShowcaseModel::tree_items() const {
+    std::vector<contract::DataTreeItemsItem> values;
     values.reserve(tree_items_.size());
     for (const TreeItem& item : tree_items_) {
         const bool children_loaded = !item.folder || !item.folder_group.has_value() ||
                                      loaded_tree_groups_.contains(*item.folder_group);
-        values.push_back(Value::object({
-            {"key", item.key},
-            {"label", item.label},
-            {"parentKey", item.parent.has_value() ? Value(*item.parent) : Value{}},
-            {"mayHaveChildren", item.folder},
-            {"childrenLoaded", children_loaded},
-        }));
+        values.push_back(contract::DataTreeItemsItem{
+            .key = item.key,
+            .label = item.label,
+            .parent_key = item.parent,
+            .may_have_children = item.folder,
+            .children_loaded = children_loaded,
+        });
     }
-    return Value(std::move(values));
+    return values;
 }
 
 Value ShowcaseModel::tree_snapshot() const {
-    return Value::object({
-        {"data", Value::object({{"treeItems", tree_items()}})},
-    });
+    return contract::encode_data_tree_items(tree_items());
 }
 
 Value ShowcaseModel::table_snapshot() const {
-    Value::Array rows;
+    std::vector<contract::DataTableRowsItem> rows;
     rows.reserve(5'000U);
     for (std::size_t index = 0U; index < 5'000U; ++index) {
         std::ostringstream name;
         name << "Entity " << std::setw(4) << std::setfill('0') << index;
-        rows.push_back(Value::object({
-            {"key", "data.table.row." + std::to_string(index)},
-            {"cells", Value::object({
-                          {"name", name.str()},
-                          {"status", index % 3U == 0U ? "Active" : "Idle"},
-                          {"progress", index % 101U},
-                      })},
-        }));
+        rows.push_back(contract::DataTableRowsItem{
+            .key = "data.table.row." + std::to_string(index),
+            .cells = contract::DataTableRowsItemCells{
+                .name = name.str(),
+                .status = index % 3U == 0U ? "Active" : "Idle",
+                .progress = static_cast<double>(index % 101U),
+            },
+        });
     }
-    return Value::object({
-        {"data", Value::object({{"tableRows", Value(std::move(rows))}})},
-    });
+    return contract::encode_data_table_rows(rows);
 }
 
 Value ShowcaseModel::grid_snapshot() const {
-    Value::Array entries;
+    std::vector<contract::DataGridEntriesItem> entries;
     entries.reserve(1'515U);
     for (std::size_t group = 0U; group < grid_groups_.size(); ++group) {
-        entries.push_back(Value::object({
-            {"kind", "HEADER"},
-            {"key", "data.grid.header." + std::to_string(group)},
-            {"label", "Group " + std::to_string(group + 1U)},
-        }));
+        entries.push_back(contract::DataGridEntriesItem{
+            .kind = "HEADER",
+            .key = "data.grid.header." + std::to_string(group),
+            .label = "Group " + std::to_string(group + 1U),
+        });
         for (const std::size_t item : grid_groups_[group]) {
-            entries.push_back(Value::object({
-                {"kind", "ITEM"},
-                {"key", "data.grid.item." + std::to_string(item)},
-                {"label", "Icon " + std::to_string(item)},
-            }));
+            entries.push_back(contract::DataGridEntriesItem{
+                .kind = "ITEM",
+                .key = "data.grid.item." + std::to_string(item),
+                .label = "Icon " + std::to_string(item),
+            });
         }
     }
-    return Value::object({
-        {"data", Value::object({{"gridEntries", Value(std::move(entries))}})},
-    });
+    return contract::encode_data_grid_entries(entries);
 }
 
 Value ShowcaseModel::demo_snapshot() const {
-    Value::Array reorder;
+    std::vector<contract::DemoReorderItemsItem> reorder;
     reorder.reserve(reorder_items_.size());
     for (const std::string& id : reorder_items_) {
         std::string label = id;
-        if (!label.empty())
+        if (!label.empty()) {
             label.front() =
                 static_cast<char>(std::toupper(static_cast<unsigned char>(label.front())));
-        reorder.push_back(Value::object({
-            {"id", id},
-            {"key", reorder_key(id)},
-            {"label", std::move(label)},
-        }));
+        }
+        reorder.push_back(contract::DemoReorderItemsItem{
+            .id = id,
+            .key = reorder_key(id),
+            .label = std::move(label),
+        });
     }
-    return Value::object({
-        {"demo",
-         Value::object({
-             {"eventTotal", 0},
-             {"retainedEventCount", 0},
-             {"events", Value::array({})},
-             {"coalescingResult", "not run yet"},
-             {"deterministicResult", "not run yet"},
-             {"focusContained", false},
-             {"inspectorPickArmed", false},
-             {"reorderItems", Value(std::move(reorder))},
-             {"controlledSplitRatio", controlled_split_ratio_},
-             {"hostValue", host_value_},
-             {"hostMessage", host_message_},
-             {"dataActivity", data_activity_},
-             {"comboQuery", combo_query_},
-             {"comboSelection", combo_selection_.has_value() ? Value(*combo_selection_) : Value{}},
-             {"inspectorNodeCount", 0},
-             {"inspectorSelectedKey", "none"},
-             {"inspectorSelectedType", "none"},
-             {"inspectorBounds", "none"},
-             {"inspectorActions", "none"},
-             {"inspectorHandlerOwners", "none"},
-             {"inspectorMotion", "none"},
-             {"measuredNodes", 0},
-             {"reusedNodes", 0},
-             {"arrangedNodes", 0},
-         })},
+    return contract::encode_demo(contract::Demo{
+        .event_total = 0.0,
+        .retained_event_count = 0.0,
+        .events = {},
+        .coalescing_result = "not run yet",
+        .deterministic_result = "not run yet",
+        .focus_contained = false,
+        .inspector_pick_armed = false,
+        .reorder_items = std::move(reorder),
+        .controlled_split_ratio = controlled_split_ratio_,
+        .host_value = host_value_,
+        .host_message = host_message_,
+        .data_activity = data_activity_,
+        .form_valid = false,
+        .form_dirty = false,
+        .form_touched = false,
+        .combo_query = combo_query_,
+        .combo_selection = combo_selection_,
+        .inspector_node_count = 0.0,
+        .inspector_selected_key = "none",
+        .inspector_selected_type = "none",
+        .inspector_bounds = "none",
+        .inspector_actions = "none",
+        .inspector_handler_owners = "none",
+        .inspector_motion = "none",
+        .measured_nodes = 0.0,
+        .reused_nodes = 0.0,
+        .arranged_nodes = 0.0,
     });
 }
 
@@ -410,7 +406,7 @@ std::string ShowcaseModel::collection_activity(const ActionEvent& event) {
 }
 
 ActionResult ShowcaseModel::handle(const ActionEvent& event) {
-    if (event.id == "demo.data.collection") {
+    if (event.id == contract::DemoDataCollectionAction::id) {
         if (event.kind == "tree-children-requested" && event.value.string() != nullptr) {
             static_cast<void>(load_tree_children(*event.value.string()));
             return ActionResult::handled;
@@ -426,13 +422,13 @@ ActionResult ShowcaseModel::handle(const ActionEvent& event) {
         }
         return ActionResult::handled;
     }
-    if (event.id == "demo.reorder") {
+    if (event.id == contract::DemoReorderAction::id) {
         if (const std::optional<DragEvent> drag = DragEvent::from(event); drag.has_value()) {
             static_cast<void>(handle_reorder(*drag));
         }
         return ActionResult::handled;
     }
-    if (event.id == "demo.split.controlled") {
+    if (event.id == contract::DemoSplitControlledAction::id) {
         if (const std::optional<double> value = scalar_number(event.value); value.has_value()) {
             const double next = std::clamp(*value, 0.0, 1.0);
             if (next != controlled_split_ratio_) {
@@ -442,30 +438,31 @@ ActionResult ShowcaseModel::handle(const ActionEvent& event) {
         }
         return ActionResult::handled;
     }
-    if (event.id == "demo.host.bump") {
+    if (event.id == contract::DemoHostBumpAction::id) {
         ++host_generation_;
         host_value_ = "desktop-v" + std::to_string(host_generation_);
         changed_demo();
         return ActionResult::handled;
     }
-    if (event.id == "demo.host.message") {
-        const std::string message(event.payload.require_string("message"));
-        const double priority_value = event.payload.optional_number("priority").value_or(0.0);
+    if (event.id == contract::DemoHostMessageAction::id) {
+        const contract::DemoHostMessageAction action =
+            contract::DemoHostMessageAction::decode(event);
+        const double priority_value = action.priority;
         if (priority_value < static_cast<double>(std::numeric_limits<int>::min()) ||
             priority_value > static_cast<double>(std::numeric_limits<int>::max())) {
             throw std::out_of_range("demo.host.message priority is outside the supported range");
         }
         const int priority = static_cast<int>(priority_value);
-        host_message_ = message + " (priority=" + std::to_string(priority) + ")";
+        host_message_ = action.message + " (priority=" + std::to_string(priority) + ")";
         changed_demo();
         return ActionResult::handled;
     }
-    if (event.id == "demo.combo.query" && event.value.string() != nullptr) {
+    if (event.id == contract::DemoComboQueryAction::id && event.value.string() != nullptr) {
         combo_query_ = *event.value.string();
         changed_demo();
         return ActionResult::handled;
     }
-    if (event.id == "demo.combo.select") {
+    if (event.id == contract::DemoComboSelectAction::id) {
         combo_selection_ = event.value.string() != nullptr
                                ? std::optional<std::string>(*event.value.string())
                                : std::nullopt;

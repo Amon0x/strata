@@ -26,6 +26,28 @@ strata_installed_smoke(strata_installed_cpp cpp_smoke.cpp)
 target_link_libraries(strata_installed_cpp PRIVATE Strata::host Strata::render_host)
 set_target_properties(strata_installed_cpp PROPERTIES CXX_EXTENSIONS OFF)
 
+if(Strata_AUTHORING)
+    set(contract_header "${CMAKE_CURRENT_BINARY_DIR}/generated/installed_contract.hpp")
+    add_custom_command(
+        OUTPUT "${contract_header}"
+        COMMAND "${Strata_AUTHORING}" --write-cpp-contract
+            "${Strata_REGISTRY}"
+            "${CMAKE_CURRENT_LIST_DIR}/contract.schemas.json"
+            installed::contract
+            "${contract_header}"
+        DEPENDS "${CMAKE_CURRENT_LIST_DIR}/contract.schemas.json"
+        COMMENT "Generating the installed C++ host contract"
+        VERBATIM
+    )
+    add_executable(strata_installed_contract contract_smoke.cpp "${contract_header}")
+    target_link_libraries(strata_installed_contract PRIVATE Strata::host)
+    target_include_directories(
+        strata_installed_contract PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated"
+    )
+    set_target_properties(strata_installed_contract PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME strata_installed_contract COMMAND strata_installed_contract)
+endif()
+
 if(WIN32 AND TARGET Strata::desktop)
     add_executable(strata_installed_desktop desktop_app.cpp)
     target_link_libraries(strata_installed_desktop PRIVATE Strata::desktop)

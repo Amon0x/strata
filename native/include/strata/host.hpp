@@ -203,7 +203,7 @@ class Bindings final {
     Bindings(Bindings&&) noexcept;
     Bindings& operator=(Bindings&&) noexcept;
 
-    void on(std::string action_id, Handler handler);
+    void on(std::string_view action_id, Handler handler);
     void snapshot(std::string snapshot_id, RevisionSource revision, SnapshotSource source);
 
     template <typename Model, typename Snapshot>
