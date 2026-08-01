@@ -609,16 +609,16 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                             config.fonts.push_back({font.id, font.resource});
                         }
                     }
-                    if (!application_launch->textures.empty()) {
-                        config.textures.clear();
-                        for (const strata::headless::TextureConfig& texture :
-                             application_launch->textures) {
-                            config.textures.push_back({
-                                texture.id,
-                                texture.resource,
-                                texture.sampling == 0U
-                                    ? strata::desktop::TextureSampling::nearest
-                                    : strata::desktop::TextureSampling::linear,
+                    if (!application_launch->images.empty()) {
+                        config.images.clear();
+                        for (const strata::headless::ImageConfig& image :
+                             application_launch->images) {
+                            config.images.push_back({
+                                image.id,
+                                image.resource,
+                                image.sampling == 0U
+                                    ? strata::desktop::ImageSampling::nearest
+                                    : strata::desktop::ImageSampling::linear,
                             });
                         }
                     }

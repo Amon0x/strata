@@ -724,18 +724,19 @@ typedef struct strata_surface_font_resource {
     strata_string_view resource_id;
 } strata_surface_font_resource;
 
-typedef uint32_t strata_texture_sampling;
-#define STRATA_TEXTURE_SAMPLING_NEAREST UINT32_C(0)
-#define STRATA_TEXTURE_SAMPLING_LINEAR UINT32_C(1)
+typedef uint32_t strata_image_sampling;
+#define STRATA_IMAGE_SAMPLING_NEAREST UINT32_C(0)
+#define STRATA_IMAGE_SAMPLING_LINEAR UINT32_C(1)
 
-typedef struct strata_surface_texture_resource {
-    /* Logical texture id referenced by render commands, for example strata:ui/icons/chevron-down. */
+typedef struct strata_surface_image_resource {
+    /* Logical image id referenced by .strata Image/icon properties. */
     strata_string_view id;
-    /* Host resource-adapter id for an encoded PNG. */
+    /* Host resource-adapter id for an encoded PNG or static SVG document. */
     strata_string_view resource_id;
-    strata_texture_sampling sampling;
+    /* Raster sampling mode; ignored for resolution-independent SVG images. */
+    strata_image_sampling sampling;
     uint32_t reserved;
-} strata_surface_texture_resource;
+} strata_surface_image_resource;
 
 typedef struct strata_widget_input_context strata_widget_input_context;
 typedef struct strata_widget_render_context strata_widget_render_context;
@@ -1296,7 +1297,7 @@ typedef struct strata_edges {
     double bottom;
 } strata_edges;
 
-/** Normalized sub-rectangle of a texture; {0,0,1,1} selects the whole image. */
+/** Normalized image source region; {0,0,1,1} selects the whole PNG or SVG. */
 typedef struct strata_texture_region {
     double u;
     double v;
@@ -1473,9 +1474,9 @@ typedef struct strata_surface_config {
     size_t font_count;
     /* Optional surface-owned lifecycle extensions. */
     const strata_surface_extension_bundle* extensions;
-    /* Encoded images are copied at creation and emitted once through render packet v4. */
-    const strata_surface_texture_resource* textures;
-    size_t texture_count;
+    /* PNGs become surface textures; SVGs become backend-independent vector geometry. */
+    const strata_surface_image_resource* images;
+    size_t image_count;
 } strata_surface_config;
 
 typedef uint32_t strata_input_event_kind;
@@ -1605,7 +1606,7 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_VALUE_DURATION UINT32_C(3)
 #define STRATA_RENDER_VALUE_STRING UINT32_C(4)
 #define STRATA_RENDER_VALUE_COLOR UINT32_C(5)
-#define STRATA_RENDER_VALUE_TEXTURE UINT32_C(6)
+#define STRATA_RENDER_VALUE_IMAGE UINT32_C(6)
 #define STRATA_RENDER_VALUE_KEY UINT32_C(7)
 #define STRATA_RENDER_VALUE_THEME_TOKEN UINT32_C(8)
 #define STRATA_RENDER_VALUE_LIST UINT32_C(9)
@@ -1899,7 +1900,7 @@ STRATA_API strata_result strata_surface_animate_scroll_to(
     const strata_scroll_animation_request* request,
     uint32_t* out_started
 );
-/* Reloads the original font/texture bindings transactionally; failure retains prior resources. */
+/* Reloads the original font/image bindings transactionally; failure retains prior resources. */
 STRATA_API strata_result strata_surface_reload_resources(strata_surface* surface);
 STRATA_API strata_result strata_runtime_create_application_state_snapshot(
     strata_runtime* runtime,
@@ -2139,7 +2140,7 @@ STRATA_API void strata_widget_render_text(
 STRATA_API void strata_widget_render_image(
     strata_widget_render_context* context,
     strata_rect bounds,
-    strata_string_view texture,
+    strata_string_view image,
     strata_color tint,
     strata_texture_region source
 );

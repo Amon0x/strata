@@ -35,8 +35,8 @@ ValueSchemaPtr runtime_schema(const compiler::SemanticType& type) {
         return ValueSchema::scalar(ValueSchemaKind::boolean);
     case SemanticTypeKind::color:
         return ValueSchema::scalar(ValueSchemaKind::color);
-    case SemanticTypeKind::texture:
-        return ValueSchema::scalar(ValueSchemaKind::texture);
+    case SemanticTypeKind::image:
+        return ValueSchema::scalar(ValueSchemaKind::image);
     case SemanticTypeKind::key:
         return ValueSchema::scalar(ValueSchemaKind::key);
     case SemanticTypeKind::list:

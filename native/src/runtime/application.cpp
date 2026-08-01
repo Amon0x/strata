@@ -57,7 +57,7 @@ namespace {
     if (type_id == "dsl.duration") return ValueSchema::scalar(ValueSchemaKind::duration);
     if (type_id == "dsl.string") return ValueSchema::scalar(ValueSchemaKind::string);
     if (type_id == "dsl.color") return ValueSchema::scalar(ValueSchemaKind::color);
-    if (type_id == "dsl.texture") return ValueSchema::scalar(ValueSchemaKind::texture);
+    if (type_id == "dsl.image") return ValueSchema::scalar(ValueSchemaKind::image);
     if (type_id == "dsl.key") return ValueSchema::scalar(ValueSchemaKind::key);
     if (type_id == "dsl.theme-token") return ValueSchema::scalar(ValueSchemaKind::theme_token);
     if (type_id == "dsl.list") return ValueSchema::list(ValueSchema::any(), true, 100'000U);

@@ -4,6 +4,7 @@
 #include <span>
 #include <vector>
 
+#include "font/atlas.hpp"
 #include "resource/image.hpp"
 #include "ui/render/submission.hpp"
 
@@ -38,11 +39,12 @@ class TextEngine;
 
 } // namespace strata::ui
 
-namespace strata::font {
-class GlyphAtlas;
-}
-
 namespace strata::ui {
+
+/** Fully allocated releases for raster images already published to a host. */
+struct HostRenderResourceInvalidationPlan final {
+    std::vector<font::AtlasOperation> releases;
+};
 
 /**
  * Packet v4: v3 geometry plus a retained geometry epoch for host-side decode/upload reuse. The logical v1
@@ -84,6 +86,10 @@ public:
     );
     /** Reuses settled geometry and updates only the packet frame index. */
     [[nodiscard]] bool reuse(std::uint64_t frame_index);
+    /** Plans release records for raster images already published by this cache. */
+    [[nodiscard]] HostRenderResourceInvalidationPlan plan_resource_invalidation() const;
+    /** Clears retained geometry and queues a prepared release plan for the next frame packet. */
+    void commit_resource_invalidation(HostRenderResourceInvalidationPlan plan) noexcept;
     /**
      * Compatibility terminal entry point. It releases the surface-owned glyph atlas and every
      * static texture descriptor already retained by this cache. Call prepare_resource_release()
@@ -115,6 +121,7 @@ private:
     std::vector<std::uint8_t> resource_packet_;
     const std::vector<std::uint8_t>* current_packet_ = &geometry_packet_;
     HostRenderPacketTelemetry telemetry_;
+    std::vector<font::AtlasOperation> pending_static_releases_;
     // A failed v4 encode must be retried even if the retained UI becomes settled meanwhile.
     bool frame_encoding_incomplete_ = false;
     bool terminal_release_prepared_ = false;

@@ -442,13 +442,13 @@ struct ApplicationHost::Impl final {
                 strata::view(font.resource),
             });
         }
-        std::vector<strata_surface_texture_resource> textures;
-        textures.reserve(scenario.textures.size());
-        for (const TextureConfig& texture : scenario.textures) {
-            textures.push_back(strata_surface_texture_resource{
-                strata::view(texture.id),
-                strata::view(texture.resource),
-                texture.sampling,
+        std::vector<strata_surface_image_resource> images;
+        images.reserve(scenario.images.size());
+        for (const ImageConfig& image : scenario.images) {
+            images.push_back(strata_surface_image_resource{
+                strata::view(image.id),
+                strata::view(image.resource),
+                image.sampling,
                 0U,
             });
         }
@@ -463,8 +463,8 @@ struct ApplicationHost::Impl final {
             fonts.empty() ? nullptr : fonts.data(),
             fonts.size(),
             extensions.pointer(),
-            textures.empty() ? nullptr : textures.data(),
-            textures.size(),
+            images.empty() ? nullptr : images.data(),
+            images.size(),
         };
         surface.emplace(runtime->create_surface(surface_config));
         resize_renderer();

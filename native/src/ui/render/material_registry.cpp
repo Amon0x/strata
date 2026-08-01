@@ -32,7 +32,7 @@ namespace {
     if (*type == "FLOAT4") return finite_vector(value, 4U);
     if (*type == "COLOR") return value.color() != nullptr;
     if (*type == "TEXTURE") {
-        return value.texture() != nullptr ||
+        return value.image() != nullptr ||
                (value.string() != nullptr && !value.string()->empty());
     }
     return false;

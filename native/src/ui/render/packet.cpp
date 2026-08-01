@@ -124,7 +124,7 @@ void texture_region(Bytes& output, const TextureRegion& value) {
     case runtime::ValueKind::duration: return 3U;
     case runtime::ValueKind::string: return 4U;
     case runtime::ValueKind::color: return 5U;
-    case runtime::ValueKind::texture: return 6U;
+    case runtime::ValueKind::image: return 6U;
     case runtime::ValueKind::key: return 7U;
     case runtime::ValueKind::theme_token: return 8U;
     case runtime::ValueKind::list: return 9U;
@@ -230,6 +230,7 @@ void command_payload(Bytes& output, const RenderCommand& command) {
                 point(output, segment.control_b);
                 point(output, segment.to);
             }
+            integer(output, static_cast<std::uint32_t>(value.shape.fill_rule));
             boolean(output, value.shape.fill.has_value());
             if (value.shape.fill.has_value()) paint(output, *value.shape.fill);
             boolean(output, value.shape.stroke.has_value());

@@ -17,6 +17,10 @@
 #include "ui/layout.hpp"
 #include "ui/typography.hpp"
 
+namespace strata::resource {
+class SvgImageRegistry;
+}
+
 namespace strata::ui {
 
 class InputRouter;
@@ -313,6 +317,7 @@ public:
         const BehaviorRegistry& behaviors,
         const MotionRuntime& motion,
         const TextEngine* text,
+        const resource::SvgImageRegistry* svg_images,
         const MaterialRegistry& materials,
         const RenderGenerationToken& generations,
         RenderCommandBuffer& output

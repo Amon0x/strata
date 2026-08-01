@@ -120,10 +120,14 @@ the initialized application and accept operations from the control stream instea
     "fonts": [
       {"id": "example:default", "resource": "assets/example/default.ttf"}
     ],
-    "textures": [
+    "images": [
       {
         "id": "example:icon",
-        "resource": "assets/example/icon.png",
+        "resource": "assets/example/icon.svg"
+      },
+      {
+        "id": "example:photo",
+        "resource": "assets/example/photo.png",
         "sampling": "linear"
       }
     ]
@@ -144,7 +148,8 @@ the initialized application and accept operations from the control stream instea
 ```
 
 Resource and module paths are relative to `--resources`; absolute and root-escaping paths are
-rejected. Imported modules resolve relative to their importer through the shared host module-path
+rejected. `surface.images` accepts encoded PNGs and the bounded static SVG subset documented in
+[PNG and SVG images](svg.md). Raster `sampling` is ignored for SVG geometry. Imported modules resolve relative to their importer through the shared host module-path
 resolver used by the native hosts.
 
 `application.actions` installs a generic recording handler for each declared host action. Framework

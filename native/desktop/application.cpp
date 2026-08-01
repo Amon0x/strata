@@ -221,10 +221,10 @@ struct ApplicationHost::Impl final {
                 throw std::invalid_argument("desktop font id must not be empty");
             require_resource_id(font.resource, "desktop font resource");
         }
-        for (const TextureResource& texture : config.textures) {
-            if (texture.id.empty())
-                throw std::invalid_argument("desktop texture id must not be empty");
-            require_resource_id(texture.resource, "desktop texture resource");
+        for (const ImageResource& image : config.images) {
+            if (image.id.empty())
+                throw std::invalid_argument("desktop image id must not be empty");
+            require_resource_id(image.resource, "desktop image resource");
         }
 
         RECT client{};
@@ -325,13 +325,13 @@ struct ApplicationHost::Impl final {
                 strata::view(font.resource),
             });
         }
-        std::vector<strata_surface_texture_resource> textures;
-        textures.reserve(config.textures.size());
-        for (const TextureResource& texture : config.textures) {
-            textures.push_back(strata_surface_texture_resource{
-                strata::view(texture.id),
-                strata::view(texture.resource),
-                static_cast<std::uint32_t>(texture.sampling),
+        std::vector<strata_surface_image_resource> images;
+        images.reserve(config.images.size());
+        for (const ImageResource& image : config.images) {
+            images.push_back(strata_surface_image_resource{
+                strata::view(image.id),
+                strata::view(image.resource),
+                static_cast<std::uint32_t>(image.sampling),
                 0U,
             });
         }
@@ -346,8 +346,8 @@ struct ApplicationHost::Impl final {
             fonts.empty() ? nullptr : fonts.data(),
             fonts.size(),
             extensions.pointer(),
-            textures.empty() ? nullptr : textures.data(),
-            textures.size(),
+            images.empty() ? nullptr : images.data(),
+            images.size(),
         };
         surface.emplace(runtime->create_surface(surface_config));
     }

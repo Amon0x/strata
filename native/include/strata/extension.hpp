@@ -57,7 +57,7 @@ using MeshVertex = strata_mesh_vertex;
     return CornerRadii{radius, radius, radius, radius};
 }
 
-/** Whole-texture sampling; narrow it to sample one sprite out of an atlas. */
+/** Whole-image source region; narrow it to sample one sprite out of a raster atlas. */
 [[nodiscard]] constexpr TextureRegion whole_texture() noexcept {
     return TextureRegion{0.0, 0.0, 1.0, 1.0};
 }
@@ -309,7 +309,7 @@ public:
     void text(std::string_view value, double x, double y, Color color);
     void image(
         Rect bounds,
-        std::string_view texture,
+        std::string_view image,
         Color tint = rgba(255U, 255U, 255U),
         TextureRegion source = whole_texture()
     );

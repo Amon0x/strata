@@ -23,7 +23,7 @@ void icon_button_content(WidgetRenderScope& scope) {
             scope.visual().border
         );
     }
-    const std::string* texture = widget_texture_value(scope.property("icon"));
+    const std::string* texture = widget_image_value(scope.property("icon"));
     if (texture == nullptr) return;
     const double size = std::max(
         0.0,

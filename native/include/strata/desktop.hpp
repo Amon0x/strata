@@ -17,17 +17,17 @@ using HWND = HWND__*;
 namespace strata::desktop {
 
 enum class SurfaceRole { screen, overlay };
-enum class TextureSampling : std::uint32_t { nearest = 0U, linear = 1U };
+enum class ImageSampling : std::uint32_t { nearest = 0U, linear = 1U };
 
 struct FontResource final {
     std::string id;
     std::string resource;
 };
 
-struct TextureResource final {
+struct ImageResource final {
     std::string id;
     std::string resource;
-    TextureSampling sampling = TextureSampling::linear;
+    ImageSampling sampling = ImageSampling::linear;
 };
 
 /** Description of one ordinary .strata application hosted in a Win32 window. */
@@ -45,9 +45,10 @@ struct ApplicationConfig final {
         {"strata:fonts/default", "assets/strata/fonts/default.ttf"},
         {"strata:fonts/mono", "assets/strata/fonts/mono.ttf"},
     };
-    std::vector<TextureResource> textures{
-        {"strata:ui/icons/chevron-down", "assets/strata/textures/ui/icons/chevron-down.png"},
-        {"strata:ui/icons/chevron-up", "assets/strata/textures/ui/icons/chevron-up.png"},
+    std::vector<ImageResource> images{
+        {"strata:brand/mark", "assets/strata/images/brand/strata-mark.svg"},
+        {"strata:ui/icons/chevron-down", "assets/strata/images/ui/icons/chevron-down.svg"},
+        {"strata:ui/icons/chevron-up", "assets/strata/images/ui/icons/chevron-up.svg"},
     };
     bool reduced_motion = false;
 };
@@ -114,7 +115,7 @@ class ApplicationHost final {
         std::intptr_t long_value
     );
 
-    /** Drops cached files and reloads Surface-owned fonts, textures, and other resources. */
+    /** Drops cached files and reloads Surface-owned fonts, images, and other resources. */
     void reload_resources();
     /** Synchronizes host bindings, frames the Surface, submits D3D11 work, and presents. */
     void frame();

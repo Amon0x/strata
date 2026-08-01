@@ -30,9 +30,9 @@ struct ColorValue final {
     [[nodiscard]] friend bool operator==(const ColorValue&, const ColorValue&) = default;
 };
 
-struct TextureValue final {
+struct ImageValue final {
     std::string id;
-    [[nodiscard]] friend bool operator==(const TextureValue&, const TextureValue&) = default;
+    [[nodiscard]] friend bool operator==(const ImageValue&, const ImageValue&) = default;
 };
 
 struct KeyValue final {
@@ -56,7 +56,7 @@ enum class ValueKind {
     duration,
     string,
     color,
-    texture,
+    image,
     key,
     theme_token,
     list,
@@ -78,7 +78,7 @@ public:
         DurationValue,
         std::string,
         ColorValue,
-        TextureValue,
+        ImageValue,
         KeyValue,
         ThemeTokenValue,
         ListPtr,
@@ -93,7 +93,7 @@ public:
     explicit Value(std::string value);
     explicit Value(const char* value);
     explicit Value(ColorValue value) noexcept;
-    explicit Value(TextureValue value);
+    explicit Value(ImageValue value);
     explicit Value(KeyValue value);
     explicit Value(ThemeTokenValue value);
     explicit Value(std::vector<Value> values);
@@ -106,7 +106,7 @@ public:
     [[nodiscard]] const DurationValue* duration() const noexcept;
     [[nodiscard]] const std::string* string() const noexcept;
     [[nodiscard]] const ColorValue* color() const noexcept;
-    [[nodiscard]] const TextureValue* texture() const noexcept;
+    [[nodiscard]] const ImageValue* image() const noexcept;
     [[nodiscard]] const KeyValue* key() const noexcept;
     [[nodiscard]] const ThemeTokenValue* theme_token() const noexcept;
     [[nodiscard]] const ValueList* list() const noexcept;

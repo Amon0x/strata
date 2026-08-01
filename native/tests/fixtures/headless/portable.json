@@ -30,7 +30,12 @@
         "resource": "assets/strata/fonts/mono.ttf"
       }
     ],
-    "textures": []
+    "images": [
+      {
+        "id": "strata:brand/mark",
+        "resource": "assets/strata/images/brand/strata-mark.svg"
+      }
+    ]
   },
   "snapshots": [],
   "steps": [

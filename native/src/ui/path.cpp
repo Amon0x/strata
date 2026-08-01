@@ -44,18 +44,33 @@ constexpr double contour_epsilon = 1e-9;
     for (std::size_t index = 1U; index < control.size(); ++index) {
         const Point from{control[index - 1U].x * scale.width, control[index - 1U].y * scale.height};
         const Point to{control[index].x * scale.width, control[index].y * scale.height};
-        length += distance(from, to);
+        if (!finite(from) || !finite(to)) {
+            throw std::invalid_argument("path scale produces non-finite curve coordinates");
+        }
+        const double segment_length = std::hypot(to.x - from.x, to.y - from.y);
+        if (!std::isfinite(segment_length) || !std::isfinite(length + segment_length)) {
+            throw std::invalid_argument("path curve length exceeds the finite geometry range");
+        }
+        length += segment_length;
     }
     const double steps = std::ceil(std::sqrt(length / std::max(tolerance, 0.01)) * 2.0);
-    return static_cast<std::size_t>(std::clamp(
-        steps, 1.0, static_cast<double>(maximum_curve_subdivisions)
-    ));
+    if (!std::isfinite(steps)) {
+        throw std::invalid_argument("path curve subdivision count is non-finite");
+    }
+    return static_cast<std::size_t>(
+        std::clamp(steps, 1.0, static_cast<double>(maximum_curve_subdivisions)));
 }
 
-void append_point(std::vector<Point>& points, const Point point) {
-    if (points.size() >= maximum_flattened_points) return;
+void append_point(std::vector<Point>& points, const Point point, std::size_t& point_count) {
+    if (!finite(point)) {
+        throw std::invalid_argument("path flattening produced a non-finite point");
+    }
     if (!points.empty() && distance(points.back(), point) <= contour_epsilon) return;
+    if (point_count >= maximum_flattened_points) {
+        throw std::invalid_argument("path exceeds the aggregate flattened-point limit");
+    }
     points.push_back(point);
+    ++point_count;
 }
 
 [[nodiscard]] const runtime::Value* field(const runtime::Value& value, const std::string_view name) {
@@ -424,6 +439,7 @@ std::vector<PathContour> flatten_path(
 ) {
     std::vector<PathContour> contours;
     PathContour current;
+    std::size_t point_count = 0U;
     Point cursor;
     Point origin;
     const auto commit = [&contours, &current]() {
@@ -436,10 +452,10 @@ std::vector<PathContour> flatten_path(
             commit();
             cursor = segment.to;
             origin = segment.to;
-            append_point(current.points, cursor);
+            append_point(current.points, cursor, point_count);
             break;
         case PathVerb::line:
-            append_point(current.points, segment.to);
+            append_point(current.points, segment.to, point_count);
             cursor = segment.to;
             break;
         case PathVerb::quadratic: {
@@ -449,7 +465,7 @@ std::vector<PathContour> flatten_path(
                 const double factor = static_cast<double>(step) / static_cast<double>(steps);
                 const Point first = lerp(cursor, segment.control_a, factor);
                 const Point second = lerp(segment.control_a, segment.to, factor);
-                append_point(current.points, lerp(first, second, factor));
+                append_point(current.points, lerp(first, second, factor), point_count);
             }
             cursor = segment.to;
             break;
@@ -466,7 +482,7 @@ std::vector<PathContour> flatten_path(
                 const Point third = lerp(segment.control_b, segment.to, factor);
                 const Point fourth = lerp(first, second, factor);
                 const Point fifth = lerp(second, third, factor);
-                append_point(current.points, lerp(fourth, fifth, factor));
+                append_point(current.points, lerp(fourth, fifth, factor), point_count);
             }
             cursor = segment.to;
             break;
@@ -477,7 +493,7 @@ std::vector<PathContour> flatten_path(
                 commit();
             }
             cursor = origin;
-            append_point(current.points, cursor);
+            append_point(current.points, cursor, point_count);
             break;
         }
     }
@@ -598,6 +614,14 @@ std::optional<PathShape> path_shape_from_value(const runtime::Value* const value
     shape.path.validate();
     shape.fill = paint_from_value(field(*value, "fill"));
     shape.stroke = paint_from_value(field(*value, "stroke"));
+    if (const runtime::Value* fill_rule = field(*value, "fillRule");
+        fill_rule != nullptr && fill_rule->string() != nullptr) {
+        if (*fill_rule->string() == "evenodd") {
+            shape.fill_rule = PathFillRule::evenodd;
+        } else if (*fill_rule->string() != "nonzero") {
+            throw std::invalid_argument("a shape fill rule must be nonzero or evenodd");
+        }
+    }
     const runtime::Value* stroke_style = field(*value, "strokeStyle");
     if (stroke_style != nullptr && stroke_style->object() != nullptr) {
         StrokeStyle style;

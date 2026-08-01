@@ -17,6 +17,7 @@
 #include "core/utf8.hpp"
 #include "font/atlas.hpp"
 #include "resource/image.hpp"
+#include "resource/svg_image.hpp"
 #include "runtime/application.hpp"
 #include "runtime/host_services.hpp"
 #include "ui/render/packet.hpp"
@@ -52,10 +53,10 @@ struct strata_surface_font_binding final {
     std::string resource_id;
 };
 
-struct strata_surface_texture_binding final {
+struct strata_surface_image_binding final {
     std::string id;
     std::string resource_id;
-    strata_texture_sampling sampling = STRATA_TEXTURE_SAMPLING_LINEAR;
+    strata_image_sampling sampling = STRATA_IMAGE_SAMPLING_LINEAR;
 };
 
 struct strata_runtime final {
@@ -196,8 +197,9 @@ struct strata_surface final {
         std::string resource_namespace,
         strata::ui::SurfaceEnvironment environment,
         std::vector<strata_surface_font_binding> font_bindings,
-        std::vector<strata_surface_texture_binding> owned_texture_bindings,
+        std::vector<strata_surface_image_binding> owned_image_bindings,
         std::shared_ptr<const strata::ui::TextEngine> text_engine,
+        std::shared_ptr<const strata::resource::SvgImageRegistry> svg_images,
         std::vector<strata::resource::EncodedTextureResource> texture_resources,
         strata::ui::WidgetRegistry widget_registry,
         strata::ui::BehaviorRegistry behavior_registry
@@ -208,7 +210,7 @@ struct strata_surface final {
           host_service_owner_token(host_resource_namespace + "/host-owner"),
           glyph_atlas(host_resource_namespace),
           fonts(std::move(font_bindings)),
-          texture_bindings(std::move(owned_texture_bindings)),
+          image_bindings(std::move(owned_image_bindings)),
           textures(std::move(texture_resources)),
           core(
               std::move(id),
@@ -221,7 +223,8 @@ struct strata_surface final {
               std::move(behavior_registry),
               &host_runtime->host_services,
               strata::ui::Theme{},
-              host_service_owner_token
+              host_service_owner_token,
+              std::move(svg_images)
           ) {}
 
     [[nodiscard]] const std::vector<std::uint8_t>& current_render_packet() const noexcept {
@@ -239,7 +242,7 @@ struct strata_surface final {
     std::string host_service_owner_token;
     strata::font::GlyphAtlas glyph_atlas;
     std::vector<strata_surface_font_binding> fonts;
-    std::vector<strata_surface_texture_binding> texture_bindings;
+    std::vector<strata_surface_image_binding> image_bindings;
     std::vector<strata::resource::EncodedTextureResource> textures;
     bool texture_resources_pending = true;
     /** A runtime adapter swap must not mix old materialized resources with the new loader. */

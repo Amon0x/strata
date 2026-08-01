@@ -877,7 +877,7 @@ ExpressionValue ExpressionRuntime::evaluate_literal(const JsonValue expression) 
     if (kind == "number") return ExpressionValue(Value(json_number(required(literal, "value"))));
     if (kind == "duration") return ExpressionValue(Value(DurationValue{*required(literal, "nanos").integer()}));
     if (kind == "string") return ExpressionValue(Value(std::string(string_field(literal, "value"))));
-    if (kind == "texture") return ExpressionValue(Value(TextureValue{std::string(string_field(literal, "value"))}));
+    if (kind == "image") return ExpressionValue(Value(ImageValue{std::string(string_field(literal, "value"))}));
     if (kind == "key") return ExpressionValue(Value(KeyValue{std::string(string_field(literal, "value"))}));
     if (kind == "color") return ExpressionValue(Value(parse_color(string_field(literal, "rgba"))));
     if (kind == "themeToken") return ExpressionValue(Value(ThemeTokenValue{std::string(string_field(literal, "name"))}));
@@ -1617,7 +1617,7 @@ bool truthy(const Value& value) noexcept {
     case ValueKind::list: return !value.list()->values.empty();
     case ValueKind::object: return !value.object()->fields.empty();
     case ValueKind::color:
-    case ValueKind::texture:
+    case ValueKind::image:
     case ValueKind::key:
     case ValueKind::theme_token: return true;
     }
@@ -1647,7 +1647,7 @@ std::string display_string(const Value& value) {
         }
         return displayed;
     }
-    case ValueKind::texture: return value.texture()->id;
+    case ValueKind::image: return value.image()->id;
     case ValueKind::key: return value.key()->value;
     case ValueKind::theme_token: return "theme." + value.theme_token()->name;
     case ValueKind::list: {

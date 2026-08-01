@@ -170,7 +170,7 @@ occurrence counts. The full catalog is [generated/diagnostics.md](generated/diag
 
 Activation is last-good. Rejected source never replaces the active unit. A host resource reload can
 read new source and call activation on the same runtime/Surface, preserving compatible stable-key
-state. Fonts/textures are also candidate-loaded before adoption; rejected resources retain the
+state. Fonts and PNG/SVG images are also candidate-loaded before adoption; rejected resources retain the
 previous usable set.
 
 Regenerate registry-derived authoring files explicitly:

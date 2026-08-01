@@ -96,6 +96,7 @@ struct PathContour final {
 
 enum class PathCap : std::uint32_t { butt = 0U, round = 1U, square = 2U };
 enum class PathJoin : std::uint32_t { miter = 0U, round = 1U, bevel = 2U };
+enum class PathFillRule : std::uint32_t { nonzero = 0U, evenodd = 1U };
 
 /** Stroke geometry. `width` and the dash pattern are logical pixels, not normalized units. */
 struct StrokeStyle final {
@@ -116,6 +117,7 @@ struct PathShape final {
     std::optional<Paint> fill;
     std::optional<Paint> stroke;
     std::optional<StrokeStyle> stroke_style;
+    PathFillRule fill_rule = PathFillRule::nonzero;
     [[nodiscard]] friend bool operator==(const PathShape&, const PathShape&) = default;
 };
 

@@ -175,11 +175,11 @@ void button_content(WidgetRenderScope& scope) {
 }
 
 void image_content(WidgetRenderScope& scope) {
-    const std::string* texture = widget_texture_value(scope.property("texture"));
-    if (texture == nullptr) return;
+    const std::string* image = widget_image_value(scope.property("image"));
+    if (image == nullptr) return;
     scope.image(
         scope.layout().bounds,
-        *texture,
+        *image,
         widget_color(scope.property("tint"), RenderColor{255U, 255U, 255U, 255U}),
         widget_texture_region(scope.property("source"))
     );

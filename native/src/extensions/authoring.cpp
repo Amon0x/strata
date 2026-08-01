@@ -401,11 +401,11 @@ void Present::text(const std::string_view value, const double x, const double y,
 
 void Present::image(
     const Rect bounds,
-    const std::string_view texture,
+    const std::string_view image,
     const Color tint,
     const TextureRegion source
 ) {
-    strata_widget_render_image(context_, bounds, view(texture), tint, source);
+    strata_widget_render_image(context_, bounds, view(image), tint, source);
 }
 
 void Present::nine_patch(

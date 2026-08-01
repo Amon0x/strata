@@ -20,7 +20,7 @@ namespace {
     case ValueSchemaKind::duration: return ValueKind::duration;
     case ValueSchemaKind::string: return ValueKind::string;
     case ValueSchemaKind::color: return ValueKind::color;
-    case ValueSchemaKind::texture: return ValueKind::texture;
+    case ValueSchemaKind::image: return ValueKind::image;
     case ValueSchemaKind::key: return ValueKind::key;
     case ValueSchemaKind::theme_token: return ValueKind::theme_token;
     case ValueSchemaKind::list: return ValueKind::list;
@@ -159,8 +159,8 @@ std::optional<Value> ValueSchema::normalize(const Value& value) const {
     if (kind_ == ValueSchemaKind::key && value.string() != nullptr) {
         return Value(KeyValue{*value.string()});
     }
-    if (kind_ == ValueSchemaKind::texture && value.string() != nullptr) {
-        return Value(TextureValue{*value.string()});
+    if (kind_ == ValueSchemaKind::image && value.string() != nullptr) {
+        return Value(ImageValue{*value.string()});
     }
     if (kind_ == ValueSchemaKind::theme_token && value.string() != nullptr) {
         return Value(ThemeTokenValue{*value.string()});

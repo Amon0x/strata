@@ -56,8 +56,8 @@ Value::Value(const char* const value) : Value(std::string(value != nullptr ? val
 
 Value::Value(const ColorValue value) noexcept : storage_(value) {}
 
-Value::Value(TextureValue value) : storage_(std::move(value)) {
-    validate_text(std::get<TextureValue>(storage_).id, "texture id", true);
+Value::Value(ImageValue value) : storage_(std::move(value)) {
+    validate_text(std::get<ImageValue>(storage_).id, "image id", true);
 }
 
 Value::Value(KeyValue value) : storage_(std::move(value)) {
@@ -112,8 +112,8 @@ const ColorValue* Value::color() const noexcept {
     return std::get_if<ColorValue>(&storage_);
 }
 
-const TextureValue* Value::texture() const noexcept {
-    return std::get_if<TextureValue>(&storage_);
+const ImageValue* Value::image() const noexcept {
+    return std::get_if<ImageValue>(&storage_);
 }
 
 const KeyValue* Value::key() const noexcept {
@@ -160,7 +160,7 @@ std::string_view Value::state_type_id() const noexcept {
     case ValueKind::duration: return "dsl.duration";
     case ValueKind::string: return "dsl.string";
     case ValueKind::color: return "dsl.color";
-    case ValueKind::texture: return "dsl.texture";
+    case ValueKind::image: return "dsl.image";
     case ValueKind::key: return "dsl.key";
     case ValueKind::theme_token: return "dsl.theme-token";
     case ValueKind::list: return "dsl.list";
@@ -219,7 +219,7 @@ data::JsonValue value_to_json(const Value& value) {
         channels.emplace_back(static_cast<std::int64_t>(color.alpha));
         return data::JsonValue(std::move(channels));
     }
-    case ValueKind::texture: return data::JsonValue(value.texture()->id);
+    case ValueKind::image: return data::JsonValue(value.image()->id);
     case ValueKind::key: return data::JsonValue(value.key()->value);
     case ValueKind::theme_token: return data::JsonValue(value.theme_token()->name);
     case ValueKind::list: {

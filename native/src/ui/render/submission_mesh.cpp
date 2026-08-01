@@ -481,6 +481,10 @@ void geometry(
                 text_geometry(output, draw, *command, data, batch_base_vertex, context);
             }
         } else if constexpr (std::is_same_v<Type, PathRenderCommand>) {
+            const double transform_scale = std::max(
+                std::hypot(draw.transform.m00, draw.transform.m10),
+                std::hypot(draw.transform.m01, draw.transform.m11)
+            );
             paint_mesh_geometry(
                 output,
                 draw,
@@ -488,7 +492,7 @@ void geometry(
                 tessellate_shape(
                     command.shape,
                     Size{command.bounds.width, command.bounds.height},
-                    context.scale
+                    context.scale * std::max(transform_scale, 0.1)
                 ),
                 data,
                 batch_base_vertex

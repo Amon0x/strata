@@ -246,7 +246,7 @@ Children: `false`
 | `action` | action | true | false | — |
 | `category` | string | false | false | — |
 | `shortcut` | string | false | true | — |
-| `icon` | texture | false | true | — |
+| `icon` | image | false | true | — |
 | `scope` | key | false | true | — |
 | `enabled` | boolean | false | false | — |
 | `checked` | boolean | false | true | — |
@@ -519,7 +519,7 @@ Children: `false`
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
-| `icon` | texture | true | false | — |
+| `icon` | image | true | false | — |
 | `key` | key | false | false | — |
 | `label` | string | false | false | — |
 | `source` | map of any | false | false | — |
@@ -558,7 +558,7 @@ Children: `false`
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
-| `texture` | texture | true | false | — |
+| `image` | image | true | false | — |
 | `key` | key | false | false | — |
 | `source` | map of any | false | false | — |
 | `tint` | color | false | false | — |
@@ -1107,8 +1107,8 @@ Children: `false`
 | `defaultSelectedId` | string | false | true | — |
 | `expanded` | boolean | false | true | — |
 | `maxVisibleRows` | number | false | false | — |
-| `collapsedIcon` | texture | false | false | — |
-| `expandedIcon` | texture | false | false | — |
+| `collapsedIcon` | image | false | false | — |
+| `expandedIcon` | image | false | false | — |
 | `enabled` | boolean | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |

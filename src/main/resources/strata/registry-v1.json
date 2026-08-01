@@ -1829,13 +1829,13 @@
       }
     },
     {
-      "name": "texture",
+      "name": "image",
       "type": {
         "ref": "t66"
       }
     },
     {
-      "name": "textureRect",
+      "name": "imageSource",
       "type": {
         "ref": "t67"
       }
@@ -5687,7 +5687,7 @@
     },
     {
       "definition": {
-        "kind": "texture"
+        "kind": "image"
       },
       "id": "t66"
     },
@@ -5729,7 +5729,7 @@
           }
         ],
         "kind": "map",
-        "label": "texture rect",
+        "label": "image source region",
         "value": {
           "ref": "t7"
         },
@@ -7888,6 +7888,14 @@
             }
           },
           {
+            "name": "fillRule",
+            "nullable": false,
+            "required": false,
+            "type": {
+              "ref": "t160"
+            }
+          },
+          {
             "name": "from",
             "nullable": false,
             "required": false,
@@ -8112,6 +8120,17 @@
               "ref": "t3"
             }
           }
+        ]
+      }
+    },
+    {
+      "id": "t160",
+      "definition": {
+        "kind": "enum",
+        "label": "path fill rule",
+        "values": [
+          "evenodd",
+          "nonzero"
         ]
       }
     }
@@ -12606,7 +12625,7 @@
         {
           "aliases": [],
           "default": null,
-          "name": "texture",
+          "name": "image",
           "nullable": false,
           "required": true,
           "type": {

@@ -136,12 +136,13 @@ struct FontResource final {
     std::string resource_id{};
 };
 
-enum class TextureSampling { nearest, linear };
+enum class ImageSampling { nearest, linear };
 
-struct TextureResource final {
+/** One PNG or static SVG exposed to authored Image/icon properties under a logical id. */
+struct ImageResource final {
     std::string id{};
     std::string resource_id{};
-    TextureSampling sampling = TextureSampling::linear;
+    ImageSampling sampling = ImageSampling::linear;
 };
 
 /** Owned creation document. All ABI views are generated transiently inside create_surface(). */
@@ -151,7 +152,7 @@ struct SurfaceOptions final {
     std::string root_name{};
     SurfaceEnvironment environment{};
     std::vector<FontResource> fonts{};
-    std::vector<TextureResource> textures{};
+    std::vector<ImageResource> images{};
     /** Extension descriptor ownership remains with the caller for the Surface lifetime. */
     const strata_surface_extension_bundle* extensions = nullptr;
 };

@@ -10,7 +10,9 @@
 
 #include "ui/command.hpp"
 #include "ui/input.hpp"
+#include "resource/svg_image.hpp"
 #include "ui/motion.hpp"
+#include "ui/svg_image.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
 
@@ -217,9 +219,9 @@ const std::string* widget_string_value(const runtime::Value* value) noexcept {
     return nullptr;
 }
 
-const std::string* widget_texture_value(const runtime::Value* value) noexcept {
+const std::string* widget_image_value(const runtime::Value* value) noexcept {
     if (value == nullptr) return nullptr;
-    if (value->texture() != nullptr) return &value->texture()->id;
+    if (value->image() != nullptr) return &value->image()->id;
     return widget_string_value(value);
 }
 
@@ -321,6 +323,7 @@ WidgetRenderScope::WidgetRenderScope(
     const InputRouter& input,
     const CommandIndex& commands,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     const double inherited_opacity,
     const WidgetVisualProfile visual_profile,
@@ -332,6 +335,7 @@ WidgetRenderScope::WidgetRenderScope(
     input_(input),
     commands_(commands),
     text_(text),
+    svg_images_(svg_images),
     motion_(motion),
     inherited_opacity_(inherited_opacity),
     apply_presentation_opacity_(apply_presentation_opacity),
@@ -513,13 +517,19 @@ void WidgetRenderScope::shape(const Rect bounds, PathShape value) {
 
 void WidgetRenderScope::image(
     const Rect bounds,
-    std::string texture,
+    std::string image,
     RenderColor tint,
     const TextureRegion source
 ) {
+    if (svg_images_ != nullptr) {
+        if (const svg::Document* document = svg_images_->find(image); document != nullptr) {
+            append_svg_image(output_, *document, bounds, source, tint, alpha());
+            return;
+        }
+    }
     output_.emplace_back(ImageRenderCommand{
         bounds,
-        std::move(texture),
+        std::move(image),
         source,
         widget_opacity(tint, alpha()),
     });
@@ -786,6 +796,7 @@ std::vector<RenderCommand> build_widget_fragment(
     const InputRouter& input,
     const CommandIndex& commands,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     const double inherited_opacity,
     const bool apply_presentation_opacity
@@ -797,8 +808,8 @@ std::vector<RenderCommand> build_widget_fragment(
         return output;
     }
     WidgetRenderScope scope(
-        node, layout, layout_result, input, commands, text, motion, inherited_opacity,
-        lifecycle->present.visual, output, apply_presentation_opacity
+        node, layout, layout_result, input, commands, text, svg_images, motion,
+        inherited_opacity, lifecycle->present.visual, output, apply_presentation_opacity
     );
     lifecycle->present.content(scope);
     return output;
@@ -812,6 +823,7 @@ std::vector<RenderCommand> build_widget_overlay(
     const InputRouter& input,
     const CommandIndex& commands,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     const double inherited_opacity
 ) {
@@ -822,8 +834,8 @@ std::vector<RenderCommand> build_widget_overlay(
         return output;
     }
     WidgetRenderScope scope(
-        node, layout, layout_result, input, commands, text, motion, inherited_opacity,
-        lifecycle->present.visual, output
+        node, layout, layout_result, input, commands, text, svg_images, motion,
+        inherited_opacity, lifecycle->present.visual, output
     );
     lifecycle->present.overlay(scope);
     return output;
@@ -837,6 +849,7 @@ void append_widget_foreground(
     const InputRouter& input,
     const CommandIndex& commands,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     const double inherited_opacity,
     std::vector<RenderCommand>& output
@@ -847,8 +860,8 @@ void append_widget_foreground(
         return;
     }
     WidgetRenderScope scope(
-        node, layout, layout_result, input, commands, text, motion, inherited_opacity,
-        lifecycle->present.visual, output
+        node, layout, layout_result, input, commands, text, svg_images, motion,
+        inherited_opacity, lifecycle->present.visual, output
     );
     lifecycle->present.foreground(scope);
 }
@@ -861,6 +874,7 @@ std::optional<Rect> widget_descendant_clip(
     const InputRouter& input,
     const CommandIndex& commands,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     const double inherited_opacity
 ) {
@@ -876,8 +890,8 @@ std::optional<Rect> widget_descendant_clip(
     }
     std::vector<RenderCommand> unused;
     WidgetRenderScope scope(
-        node, layout, layout_result, input, commands, text, motion, inherited_opacity,
-        lifecycle->present.visual, unused
+        node, layout, layout_result, input, commands, text, svg_images, motion,
+        inherited_opacity, lifecycle->present.visual, unused
     );
     return lifecycle->present.descendant_clip(scope);
 }

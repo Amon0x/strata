@@ -432,7 +432,7 @@ private:
             }
         } else if (kind == "duration") {
             if (!required(literal, "nanos").integer().has_value()) fail(context, "duration nanos must be an integer");
-        } else if (kind == "string" || kind == "texture" || kind == "key") {
+        } else if (kind == "string" || kind == "image" || kind == "key") {
             require_string(literal, "value", context, kind == "string");
         } else if (kind == "color") {
             const std::string_view rgba = require_string(literal, "rgba", context);

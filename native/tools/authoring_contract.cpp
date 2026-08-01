@@ -342,7 +342,7 @@ private:
         case SemanticTypeKind::string_literal:
         case SemanticTypeKind::color:
         case SemanticTypeKind::path:
-        case SemanticTypeKind::texture:
+        case SemanticTypeKind::image:
         case SemanticTypeKind::key: return {"std::string", false};
         case SemanticTypeKind::unknown:
         case SemanticTypeKind::any: return {"strata::host::Value", false};
@@ -533,7 +533,7 @@ private:
         case SemanticTypeKind::string_literal:
         case SemanticTypeKind::color:
         case SemanticTypeKind::path:
-        case SemanticTypeKind::texture:
+        case SemanticTypeKind::image:
         case SemanticTypeKind::key: return {"std::string", false};
         case SemanticTypeKind::unknown:
         case SemanticTypeKind::any: return {"strata::host::Value", false};
@@ -596,7 +596,7 @@ private:
         case SemanticTypeKind::string:
         case SemanticTypeKind::color:
         case SemanticTypeKind::path:
-        case SemanticTypeKind::texture:
+        case SemanticTypeKind::image:
         case SemanticTypeKind::key:
             return "detail::decode_string(" + std::string(input) + ", " + context_literal + ")";
         case SemanticTypeKind::string_literal:
@@ -698,7 +698,7 @@ private:
         case SemanticTypeKind::string:
         case SemanticTypeKind::color:
         case SemanticTypeKind::path:
-        case SemanticTypeKind::texture:
+        case SemanticTypeKind::image:
         case SemanticTypeKind::key:
             if (payload.string() != nullptr) return cpp_quote(*payload.string());
             break;

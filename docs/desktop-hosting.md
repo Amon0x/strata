@@ -29,7 +29,7 @@ build/install/windows-x64/
   lib/                         import/static libraries
   lib/cmake/Strata/            find_package configuration
   share/strata/                neutral registry and buildable samples
-  share/assets/strata/         fonts, textures, shaders, and sample UI
+  share/assets/strata/         fonts, PNG/SVG images, shaders, and sample UI
   share/licenses/strata/       Strata and third-party licenses
 ```
 
@@ -134,7 +134,7 @@ and candidate windows at the logical editor caret using the current Surface scal
 Low-level `resize`, `pointer`, `scroll`, `key`, `text`, and `ime_preedit` methods remain available to
 applications with an existing platform translation layer. `reload_resources()` invalidates the
 file cache, advances the adapter generation, and performs the Surface reload barrier for changed
-fonts and textures. The message loop calls `host.frame()`. The host synchronizes revision-watched bindings, frames the
+fonts and PNG/SVG images. The message loop calls `host.frame()`. The host synchronizes revision-watched bindings, frames the
 Surface, decodes packet v4, submits D3D11 work, and presents. `close()` is optional during ordinary
 scope destruction; calling it explicitly reports release errors. Either path consumes and
 acknowledges the terminal resource packet before releasing the Surface.

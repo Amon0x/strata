@@ -11,7 +11,7 @@ negotiate ABI/capabilities
   -> configure registry/application schemas
   -> publish host snapshots + register actions
   -> compile and activate source (last-good)
-  -> create Surface with environment/fonts/textures
+  -> create Surface with environment/fonts/images
   -> enqueue input -> frame -> consume packet
   -> prepare terminal packet -> consume -> acknowledge -> release Surface
   -> release registrations/snapshots/runtime
@@ -230,7 +230,7 @@ through the diagnostic sink.
 ## Reload and failure recovery
 
 Compilation/activation is last-good: a rejected generation returns diagnostics and leaves the active
-unit and compatible state untouched. Resource reload similarly builds candidate font/texture state
+unit and compatible state untouched. Resource reload similarly builds candidate font/image state
 before swapping it into a Surface. After successful resource reload, frame again before reading the
 new packet or canonical frame. A rejected reload leaves the prior resources usable. Host-facing
 texture identities are generated per process/runtime/Surface and never reuse adapter source paths.

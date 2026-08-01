@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="currentColor">
+  <path fill-rule="evenodd" d="M32 3 61 18 32 33 3 18ZM32 11 18 18 32 25 46 18Z"/>
+  <path opacity=".78" d="m8 29 24 12 24-12v9L32 51 8 38Z"/>
+  <path opacity=".52" d="m8 43 24 12 24-12v8L32 63 8 51Z"/>
+</svg>

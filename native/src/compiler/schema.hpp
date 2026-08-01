@@ -26,7 +26,7 @@ enum class SemanticTypeKind {
     color,
     /** A vector outline authored in the compact command form; parsed at compile time. */
     path,
-    texture,
+    image,
     key,
     style,
     layout,

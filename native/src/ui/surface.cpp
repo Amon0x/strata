@@ -458,7 +458,8 @@ Surface::Surface(
     BehaviorRegistry behavior_registry,
     runtime::HostServices* const host_services,
     Theme initial_theme,
-    std::string host_service_owner
+    std::string host_service_owner,
+    std::shared_ptr<const resource::SvgImageRegistry> svg_images
 ) : id_(std::move(id)),
     profiler_(runtime::ProfilerScope::surface, id_),
     application_(application),
@@ -472,6 +473,7 @@ Surface::Surface(
     descriptions_(application_, widgets_),
     themes_(std::move(initial_theme)),
     text_engine_(std::move(text_engine)),
+    svg_images_(std::move(svg_images)),
     layout_engine_(text_engine_ != nullptr
         ? LayoutEngine::IntrinsicMeasure(
               [engine = text_engine_](const RetainedNode& node, const Constraints& constraints) {
@@ -934,7 +936,8 @@ void Surface::note_resource_reload_duration(const std::uint64_t duration_nanos) 
 }
 
 SurfaceResourceReloadPlan Surface::prepare_resource_reload(
-    std::shared_ptr<const TextEngine> text_engine
+    std::shared_ptr<const TextEngine> text_engine,
+    std::shared_ptr<const resource::SvgImageRegistry> svg_images
 ) const {
     LayoutEngine next_layout = text_engine != nullptr
         ? LayoutEngine(LayoutEngine::IntrinsicMeasure(
@@ -943,19 +946,27 @@ SurfaceResourceReloadPlan Surface::prepare_resource_reload(
               }
           ))
         : LayoutEngine{};
-    return SurfaceResourceReloadPlan{std::move(text_engine), std::move(next_layout)};
+    return SurfaceResourceReloadPlan{
+        std::move(text_engine),
+        std::move(svg_images),
+        std::move(next_layout),
+    };
 }
 
 void Surface::commit_resource_reload(SurfaceResourceReloadPlan plan) noexcept {
     static_assert(std::is_nothrow_move_assignable_v<std::shared_ptr<const TextEngine>>);
+    static_assert(std::is_nothrow_move_assignable_v<
+        std::shared_ptr<const resource::SvgImageRegistry>
+    >);
     static_assert(std::is_nothrow_move_assignable_v<LayoutEngine>);
     text_engine_ = std::move(plan.text_engine);
+    svg_images_ = std::move(plan.svg_images);
     layout_engine_ = std::move(plan.layout_engine);
     queue_resource_invalidation();
 }
 
 void Surface::replace_text_engine(std::shared_ptr<const TextEngine> text_engine) {
-    commit_resource_reload(prepare_resource_reload(std::move(text_engine)));
+    commit_resource_reload(prepare_resource_reload(std::move(text_engine), svg_images_));
 }
 
 void Surface::queue_resource_invalidation() noexcept {
@@ -1912,6 +1923,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
             behaviors_,
             motion_,
             text_engine_.get(),
+            svg_images_.get(),
             material_registry_,
             RenderGenerationToken{
                 scale_context_generation_,

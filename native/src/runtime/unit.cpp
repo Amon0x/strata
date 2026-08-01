@@ -115,7 +115,7 @@ using JsonArray = data::JsonArrayView;
         return ValueSchema::scalar(ValueSchemaKind::string);
     }
     if (kind == "color") return ValueSchema::scalar(ValueSchemaKind::color);
-    if (kind == "texture") return ValueSchema::scalar(ValueSchemaKind::texture);
+    if (kind == "image") return ValueSchema::scalar(ValueSchemaKind::image);
     if (kind == "key") return ValueSchema::scalar(ValueSchemaKind::key);
     if (kind == "list" || kind == "collection") {
         const JsonValue element = value.find(kind == "list" ? "element" : "item");

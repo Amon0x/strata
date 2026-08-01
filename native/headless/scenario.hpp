@@ -18,7 +18,7 @@ struct FontConfig final {
     std::string resource;
 };
 
-struct TextureConfig final {
+struct ImageConfig final {
     std::string id;
     std::string resource;
     std::uint32_t sampling = 1U;
@@ -85,7 +85,7 @@ struct Scenario final {
     std::vector<std::filesystem::path> extension_search_paths;
     std::vector<std::string> actions;
     std::vector<FontConfig> fonts;
-    std::vector<TextureConfig> textures;
+    std::vector<ImageConfig> images;
     std::vector<SnapshotConfig> snapshots;
     std::vector<ScenarioStep> steps;
     double width = 1280.0;

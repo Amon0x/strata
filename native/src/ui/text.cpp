@@ -139,8 +139,8 @@ namespace {
     if (value != nullptr && value->string() != nullptr && !value->string()->empty()) {
         return *value->string();
     }
-    if (value != nullptr && value->texture() != nullptr && !value->texture()->id.empty()) {
-        return value->texture()->id;
+    if (value != nullptr && value->image() != nullptr && !value->image()->id.empty()) {
+        return value->image()->id;
     }
     return fallback;
 }
@@ -153,7 +153,7 @@ namespace {
     for (const runtime::Value& entry : value->list()->values) {
         std::string id;
         if (entry.string() != nullptr) id = *entry.string();
-        else if (entry.texture() != nullptr) id = entry.texture()->id;
+        else if (entry.image() != nullptr) id = entry.image()->id;
         if (!id.empty() && !std::ranges::contains(result, id)) result.push_back(std::move(id));
     }
     return result;
@@ -371,7 +371,7 @@ std::string TextEngine::requested_font_id(const RetainedNode& node) const {
     const runtime::Value* value = style_field(node.description(), "font");
     if (value != nullptr) {
         if (value->string() != nullptr && !value->string()->empty()) return *value->string();
-        if (value->texture() != nullptr && !value->texture()->id.empty()) return value->texture()->id;
+        if (value->image() != nullptr && !value->image()->id.empty()) return value->image()->id;
     }
     return "strata:fonts/default";
 }

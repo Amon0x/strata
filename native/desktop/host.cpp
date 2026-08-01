@@ -931,17 +931,17 @@ struct Host::Impl final {
                 strata::view("assets/strata/fonts/mono.ttf"),
             },
         };
-        constexpr std::array textures{
-            strata_surface_texture_resource{
+        constexpr std::array images{
+            strata_surface_image_resource{
                 strata::view("strata:ui/icons/chevron-down"),
-                strata::view("assets/strata/textures/ui/icons/chevron-down.png"),
-                STRATA_TEXTURE_SAMPLING_LINEAR,
+                strata::view("assets/strata/images/ui/icons/chevron-down.svg"),
+                STRATA_IMAGE_SAMPLING_LINEAR,
                 0U,
             },
-            strata_surface_texture_resource{
+            strata_surface_image_resource{
                 strata::view("strata:ui/icons/chevron-up"),
-                strata::view("assets/strata/textures/ui/icons/chevron-up.png"),
-                STRATA_TEXTURE_SAMPLING_LINEAR,
+                strata::view("assets/strata/images/ui/icons/chevron-up.svg"),
+                STRATA_IMAGE_SAMPLING_LINEAR,
                 0U,
             },
         };
@@ -954,8 +954,8 @@ struct Host::Impl final {
         surface_config.fonts = fonts.data();
         surface_config.font_count = fonts.size();
         surface_config.extensions = session.extensions.pointer();
-        surface_config.textures = textures.data();
-        surface_config.texture_count = textures.size();
+        surface_config.images = images.data();
+        surface_config.image_count = images.size();
         session.surface.emplace(session.runtime->create_surface(surface_config));
     }
 

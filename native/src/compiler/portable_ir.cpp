@@ -198,7 +198,7 @@ using data::JsonValue;
     case SemanticTypeKind::boolean: return type_base("boolean");
     case SemanticTypeKind::color: return type_base("color");
     case SemanticTypeKind::path: return type_base("path");
-    case SemanticTypeKind::texture: return type_base("texture");
+    case SemanticTypeKind::image: return type_base("image");
     case SemanticTypeKind::key: return type_base("key");
     case SemanticTypeKind::style: return type_base("style");
     case SemanticTypeKind::layout: return type_base("layout");
@@ -1475,8 +1475,8 @@ private:
             if (accepts_kind(expected, SemanticTypeKind::key)) {
                 return object({{"kind", JsonValue("key")}, {"value", JsonValue(value->value)}});
             }
-            if (accepts_kind(expected, SemanticTypeKind::texture)) {
-                return object({{"kind", JsonValue("texture")}, {"value", JsonValue(value->value)}});
+            if (accepts_kind(expected, SemanticTypeKind::image)) {
+                return object({{"kind", JsonValue("image")}, {"value", JsonValue(value->value)}});
             }
             return object({{"kind", JsonValue("string")}, {"value", JsonValue(value->value)}});
         }

@@ -76,6 +76,7 @@ void check(const bool condition, const std::string_view message) {
         surface.input(),
         surface.commands(),
         surface.text_engine(),
+        nullptr,
         &surface.motion(),
         1.0
     );

@@ -8,6 +8,10 @@
 #include "ui/render.hpp"
 #include "ui/widget/registry.hpp"
 
+namespace strata::resource {
+class SvgImageRegistry;
+}
+
 namespace strata::ui {
 
 class CommandIndex;
@@ -60,6 +64,7 @@ public:
         const InputRouter& input,
         const CommandIndex& commands,
         const TextEngine* text,
+        const resource::SvgImageRegistry* svg_images,
         const MotionRuntime* motion,
         double inherited_opacity,
         WidgetVisualProfile visual_profile,
@@ -115,7 +120,7 @@ public:
     void solid_rect(Rect bounds, Paint fill);
     void image(
         Rect bounds,
-        std::string texture,
+        std::string image,
         RenderColor tint = RenderColor{255U, 255U, 255U, 255U},
         TextureRegion source = TextureRegion{}
     );
@@ -169,6 +174,7 @@ private:
     const InputRouter& input_;
     const CommandIndex& commands_;
     const TextEngine* text_;
+    const resource::SvgImageRegistry* svg_images_;
     const MotionRuntime* motion_;
     double inherited_opacity_ = 1.0;
     bool apply_presentation_opacity_ = true;
@@ -185,6 +191,7 @@ private:
     const InputRouter& input,
     const CommandIndex& commands,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     double inherited_opacity,
     bool apply_presentation_opacity = true
@@ -198,6 +205,7 @@ private:
     const InputRouter& input,
     const CommandIndex& commands,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     double inherited_opacity
 );
@@ -210,6 +218,7 @@ void append_widget_foreground(
     const InputRouter& input,
     const CommandIndex& commands,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     double inherited_opacity,
     std::vector<RenderCommand>& output
@@ -223,12 +232,13 @@ void append_widget_foreground(
     const InputRouter& input,
     const CommandIndex& commands,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     double inherited_opacity
 );
 
 [[nodiscard]] const std::string* widget_string_value(const runtime::Value* value) noexcept;
-[[nodiscard]] const std::string* widget_texture_value(const runtime::Value* value) noexcept;
+[[nodiscard]] const std::string* widget_image_value(const runtime::Value* value) noexcept;
 [[nodiscard]] TextureRegion widget_texture_region(
     const runtime::Value* value,
     TextureRegion fallback = TextureRegion{}

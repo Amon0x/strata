@@ -2022,15 +2022,15 @@ inline Surface Runtime::create_surface(const SurfaceOptions& options) const {
             strata_string_view{font.resource_id.data(), font.resource_id.size()},
         });
     }
-    std::vector<strata_surface_texture_resource> textures;
-    textures.reserve(options.textures.size());
-    for (const TextureResource& texture : options.textures) {
-        textures.push_back(strata_surface_texture_resource{
-            strata_string_view{texture.id.data(), texture.id.size()},
-            strata_string_view{texture.resource_id.data(), texture.resource_id.size()},
-            texture.sampling == TextureSampling::nearest
-                ? STRATA_TEXTURE_SAMPLING_NEAREST
-                : STRATA_TEXTURE_SAMPLING_LINEAR,
+    std::vector<strata_surface_image_resource> images;
+    images.reserve(options.images.size());
+    for (const ImageResource& image : options.images) {
+        images.push_back(strata_surface_image_resource{
+            strata_string_view{image.id.data(), image.id.size()},
+            strata_string_view{image.resource_id.data(), image.resource_id.size()},
+            image.sampling == ImageSampling::nearest
+                ? STRATA_IMAGE_SAMPLING_NEAREST
+                : STRATA_IMAGE_SAMPLING_LINEAR,
             0U,
         });
     }
@@ -2046,8 +2046,8 @@ inline Surface Runtime::create_surface(const SurfaceOptions& options) const {
         fonts.data(),
         fonts.size(),
         options.extensions,
-        textures.data(),
-        textures.size(),
+        images.data(),
+        images.size(),
     };
     return create_surface(config);
 }

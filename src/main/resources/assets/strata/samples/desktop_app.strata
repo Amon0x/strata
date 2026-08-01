@@ -22,6 +22,12 @@ overlay DesktopExample {
   state count = 0;
 
   root Panel(key: "example.root", style: Root) {
+    Image(
+      key: "example.logo",
+      image: "strata:brand/mark",
+      tint: #70aaff,
+      layout: { width: 64, height: 64 }
+    )
     Text(text: "Strata desktop application", style: Title)
     Text(
       text: "This window is hosted through the installed Strata::desktop target.",

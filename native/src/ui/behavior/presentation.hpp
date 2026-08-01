@@ -4,6 +4,10 @@
 
 #include "ui/render.hpp"
 
+namespace strata::resource {
+class SvgImageRegistry;
+}
+
 namespace strata::ui {
 
 class BehaviorRegistry;
@@ -30,6 +34,7 @@ void append_behavior_overlays(
     const InputRouter& input,
     const CommandIndex& commands,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MotionRuntime* motion,
     double inherited_opacity,
     bool detached,

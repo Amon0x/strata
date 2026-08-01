@@ -25,8 +25,10 @@ namespace {
 using Bytes = std::vector<std::uint8_t>;
 
 class Writer final {
-public:
-    explicit Writer(const std::size_t reserve = 0U) { bytes_.reserve(reserve); }
+  public:
+    explicit Writer(const std::size_t reserve = 0U) {
+        bytes_.reserve(reserve);
+    }
 
     template <typename Integer>
         requires std::is_unsigned_v<Integer>
@@ -36,7 +38,9 @@ public:
         }
     }
 
-    void number(const double value) { integer(std::bit_cast<std::uint64_t>(value)); }
+    void number(const double value) {
+        integer(std::bit_cast<std::uint64_t>(value));
+    }
 
     void text(const std::string_view value) {
         if (value.size() > std::numeric_limits<std::uint32_t>::max()) {
@@ -57,16 +61,19 @@ public:
         bytes_.insert(bytes_.end(), value.begin(), value.end());
     }
 
-    [[nodiscard]] Bytes take() && { return std::move(bytes_); }
+    [[nodiscard]] Bytes take() && {
+        return std::move(bytes_);
+    }
 
-private:
+  private:
     Bytes bytes_;
 };
 
 [[nodiscard]] Bytes resource_payload(const font::AtlasOperation& operation) {
     Writer output;
     output.text(operation.texture);
-    if (operation.kind == font::AtlasOperationKind::release) return std::move(output).take();
+    if (operation.kind == font::AtlasOperationKind::release)
+        return std::move(output).take();
     output.integer(static_cast<std::uint32_t>(operation.format));
     output.integer(operation.region.x);
     output.integer(operation.region.y);
@@ -85,8 +92,7 @@ private:
 [[nodiscard]] Bytes resource_payload(const resource::EncodedTextureResource& texture) {
     if (texture.logical_id.empty() || texture.host_id.empty()) {
         throw std::invalid_argument(
-            "encoded texture requires non-empty logical and surface host ids"
-        );
+            "encoded texture requires non-empty logical and surface host ids");
     }
     Writer output;
     output.text(texture.host_id);
@@ -102,18 +108,17 @@ private:
     return std::move(output).take();
 }
 
-void append_terminal_release(
-    std::vector<font::AtlasOperation>& releases,
-    const std::string_view host_id
-) {
+void append_terminal_release(std::vector<font::AtlasOperation>& releases,
+                             const std::string_view host_id) {
     if (host_id.empty()) {
         throw std::invalid_argument("terminal texture release requires a non-empty host id");
     }
-    const bool duplicate = std::ranges::any_of(
-        releases,
-        [host_id](const font::AtlasOperation& release) { return release.texture == host_id; }
-    );
-    if (duplicate) return;
+    const bool duplicate =
+        std::ranges::any_of(releases, [host_id](const font::AtlasOperation& release) {
+            return release.texture == host_id;
+        });
+    if (duplicate)
+        return;
     releases.push_back(font::AtlasOperation{
         font::AtlasOperationKind::release,
         std::string(host_id),
@@ -134,7 +139,8 @@ void append_terminal_release(
         output.text(batch.material);
         output.text(batch.blend_mode);
         output.integer(batch.texture.has_value() ? std::uint32_t{1U} : std::uint32_t{0U});
-        if (batch.texture.has_value()) output.text(*batch.texture);
+        if (batch.texture.has_value())
+            output.text(*batch.texture);
         output.integer(batch.base_vertex);
         output.integer(batch.first_index);
         output.integer(batch.index_count);
@@ -169,21 +175,18 @@ void write_frame_index(Bytes& packet, const std::uint64_t frame_index) {
         throw std::logic_error("cached host render packet header is truncated");
     }
     for (std::size_t byte = 0U; byte < sizeof(frame_index); ++byte) {
-        packet[frame_index_offset + byte] =
-            static_cast<std::uint8_t>(frame_index >> (byte * 8U));
+        packet[frame_index_offset + byte] = static_cast<std::uint8_t>(frame_index >> (byte * 8U));
     }
 }
 
-[[nodiscard]] Bytes encode_packet(
-    const RenderSubmission& submission,
-    const std::uint64_t frame_index,
-    const std::uint64_t geometry_epoch,
-    const std::span<const resource::EncodedTextureResource> texture_resources,
-    const std::span<const font::AtlasOperation> resources
-) {
+[[nodiscard]] Bytes
+encode_packet(const RenderSubmission& submission, const std::uint64_t frame_index,
+              const std::uint64_t geometry_epoch,
+              const std::span<const resource::EncodedTextureResource> texture_resources,
+              const std::span<const font::AtlasOperation> resources) {
     std::size_t reserve = 52U + submission.vertex_bytes.size() +
-        submission.indices.size() * sizeof(std::uint32_t) +
-        submission.batches.size() * 80U;
+                          submission.indices.size() * sizeof(std::uint32_t) +
+                          submission.batches.size() * 80U;
     for (const resource::EncodedTextureResource& texture : texture_resources) {
         reserve += texture.bytes.size() + texture.host_id.size() + 40U;
     }
@@ -192,16 +195,14 @@ void write_frame_index(Bytes& packet, const std::uint64_t frame_index) {
     }
     Writer output(reserve);
     constexpr std::string_view magic = "STRATARP";
-    output.raw(std::span<const std::uint8_t>(
-        reinterpret_cast<const std::uint8_t*>(magic.data()), magic.size()
-    ));
+    output.raw(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(magic.data()),
+                                             magic.size()));
     output.integer(std::uint32_t{4U});
     if (texture_resources.size() > std::numeric_limits<std::size_t>::max() - resources.size()) {
         throw std::length_error("render resource count exceeds size_t");
     }
-    output.integer(checked_count(
-        texture_resources.size() + resources.size(), "render resource count"
-    ));
+    output.integer(
+        checked_count(texture_resources.size() + resources.size(), "render resource count"));
     output.integer(checked_count(submission.batches.size(), "render batch count"));
     output.integer(frame_index);
     output.integer(geometry_epoch);
@@ -209,16 +210,19 @@ void write_frame_index(Bytes& packet, const std::uint64_t frame_index) {
     output.integer(checked_count(submission.indices.size(), "render index count"));
     output.integer(checked_count(submission.planned_draws, "render planned draw count"));
     output.integer(checked_count(submission.skipped_draws, "render skipped draw count"));
-    for (const resource::EncodedTextureResource& texture : texture_resources) {
-        const Bytes payload = resource_payload(texture);
-        record(output, 3U, payload);
-    }
+    // Releases queued by a resource reload must precede creates that may reuse the same
+    // Surface-scoped host id. Atlas operations use disjoint ids and retain their own order.
     for (const font::AtlasOperation& operation : resources) {
         const Bytes payload = resource_payload(operation);
         record(output, static_cast<std::uint32_t>(operation.kind), payload);
     }
+    for (const resource::EncodedTextureResource& texture : texture_resources) {
+        const Bytes payload = resource_payload(texture);
+        record(output, 3U, payload);
+    }
     output.raw(submission.vertex_bytes);
-    for (const std::uint32_t index : submission.indices) output.integer(index);
+    for (const std::uint32_t index : submission.indices)
+        output.integer(index);
     for (const SubmissionBatch& batch : submission.batches) {
         const Bytes payload = batch_payload(batch);
         record(output, static_cast<std::uint32_t>(batch.kind), payload);
@@ -229,24 +233,17 @@ void write_frame_index(Bytes& packet, const std::uint64_t frame_index) {
 } // namespace
 
 const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
-    const RenderCommandBuffer& commands,
-    const std::uint64_t frame_index,
+    const RenderCommandBuffer& commands, const std::uint64_t frame_index,
     const std::span<const resource::EncodedTextureResource> texture_resources,
-    font::GlyphAtlas& glyph_atlas,
-    const TextEngine* const text_engine,
-    const double display_scale,
-    const std::int64_t framebuffer_width,
-    const std::int64_t framebuffer_height,
-    const double logical_width,
-    const double logical_height
-) {
+    font::GlyphAtlas& glyph_atlas, const TextEngine* const text_engine, const double display_scale,
+    const std::int64_t framebuffer_width, const std::int64_t framebuffer_height,
+    const double logical_width, const double logical_height) {
     // Cleared only after geometry and every resource operation are retained. This prevents the
     // settled fast path from masking a prior allocation/planning failure on the next frame.
     frame_encoding_incomplete_ = true;
     const bool profile_cold_encode = geometry_packet_.empty();
-    const auto cold_encode_started = profile_cold_encode
-        ? std::chrono::steady_clock::now()
-        : std::chrono::steady_clock::time_point{};
+    const auto cold_encode_started = profile_cold_encode ? std::chrono::steady_clock::now()
+                                                         : std::chrono::steady_clock::time_point{};
     if (!texture_resources.empty()) {
         std::vector<resource::TextureResourceDescriptor> next_descriptors;
         next_descriptors.reserve(texture_resources.size());
@@ -256,25 +253,31 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         texture_descriptors_.swap(next_descriptors);
     }
     const std::size_t prior_hits = submission_cache_.hit_count();
-    const RenderSubmission& submission = submission_cache_.resolve(
-        commands,
-        glyph_atlas,
-        text_engine,
-        RenderSubmissionEnvironment{
-            display_scale,
-            framebuffer_width,
-            framebuffer_height,
-            logical_width,
-            logical_height,
-        },
-        texture_descriptors_
-    );
-    const auto submission_finished = profile_cold_encode
-        ? std::chrono::steady_clock::now()
-        : std::chrono::steady_clock::time_point{};
+    const RenderSubmission& submission =
+        submission_cache_.resolve(commands, glyph_atlas, text_engine,
+                                  RenderSubmissionEnvironment{
+                                      display_scale,
+                                      framebuffer_width,
+                                      framebuffer_height,
+                                      logical_width,
+                                      logical_height,
+                                  },
+                                  texture_descriptors_);
+    const auto submission_finished = profile_cold_encode ? std::chrono::steady_clock::now()
+                                                         : std::chrono::steady_clock::time_point{};
     // Submission planning has finished mutating the atlas. Keep a stable view of its pending
     // operations until every packet that references them has been encoded and retained.
-    const std::span<const font::AtlasOperation> resources = glyph_atlas.pending_operations();
+    const std::span<const font::AtlasOperation> atlas_resources = glyph_atlas.pending_operations();
+    std::vector<font::AtlasOperation> combined_resources;
+    std::span<const font::AtlasOperation> resources = atlas_resources;
+    if (!pending_static_releases_.empty()) {
+        combined_resources.reserve(pending_static_releases_.size() + atlas_resources.size());
+        combined_resources.insert(combined_resources.end(), pending_static_releases_.begin(),
+                                  pending_static_releases_.end());
+        combined_resources.insert(combined_resources.end(), atlas_resources.begin(),
+                                  atlas_resources.end());
+        resources = combined_resources;
+    }
     const bool submission_reused = submission_cache_.hit_count() != prior_hits;
     telemetry_ = HostRenderPacketTelemetry{
         submission.vertex_bytes.size() / 88U,
@@ -285,11 +288,10 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         submission.effect_batch_breaks,
         submission_reused,
         profile_cold_encode,
-        profile_cold_encode
-            ? std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  submission_finished - cold_encode_started
-              ).count()
-            : 0,
+        profile_cold_encode ? std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                  submission_finished - cold_encode_started)
+                                  .count()
+                            : 0,
         profile_cold_encode ? submission.planning_nanos : 0,
         profile_cold_encode ? submission.atlas_warmup_nanos : 0,
         profile_cold_encode ? submission.text_preparation_nanos : 0,
@@ -311,8 +313,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         if (profile_cold_encode) {
             telemetry_.cold_geometry_packet_nanos =
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - submission_finished
-                ).count();
+                    std::chrono::steady_clock::now() - submission_finished)
+                    .count();
         }
     } else {
         write_frame_index(geometry_packet_, frame_index);
@@ -321,88 +323,90 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         current_packet_ = &geometry_packet_;
     } else {
         const auto resource_encode_started = profile_cold_encode
-            ? std::chrono::steady_clock::now()
-            : std::chrono::steady_clock::time_point{};
+                                                 ? std::chrono::steady_clock::now()
+                                                 : std::chrono::steady_clock::time_point{};
         std::vector<std::uint8_t> next_resources =
-            encode_packet(
-                submission, frame_index, geometry_epoch_, texture_resources, resources
-            );
+            encode_packet(submission, frame_index, geometry_epoch_, texture_resources, resources);
         static_assert(noexcept(resource_packet_.swap(next_resources)));
         resource_packet_.swap(next_resources);
         current_packet_ = &resource_packet_;
         if (profile_cold_encode) {
             telemetry_.cold_resource_packet_nanos =
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - resource_encode_started
-                ).count();
+                    std::chrono::steady_clock::now() - resource_encode_started)
+                    .count();
         }
     }
     // This is the final state transition. All retained packet/cache operations above are complete
     // and the noexcept commit merely consumes operations now owned by the host packet.
     frame_encoding_incomplete_ = false;
+    pending_static_releases_.clear();
     glyph_atlas.commit_operations();
     return *current_packet_;
 }
 
 const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
-    const RenderCommandBuffer& commands,
-    const std::uint64_t frame_index,
+    const RenderCommandBuffer& commands, const std::uint64_t frame_index,
     const std::span<const resource::EncodedTextureResource> texture_resources,
-    font::GlyphAtlas& glyph_atlas,
-    const TextEngine& text_engine,
-    const double display_scale,
-    const std::int64_t framebuffer_width,
-    const std::int64_t framebuffer_height,
-    const double logical_width,
-    const double logical_height
-) {
-    return encode(
-        commands,
-        frame_index,
-        texture_resources,
-        glyph_atlas,
-        &text_engine,
-        display_scale,
-        framebuffer_width,
-        framebuffer_height,
-        logical_width,
-        logical_height
-    );
+    font::GlyphAtlas& glyph_atlas, const TextEngine& text_engine, const double display_scale,
+    const std::int64_t framebuffer_width, const std::int64_t framebuffer_height,
+    const double logical_width, const double logical_height) {
+    return encode(commands, frame_index, texture_resources, glyph_atlas, &text_engine,
+                  display_scale, framebuffer_width, framebuffer_height, logical_width,
+                  logical_height);
 }
 
 bool HostRenderPacketCache::reuse(const std::uint64_t frame_index) {
-    if (frame_encoding_incomplete_ || geometry_packet_.empty()) return false;
+    if (frame_encoding_incomplete_ || geometry_packet_.empty() ||
+        !pending_static_releases_.empty()) {
+        return false;
+    }
     write_frame_index(geometry_packet_, frame_index);
     current_packet_ = &geometry_packet_;
     telemetry_.geometry_reused = true;
     return true;
 }
 
-const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_atlas_release(
-    const std::uint64_t frame_index,
-    font::GlyphAtlas& glyph_atlas
-) {
+HostRenderResourceInvalidationPlan HostRenderPacketCache::plan_resource_invalidation() const {
+    HostRenderResourceInvalidationPlan plan;
+    plan.releases = pending_static_releases_;
+    for (const resource::TextureResourceDescriptor& texture : texture_descriptors_) {
+        append_terminal_release(plan.releases, texture.host_id);
+    }
+    return plan;
+}
+
+void HostRenderPacketCache::commit_resource_invalidation(
+    HostRenderResourceInvalidationPlan plan) noexcept {
+    static_assert(noexcept(pending_static_releases_.swap(plan.releases)));
+    clear();
+    pending_static_releases_.swap(plan.releases);
+}
+
+const std::vector<std::uint8_t>&
+HostRenderPacketCache::prepare_atlas_release(const std::uint64_t frame_index,
+                                             font::GlyphAtlas& glyph_atlas) {
     return prepare_resource_release(frame_index, glyph_atlas, {});
 }
 
 const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release(
-    const std::uint64_t frame_index,
-    font::GlyphAtlas& glyph_atlas,
-    const std::span<const resource::EncodedTextureResource> static_textures
-) {
-    if (terminal_release_prepared_) return resource_packet_;
+    const std::uint64_t frame_index, font::GlyphAtlas& glyph_atlas,
+    const std::span<const resource::EncodedTextureResource> static_textures) {
+    if (terminal_release_prepared_)
+        return resource_packet_;
 
     // Snapshotting and encoding are deliberately non-mutating. An allocation failure therefore
     // leaves live pages, pending releases and the retained static descriptor table retryable.
-    std::vector<font::AtlasOperation> operations = glyph_atlas.plan_terminal_release();
+    std::vector<font::AtlasOperation> operations = pending_static_releases_;
+    std::vector<font::AtlasOperation> atlas_releases = glyph_atlas.plan_terminal_release();
+    operations.insert(operations.end(), std::make_move_iterator(atlas_releases.begin()),
+                      std::make_move_iterator(atlas_releases.end()));
     for (const resource::TextureResourceDescriptor& texture : texture_descriptors_) {
         append_terminal_release(operations, texture.host_id);
     }
     for (const resource::EncodedTextureResource& texture : static_textures) {
         if (texture.logical_id.empty()) {
-            throw std::invalid_argument(
-                "terminal texture release requires a non-empty logical id"
-            );
+            throw std::invalid_argument("terminal texture release requires a non-empty logical id");
         }
         append_terminal_release(operations, texture.host_id);
     }
@@ -425,6 +429,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
     geometry_packet_.clear();
     telemetry_ = {};
     frame_encoding_incomplete_ = false;
+    pending_static_releases_.clear();
     glyph_atlas.commit_terminal_release();
     return resource_packet_;
 }
@@ -436,9 +441,9 @@ void HostRenderPacketCache::clear() noexcept {
     resource_packet_.clear();
     current_packet_ = &geometry_packet_;
     telemetry_ = {};
+    pending_static_releases_.clear();
     frame_encoding_incomplete_ = false;
     terminal_release_prepared_ = false;
-    geometry_epoch_ = 0U;
 }
 
 const std::vector<std::uint8_t>& HostRenderPacketCache::packet() const noexcept {

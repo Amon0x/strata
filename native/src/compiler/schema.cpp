@@ -92,7 +92,7 @@ namespace {
     if (kind == "boolean") return SemanticTypeKind::boolean;
     if (kind == "color") return SemanticTypeKind::color;
     if (kind == "path") return SemanticTypeKind::path;
-    if (kind == "texture") return SemanticTypeKind::texture;
+    if (kind == "image") return SemanticTypeKind::image;
     if (kind == "key") return SemanticTypeKind::key;
     if (kind == "style") return SemanticTypeKind::style;
     if (kind == "layout") return SemanticTypeKind::layout;
@@ -148,7 +148,7 @@ std::string SemanticType::diagnostic_name() const {
     case SemanticTypeKind::boolean: return "boolean";
     case SemanticTypeKind::color: return "color";
     case SemanticTypeKind::path: return "path outline";
-    case SemanticTypeKind::texture: return "texture id";
+    case SemanticTypeKind::image: return "image id";
     case SemanticTypeKind::key: return "key";
     case SemanticTypeKind::style: return "style";
     case SemanticTypeKind::layout: return "layout";
@@ -204,7 +204,7 @@ bool SemanticType::accepts(const SemanticType& actual) const {
         (actual.kind == SemanticTypeKind::string || actual.kind == SemanticTypeKind::string_literal)) {
         return true;
     }
-    if ((kind == SemanticTypeKind::key || kind == SemanticTypeKind::texture) &&
+    if ((kind == SemanticTypeKind::key || kind == SemanticTypeKind::image) &&
         (actual.kind == SemanticTypeKind::string || actual.kind == SemanticTypeKind::string_literal)) {
         return true;
     }

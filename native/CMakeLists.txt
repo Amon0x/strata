@@ -23,8 +23,7 @@ option(STRATA_ENABLE_TRACY "Enable local Tracy instrumentation" OFF)
 
 if(MSVC AND MSVC_VERSION LESS 1940)
     message(FATAL_ERROR
-        "Strata requires MSVC 19.40 or newer (Visual Studio 2022 17.10); "
-        "the newest installed stable v143 toolset is selected automatically."
+        "Strata requires MSVC 19.40 or newer; use the repository's windows-x64 workflow."
     )
 endif()
 
@@ -150,6 +149,31 @@ target_include_directories(
 set_target_properties(strata_internal_data PROPERTIES POSITION_INDEPENDENT_CODE ON)
 strata_target_defaults(strata_internal_data)
 
+# Standalone, dependency-free static SVG parser and deterministic reference rasterizer. The UI
+# runtime consumes the same parsed display list directly, while external tools can use Strata::svg
+# without linking the runtime or a render backend.
+add_library(
+    strata_svg
+    STATIC
+        src/svg/svg.cpp
+        src/svg/rasterizer.cpp
+)
+add_library(Strata::svg ALIAS strata_svg)
+target_include_directories(
+    strata_svg
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+set_target_properties(
+    strata_svg
+    PROPERTIES
+        EXPORT_NAME svg
+        POSITION_INDEPENDENT_CODE ON
+)
+strata_target_defaults(strata_svg)
+target_compile_features(strata_svg PUBLIC cxx_std_23)
+
 add_library(
     strata_render_host
     STATIC
@@ -220,6 +244,7 @@ add_library(
         src/resource/assets.cpp
         src/resource/image.cpp
         src/resource/resource.cpp
+        src/resource/svg_image.cpp
         src/runtime/action.cpp
         src/runtime/application.cpp
         src/runtime/async.cpp
@@ -303,6 +328,7 @@ add_library(
         src/ui/semantics.cpp
         src/ui/status.cpp
         src/ui/surface.cpp
+        src/ui/svg_image.cpp
         src/ui/text.cpp
         src/ui/text_geometry.cpp
         src/ui/theme.cpp
@@ -356,7 +382,7 @@ target_include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 set_target_properties(strata_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(strata_core PRIVATE freetype strata_internal_data)
+target_link_libraries(strata_core PRIVATE freetype strata_internal_data Strata::svg)
 if(STRATA_ENABLE_TRACY)
     target_link_libraries(strata_core PRIVATE Tracy::TracyClient)
     target_compile_definitions(strata_core PRIVATE STRATA_ENABLE_TRACY)
@@ -548,6 +574,10 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
 endif()
 
 if(STRATA_BUILD_TOOLS)
+    add_executable(strata_svg_render tools/svg_render.cpp)
+    target_link_libraries(strata_svg_render PRIVATE Strata::svg)
+    strata_target_defaults(strata_svg_render)
+
     add_executable(
         strata_compile
         tools/compiler_main.cpp
@@ -632,7 +662,9 @@ if(STRATA_BUILD_SAMPLES)
     strata_target_defaults(strata_c_smoke)
 
     add_executable(strata_cpp_smoke samples/cpp_smoke.cpp)
-    target_link_libraries(strata_cpp_smoke PRIVATE Strata::host Strata::render_host)
+    target_link_libraries(
+        strata_cpp_smoke PRIVATE Strata::host Strata::render_host Strata::svg
+    )
     strata_target_defaults(strata_cpp_smoke)
 
     if(WIN32 AND STRATA_BUILD_DESKTOP)
@@ -893,6 +925,14 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     target_include_directories(strata_showcase_model_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop)
     strata_target_defaults(strata_showcase_model_tests)
     add_test(NAME strata.showcase.model COMMAND strata_showcase_model_tests)
+
+    add_executable(strata_svg_tests tests/svg_tests.cpp)
+    target_link_libraries(strata_svg_tests PRIVATE Strata::svg)
+    strata_target_defaults(strata_svg_tests)
+    add_test(
+        NAME strata.svg
+        COMMAND strata_svg_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/svg
+    )
 
     add_executable(strata_core_tests tests/core_tests.cpp)
     target_link_libraries(strata_core_tests PRIVATE Strata::core)
@@ -1164,7 +1204,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
 endif()
 
 install(
-    TARGETS strata_c strata_host_cpp strata_extensions strata_render_host
+    TARGETS strata_c strata_host_cpp strata_extensions strata_render_host strata_svg
     EXPORT StrataTargets
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
@@ -1185,7 +1225,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
 endif()
 if(STRATA_BUILD_TOOLS)
     install(
-        TARGETS strata_compile strata_authoring strata_headless
+        TARGETS strata_compile strata_authoring strata_headless strata_svg_render
         EXPORT StrataTargets
         RUNTIME DESTINATION bin
     )

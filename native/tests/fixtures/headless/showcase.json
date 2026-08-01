@@ -60,15 +60,15 @@
         "resource": "assets/strata/fonts/mono.ttf"
       }
     ],
-    "textures": [
+    "images": [
       {
         "id": "strata:ui/icons/chevron-down",
-        "resource": "assets/strata/textures/ui/icons/chevron-down.png",
+        "resource": "assets/strata/images/ui/icons/chevron-down.svg",
         "sampling": "linear"
       },
       {
         "id": "strata:ui/icons/chevron-up",
-        "resource": "assets/strata/textures/ui/icons/chevron-up.png",
+        "resource": "assets/strata/images/ui/icons/chevron-up.svg",
         "sampling": "linear"
       }
     ]

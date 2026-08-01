@@ -15,6 +15,7 @@
 #include "runtime/host_services.hpp"
 #include "runtime/layer.hpp"
 #include "runtime/profiler.hpp"
+#include "resource/svg_image.hpp"
 #include "ui/command.hpp"
 #include "ui/behavior/registry.hpp"
 #include "ui/description.hpp"
@@ -129,6 +130,7 @@ struct ScrollAnimationRequest final {
 /** Fully prepared text/layout half of an atomic host-resource reload. */
 struct SurfaceResourceReloadPlan final {
     std::shared_ptr<const TextEngine> text_engine;
+    std::shared_ptr<const resource::SvgImageRegistry> svg_images;
     LayoutEngine layout_engine;
 };
 
@@ -237,7 +239,8 @@ public:
         BehaviorRegistry behavior_registry = BehaviorRegistry{},
         runtime::HostServices* host_services = nullptr,
         Theme initial_theme = Theme{},
-        std::string host_service_owner = {}
+        std::string host_service_owner = {},
+        std::shared_ptr<const resource::SvgImageRegistry> svg_images = {}
     );
     ~Surface();
 
@@ -256,7 +259,8 @@ public:
     void invalidate_resources();
     /** Performs every potentially throwing text/layout step without changing the live surface. */
     [[nodiscard]] SurfaceResourceReloadPlan prepare_resource_reload(
-        std::shared_ptr<const TextEngine> text_engine
+        std::shared_ptr<const TextEngine> text_engine,
+        std::shared_ptr<const resource::SvgImageRegistry> svg_images
     ) const;
     /** Installs a matching prepared text/layout state; frame-time invalidation remains retryable. */
     void commit_resource_reload(SurfaceResourceReloadPlan plan) noexcept;
@@ -375,6 +379,7 @@ private:
     std::shared_ptr<const DescriptionNode> raw_description_;
     RetainedTree tree_;
     std::shared_ptr<const TextEngine> text_engine_;
+    std::shared_ptr<const resource::SvgImageRegistry> svg_images_;
     MotionRuntime motion_;
     LayoutEngine layout_engine_;
     StatusFeedbackService status_feedback_;

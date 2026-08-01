@@ -222,6 +222,7 @@ RenderOperationCounters RenderEngine::render(
     const BehaviorRegistry& behaviors,
     const MotionRuntime& motion,
     const TextEngine* text,
+    const resource::SvgImageRegistry* svg_images,
     const MaterialRegistry& materials,
     const RenderGenerationToken& generations,
     RenderCommandBuffer& output
@@ -249,7 +250,7 @@ RenderOperationCounters RenderEngine::render(
             const LayoutRecord* record = layout.find(node->identity());
             if (record == nullptr) continue;
             std::vector<RenderCommand> overlay = build_widget_overlay(
-                widgets, *node, *record, layout, input, commands, text, &motion, 1.0
+                widgets, *node, *record, layout, input, commands, text, svg_images, &motion, 1.0
             );
             append_behavior_overlays(
                 behaviors,
@@ -259,6 +260,7 @@ RenderOperationCounters RenderEngine::render(
                 input,
                 commands,
                 text,
+                svg_images,
                 &motion,
                 1.0,
                 true,
@@ -539,7 +541,8 @@ RenderOperationCounters RenderEngine::render(
         const bool rebuild = !retained_layout_matches && !has_fragment_translation;
         if (rebuild) {
             std::vector<RenderCommand> fragment = build_widget_fragment(
-                widgets, node, *record, layout, input, commands, text, &motion, 1.0, false
+                widgets, node, *record, layout, input, commands, text, svg_images, &motion,
+                1.0, false
             );
             Impl::CachedFragment next{
                 generations,
@@ -608,7 +611,8 @@ RenderOperationCounters RenderEngine::render(
         }
 
         const std::optional<Rect> lifecycle_clip = widget_descendant_clip(
-            widgets, node, *record, layout, input, commands, text, &motion, inherited_opacity
+            widgets, node, *record, layout, input, commands, text, svg_images, &motion,
+            inherited_opacity
         );
         std::optional<Rect> descendant_local_clip = lifecycle_clip;
         if (record->local_clip.has_value()) {
@@ -720,7 +724,7 @@ RenderOperationCounters RenderEngine::render(
             !presentation_translation.has_value()) {
             std::vector<RenderCommand> presentation;
             append_widget_foreground(
-                widgets, node, *record, layout, input, commands, text, &motion,
+                widgets, node, *record, layout, input, commands, text, svg_images, &motion,
                 inherited_opacity, presentation
             );
             bool local_overlay_rendered = false;
@@ -728,7 +732,7 @@ RenderOperationCounters RenderEngine::render(
                 !lifecycle->present.detached_overlay) {
                 const std::size_t before = presentation.size();
                 std::vector<RenderCommand> overlay = build_widget_overlay(
-                    widgets, node, *record, layout, input, commands, text, &motion,
+                    widgets, node, *record, layout, input, commands, text, svg_images, &motion,
                     inherited_opacity
                 );
                 presentation.insert(
@@ -747,6 +751,7 @@ RenderOperationCounters RenderEngine::render(
                 input,
                 commands,
                 text,
+                svg_images,
                 &motion,
                 inherited_opacity,
                 false,

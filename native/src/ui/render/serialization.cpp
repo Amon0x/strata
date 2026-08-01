@@ -125,8 +125,8 @@ using data::JsonValue;
 }
 
 [[nodiscard]] JsonValue material_parameter(const runtime::Value& value) {
-    if (value.texture() != nullptr) {
-        return object({{"texture", JsonValue(value.texture()->id)}});
+    if (value.image() != nullptr) {
+        return object({{"texture", JsonValue(value.image()->id)}});
     }
     if (value.color() != nullptr) {
         return JsonValue(color_string(RenderColor{
@@ -320,6 +320,10 @@ JsonValue render_command_json(const RenderCommand& command) {
             };
             if (value.shape.fill.has_value()) {
                 fields.emplace_back("fill", paint(*value.shape.fill));
+                fields.emplace_back(
+                    "fillRule",
+                    JsonValue(value.shape.fill_rule == PathFillRule::evenodd ? "evenodd" : "nonzero")
+                );
             }
             if (value.shape.stroke.has_value()) {
                 const StrokeStyle style = value.shape.stroke_style.value_or(StrokeStyle{});

@@ -871,14 +871,14 @@ void strata_widget_render_text(
 void strata_widget_render_image(
     strata_widget_render_context* const context,
     const strata_rect bounds,
-    const strata_string_view texture,
+    const strata_string_view image,
     const strata_color tint,
     const strata_texture_region source
 ) {
-    if (context == nullptr || context->scope == nullptr || !valid_view(texture, false)) return;
+    if (context == nullptr || context->scope == nullptr || !valid_view(image, false)) return;
     context->scope->image(
         rect(bounds),
-        std::string(texture.data, texture.size),
+        std::string(image.data, image.size),
         color(tint),
         region(source)
     );

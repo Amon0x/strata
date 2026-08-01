@@ -1,5 +1,6 @@
 #include <strata/host.hpp>
 #include <strata/render_packet.hpp>
+#include <strata/svg.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -39,6 +40,12 @@ int main(const int argument_count, const char* const* const arguments) {
         constexpr std::string_view source =
             "style Root { width: { weight: 1 }; height: { weight: 1 }; background: #334155FF; } "
             "overlay Main { root Panel(key: \"embedded.panel\", style: Root) }";
+        const strata::svg::Document svg = strata::svg::parse(
+            "<svg width='16' height='16'><path d='M1 1h14v14H1z'/></svg>"
+        );
+        if (svg.commands.size() != 1U) {
+            throw std::runtime_error("installed Strata::svg parser lost static geometry");
+        }
 
         strata::Surface surface = [&] {
             strata::RuntimeOptions runtime_options;

@@ -374,24 +374,24 @@ Scenario load_scenario(const std::filesystem::path& path) {
             result.fonts.push_back(std::move(font));
         }
     }
-    if (const JsonValue* values = optional(surface, "textures"); values != nullptr) {
-        for (const JsonValue& value : as_array(*values, "surface.textures")) {
-            static_cast<void>(as_object(value, "surface texture"));
-            TextureConfig texture{
-                text(required(value, "id"), "texture.id"),
-                text(required(value, "resource"), "texture.resource"),
+    if (const JsonValue* values = optional(surface, "images"); values != nullptr) {
+        for (const JsonValue& value : as_array(*values, "surface.images")) {
+            static_cast<void>(as_object(value, "surface image"));
+            ImageConfig image{
+                text(required(value, "id"), "image.id"),
+                text(required(value, "resource"), "image.resource"),
                 1U,
             };
             if (const JsonValue* sampling = optional(value, "sampling"); sampling != nullptr) {
-                const std::string name = text(*sampling, "texture.sampling");
+                const std::string name = text(*sampling, "image.sampling");
                 if (name == "nearest")
-                    texture.sampling = 0U;
+                    image.sampling = 0U;
                 else if (name != "linear") {
-                    throw std::invalid_argument("texture.sampling must be 'nearest' or 'linear'");
+                    throw std::invalid_argument("image.sampling must be 'nearest' or 'linear'");
                 }
             }
-            require_relative_resource(texture.resource, "texture.resource");
-            result.textures.push_back(std::move(texture));
+            require_relative_resource(image.resource, "image.resource");
+            result.images.push_back(std::move(image));
         }
     }
 

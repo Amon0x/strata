@@ -707,11 +707,11 @@ screen Main {
         {view("strata:fonts/default"), view(regular_font)},
         {view("strata:fonts/mono"), view(mono_font)},
     };
-    const strata_surface_texture_resource textures[]{
+    const strata_surface_image_resource images[]{
         {
             view("strata:ui/icons/chevron-down"),
-            view("assets/strata/textures/ui/icons/chevron-down.png"),
-            STRATA_TEXTURE_SAMPLING_LINEAR,
+            view("assets/strata/images/ui/icons/chevron-down.svg"),
+            STRATA_IMAGE_SAMPLING_LINEAR,
             0U,
         },
     };
@@ -752,8 +752,8 @@ screen Main {
         fonts,
         std::size(fonts),
         &extensions,
-        textures,
-        std::size(textures),
+        images,
+        std::size(images),
     };
     strata_surface* surface = nullptr;
     check(
@@ -768,6 +768,27 @@ screen Main {
                 STRATA_STATUS_INVALID_ARGUMENT &&
             duplicate_surface == nullptr,
         "duplicate public Surface ids aliased runtime host-service ownership"
+    );
+    const strata_surface_image_resource malformed_images[]{
+        {
+            view("fixture:malformed-svg"),
+            view("assets/strata/samples/desktop_app.strata"),
+            STRATA_IMAGE_SAMPLING_LINEAR,
+            0U,
+        },
+    };
+    strata_surface_config malformed_surface_config = surface_config;
+    malformed_surface_config.id = view("abi.malformed-svg");
+    malformed_surface_config.images = malformed_images;
+    malformed_surface_config.image_count = std::size(malformed_images);
+    strata_surface* malformed_surface = reinterpret_cast<strata_surface*>(UINTPTR_MAX);
+    check(
+        strata_runtime_create_surface(
+            runtime,
+            &malformed_surface_config,
+            &malformed_surface
+        ).status == STRATA_STATUS_INVALID_ARGUMENT && malformed_surface == nullptr,
+        "Surface image loading accepted a malformed SVG document"
     );
     std::string frame_json;
     const strata_value_json_sink frame_sink{

@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include <strata/svg.hpp>
+
 #include "runtime/expression.hpp"
 #include "runtime/application.hpp"
 #include "runtime/value.hpp"
@@ -32,6 +34,7 @@
 #include "ui/render/submission.hpp"
 #include "ui/scheduler.hpp"
 #include "ui/surface.hpp"
+#include "ui/svg_image.hpp"
 #include "data/json.hpp"
 #include "font/atlas.hpp"
 #include "font/opentype.hpp"
@@ -450,6 +453,202 @@ void test_bundled_font_metrics(const std::filesystem::path& registry_path) {
         const std::shared_ptr<const strata::font::GlyphOutline> compound = font.glyph_outline(e_acute);
         check(compound != nullptr && !compound->empty(), "native glyf decoder lost a composite glyph");
     }
+}
+
+void test_svg_image_projection_and_compound_fill() {
+    using namespace strata::ui;
+    const strata::svg::Document document = strata::svg::parse(R"SVG(
+<svg width="20" height="10" viewBox="0 0 10 10">
+  <rect width="10" height="10" fill="currentColor"/>
+</svg>)SVG");
+    std::vector<RenderCommand> commands;
+    append_svg_image(commands, document, Rect{0.0, 0.0, 100.0, 50.0}, TextureRegion{},
+                     RenderColor{70U, 120U, 240U, 200U}, 0.5);
+    check(commands.size() == 5U &&
+              std::holds_alternative<ClipPushRenderCommand>(commands.front()) &&
+              std::holds_alternative<TransformPushRenderCommand>(commands[1]) &&
+              std::holds_alternative<TransformPopRenderCommand>(commands[3]) &&
+              std::holds_alternative<ClipPopRenderCommand>(commands.back()),
+          "SVG image projection did not preserve its viewport clip and transform");
+    const auto* projected = std::get_if<PathRenderCommand>(&commands[2]);
+    check(projected != nullptr && projected->shape.fill.has_value(),
+          "SVG image projection did not emit vector path geometry");
+    const RenderColor projected_color = projected->shape.fill->representative();
+    check(projected_color == RenderColor{70U, 120U, 240U, 100U},
+          "SVG currentColor did not resolve through Image tint and opacity");
+    const auto* transform = std::get_if<TransformPushRenderCommand>(&commands[1]);
+    check(transform != nullptr && std::abs(transform->m00 - 5.0) < 1.0e-9 &&
+              std::abs(transform->m11 - 5.0) < 1.0e-9 && std::abs(transform->m02 - 25.0) < 1.0e-9,
+          "SVG default preserveAspectRatio did not center the viewBox");
+
+    Path compound;
+    compound.move_to(Point{0.0, 0.0});
+    compound.line_to(Point{1.0, 0.0});
+    compound.line_to(Point{1.0, 1.0});
+    compound.line_to(Point{0.0, 1.0});
+    compound.close();
+    compound.move_to(Point{0.25, 0.25});
+    compound.line_to(Point{0.75, 0.25});
+    compound.line_to(Point{0.75, 0.75});
+    compound.line_to(Point{0.25, 0.75});
+    compound.close();
+    const PaintMesh mesh = tessellate_shape(
+        PathShape{
+            std::move(compound),
+            Paint(RenderColor{255U, 255U, 255U, 255U}),
+            std::nullopt,
+            std::nullopt,
+            PathFillRule::evenodd,
+        },
+        Size{100.0, 100.0}, 1.0);
+    const auto covered = [](const PaintMesh& candidate, const Point point) {
+        const auto cross = [](const Point first, const Point second, const Point third) {
+            return (second.x - first.x) * (third.y - first.y) -
+                   (second.y - first.y) * (third.x - first.x);
+        };
+        for (std::size_t index = 0U; index + 2U < candidate.indices.size(); index += 3U) {
+            const Point a = candidate.vertices[candidate.indices[index]].normalized;
+            const Point b = candidate.vertices[candidate.indices[index + 1U]].normalized;
+            const Point c = candidate.vertices[candidate.indices[index + 2U]].normalized;
+            const double first = cross(a, b, point);
+            const double second = cross(b, c, point);
+            const double third = cross(c, a, point);
+            if (!((first < 0.0 || second < 0.0 || third < 0.0) &&
+                  (first > 0.0 || second > 0.0 || third > 0.0))) {
+                return true;
+            }
+        }
+        return false;
+    };
+    check(covered(mesh, Point{0.1, 0.1}) && !covered(mesh, Point{0.5, 0.5}),
+          "compound even-odd path tessellation filled its hole");
+
+    Path open_triangle;
+    open_triangle.move_to(Point{0.0, 0.0});
+    open_triangle.line_to(Point{1.0, 0.0});
+    open_triangle.line_to(Point{0.5, 1.0});
+    const PaintMesh open_mesh = tessellate_shape(
+        PathShape{
+            std::move(open_triangle),
+            Paint(RenderColor{255U, 255U, 255U, 255U}),
+            std::nullopt,
+            std::nullopt,
+            PathFillRule::nonzero,
+        },
+        Size{100.0, 100.0}, 1.0);
+    check(covered(open_mesh, Point{0.5, 0.25}),
+          "an open filled SVG subpath was not implicitly closed");
+
+    const auto overlapping_rectangles = [] {
+        Path path;
+        path.move_to(Point{0.0, 0.0});
+        path.line_to(Point{0.75, 0.0});
+        path.line_to(Point{0.75, 1.0});
+        path.line_to(Point{0.0, 1.0});
+        path.close();
+        path.move_to(Point{0.25, 0.0});
+        path.line_to(Point{1.0, 0.0});
+        path.line_to(Point{1.0, 1.0});
+        path.line_to(Point{0.25, 1.0});
+        path.close();
+        return path;
+    };
+    const PaintMesh overlap_evenodd = tessellate_shape(
+        PathShape{
+            overlapping_rectangles(),
+            Paint(RenderColor{255U, 255U, 255U, 255U}),
+            std::nullopt,
+            std::nullopt,
+            PathFillRule::evenodd,
+        },
+        Size{100.0, 100.0}, 1.0);
+    const PaintMesh overlap_nonzero = tessellate_shape(
+        PathShape{
+            overlapping_rectangles(),
+            Paint(RenderColor{255U, 255U, 255U, 255U}),
+            std::nullopt,
+            std::nullopt,
+            PathFillRule::nonzero,
+        },
+        Size{100.0, 100.0}, 1.0);
+    check(covered(overlap_evenodd, Point{0.1, 0.5}) && !covered(overlap_evenodd, Point{0.5, 0.5}),
+          "intersecting even-odd subpaths did not cancel their overlap");
+    check(covered(overlap_nonzero, Point{0.5, 0.5}),
+          "intersecting nonzero subpaths lost their overlap");
+
+    Path bow_tie;
+    bow_tie.move_to(Point{0.0, 0.0});
+    bow_tie.line_to(Point{1.0, 1.0});
+    bow_tie.line_to(Point{0.0, 1.0});
+    bow_tie.line_to(Point{1.0, 0.0});
+    bow_tie.close();
+    const PaintMesh bow_tie_mesh = tessellate_shape(
+        PathShape{
+            std::move(bow_tie),
+            Paint(RenderColor{255U, 255U, 255U, 255U}),
+            std::nullopt,
+            std::nullopt,
+            PathFillRule::evenodd,
+        },
+        Size{100.0, 100.0}, 1.0);
+    check(covered(bow_tie_mesh, Point{0.5, 0.2}) && covered(bow_tie_mesh, Point{0.5, 0.8}) &&
+              !covered(bow_tie_mesh, Point{0.1, 0.5}),
+          "self-intersecting even-odd path tessellation changed its winding regions");
+
+    Path translucent_corner;
+    translucent_corner.move_to(Point{0.2, 0.2});
+    translucent_corner.line_to(Point{0.8, 0.2});
+    translucent_corner.line_to(Point{0.8, 0.8});
+    const PaintMesh translucent_stroke = tessellate_shape(
+        PathShape{
+            std::move(translucent_corner),
+            std::nullopt,
+            Paint(RenderColor{255U, 255U, 255U, 128U}),
+            StrokeStyle{20.0, PathCap::butt, PathJoin::round, 4.0},
+        },
+        Size{100.0, 100.0}, 1.0);
+    const auto coverage_count = [](const PaintMesh& candidate, const Point point) {
+        const auto cross = [](const Point first, const Point second, const Point third) {
+            return (second.x - first.x) * (third.y - first.y) -
+                   (second.y - first.y) * (third.x - first.x);
+        };
+        std::size_t result = 0U;
+        for (std::size_t index = 0U; index + 2U < candidate.indices.size(); index += 3U) {
+            const Point a = candidate.vertices[candidate.indices[index]].normalized;
+            const Point b = candidate.vertices[candidate.indices[index + 1U]].normalized;
+            const Point c = candidate.vertices[candidate.indices[index + 2U]].normalized;
+            const double first = cross(a, b, point);
+            const double second = cross(b, c, point);
+            const double third = cross(c, a, point);
+            if (!((first < 0.0 || second < 0.0 || third < 0.0) &&
+                  (first > 0.0 || second > 0.0 || third > 0.0))) {
+                ++result;
+            }
+        }
+        return result;
+    };
+    check(coverage_count(translucent_stroke, Point{0.74, 0.26}) == 1U,
+          "translucent stroke geometry over-composited its joined segments");
+
+    Path excessive_curves;
+    for (std::size_t contour = 0U; contour < 33U; ++contour) {
+        excessive_curves.move_to(Point{0.0, 0.5});
+        excessive_curves.cubic_to(
+            Point{0.0, 1.0e8}, Point{1.0, -1.0e8}, Point{1.0, 0.5});
+    }
+    bool aggregate_limit_rejected = false;
+    try {
+        static_cast<void>(tessellate_shape(
+            PathShape{
+                std::move(excessive_curves),
+                Paint(RenderColor{255U, 255U, 255U, 255U}),
+            },
+            Size{100.0, 100.0}, 1.0));
+    } catch (const std::invalid_argument&) {
+        aggregate_limit_rejected = true;
+    }
+    check(aggregate_limit_rejected,
+          "UI path flattening did not enforce its aggregate point budget");
 }
 
 void test_bundled_texture_descriptor(const std::filesystem::path& registry_path) {
@@ -987,6 +1186,42 @@ void test_native_nine_patch_geometry(const std::filesystem::path& registry_path)
             }),
         "surface teardown lost or duplicated its static/atlas resource ownership"
     );
+
+    font::GlyphAtlas reload_atlas("static-image-reload-test");
+    ui::HostRenderPacketCache reload_cache;
+    const std::vector<std::uint8_t>& before_reload = reload_cache.encode(
+        commands, 1U, textures, reload_atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
+    std::size_t before_offset = 8U;
+    static_cast<void>(packet_u32(before_reload, before_offset));
+    static_cast<void>(packet_u32(before_reload, before_offset));
+    static_cast<void>(packet_u32(before_reload, before_offset));
+    static_cast<void>(packet_u64(before_reload, before_offset));
+    const std::uint64_t before_epoch = packet_u64(before_reload, before_offset);
+    ui::HostRenderResourceInvalidationPlan invalidation = reload_cache.plan_resource_invalidation();
+    reload_cache.commit_resource_invalidation(std::move(invalidation));
+    ui::HostRenderResourceInvalidationPlan repeated_invalidation =
+        reload_cache.plan_resource_invalidation();
+    reload_cache.commit_resource_invalidation(std::move(repeated_invalidation));
+    const std::vector<std::uint8_t>& after_reload = reload_cache.encode(
+        commands, 2U, textures, reload_atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
+    std::size_t after_offset = 8U;
+    check(packet_u32(after_reload, after_offset) == 4U,
+          "static image reload packet version changed");
+    check(packet_u32(after_reload, after_offset) == 2U,
+          "repeated static image reload dropped its pending release or replacement");
+    static_cast<void>(packet_u32(after_reload, after_offset));
+    static_cast<void>(packet_u64(after_reload, after_offset));
+    check(packet_u64(after_reload, after_offset) > before_epoch,
+          "resource invalidation reused a prior geometry epoch");
+    for (std::size_t field = 0U; field < 4U; ++field) {
+        static_cast<void>(packet_u32(after_reload, after_offset));
+    }
+    check(packet_u32(after_reload, after_offset) == 2U,
+          "static image reload did not release the prior host id first");
+    const std::uint32_t release_size = packet_u32(after_reload, after_offset);
+    after_offset += release_size;
+    check(packet_u32(after_reload, after_offset) == 3U,
+          "static image reload did not create the replacement after release");
 }
 
 void test_native_custom_mesh_geometry(const std::filesystem::path& registry_path) {
@@ -5754,6 +5989,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_authored_material_scope_is_fill_local();
         test_gradient_paint_authoring_and_tessellation();
         test_vector_shape_tessellation();
+        test_svg_image_projection_and_compound_fill();
         if (argument_count >= 3 && std::string_view(arguments[2]).size() != 0U) {
             test_bundled_font_metrics(arguments[1]);
             test_bundled_texture_descriptor(arguments[1]);

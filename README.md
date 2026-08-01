@@ -11,7 +11,7 @@ ABI.
 | Area | Ownership |
 | --- | --- |
 | `native/` | C++23 core, C/C++ ABI, tools, tests, samples, and host implementations |
-| `src/main/resources/` | Bundled fonts, shaders, textures, schemas, and `.strata` applications |
+| `src/main/resources/` | Bundled fonts, shaders, PNG/SVG images, schemas, and `.strata` applications |
 | `docs/` | Embedding, authoring, language, testing, and generated reference documentation |
 | `editor/` | Generated editor metadata and the VS Code language extension source |
 
@@ -33,18 +33,16 @@ and Linux artifacts in separate build trees.
 Requirements:
 
 - CMake 3.25 or newer
-- Visual Studio 2022 17.10 or newer with the Desktop C++ workload and Windows SDK
+- Visual Studio 2026 with the Desktop C++ workload and Windows SDK
 
-The primary preset uses the stable Visual Studio 2022 generator and the newest installed v143
-compiler rather than pinning a preview toolset. From a Windows command shell:
+The single Windows preset uses the installed Visual Studio 2026 generator without pinning a
+specific toolset version. From a Windows command shell:
 
 ```bat
 cmake --workflow --preset windows-x64
 ```
 
-This configures, builds, and runs the complete test gate in `build\cmake\windows-x64`. A separate
-`windows-x64-vs2026` workflow is available as an unpinned compatibility lane for machines that only
-have Visual Studio 2026; it writes to its own build/install trees and is not the baseline.
+This configures, builds, and runs the complete test gate in `build\cmake\windows-x64`.
 
 ### Linux x64
 
@@ -91,6 +89,7 @@ exports these portable targets:
 | `Strata::host` | C++ ownership and structured host-data/action bindings. |
 | `Strata::extensions` | Authoring support linked into independently loaded extension libraries. |
 | `Strata::render_host` | Stateful public packet-v4 decoder for custom render backends. |
+| `Strata::svg` | Dependency-free static SVG parser and deterministic CPU rasterizer. |
 
 Windows additionally exports `Strata::desktop`. See [Embedding](docs/embedding.md) for custom
 renderer integration and [Win32 desktop hosting](docs/desktop-hosting.md) for DLL/resource
@@ -149,6 +148,7 @@ the single source of truth and JSON remains confined to the stable C ABI. The in
 `Strata_VSCODE_EXTENSION` VSIX provides schema-aware editing backed by the same metadata and native
 compiler.
 
+- [PNG and SVG images](docs/svg.md)
 - [C/C++ embedding and custom renderer guide](docs/embedding.md)
 - [Win32 desktop hosting and SDK consumption](docs/desktop-hosting.md)
 - [Native ABI and build notes](native/README.md)

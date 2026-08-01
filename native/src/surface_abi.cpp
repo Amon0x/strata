@@ -1,11 +1,13 @@
 #include <strata/strata.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <new>
 #include <span>
 #include <stdexcept>
@@ -23,11 +25,13 @@
 #include "font/opentype.hpp"
 #include "resource/image.hpp"
 #include "resource/resource.hpp"
+#include "resource/svg_image.hpp"
 #include "ui/frame_snapshot.hpp"
 #include "ui/input.hpp"
 #include "ui/layout.hpp"
 #include "ui/render/packet.hpp"
 #include "ui/surface.hpp"
+#include "ui/svg_image.hpp"
 
 namespace {
 
@@ -255,47 +259,47 @@ private:
     }
 }
 
-[[nodiscard]] strata::resource::TextureSampling texture_sampling(
-    const strata_texture_sampling value
+[[nodiscard]] strata::resource::TextureSampling image_sampling(
+    const strata_image_sampling value
 ) {
     switch (value) {
-    case STRATA_TEXTURE_SAMPLING_NEAREST: return strata::resource::TextureSampling::nearest;
-    case STRATA_TEXTURE_SAMPLING_LINEAR: return strata::resource::TextureSampling::linear;
-    default: throw std::invalid_argument("surface texture sampling is invalid");
+    case STRATA_IMAGE_SAMPLING_NEAREST: return strata::resource::TextureSampling::nearest;
+    case STRATA_IMAGE_SAMPLING_LINEAR: return strata::resource::TextureSampling::linear;
+    default: throw std::invalid_argument("surface image sampling is invalid");
     }
 }
 
-[[nodiscard]] std::vector<strata_surface_texture_binding> texture_bindings(
+[[nodiscard]] std::vector<strata_surface_image_binding> image_bindings(
     const strata_surface_config& config
 ) {
-    constexpr std::size_t maximum_texture_count = 256U;
-    if (config.texture_count == 0U) {
-        if (config.textures != nullptr) {
-            throw std::invalid_argument("an empty Surface texture table must use a null pointer");
+    constexpr std::size_t maximum_image_count = 256U;
+    if (config.image_count == 0U) {
+        if (config.images != nullptr) {
+            throw std::invalid_argument("an empty Surface image table must use a null pointer");
         }
         return {};
     }
-    if (config.textures == nullptr || config.texture_count > maximum_texture_count) {
-        throw std::invalid_argument("Surface texture table pointer or count is invalid");
+    if (config.images == nullptr || config.image_count > maximum_image_count) {
+        throw std::invalid_argument("Surface image table pointer or count is invalid");
     }
-    std::vector<strata_surface_texture_binding> result;
-    result.reserve(config.texture_count);
-    for (std::size_t index = 0U; index < config.texture_count; ++index) {
-        const strata_surface_texture_resource& entry = config.textures[index];
+    std::vector<strata_surface_image_binding> result;
+    result.reserve(config.image_count);
+    for (std::size_t index = 0U; index < config.image_count; ++index) {
+        const strata_surface_image_resource& entry = config.images[index];
         if (!valid_view(entry.id, false) || !valid_view(entry.resource_id, false) ||
             entry.reserved != 0U) {
-            throw std::invalid_argument("Surface texture entries are incomplete");
+            throw std::invalid_argument("Surface image entries are incomplete");
         }
         std::string id = copied_string(entry.id);
         std::string resource_id = copied_string(entry.resource_id);
         if (!strata::core::valid_utf8(id) || !strata::core::valid_utf8(resource_id)) {
-            throw std::invalid_argument("Surface texture ids must be valid UTF-8");
+            throw std::invalid_argument("Surface image ids must be valid UTF-8");
         }
-        if (std::ranges::any_of(result, [&](const auto& texture) { return texture.id == id; })) {
-            throw std::invalid_argument("Surface logical texture ids must be unique");
+        if (std::ranges::any_of(result, [&](const auto& image) { return image.id == id; })) {
+            throw std::invalid_argument("Surface logical image ids must be unique");
         }
-        static_cast<void>(texture_sampling(entry.sampling));
-        result.push_back(strata_surface_texture_binding{
+        static_cast<void>(image_sampling(entry.sampling));
+        result.push_back(strata_surface_image_binding{
             std::move(id),
             std::move(resource_id),
             entry.sampling,
@@ -304,30 +308,72 @@ private:
     return result;
 }
 
-[[nodiscard]] std::vector<strata::resource::EncodedTextureResource> texture_resources(
+struct MaterializedImages final {
+    std::vector<strata::resource::EncodedTextureResource> textures;
+    std::shared_ptr<const strata::resource::SvgImageRegistry> svg_images;
+};
+
+[[nodiscard]] MaterializedImages image_resources(
     const ResourceAdapterTransaction& resources,
-    const std::span<const strata_surface_texture_binding> bindings,
+    const std::span<const strata_surface_image_binding> bindings,
     const std::string_view host_resource_namespace
 ) {
     if (host_resource_namespace.empty()) {
         throw std::invalid_argument("Surface host resource namespace must not be empty");
     }
-    std::vector<strata::resource::EncodedTextureResource> result;
-    result.reserve(bindings.size());
+    constexpr std::array<std::uint8_t, 8U> png_signature{
+        0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU,
+    };
+    MaterializedImages result;
+    result.textures.reserve(bindings.size());
+    std::vector<strata::resource::SvgImageResource> vectors;
+    vectors.reserve(bindings.size());
     for (std::size_t index = 0U; index < bindings.size(); ++index) {
-        const strata_surface_texture_binding& binding = bindings[index];
+        const strata_surface_image_binding& binding = bindings[index];
         const strata_string_view resource_id{binding.resource_id.data(), binding.resource_id.size()};
         strata::resource::ResourceBytes bytes = resources.load(resource_id);
-        const strata::resource::ImageDimensions dimensions = strata::resource::inspect_png(bytes);
-        result.push_back(strata::resource::EncodedTextureResource{
-            binding.id,
-            std::string(host_resource_namespace) + "/static/" + std::to_string(index),
-            texture_sampling(binding.sampling),
-            strata::resource::ImageEncoding::png,
-            dimensions,
-            std::move(bytes),
-        });
+        const bool png = bytes.size() >= png_signature.size() &&
+            std::equal(png_signature.begin(), png_signature.end(), bytes.begin());
+        if (png) {
+            const strata::resource::ImageDimensions dimensions =
+                strata::resource::inspect_png(bytes);
+            result.textures.push_back(strata::resource::EncodedTextureResource{
+                binding.id,
+                std::string(host_resource_namespace) + "/static/" + std::to_string(index),
+                image_sampling(binding.sampling),
+                strata::resource::ImageEncoding::png,
+                dimensions,
+                std::move(bytes),
+            });
+            continue;
+        }
+        const std::string source(bytes.begin(), bytes.end());
+        if (!strata::core::valid_utf8(source)) {
+            throw std::invalid_argument(
+                "image resource '" + binding.resource_id + "' is neither PNG nor UTF-8 SVG"
+            );
+        }
+        try {
+            strata::svg::Document document = strata::svg::parse(source);
+            strata::ui::validate_svg_image_geometry(document);
+            vectors.push_back(strata::resource::SvgImageResource{
+                binding.id,
+                std::move(document),
+            });
+        } catch (const strata::svg::ParseError& error) {
+            throw std::invalid_argument(
+                "SVG image resource '" + binding.resource_id + "' is invalid at byte " +
+                std::to_string(error.byte_offset()) + ": " + error.what()
+            );
+        } catch (const std::invalid_argument& error) {
+            throw std::invalid_argument(
+                "SVG image resource '" + binding.resource_id +
+                "' exceeds the supported UI geometry budget: " + error.what()
+            );
+        }
     }
+    result.svg_images =
+        std::make_shared<const strata::resource::SvgImageRegistry>(std::move(vectors));
     return result;
 }
 
@@ -562,14 +608,17 @@ strata_result strata_runtime_create_surface(
         strata::abi_detail::ExtensionRegistries extensions =
             strata::abi_detail::extension_registries(extension_bundle);
         std::vector<strata_surface_font_binding> owned_fonts = font_bindings(*config);
-        std::vector<strata_surface_texture_binding> owned_texture_bindings =
-            texture_bindings(*config);
+        std::vector<strata_surface_image_binding> owned_image_bindings =
+            image_bindings(*config);
         std::string owned_resource_namespace = runtime->allocate_surface_resource_namespace();
         const ResourceAdapterTransaction resource_transaction(*runtime);
         std::shared_ptr<const strata::ui::TextEngine> owned_text_engine =
             text_engine(resource_transaction, owned_fonts);
-        std::vector<strata::resource::EncodedTextureResource> owned_textures =
-            texture_resources(resource_transaction, owned_texture_bindings, owned_resource_namespace);
+        MaterializedImages owned_images = image_resources(
+            resource_transaction,
+            owned_image_bindings,
+            owned_resource_namespace
+        );
         // This is the final fallible/callback-sensitive gate before candidate publication.
         resource_transaction.verify_current();
         strata_surface* const created = std::construct_at(
@@ -582,9 +631,10 @@ strata_result strata_runtime_create_surface(
             std::move(owned_resource_namespace),
             environment(config->environment),
             std::move(owned_fonts),
-            std::move(owned_texture_bindings),
+            std::move(owned_image_bindings),
             std::move(owned_text_engine),
-            std::move(owned_textures),
+            std::move(owned_images.svg_images),
+            std::move(owned_images.textures),
             std::move(extensions.widgets),
             std::move(extensions.behaviors)
         );
@@ -744,14 +794,16 @@ strata_result strata_surface_reload_resources(strata_surface* const surface) {
         }
         std::shared_ptr<const strata::ui::TextEngine> next_text_engine =
             text_engine(resource_transaction, surface->fonts);
-        std::vector<strata::resource::EncodedTextureResource> next_textures =
-            texture_resources(
-                resource_transaction,
-                surface->texture_bindings,
-                surface->host_resource_namespace
-            );
+        MaterializedImages next_images = image_resources(
+            resource_transaction,
+            surface->image_bindings,
+            surface->host_resource_namespace
+        );
         strata::ui::SurfaceResourceReloadPlan core_plan =
-            surface->core.prepare_resource_reload(std::move(next_text_engine));
+            surface->core.prepare_resource_reload(
+                std::move(next_text_engine),
+                std::move(next_images.svg_images)
+            );
         resource_transaction.verify_current();
         if (surface->required_resource_generation != candidate_generation) {
             throw HostServiceError(
@@ -761,15 +813,19 @@ strata_result strata_surface_reload_resources(strata_surface* const surface) {
         }
         strata::font::AtlasResourceInvalidationPlan atlas_plan =
             surface->glyph_atlas.plan_resource_invalidation();
+        strata::ui::HostRenderResourceInvalidationPlan packet_plan =
+            surface->host_render_packet_cache.plan_resource_invalidation();
 
         // Every operation below is an allocation-free commit. A failure above leaves the old
         // engine, layout, atlas, textures, packet cache, and adapter gate intact for retry.
-        static_assert(noexcept(next_textures.swap(surface->textures)));
+        static_assert(noexcept(next_images.textures.swap(surface->textures)));
         surface->core.commit_resource_reload(std::move(core_plan));
         surface->glyph_atlas.commit_resource_invalidation(std::move(atlas_plan));
-        next_textures.swap(surface->textures);
+        next_images.textures.swap(surface->textures);
         surface->texture_resources_pending = true;
-        surface->host_render_packet_cache.clear();
+        surface->host_render_packet_cache.commit_resource_invalidation(
+            std::move(packet_plan)
+        );
         surface->materialized_resource_generation = candidate_generation;
         surface->required_resource_generation = candidate_generation;
         surface->resource_reload_required = false;

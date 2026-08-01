@@ -43,7 +43,7 @@ for its callback. Resource create/upload/release operations are one-shot; settle
 cached and the frame index is updated in place. Reading canonical frame JSON is optional and lazily
 materialized.
 
-`strata_surface_reload_resources` constructs candidate fonts/textures before adoption. On success it
+`strata_surface_reload_resources` constructs candidate fonts/images before adoption. On success it
 invalidates the prior frame and packet; call `strata_surface_frame` again before reading them. On
 failure, the prior resources remain active and the result carries a diagnostic.
 
@@ -51,7 +51,7 @@ Replacing a runtime resource adapter is a host-wide loader transition, not a laz
 live Surface enters `RESOURCE_RELOAD_REQUIRED`; the host must call
 `strata_surface_reload_resources` successfully for each Surface before framing it again. Each
 Surface reload remains transactional. A failed Surface keeps its prior materialized resources but
-stays gated, preventing a frame that mixes an old font/texture set with the new adapter. Adapter
+stays gated, preventing a frame that mixes an old font/image set with the new adapter. Adapter
 generations are nonzero and strictly increasing; null, repeated, or stale replacements are rejected
 without changing the active adapter or gating any Surface. Source resource paths remain private to
 the adapter. Packets use collision-free process/runtime/Surface host resource identities.
@@ -80,9 +80,9 @@ cmake --workflow --preset windows-x64
 cmake --workflow --preset linux-x64
 ```
 
-The Windows baseline uses stable Visual Studio 2022 x64 with the newest installed v143 toolset;
-`windows-x64-vs2026` is an unpinned compatibility lane with separate build/install trees. The Linux
-preset uses GCC, Ninja, and a RelWithDebInfo single-configuration tree. Both enable tools, samples, tests, strict
+The single Windows lane uses Visual Studio 2026 x64 without pinning a toolset version. The Linux
+preset remains available for native compatibility checks and uses GCC, Ninja, and a RelWithDebInfo
+single-configuration tree. Both enable tools, samples, tests, strict
 warnings, and installed-package acceptance. ASan uses a separate build with
 `-DSTRATA_ENABLE_ASAN=ON`; MSVC does not claim UBSan support.
 

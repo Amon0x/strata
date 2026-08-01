@@ -19,7 +19,7 @@ enum class ValueSchemaKind {
     duration,
     string,
     color,
-    texture,
+    image,
     key,
     theme_token,
     list,
@@ -56,7 +56,7 @@ public:
 
     [[nodiscard]] ValueSchemaKind kind() const noexcept;
     [[nodiscard]] bool accepts(const Value& value) const;
-    /** Coerces canonical JSON-shaped values into semantic scalar kinds such as key/texture. */
+    /** Coerces canonical JSON-shaped values into semantic scalar kinds such as key/image. */
     [[nodiscard]] std::optional<Value> normalize(const Value& value) const;
     [[nodiscard]] const ValueSchemaPtr& element() const noexcept;
     [[nodiscard]] bool element_nullable() const noexcept;

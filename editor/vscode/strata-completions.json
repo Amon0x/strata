@@ -4533,7 +4533,7 @@
           "name": "icon",
           "nullable": true,
           "required": false,
-          "type": "texture"
+          "type": "image"
         },
         {
           "aliases": [],
@@ -6385,7 +6385,7 @@
           "name": "icon",
           "nullable": false,
           "required": true,
-          "type": "texture"
+          "type": "image"
         },
         {
           "aliases": [],
@@ -6641,10 +6641,10 @@
         {
           "aliases": [],
           "enumValues": [],
-          "name": "texture",
+          "name": "image",
           "nullable": false,
           "required": true,
-          "type": "texture"
+          "type": "image"
         },
         {
           "aliases": [],
@@ -10476,7 +10476,7 @@
           "name": "collapsedIcon",
           "nullable": false,
           "required": false,
-          "type": "texture"
+          "type": "image"
         },
         {
           "aliases": [],
@@ -10484,7 +10484,7 @@
           "name": "expandedIcon",
           "nullable": false,
           "required": false,
-          "type": "texture"
+          "type": "image"
         },
         {
           "aliases": [],
