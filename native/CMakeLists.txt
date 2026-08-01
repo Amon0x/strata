@@ -653,6 +653,32 @@ if(STRATA_BUILD_TOOLS)
         COMMENT "Checking registry-derived Strata authoring files"
         VERBATIM
     )
+    file(READ "${STRATA_REPOSITORY_ROOT}/editor/vscode/package.json" strata_vscode_manifest)
+    string(JSON STRATA_VSCODE_VERSION GET "${strata_vscode_manifest}" version)
+    set(
+        STRATA_VSCODE_PACKAGE
+        "${CMAKE_BINARY_DIR}/editor/strata-language-${STRATA_VSCODE_VERSION}.vsix"
+    )
+    add_custom_command(
+        OUTPUT ${STRATA_VSCODE_PACKAGE}
+        COMMAND ${CMAKE_COMMAND}
+            -DSTRATA_EDITOR_SOURCE=${STRATA_REPOSITORY_ROOT}/editor/vscode
+            -DSTRATA_EDITOR_PACKAGE=${STRATA_VSCODE_PACKAGE}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/package_vscode_extension.cmake
+        DEPENDS
+            ${STRATA_REPOSITORY_ROOT}/editor/vscode/package.json
+            ${STRATA_REPOSITORY_ROOT}/editor/vscode/language-configuration.json
+            ${STRATA_REPOSITORY_ROOT}/editor/vscode/extension.js
+            ${STRATA_REPOSITORY_ROOT}/editor/vscode/README.md
+            ${STRATA_REPOSITORY_ROOT}/editor/vscode/strata-completions.json
+            ${STRATA_REPOSITORY_ROOT}/editor/vscode/syntaxes/strata.tmLanguage.json
+            ${STRATA_REPOSITORY_ROOT}/editor/vscode/extension.vsixmanifest
+            ${STRATA_REPOSITORY_ROOT}/editor/vscode/[Content_Types].xml
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/package_vscode_extension.cmake
+        COMMENT "Packaging the schema-aware Strata VS Code extension"
+        VERBATIM
+    )
+    add_custom_target(strata_vscode_extension ALL DEPENDS ${STRATA_VSCODE_PACKAGE})
     add_custom_target(strata_validate_modules COMMENT "Validating bundled Strata modules")
     add_custom_target(strata_generate_artifacts COMMENT "Regenerating bundled Strata artifacts")
     add_custom_target(strata_check_artifacts COMMENT "Checking bundled Strata artifacts")
@@ -774,6 +800,31 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             NAME strata.authoring.generated
             COMMAND strata_authoring --check "${CMAKE_CURRENT_SOURCE_DIR}/.."
         )
+        add_test(
+            NAME strata.compiler.diagnostics_json
+            COMMAND ${CMAKE_COMMAND}
+                -DSTRATA_COMPILER=$<TARGET_FILE:strata_compile>
+                -DSTRATA_REGISTRY=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+                -DSTRATA_VALID_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/assets/strata/ui/settings_app.strata
+                -DSTRATA_VALID_SCHEMAS=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/assets/strata/ui/settings_app.schemas.json
+                -DSTRATA_TEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/compiler-diagnostics-json
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/compiler_diagnostics_json.cmake
+        )
+        add_test(
+            NAME strata.editor.vscode.package
+            COMMAND ${CMAKE_COMMAND}
+                -DSTRATA_EDITOR_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/../editor/vscode
+                -DSTRATA_EDITOR_PACKAGE=${CMAKE_CURRENT_BINARY_DIR}/editor-test/strata-language.vsix
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/package_vscode_extension.cmake
+        )
+        find_program(strata_node_executable NAMES node nodejs)
+        if(strata_node_executable)
+            add_test(
+                NAME strata.editor.vscode.javascript
+                COMMAND ${strata_node_executable} --check
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../editor/vscode/extension.js
+            )
+        endif()
     endif()
 
     add_executable(strata_host_tests tests/host_tests.cpp)
@@ -1059,6 +1110,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             -DSTRATA_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DSTRATA_CONFIG=$<CONFIG>
             -DSTRATA_CTEST_COMMAND=${CMAKE_CTEST_COMMAND}
+            -DSTRATA_EXPECT_VSCODE_EXTENSION=${STRATA_BUILD_TOOLS}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/installed_package.cmake
     )
     set_tests_properties(strata.install.consumer PROPERTIES RUN_SERIAL TRUE)
@@ -1084,6 +1136,11 @@ if(STRATA_BUILD_TOOLS)
         TARGETS strata_compile strata_authoring strata_headless
         EXPORT StrataTargets
         RUNTIME DESTINATION bin
+    )
+    install(
+        FILES ${STRATA_VSCODE_PACKAGE}
+        DESTINATION share/strata/editor
+        OPTIONAL
     )
 endif()
 install(DIRECTORY include/ DESTINATION include)

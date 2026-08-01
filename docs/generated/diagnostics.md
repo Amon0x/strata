@@ -274,6 +274,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.TEXT.FONT_OPTIONAL_TABLE_IGNORED` | `native/src/ui/text.cpp` |
 | `STRATA.TEXT.MISSING_GLYPH` | `native/src/ui/text.cpp` |
 | `STRATA.THEME.INVALID` | `native/src/surface_theme_abi.cpp` |
+| `STRATA.TOOL.VALIDATION_FAILED` | `native/tools/compiler_check.cpp` |
 | `STRATA.UI.ACTION_DISPATCH_FAILED` | `native/src/ui/input/diagnostics.cpp` |
 | `STRATA.UI.ACTION_UNHANDLED` | `native/src/ui/input/diagnostics.cpp` |
 | `STRATA.UI.COMMAND_UNKNOWN_REFERENCE` | `native/src/ui/input/framework_actions.cpp` |

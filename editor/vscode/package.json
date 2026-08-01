@@ -1,13 +1,21 @@
 {
   "name": "strata-language",
   "displayName": "Strata UI Language",
-  "description": "Syntax highlighting for registry-validated .strata UI modules.",
-  "version": "0.1.1",
+  "description": "Schema-aware completions, hovers, symbols, imports, and native compiler diagnostics for .strata applications.",
+  "version": "0.2.0",
   "publisher": "strata",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.80.0"
   },
-  "categories": ["Programming Languages"],
+  "categories": ["Programming Languages", "Linters"],
+  "keywords": ["strata", "ui", "declarative", "language"],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:strata",
+    "onCommand:strata.validateModule",
+    "onCommand:strata.reloadSchema"
+  ],
   "contributes": {
     "languages": [
       {
@@ -23,6 +31,41 @@
         "scopeName": "source.strata",
         "path": "./syntaxes/strata.tmLanguage.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "strata.validateModule",
+        "title": "Strata: Validate Current Module"
+      },
+      {
+        "command": "strata.reloadSchema",
+        "title": "Strata: Reload Completion Schema"
+      }
+    ],
+    "configuration": {
+      "title": "Strata",
+      "properties": {
+        "strata.compiler.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the installed strata_compile executable. Relative paths resolve from the workspace folder."
+        },
+        "strata.registry.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to registry-v1.json. Empty uses workspace and installed-SDK discovery."
+        },
+        "strata.applicationSchemas.path": {
+          "type": "string",
+          "default": "",
+          "description": "Application *.schemas.json used for validation and app-specific completions. Empty discovers a schema beside the module."
+        },
+        "strata.validation.onSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the native compiler when a Strata document is opened or saved."
+        }
+      }
+    }
   }
 }

@@ -8,13 +8,22 @@
 int main(const int argument_count, const char* const* const arguments) {
     try {
         if ((argument_count == 4 || argument_count == 5) &&
-            std::string_view(arguments[1]) == "--check-module") {
-            return strata::tools::check_module(
-                std::filesystem::path(arguments[2]),
-                std::filesystem::path(arguments[3]),
-                argument_count == 5 ? std::filesystem::path(arguments[4])
-                                    : std::filesystem::path{}
-            );
+            (std::string_view(arguments[1]) == "--check-module" ||
+             std::string_view(arguments[1]) == "--check-module-json")) {
+            const std::filesystem::path schemas = argument_count == 5
+                ? std::filesystem::path(arguments[4])
+                : std::filesystem::path{};
+            return std::string_view(arguments[1]) == "--check-module-json"
+                ? strata::tools::check_module_json(
+                      std::filesystem::path(arguments[2]),
+                      std::filesystem::path(arguments[3]),
+                      schemas
+                  )
+                : strata::tools::check_module(
+                      std::filesystem::path(arguments[2]),
+                      std::filesystem::path(arguments[3]),
+                      schemas
+                  );
         }
         if (argument_count == 7 &&
             (std::string_view(arguments[1]) == "--emit-artifact" ||
@@ -33,7 +42,7 @@ int main(const int argument_count, const char* const* const arguments) {
         return 4;
     }
     std::cerr << "usage:\n"
-                 "  strata_compile --check-module <entry.strata> "
+                 "  strata_compile --check-module|--check-module-json <entry.strata> "
                  "<registry.json> [application-schemas.json]\n"
                  "  strata_compile --emit-artifact|--check-artifact <entry.strata> "
                  "<registry.json> <application-schemas.json> <resource-root> <artifact.bin>\n";

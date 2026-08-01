@@ -49,12 +49,14 @@ repository-path leaks and undeclared runtime dependencies.
 ## Generated and bundled artifacts
 
 The full CTest gate validates every bundled `.strata` module, checks compiled artifact freshness,
-and verifies generated authoring/reference files. Explicit maintenance targets are available when
-source artifacts intentionally change:
+verifies generated authoring/reference/host-contract files, parses machine-readable compiler
+diagnostics, checks the VS Code JavaScript, and opens the packaged VSIX to verify its required
+assets. Explicit maintenance targets are available when source artifacts intentionally change:
 
 ```sh
 cmake --build --preset linux-x64 --target strata_generate_artifacts
 cmake --build --preset linux-x64 --target strata_generate_authoring
+cmake --build --preset linux-x64 --target strata_vscode_extension
 ```
 
 Use `windows-x64` on Windows. Validation-only targets are `strata_validate_modules`,

@@ -30,8 +30,11 @@ dependency recompiles the module atomically; a rejected edit leaves the last-goo
 - Literals are strings, numbers/durations, colors, `true`, `false`, `null`, lists, and objects.
 - Statements and style properties end with `;`. Widget calls do not require a trailing semicolon.
 
-The generated TextMate grammar is packaged as a minimal VS Code extension under `editor/vscode`.
-Its keywords are generated from the same `DslLexicalSpecification` used by the lexer.
+The VS Code extension under `editor/vscode` packages the generated TextMate grammar and registry
+metadata. It provides schema-aware widget/action/host/property completions, hovers, signature help,
+symbols, import/local-definition navigation, and exact diagnostics from `strata_compile
+--check-module-json`. It does not maintain a second JavaScript parser: the production compiler
+remains the validation authority. Build `strata_vscode_extension` to produce the installable VSIX.
 
 ## Screens and overlays
 

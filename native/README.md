@@ -115,8 +115,10 @@ programs configure an application, activate `.strata`, create/frame a Surface, d
 exercise resource reload, inspect allocator telemetry, and release every handle. The public C++
 facade is split into focused owned-value headers (`diagnostic.hpp`, `input.hpp`, `adapters.hpp`,
 `profiler.hpp`, and `config.hpp`) aggregated by `strata.hpp`; custom hosts do not need to keep
-borrowed C strings or callback bridge records alive. `Strata_AUTHORING` names the installed schema-to-C++ generator;
-the installed consumer gate generates and compiles a typed host contract without repository paths.
-On Windows it also builds a hidden one-frame program linked through `Strata::desktop`. See
+borrowed C strings or callback bridge records alive. `Strata_AUTHORING` names the installed
+schema-to-C++ generator; the installed consumer gate generates and compiles a typed host contract
+without repository paths. `Strata_VSCODE_EXTENSION` names the installed schema-aware VSIX when tools
+were built. On Windows the gate also builds a hidden one-frame program linked through
+`Strata::desktop`. See
 [`docs/embedding.md`](../docs/embedding.md) for portable package and custom-renderer consumption, and
 [`docs/desktop-hosting.md`](../docs/desktop-hosting.md) for Win32 deployment.

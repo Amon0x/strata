@@ -11,6 +11,13 @@ namespace strata::tools {
     const std::filesystem::path& schemas_path
 );
 
+/** Compiles a module and emits one machine-readable diagnostics document to stdout. */
+[[nodiscard]] int check_module_json(
+    const std::filesystem::path& entry_path,
+    const std::filesystem::path& registry_path,
+    const std::filesystem::path& schemas_path
+);
+
 /** Emits or verifies the canonical portable artifact for one bundled application module. */
 [[nodiscard]] int write_module_artifact(
     const std::filesystem::path& entry_path,

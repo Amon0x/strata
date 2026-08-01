@@ -4,6 +4,12 @@ project(StrataInstalledSmoke LANGUAGES C CXX)
 
 include(CTest)
 find_package(Strata CONFIG REQUIRED)
+if(Strata_VSCODE_EXTENSION AND NOT EXISTS "${Strata_VSCODE_EXTENSION}")
+    message(FATAL_ERROR "Strata_VSCODE_EXTENSION does not name an installed VSIX")
+endif()
+if(STRATA_REQUIRE_VSCODE_EXTENSION AND NOT Strata_VSCODE_EXTENSION)
+    message(FATAL_ERROR "installed Strata package did not expose its VS Code extension")
+endif()
 
 function(strata_installed_smoke target source)
     add_executable(${target} ${source})

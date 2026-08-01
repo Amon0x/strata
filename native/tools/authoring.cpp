@@ -47,10 +47,12 @@ namespace {
     const data::JsonValue lexical = load_json(
         project_root / "src/main/resources/strata/lexical-v1.json"
     );
+    const std::string completions = render_completions(registry);
     std::map<std::filesystem::path, std::string> result{
         {"docs/generated/diagnostics.md", render_diagnostic_catalog(project_root)},
         {"docs/generated/strata-reference.md", render_reference(registry)},
-        {"editor/strata-completions.json", render_completions(registry)},
+        {"editor/strata-completions.json", completions},
+        {"editor/vscode/strata-completions.json", completions},
         {"editor/vscode/syntaxes/strata.tmLanguage.json", render_grammar(lexical)},
     };
     constexpr std::pair<std::string_view, std::string_view> contracts[]{

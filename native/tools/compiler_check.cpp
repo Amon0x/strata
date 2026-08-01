@@ -1,8 +1,10 @@
 #include "compiler_check.hpp"
 
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <iterator>
 #include <optional>
@@ -10,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <strata/extension.hpp>
@@ -196,6 +199,61 @@ void print_diagnostic(const compiler::Diagnostic& diagnostic) {
     std::cerr << ": " << diagnostic.message << '\n';
 }
 
+[[nodiscard]] data::JsonValue json_object(
+    std::initializer_list<data::JsonValue::ObjectEntry> fields
+) {
+    return data::JsonValue(data::JsonValue::Object(fields));
+}
+
+[[nodiscard]] const char* severity_name(
+    const compiler::DiagnosticSeverity severity
+) noexcept {
+    switch (severity) {
+    case compiler::DiagnosticSeverity::info: return "info";
+    case compiler::DiagnosticSeverity::warning: return "warning";
+    case compiler::DiagnosticSeverity::error: return "error";
+    }
+    return "error";
+}
+
+[[nodiscard]] data::JsonValue diagnostic_json(const compiler::Diagnostic& diagnostic) {
+    data::JsonValue range;
+    if (diagnostic.range.has_value()) {
+        const compiler::SourceRange& source = *diagnostic.range;
+        range = json_object({
+            {"sourceId", data::JsonValue(source.source_id)},
+            {"start", json_object({
+                {"line", data::JsonValue(static_cast<std::int64_t>(source.start.line))},
+                {"column", data::JsonValue(static_cast<std::int64_t>(source.start.column))},
+                {"offset", data::JsonValue(static_cast<std::int64_t>(source.start.offset))},
+            })},
+            {"end", json_object({
+                {"line", data::JsonValue(static_cast<std::int64_t>(source.end.line))},
+                {"column", data::JsonValue(static_cast<std::int64_t>(source.end.column))},
+                {"offset", data::JsonValue(static_cast<std::int64_t>(source.end.offset))},
+            })},
+        });
+    }
+    return json_object({
+        {"code", data::JsonValue(diagnostic.code)},
+        {"severity", data::JsonValue(severity_name(diagnostic.severity))},
+        {"message", data::JsonValue(diagnostic.message)},
+        {"range", std::move(range)},
+        {
+            "componentPath",
+            diagnostic.component_path.has_value()
+                ? data::JsonValue(*diagnostic.component_path)
+                : data::JsonValue(),
+        },
+        {
+            "expected",
+            diagnostic.expected.has_value()
+                ? data::JsonValue(*diagnostic.expected)
+                : data::JsonValue(),
+        },
+    });
+}
+
 } // namespace
 
 int check_module(
@@ -217,6 +275,49 @@ int check_module(
     std::cout << "STRATA VALIDATE: OK - "
               << compilation.entry.filename().generic_string() << " (native)\n";
     return 0;
+}
+
+int check_module_json(
+    const std::filesystem::path& entry_path,
+    const std::filesystem::path& registry_path,
+    const std::filesystem::path& schemas_path
+) {
+    try {
+        ModuleCompilation compilation = compile_module(
+            entry_path, registry_path, schemas_path, std::nullopt
+        );
+        std::vector<data::JsonValue> diagnostics;
+        diagnostics.reserve(compilation.result.diagnostics.size());
+        for (const compiler::Diagnostic& diagnostic : compilation.result.diagnostics) {
+            diagnostics.push_back(diagnostic_json(diagnostic));
+        }
+        std::cout << data::encode_json_line(json_object({
+            {"format", data::JsonValue("strata.diagnostics")},
+            {"version", data::JsonValue(std::int64_t{1})},
+            {"succeeded", data::JsonValue(compilation.result.succeeded())},
+            {"entry", data::JsonValue(compilation.entry.generic_string())},
+            {"diagnostics", data::JsonValue(std::move(diagnostics))},
+        }));
+        return compilation.result.succeeded() ? 0 : 2;
+    } catch (const std::exception& error) {
+        std::vector<data::JsonValue> diagnostics;
+        diagnostics.push_back(diagnostic_json(compiler::Diagnostic{
+            "STRATA.TOOL.VALIDATION_FAILED",
+            compiler::DiagnosticSeverity::error,
+            error.what(),
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+        }));
+        std::cout << data::encode_json_line(json_object({
+            {"format", data::JsonValue("strata.diagnostics")},
+            {"version", data::JsonValue(std::int64_t{1})},
+            {"succeeded", data::JsonValue(false)},
+            {"entry", data::JsonValue(entry_path.generic_string())},
+            {"diagnostics", data::JsonValue(std::move(diagnostics))},
+        }));
+        return 2;
+    }
 }
 
 int write_module_artifact(

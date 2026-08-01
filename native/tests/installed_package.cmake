@@ -19,6 +19,15 @@ if(NOT install_status EQUAL 0)
     message(FATAL_ERROR
         "SDK installation failed (${install_status})\n${install_output}\n${install_error}")
 endif()
+if(STRATA_EXPECT_VSCODE_EXTENSION)
+    file(GLOB installed_vscode_packages
+        "${STRATA_INSTALL_PREFIX}/share/strata/editor/strata-language-*.vsix"
+    )
+    list(LENGTH installed_vscode_packages installed_vscode_package_count)
+    if(NOT installed_vscode_package_count EQUAL 1)
+        message(FATAL_ERROR "SDK installation did not contain exactly one Strata VS Code extension")
+    endif()
+endif()
 
 set(configure_command
     "${CMAKE_COMMAND}"
@@ -26,6 +35,7 @@ set(configure_command
     -B "${STRATA_SMOKE_BUILD_DIR}"
     -G "${STRATA_GENERATOR}"
     "-DCMAKE_PREFIX_PATH=${STRATA_INSTALL_PREFIX}"
+    "-DSTRATA_REQUIRE_VSCODE_EXTENSION=${STRATA_EXPECT_VSCODE_EXTENSION}"
 )
 if(DEFINED STRATA_GENERATOR_PLATFORM AND NOT STRATA_GENERATOR_PLATFORM STREQUAL "")
     list(APPEND configure_command -A "${STRATA_GENERATOR_PLATFORM}")

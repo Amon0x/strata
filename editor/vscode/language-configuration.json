@@ -10,5 +10,16 @@
     {"open": "(", "close": ")"},
     {"open": "\"", "close": "\"", "notIn": ["string", "comment"]}
   ],
-  "surroundingPairs": [["{", "}"], ["[", "]"], ["(", ")"], ["\"", "\""]]
+  "surroundingPairs": [["{", "}"], ["[", "]"], ["(", ")"], ["\"", "\""]],
+  "wordPattern": "(-?\\d*\\.?\\d+([eE][+-]?\\d+)?)|([A-Za-z_][A-Za-z0-9_.:-]*)",
+  "indentationRules": {
+    "increaseIndentPattern": "^.*\\{[^}]*$",
+    "decreaseIndentPattern": "^\\s*\\}"
+  },
+  "folding": {
+    "markers": {
+      "start": "^\\s*//\\s*#?region\\b",
+      "end": "^\\s*//\\s*#?endregion\\b"
+    }
+  }
 }

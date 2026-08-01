@@ -14,6 +14,14 @@ if(EXISTS "${PACKAGE_PREFIX_DIR}/bin/strata_authoring${CMAKE_EXECUTABLE_SUFFIX}"
 else()
     set(Strata_AUTHORING "")
 endif()
+if(EXISTS "${PACKAGE_PREFIX_DIR}/share/strata/editor/strata-language-@STRATA_VSCODE_VERSION@.vsix")
+    set(
+        Strata_VSCODE_EXTENSION
+        "${PACKAGE_PREFIX_DIR}/share/strata/editor/strata-language-@STRATA_VSCODE_VERSION@.vsix"
+    )
+else()
+    set(Strata_VSCODE_EXTENSION "")
+endif()
 if(WIN32 AND EXISTS "${PACKAGE_PREFIX_DIR}/bin/strata_desktop.exe")
     set(Strata_DESKTOP_RUNNER "${PACKAGE_PREFIX_DIR}/bin/strata_desktop.exe")
 else()
