@@ -188,9 +188,9 @@ void test_negotiation() {
     );
     check(info.minimum_abi_version == STRATA_ABI_VERSION_MINIMUM, "minimum ABI changed");
     check(
-        strata_get_api_info(STRATA_ABI_VERSION_3, &info).status ==
+        strata_get_api_info(STRATA_ABI_VERSION_4, &info).status ==
             STRATA_STATUS_UNSUPPORTED_ABI,
-        "pre-Target-10 ABI remained falsely negotiable"
+        "pre-native-catalog ABI remained falsely negotiable"
     );
     check(info.capabilities == strata_capability_bits(), "capability reports disagree");
     check(
@@ -475,7 +475,7 @@ strata_action_handler_result capture_action(
     return STRATA_ACTION_HANDLER_HANDLED;
 }
 
-void test_application_activation_and_action_abi(const std::filesystem::path& registry_path) {
+void test_application_activation_and_action_abi(const std::filesystem::path& resource_root) {
     Clock clock{8000};
     DiagnosticCapture diagnostics;
     strata_runtime_config runtime_config = config(clock, diagnostics);
@@ -486,7 +486,7 @@ void test_application_activation_and_action_abi(const std::filesystem::path& reg
     strata_runtime* runtime = nullptr;
     check(strata_runtime_create(&runtime_config, &runtime).status == STRATA_STATUS_OK, "application runtime creation failed");
 
-    FileResources file_resources{registry_path.parent_path().parent_path(), {}};
+    FileResources file_resources{resource_root, {}};
     const strata_resource_adapter resource_adapter{
         sizeof(strata_resource_adapter), &file_resources, 1U, &load_file_resource,
     };
@@ -496,7 +496,6 @@ void test_application_activation_and_action_abi(const std::filesystem::path& reg
         "application runtime resource adapter failed"
     );
 
-    const std::string registry = read_file(registry_path);
     const std::string schemas = R"({
       "widgets": {
         "registry": "abi-extension.v1",
@@ -524,7 +523,6 @@ void test_application_activation_and_action_abi(const std::filesystem::path& reg
     const strata_application_config application{
         sizeof(strata_application_config),
         view("abi-application"),
-        view(registry),
         view(schemas),
         nullptr,
         0U,

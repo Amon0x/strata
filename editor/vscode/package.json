@@ -50,11 +50,6 @@
           "default": "",
           "description": "Path to the installed strata_compile executable. Relative paths resolve from the workspace folder."
         },
-        "strata.registry.path": {
-          "type": "string",
-          "default": "",
-          "description": "Path to registry-v1.json. Empty uses workspace and installed-SDK discovery."
-        },
         "strata.applicationSchemas.path": {
           "type": "string",
           "default": "",

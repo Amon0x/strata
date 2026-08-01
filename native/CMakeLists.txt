@@ -21,6 +21,9 @@ option(STRATA_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer where supported" O
 option(STRATA_ENABLE_STATIC_ANALYSIS "Enable compiler static analysis" OFF)
 option(STRATA_ENABLE_TRACY "Enable local Tracy instrumentation" OFF)
 
+set(STRATA_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
+set(STRATA_RESOURCE_ROOT "${STRATA_REPOSITORY_ROOT}/src/main/resources")
+
 if(MSVC AND MSVC_VERSION LESS 1940)
     message(FATAL_ERROR
         "Strata requires MSVC 19.40 or newer; use the repository's windows-x64 workflow."
@@ -224,6 +227,15 @@ add_library(
         src/core/runtime.cpp
         src/compiler/artifact.cpp
         src/compiler/ast.cpp
+        src/compiler/builtin_catalog.cpp
+        src/compiler/builtin_catalog_actions.cpp
+        src/compiler/builtin_catalog_helpers.cpp
+        src/compiler/builtin_catalog_properties.cpp
+        src/compiler/builtin_catalog_types.cpp
+        src/compiler/builtin_catalog_widgets_collections.cpp
+        src/compiler/builtin_catalog_widgets_controls.cpp
+        src/compiler/builtin_catalog_widgets_primitives.cpp
+        src/compiler/builtin_catalog_widgets_shell.cpp
         src/compiler/compile.cpp
         src/compiler/lexer.cpp
         src/compiler/module.cpp
@@ -700,22 +712,28 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
 endif()
 
 if(STRATA_BUILD_TOOLS)
-    set(STRATA_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
-    set(STRATA_RESOURCE_ROOT "${STRATA_REPOSITORY_ROOT}/src/main/resources")
-    set(STRATA_REGISTRY "${STRATA_RESOURCE_ROOT}/strata/registry-v1.json")
+    set(STRATA_REGISTRY "${CMAKE_BINARY_DIR}/generated/strata/registry-v1.json")
+    add_custom_command(
+        OUTPUT "${STRATA_REGISTRY}"
+        COMMAND strata_authoring --write-registry "${STRATA_REGISTRY}"
+        DEPENDS strata_authoring
+        COMMENT "Generating the language-neutral Strata registry artifact"
+        VERBATIM
+    )
+    add_custom_target(strata_registry ALL DEPENDS "${STRATA_REGISTRY}")
 
     add_custom_target(
         strata_generate_authoring
         COMMAND strata_authoring --write "${STRATA_REPOSITORY_ROOT}"
         DEPENDS strata_authoring
-        COMMENT "Regenerating registry-derived Strata authoring files"
+        COMMENT "Regenerating catalog-derived Strata authoring files"
         VERBATIM
     )
     add_custom_target(
         strata_check_authoring
         COMMAND strata_authoring --check "${STRATA_REPOSITORY_ROOT}"
         DEPENDS strata_authoring
-        COMMENT "Checking registry-derived Strata authoring files"
+        COMMENT "Checking catalog-derived Strata authoring files"
         VERBATIM
     )
     file(READ "${STRATA_REPOSITORY_ROOT}/editor/vscode/package.json" strata_vscode_manifest)
@@ -734,6 +752,7 @@ if(STRATA_BUILD_TOOLS)
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/package.json
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/language-configuration.json
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/extension.js
+            ${STRATA_REPOSITORY_ROOT}/editor/vscode/compiler_arguments.js
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/README.md
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/strata-completions.json
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/syntaxes/strata.tmLanguage.json
@@ -759,7 +778,6 @@ if(STRATA_BUILD_TOOLS)
                 --extension-path $<TARGET_FILE_DIR:strata_demo_extension>
                 --check-module
                 "${STRATA_REPOSITORY_ROOT}/${source}"
-                "${STRATA_REGISTRY}"
                 "${STRATA_REPOSITORY_ROOT}/${schemas}"
             VERBATIM
         )
@@ -771,7 +789,6 @@ if(STRATA_BUILD_TOOLS)
                     --extension-path $<TARGET_FILE_DIR:strata_demo_extension>
                     --emit-artifact
                     "${STRATA_REPOSITORY_ROOT}/${source}"
-                    "${STRATA_REGISTRY}"
                     "${STRATA_REPOSITORY_ROOT}/${schemas}"
                     "${STRATA_RESOURCE_ROOT}"
                     "${STRATA_REPOSITORY_ROOT}/${artifact}"
@@ -784,7 +801,6 @@ if(STRATA_BUILD_TOOLS)
                     --extension-path $<TARGET_FILE_DIR:strata_demo_extension>
                     --check-artifact
                     "${STRATA_REPOSITORY_ROOT}/${source}"
-                    "${STRATA_REGISTRY}"
                     "${STRATA_REPOSITORY_ROOT}/${schemas}"
                     "${STRATA_RESOURCE_ROOT}"
                     "${STRATA_REPOSITORY_ROOT}/${artifact}"
@@ -798,7 +814,6 @@ if(STRATA_BUILD_TOOLS)
                     --extension-path $<TARGET_FILE_DIR:strata_demo_extension>
                     --check-module
                     "${STRATA_REPOSITORY_ROOT}/${source}"
-                    "${STRATA_REGISTRY}"
                     "${STRATA_REPOSITORY_ROOT}/${schemas}"
             )
             if(NOT artifact STREQUAL "")
@@ -808,7 +823,6 @@ if(STRATA_BUILD_TOOLS)
                         --extension-path $<TARGET_FILE_DIR:strata_demo_extension>
                         --check-artifact
                         "${STRATA_REPOSITORY_ROOT}/${source}"
-                        "${STRATA_REGISTRY}"
                         "${STRATA_REPOSITORY_ROOT}/${schemas}"
                         "${STRATA_RESOURCE_ROOT}"
                         "${STRATA_REPOSITORY_ROOT}/${artifact}"
@@ -879,7 +893,6 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             NAME strata.compiler.diagnostics_json
             COMMAND ${CMAKE_COMMAND}
                 -DSTRATA_COMPILER=$<TARGET_FILE:strata_compile>
-                -DSTRATA_REGISTRY=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
                 -DSTRATA_VALID_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/assets/strata/ui/settings_app.strata
                 -DSTRATA_VALID_SCHEMAS=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/assets/strata/ui/settings_app.schemas.json
                 -DSTRATA_TEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/compiler-diagnostics-json
@@ -902,6 +915,11 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                 COMMAND ${strata_node_executable} --check
                     ${CMAKE_CURRENT_SOURCE_DIR}/../editor/vscode/extension.js
             )
+            add_test(
+                NAME strata.editor.vscode.compiler_arguments
+                COMMAND ${strata_node_executable}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../editor/vscode/compiler_arguments.test.js
+            )
         endif()
     endif()
 
@@ -911,7 +929,6 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.host
         COMMAND strata_host_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
     )
 
     add_executable(
@@ -965,7 +982,6 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.runtime
         COMMAND strata_runtime_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dynamic-session
     )
 
@@ -988,7 +1004,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.ui
         COMMAND strata_ui_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+            ${STRATA_RESOURCE_ROOT}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dynamic-session
     )
 
@@ -1001,7 +1017,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.ui.text_font_residuals
         COMMAND strata_text_font_residual_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+            ${STRATA_RESOURCE_ROOT}
     )
 
     add_executable(strata_theme_tests tests/theme_tests.cpp)
@@ -1011,7 +1027,6 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.ui.theme
         COMMAND strata_theme_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
     )
 
     add_executable(strata_input_editor_tests tests/input_editor_tests.cpp)
@@ -1027,7 +1042,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.widget.chip_input
         COMMAND strata_chip_input_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+            ${STRATA_RESOURCE_ROOT}
     )
 
     add_executable(strata_shell_lifecycle_tests tests/shell_lifecycle_tests.cpp)
@@ -1037,7 +1052,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.widget.shell_lifecycle
         COMMAND strata_shell_lifecycle_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+            ${STRATA_RESOURCE_ROOT}
     )
 
     add_executable(strata_interaction_residual_tests tests/interaction_residual_tests.cpp)
@@ -1047,7 +1062,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.ui.interaction_residuals
         COMMAND strata_interaction_residual_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+            ${STRATA_RESOURCE_ROOT}
     )
 
     add_executable(strata_widget_binding_tests tests/widget_binding_tests.cpp)
@@ -1057,7 +1072,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.widget.binding
         COMMAND strata_widget_binding_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+            ${STRATA_RESOURCE_ROOT}
     )
 
     add_executable(strata_form_validation_tests tests/form_validation_tests.cpp)
@@ -1067,7 +1082,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.form.validation
         COMMAND strata_form_validation_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+            ${STRATA_RESOURCE_ROOT}
     )
 
     add_executable(strata_command_binding_tests tests/command_binding_tests.cpp)
@@ -1077,7 +1092,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.command.binding
         COMMAND strata_command_binding_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+            ${STRATA_RESOURCE_ROOT}
     )
 
     add_executable(strata_extension_tests tests/extension_tests.cpp)
@@ -1087,7 +1102,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.extension
         COMMAND strata_extension_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+            ${STRATA_RESOURCE_ROOT}
     )
 
     add_executable(strata_abi_tests tests/abi_tests.cpp)
@@ -1096,19 +1111,17 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(
         NAME strata.abi
         COMMAND strata_abi_tests
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
+            ${STRATA_RESOURCE_ROOT}
     )
 
     if(STRATA_BUILD_SAMPLES)
         add_test(
             NAME strata.embed.c
             COMMAND strata_c_smoke
-                ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
         )
         add_test(
             NAME strata.embed.cpp
             COMMAND strata_cpp_smoke
-                ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
         )
         if(WIN32 AND STRATA_BUILD_DESKTOP)
             add_test(
@@ -1234,12 +1247,12 @@ if(STRATA_BUILD_TOOLS)
         DESTINATION share/strata/editor
         OPTIONAL
     )
+    install(
+        FILES ${STRATA_REGISTRY}
+        DESTINATION share/strata
+    )
 endif()
 install(DIRECTORY include/ DESTINATION include)
-install(
-    FILES ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/strata/registry-v1.json
-    DESTINATION share/strata
-)
 install(
     FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt

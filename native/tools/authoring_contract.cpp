@@ -254,12 +254,11 @@ struct ActionDefinition final {
 class ContractGenerator final {
 public:
     ContractGenerator(
-        const JsonValue& registry_document,
         const JsonValue& application_schema,
         std::string cpp_namespace,
         std::string source_name
     ) : application_schema_(application_schema),
-        registry_(SchemaRegistry::parse(registry_document)),
+        registry_(SchemaRegistry::builtins()),
         cpp_namespace_(std::move(cpp_namespace)),
         source_name_(std::move(source_name)) {
         validate_namespace(cpp_namespace_);
@@ -1076,13 +1075,11 @@ template <typename... T>
 } // namespace
 
 std::string render_cpp_contract(
-    const data::JsonValue& registry,
     const data::JsonValue& application_schema,
     const std::string_view cpp_namespace,
     const std::string_view source_name
 ) {
     return ContractGenerator(
-        registry,
         application_schema,
         std::string(cpp_namespace),
         std::string(source_name)
@@ -1090,16 +1087,14 @@ std::string render_cpp_contract(
 }
 
 void write_cpp_contract(
-    const std::filesystem::path& registry_path,
     const std::filesystem::path& application_schema_path,
     const std::string_view cpp_namespace,
     const std::filesystem::path& output_path
 ) {
-    const data::JsonValue registry = data::parse_json(read_text(registry_path));
     const data::JsonValue schema = data::parse_json(read_text(application_schema_path));
     write_text(
         output_path,
-        render_cpp_contract(registry, schema, cpp_namespace, application_schema_path.filename().string())
+        render_cpp_contract(schema, cpp_namespace, application_schema_path.filename().string())
     );
 }
 

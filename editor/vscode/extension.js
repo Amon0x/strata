@@ -4,6 +4,7 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
+const { compilerArguments } = require('./compiler_arguments');
 
 const selector = { language: 'strata', scheme: 'file' };
 const core = require('./strata-completions.json');
@@ -54,19 +55,6 @@ function compilerPath(document) {
         path.join(root, 'build', 'cmake', 'linux-x64', 'native', executable),
         path.join(root, 'build', 'cmake', 'windows-x64', 'native', 'RelWithDebInfo', executable),
     ]) || executable;
-}
-
-function registryPath(document) {
-    const configured = configuredPath(document, 'registry.path');
-    if (configured) return configured;
-    const root = workspaceFolder(document);
-    return existing([
-        process.env.STRATA_REGISTRY,
-        path.join(root, 'src', 'main', 'resources', 'strata', 'registry-v1.json'),
-        path.join(root, 'share', 'strata', 'registry-v1.json'),
-        path.join(root, 'build', 'install', 'linux-x64', 'share', 'strata', 'registry-v1.json'),
-        path.join(root, 'build', 'install', 'windows-x64', 'share', 'strata', 'registry-v1.json'),
-    ]);
 }
 
 function readSchema(file) {
@@ -466,17 +454,13 @@ async function validateDocument(document, diagnostics, output, explicit) {
         if (!explicit) return;
         if (!(await document.save())) return;
     }
-    const registry = registryPath(document);
-    if (!registry) {
-        if (explicit) vscode.window.showErrorMessage('Strata registry-v1.json was not found. Configure strata.registry.path.');
-        return;
-    }
     const compiler = compilerPath(document);
     const schema = schemaPath(document);
-    const args = [];
-    for (const directory of extensionPaths(document)) args.push('--extension-path', directory);
-    args.push('--check-module-json', document.uri.fsPath, registry);
-    if (schema) args.push(schema);
+    const args = compilerArguments(
+        document.uri.fsPath,
+        schema,
+        extensionPaths(document)
+    );
     const result = await executeCompiler(compiler, args, workspaceFolder(document));
     const lines = result.stdout.trim().split(/\r?\n/);
     let line = '';

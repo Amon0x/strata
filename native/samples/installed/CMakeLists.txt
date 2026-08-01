@@ -22,7 +22,7 @@ function(strata_installed_smoke target source)
             $<TARGET_FILE_DIR:${target}>
         VERBATIM
     )
-    add_test(NAME ${target} COMMAND ${target} "${Strata_REGISTRY}")
+    add_test(NAME ${target} COMMAND ${target})
 endfunction()
 
 strata_installed_smoke(strata_installed_c c_smoke.c)
@@ -39,7 +39,6 @@ if(Strata_AUTHORING)
     add_custom_command(
         OUTPUT "${contract_header}"
         COMMAND "${Strata_AUTHORING}" --write-cpp-contract
-            "${Strata_REGISTRY}"
             "${CMAKE_CURRENT_LIST_DIR}/contract.schemas.json"
             installed::contract
             "${contract_header}"

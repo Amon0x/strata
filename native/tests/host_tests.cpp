@@ -5,10 +5,7 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -26,13 +23,6 @@ void check(const bool condition, const std::string& message) {
 
 std::int64_t clock(void* const user_data) noexcept {
     return *static_cast<std::int64_t*>(user_data);
-}
-
-[[nodiscard]] std::string read_file(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input)
-        throw std::runtime_error("could not open host test registry");
-    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
 
 void generated_contracts_round_trip() {
@@ -144,7 +134,7 @@ void list_reorder_uses_stable_neighbors() {
           "stable-neighbor list reorder produced the wrong order");
 }
 
-void action_bindings_decode_at_the_boundary(const std::filesystem::path& registry_path) {
+void action_bindings_decode_at_the_boundary() {
     std::int64_t now = 1;
     strata_runtime_config config{};
     config.struct_size = sizeof(config);
@@ -154,7 +144,6 @@ void action_bindings_decode_at_the_boundary(const std::filesystem::path& registr
         STRATA_CAPABILITY_APPLICATION_LIFECYCLE | STRATA_CAPABILITY_ACTION_DISPATCH;
     config.clock = strata_clock{sizeof(strata_clock), &now, &clock};
     strata::Runtime runtime(config);
-    const std::string registry = read_file(registry_path);
     const std::string schemas = R"({
       "widgets":{"registry":"host-tests.v1","required":[],"definitions":[]},
       "actions":{"registry":"host-tests.v1","required":["host.test"],"definitions":[{
@@ -166,7 +155,6 @@ void action_bindings_decode_at_the_boundary(const std::filesystem::path& registr
     const strata_application_config application{
         sizeof(strata_application_config),
         strata::view("host-tests.actions"),
-        strata::view(registry),
         strata::view(schemas),
         nullptr,
         0U,
@@ -197,7 +185,7 @@ void action_bindings_decode_at_the_boundary(const std::filesystem::path& registr
           "typed action binding leaked or mistranslated the ABI JSON call");
 }
 
-void public_runtime_facade_owns_host_boundaries(const std::filesystem::path& registry_path) {
+void public_runtime_facade_owns_host_boundaries() {
     std::int64_t now = 100;
     std::vector<strata::Diagnostic> observed_diagnostics;
     strata::RuntimeOptions options;
@@ -249,7 +237,6 @@ void public_runtime_facade_owns_host_boundaries(const std::filesystem::path& reg
 
     runtime.configure_application(strata::ApplicationOptions{
         .id = "host-tests.facade",
-        .registry_json = read_file(registry_path),
     });
     runtime.set_profiler_capture(true);
     runtime.set_durable_store(strata::DurableStoreAdapter{
@@ -387,17 +374,15 @@ void snapshot_bindings_publish_only_changed_revisions() {
 
 } // namespace
 
-int main(const int argument_count, const char* const* const arguments) {
+int main() {
     try {
-        if (argument_count != 2)
-            throw std::runtime_error("host tests require the registry path");
         generated_contracts_round_trip();
         structured_values_round_trip();
         drag_events_are_typed_once();
         list_reorder_uses_stable_neighbors();
-        action_bindings_decode_at_the_boundary(arguments[1]);
+        action_bindings_decode_at_the_boundary();
         snapshot_bindings_publish_only_changed_revisions();
-        public_runtime_facade_owns_host_boundaries(arguments[1]);
+        public_runtime_facade_owns_host_boundaries();
         std::cout << "strata_host_tests: typed values, models, and complete host facade OK\n";
         return 0;
     } catch (const std::exception& error) {

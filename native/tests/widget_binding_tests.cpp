@@ -23,14 +23,8 @@ void check(const bool condition, const std::string_view message) {
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
-[[nodiscard]] std::shared_ptr<const strata::runtime::ApplicationBundle> load_bundle(
-    const std::filesystem::path& registry_path
-) {
-    const std::string registry = strata::resource::load_utf8_resource(
-        registry_path.parent_path(),
-        strata::resource::ResourceId::parse(registry_path.filename().generic_string())
-    );
-    return strata::runtime::ApplicationBundle::create(strata::data::parse_json(registry));
+[[nodiscard]] std::shared_ptr<const strata::runtime::ApplicationBundle> load_bundle() {
+    return strata::runtime::ApplicationBundle::create();
 }
 
 [[nodiscard]] strata::compiler::ModuleLoader no_imports() {
@@ -104,7 +98,7 @@ overlay Main { root InvalidTarget() }
 }
 
 void test_binding_initial_value_and_round_trip(
-    const std::filesystem::path& registry_path,
+    const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
 ) {
     constexpr std::string_view source = R"(
@@ -156,7 +150,7 @@ overlay Main { root BoundControls() }
         true,
         false,
     };
-    const std::filesystem::path resources = registry_path.parent_path().parent_path();
+    const std::filesystem::path& resources = resource_root;
     strata::ui::Surface surface(
         "binding-round-trip",
         application,
@@ -258,7 +252,7 @@ overlay Main { root BoundControls() }
 }
 
 void test_section_content_and_activation_contract(
-    const std::filesystem::path& registry_path,
+    const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
 ) {
     constexpr std::string_view source = R"(
@@ -296,7 +290,7 @@ overlay Main { root SectionFixture() }
         true,
         false,
     };
-    const std::filesystem::path resources = registry_path.parent_path().parent_path();
+    const std::filesystem::path& resources = resource_root;
     strata::ui::Surface surface(
         "section-contract",
         application,
@@ -400,7 +394,7 @@ overlay Main { root SectionFixture() }
 }
 
 void test_range_and_choice_control_defaults(
-    const std::filesystem::path& registry_path,
+    const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
 ) {
     constexpr std::string_view source = R"(
@@ -454,7 +448,7 @@ overlay Main { root ControlDefaults() }
         true,
         false,
     };
-    const std::filesystem::path resources = registry_path.parent_path().parent_path();
+    const std::filesystem::path& resources = resource_root;
     strata::ui::Surface surface(
         "control-defaults",
         application,
@@ -525,7 +519,7 @@ overlay Main { root ControlDefaults() }
 }
 
 void test_scrolled_clipped_subtree_render_cache(
-    const std::filesystem::path& registry_path,
+    const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
 ) {
     constexpr std::string_view source = R"(
@@ -569,7 +563,7 @@ overlay Main {
         true,
         false,
     };
-    const std::filesystem::path resources = registry_path.parent_path().parent_path();
+    const std::filesystem::path& resources = resource_root;
     strata::ui::Surface surface(
         "scroll-clip-cache",
         application,
@@ -734,13 +728,7 @@ overlay Main {
     );
 }
 
-void test_typed_host_keys_and_derived_collection_metadata(
-    const std::filesystem::path& registry_path
-) {
-    const std::string registry = strata::resource::load_utf8_resource(
-        registry_path.parent_path(),
-        strata::resource::ResourceId::parse(registry_path.filename().generic_string())
-    );
+void test_typed_host_keys_and_derived_collection_metadata() {
     const strata::data::JsonValue schemas = strata::data::parse_json(R"({
       "widgets":{"definitions":[]},
       "actions":{"definitions":[]},
@@ -773,10 +761,7 @@ void test_typed_host_keys_and_derived_collection_metadata(
         }
       }]
     })");
-    const auto bundle = strata::runtime::ApplicationBundle::create(
-        strata::data::parse_json(registry),
-        &schemas
-    );
+    const auto bundle = strata::runtime::ApplicationBundle::create(&schemas);
     strata::runtime::ApplicationContext application("typed-host-derived", bundle);
     static_cast<void>(application.host().adopt(bundle->host_snapshot(
         "typed-host",
@@ -846,15 +831,15 @@ overlay Main { root TypedProjection() }
 
 int main(const int argument_count, const char* const* const arguments) {
     try {
-        if (argument_count != 2) throw std::invalid_argument("expected registry path");
-        const std::filesystem::path registry_path(arguments[1]);
-        const auto bundle = load_bundle(registry_path);
+        if (argument_count != 2) throw std::invalid_argument("expected resource root");
+        const std::filesystem::path resource_root(arguments[1]);
+        const auto bundle = load_bundle();
         test_semantic_binding_rejections(bundle);
-        test_binding_initial_value_and_round_trip(registry_path, bundle);
-        test_section_content_and_activation_contract(registry_path, bundle);
-        test_range_and_choice_control_defaults(registry_path, bundle);
-        test_scrolled_clipped_subtree_render_cache(registry_path, bundle);
-        test_typed_host_keys_and_derived_collection_metadata(registry_path);
+        test_binding_initial_value_and_round_trip(resource_root, bundle);
+        test_section_content_and_activation_contract(resource_root, bundle);
+        test_range_and_choice_control_defaults(resource_root, bundle);
+        test_scrolled_clipped_subtree_render_cache(resource_root, bundle);
+        test_typed_host_keys_and_derived_collection_metadata();
         std::cout << "strata_widget_binding_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

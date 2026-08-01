@@ -1,0 +1,351 @@
+#include "compiler/builtin_catalog_internal.hpp"
+
+namespace strata::compiler {
+
+void add_builtin_properties(BuiltinCatalog& catalog) {
+    catalog.layout_properties = {
+        DeclaredProperty{.name = "alignContent", .type = declared_type_reference("t42")},
+        DeclaredProperty{.name = "alignItems", .type = declared_type_reference("t37")},
+        DeclaredProperty{
+            .name = "alignSelf", .type = declared_type_reference("t37"), .nullable = true},
+        DeclaredProperty{
+            .name = "aspectRatio", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{.name = "clip", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "columnSpan", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "gap", .type = declared_type_reference("t61")},
+        DeclaredProperty{
+            .name = "gridColumn", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "gridRow", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{.name = "height", .type = declared_type_reference("t45")},
+        DeclaredProperty{.name = "justifyContent", .type = declared_type_reference("t42")},
+        DeclaredProperty{
+            .name = "justifySelf", .type = declared_type_reference("t37"), .nullable = true},
+        DeclaredProperty{.name = "kind", .type = declared_type_reference("t44")},
+        DeclaredProperty{.name = "margin", .type = declared_type_reference("t61")},
+        DeclaredProperty{
+            .name = "maxHeight", .type = declared_type_reference("t45"), .nullable = true},
+        DeclaredProperty{
+            .name = "maxWidth", .type = declared_type_reference("t45"), .nullable = true},
+        DeclaredProperty{
+            .name = "minHeight", .type = declared_type_reference("t45"), .nullable = true},
+        DeclaredProperty{
+            .name = "minWidth", .type = declared_type_reference("t45"), .nullable = true},
+        DeclaredProperty{.name = "padding", .type = declared_type_reference("t61")},
+        DeclaredProperty{.name = "rowSpan", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "width", .type = declared_type_reference("t45")},
+        DeclaredProperty{.name = "wrap", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "zIndex", .type = declared_type_reference("t3")},
+    };
+    catalog.style_properties = {
+        DeclaredProperty{
+            .name = "activeOverlay", .type = declared_type_reference("t8"), .nullable = true},
+        DeclaredProperty{.name = "alignContent", .type = declared_type_reference("t42")},
+        DeclaredProperty{.name = "alignItems", .type = declared_type_reference("t37")},
+        DeclaredProperty{
+            .name = "alignSelf", .type = declared_type_reference("t37"), .nullable = true},
+        DeclaredProperty{.name = "alignment", .type = declared_type_reference("t65")},
+        DeclaredProperty{
+            .name = "animateChanges", .type = declared_type_reference("t77"), .nullable = true},
+        DeclaredProperty{
+            .name = "animateContentSize", .type = declared_type_reference("t79"), .nullable = true},
+        DeclaredProperty{
+            .name = "animation", .type = declared_type_reference("t5"), .nullable = true},
+        DeclaredProperty{
+            .name = "aspectRatio", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "background", .type = declared_type_reference("t145"), .nullable = true},
+        DeclaredProperty{
+            .name = "border", .type = declared_type_reference("t38"), .nullable = true},
+        DeclaredProperty{.name = "caretColor", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "clip", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "color", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "columnSpan", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "disabledOpacity", .type = declared_type_reference("t3")},
+        DeclaredProperty{
+            .name = "disclosure", .type = declared_type_reference("t80"), .nullable = true},
+        DeclaredProperty{
+            .name = "effect", .type = declared_type_reference("t41"), .nullable = true},
+        DeclaredProperty{.name = "fallbackFonts", .type = declared_type_reference("t78")},
+        DeclaredProperty{.name = "fill", .type = declared_type_reference("t145"), .nullable = true},
+        DeclaredProperty{
+            .name = "focusRing", .type = declared_type_reference("t38"), .nullable = true},
+        DeclaredProperty{.name = "font", .type = declared_type_reference("t0")},
+        DeclaredProperty{.name = "fontStyleFlags", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "fontRasterization", .type = declared_type_reference("t155")},
+        DeclaredProperty{.name = "foreground", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "gap", .type = declared_type_reference("t61")},
+        DeclaredProperty{
+            .name = "gridColumn", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "gridRow", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{.name = "height", .type = declared_type_reference("t45")},
+        DeclaredProperty{.name = "hintColor", .type = declared_type_reference("t8")},
+        DeclaredProperty{
+            .name = "hoverOverlay", .type = declared_type_reference("t8"), .nullable = true},
+        DeclaredProperty{
+            .name = "indicatorInset", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "indicatorPosition", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "indicatorSize", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{.name = "justifyContent", .type = declared_type_reference("t42")},
+        DeclaredProperty{
+            .name = "justifySelf", .type = declared_type_reference("t37"), .nullable = true},
+        DeclaredProperty{.name = "kind", .type = declared_type_reference("t44")},
+        DeclaredProperty{
+            .name = "lineHeight", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{.name = "lineHeightMultiplier", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "margin", .type = declared_type_reference("t61")},
+        DeclaredProperty{
+            .name = "material", .type = declared_type_reference("t51"), .nullable = true},
+        DeclaredProperty{
+            .name = "maxHeight", .type = declared_type_reference("t45"), .nullable = true},
+        DeclaredProperty{
+            .name = "maxLines", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "maxWidth", .type = declared_type_reference("t45"), .nullable = true},
+        DeclaredProperty{
+            .name = "minHeight", .type = declared_type_reference("t45"), .nullable = true},
+        DeclaredProperty{
+            .name = "minWidth", .type = declared_type_reference("t45"), .nullable = true},
+        DeclaredProperty{.name = "opacity", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "overflow", .type = declared_type_reference("t55")},
+        DeclaredProperty{.name = "padding", .type = declared_type_reference("t61")},
+        DeclaredProperty{.name = "pixelSize", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "radius", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "rowSpan", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "scale", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "scaleX", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "scaleY", .type = declared_type_reference("t3")},
+        DeclaredProperty{
+            .name = "scrim", .type = declared_type_reference("t145"), .nullable = true},
+        DeclaredProperty{
+            .name = "selection", .type = declared_type_reference("t8"), .nullable = true},
+        DeclaredProperty{.name = "selectionColor", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "thumb", .type = declared_type_reference("t8"), .nullable = true},
+        DeclaredProperty{
+            .name = "thumbRadius", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "thumbSize", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "track", .type = declared_type_reference("t145"), .nullable = true},
+        DeclaredProperty{
+            .name = "trackHeight", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "trackRadius", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "trackWidth", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{.name = "translateX", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "translateY", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "width", .type = declared_type_reference("t45")},
+        DeclaredProperty{.name = "wrap", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "wrapMode", .type = declared_type_reference("t69")},
+        DeclaredProperty{
+            .name = "wrapWidth", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{.name = "zIndex", .type = declared_type_reference("t3")},
+    };
+    catalog.animation_properties = {
+        DeclaredProperty{.name = "background", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "clip", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "color", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "fill", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "foreground", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "height", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "indicatorPosition", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "marginBottom", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "marginLeft", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "marginRight", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "marginTop", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "maxHeight", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "maxWidth", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "minHeight", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "minWidth", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "opacity", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "paddingBottom", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "paddingLeft", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "paddingRight", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "paddingTop", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "radius", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "scale", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "scaleX", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "scaleY", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "thumb", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "thumbRadius", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "thumbSize", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "track", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "trackRadius", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "translateX", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "translateY", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "width", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "x", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "y", .type = declared_type_reference("t3")},
+    };
+    catalog.animation_timing_properties = {
+        DeclaredProperty{.name = "delay", .type = declared_type_reference("t9")},
+        DeclaredProperty{.name = "duration", .type = declared_type_reference("t9")},
+        DeclaredProperty{.name = "easing", .type = declared_type_reference("t10")},
+        DeclaredProperty{.name = "fillMode", .type = declared_type_reference("t11")},
+        DeclaredProperty{.name = "repeat", .type = declared_type_reference("t12")},
+        DeclaredProperty{.name = "reverse", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "trigger", .type = declared_type_reference("t15")},
+    };
+    catalog.framework_widget_parameters = {
+        DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+        DeclaredParameter{.name = "layout", .type = declared_type_reference("t43")},
+        DeclaredParameter{.name = "variant", .type = declared_type_reference("t68")},
+        DeclaredParameter{.name = "style", .type = declared_type_reference("t57")},
+        DeclaredParameter{.name = "visualStyle", .type = declared_type_reference("t57")},
+        DeclaredParameter{.name = "effect", .type = declared_type_reference("t41")},
+        DeclaredParameter{.name = "material", .type = declared_type_reference("t51")},
+        DeclaredParameter{.name = "transition", .type = declared_type_reference("t5")},
+        DeclaredParameter{.name = "enter", .type = declared_type_reference("t5")},
+        DeclaredParameter{.name = "exit", .type = declared_type_reference("t5")},
+        DeclaredParameter{.name = "move", .type = declared_type_reference("t5")},
+        DeclaredParameter{.name = "motions", .type = declared_type_reference("t70")},
+        DeclaredParameter{
+            .name = "animateChanges", .type = declared_type_reference("t77"), .nullable = true},
+        DeclaredParameter{
+            .name = "animateContentSize", .type = declared_type_reference("t79"), .nullable = true},
+        DeclaredParameter{
+            .name = "disclosure", .type = declared_type_reference("t80"), .nullable = true},
+        DeclaredParameter{.name = "contentKey", .type = declared_type_reference("t4")},
+        DeclaredParameter{.name = "contentTransition", .type = declared_type_reference("t5")},
+        DeclaredParameter{.name = "contentTransitionMode", .type = declared_type_reference("t81")},
+        DeclaredParameter{.name = "stagger", .type = declared_type_reference("t9")},
+        DeclaredParameter{.name = "semantics", .type = declared_type_reference("t82")},
+        DeclaredParameter{.name = "textStyle", .type = declared_type_reference("t57")},
+        DeclaredParameter{.name = "textVisualStyle", .type = declared_type_reference("t57")},
+        DeclaredParameter{.name = "animation", .type = declared_type_reference("t5")},
+        DeclaredParameter{.name = "behaviors", .type = declared_type_reference("t85")},
+        DeclaredParameter{.name = "persistenceKey", .type = declared_type_reference("t0")},
+        DeclaredParameter{.name = "undoLabel", .type = declared_type_reference("t0")},
+        DeclaredParameter{.name = "undoCoalesce", .type = declared_type_reference("t0")},
+    };
+    catalog.component_parameter_types = {
+        DeclaredProperty{.name = "action", .type = declared_type_reference("t36")},
+        DeclaredProperty{.name = "align", .type = declared_type_reference("t37")},
+        DeclaredProperty{.name = "animation", .type = declared_type_reference("t5")},
+        DeclaredProperty{.name = "any", .type = declared_type_reference("t7")},
+        DeclaredProperty{.name = "axis", .type = declared_type_reference("t28")},
+        DeclaredProperty{.name = "boolean", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "borderStroke", .type = declared_type_reference("t38")},
+        DeclaredProperty{.name = "breadcrumbItems", .type = declared_type_reference("t39")},
+        DeclaredProperty{.name = "color", .type = declared_type_reference("t8")},
+        DeclaredProperty{.name = "duration", .type = declared_type_reference("t9")},
+        DeclaredProperty{.name = "easing", .type = declared_type_reference("t10")},
+        DeclaredProperty{.name = "effect", .type = declared_type_reference("t41")},
+        DeclaredProperty{.name = "justify", .type = declared_type_reference("t42")},
+        DeclaredProperty{.name = "key", .type = declared_type_reference("t4")},
+        DeclaredProperty{.name = "layout", .type = declared_type_reference("t43")},
+        DeclaredProperty{.name = "layoutKind", .type = declared_type_reference("t44")},
+        DeclaredProperty{.name = "layoutSize", .type = declared_type_reference("t45")},
+        DeclaredProperty{.name = "material", .type = declared_type_reference("t51")},
+        DeclaredProperty{.name = "menuItems", .type = declared_type_reference("t52")},
+        DeclaredProperty{.name = "movement", .type = declared_type_reference("t53")},
+        DeclaredProperty{.name = "number", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "overflow", .type = declared_type_reference("t55")},
+        DeclaredProperty{.name = "repeat", .type = declared_type_reference("t12")},
+        DeclaredProperty{.name = "richTextSpan", .type = declared_type_reference("t56")},
+        DeclaredProperty{.name = "richTextSpans", .type = declared_type_reference("t58")},
+        DeclaredProperty{.name = "selectItem", .type = declared_type_reference("t59")},
+        DeclaredProperty{.name = "selectItems", .type = declared_type_reference("t60")},
+        DeclaredProperty{.name = "spacing", .type = declared_type_reference("t61")},
+        DeclaredProperty{.name = "string", .type = declared_type_reference("t0")},
+        DeclaredProperty{.name = "style", .type = declared_type_reference("t57")},
+        DeclaredProperty{.name = "tabItem", .type = declared_type_reference("t63")},
+        DeclaredProperty{.name = "tabItems", .type = declared_type_reference("t64")},
+        DeclaredProperty{.name = "textAlign", .type = declared_type_reference("t65")},
+        DeclaredProperty{.name = "image", .type = declared_type_reference("t66")},
+        DeclaredProperty{.name = "imageSource", .type = declared_type_reference("t67")},
+        DeclaredProperty{.name = "widgetVariant", .type = declared_type_reference("t68")},
+        DeclaredProperty{.name = "wrapMode", .type = declared_type_reference("t69")},
+    };
+    catalog.behaviors = {
+        DeclaredBehavior{.id = "strata.activate", .options = declared_type_reference("t16")},
+        DeclaredBehavior{.id = "strata.disabled", .options = declared_type_reference("t21")},
+        DeclaredBehavior{.id = "strata.drag-source", .options = declared_type_reference("t22")},
+        DeclaredBehavior{.id = "strata.drop-target", .options = declared_type_reference("t26")},
+        DeclaredBehavior{.id = "strata.focusable", .options = declared_type_reference("t29")},
+        DeclaredBehavior{.id = "strata.hoverable", .options = declared_type_reference("t30")},
+        DeclaredBehavior{.id = "strata.movable", .options = declared_type_reference("t31")},
+        DeclaredBehavior{.id = "strata.reorder-target", .options = declared_type_reference("t33")},
+        DeclaredBehavior{.id = "strata.resize", .options = declared_type_reference("t34")},
+        DeclaredBehavior{.id = "strata.split-handle", .options = declared_type_reference("t35")},
+    };
+    catalog.materials = {
+        DeclaredMaterial{.id = "strata:border",
+                         .parameters = {DeclaredParameter{.name = "borderWidth",
+                                                          .type = declared_type_reference("t3"),
+                                                          .material_type = "FLOAT"},
+                                        DeclaredParameter{.name = "cornerRadii",
+                                                          .type = declared_type_reference("t109"),
+                                                          .material_type = "FLOAT4"},
+                                        DeclaredParameter{.name = "rectSize",
+                                                          .type = declared_type_reference("t110"),
+                                                          .material_type = "FLOAT2"},
+                                        DeclaredParameter{.name = "softness",
+                                                          .type = declared_type_reference("t3"),
+                                                          .material_type = "FLOAT"}}},
+        DeclaredMaterial{.id = "strata:coverage_text", .parameters = {}},
+        DeclaredMaterial{.id = "strata:custom_mesh", .parameters = {}},
+        DeclaredMaterial{.id = "strata:msdf_text",
+                         .parameters = {DeclaredParameter{.name = "msdfDistanceScale",
+                                                          .type = declared_type_reference("t3"),
+                                                          .material_type = "FLOAT"},
+                                        DeclaredParameter{.name = "msdfLayoutPixelRange",
+                                                          .type = declared_type_reference("t3"),
+                                                          .material_type = "FLOAT"},
+                                        DeclaredParameter{.name = "textPixelSize",
+                                                          .type = declared_type_reference("t3"),
+                                                          .material_type = "FLOAT"}}},
+        DeclaredMaterial{.id = "strata:nine_patch", .parameters = {}},
+        DeclaredMaterial{.id = "strata:rounded_rect",
+                         .parameters = {DeclaredParameter{.name = "borderColor",
+                                                          .type = declared_type_reference("t8"),
+                                                          .material_type = "COLOR"},
+                                        DeclaredParameter{.name = "borderWidth",
+                                                          .type = declared_type_reference("t3"),
+                                                          .material_type = "FLOAT"},
+                                        DeclaredParameter{.name = "cornerRadii",
+                                                          .type = declared_type_reference("t109"),
+                                                          .material_type = "FLOAT4"},
+                                        DeclaredParameter{.name = "rectSize",
+                                                          .type = declared_type_reference("t110"),
+                                                          .material_type = "FLOAT2"},
+                                        DeclaredParameter{.name = "softness",
+                                                          .type = declared_type_reference("t3"),
+                                                          .material_type = "FLOAT"}}},
+        DeclaredMaterial{.id = "strata:shadow",
+                         .parameters = {DeclaredParameter{.name = "blurRadius",
+                                                          .type = declared_type_reference("t3"),
+                                                          .material_type = "FLOAT"},
+                                        DeclaredParameter{.name = "cornerRadii",
+                                                          .type = declared_type_reference("t109"),
+                                                          .material_type = "FLOAT4"},
+                                        DeclaredParameter{.name = "rectSize",
+                                                          .type = declared_type_reference("t110"),
+                                                          .material_type = "FLOAT2"},
+                                        DeclaredParameter{.name = "spread",
+                                                          .type = declared_type_reference("t3"),
+                                                          .material_type = "FLOAT"}}},
+        DeclaredMaterial{.id = "strata:solid", .parameters = {}},
+        DeclaredMaterial{.id = "strata:textured", .parameters = {}},
+    };
+    catalog.effects = {
+        DeclaredEffect{.name = "blur",
+                       .parameters = {DeclaredProperty{.name = "downsample",
+                                                       .type = declared_type_reference("t3")},
+                                      DeclaredProperty{.name = "radius",
+                                                       .type = declared_type_reference("t3")}}},
+        DeclaredEffect{
+            .name = "shadow",
+            .parameters = {DeclaredProperty{.name = "color", .type = declared_type_reference("t8")},
+                           DeclaredProperty{.name = "radius",
+                                            .type = declared_type_reference("t3")},
+                           DeclaredProperty{.name = "spread",
+                                            .type = declared_type_reference("t3")}}},
+    };
+}
+
+} // namespace strata::compiler

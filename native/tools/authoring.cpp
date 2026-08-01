@@ -13,6 +13,7 @@
 #include "authoring_contract.hpp"
 #include "authoring_grammar.hpp"
 #include "authoring_registry.hpp"
+#include "compiler/builtin_catalog.hpp"
 #include "core/utf8.hpp"
 #include "data/json.hpp"
 #include "diagnostic_catalog.hpp"
@@ -41,8 +42,8 @@ namespace {
 [[nodiscard]] std::map<std::filesystem::path, std::string> generated(
     const std::filesystem::path& project_root
 ) {
-    const data::JsonValue registry = load_json(
-        project_root / "src/main/resources/strata/registry-v1.json"
+    const data::JsonValue registry = compiler::export_builtin_registry(
+        compiler::builtin_catalog()
     );
     const data::JsonValue lexical = load_json(
         project_root / "src/main/resources/strata/lexical-v1.json"
@@ -70,7 +71,6 @@ namespace {
             std::filesystem::path("native/generated/strata/contracts") /
                 (std::string(file_stem) + ".hpp"),
             render_cpp_contract(
-                registry,
                 load_json(schema_path),
                 "strata::contracts::" + std::string(namespace_name),
                 schema_path.lexically_relative(project_root).generic_string()
@@ -117,6 +117,10 @@ int write_authoring(const std::filesystem::path& project_root) {
         std::cout << "Wrote " << relative.generic_string() << '\n';
     }
     return 0;
+}
+
+void write_builtin_registry(const std::filesystem::path& output) {
+    write_text(output, compiler::export_builtin_registry_json());
 }
 
 } // namespace strata::tools

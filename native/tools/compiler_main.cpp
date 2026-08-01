@@ -20,33 +20,30 @@ int main(const int argument_count, const char* const* const arguments) {
         if (command_index >= argument_count) throw std::invalid_argument("missing compiler command");
         const std::string_view command(arguments[command_index]);
         const int remaining = argument_count - command_index;
-        if ((remaining == 3 || remaining == 4) &&
+        if ((remaining == 2 || remaining == 3) &&
             (command == "--check-module" || command == "--check-module-json")) {
-            const std::filesystem::path schemas = remaining == 4
-                ? std::filesystem::path(arguments[command_index + 3])
+            const std::filesystem::path schemas = remaining == 3
+                ? std::filesystem::path(arguments[command_index + 2])
                 : std::filesystem::path{};
             return command == "--check-module-json"
                 ? strata::tools::check_module_json(
                       std::filesystem::path(arguments[command_index + 1]),
-                      std::filesystem::path(arguments[command_index + 2]),
                       schemas,
                       extension_paths
                   )
                 : strata::tools::check_module(
                       std::filesystem::path(arguments[command_index + 1]),
-                      std::filesystem::path(arguments[command_index + 2]),
                       schemas,
                       extension_paths
                   );
         }
-        if (remaining == 6 &&
+        if (remaining == 5 &&
             (command == "--emit-artifact" || command == "--check-artifact")) {
             return strata::tools::write_module_artifact(
                 std::filesystem::path(arguments[command_index + 1]),
                 std::filesystem::path(arguments[command_index + 2]),
                 std::filesystem::path(arguments[command_index + 3]),
                 std::filesystem::path(arguments[command_index + 4]),
-                std::filesystem::path(arguments[command_index + 5]),
                 command == "--check-artifact",
                 extension_paths
             );
@@ -58,9 +55,9 @@ int main(const int argument_count, const char* const* const arguments) {
     std::cerr << "usage:\n"
                  "  strata_compile [--extension-path <directory>]... "
                  "--check-module|--check-module-json <entry.strata> "
-                 "<registry.json> [application-schemas.json]\n"
+                 "[application-schemas.json]\n"
                  "  strata_compile [--extension-path <directory>]... "
                  "--emit-artifact|--check-artifact <entry.strata> "
-                 "<registry.json> <application-schemas.json> <resource-root> <artifact.bin>\n";
+                 "<application-schemas.json> <resource-root> <artifact.bin>\n";
     return 1;
 }

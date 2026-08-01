@@ -6,9 +6,11 @@ rather than exposing implementation classes.
 
 ## ABI and ownership
 
-- ABI v4 uses opaque runtime, snapshot, registration, and Surface handles with paired release
+- ABI v5 uses opaque runtime, snapshot, registration, and Surface handles with paired release
   functions and exposes modality-aware focus presentation, durable-state, and typed asynchronous
-  host-data contracts. Releasing `NULL` is harmless; v4 is the minimum negotiable host contract.
+  host-data contracts. Built-in language declarations are native and no longer cross the
+  application configuration boundary as JSON. Releasing `NULL` is harmless; v5 is the minimum
+  negotiable host contract.
 - All public structures start with `struct_size`; reserved fields are zeroed. Required capabilities
   are negotiated before construction and fail explicitly when unsupported.
 - Public text is length-delimited UTF-8. Callback strings/bytes are borrowed only for the callback.
@@ -107,7 +109,7 @@ cmake --install build/cmake/linux-x64
 
 The default prefixes are `build/install/windows-x64` and `build/install/linux-x64`. Every package
 exports `Strata::c`, `Strata::host`, `Strata::extensions`, and `Strata::render_host`, plus public
-headers, the neutral registry, runtime assets, tools, and samples. `Strata::extensions` is static
+headers, a generated JSON catalog projection, runtime assets, tools, and samples. `Strata::extensions` is static
 authoring support linked into independently loaded package libraries; the installed
 `strata_configure_extension` CMake helper assigns their discovery-safe names. Windows also exports
 `Strata::desktop`. `Strata_RESOURCES` names the installed `share` directory so consumers do not

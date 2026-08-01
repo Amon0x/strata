@@ -89,14 +89,8 @@ void check(const bool condition, const std::string_view message) {
     return {{"$layout", layout(width, height, std::move(kind))}};
 }
 
-[[nodiscard]] std::shared_ptr<const runtime::ApplicationBundle> load_bundle(
-    const std::filesystem::path& registry_path
-) {
-    const std::string registry = resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().generic_string())
-    );
-    return runtime::ApplicationBundle::create(data::parse_json(registry));
+[[nodiscard]] std::shared_ptr<const runtime::ApplicationBundle> load_bundle() {
+    return runtime::ApplicationBundle::create();
 }
 
 [[nodiscard]] ui::Point center(const ui::Rect bounds) noexcept {
@@ -1816,10 +1810,9 @@ void test_banner_semantics(InputFixture& fixture) {
 
 int main(const int argument_count, const char* const* const arguments) {
     try {
-        if (argument_count != 2) throw std::invalid_argument("expected registry path");
-        const std::filesystem::path registry_path(arguments[1]);
-        const std::shared_ptr<const runtime::ApplicationBundle> bundle = load_bundle(registry_path);
-        const std::filesystem::path resources = registry_path.parent_path().parent_path();
+        if (argument_count != 2) throw std::invalid_argument("expected resource root");
+        const std::filesystem::path resources(arguments[1]);
+        const std::shared_ptr<const runtime::ApplicationBundle> bundle = load_bundle();
         InputFixture fixture(bundle, resources);
         test_primary_pointer_focus_default(fixture);
         test_rich_text_press_arm(fixture);

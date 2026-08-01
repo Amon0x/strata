@@ -1,7 +1,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
-#include <filesystem>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -19,7 +18,6 @@
 #include "core/utf8.hpp"
 #include "compiler/source.hpp"
 #include "data/json.hpp"
-#include "resource/resource.hpp"
 #include "ui/layout.hpp"
 #include "ui/layout/detail_algorithms.hpp"
 #include "ui/surface.hpp"
@@ -871,14 +869,8 @@ void test_unicode_recursive_layout_and_typed_motion_contracts() {
           "counted alternating terminal direction disagrees with exit completion");
 }
 
-[[nodiscard]] std::shared_ptr<const strata::runtime::ApplicationBundle> load_bundle(
-    const std::filesystem::path& registry_path
-) {
-    const std::string registry = strata::resource::load_utf8_resource(
-        registry_path.parent_path(),
-        strata::resource::ResourceId::parse(registry_path.filename().generic_string())
-    );
-    return strata::runtime::ApplicationBundle::create(strata::data::parse_json(registry));
+[[nodiscard]] std::shared_ptr<const strata::runtime::ApplicationBundle> load_bundle() {
+    return strata::runtime::ApplicationBundle::create();
 }
 
 [[nodiscard]] strata::compiler::ModuleLoader no_imports() {
@@ -887,7 +879,7 @@ void test_unicode_recursive_layout_and_typed_motion_contracts() {
     };
 }
 
-void test_scroll_animation_lifecycle(const std::filesystem::path& registry_path) {
+void test_scroll_animation_lifecycle() {
     using namespace strata;
     constexpr std::string_view source = R"(
 overlay Main {
@@ -896,7 +888,7 @@ overlay Main {
   }
 }
 )";
-    runtime::ApplicationContext application("theme-scroll", load_bundle(registry_path));
+    runtime::ApplicationContext application("theme-scroll", load_bundle());
     check(application.compile_and_activate(
               compiler::ModuleSource{"theme-scroll.strata", std::string(source)}, no_imports(), 0U
           ).activated(),
@@ -1054,16 +1046,15 @@ overlay Main {
 
 } // namespace
 
-int main(const int argument_count, const char* const* const arguments) {
+int main() {
     try {
-        if (argument_count != 2) throw std::invalid_argument("expected registry path");
         test_defaults_and_validation();
         test_scopes_styles_tokens_and_lazy_ranges();
         test_catalog_and_motion_policy();
         test_exact_resolution_validation_and_local_scope();
         test_full_style_round_trip_and_nullability();
         test_unicode_recursive_layout_and_typed_motion_contracts();
-        test_scroll_animation_lifecycle(std::filesystem::path(arguments[1]));
+        test_scroll_animation_lifecycle();
         std::cout << "strata_theme_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

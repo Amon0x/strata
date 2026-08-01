@@ -175,8 +175,8 @@ void test_collection_models() {
                "collection reveal trailing edge changed");
 }
 
-void test_bundled_font_metrics(const std::filesystem::path& registry_path) {
-    const std::filesystem::path resources = registry_path.parent_path().parent_path();
+void test_bundled_font_metrics(const std::filesystem::path& resource_root) {
+    const std::filesystem::path& resources = resource_root;
     const strata::font::OpenTypeFont font = strata::font::OpenTypeFont::parse(
         strata::resource::load_binary_resource(
             resources,
@@ -651,8 +651,8 @@ void test_svg_image_projection_and_compound_fill() {
           "UI path flattening did not enforce its aggregate point budget");
 }
 
-void test_bundled_texture_descriptor(const std::filesystem::path& registry_path) {
-    const std::filesystem::path resources = registry_path.parent_path().parent_path();
+void test_bundled_texture_descriptor(const std::filesystem::path& resource_root) {
+    const std::filesystem::path& resources = resource_root;
     const strata::resource::ResourceBytes png = strata::resource::load_binary_resource(
         resources,
         strata::resource::ResourceId::parse(
@@ -765,7 +765,7 @@ void test_render_packet_batches_every_portable_command() {
     check(offset == packet.size(), "render packet has unframed trailing bytes");
 }
 
-void test_render_submission_cache(const std::filesystem::path& registry_path) {
+void test_render_submission_cache(const std::filesystem::path& resource_root) {
     using namespace strata;
     ui::RenderCommandBuffer commands;
     commands.append(ui::SolidRectRenderCommand{
@@ -773,7 +773,7 @@ void test_render_submission_cache(const std::filesystem::path& registry_path) {
         ui::RenderColor{10U, 20U, 30U, 255U},
     });
     const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
-        registry_path.parent_path().parent_path(),
+        resource_root,
         resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
     );
     font::GlyphAtlas atlas("submission-cache-test");
@@ -823,7 +823,7 @@ void test_render_submission_cache(const std::filesystem::path& registry_path) {
     );
     const std::shared_ptr<const ui::TextEngine> replacement_text_engine =
         ui::TextEngine::load_control_font(
-            registry_path.parent_path().parent_path(),
+            resource_root,
             resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
         );
     static_cast<void>(cache.resolve(commands, atlas, *replacement_text_engine, environment));
@@ -978,10 +978,10 @@ void check_translation_reused_geometry(
     }
 }
 
-void test_render_submission_translation_reuse(const std::filesystem::path& registry_path) {
+void test_render_submission_translation_reuse(const std::filesystem::path& resource_root) {
     using namespace strata;
     const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
-        registry_path.parent_path().parent_path(),
+        resource_root,
         resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
     );
     const std::uint16_t glyph = text_engine->control_font().glyph_id('A');
@@ -1022,7 +1022,7 @@ void test_render_submission_translation_reuse(const std::filesystem::path& regis
     check_translation_reused_geometry(reused, rebuilt);
 }
 
-void test_native_nine_patch_geometry(const std::filesystem::path& registry_path) {
+void test_native_nine_patch_geometry(const std::filesystem::path& resource_root) {
     using namespace strata;
     ui::RenderCommandBuffer commands;
     commands.append(ui::NinePatchRenderCommand{
@@ -1034,7 +1034,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& registry_path)
         ui::RenderColor{255U, 255U, 255U, 255U},
     });
     const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
-        registry_path.parent_path().parent_path(),
+        resource_root,
         resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
     );
     std::vector<resource::EncodedTextureResource> textures{
@@ -1224,7 +1224,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& registry_path)
           "static image reload did not create the replacement after release");
 }
 
-void test_native_custom_mesh_geometry(const std::filesystem::path& registry_path) {
+void test_native_custom_mesh_geometry(const std::filesystem::path& resource_root) {
     using namespace strata;
     ui::RenderCommandBuffer commands;
     commands.append(ui::CustomMeshRenderCommand{
@@ -1243,7 +1243,7 @@ void test_native_custom_mesh_geometry(const std::filesystem::path& registry_path
         1.0,
     });
     const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
-        registry_path.parent_path().parent_path(),
+        resource_root,
         resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
     );
     font::GlyphAtlas atlas("custom-mesh-test");
@@ -2704,7 +2704,7 @@ void test_active_work_scheduler_and_detach_cleanup() {
 }
 
 void test_portable_description_and_declaration_state(
-    const std::filesystem::path& registry_path,
+    const std::filesystem::path& resource_root,
     const std::filesystem::path& fixture_root
 ) {
     using namespace strata;
@@ -2712,11 +2712,8 @@ void test_portable_description_and_declaration_state(
     const auto load = [](const std::filesystem::path& root, const std::string& name) {
         return resource::load_utf8_resource(root, resource::ResourceId::parse(name));
     };
-    const data::JsonValue registry = data::parse_json(
-        load(registry_path.parent_path(), registry_path.filename().string())
-    );
     const data::JsonValue schemas = data::parse_json(load(scenario_directory, "schemas.json"));
-    const auto bundle = runtime::ApplicationBundle::create(registry, &schemas);
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
     runtime::ApplicationContext application("description", bundle);
     static_cast<void>(application.host().adopt(runtime::HostSnapshot::from_json(
         "initial",
@@ -2841,7 +2838,7 @@ void test_portable_description_and_declaration_state(
         "Main",
         surface_environment,
         ui::TextEngine::load_control_font(
-            registry_path.parent_path().parent_path(),
+            resource_root,
             resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
         ),
         ui::WidgetRegistry{},
@@ -3057,7 +3054,7 @@ void test_portable_description_and_declaration_state(
     );
 }
 
-void test_repeater_description_is_data_backed(const std::filesystem::path& registry_path) {
+void test_repeater_description_is_data_backed() {
     using namespace strata;
     const auto collection_property = [](
         const std::uint64_t rebuilds,
@@ -3094,11 +3091,7 @@ void test_repeater_description_is_data_backed(const std::filesystem::path& regis
         "CollectionView retained/dependency identity diverged on rebuilds or cacheHits"
     );
 
-    const data::JsonValue registry = data::parse_json(resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().string())
-    ));
-    const auto bundle = runtime::ApplicationBundle::create(registry);
+    const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("lazy-repeater-description", bundle);
     const auto no_imports = [](const std::string_view, const std::string_view path)
         -> compiler::ModuleSource {
@@ -3883,13 +3876,9 @@ overlay LazyRepeater {
     );
 }
 
-void test_surface_contextual_environment(const std::filesystem::path& registry_path) {
+void test_surface_contextual_environment(const std::filesystem::path& resource_root) {
     using namespace strata;
-    const std::string registry_text = resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().string())
-    );
-    const auto bundle = runtime::ApplicationBundle::create(data::parse_json(registry_text));
+    const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("surface-environment", bundle);
     const std::string source = R"(
 component EnvironmentPanel() {
@@ -3946,7 +3935,7 @@ overlay Environment {
         true, ui::PointerPrecision::fine, true, false, true, true, true,
     };
     const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
-        registry_path.parent_path().parent_path(),
+        resource_root,
         resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
     );
     ui::Surface compact(
@@ -4048,19 +4037,14 @@ overlay Environment {
 }
 
 void test_async_collection_key_isolation_and_lazy_tree_publication(
-    const std::filesystem::path& registry_path
+    const std::filesystem::path& resource_root
 ) {
     using namespace strata;
-    const std::filesystem::path resource_root = registry_path.parent_path().parent_path();
-    const data::JsonValue registry = data::parse_json(resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().string())
-    ));
     const data::JsonValue schemas = data::parse_json(resource::load_utf8_resource(
         resource_root,
         resource::ResourceId::parse("assets/strata/ui/demo_surface.schemas.json")
     ));
-    const auto bundle = runtime::ApplicationBundle::create(registry, &schemas);
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
     runtime::ApplicationContext application("async-collection-integration", bundle);
     check(
         application.host().adopt(bundle->host_snapshot(
@@ -4387,14 +4371,10 @@ overlay AsyncCollections {
 }
 
 void test_native_collection_interaction_and_templates(
-    const std::filesystem::path& registry_path
+    const std::filesystem::path& resource_root
 ) {
     using namespace strata;
-    const data::JsonValue registry = data::parse_json(resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().string())
-    ));
-    const auto bundle = runtime::ApplicationBundle::create(registry);
+    const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("collection-core", bundle);
     const std::string source = R"(
 component CollectionTreeRow(key: key, label: string, selected: boolean, expanded: boolean, loading: boolean) {
@@ -4579,7 +4559,7 @@ overlay Collections {
         "Collections",
         environment,
         ui::TextEngine::load_control_font(
-            registry_path.parent_path().parent_path(),
+            resource_root,
             resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
         )
     );
@@ -5043,15 +5023,9 @@ overlay Collections {
     );
 }
 
-void test_motion_timing_and_indeterminate_progress(
-    const std::filesystem::path& registry_path
-) {
+void test_motion_timing_and_indeterminate_progress() {
     using namespace strata;
-    const std::string registry_text = resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().string())
-    );
-    const auto bundle = runtime::ApplicationBundle::create(data::parse_json(registry_text));
+    const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("motion-contract", bundle);
     const std::string source = R"(
 animation Counted {
@@ -5464,13 +5438,9 @@ overlay LazyMotion {
     );
 }
 
-void test_component_slot_projection(const std::filesystem::path& registry_path) {
+void test_component_slot_projection() {
     using namespace strata;
-    const std::string registry_text = resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().string())
-    );
-    const auto bundle = runtime::ApplicationBundle::create(data::parse_json(registry_text));
+    const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("slot-projection", bundle);
     const std::string source = R"(
 component Frame() {
@@ -5523,14 +5493,8 @@ overlay Projection {
     );
 }
 
-void test_component_cache_tracks_exact_retained_dependencies(
-    const std::filesystem::path& registry_path
-) {
+void test_component_cache_tracks_exact_retained_dependencies() {
     using namespace strata;
-    const std::string registry_text = resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().string())
-    );
     const data::JsonValue schemas = data::parse_json(R"({
       "extensionPackages":[],
       "widgets":{"registry":"component-cache","required":[],"definitions":[]},
@@ -5540,10 +5504,7 @@ void test_component_cache_tracks_exact_retained_dependencies(
         {"path":"beta","nullable":false,"type":{"kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[{"name":"value","type":{"kind":"string"},"required":true,"nullable":false}]}}
       ]
     })");
-    const auto bundle = runtime::ApplicationBundle::create(
-        data::parse_json(registry_text),
-        &schemas
-    );
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
     runtime::ApplicationContext application("component-retained-cache", bundle);
     static_cast<void>(application.host().adopt(bundle->host_snapshot(
         "component-cache-alpha", 1U, data::parse_json(R"({"alpha":{"value":"stable"}})")
@@ -5683,15 +5644,9 @@ overlay Other { root Text(key: "cache.other", text: "other") }
     );
 }
 
-void test_phased_input_dispatch_and_gesture_claim(
-    const std::filesystem::path& registry_path
-) {
+void test_phased_input_dispatch_and_gesture_claim() {
     using namespace strata;
-    const std::string registry_text = resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().string())
-    );
-    const auto bundle = runtime::ApplicationBundle::create(data::parse_json(registry_text));
+    const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("phased-input", bundle);
     const std::string source = R"(
 overlay PhasedInput {
@@ -5997,12 +5952,12 @@ int main(const int argument_count, const char* const* const arguments) {
             test_render_submission_translation_reuse(arguments[1]);
             test_native_nine_patch_geometry(arguments[1]);
             test_native_custom_mesh_geometry(arguments[1]);
-            test_motion_timing_and_indeterminate_progress(arguments[1]);
-            test_component_slot_projection(arguments[1]);
-            test_component_cache_tracks_exact_retained_dependencies(arguments[1]);
-            test_phased_input_dispatch_and_gesture_claim(arguments[1]);
+            test_motion_timing_and_indeterminate_progress();
+            test_component_slot_projection();
+            test_component_cache_tracks_exact_retained_dependencies();
+            test_phased_input_dispatch_and_gesture_claim();
             test_portable_description_and_declaration_state(arguments[1], arguments[2]);
-            test_repeater_description_is_data_backed(arguments[1]);
+            test_repeater_description_is_data_backed();
             test_surface_contextual_environment(arguments[1]);
             test_async_collection_key_isolation_and_lazy_tree_publication(arguments[1]);
             test_native_collection_interaction_and_templates(arguments[1]);

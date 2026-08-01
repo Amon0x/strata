@@ -8,7 +8,7 @@ typed ownership and result exceptions, but both paths use the same ABI and capab
 ```text
 negotiate ABI/capabilities
   -> create runtime + install host adapters
-  -> configure registry/application schemas
+  -> configure application schemas
   -> publish host snapshots + register actions
   -> compile and activate source (last-good)
   -> create Surface with environment/fonts/images
@@ -41,7 +41,7 @@ strata_runtime* runtime = NULL;
 strata_result result = strata_runtime_create(&config, &runtime);
 ```
 
-Configure the neutral registry, compile/activate an entry source, then create a Surface. The complete
+Configure the application schema, compile/activate an entry source, then create a Surface. The complete
 buildable flow is [c_smoke.c](../native/samples/c_smoke.c); it uses only the installed header and
 library.
 
@@ -59,7 +59,6 @@ strata::Runtime runtime(std::move(runtime_options));
 
 runtime.configure_application(strata::ApplicationOptions{
     .id = "example.application",
-    .registry_json = registry_json,
 });
 if (!runtime.activate(strata::SourceActivation{
         .generation = 1,
@@ -139,7 +138,7 @@ and the Surface release-packet barrier.
 C hosts use the JSON ABI directly. Ordinary C++ application code should generate its contract from
 the same application schema consumed by the compiler, include `strata/host.hpp`, and link
 `Strata::host`. The installed CMake package exposes `Strata_AUTHORING`; invoke it with
-`--write-cpp-contract <registry> <schema> <namespace> <output.hpp>` from a custom command.
+`--write-cpp-contract <schema> <namespace> <output.hpp>` from a custom command.
 
 The generated header provides model structures, complete/per-field snapshot encoders, action IDs,
 typed payload decoders, enums, maps/unions, and an action variant:

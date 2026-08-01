@@ -20,6 +20,9 @@ if(NOT install_status EQUAL 0)
         "SDK installation failed (${install_status})\n${install_output}\n${install_error}")
 endif()
 if(STRATA_EXPECT_VSCODE_EXTENSION)
+    if(NOT EXISTS "${STRATA_INSTALL_PREFIX}/share/strata/registry-v1.json")
+        message(FATAL_ERROR "SDK installation omitted the generated registry projection")
+    endif()
     file(GLOB installed_vscode_packages
         "${STRATA_INSTALL_PREFIX}/share/strata/editor/strata-language-*.vsix"
     )
@@ -34,7 +37,6 @@ if(STRATA_EXPECT_VSCODE_EXTENSION)
     execute_process(
         COMMAND "${installed_compiler}" --check-module
             "${STRATA_INSTALL_PREFIX}/share/assets/strata/ui/demo_surface.strata"
-            "${STRATA_INSTALL_PREFIX}/share/strata/registry-v1.json"
             "${STRATA_INSTALL_PREFIX}/share/assets/strata/ui/demo_surface.schemas.json"
         RESULT_VARIABLE installed_compiler_status
         OUTPUT_VARIABLE installed_compiler_output

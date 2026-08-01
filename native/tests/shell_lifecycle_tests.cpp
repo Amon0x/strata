@@ -30,14 +30,8 @@ void check(const bool condition, const std::string_view message) {
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
-[[nodiscard]] std::shared_ptr<const runtime::ApplicationBundle> load_bundle(
-    const std::filesystem::path& registry_path
-) {
-    const std::string registry = resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().generic_string())
-    );
-    return runtime::ApplicationBundle::create(data::parse_json(registry));
+[[nodiscard]] std::shared_ptr<const runtime::ApplicationBundle> load_bundle() {
+    return runtime::ApplicationBundle::create();
 }
 
 [[nodiscard]] compiler::ModuleLoader no_imports() {
@@ -185,7 +179,7 @@ void test_notification_queue() {
 
 void test_surface_shell_lifecycle(
     const std::shared_ptr<const runtime::ApplicationBundle>& bundle,
-    const std::filesystem::path& registry_path
+    const std::filesystem::path& resource_root
 ) {
     constexpr std::string_view source = R"(
 style OutsideFocus {
@@ -270,7 +264,7 @@ overlay Main { root ShellFixture() }
         runtime::LayerRole::overlay,
         "Main",
         environment(),
-        ui::TextEngine::load_default_fonts(registry_path.parent_path().parent_path())
+        ui::TextEngine::load_default_fonts(resource_root)
     );
     static_cast<void>(surface.frame(1'000'000));
 
@@ -979,11 +973,11 @@ overlay Main { root ShellFixture() }
 
 int main(const int argument_count, const char* const* const arguments) {
     try {
-        if (argument_count != 2) throw std::invalid_argument("expected registry path");
-        const std::filesystem::path registry_path(arguments[1]);
-        const auto bundle = load_bundle(registry_path);
+        if (argument_count != 2) throw std::invalid_argument("expected resource root");
+        const std::filesystem::path resource_root(arguments[1]);
+        const auto bundle = load_bundle();
         test_notification_queue();
-        test_surface_shell_lifecycle(bundle, registry_path);
+        test_surface_shell_lifecycle(bundle, resource_root);
         std::cout << "strata_shell_lifecycle_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

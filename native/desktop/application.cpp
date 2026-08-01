@@ -266,7 +266,6 @@ struct ApplicationHost::Impl final {
             "desktop IME adapter installation"
         );
 
-        registry = services.text("strata/registry-v1.json");
         schemas = config.schemas_resource.empty() ? std::string{}
                                                   : services.text(config.schemas_resource);
         extensions = host::select_extensions(
@@ -281,7 +280,6 @@ struct ApplicationHost::Impl final {
         const strata_application_config application{
             sizeof(strata_application_config),
             strata::view(config.application_id),
-            strata::view(registry),
             strata::view(schemas),
             extension_views.empty() ? nullptr : extension_views.data(),
             extension_views.size(),
@@ -477,7 +475,6 @@ struct ApplicationHost::Impl final {
     host::RenderPacketDecoder decoder;
     std::vector<Diagnostic> diagnostics;
     std::vector<std::string> extension_schemas;
-    std::string registry;
     std::string schemas;
     std::string source;
     std::string module_id_scratch;

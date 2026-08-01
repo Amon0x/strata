@@ -38,7 +38,7 @@ Form(
 ) { /* fields */ }
 ```
 
-The native compiler resolves that id against the composed registry/schema, checks required and
+The native compiler resolves that id against the composed built-in catalog/application schema, checks required and
 optional fields, validates types, and retains the source range and component path. Unknown ids,
 misspellings, or incompatible payloads reject activation and leave the last-good unit active.
 
@@ -49,7 +49,7 @@ header with the installed authoring tool (CMake packages expose its path as `Str
 
 ```sh
 strata_authoring --write-cpp-contract \
-  registry-v1.json application.schemas.json my::contracts generated/application_contract.hpp
+  application.schemas.json my::contracts generated/application_contract.hpp
 ```
 
 The header contains owned model structures, encoders for complete and per-field host snapshots,

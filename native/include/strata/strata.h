@@ -24,8 +24,9 @@ extern "C" {
 #define STRATA_ABI_VERSION_2 UINT32_C(2)
 #define STRATA_ABI_VERSION_3 UINT32_C(3)
 #define STRATA_ABI_VERSION_4 UINT32_C(4)
-#define STRATA_ABI_VERSION_CURRENT STRATA_ABI_VERSION_4
-#define STRATA_ABI_VERSION_MINIMUM STRATA_ABI_VERSION_4
+#define STRATA_ABI_VERSION_5 UINT32_C(5)
+#define STRATA_ABI_VERSION_CURRENT STRATA_ABI_VERSION_5
+#define STRATA_ABI_VERSION_MINIMUM STRATA_ABI_VERSION_5
 
 typedef uint32_t strata_status;
 
@@ -377,7 +378,6 @@ typedef struct strata_value_json_sink {
 typedef struct strata_application_config {
     size_t struct_size;
     strata_string_view id;
-    strata_string_view registry_json;
     strata_string_view schemas_json;
     /*
      * Declaration documents of the native extension packages this application activates, applied

@@ -26,14 +26,8 @@ void check(const bool condition, const std::string_view message) {
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
-[[nodiscard]] std::shared_ptr<const runtime::ApplicationBundle> load_bundle(
-    const std::filesystem::path& registry_path
-) {
-    const std::string registry = resource::load_utf8_resource(
-        registry_path.parent_path(),
-        resource::ResourceId::parse(registry_path.filename().generic_string())
-    );
-    return runtime::ApplicationBundle::create(data::parse_json(registry));
+[[nodiscard]] std::shared_ptr<const runtime::ApplicationBundle> load_bundle() {
+    return runtime::ApplicationBundle::create();
 }
 
 [[nodiscard]] compiler::ModuleLoader no_imports() {
@@ -58,10 +52,10 @@ void check(const bool condition, const std::string_view message) {
 }
 
 [[nodiscard]] std::shared_ptr<const ui::TextEngine> text_engine(
-    const std::filesystem::path& registry_path
+    const std::filesystem::path& resource_root
 ) {
     return ui::TextEngine::load_control_font(
-        registry_path.parent_path().parent_path(),
+        resource_root,
         resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
     );
 }
@@ -92,7 +86,7 @@ void check(const bool condition, const std::string_view message) {
 }
 
 void test_uncontrolled_editor_lifecycle(
-    const std::filesystem::path& registry_path,
+    const std::filesystem::path& resource_root,
     const std::shared_ptr<const runtime::ApplicationBundle>& bundle
 ) {
     constexpr std::string_view source = R"(
@@ -115,7 +109,7 @@ overlay Main { root ChipFixture() }
     check(activation.activated(), "uncontrolled ChipInput fixture did not activate");
     ui::Surface surface(
         "chip-uncontrolled", application, runtime::LayerRole::overlay, "Main",
-        environment(), text_engine(registry_path)
+        environment(), text_engine(resource_root)
     );
     static_cast<void>(surface.frame(1'000'000));
     ui::RetainedNode* chip = surface.tree().find_key("chips");
@@ -265,7 +259,7 @@ overlay Main { root ChipFixture() }
 }
 
 void test_controlled_binding_round_trip(
-    const std::filesystem::path& registry_path,
+    const std::filesystem::path& resource_root,
     const std::shared_ptr<const runtime::ApplicationBundle>& bundle
 ) {
     constexpr std::string_view source = R"(
@@ -284,7 +278,7 @@ overlay Main { root BoundChips() }
     check(activation.activated(), "controlled ChipInput fixture did not activate");
     ui::Surface surface(
         "chip-controlled", application, runtime::LayerRole::overlay, "Main",
-        environment(), text_engine(registry_path)
+        environment(), text_engine(resource_root)
     );
     static_cast<void>(surface.frame(1'000'000));
     ui::RetainedNode* chip = surface.tree().find_key("bound.chips");
@@ -309,11 +303,11 @@ overlay Main { root BoundChips() }
 
 int main(const int argument_count, const char* const* const arguments) {
     try {
-        if (argument_count != 2) throw std::invalid_argument("expected registry path");
-        const std::filesystem::path registry_path(arguments[1]);
-        const auto bundle = load_bundle(registry_path);
-        test_uncontrolled_editor_lifecycle(registry_path, bundle);
-        test_controlled_binding_round_trip(registry_path, bundle);
+        if (argument_count != 2) throw std::invalid_argument("expected resource root");
+        const std::filesystem::path resource_root(arguments[1]);
+        const auto bundle = load_bundle();
+        test_uncontrolled_editor_lifecycle(resource_root, bundle);
+        test_controlled_binding_round_trip(resource_root, bundle);
         std::cout << "strata_chip_input_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

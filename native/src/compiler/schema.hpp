@@ -13,6 +13,10 @@
 
 namespace strata::compiler {
 
+struct BuiltinCatalog;
+struct DeclaredParameter;
+struct DeclaredType;
+
 enum class SemanticTypeKind {
     unknown,
     any,
@@ -163,7 +167,8 @@ struct EffectSchema final {
 
 class SchemaRegistry final {
 public:
-    [[nodiscard]] static SchemaRegistry parse(const data::JsonValue& document);
+    /** Creates a mutable application view over the immutable native built-in catalog. */
+    [[nodiscard]] static SchemaRegistry builtins();
 
     [[nodiscard]] const WidgetSchema* widget(std::string_view name) const noexcept;
     [[nodiscard]] const ActionSchema* action(std::string_view id) const noexcept;
@@ -189,6 +194,8 @@ public:
     [[nodiscard]] const std::unordered_map<std::string, SemanticTypePtr>& host_types() const noexcept;
 
 private:
+    [[nodiscard]] static SchemaRegistry from_catalog(const BuiltinCatalog& catalog);
+
     std::unordered_map<std::string, WidgetSchema> widgets_;
     std::unordered_map<std::string, ActionSchema> actions_;
     std::unordered_map<std::string, HelperSchema> helpers_;
@@ -202,11 +209,16 @@ private:
     std::vector<SchemaParameter> animation_properties_;
     std::vector<SchemaParameter> animation_timing_properties_;
     std::vector<std::string> material_ids_;
-    std::unordered_map<std::string, data::JsonValue> type_definitions_;
+    std::unordered_map<std::string, std::shared_ptr<const DeclaredType>>
+        declared_type_definitions_;
     std::unordered_map<std::string, SemanticTypePtr> resolved_types_;
 
     [[nodiscard]] SemanticTypePtr parse_type(const data::JsonValue& value);
+    [[nodiscard]] SemanticTypePtr parse_type(
+        const std::shared_ptr<const DeclaredType>& value
+    );
     [[nodiscard]] SchemaParameter parse_parameter(const data::JsonValue& value);
+    [[nodiscard]] SchemaParameter parse_parameter(const DeclaredParameter& value);
 };
 
 } // namespace strata::compiler

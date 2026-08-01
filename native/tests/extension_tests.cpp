@@ -389,7 +389,7 @@ void test_external_package_and_schema_projection() {
     return config;
 }
 
-void test_surface_lifecycle(const std::filesystem::path& registry_path) {
+void test_surface_lifecycle(const std::filesystem::path& resource_root) {
     counters = HarnessCounters{};
     const std::unique_ptr<Package> harness = harness_package();
     const std::string package_schema = harness->schema_json();
@@ -403,7 +403,7 @@ void test_surface_lifecycle(const std::filesystem::path& registry_path) {
         "extension harness runtime creation failed"
     );
 
-    FileResources resources{registry_path.parent_path().parent_path(), {}};
+    FileResources resources{resource_root, {}};
     const strata_resource_adapter adapter{
         sizeof(strata_resource_adapter), &resources, 1U, &load_resource,
     };
@@ -412,12 +412,10 @@ void test_surface_lifecycle(const std::filesystem::path& registry_path) {
         "extension harness resource adapter installation failed"
     );
 
-    const std::string registry = read_file(registry_path);
     const strata_string_view extension_schemas[]{view(package_schema)};
     const strata_application_config application{
         sizeof(strata_application_config),
         view("strata.extension.harness"),
-        view(registry),
         strata_string_view{nullptr, 0U},
         extension_schemas,
         std::size(extension_schemas),

@@ -1,5 +1,5 @@
-if(NOT DEFINED STRATA_COMPILER OR NOT DEFINED STRATA_REGISTRY OR
-   NOT DEFINED STRATA_VALID_SOURCE OR NOT DEFINED STRATA_VALID_SCHEMAS OR
+if(NOT DEFINED STRATA_COMPILER OR NOT DEFINED STRATA_VALID_SOURCE OR
+   NOT DEFINED STRATA_VALID_SCHEMAS OR
    NOT DEFINED STRATA_TEST_DIRECTORY OR NOT DEFINED STRATA_EXTENSION_DIRECTORY OR
    NOT DEFINED STRATA_EXTENSION_SOURCE OR NOT DEFINED STRATA_EXTENSION_SCHEMAS)
     message(FATAL_ERROR "compiler diagnostics JSON test arguments are incomplete")
@@ -7,7 +7,7 @@ endif()
 
 execute_process(
     COMMAND "${STRATA_COMPILER}" --check-module-json
-        "${STRATA_VALID_SOURCE}" "${STRATA_REGISTRY}" "${STRATA_VALID_SCHEMAS}"
+        "${STRATA_VALID_SOURCE}" "${STRATA_VALID_SCHEMAS}"
     RESULT_VARIABLE valid_status
     OUTPUT_VARIABLE valid_output
     ERROR_VARIABLE valid_error
@@ -25,8 +25,7 @@ endif()
 
 execute_process(
     COMMAND "${STRATA_COMPILER}" --extension-path "${STRATA_EXTENSION_DIRECTORY}"
-        --check-module-json "${STRATA_EXTENSION_SOURCE}" "${STRATA_REGISTRY}"
-        "${STRATA_EXTENSION_SCHEMAS}"
+        --check-module-json "${STRATA_EXTENSION_SOURCE}" "${STRATA_EXTENSION_SCHEMAS}"
     RESULT_VARIABLE extension_status
     OUTPUT_VARIABLE extension_output
     ERROR_VARIABLE extension_error
@@ -46,7 +45,7 @@ set(invalid_source "${STRATA_TEST_DIRECTORY}/invalid-editor-module.strata")
 file(WRITE "${invalid_source}" "overlay Broken { root MissingWidget(label: 1) }\n")
 execute_process(
     COMMAND "${STRATA_COMPILER}" --check-module-json
-        "${invalid_source}" "${STRATA_REGISTRY}" "${STRATA_VALID_SCHEMAS}"
+        "${invalid_source}" "${STRATA_VALID_SCHEMAS}"
     RESULT_VARIABLE invalid_status
     OUTPUT_VARIABLE invalid_output
     ERROR_VARIABLE invalid_error
@@ -71,7 +70,7 @@ endif()
 
 execute_process(
     COMMAND "${STRATA_COMPILER}" --check-module-json
-        "${STRATA_TEST_DIRECTORY}/missing.strata" "${STRATA_REGISTRY}"
+        "${STRATA_TEST_DIRECTORY}/missing.strata"
     RESULT_VARIABLE failure_status
     OUTPUT_VARIABLE failure_output
     ERROR_VARIABLE failure_error

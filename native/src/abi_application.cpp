@@ -295,19 +295,16 @@ strata_result strata_runtime_configure_application(
 ) {
     if (runtime == nullptr) return invalid_argument();
     if (config == nullptr || config->struct_size < sizeof(strata_application_config) ||
-        !valid_view(config->id, false) || !valid_view(config->registry_json, false) ||
-        !valid_view(config->schemas_json, true) ||
+        !valid_view(config->id, false) || !valid_view(config->schemas_json, true) ||
         (config->extension_schemas_json == nullptr && config->extension_schema_count != 0U)) {
         return runtime_failure(
             *runtime,
             STRATA_STATUS_INVALID_ARGUMENT,
             "STRATA.ABI.INVALID_APPLICATION_CONFIG",
-            "Application configuration requires an id, neutral registry JSON, and an optional schemas JSON object."
+            "Application configuration requires an id and an optional schemas JSON object."
         );
     }
     try {
-        const strata::data::JsonValue registry =
-            strata::data::parse_json(copied_string(config->registry_json));
         std::optional<strata::data::JsonValue> schemas;
         if (config->schemas_json.size != 0U) {
             schemas = strata::data::parse_json(copied_string(config->schemas_json));
@@ -330,7 +327,6 @@ strata_result strata_runtime_configure_application(
         }
         runtime->core.configure_application(
             copied_string(config->id),
-            registry,
             schemas.has_value() ? &*schemas : nullptr,
             extension_declarations
         );
@@ -347,7 +343,7 @@ strata_result strata_runtime_configure_application(
             *runtime,
             STRATA_STATUS_INVALID_ARGUMENT,
             "STRATA.APPLICATION.INVALID_JSON",
-            "Application registry or schemas are not valid strict JSON."
+            "Application schemas are not valid strict JSON."
         );
     } catch (const std::exception& error) {
         return runtime_failure(

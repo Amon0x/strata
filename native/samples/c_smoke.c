@@ -2,13 +2,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-
-struct owned_file {
-    char* data;
-    size_t size;
-};
 
 struct packet_capture {
     uint8_t header[12];
@@ -17,28 +11,6 @@ struct packet_capture {
 
 static int64_t smoke_clock(void* user_data) {
     return *(const int64_t*)user_data;
-}
-
-static struct owned_file read_file(const char* path) {
-    struct owned_file result = {NULL, 0U};
-    FILE* input = fopen(path, "rb");
-    long length;
-    if (input == NULL || fseek(input, 0L, SEEK_END) != 0) goto fail;
-    length = ftell(input);
-    if (length <= 0L || fseek(input, 0L, SEEK_SET) != 0) goto fail;
-    result.size = (size_t)length;
-    if (result.size == SIZE_MAX) goto fail;
-    result.data = (char*)malloc(result.size + 1U);
-    if (result.data == NULL || fread(result.data, 1U, result.size, input) != result.size) goto fail;
-    result.data[result.size] = '\0';
-    fclose(input);
-    return result;
-fail:
-    if (input != NULL) fclose(input);
-    free(result.data);
-    result.data = NULL;
-    result.size = 0U;
-    return result;
 }
 
 static void capture_packet(void* user_data, strata_bytes_view bytes) {
@@ -53,7 +25,7 @@ static int failed(strata_result result) {
     return result.status != STRATA_STATUS_OK;
 }
 
-int main(int argument_count, char** arguments) {
+int main(void) {
     static const char application_id[] = "installed.c.application";
     static const char source_id[] = "installed/c/main.strata";
     static const char source[] =
@@ -61,7 +33,6 @@ int main(int argument_count, char** arguments) {
         "screen Main { root Panel(key: \"embedded.panel\", style: Root) }";
     static const char surface_id[] = "installed.c.surface";
     static const char root_name[] = "Main";
-    struct owned_file registry = {NULL, 0U};
     strata_runtime* runtime = NULL;
     strata_surface* surface = NULL;
     int exit_code = 1;
@@ -88,11 +59,8 @@ int main(int argument_count, char** arguments) {
     (void)theme_contract;
     (void)scroll_contract;
 
-    if (argument_count != 2) return 64;
     if (failed(strata_theme_visual_style_defaults(&theme_visual)) ||
         failed(strata_theme_layout_style_defaults(&theme_layout))) return 66;
-    registry = read_file(arguments[1]);
-    if (registry.data == NULL) return 65;
 
     runtime_config.struct_size = sizeof(runtime_config);
     runtime_config.abi_version = STRATA_ABI_VERSION_CURRENT;
@@ -111,8 +79,6 @@ int main(int argument_count, char** arguments) {
     application.struct_size = sizeof(application);
     application.id.data = application_id;
     application.id.size = sizeof(application_id) - 1U;
-    application.registry_json.data = registry.data;
-    application.registry_json.size = registry.size;
     if (failed(strata_runtime_configure_application(runtime, &application))) goto cleanup;
 
     activation.struct_size = sizeof(activation);
@@ -173,7 +139,6 @@ cleanup:
         if (failed(released)) exit_code = 1;
     }
     if (failed(strata_runtime_release(runtime))) exit_code = 1;
-    free(registry.data);
     if (exit_code == 0) puts("strata_c_smoke: compiled, activated, framed, emitted a packet, and read allocator telemetry");
     return exit_code;
 }

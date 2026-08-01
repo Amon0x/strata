@@ -14,13 +14,17 @@ int main(const int argument_count, const char* const* const arguments) {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--write") {
             return strata::tools::write_authoring(std::filesystem::path(arguments[2]));
         }
-        if (argument_count == 6 &&
+        if (argument_count == 3 &&
+            std::string_view(arguments[1]) == "--write-registry") {
+            strata::tools::write_builtin_registry(std::filesystem::path(arguments[2]));
+            return 0;
+        }
+        if (argument_count == 5 &&
             std::string_view(arguments[1]) == "--write-cpp-contract") {
             strata::tools::write_cpp_contract(
                 std::filesystem::path(arguments[2]),
-                std::filesystem::path(arguments[3]),
-                arguments[4],
-                std::filesystem::path(arguments[5])
+                arguments[3],
+                std::filesystem::path(arguments[4])
             );
             return 0;
         }
@@ -30,7 +34,8 @@ int main(const int argument_count, const char* const* const arguments) {
     }
     std::cerr
         << "usage: strata_authoring <--check|--write> <project-root>\n"
-           "       strata_authoring --write-cpp-contract <registry.json> <application.schemas.json> "
+           "       strata_authoring --write-registry <output.json>\n"
+           "       strata_authoring --write-cpp-contract <application.schemas.json> "
            "<cpp-namespace> <output.hpp>\n";
     return 1;
 }

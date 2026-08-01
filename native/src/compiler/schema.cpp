@@ -1,12 +1,13 @@
 #include "compiler/schema.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
+
+#include "compiler/builtin_catalog.hpp"
 
 namespace strata::compiler {
 namespace {
@@ -17,7 +18,7 @@ namespace {
 ) {
     const data::JsonValue* child = value.find(field);
     if (child == nullptr) {
-        throw std::runtime_error("registry value is missing field '" + std::string(field) + "'");
+        throw std::runtime_error("schema value is missing field '" + std::string(field) + "'");
     }
     return *child;
 }
@@ -28,7 +29,7 @@ namespace {
 ) {
     const std::string* text = required(value, field).string();
     if (text == nullptr) {
-        throw std::runtime_error("registry field '" + std::string(field) + "' must be a string");
+        throw std::runtime_error("schema field '" + std::string(field) + "' must be a string");
     }
     return *text;
 }
@@ -36,7 +37,7 @@ namespace {
 [[nodiscard]] bool bool_field(const data::JsonValue& value, const std::string_view field) {
     const bool* boolean = required(value, field).boolean();
     if (boolean == nullptr) {
-        throw std::runtime_error("registry field '" + std::string(field) + "' must be a boolean");
+        throw std::runtime_error("schema field '" + std::string(field) + "' must be a boolean");
     }
     return *boolean;
 }
@@ -50,7 +51,7 @@ namespace {
     if (child == nullptr) return fallback;
     const bool* boolean = child->boolean();
     if (boolean == nullptr) {
-        throw std::runtime_error("registry field '" + std::string(field) + "' must be a boolean");
+        throw std::runtime_error("schema field '" + std::string(field) + "' must be a boolean");
     }
     return *boolean;
 }
@@ -61,7 +62,7 @@ namespace {
 ) {
     const data::JsonValue::Array* array = required(value, field).array();
     if (array == nullptr) {
-        throw std::runtime_error("registry field '" + std::string(field) + "' must be an array");
+        throw std::runtime_error("schema field '" + std::string(field) + "' must be an array");
     }
     return *array;
 }
@@ -75,7 +76,7 @@ namespace {
     const std::int64_t* integer = child->integer();
     if (integer == nullptr || *integer < 0 ||
         static_cast<std::uint64_t>(*integer) > std::numeric_limits<std::size_t>::max()) {
-        throw std::runtime_error("registry field '" + std::string(field) + "' must be a size");
+        throw std::runtime_error("schema field '" + std::string(field) + "' must be a size");
     }
     return static_cast<std::size_t>(*integer);
 }
@@ -110,7 +111,44 @@ namespace {
     if (kind == "hostObject") return SemanticTypeKind::host_object;
     if (kind == "async") return SemanticTypeKind::async_value;
     if (kind == "collection") return SemanticTypeKind::collection;
-    throw std::runtime_error("unsupported registry semantic type kind '" + std::string(kind) + "'");
+    throw std::runtime_error("unsupported schema semantic type kind '" + std::string(kind) + "'");
+}
+
+[[nodiscard]] SemanticTypeKind type_kind(const DeclaredTypeKind kind) {
+    switch (kind) {
+    case DeclaredTypeKind::unknown: return SemanticTypeKind::unknown;
+    case DeclaredTypeKind::any: return SemanticTypeKind::any;
+    case DeclaredTypeKind::unsafe_component_parameter:
+        return SemanticTypeKind::unsafe_component_parameter;
+    case DeclaredTypeKind::null_value: return SemanticTypeKind::null_value;
+    case DeclaredTypeKind::string: return SemanticTypeKind::string;
+    case DeclaredTypeKind::string_literal: return SemanticTypeKind::string_literal;
+    case DeclaredTypeKind::number: return SemanticTypeKind::number;
+    case DeclaredTypeKind::duration: return SemanticTypeKind::duration;
+    case DeclaredTypeKind::boolean: return SemanticTypeKind::boolean;
+    case DeclaredTypeKind::color: return SemanticTypeKind::color;
+    case DeclaredTypeKind::path: return SemanticTypeKind::path;
+    case DeclaredTypeKind::image: return SemanticTypeKind::image;
+    case DeclaredTypeKind::key: return SemanticTypeKind::key;
+    case DeclaredTypeKind::style: return SemanticTypeKind::style;
+    case DeclaredTypeKind::layout: return SemanticTypeKind::layout;
+    case DeclaredTypeKind::animation: return SemanticTypeKind::animation;
+    case DeclaredTypeKind::effect: return SemanticTypeKind::effect;
+    case DeclaredTypeKind::material: return SemanticTypeKind::material;
+    case DeclaredTypeKind::action: return SemanticTypeKind::action;
+    case DeclaredTypeKind::component: return SemanticTypeKind::component;
+    case DeclaredTypeKind::lambda: return SemanticTypeKind::lambda;
+    case DeclaredTypeKind::component_template: return SemanticTypeKind::component_template;
+    case DeclaredTypeKind::enumeration: return SemanticTypeKind::enumeration;
+    case DeclaredTypeKind::list: return SemanticTypeKind::list;
+    case DeclaredTypeKind::map:
+    case DeclaredTypeKind::object: return SemanticTypeKind::map;
+    case DeclaredTypeKind::union_value: return SemanticTypeKind::union_value;
+    case DeclaredTypeKind::host_object: return SemanticTypeKind::host_object;
+    case DeclaredTypeKind::async_value: return SemanticTypeKind::async_value;
+    case DeclaredTypeKind::collection: return SemanticTypeKind::collection;
+    }
+    throw std::logic_error("invalid native catalog type kind");
 }
 
 [[nodiscard]] std::string join(const std::vector<std::string>& values) {
@@ -280,171 +318,132 @@ const WidgetBindingSchema* WidgetSchema::find_binding(const std::string_view sho
     return found == bindings.end() ? nullptr : &*found;
 }
 
-SchemaRegistry SchemaRegistry::parse(const data::JsonValue& document) {
-    if (string_field(document, "format") != "strata.registry" ||
-        required(document, "version").integer() == nullptr ||
-        *required(document, "version").integer() != 1) {
-        throw std::runtime_error("unsupported Strata registry document");
-    }
+SchemaRegistry SchemaRegistry::builtins() {
+    static const SchemaRegistry registry = from_catalog(builtin_catalog());
+    return registry;
+}
+
+SchemaRegistry SchemaRegistry::from_catalog(const BuiltinCatalog& catalog) {
     SchemaRegistry registry;
-    const auto property_parameter = [&registry](const data::JsonValue& value) {
+    for (const DeclaredNamedType& entry : catalog.types) {
+        if (!registry.declared_type_definitions_.emplace(entry.id, entry.definition).second) {
+            throw std::logic_error("duplicate native catalog type id '" + entry.id + "'");
+        }
+    }
+    const auto property_parameter = [&registry](const DeclaredProperty& value) {
         SchemaParameter parameter;
-        parameter.name = string_field(value, "name");
-        parameter.type = registry.parse_type(required(value, "type"));
-        parameter.nullable = optional_bool(value, "nullable");
+        parameter.name = value.name;
+        parameter.type = registry.parse_type(value.type);
+        parameter.nullable = value.nullable;
         return parameter;
     };
-    for (const data::JsonValue& entry : array_field(document, "types")) {
-        const std::string& id = string_field(entry, "id");
-        if (!registry.type_definitions_.emplace(id, required(entry, "definition")).second) {
-            throw std::runtime_error("duplicate registry type id '" + id + "'");
-        }
+    for (const DeclaredProperty& value : catalog.layout_properties) {
+        registry.layout_properties_.push_back(property_parameter(value));
     }
-    for (const data::JsonValue& property : array_field(document, "layoutProperties")) {
-        registry.layout_properties_.push_back(property_parameter(property));
+    for (const DeclaredProperty& value : catalog.style_properties) {
+        registry.style_properties_.push_back(property_parameter(value));
     }
-    for (const data::JsonValue& property : array_field(document, "styleProperties")) {
-        registry.style_properties_.push_back(property_parameter(property));
+    for (const DeclaredProperty& value : catalog.animation_properties) {
+        registry.animation_properties_.push_back(property_parameter(value));
     }
-    for (const data::JsonValue& property : array_field(document, "animationProperties")) {
-        registry.animation_properties_.push_back(property_parameter(property));
+    for (const DeclaredProperty& value : catalog.animation_timing_properties) {
+        registry.animation_timing_properties_.push_back(property_parameter(value));
     }
-    for (const data::JsonValue& property : array_field(document, "animationTimingProperties")) {
-        registry.animation_timing_properties_.push_back(property_parameter(property));
-    }
-    for (const data::JsonValue& value : array_field(document, "widgets")) {
+    for (const DeclaredWidget& value : catalog.widgets) {
         WidgetSchema schema;
-        schema.name = string_field(value, "name");
-        schema.allows_children = bool_field(value, "allowsChildren");
-        for (const data::JsonValue& parameter : array_field(value, "parameters")) {
+        schema.name = value.name;
+        schema.allows_children = value.allows_children;
+        for (const DeclaredParameter& parameter :
+             composed_widget_parameters(catalog, value)) {
             schema.parameters.push_back(registry.parse_parameter(parameter));
         }
-        for (const data::JsonValue& binding : array_field(value, "bindings")) {
+        for (const DeclaredWidgetBinding& binding : value.bindings) {
             WidgetBindingSchema parsed{
-                string_field(binding, "shorthandParameter"),
-                string_field(binding, "valueParameter"),
-                string_field(binding, "eventParameter"),
+                binding.shorthand_parameter,
+                binding.value_parameter,
+                binding.event_parameter,
             };
-            if (parsed.shorthand_parameter.empty() || parsed.value_parameter.empty() ||
-                parsed.event_parameter.empty()) {
-                throw std::runtime_error("widget binding parameter names must not be empty");
-            }
             if (schema.find_binding(parsed.shorthand_parameter) != nullptr) {
-                throw std::runtime_error(
-                    "duplicate widget binding shorthand '" + parsed.shorthand_parameter + "'"
+                throw std::logic_error(
+                    "duplicate native widget binding shorthand '" +
+                    parsed.shorthand_parameter + "'"
                 );
             }
-            const SchemaParameter* shorthand = schema.find_parameter(parsed.shorthand_parameter);
-            const SchemaParameter* controlled = schema.find_parameter(parsed.value_parameter);
             const SchemaParameter* event = schema.find_parameter(parsed.event_parameter);
-            if (shorthand == nullptr || controlled == nullptr || event == nullptr) {
-                throw std::runtime_error(
-                    "widget binding for '" + schema.name + "' references an undeclared parameter"
-                );
-            }
-            if (event->type == nullptr || event->type->kind != SemanticTypeKind::action) {
-                throw std::runtime_error(
-                    "widget binding event parameter for '" + schema.name + "' must be an action"
+            if (event == nullptr || event->type == nullptr ||
+                event->type->kind != SemanticTypeKind::action) {
+                throw std::logic_error(
+                    "native widget binding event parameter must be an action"
                 );
             }
             schema.bindings.push_back(std::move(parsed));
         }
         if (!registry.widgets_.emplace(schema.name, std::move(schema)).second) {
-            throw std::runtime_error("duplicate registry widget");
+            throw std::logic_error("duplicate native catalog widget");
         }
     }
-    for (const data::JsonValue& parameter : array_field(document, "frameworkWidgetParameters")) {
-        registry.framework_widget_parameters_.push_back(registry.parse_parameter(parameter));
+    for (const DeclaredParameter& value : catalog.framework_widget_parameters) {
+        registry.framework_widget_parameters_.push_back(registry.parse_parameter(value));
     }
-    constexpr std::array persistent_widgets{
-        std::string_view("Scroll"), std::string_view("List"),
-        std::string_view("VirtualList"), std::string_view("Table"),
-        std::string_view("TreeView"), std::string_view("ItemGrid"),
-        std::string_view("SplitPane"), std::string_view("Section"),
-    };
-    for (auto& [name, widget] : registry.widgets_) {
-        for (const SchemaParameter& framework : registry.framework_widget_parameters_) {
-            if (framework.name == "persistenceKey" &&
-                std::ranges::find(persistent_widgets, std::string_view(name)) ==
-                    persistent_widgets.end()) {
-                continue;
-            }
-            if ((framework.name == "undoLabel" || framework.name == "undoCoalesce") &&
-                widget.bindings.empty()) {
-                continue;
-            }
-            const bool declared = std::ranges::any_of(
-                widget.parameters,
-                [&framework](const SchemaParameter& parameter) {
-                    return parameter.name == framework.name;
-                }
-            );
-            if (!declared) widget.parameters.push_back(framework);
-        }
-    }
-    for (const data::JsonValue& value : array_field(document, "actions")) {
+    for (const DeclaredAction& value : catalog.actions) {
         ActionSchema schema;
-        schema.id = string_field(value, "id");
-        schema.dispatch_policy = string_field(value, "dispatchPolicy");
-        schema.payload_contract = string_field(value, "payloadContract");
-        schema.summary = string_field(value, "summary");
-        for (const data::JsonValue& parameter : array_field(value, "parameters")) {
+        schema.id = value.id;
+        schema.dispatch_policy = value.dispatch_policy;
+        schema.payload_contract = value.payload_contract;
+        schema.summary = value.summary;
+        for (const DeclaredParameter& parameter : value.parameters) {
             schema.parameters.push_back(registry.parse_parameter(parameter));
         }
-        registry.actions_.emplace(schema.id, std::move(schema));
+        if (!registry.actions_.emplace(schema.id, std::move(schema)).second) {
+            throw std::logic_error("duplicate native catalog action");
+        }
     }
-    for (const data::JsonValue& value : array_field(document, "helpers")) {
+    for (const DeclaredHelper& value : catalog.helpers) {
         HelperSchema schema;
-        schema.name = string_field(value, "name");
-        schema.implementation = string_field(value, "implementation");
-        schema.return_type = registry.parse_type(required(value, "returnType"));
-        schema.allow_named_varargs = bool_field(value, "allowNamedVarargs");
-        const data::JsonValue& vararg = required(value, "varargType");
-        if (!vararg.is_null()) schema.vararg_type = registry.parse_type(vararg);
-        for (const data::JsonValue& parameter : array_field(value, "parameters")) {
+        schema.name = value.name;
+        schema.implementation = value.implementation;
+        schema.return_type = registry.parse_type(value.return_type);
+        schema.vararg_type = value.vararg_type != nullptr
+            ? registry.parse_type(value.vararg_type) : SemanticTypePtr{};
+        schema.allow_named_varargs = value.allow_named_varargs;
+        for (const DeclaredParameter& parameter : value.parameters) {
             schema.parameters.push_back(registry.parse_parameter(parameter));
         }
-        registry.helpers_.emplace(schema.name, std::move(schema));
+        if (!registry.helpers_.emplace(schema.name, std::move(schema)).second) {
+            throw std::logic_error("duplicate native catalog helper");
+        }
     }
-    for (const data::JsonValue& value : array_field(document, "componentParameterTypes")) {
-        registry.component_parameter_types_.emplace(
-            normalized_semantic_name(string_field(value, "name")),
-            registry.parse_type(required(value, "type"))
+    for (const DeclaredProperty& value : catalog.component_parameter_types) {
+        const auto [entry, inserted] = registry.component_parameter_types_.emplace(
+            normalized_semantic_name(value.name),
+            registry.parse_type(value.type)
         );
+        static_cast<void>(entry);
+        if (!inserted) {
+            throw std::logic_error(
+                "duplicate normalized native catalog component parameter type"
+            );
+        }
     }
-    for (const data::JsonValue& value : array_field(document, "materials")) {
+    for (const DeclaredMaterial& value : catalog.materials) {
         MaterialSchema schema;
-        schema.id = string_field(value, "id");
-        for (const data::JsonValue& value_parameter : array_field(value, "parameters")) {
-            SchemaParameter parameter;
-            parameter.name = string_field(value_parameter, "name");
-            parameter.type = registry.parse_type(required(value_parameter, "type"));
-            if (const data::JsonValue* material_type = value_parameter.find("materialType");
-                material_type != nullptr && material_type->string() != nullptr) {
-                parameter.material_type = *material_type->string();
-            }
-            if (std::ranges::any_of(schema.parameters, [&parameter](const SchemaParameter& existing) {
-                    return existing.name == parameter.name;
-                })) {
-                throw std::runtime_error(
-                    "duplicate material parameter '" + schema.id + "." + parameter.name + "'"
-                );
-            }
-            schema.parameters.push_back(std::move(parameter));
+        schema.id = value.id;
+        for (const DeclaredParameter& declared : value.parameters) {
+            schema.parameters.push_back(registry.parse_parameter(declared));
         }
         registry.material_ids_.push_back(schema.id);
         if (!registry.materials_.emplace(schema.id, std::move(schema)).second) {
-            throw std::runtime_error("duplicate material id");
+            throw std::logic_error("duplicate native catalog material");
         }
     }
-    for (const data::JsonValue& value : array_field(document, "effects")) {
+    for (const DeclaredEffect& value : catalog.effects) {
         EffectSchema schema;
-        schema.name = string_field(value, "name");
-        for (const data::JsonValue& parameter : array_field(value, "parameters")) {
+        schema.name = value.name;
+        for (const DeclaredProperty& parameter : value.parameters) {
             schema.parameters.push_back(property_parameter(parameter));
         }
         if (!registry.effects_.emplace(schema.name, std::move(schema)).second) {
-            throw std::runtime_error("duplicate effect name");
+            throw std::logic_error("duplicate native catalog effect");
         }
     }
     std::ranges::sort(registry.material_ids_);
@@ -453,18 +452,19 @@ SchemaRegistry SchemaRegistry::parse(const data::JsonValue& document) {
 
 SemanticTypePtr SchemaRegistry::parse_type(const data::JsonValue& value) {
     if (const data::JsonValue* reference = value.find("ref"); reference != nullptr) {
-        if (reference->string() == nullptr) throw std::runtime_error("registry type ref must be a string");
+        if (reference->string() == nullptr)
+            throw std::runtime_error("schema type ref must be a string");
         const std::string& id = *reference->string();
         if (const auto cached = resolved_types_.find(id); cached != resolved_types_.end()) {
             return cached->second;
         }
-        const auto definition = type_definitions_.find(id);
-        if (definition == type_definitions_.end()) {
-            throw std::runtime_error("unknown registry type ref '" + id + "'");
+        if (const auto definition = declared_type_definitions_.find(id);
+            definition != declared_type_definitions_.end()) {
+            SemanticTypePtr parsed = parse_type(definition->second);
+            resolved_types_.emplace(id, parsed);
+            return parsed;
         }
-        SemanticTypePtr parsed = parse_type(definition->second);
-        resolved_types_.emplace(id, parsed);
-        return parsed;
+        throw std::runtime_error("unknown schema type ref '" + id + "'");
     }
 
     auto parsed = std::make_shared<SemanticType>();
@@ -480,12 +480,14 @@ SemanticTypePtr SchemaRegistry::parse_type(const data::JsonValue& value) {
     }
     if (const data::JsonValue* values = value.find("values"); values != nullptr && values->array() != nullptr) {
         for (const data::JsonValue& item : *values->array()) {
-            if (item.string() == nullptr) throw std::runtime_error("registry enum value must be a string");
+            if (item.string() == nullptr)
+                throw std::runtime_error("schema enum value must be a string");
             parsed->values.push_back(*item.string());
         }
     }
     if (const data::JsonValue* fields = value.find("fields"); fields != nullptr) {
-        if (fields->array() == nullptr) throw std::runtime_error("registry type fields must be an array");
+        if (fields->array() == nullptr)
+            throw std::runtime_error("schema type fields must be an array");
         for (const data::JsonValue& field : *fields->array()) {
             parsed->fields.push_back(ObjectField{
                 string_field(field, "name"),
@@ -496,7 +498,8 @@ SemanticTypePtr SchemaRegistry::parse_type(const data::JsonValue& value) {
         }
     }
     if (const data::JsonValue* options = value.find("options"); options != nullptr) {
-        if (options->array() == nullptr) throw std::runtime_error("registry type options must be an array");
+        if (options->array() == nullptr)
+            throw std::runtime_error("schema type options must be an array");
         for (const data::JsonValue& option : *options->array()) {
             parsed->options.push_back(parse_type(option));
         }
@@ -516,7 +519,91 @@ SemanticTypePtr SchemaRegistry::parse_type(const data::JsonValue& value) {
     parsed->allow_unknown_fields = optional_bool(value, "allowUnknownFields");
     if (parsed->kind == SemanticTypeKind::async_value) {
         if (parsed->value == nullptr) {
-            throw std::runtime_error("registry async type requires a value schema");
+            throw std::runtime_error("schema async type requires a value schema");
+        }
+        auto status = std::make_shared<SemanticType>();
+        status->kind = SemanticTypeKind::enumeration;
+        status->label = "async status";
+        status->values = {"IDLE", "LOADING", "READY", "FAILED"};
+        auto string = std::make_shared<SemanticType>();
+        string->kind = SemanticTypeKind::string;
+        auto number = std::make_shared<SemanticType>();
+        number->kind = SemanticTypeKind::number;
+        auto progress = std::make_shared<SemanticType>();
+        progress->kind = SemanticTypeKind::host_object;
+        progress->label = "async progress";
+        progress->fields = {
+            {"completed", number, true, false},
+            {"message", string, true, false},
+            {"total", number, true, true},
+        };
+        auto error = std::make_shared<SemanticType>();
+        error->kind = SemanticTypeKind::host_object;
+        error->label = "async failure";
+        error->fields = {
+            {"code", string, true, false},
+            {"message", string, true, false},
+        };
+        parsed->fields = {
+            {"error", error, true, true},
+            {"progress", progress, true, true},
+            {"status", status, true, false},
+            {"value", parsed->value, true, true},
+        };
+        parsed->label = parsed->label.empty() ? "async value" : parsed->label;
+        parsed->allow_unknown_fields = false;
+    }
+    return parsed;
+}
+
+SemanticTypePtr SchemaRegistry::parse_type(
+    const std::shared_ptr<const DeclaredType>& value
+) {
+    if (value == nullptr) throw std::logic_error("native catalog contains a null type");
+    if (!value->reference.empty()) {
+        if (const auto cached = resolved_types_.find(value->reference);
+            cached != resolved_types_.end()) {
+            return cached->second;
+        }
+        if (const auto definition = declared_type_definitions_.find(value->reference);
+            definition != declared_type_definitions_.end()) {
+            SemanticTypePtr parsed = parse_type(definition->second);
+            resolved_types_.emplace(value->reference, parsed);
+            return parsed;
+        }
+        throw std::logic_error("unknown native catalog type ref '" + value->reference + "'");
+    }
+
+    auto parsed = std::make_shared<SemanticType>();
+    parsed->kind = type_kind(value->kind);
+    parsed->label = value->label;
+    parsed->literal = value->literal;
+    parsed->values = value->values;
+    parsed->fields.reserve(value->fields.size());
+    for (const DeclaredTypeField& field : value->fields) {
+        parsed->fields.push_back(ObjectField{
+            field.name,
+            parse_type(field.type),
+            field.required,
+            field.nullable,
+        });
+    }
+    parsed->options.reserve(value->options.size());
+    for (const DeclaredTypePtr& option : value->options) {
+        parsed->options.push_back(parse_type(option));
+    }
+    if (value->element != nullptr) parsed->element = parse_type(value->element);
+    if (value->value != nullptr) parsed->value = parse_type(value->value);
+    if (value->parameter != nullptr) parsed->parameter = parse_type(value->parameter);
+    if (value->returns != nullptr) parsed->returns = parse_type(value->returns);
+    parsed->minimum_items = value->minimum_items;
+    parsed->maximum_items = value->maximum_items;
+    parsed->element_nullable = value->element_nullable;
+    parsed->value_nullable = value->value_nullable;
+    parsed->allow_unknown_fields = value->allow_unknown_fields;
+    if (parsed->kind == SemanticTypeKind::async_value) {
+        if (parsed->value == nullptr) {
+            throw std::logic_error("native catalog async type requires a value schema");
         }
         auto status = std::make_shared<SemanticType>();
         status->kind = SemanticTypeKind::enumeration;
@@ -560,10 +647,21 @@ SchemaParameter SchemaRegistry::parse_parameter(const data::JsonValue& value) {
     parameter.required = bool_field(value, "required");
     parameter.nullable = bool_field(value, "nullable");
     for (const data::JsonValue& alias : array_field(value, "aliases")) {
-        if (alias.string() == nullptr) throw std::runtime_error("registry alias must be a string");
+        if (alias.string() == nullptr) throw std::runtime_error("schema alias must be a string");
         parameter.aliases.push_back(*alias.string());
     }
     return parameter;
+}
+
+SchemaParameter SchemaRegistry::parse_parameter(const DeclaredParameter& value) {
+    return SchemaParameter{
+        value.name,
+        parse_type(value.type),
+        value.required,
+        value.nullable,
+        value.aliases,
+        value.material_type,
+    };
 }
 
 const WidgetSchema* SchemaRegistry::widget(const std::string_view name) const noexcept {

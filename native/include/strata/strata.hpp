@@ -1244,7 +1244,6 @@ public:
         const strata_application_config config{
             sizeof(strata_application_config),
             strata_string_view{options.id.data(), options.id.size()},
-            strata_string_view{options.registry_json.data(), options.registry_json.size()},
             strata_string_view{options.schemas_json.data(), options.schemas_json.size()},
             extension_schemas.data(),
             extension_schemas.size(),

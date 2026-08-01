@@ -2,7 +2,10 @@
 
 include("${CMAKE_CURRENT_LIST_DIR}/StrataTargets.cmake")
 
-set_and_check(Strata_REGISTRY "${PACKAGE_PREFIX_DIR}/share/strata/registry-v1.json")
+set(Strata_REGISTRY "${PACKAGE_PREFIX_DIR}/share/strata/registry-v1.json")
+if(NOT EXISTS "${Strata_REGISTRY}")
+    set(Strata_REGISTRY "")
+endif()
 set_and_check(Strata_RESOURCES "${PACKAGE_PREFIX_DIR}/share")
 if(EXISTS "${PACKAGE_PREFIX_DIR}/bin/strata_compile${CMAKE_EXECUTABLE_SUFFIX}")
     set(Strata_COMPILER "${PACKAGE_PREFIX_DIR}/bin/strata_compile${CMAKE_EXECUTABLE_SUFFIX}")

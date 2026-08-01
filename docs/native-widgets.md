@@ -122,7 +122,7 @@ Point tools at the directory containing the library:
 
 ```sh
 strata_compile --extension-path build/extensions --check-module \
-  app.strata registry-v1.json app.schemas.json
+  app.strata app.schemas.json
 ```
 
 The option is repeatable. Discovery checks explicit paths first, then `STRATA_EXTENSION_PATH`, then
@@ -160,7 +160,7 @@ frame simulation, text editing, and command surfaces. The first two have no inte
 exposing them means new engine capability rather than a projection. The last two exist internally
 but carry draft buffers, IME, undo, and command indices that no extension has needed yet.
 
-Behavior *options* have no compiler validation today. The neutral registry declares behavior ids
+Behavior *options* have no compiler validation today. The built-in catalog declares behavior ids
 only, so a package projects its behavior ids and their option objects are not type checked.
 
 ## Rules the layer enforces
@@ -184,7 +184,7 @@ only, so a package projects its behavior ids and their option objects are not ty
 - Clipping is only reachable through the `ClipScope` guard returned by `Present::clip`, so a push
   cannot outlive its pop.
 - Hooks are plain function pointers over a package-owned hook table passed as `user_data`. Nothing
-  is allocated per callback, per frame, or per registry lookup: descriptors, JSON defaults, and the
+  is allocated per callback, per frame, or per catalog lookup: descriptors, JSON defaults, and the
   retained table are materialized once when the bundle is first taken.
 
 ## Testing

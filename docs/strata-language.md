@@ -30,7 +30,7 @@ dependency recompiles the module atomically; a rejected edit leaves the last-goo
 - Literals are strings, numbers/durations, colors, `true`, `false`, `null`, lists, and objects.
 - Statements and style properties end with `;`. Widget calls do not require a trailing semicolon.
 
-The VS Code extension under `editor/vscode` packages the generated TextMate grammar and registry
+The VS Code extension under `editor/vscode` packages the generated TextMate grammar and catalog
 metadata. It provides schema-aware widget/action/host/property completions, hovers, signature help,
 symbols, import/local-definition navigation, and exact diagnostics from `strata_compile
 --check-module-json`. It does not maintain a second JavaScript parser: the production compiler
@@ -288,7 +288,7 @@ Collection helpers accept bounded pure lambdas such as `item -> item.enabled`. V
 terminal helpers are `count`, `any`, and `all`. A derived view exposes `items`, `total`, `matched`,
 `rangeStart`, `rangeEnd`, `cacheHits`, and `rebuilds`.
 
-Registry-declared controls accept a typed binding shorthand, for example
+Catalog-declared controls accept a typed binding shorthand, for example
 `TextBox(bind: query)` or `Toggle(bind: enabled)`. The compiler lowers it to the widget's canonical
 controlled property and change callback and rejects conflicts when either is also written.
 
@@ -338,7 +338,7 @@ Panel(contentKey: selectedId, contentTransition: ContentMotion) { SelectedDetail
 Button(onClick: action("layer.push", name: "details", transition: ContentMotion))
 ```
 
-Animation timing properties, triggers, and animatable values are registry-derived in the generated
+Animation timing properties, triggers, and animatable values are catalog-derived in the generated
 reference. `transition` plays one timeline forward on insertion and backward on removal, reversing
 continuously from its current position when visibility changes mid-flight. Use separate `enter` and
 `exit` timelines only for deliberately asymmetric motion; mixing either with `transition` is a
@@ -401,11 +401,12 @@ cmake --build --preset linux-x64 --target strata_validate_modules
 Use `windows-x64` on Windows. For one custom module, invoke the installed compiler directly:
 
 ```sh
-strata_compile --check-module path/to/module.strata path/to/registry-v1.json path/to/module.schemas.json
+strata_compile --check-module path/to/module.strata path/to/module.schemas.json
 ```
 
 Prefix repeatable `--extension-path <directory>` options when the schema selects external native
 packages. Use `--check-module-json` for the versioned `strata.diagnostics` document consumed by
-editors. The schema argument is optional. Command-line diagnostics include the diagnostic code,
+editors. Built-in declarations come directly from the compiler's immutable native catalog; the
+schema argument is optional and supplies only application declarations. Command-line diagnostics include the diagnostic code,
 `file:line:column`, and message. Runtime diagnostic callbacks additionally carry the full source
 range, component path, expected value, and occurrence metadata.

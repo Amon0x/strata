@@ -5,7 +5,8 @@ application crosses its UI boundary, and use native C++ extensions only for genu
 behavior mechanics.
 
 The [language guide](strata-language.md) describes syntax. The
-[generated reference](generated/strata-reference.md) is authoritative for the live registry:
+[generated reference](generated/strata-reference.md) is projected from the authoritative native
+built-in catalog:
 widgets, properties, styles, layout, actions, motion, environment fields, materials, and effects.
 
 ## 1. Ordinary UI belongs in `.strata`
@@ -155,7 +156,7 @@ new: for example continuous thumb dragging, a distinct semantic control, custom 
 new primitive/material path.
 
 Extensions are registered per Surface through the public ABI. Their package/schema declarations
-travel through the neutral registry. They receive bounded native lifecycle,
+travel through application schema composition. They receive bounded native lifecycle,
 input, measure/arrange, semantics, and render callbacks; they do not acquire compiler internals or
 host-global state. Built-ins and extensions share stable identity, invalidation, focus/capture,
 motion, layout, semantics, and packet planning.
@@ -173,7 +174,7 @@ read new source and call activation on the same runtime/Surface, preserving comp
 state. Fonts and PNG/SVG images are also candidate-loaded before adoption; rejected resources retain the
 previous usable set.
 
-Regenerate registry-derived authoring files explicitly:
+Regenerate catalog-derived authoring files explicitly:
 
 ```sh
 cmake --build --preset linux-x64 --target strata_generate_authoring
@@ -181,5 +182,5 @@ cmake --build --preset linux-x64 --target strata_generate_authoring
 
 Use the `windows-x64` preset on Windows. The ordinary CTest gate runs the equivalent
 `strata_check_authoring` check and fails if reference, diagnostic, completion, grammar, generated
-C++ host-contract, registry, or lexical artifacts are stale. External projects invoke the installed
+C++ host-contract, generated registry projection, or lexical artifacts are stale. External projects invoke the installed
 `Strata_AUTHORING` tool directly for their own application schema.

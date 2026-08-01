@@ -56,7 +56,6 @@ struct RuntimeOptions final {
 
 struct ApplicationOptions final {
     std::string id{};
-    std::string registry_json{};
     std::string schemas_json{};
     std::vector<std::string> extension_schemas_json{};
 };

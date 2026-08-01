@@ -1,9 +1,9 @@
 # Strata UI Language for VS Code
 
-The extension is generated and packaged from the same registry metadata used by the native compiler.
+The extension is generated and packaged from the native built-in catalog used by the compiler.
 It provides:
 
-- registry- and application-schema-aware completions for widgets, parameters, actions, host roots,
+- catalog- and application-schema-aware completions for widgets, parameters, actions, host roots,
   properties, helpers, and local components/styles;
 - hovers and signature help from generated type/dispatch metadata;
 - document symbols and local/import definition navigation;
@@ -13,8 +13,8 @@ It provides:
 ## Native diagnostics
 
 Install the Strata SDK or build the repository, then set `strata.compiler.path` if automatic
-discovery cannot find `strata_compile`. `strata.registry.path` and
-`strata.applicationSchemas.path` accept absolute paths, workspace-relative paths, or
+discovery cannot find `strata_compile`. `strata.applicationSchemas.path` accepts an absolute path,
+a workspace-relative path, or
 `${workspaceFolder}` placeholders. External package directories go in `strata.extensions.paths` and
 are forwarded as repeatable native compiler `--extension-path` options. The command **Strata:
 Validate Current Module** saves and checks the active module immediately.

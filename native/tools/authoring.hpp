@@ -6,5 +6,6 @@ namespace strata::tools {
 
 [[nodiscard]] int check_authoring(const std::filesystem::path& project_root);
 [[nodiscard]] int write_authoring(const std::filesystem::path& project_root);
+void write_builtin_registry(const std::filesystem::path& output);
 
 } // namespace strata::tools

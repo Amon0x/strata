@@ -21,14 +21,8 @@ void check(const bool condition, const std::string_view message) {
     if (!condition) throw std::runtime_error(std::string(message));
 }
 
-[[nodiscard]] std::shared_ptr<const strata::runtime::ApplicationBundle> load_bundle(
-    const std::filesystem::path& registry_path
-) {
-    const std::string registry = strata::resource::load_utf8_resource(
-        registry_path.parent_path(),
-        strata::resource::ResourceId::parse(registry_path.filename().generic_string())
-    );
-    return strata::runtime::ApplicationBundle::create(strata::data::parse_json(registry));
+[[nodiscard]] std::shared_ptr<const strata::runtime::ApplicationBundle> load_bundle() {
+    return strata::runtime::ApplicationBundle::create();
 }
 
 [[nodiscard]] strata::compiler::ModuleLoader no_imports() {
@@ -100,7 +94,7 @@ void check(const bool condition, const std::string_view message) {
 }
 
 void test_command_bound_controls(
-    const std::filesystem::path& registry_path,
+    const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
 ) {
     constexpr std::string_view source = R"(
@@ -164,7 +158,7 @@ overlay Main { root CommandFixture() }
         true,
         false,
     };
-    const std::filesystem::path resources = registry_path.parent_path().parent_path();
+    const std::filesystem::path& resources = resource_root;
     strata::ui::Surface surface(
         "command-binding",
         application,
@@ -325,10 +319,10 @@ overlay Main { root CommandFixture() }
 
 int main(const int argument_count, const char* const* const arguments) {
     try {
-        if (argument_count != 2) throw std::invalid_argument("expected registry path");
-        const std::filesystem::path registry_path(arguments[1]);
-        const auto bundle = load_bundle(registry_path);
-        test_command_bound_controls(registry_path, bundle);
+        if (argument_count != 2) throw std::invalid_argument("expected resource root");
+        const std::filesystem::path resource_root(arguments[1]);
+        const auto bundle = load_bundle();
+        test_command_bound_controls(resource_root, bundle);
         std::cout << "strata_command_binding_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

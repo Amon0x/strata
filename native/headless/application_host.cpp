@@ -354,7 +354,6 @@ struct ApplicationHost::Impl final {
             strata_runtime_set_effect_adapter(runtime->native_handle(), &effect_adapter),
             "headless effect adapter installation");
 
-        const std::string registry = read_text(resource_path("strata/registry-v1.json"));
         const std::string schemas =
             scenario.schemas.empty() ? std::string{}
                                      : read_text(resource_path(scenario.schemas.generic_string()));
@@ -371,7 +370,6 @@ struct ApplicationHost::Impl final {
         const strata_application_config application{
             sizeof(strata_application_config),
             strata::view(scenario.application_id),
-            strata::view(registry),
             strata::view(schemas),
             extension_schema_views.empty() ? nullptr : extension_schema_views.data(),
             extension_schema_views.size(),

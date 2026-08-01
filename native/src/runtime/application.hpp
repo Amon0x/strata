@@ -38,7 +38,6 @@ public:
      * activates.
      */
     static std::shared_ptr<const ApplicationBundle> create(
-        const data::JsonValue& neutral_registry,
         const data::JsonValue* application_schemas = nullptr,
         ActionPayloadDecoders action_decoders = {},
         std::span<const data::JsonValue> extension_declarations = {}

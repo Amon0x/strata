@@ -1591,9 +1591,8 @@ void test_logical_glyph_json_default_absence() {
 
 int main(const int argument_count, const char* const* arguments) {
     try {
-        if (argument_count != 2) throw std::runtime_error("expected registry resource path");
-        const std::filesystem::path resources =
-            std::filesystem::path(arguments[1]).parent_path().parent_path();
+        if (argument_count != 2) throw std::runtime_error("expected resource root");
+        const std::filesystem::path resources(arguments[1]);
         test_logical_glyph_json_default_absence();
         test_optional_tables_and_generic_positioning(resources);
         test_layout_runs_fallback_and_soft_wrap(resources);

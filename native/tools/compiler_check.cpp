@@ -116,18 +116,14 @@ struct ModuleCompilation final {
 
 [[nodiscard]] ModuleCompilation compile_module(
     const std::filesystem::path& entry_path,
-    const std::filesystem::path& registry_path,
     const std::filesystem::path& schemas_path,
     const std::optional<std::filesystem::path>& source_root,
     const std::vector<std::filesystem::path>& extension_paths
 ) {
     const std::filesystem::path entry = canonical_file(entry_path, "entry module");
     const std::filesystem::path module_root = entry.parent_path();
-    const std::filesystem::path registry_file = canonical_file(registry_path, "schema registry");
 
-    compiler::SchemaRegistry registry = compiler::SchemaRegistry::parse(
-        data::parse_json(load_file(registry_file))
-    );
+    compiler::SchemaRegistry registry = compiler::SchemaRegistry::builtins();
     std::vector<std::string> extension_schemas;
     if (!schemas_path.empty()) {
         const std::filesystem::path schemas_file = canonical_file(
@@ -266,12 +262,11 @@ void print_diagnostic(const compiler::Diagnostic& diagnostic) {
 
 int check_module(
     const std::filesystem::path& entry_path,
-    const std::filesystem::path& registry_path,
     const std::filesystem::path& schemas_path,
     const std::vector<std::filesystem::path>& extension_paths
 ) {
     ModuleCompilation compilation = compile_module(
-        entry_path, registry_path, schemas_path, std::nullopt, extension_paths
+        entry_path, schemas_path, std::nullopt, extension_paths
     );
 
     for (const compiler::Diagnostic& diagnostic : compilation.result.diagnostics) {
@@ -288,13 +283,12 @@ int check_module(
 
 int check_module_json(
     const std::filesystem::path& entry_path,
-    const std::filesystem::path& registry_path,
     const std::filesystem::path& schemas_path,
     const std::vector<std::filesystem::path>& extension_paths
 ) {
     try {
         ModuleCompilation compilation = compile_module(
-            entry_path, registry_path, schemas_path, std::nullopt, extension_paths
+            entry_path, schemas_path, std::nullopt, extension_paths
         );
         std::vector<data::JsonValue> diagnostics;
         diagnostics.reserve(compilation.result.diagnostics.size());
@@ -339,7 +333,6 @@ int check_module_json(
 
 int write_module_artifact(
     const std::filesystem::path& entry_path,
-    const std::filesystem::path& registry_path,
     const std::filesystem::path& schemas_path,
     const std::filesystem::path& resource_root,
     const std::filesystem::path& artifact_path,
@@ -348,7 +341,7 @@ int write_module_artifact(
 ) {
     const std::filesystem::path root = canonical_directory(resource_root, "resource root");
     ModuleCompilation compilation = compile_module(
-        entry_path, registry_path, schemas_path, root, extension_paths
+        entry_path, schemas_path, root, extension_paths
     );
     for (const compiler::Diagnostic& diagnostic : compilation.result.diagnostics) {
         print_diagnostic(diagnostic);

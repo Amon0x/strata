@@ -337,17 +337,12 @@ void test_action_contracts_dispatch_and_handler_lifetime() {
     check(dispatcher.missing_required_handlers({required, forwarded}).size() == 1U, "required-handler audit changed");
 }
 
-void test_neutral_registry_projects_runtime_action_contracts(const std::filesystem::path& path) {
-    const std::string document = strata::resource::load_utf8_resource(
-        path.parent_path(),
-        strata::resource::ResourceId::parse(path.filename().string())
-    );
-    const strata::compiler::SchemaRegistry schema = strata::compiler::SchemaRegistry::parse(
-        strata::data::parse_json(document)
-    );
+void test_builtin_catalog_projects_runtime_action_contracts() {
+    const strata::compiler::SchemaRegistry schema =
+        strata::compiler::SchemaRegistry::builtins();
     const strata::runtime::RuntimeActionRegistry actions =
         strata::runtime::RuntimeActionRegistry::from_schema(schema);
-    check(actions.contracts().size() == 54U, "neutral registry action inventory changed");
+    check(actions.contracts().size() == 54U, "built-in action inventory changed");
     const auto button = actions.contract("Button");
     check(
         button != nullptr && button->dispatch_policy == strata::runtime::ActionDispatchPolicy::optional &&
@@ -375,15 +370,9 @@ void test_neutral_registry_projects_runtime_action_contracts(const std::filesyst
     );
 }
 
-void test_animation_validation_is_total(const std::filesystem::path& path) {
+void test_animation_validation_is_total() {
     using namespace strata;
-    const std::string document = resource::load_utf8_resource(
-        path.parent_path(),
-        resource::ResourceId::parse(path.filename().string())
-    );
-    const compiler::SchemaRegistry schema = compiler::SchemaRegistry::parse(
-        data::parse_json(document)
-    );
+    const compiler::SchemaRegistry schema = compiler::SchemaRegistry::builtins();
     const std::string invalid_source = R"(
 animation DuplicateFrame {
   from { opacity: 0 }
@@ -530,12 +519,8 @@ animation Validated {
     );
 }
 
-void test_application_bundle_and_runtime_isolation(const std::filesystem::path& path) {
-    const std::string document = strata::resource::load_utf8_resource(
-        path.parent_path(),
-        strata::resource::ResourceId::parse(path.filename().string())
-    );
-    const auto bundle = strata::runtime::ApplicationBundle::create(strata::data::parse_json(document));
+void test_application_bundle_and_runtime_isolation() {
+    const auto bundle = strata::runtime::ApplicationBundle::create();
     strata::runtime::ApplicationContext left("left", bundle);
     strata::runtime::ApplicationContext right("right", bundle);
     const strata::runtime::StateAddress address{"component/Main", "count"};
@@ -648,7 +633,6 @@ void test_canonical_runtime_diagnostic_store() {
 }
 
 void test_transactional_activation_and_last_good_reload(
-    const std::filesystem::path& registry_path,
     const std::filesystem::path& fixture_root
 ) {
     using namespace strata::runtime;
@@ -660,8 +644,7 @@ void test_transactional_activation_and_last_good_reload(
         );
     };
     const auto schemas = strata::data::parse_json(load(scenario_directory, "schemas.json"));
-    const auto registry = strata::data::parse_json(load(registry_path.parent_path(), registry_path.filename().string()));
-    const auto bundle = ApplicationBundle::create(registry, &schemas);
+    const auto bundle = ApplicationBundle::create(&schemas);
     ApplicationContext application("reload", bundle);
     const auto loader = [](const std::string_view, const std::string_view path) -> strata::compiler::ModuleSource {
         throw strata::compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
@@ -973,13 +956,9 @@ void test_transactional_activation_and_last_good_reload(
     );
 }
 
-void test_portable_ir_expression_runtime(const std::filesystem::path& path) {
+void test_portable_ir_expression_runtime() {
     using namespace strata::runtime;
-    const std::string document = strata::resource::load_utf8_resource(
-        path.parent_path(),
-        strata::resource::ResourceId::parse(path.filename().string())
-    );
-    const auto bundle = ApplicationBundle::create(strata::data::parse_json(document));
+    const auto bundle = ApplicationBundle::create();
     HostStore host;
     const auto host_snapshot = HostSnapshot::from_json(
         "expression-host",
@@ -1344,15 +1323,9 @@ void test_portable_ir_expression_runtime(const std::filesystem::path& path) {
     check(runtime.diagnostics().empty(), "valid portable IR expressions produced runtime diagnostics");
 }
 
-void test_target10_compile_diagnostics(const std::filesystem::path& registry_path) {
+void test_target10_compile_diagnostics() {
     using namespace strata;
-    const data::JsonValue registry_document = data::parse_json(
-        resource::load_utf8_resource(
-            registry_path.parent_path(),
-            resource::ResourceId::parse(registry_path.filename().string())
-        )
-    );
-    compiler::SchemaRegistry schema = compiler::SchemaRegistry::parse(registry_document);
+    compiler::SchemaRegistry schema = compiler::SchemaRegistry::builtins();
     const data::JsonValue scenario_document = data::parse_json(R"({
       "widgets":{"registry":"test","required":[],"definitions":[]},
       "actions":{"registry":"test","required":[],"definitions":[]},
@@ -1465,7 +1438,7 @@ void test_target10_compile_diagnostics(const std::filesystem::path& registry_pat
     const compiler::SemanticResult valid = compiler::validate_semantics(valid_parsed.file, schema);
     check(valid.diagnostics.empty(), "valid Target 10 declarations produced semantic diagnostics");
 
-    const auto bundle = runtime::ApplicationBundle::create(registry_document, &scenario_document);
+    const auto bundle = runtime::ApplicationBundle::create(&scenario_document);
     runtime::ApplicationContext application("target10-schema", bundle);
     application.configure_durable_store(runtime::DurableStoreAdapter{
         [](const std::string_view) -> std::optional<std::string> {
@@ -1870,26 +1843,16 @@ int main(const int argument_count, const char* const* const arguments) {
         test_action_contracts_dispatch_and_handler_lifetime();
         test_layer_stack_and_declarative_registry();
         test_canonical_runtime_diagnostic_store();
-        if (argument_count >= 2) {
-            run("neutral registry", [&] {
-                test_neutral_registry_projects_runtime_action_contracts(arguments[1]);
-            });
-            run("animation validation", [&] {
-                test_animation_validation_is_total(arguments[1]);
-            });
-            run("Target 10 compile diagnostics", [&] {
-                test_target10_compile_diagnostics(arguments[1]);
-            });
-            run("application isolation", [&] {
-                test_application_bundle_and_runtime_isolation(arguments[1]);
-            });
-            run("portable expression runtime", [&] {
-                test_portable_ir_expression_runtime(arguments[1]);
-            });
-        }
-        if (argument_count >= 3 && std::string_view(arguments[2]).size() != 0U) {
+        run("built-in catalog", [&] {
+            test_builtin_catalog_projects_runtime_action_contracts();
+        });
+        run("animation validation", [&] { test_animation_validation_is_total(); });
+        run("Target 10 compile diagnostics", [&] { test_target10_compile_diagnostics(); });
+        run("application isolation", [&] { test_application_bundle_and_runtime_isolation(); });
+        run("portable expression runtime", [&] { test_portable_ir_expression_runtime(); });
+        if (argument_count >= 2 && std::string_view(arguments[1]).size() != 0U) {
             run("transactional activation", [&] {
-                test_transactional_activation_and_last_good_reload(arguments[1], arguments[2]);
+                test_transactional_activation_and_last_good_reload(arguments[1]);
             });
         }
         std::cout << "strata_runtime_tests: OK\n";

@@ -3,10 +3,7 @@
 #include <strata/svg.hpp>
 
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -17,26 +14,15 @@ namespace {
 
 static_assert(STRATA_THEME_MODEL_VERSION_CURRENT == STRATA_THEME_MODEL_VERSION_3);
 
-[[nodiscard]] std::string read_file(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) throw std::runtime_error("could not open installed Strata registry");
-    return std::string(
-        std::istreambuf_iterator<char>(input),
-        std::istreambuf_iterator<char>()
-    );
-}
-
 } // namespace
 
-int main(const int argument_count, const char* const* const arguments) {
+int main() {
     try {
-        if (argument_count != 2) return 64;
         const strata_theme_visual_style theme_visual = strata::theme_visual_style_defaults();
         const strata_theme_layout_style theme_layout = strata::theme_layout_style_defaults();
         static_cast<void>(theme_visual);
         static_cast<void>(theme_layout);
         std::int64_t now = 654321;
-        const std::string registry = read_file(arguments[1]);
         constexpr std::string_view source =
             "style Root { width: { weight: 1 }; height: { weight: 1 }; background: #334155FF; } "
             "overlay Main { root Panel(key: \"embedded.panel\", style: Root) }";
@@ -53,7 +39,6 @@ int main(const int argument_count, const char* const* const arguments) {
             strata::Runtime runtime(std::move(runtime_options));
             runtime.configure_application(strata::ApplicationOptions{
                 .id = "installed.cpp.application",
-                .registry_json = registry,
             });
             strata::host::Revision model_revision;
             strata::host::Bindings bindings(runtime, "installed.cpp.host");

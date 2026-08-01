@@ -111,7 +111,6 @@ std::optional<runtime::Value> Runtime::read_host_value(const std::string_view pa
 
 void Runtime::configure_application(
     std::string id,
-    const data::JsonValue& registry,
     const data::JsonValue* const schemas,
     const std::span<const data::JsonValue> extension_declarations
 ) {
@@ -119,7 +118,7 @@ void Runtime::configure_application(
         throw std::logic_error("runtime application is already configured");
     }
     std::shared_ptr<const runtime::ApplicationBundle> bundle =
-        runtime::ApplicationBundle::create(registry, schemas, {}, extension_declarations);
+        runtime::ApplicationBundle::create(schemas, {}, extension_declarations);
     auto application = std::make_unique<runtime::ApplicationContext>(
         std::move(id),
         bundle,

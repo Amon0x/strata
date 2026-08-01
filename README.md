@@ -144,7 +144,7 @@ frame-time report. See [Desktop performance testing](docs/performance-testing.md
 
 C++ application hosts use `strata/host.hpp` (`Strata::host`) plus schema-generated model/action
 headers. The package exposes `Strata_AUTHORING` for contract generation, so application schemas stay
-the single source of truth and JSON remains confined to the stable C ABI. The installed
+the single source of truth and application-owned JSON remains confined to the stable C ABI. The installed
 `Strata_VSCODE_EXTENSION` VSIX provides schema-aware editing backed by the same metadata and native
 compiler.
 
@@ -157,7 +157,7 @@ compiler.
 - [`.strata` authoring guide](docs/strata-authoring.md)
 - [Language syntax](docs/strata-language.md)
 - [Testing guide](docs/testing.md)
-- [Generated registry reference](docs/generated/strata-reference.md)
+- [Generated built-in catalog reference](docs/generated/strata-reference.md)
 
 ## Optional profiling
 

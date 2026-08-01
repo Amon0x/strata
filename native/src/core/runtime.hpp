@@ -53,7 +53,6 @@ public:
     [[nodiscard]] std::optional<runtime::Value> read_host_value(std::string_view path) const;
     void configure_application(
         std::string id,
-        const data::JsonValue& registry,
         const data::JsonValue* schemas,
         std::span<const data::JsonValue> extension_declarations = {}
     );

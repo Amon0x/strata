@@ -851,7 +851,6 @@ struct Host::Impl final {
             "desktop IME adapter installation"
         );
 
-        const std::string registry = services.text("strata/registry-v1.json");
         const std::string schemas = services.text(schemas_resource);
         std::vector<std::string> extension_ids;
         extension_ids.reserve(extension_packages.size());
@@ -868,7 +867,6 @@ struct Host::Impl final {
         const strata_application_config application{
             sizeof(strata_application_config),
             strata::view(result.id),
-            strata::view(registry),
             strata::view(schemas),
             extension_schema_views.empty() ? nullptr : extension_schema_views.data(),
             extension_schema_views.size(),

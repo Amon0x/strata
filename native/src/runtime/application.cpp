@@ -93,12 +93,11 @@ ApplicationBundle::ApplicationBundle(
       async_bindings_(std::move(async_bindings)) {}
 
 std::shared_ptr<const ApplicationBundle> ApplicationBundle::create(
-    const data::JsonValue& neutral_registry,
     const data::JsonValue* const application_schemas,
     ActionPayloadDecoders action_decoders,
     const std::span<const data::JsonValue> extension_declarations
 ) {
-    compiler::SchemaRegistry schemas = compiler::SchemaRegistry::parse(neutral_registry);
+    compiler::SchemaRegistry schemas = compiler::SchemaRegistry::builtins();
     for (const data::JsonValue& declaration : extension_declarations) {
         schemas.apply_scenario_declarations(declaration);
     }

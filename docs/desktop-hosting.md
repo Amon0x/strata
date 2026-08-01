@@ -28,7 +28,7 @@ build/install/windows-x64/
   include/strata/              public C and C++ headers
   lib/                         import/static libraries
   lib/cmake/Strata/            find_package configuration
-  share/strata/                neutral registry and buildable samples
+  share/strata/                generated catalog projection and buildable samples
   share/assets/strata/         fonts, PNG/SVG images, shaders, and sample UI
   share/licenses/strata/       Strata and third-party licenses
 ```
@@ -72,15 +72,15 @@ The package also defines:
 
 | Variable | Value |
 | --- | --- |
-| `Strata_REGISTRY` | Absolute path to `registry-v1.json`. |
+| `Strata_REGISTRY` | Optional generated JSON projection of the native built-in catalog for language-neutral tooling. |
 | `Strata_RESOURCES` | Absolute path to the installed `share` resource root. |
 | `Strata_DESKTOP_RUNNER` | Absolute path to `strata_desktop.exe`. |
 
 A deployed application must keep `strata_c.dll` loadable and provide one resource root containing
-`strata/registry-v1.json`, Strata's `assets/strata` directory, and the application's own relative
-module/assets. Copying the installed `share` directory beside `bin` preserves the layout understood
-by the runner. An embedded host may place the same tree anywhere and pass that directory to
-`ApplicationHost`.
+Strata's `assets/strata` directory and the application's own relative module/assets. Built-in
+language declarations are compiled into Strata and are not runtime resources. Copying the installed
+`share` directory beside `bin` preserves the asset layout understood by the runner. An embedded host
+may place the same tree anywhere and pass that directory to `ApplicationHost`.
 
 ## Reusable application host
 
