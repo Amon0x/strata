@@ -31,6 +31,7 @@ class ShowcaseModel final {
     [[nodiscard]] strata::host::ActionResult handle(const strata::host::ActionEvent& event);
     [[nodiscard]] bool load_tree_children(std::string_view key);
     void data_activity(std::string value);
+    void surface_visible(bool visible);
 
   private:
     struct TreeItem final {
@@ -76,6 +77,7 @@ class ShowcaseModel final {
     std::optional<std::string> combo_selection_;
     double controlled_split_ratio_ = 0.35;
     std::uint64_t host_generation_ = 0U;
+    bool surface_visible_ = true;
     strata::host::Revision demo_revision_;
     strata::host::Revision tree_revision_;
     strata::host::Revision table_revision_;

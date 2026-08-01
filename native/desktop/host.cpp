@@ -1604,10 +1604,19 @@ struct Host::Impl final {
         if (!showcase_enabled && !showcase.surface.has_value()) {
             create_showcase();
         }
-        showcase_enabled = !showcase_enabled;
-        if (!showcase_enabled && showcase.surface.has_value()) {
+        if (showcase_enabled) {
+            showcase_enabled = false;
+            showcase_closing = true;
+            showcase_hidden_at = now();
+            showcase_model.surface_visible(false);
+            showcase.bindings->synchronize();
             static_cast<void>(strata_surface_cancel_interactions(showcase.surface->native_handle()));
+            return;
         }
+        showcase_enabled = true;
+        showcase_closing = false;
+        showcase_model.surface_visible(true);
+        showcase.bindings->synchronize();
     }
 
     void cycle_debug(const bool reverse) {
@@ -1786,7 +1795,7 @@ struct Host::Impl final {
         std::int64_t showcase_native_nanos = 0;
         std::int64_t showcase_submit_nanos = 0;
         DesktopFrameSample sample;
-        if (showcase_enabled && showcase.surface.has_value()) {
+        if ((showcase_enabled || showcase_closing) && showcase.surface.has_value()) {
             const auto native_started = std::chrono::steady_clock::now();
             const strata_surface_frame_info info = showcase.surface->frame(frame_time);
             showcase_native_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -1801,6 +1810,10 @@ struct Host::Impl final {
             had_draws = render_session(
                 showcase, info, &showcase_submit_nanos, &sample
             ) || had_draws;
+            if (!showcase_enabled &&
+                frame_time - showcase_hidden_at >= showcase_transition_nanos) {
+                showcase_closing = false;
+            }
         }
         if (settings_enabled && settings.surface.has_value()) {
             const strata_surface_frame_info info = settings.surface->frame(frame_time);
@@ -1897,6 +1910,7 @@ struct Host::Impl final {
     std::int64_t next_debug_snapshot = 0;
     std::int64_t next_performance_snapshot = 0;
     std::int64_t next_profile_capture = 0;
+    std::int64_t showcase_hidden_at = 0;
     std::uint64_t environment_generation = 1U;
     std::uint64_t rendered_frames = 0U;
     std::uint64_t settings_save_count = 0U;
@@ -1906,6 +1920,7 @@ struct Host::Impl final {
     std::uint32_t framebuffer_height = 1U;
     double display_scale = 1.0;
     bool showcase_enabled = false;
+    bool showcase_closing = false;
     bool settings_enabled = false;
     bool debug_enabled = false;
     bool performance_hud_enabled = true;
@@ -1917,6 +1932,7 @@ struct Host::Impl final {
     bool clear_diagnostics_pending = false;
     bool last_frame_had_draws = false;
     bool first_frame_contains_instance = false;
+    static constexpr std::int64_t showcase_transition_nanos = 180'000'000;
     static constexpr std::array debug_modes{
         contracts::debug_overlay::StrataDebugSelectModeActionMode::diagnostics,
         contracts::debug_overlay::StrataDebugSelectModeActionMode::summary,

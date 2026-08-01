@@ -1,5 +1,6 @@
 #include "showcase.hpp"
 
+#include <cstdint>
 #include <iostream>
 #include <ranges>
 #include <stdexcept>
@@ -91,6 +92,25 @@ void grid_reorders_at_the_target_callback_only() {
           "showcase grid drop did not commit its typed item order");
 }
 
+void surface_visibility_preserves_the_model() {
+    ShowcaseModel model("tests");
+    const Value initial = model.demo_snapshot();
+    const bool* const initially_visible = field(initial, "demo", "surfaceVisible").boolean();
+    check(
+        initially_visible != nullptr && *initially_visible,
+        "showcase must begin presented"
+    );
+    const std::uint64_t before = model.demo_revision().value();
+    model.surface_visible(false);
+    const Value hidden = model.demo_snapshot();
+    const bool* const currently_visible = field(hidden, "demo", "surfaceVisible").boolean();
+    check(
+        currently_visible != nullptr && !*currently_visible &&
+            model.demo_revision().value() > before,
+        "showcase visibility did not publish through the retained typed model"
+    );
+}
+
 } // namespace
 
 int main() {
@@ -98,6 +118,7 @@ int main() {
         cards_reorder_through_typed_action();
         tree_reparents_without_json_plumbing();
         grid_reorders_at_the_target_callback_only();
+        surface_visibility_preserves_the_model();
         std::cout << "strata_showcase_model_tests: typed showcase mutations OK\n";
         return 0;
     } catch (const std::exception& error) {

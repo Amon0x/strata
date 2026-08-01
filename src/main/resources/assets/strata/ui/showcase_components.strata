@@ -378,6 +378,9 @@ component Showcase() {
   Panel(
     key: "targets.root",
     style: Root,
+    motions: [
+      { id: "surface.visibility", target: demo.surfaceVisible, animation: ContentMotion }
+    ],
     behaviors: [
       { id: "demo.inspector-pick", enabled: demo.inspectorPickArmed }
     ]

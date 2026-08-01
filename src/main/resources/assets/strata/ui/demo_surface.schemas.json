@@ -558,6 +558,14 @@
             },
             "required": true,
             "nullable": false
+          },
+          {
+            "name": "surfaceVisible",
+            "type": {
+              "kind": "boolean"
+            },
+            "required": true,
+            "nullable": false
           }
         ]
       }

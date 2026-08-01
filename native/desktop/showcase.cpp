@@ -194,6 +194,7 @@ Value ShowcaseModel::demo_snapshot() const {
         .measured_nodes = 0.0,
         .reused_nodes = 0.0,
         .arranged_nodes = 0.0,
+        .surface_visible = surface_visible_,
     });
 }
 
@@ -205,6 +206,12 @@ void ShowcaseModel::data_activity(std::string value) {
     if (value == data_activity_)
         return;
     data_activity_ = std::move(value);
+    changed_demo();
+}
+
+void ShowcaseModel::surface_visible(const bool visible) {
+    if (surface_visible_ == visible) return;
+    surface_visible_ = visible;
     changed_demo();
 }
 
