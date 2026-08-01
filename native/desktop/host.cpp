@@ -54,6 +54,34 @@ namespace {
     return value.size == 0U ? std::string{} : std::string(value.data, value.size);
 }
 
+[[nodiscard]] double desktop_display_scale(
+    const std::uint32_t framebuffer_width,
+    const std::uint32_t framebuffer_height,
+    const double dpi_scale
+) {
+    strata_scale_policy_config policy{sizeof(strata_scale_policy_config)};
+    strata::require_ok(
+        strata_scale_policy_defaults(STRATA_SCALE_POLICY_AUTO_FIT, &policy),
+        "desktop scale-policy defaults"
+    );
+    // Desktop windows need more working room than a full-screen game surface. Auto-fit around a
+    // 1600x900 logical viewport, never shrinking below the scale requested by the monitor DPI.
+    policy.preferred_logical_width = 1'600.0;
+    policy.preferred_logical_height = 900.0;
+    policy.min_scale = std::min(dpi_scale, policy.max_scale);
+    strata_scale_context context{sizeof(strata_scale_context)};
+    strata::require_ok(
+        strata_resolve_scale_context(
+            &policy,
+            static_cast<std::int64_t>(framebuffer_width),
+            static_cast<std::int64_t>(framebuffer_height),
+            &context
+        ),
+        "desktop scale-context resolution"
+    );
+    return context.scale;
+}
+
 [[nodiscard]] std::uint32_t current_modifiers() noexcept {
     std::uint32_t result = 0U;
     if ((GetKeyState(VK_SHIFT) & 0x8000) != 0) result |= STRATA_KEY_MODIFIER_SHIFT;
@@ -345,7 +373,10 @@ struct Host::Impl final {
         framebuffer_width = static_cast<std::uint32_t>(std::max<LONG>(1L, client.right - client.left));
         framebuffer_height = static_cast<std::uint32_t>(std::max<LONG>(1L, client.bottom - client.top));
         const UINT dpi = GetDpiForWindow(window);
-        display_scale = dpi == 0U ? 1.0 : static_cast<double>(dpi) / 96.0;
+        const double dpi_scale = dpi == 0U ? 1.0 : static_cast<double>(dpi) / 96.0;
+        display_scale = desktop_display_scale(
+            framebuffer_width, framebuffer_height, dpi_scale
+        );
         renderer.resize(
             framebuffer_width,
             framebuffer_height,
@@ -363,6 +394,9 @@ struct Host::Impl final {
             );
             framebuffer_height = static_cast<std::uint32_t>(
                 std::max<LONG>(1L, restored_client.bottom - restored_client.top)
+            );
+            display_scale = desktop_display_scale(
+                framebuffer_width, framebuffer_height, dpi_scale
             );
             renderer.resize(
                 framebuffer_width, framebuffer_height, logical_width(), logical_height()
@@ -1584,7 +1618,7 @@ struct Host::Impl final {
         if (next_width == 0U || next_height == 0U || next_scale <= 0.0) return;
         framebuffer_width = next_width;
         framebuffer_height = next_height;
-        display_scale = next_scale;
+        display_scale = desktop_display_scale(next_width, next_height, next_scale);
         renderer.resize(next_width, next_height, logical_width(), logical_height());
         ++environment_generation;
         const strata_surface_environment next = environment();

@@ -63,11 +63,11 @@ struct CoverageRasterConfig final {
     /** FreeType executes the face's native TrueType instructions for the ordinary UI path. */
     GlyphHinting hinting = GlyphHinting::full;
     /** Physical-pixel optical emboldening for small grayscale glyphs. */
-    double stem_darkening_pixels = 0.10;
+    double stem_darkening_pixels = 0.16;
     double stem_darkening_taper_start_physical_pixel_size = 14.0;
     double stem_darkening_taper_end_physical_pixel_size = 28.0;
-    /** Optional post-raster coverage weighting; optical darkening is sufficient by default. */
-    double transfer_strength = 0.0;
+    /** Perceptual weighting that keeps grayscale antialiasing from looking frail on dark UI. */
+    double transfer_strength = 0.60;
 };
 
 struct MsdfRasterConfig final {
