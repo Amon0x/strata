@@ -21,6 +21,13 @@ option(STRATA_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer where supported" O
 option(STRATA_ENABLE_STATIC_ANALYSIS "Enable compiler static analysis" OFF)
 option(STRATA_ENABLE_TRACY "Enable local Tracy instrumentation" OFF)
 
+if(MSVC AND MSVC_VERSION LESS 1940)
+    message(FATAL_ERROR
+        "Strata requires MSVC 19.40 or newer (Visual Studio 2022 17.10); "
+        "the newest installed stable v143 toolset is selected automatically."
+    )
+endif()
+
 if(STRATA_ENABLE_TRACY)
     set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
     set(TRACY_ON_DEMAND OFF CACHE BOOL "" FORCE)

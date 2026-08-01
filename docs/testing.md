@@ -18,6 +18,10 @@ cmake --workflow --preset windows-x64
 cmake --workflow --preset linux-x64
 ```
 
+`windows-x64` is the stable Visual Studio 2022 baseline. `windows-x64-vs2026` is a separate,
+unpinned compatibility lane for environments without VS2022; it must not silently replace the
+baseline in release verification.
+
 For incremental work, use `cmake --build --preset <platform>` followed by
 `ctest --preset <platform>`. Sanitizer configurations use separate CMake build directories so the
 ordinary build remains incremental.

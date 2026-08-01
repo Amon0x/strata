@@ -32,16 +32,19 @@ and Linux artifacts in separate build trees.
 
 Requirements:
 
-- CMake with the `Visual Studio 18 2026` generator
-- x64 preview MSVC toolset 14.52 with C++23 support
+- CMake 3.25 or newer
+- Visual Studio 2022 17.10 or newer with the Desktop C++ workload and Windows SDK
 
-From a Windows command shell:
+The primary preset uses the stable Visual Studio 2022 generator and the newest installed v143
+compiler rather than pinning a preview toolset. From a Windows command shell:
 
 ```bat
 cmake --workflow --preset windows-x64
 ```
 
-This configures, builds, and runs the complete test gate in `build\cmake\windows-x64`.
+This configures, builds, and runs the complete test gate in `build\cmake\windows-x64`. A separate
+`windows-x64-vs2026` workflow is available as an unpinned compatibility lane for machines that only
+have Visual Studio 2026; it writes to its own build/install trees and is not the baseline.
 
 ### Linux x64
 

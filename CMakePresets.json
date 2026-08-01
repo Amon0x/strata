@@ -17,17 +17,38 @@
       }
     },
     {
-      "name": "windows-x64",
-      "displayName": "Windows x64 / Visual Studio 18 2026 / MSVC 14.52",
+      "name": "windows-base",
+      "hidden": true,
       "inherits": "base",
-      "generator": "Visual Studio 18 2026",
-      "binaryDir": "${sourceDir}/build/cmake/windows-x64",
       "architecture": "x64",
-      "toolset": "version=14.52",
       "cacheVariables": {
         "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install/windows-x64",
         "STRATA_BUILD_DESKTOP": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-x64",
+      "displayName": "Windows x64 / Visual Studio 2022 (stable)",
+      "inherits": "windows-base",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/cmake/windows-x64",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install/windows-x64"
+      }
+    },
+    {
+      "name": "windows-x64-vs2026",
+      "displayName": "Windows x64 / Visual Studio 2026 compatibility",
+      "inherits": "windows-base",
+      "generator": "Visual Studio 18 2026",
+      "binaryDir": "${sourceDir}/build/cmake/windows-x64-vs2026",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install/windows-x64-vs2026"
       }
     },
     {
@@ -55,6 +76,11 @@
       "configuration": "RelWithDebInfo"
     },
     {
+      "name": "windows-x64-vs2026",
+      "configurePreset": "windows-x64-vs2026",
+      "configuration": "RelWithDebInfo"
+    },
+    {
       "name": "linux-x64",
       "configurePreset": "linux-x64"
     }
@@ -63,6 +89,14 @@
     {
       "name": "windows-x64",
       "configurePreset": "windows-x64",
+      "configuration": "RelWithDebInfo",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-x64-vs2026",
+      "configurePreset": "windows-x64-vs2026",
       "configuration": "RelWithDebInfo",
       "output": {
         "outputOnFailure": true
@@ -83,6 +117,14 @@
         {"type": "configure", "name": "windows-x64"},
         {"type": "build", "name": "windows-x64"},
         {"type": "test", "name": "windows-x64"}
+      ]
+    },
+    {
+      "name": "windows-x64-vs2026",
+      "steps": [
+        {"type": "configure", "name": "windows-x64-vs2026"},
+        {"type": "build", "name": "windows-x64-vs2026"},
+        {"type": "test", "name": "windows-x64-vs2026"}
       ]
     },
     {

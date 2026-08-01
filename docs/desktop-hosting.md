@@ -37,7 +37,7 @@ A consumer configures against that prefix:
 
 ```bat
 cmake -S . -B build ^
-  -G "Visual Studio 18 2026" -A x64 -T version=14.52 ^
+  -G "Visual Studio 17 2022" -A x64 ^
   -DCMAKE_PREFIX_PATH=C:\path\to\strata\build\install\windows-x64
 cmake --build build --config RelWithDebInfo
 ```

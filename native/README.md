@@ -80,8 +80,9 @@ cmake --workflow --preset windows-x64
 cmake --workflow --preset linux-x64
 ```
 
-The Windows preset pins Visual Studio 18 2026, x64, and preview toolset 14.52. The Linux preset uses
-GCC, Ninja, and a RelWithDebInfo single-configuration tree. Both enable tools, samples, tests, strict
+The Windows baseline uses stable Visual Studio 2022 x64 with the newest installed v143 toolset;
+`windows-x64-vs2026` is an unpinned compatibility lane with separate build/install trees. The Linux
+preset uses GCC, Ninja, and a RelWithDebInfo single-configuration tree. Both enable tools, samples, tests, strict
 warnings, and installed-package acceptance. ASan uses a separate build with
 `-DSTRATA_ENABLE_ASAN=ON`; MSVC does not claim UBSan support.
 
