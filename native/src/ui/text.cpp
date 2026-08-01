@@ -373,7 +373,7 @@ std::string TextEngine::requested_font_id(const RetainedNode& node) const {
         if (value->string() != nullptr && !value->string()->empty()) return *value->string();
         if (value->texture() != nullptr && !value->texture()->id.empty()) return value->texture()->id;
     }
-    return "strata:fonts/default-medium";
+    return "strata:fonts/default";
 }
 
 std::string TextEngine::font_id(const RetainedNode& node) const {

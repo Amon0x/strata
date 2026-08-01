@@ -840,7 +840,7 @@ strata_result strata_theme_text_layout_style_defaults(
     if (out_style == nullptr || out_style->struct_size < sizeof(strata_theme_text_layout_style)) {
         return strata::abi_detail::invalid_argument();
     }
-    static constexpr char default_font[] = "strata:fonts/default-medium";
+    static constexpr char default_font[] = "strata:fonts/default";
     *out_style = strata_theme_text_layout_style{
         sizeof(strata_theme_text_layout_style),
         strata_string_view{default_font, sizeof(default_font) - 1U},

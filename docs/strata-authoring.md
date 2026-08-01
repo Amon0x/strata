@@ -92,8 +92,9 @@ to the same final tree without a parallel behavior implementation.
 
 ### Typography rasterization
 
-Text uses size-specific, TrueType-hinted grayscale masks by default at every font size and display
-scale. No authoring property is required for normal UI typography. Grayscale runs are regenerated
+Text uses the bundled Regular face and size-specific, TrueType-hinted grayscale masks by default at
+every font size and display scale. Controls use the Medium face; headings and other emphasized text
+should select `strata:fonts/default-medium` explicitly. Grayscale runs are regenerated
 for their physical scale, retain quarter-pixel horizontal positioning, and use R8 atlas pages.
 
 MSDF remains available for text that is deliberately scaled or transformed after layout. Opt in on

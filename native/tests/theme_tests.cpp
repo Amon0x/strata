@@ -112,13 +112,17 @@ void test_defaults_and_validation() {
     const ui::ThemedWidgetStyle text = default_theme.style("Text", "subtle");
     check(text.visual.has_value() && !text.visual->background.has_value(),
           "text semantic chrome is not transparent");
+    check(text.text_layout.has_value() &&
+              text.text_layout->primary_font == "strata:fonts/default",
+          "ordinary text no longer defaults to the Regular face");
     const ui::ThemedWidgetStyle raised = default_theme.style("Tooltip");
     check(raised.visual.has_value() && raised.visual->background.has_value() &&
               *raised.visual->background == default_theme.tokens().surface_raised,
           "raised widget semantic background changed");
     const ui::ThemedWidgetStyle compact = default_theme.style("Button", "compact");
-    check(compact.visual->radius == 3.0 && compact.text_layout->pixel_size == 10.8,
-          "compact theme semantics changed");
+    check(compact.visual->radius == 3.0 && compact.text_layout->pixel_size == 10.8 &&
+              compact.text_layout->primary_font == "strata:fonts/default-medium",
+          "compact control typography or theme semantics changed");
 }
 
 void test_scopes_styles_tokens_and_lazy_ranges() {

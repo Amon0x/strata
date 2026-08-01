@@ -1181,6 +1181,15 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
         {"strata:fonts/default-medium", medium},
     });
 
+    ui::RetainedTree default_tree;
+    const ui::RetainedNode& default_node = retain(
+        default_tree,
+        text_node("Text", object({{"pixelSize", runtime::Value(12.0)}}))
+    );
+    check(engine.layout(default_node, "A").glyph_font_ids ==
+              std::vector<std::string>{"strata:fonts/default"},
+          "unstyled text did not resolve to the Regular default face");
+
     ui::RetainedTree fallback_tree;
     const ui::RetainedNode& fallback_node = retain(fallback_tree, text_node("Text", object({
         {"fallbackFonts", runtime::Value(std::vector<runtime::Value>{runtime::Value("explicit")})},

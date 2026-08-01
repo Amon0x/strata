@@ -89,11 +89,13 @@ style ActionRow extends Transparent {
 }
 
 style TitleText {
+  font: "strata:fonts/default-medium";
   pixelSize: 18;
   color: #F4F7FBFF;
 }
 
 style SectionText {
+  font: "strata:fonts/default-medium";
   pixelSize: 14;
   color: #E8EDF5FF;
 }

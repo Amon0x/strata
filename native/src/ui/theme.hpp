@@ -104,7 +104,7 @@ struct ThemeWidgetTextVisualStyle final {
 };
 
 struct ThemeTextLayoutStyle final {
-    std::string primary_font = "strata:fonts/default-medium";
+    std::string primary_font = "strata:fonts/default";
     std::vector<std::string> fallback_fonts;
     double pixel_size = 12.0;
     std::uint32_t style_flags = 0U;

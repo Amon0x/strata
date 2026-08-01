@@ -193,11 +193,13 @@ style MiniMetric {
 }
 
 style TitleText {
+  font: "strata:fonts/default-medium";
   pixelSize: 17;
   color: #F3F6FBFF;
 }
 
 style SectionText {
+  font: "strata:fonts/default-medium";
   pixelSize: 12;
   color: #DDE5F1FF;
 }

@@ -28,9 +28,9 @@ style Card {
   border: { width: 1, color: #536078CC };
 }
 
-style Title { pixelSize: 22; fontRasterization: "MSDF"; color: theme.foreground; }
+style Title { font: "strata:fonts/default-medium"; pixelSize: 22; fontRasterization: "MSDF"; color: theme.foreground; }
 style Muted { pixelSize: 12; color: theme.mutedForeground; }
-style ProfileTitle { pixelSize: 14; color: theme.foreground; }
+style ProfileTitle { font: "strata:fonts/default-medium"; pixelSize: 14; color: theme.foreground; }
 style GoldFocus { focusRing: { width: 2, color: #FACC15FF }; }
 
 animation ContentMotion {

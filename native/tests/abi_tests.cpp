@@ -817,6 +817,11 @@ screen Main {
         strata_theme_text_layout_style_defaults(&theme_text).status == STRATA_STATUS_OK,
         "typed theme text-layout defaults failed"
     );
+    check(
+        std::string_view(theme_text.primary_font.data, theme_text.primary_font.size) ==
+            "strata:fonts/default",
+        "typed theme text-layout default is not the Regular face"
+    );
     theme_text.primary_font = view("strata:fonts/default");
     theme_text.fallback_fonts = fallback_fonts;
     theme_text.fallback_font_count = std::size(fallback_fonts);

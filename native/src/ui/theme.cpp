@@ -1483,6 +1483,9 @@ ThemedWidgetStyle Theme::semantic_style(
     text_visual.selection_color = accent;
     text_visual.caret_color = tokens_.foreground;
     ThemeTextLayoutStyle text_layout;
+    // Ordinary Text/RichText is body copy and defaults to Regular. Controls retain the Medium
+    // face so labels remain distinct without making every authored paragraph weight 500.
+    if (!text_only) text_layout.primary_font = "strata:fonts/default-medium";
     text_layout.pixel_size = 12.0 * tokens_.density * (variant == "compact" ? 0.9 : 1.0);
     return ThemedWidgetStyle{
         std::move(visual),
