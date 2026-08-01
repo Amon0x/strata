@@ -106,7 +106,9 @@ cmake --install build/cmake/linux-x64
 
 The default prefixes are `build/install/windows-x64` and `build/install/linux-x64`. Every package
 exports `Strata::c`, `Strata::host`, `Strata::extensions`, and `Strata::render_host`, plus public
-headers, the neutral registry, runtime assets, tools, and samples. Windows also exports
+headers, the neutral registry, runtime assets, tools, and samples. `Strata::extensions` is static
+authoring support linked into independently loaded package libraries; the installed
+`strata_configure_extension` CMake helper assigns their discovery-safe names. Windows also exports
 `Strata::desktop`. `Strata_RESOURCES` names the installed `share` directory so consumers do not
 reconstruct package paths; `Strata_DESKTOP_RUNNER` exists only when the desktop runner was installed.
 

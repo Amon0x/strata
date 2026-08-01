@@ -86,7 +86,7 @@ exports these portable targets:
 | --- | --- |
 | `Strata::c` | Stable shared C ABI. |
 | `Strata::host` | C++ ownership and structured host-data/action bindings. |
-| `Strata::extensions` | Native extension package authoring implementation. |
+| `Strata::extensions` | Authoring support linked into independently loaded extension libraries. |
 | `Strata::render_host` | Stateful public packet-v4 decoder for custom render backends. |
 
 Windows additionally exports `Strata::desktop`. See [Embedding](docs/embedding.md) for custom

@@ -82,6 +82,7 @@ struct Scenario final {
     std::string render_backend = "reference";
 #endif
     std::vector<std::string> packages;
+    std::vector<std::filesystem::path> extension_search_paths;
     std::vector<std::string> actions;
     std::vector<FontConfig> fonts;
     std::vector<TextureConfig> textures;

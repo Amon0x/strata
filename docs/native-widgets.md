@@ -5,10 +5,11 @@ application composition are language concerns; host persistence, networking, and
 are typed actions. A native extension is the right tool only for genuinely new mechanics: custom
 render primitives, custom hit geometry, or interaction a component cannot express by composition.
 
-An extension package is declared once in C++ with `<strata/extension.hpp>`. That single definition
-produces both the runtime bundle passed to `strata_surface_config::extensions` and the compiler
-schema applied by `strata_compile`, so a widget name, parameter, or action contract cannot drift
-between the two.
+An extension package is declared once in C++ with `<strata/extension.hpp>` and built as its own
+shared library. That single definition exports both the runtime bundle passed to
+`strata_surface_config::extensions` and the compiler schema applied by `strata_compile`, so a widget
+name, parameter, or action contract cannot drift between the two. Hosts load the library through the
+stable C ABI in `<strata/extension_plugin.h>`; no C++ object crosses the library boundary.
 
 ## A complete package
 
@@ -76,6 +77,8 @@ std::unique_ptr<Package> meter_package() {
     created->widget(std::move(meter));
     return created;
 }
+
+STRATA_EXTENSION_PACKAGE(meter_package)
 ```
 
 Use `Present::focused()` for semantic state and `Present::focus_visible()` for focus paint. Pointer
@@ -87,17 +90,20 @@ reads and writes through them, and `get` on a parameter uses the default declare
 field name is never spelled twice, a default is never restated at a call site, and a mistyped or
 wrongly typed field is a compile error rather than a silent fallback.
 
-Register it in `native/src/extensions/packages.cpp`:
+Build it against an installed SDK. The package id supplied to the CMake helper must equal the id
+returned by the factory; the helper links the authoring implementation, hides the C++ symbols, and
+assigns the portable discovery name (`strata-extension-example.meter.v1.dll` on Windows or
+`libstrata-extension-example.meter.v1.so` on Linux):
 
-```cpp
-void register_builtin_packages(Registry& registry) {
-    registry.add(demo_package());
-    registry.add(example::meter_package());
-}
+```cmake
+find_package(Strata CONFIG REQUIRED)
+add_library(example_meter SHARED meter.cpp)
+strata_configure_extension(example_meter example.meter.v1)
+install(TARGETS example_meter RUNTIME DESTINATION bin LIBRARY DESTINATION lib/strata/extensions)
 ```
 
-That is the only edit outside the package itself: no compiler or host source changes, and no schema
-JSON to keep in sync.
+The extension library links the static `Strata::extensions` authoring layer and the shared stable
+`Strata::c` ABI. It is not linked into the compiler, desktop host, or headless host.
 
 ## Activating a package
 
@@ -112,16 +118,25 @@ An application names the packages it activates in its `*.schemas.json`:
 }
 ```
 
-`strata_compile --check-module` resolves those ids through the package registry and applies the
-projected declarations before the application's own, so `.strata` sees `Meter`, its parameters, and
-`meter.changed` without a hand-written copy.
+Point tools at the directory containing the library:
 
-Hosts select the same ids. The desktop and headless hosts forward each package's `schema_json()`
-through `strata_application_config::extension_schemas_json` and its `bundle()` through
-`strata_surface_config::extensions`.
+```sh
+strata_compile --extension-path build/extensions --check-module \
+  app.strata registry-v1.json app.schemas.json
+```
 
-Selecting an unregistered id fails immediately with a diagnostic naming the unknown id and every
-registered package.
+The option is repeatable. Discovery checks explicit paths first, then `STRATA_EXTENSION_PATH`, then
+the executable directory and the installed `lib/strata/extensions` location. VS Code exposes the
+same list as `strata.extensions.paths`.
+
+Hosts select the same ids. `desktop::ApplicationConfig` accepts `extension_packages` and
+`extension_search_paths`; headless scenario applications use `packages` and `extensionPaths`.
+Each host loads a package once, forwards its copied schema through
+`strata_application_config::extension_schemas_json`, forwards its descriptor bundle through
+`strata_surface_config::extensions`, and keeps the library loaded until the Surface has been
+released. A missing library, mismatched exported id, incompatible plugin/core ABI, missing entry
+point, or malformed descriptor fails before application activation with the package and library in
+the error.
 
 ## Supported lifecycle
 
@@ -158,6 +173,9 @@ only, so a package projects its behavior ids and their option objects are not ty
 - Duplicate widget types, behavior ids, parameters, retained fields, or package ids are rejected at
   definition time with a message naming the offender.
 - A package is sealed once its bundle is taken; a late addition raises `std::logic_error`.
+- The exported package descriptor and every callback/string it references remain owned by the
+  loaded library. The loader copies schema text but deliberately retains the library until all
+  copied callbacks are unreachable.
 - Custom mesh vertices are normalized inside the draw bounds and must form indexed triangles. A mesh
   that violates either is dropped as a single draw, because the submission planner treats the same
   defect in engine-authored geometry as a fatal frame error and one extension must not blank a
@@ -177,6 +195,8 @@ rejection, schema and compile parity, retained identity and rejection of undecla
 activation, key input, semantics, hit bounds, detached overlay painting, behavior dispatch, and
 action contracts against a headless Surface — no host window involved.
 
-The shipped demo package (`native/src/extensions/demo_package.cpp`) is the reference: `DemoPulse`,
-`DemoDisclosure`, and `demo.inspector-pick` in roughly 200 lines with no schema copy and no host
-wiring.
+The shipped `strata_demo_extension` shared library
+(`native/src/extensions/demo_package.cpp`) is the reference: `DemoPulse`, `DemoDisclosure`, and
+`demo.inspector-pick` in roughly 200 lines with no schema copy and no host wiring. Installed-package
+tests independently build and query another extension against only the installed SDK, proving the
+package is not relying on repository linkage.

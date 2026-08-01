@@ -358,7 +358,11 @@ struct ApplicationHost::Impl final {
         const std::string schemas =
             scenario.schemas.empty() ? std::string{}
                                      : read_text(resource_path(scenario.schemas.generic_string()));
-        std::vector<std::string> extension_schemas = host::package_schemas(scenario.packages);
+        extensions = host::select_extensions(
+            scenario.packages,
+            scenario.extension_search_paths
+        );
+        std::vector<std::string> extension_schemas = extensions.schemas();
         std::vector<strata_string_view> extension_schema_views;
         extension_schema_views.reserve(extension_schemas.size());
         for (const std::string& schema : extension_schemas) {
@@ -430,7 +434,6 @@ struct ApplicationHost::Impl final {
             throw std::runtime_error("headless scenario module did not activate");
         }
 
-        extensions = host::select_extensions(scenario.packages);
         std::vector<strata_surface_font_resource> fonts;
         fonts.reserve(scenario.fonts.size());
         for (const FontConfig& font : scenario.fonts) {

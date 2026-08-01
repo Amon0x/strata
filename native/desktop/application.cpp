@@ -18,7 +18,6 @@
 #define NOMINMAX
 #include <Windows.h>
 
-#include <strata/extension.hpp>
 #include <strata/strata.hpp>
 
 #include "host_services.hpp"
@@ -262,7 +261,11 @@ struct ApplicationHost::Impl final {
         registry = services.text("strata/registry-v1.json");
         schemas = config.schemas_resource.empty() ? std::string{}
                                                   : services.text(config.schemas_resource);
-        extension_schemas = host::package_schemas(config.extension_packages);
+        extensions = host::select_extensions(
+            config.extension_packages,
+            config.extension_search_paths
+        );
+        extension_schemas = extensions.schemas();
         std::vector<strata_string_view> extension_views;
         extension_views.reserve(extension_schemas.size());
         for (const std::string& document : extension_schemas)
@@ -306,7 +309,6 @@ struct ApplicationHost::Impl final {
             throw std::runtime_error("desktop application activation was rejected: " + detail);
         }
 
-        extensions = host::select_extensions(config.extension_packages);
         std::vector<strata_surface_font_resource> fonts;
         fonts.reserve(config.fonts.size());
         for (const FontResource& font : config.fonts) {

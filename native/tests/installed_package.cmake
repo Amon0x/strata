@@ -27,6 +27,24 @@ if(STRATA_EXPECT_VSCODE_EXTENSION)
     if(NOT installed_vscode_package_count EQUAL 1)
         message(FATAL_ERROR "SDK installation did not contain exactly one Strata VS Code extension")
     endif()
+    set(installed_compiler "${STRATA_INSTALL_PREFIX}/bin/strata_compile")
+    if(WIN32)
+        string(APPEND installed_compiler ".exe")
+    endif()
+    execute_process(
+        COMMAND "${installed_compiler}" --check-module
+            "${STRATA_INSTALL_PREFIX}/share/assets/strata/ui/demo_surface.strata"
+            "${STRATA_INSTALL_PREFIX}/share/strata/registry-v1.json"
+            "${STRATA_INSTALL_PREFIX}/share/assets/strata/ui/demo_surface.schemas.json"
+        RESULT_VARIABLE installed_compiler_status
+        OUTPUT_VARIABLE installed_compiler_output
+        ERROR_VARIABLE installed_compiler_error
+    )
+    if(NOT installed_compiler_status EQUAL 0)
+        message(FATAL_ERROR
+            "installed compiler could not load the installed external demo package\n"
+            "${installed_compiler_output}\n${installed_compiler_error}")
+    endif()
 endif()
 
 set(configure_command

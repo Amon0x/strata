@@ -310,6 +310,15 @@ Scenario load_scenario(const std::filesystem::path& path) {
     }
     result.root = text(required(application, "root"), "application.root");
     result.packages = strings(optional(application, "packages"), "application.packages");
+    for (const std::string& directory : strings(
+             optional(application, "extensionPaths"),
+             "application.extensionPaths"
+         )) {
+        const std::filesystem::path configured(directory);
+        result.extension_search_paths.push_back(
+            configured.is_absolute() ? configured : path.parent_path() / configured
+        );
+    }
     result.actions = strings(optional(application, "actions"), "application.actions");
     require_relative_resource(result.module, "application.module");
     if (!result.schemas.empty())

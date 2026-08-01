@@ -1,6 +1,7 @@
 if(NOT DEFINED STRATA_COMPILER OR NOT DEFINED STRATA_REGISTRY OR
    NOT DEFINED STRATA_VALID_SOURCE OR NOT DEFINED STRATA_VALID_SCHEMAS OR
-   NOT DEFINED STRATA_TEST_DIRECTORY)
+   NOT DEFINED STRATA_TEST_DIRECTORY OR NOT DEFINED STRATA_EXTENSION_DIRECTORY OR
+   NOT DEFINED STRATA_EXTENSION_SOURCE OR NOT DEFINED STRATA_EXTENSION_SCHEMAS)
     message(FATAL_ERROR "compiler diagnostics JSON test arguments are incomplete")
 endif()
 
@@ -20,6 +21,24 @@ string(JSON valid_count LENGTH "${valid_output}" diagnostics)
 if(NOT valid_format STREQUAL "strata.diagnostics" OR NOT valid_succeeded OR
    NOT valid_count EQUAL 0)
     message(FATAL_ERROR "valid compiler diagnostics document has the wrong shape: ${valid_output}")
+endif()
+
+execute_process(
+    COMMAND "${STRATA_COMPILER}" --extension-path "${STRATA_EXTENSION_DIRECTORY}"
+        --check-module-json "${STRATA_EXTENSION_SOURCE}" "${STRATA_REGISTRY}"
+        "${STRATA_EXTENSION_SCHEMAS}"
+    RESULT_VARIABLE extension_status
+    OUTPUT_VARIABLE extension_output
+    ERROR_VARIABLE extension_error
+)
+if(NOT extension_status EQUAL 0)
+    message(FATAL_ERROR
+        "external package diagnostics check failed\n${extension_output}\n${extension_error}")
+endif()
+string(JSON extension_count LENGTH "${extension_output}" extensionSchemas)
+string(JSON extension_id GET "${extension_output}" extensionSchemas 0 package)
+if(NOT extension_count EQUAL 1 OR NOT extension_id STREQUAL "strata.demo.v1")
+    message(FATAL_ERROR "compiler diagnostics omitted external package metadata: ${extension_output}")
 endif()
 
 file(MAKE_DIRECTORY "${STRATA_TEST_DIRECTORY}")

@@ -15,14 +15,13 @@
 #include <utility>
 #include <vector>
 
-#include <strata/extension.hpp>
-
 #include "compiler/compile.hpp"
 #include "compiler/artifact.hpp"
 #include "compiler/diagnostic.hpp"
 #include "compiler/module.hpp"
 #include "compiler/schema.hpp"
 #include "data/json.hpp"
+#include "host/extensions.hpp"
 #include "resource/resource.hpp"
 
 namespace strata::tools {
@@ -112,13 +111,15 @@ namespace {
 struct ModuleCompilation final {
     std::filesystem::path entry;
     compiler::CompileResult result;
+    std::vector<std::string> extension_schemas;
 };
 
 [[nodiscard]] ModuleCompilation compile_module(
     const std::filesystem::path& entry_path,
     const std::filesystem::path& registry_path,
     const std::filesystem::path& schemas_path,
-    const std::optional<std::filesystem::path>& source_root
+    const std::optional<std::filesystem::path>& source_root,
+    const std::vector<std::filesystem::path>& extension_paths
 ) {
     const std::filesystem::path entry = canonical_file(entry_path, "entry module");
     const std::filesystem::path module_root = entry.parent_path();
@@ -127,6 +128,7 @@ struct ModuleCompilation final {
     compiler::SchemaRegistry registry = compiler::SchemaRegistry::parse(
         data::parse_json(load_file(registry_file))
     );
+    std::vector<std::string> extension_schemas;
     if (!schemas_path.empty()) {
         const std::filesystem::path schemas_file = canonical_file(
             schemas_path,
@@ -143,15 +145,21 @@ struct ModuleCompilation final {
             if (packages->array() == nullptr) {
                 throw std::runtime_error("extensionPackages must be an array of package ids");
             }
+            std::vector<std::string> package_ids;
+            package_ids.reserve(packages->array()->size());
             for (const data::JsonValue& package : *packages->array()) {
                 if (package.string() == nullptr) {
                     throw std::runtime_error("extensionPackages entries must be package id strings");
                 }
-                registry.apply_scenario_declarations(
-                    data::parse_json(
-                        extension::Registry::instance().require(*package.string()).schema_json()
-                    )
-                );
+                package_ids.push_back(*package.string());
+            }
+            const host::SelectedExtensions extensions = host::select_extensions(
+                package_ids,
+                extension_paths
+            );
+            extension_schemas = extensions.schemas();
+            for (const std::string& schema : extension_schemas) {
+                registry.apply_scenario_declarations(data::parse_json(schema));
             }
         }
         registry.apply_scenario_declarations(schemas);
@@ -186,7 +194,7 @@ struct ModuleCompilation final {
         },
         registry
     );
-    return ModuleCompilation{entry, std::move(result)};
+    return ModuleCompilation{entry, std::move(result), std::move(extension_schemas)};
 }
 
 void print_diagnostic(const compiler::Diagnostic& diagnostic) {
@@ -259,10 +267,11 @@ void print_diagnostic(const compiler::Diagnostic& diagnostic) {
 int check_module(
     const std::filesystem::path& entry_path,
     const std::filesystem::path& registry_path,
-    const std::filesystem::path& schemas_path
+    const std::filesystem::path& schemas_path,
+    const std::vector<std::filesystem::path>& extension_paths
 ) {
     ModuleCompilation compilation = compile_module(
-        entry_path, registry_path, schemas_path, std::nullopt
+        entry_path, registry_path, schemas_path, std::nullopt, extension_paths
     );
 
     for (const compiler::Diagnostic& diagnostic : compilation.result.diagnostics) {
@@ -280,16 +289,22 @@ int check_module(
 int check_module_json(
     const std::filesystem::path& entry_path,
     const std::filesystem::path& registry_path,
-    const std::filesystem::path& schemas_path
+    const std::filesystem::path& schemas_path,
+    const std::vector<std::filesystem::path>& extension_paths
 ) {
     try {
         ModuleCompilation compilation = compile_module(
-            entry_path, registry_path, schemas_path, std::nullopt
+            entry_path, registry_path, schemas_path, std::nullopt, extension_paths
         );
         std::vector<data::JsonValue> diagnostics;
         diagnostics.reserve(compilation.result.diagnostics.size());
         for (const compiler::Diagnostic& diagnostic : compilation.result.diagnostics) {
             diagnostics.push_back(diagnostic_json(diagnostic));
+        }
+        std::vector<data::JsonValue> extension_schemas;
+        extension_schemas.reserve(compilation.extension_schemas.size());
+        for (const std::string& schema : compilation.extension_schemas) {
+            extension_schemas.push_back(data::parse_json(schema));
         }
         std::cout << data::encode_json_line(json_object({
             {"format", data::JsonValue("strata.diagnostics")},
@@ -297,6 +312,7 @@ int check_module_json(
             {"succeeded", data::JsonValue(compilation.result.succeeded())},
             {"entry", data::JsonValue(compilation.entry.generic_string())},
             {"diagnostics", data::JsonValue(std::move(diagnostics))},
+            {"extensionSchemas", data::JsonValue(std::move(extension_schemas))},
         }));
         return compilation.result.succeeded() ? 0 : 2;
     } catch (const std::exception& error) {
@@ -315,6 +331,7 @@ int check_module_json(
             {"succeeded", data::JsonValue(false)},
             {"entry", data::JsonValue(entry_path.generic_string())},
             {"diagnostics", data::JsonValue(std::move(diagnostics))},
+            {"extensionSchemas", data::JsonValue(std::vector<data::JsonValue>{})},
         }));
         return 2;
     }
@@ -326,11 +343,12 @@ int write_module_artifact(
     const std::filesystem::path& schemas_path,
     const std::filesystem::path& resource_root,
     const std::filesystem::path& artifact_path,
-    const bool check_only
+    const bool check_only,
+    const std::vector<std::filesystem::path>& extension_paths
 ) {
     const std::filesystem::path root = canonical_directory(resource_root, "resource root");
     ModuleCompilation compilation = compile_module(
-        entry_path, registry_path, schemas_path, root
+        entry_path, registry_path, schemas_path, root, extension_paths
     );
     for (const compiler::Diagnostic& diagnostic : compilation.result.diagnostics) {
         print_diagnostic(diagnostic);

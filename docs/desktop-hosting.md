@@ -64,7 +64,7 @@ Installed targets are:
 | `Strata::c` | Stable shared C ABI. |
 | `Strata::host` | C++ ownership and structured host-data/action bindings. |
 | `Strata::desktop` | Complete reusable Win32/D3D11 application host. |
-| `Strata::extensions` | Native extension package authoring implementation. |
+| `Strata::extensions` | Authoring support linked into independently loaded extension libraries. |
 | `Strata::render_host` | Public stateful packet-v4 decoder used by custom render backends. |
 
 The package also defines:
@@ -95,6 +95,8 @@ config.application_id = "my.tool";
 config.module_resource = "assets/my_tool/app.strata";
 config.schemas_resource = "assets/my_tool/app.schemas.json"; // optional
 config.root_name = "Main";
+config.extension_packages = {"example.meter.v1"};             // optional
+config.extension_search_paths = {resource_root / "extensions"};
 
 strata::desktop::ApplicationHost host(window, resource_root, std::move(config));
 
@@ -148,6 +150,7 @@ example is `share/strata/samples/desktop_app.json`:
     "schemas": "assets/my_tool/app.schemas.json",
     "root": "Main",
     "packages": [],
+    "extensionPaths": [],
     "actions": ["tool.save"]
   },
   "surface": {
@@ -177,7 +180,9 @@ bin\strata_desktop.exe ^
 ```
 
 The runner compiles the configured module and imports, creates one ordinary window, publishes the
-initial snapshots, and installs recording handlers for the listed domain actions. Invoked actions
+initial snapshots, and installs recording handlers for the listed domain actions. Relative
+`extensionPaths` resolve from the launch document; each selected package is loaded from its own
+shared library and retained through Surface release. Invoked actions
 are written to standard output as `STRATA ACTION ...`. The visible host derives scale from the
 window's monitor DPI and viewport; `surface.backend`, `surface.scale`, and scripted `steps` remain
 headless-test settings. Use `Strata::desktop` instead when actions must call directly into the tool's

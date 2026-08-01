@@ -2,7 +2,7 @@
   "name": "strata-language",
   "displayName": "Strata UI Language",
   "description": "Schema-aware completions, hovers, symbols, imports, and native compiler diagnostics for .strata applications.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "strata",
   "license": "MIT",
   "engines": {
@@ -59,6 +59,12 @@
           "type": "string",
           "default": "",
           "description": "Application *.schemas.json used for validation and app-specific completions. Empty discovers a schema beside the module."
+        },
+        "strata.extensions.paths": {
+          "type": "array",
+          "items": {"type": "string"},
+          "default": [],
+          "description": "Directories containing external native extension libraries. Relative paths resolve from the workspace folder."
         },
         "strata.validation.onSave": {
           "type": "boolean",

@@ -515,6 +515,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                         ? strata::desktop::SurfaceRole::screen
                         : strata::desktop::SurfaceRole::overlay;
                     config.extension_packages = application_launch->packages;
+                    config.extension_search_paths = application_launch->extension_search_paths;
                     config.reduced_motion = application_launch->reduced_motion;
                     if (!application_launch->fonts.empty()) {
                         config.fonts.clear();

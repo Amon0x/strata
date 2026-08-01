@@ -1,6 +1,8 @@
 #include <strata/extension.hpp>
 #include <strata/strata.h>
 
+#include "host/extensions.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -326,36 +328,35 @@ void test_definition_diagnostics() {
     );
 }
 
-void test_registry_and_schema_projection() {
-    Registry& registry = Registry::instance();
-    Package& demo = registry.require("strata.demo.v1");
-    check(demo.id() == "strata.demo.v1", "the built-in demo package is not registered");
-    const std::vector<std::string> types = demo.widget_types();
+void test_external_package_and_schema_projection() {
+    strata::host::SelectedExtensions selected =
+        strata::host::select_extensions({"strata.demo.v1"});
     check(
-        types.size() == 2U && types[0] == "DemoPulse" && types[1] == "DemoDisclosure",
-        "the demo package does not project both showcase widgets"
+        selected.packages.size() == 1U && selected.packages.front().id() == "strata.demo.v1",
+        "the external demo package was not loaded"
     );
     check(
-        demo.behavior_ids().size() == 1U && demo.behavior_ids().front() == "demo.inspector-pick",
-        "the demo package does not project its inspector behavior"
+        selected.widgets.size() == 2U && selected.behaviors.size() == 1U,
+        "the external demo package did not project its runtime descriptors"
     );
-    const std::string unknown = rejection([&registry] {
-        static_cast<void>(registry.require("strata.missing.v1"));
+    const std::string unknown = rejection([] {
+        static_cast<void>(strata::host::select_extensions({"strata.missing.v1"}));
     });
     check(
         unknown.find("strata.missing.v1") != std::string::npos &&
-            unknown.find("strata.demo.v1") != std::string::npos,
-        "an unknown package id did not report the registered packages"
+            unknown.find("strata-extension-strata.missing.v1") != std::string::npos,
+        "an unknown external package did not report its id and expected library"
     );
     check(
-        rejection([&registry] {
-            auto conflicting = package("strata.demo.v1");
-            registry.add(std::move(conflicting));
-        }).find("already registered") != std::string::npos,
-        "a duplicate package registration was accepted"
+        rejection([] {
+            static_cast<void>(strata::host::select_extensions(
+                {"strata.demo.v1", "strata.demo.v1"}
+            ));
+        }).find("must be unique") != std::string::npos,
+        "duplicate external package selection was accepted"
     );
 
-    const std::string schema = demo.schema_json();
+    const std::string schema = selected.packages.front().schema_json();
     for (const std::string_view expected : {
              std::string_view(R"("name":"DemoPulse")"),
              std::string_view(R"("name":"DemoDisclosure")"),
@@ -612,7 +613,7 @@ screen Main {
 int main(const int argument_count, const char* const* const arguments) {
     try {
         test_definition_diagnostics();
-        test_registry_and_schema_projection();
+        test_external_package_and_schema_projection();
         if (argument_count == 2) test_surface_lifecycle(std::filesystem::path(arguments[1]));
         std::cout << "strata_extension_tests: OK\n";
         return 0;

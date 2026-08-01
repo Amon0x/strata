@@ -15,6 +15,7 @@
  */
 
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <optional>
@@ -25,6 +26,7 @@
 #include <variant>
 #include <vector>
 
+#include <strata/extension_plugin.h>
 #include <strata/strata.h>
 
 namespace strata::extension {
@@ -605,25 +607,28 @@ private:
     return std::make_unique<Package>(std::move(id));
 }
 
-/**
- * Process-wide package table. Hosts and the module compiler resolve the same ids through this
- * registry; adding a package touches no host or compiler source.
- */
-class Registry final {
-public:
-    [[nodiscard]] static Registry& instance();
+/** Entry-point support used by STRATA_EXTENSION_PACKAGE; not an application-facing callback. */
+namespace detail {
 
-    void add(std::unique_ptr<Package> package);
-    [[nodiscard]] Package* find(std::string_view id) noexcept;
-    /** Fails with a diagnostic naming the unknown id and every registered package. */
-    [[nodiscard]] Package& require(std::string_view id);
-    [[nodiscard]] std::vector<std::string> ids() const;
+using PackageFactory = std::unique_ptr<Package> (*)();
 
-private:
-    std::vector<std::unique_ptr<Package>> packages_;
-};
+[[nodiscard]] strata_status query_plugin(
+    PackageFactory factory,
+    std::uint32_t requested_plugin_abi,
+    strata_extension_plugin* output
+) noexcept;
 
-/** Registers every package shipped in this build. Called once when the registry is created. */
-void register_builtin_packages(Registry& registry);
+} // namespace detail
 
 } // namespace strata::extension
+
+/** Exports one package factory as the stable C extension-library entry point. */
+#define STRATA_EXTENSION_PACKAGE(factory)                                                    \
+    extern "C" STRATA_EXTENSION_PLUGIN_EXPORT strata_status strata_extension_plugin_query( \
+        const std::uint32_t requested_plugin_abi,                                             \
+        strata_extension_plugin* const output                                                 \
+    ) noexcept {                                                                               \
+        return ::strata::extension::detail::query_plugin(                                     \
+            &(factory), requested_plugin_abi, output                                          \
+        );                                                                                    \
+    }

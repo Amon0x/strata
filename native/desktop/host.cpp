@@ -39,11 +39,11 @@
 #include <strata/contracts/performance_hud.hpp>
 #include <strata/contracts/settings_app.hpp>
 #include <strata/contracts/strata_hub.hpp>
-#include <strata/extension.hpp>
 #include <strata/host.hpp>
 #include <strata/strata.hpp>
 
 #include "host_services.hpp"
+#include "host/extensions.hpp"
 #include <strata/render_packet.hpp>
 #include "renderer.hpp"
 #include "showcase.hpp"
@@ -327,6 +327,7 @@ struct Host::Impl final {
         std::unique_ptr<strata::Runtime> runtime;
         std::unique_ptr<AsyncBridge> async;
         std::unique_ptr<strata::host::Bindings> bindings;
+        host::SelectedExtensions extensions;
         std::optional<strata::Surface> surface;
         RenderPacketDecoder decoder;
     };
@@ -846,13 +847,13 @@ struct Host::Impl final {
 
         const std::string registry = services.text("strata/registry-v1.json");
         const std::string schemas = services.text(schemas_resource);
-        std::vector<std::string> extension_schemas;
-        extension_schemas.reserve(extension_packages.size());
+        std::vector<std::string> extension_ids;
+        extension_ids.reserve(extension_packages.size());
         for (const std::string_view package_id : extension_packages) {
-            extension_schemas.push_back(
-                strata::extension::Registry::instance().require(package_id).schema_json()
-            );
+            extension_ids.emplace_back(package_id);
         }
+        result.extensions = host::select_extensions(extension_ids);
+        const std::vector<std::string> extension_schemas = result.extensions.schemas();
         std::vector<strata_string_view> extension_schema_views;
         extension_schema_views.reserve(extension_schemas.size());
         for (const std::string& document : extension_schemas) {
@@ -891,8 +892,7 @@ struct Host::Impl final {
     void activate(
         Session& session,
         const std::string_view source_resource,
-        const std::string_view root_name,
-        const strata_surface_extension_bundle* const extensions
+        const std::string_view root_name
     ) {
         if (!source_resource.ends_with(".strata")) {
             throw std::invalid_argument("desktop bundled module must use a .strata resource id");
@@ -947,7 +947,7 @@ struct Host::Impl final {
         surface_config.environment = environment();
         surface_config.fonts = fonts.data();
         surface_config.font_count = fonts.size();
-        surface_config.extensions = extensions;
+        surface_config.extensions = session.extensions.pointer();
         surface_config.textures = textures.data();
         surface_config.texture_count = textures.size();
         session.surface.emplace(session.runtime->create_surface(surface_config));
@@ -999,8 +999,7 @@ struct Host::Impl final {
         activate(
             settings,
             "assets/strata/ui/settings_app.strata",
-            "SettingsApp",
-            nullptr
+            "SettingsApp"
         );
     }
 
@@ -1051,8 +1050,7 @@ struct Host::Impl final {
         activate(
             showcase,
             "assets/strata/ui/demo_surface.strata",
-            "MainShowcase",
-            &strata::extension::Registry::instance().require(extension_packages.front()).bundle()
+            "MainShowcase"
         );
         strata::require_ok(
             strata_surface_set_profiler_capture(showcase.surface->native_handle(), 1U),
@@ -1341,8 +1339,7 @@ struct Host::Impl final {
         activate(
             debug,
             "assets/strata/ui/debug_overlay.strata",
-            "ProfilerOverlay",
-            nullptr
+            "ProfilerOverlay"
         );
     }
 
@@ -1497,7 +1494,7 @@ struct Host::Impl final {
             }
         );
         publish(hub, "hub.desktop", hub_json());
-        activate(hub, "assets/strata/ui/strata_hub.strata", "StrataHub", nullptr);
+        activate(hub, "assets/strata/ui/strata_hub.strata", "StrataHub");
     }
 
     void toggle_hub() {
@@ -1517,8 +1514,7 @@ struct Host::Impl final {
         activate(
             performance_hud,
             "assets/strata/ui/performance_hud.strata",
-            "PerformanceHud",
-            nullptr
+            "PerformanceHud"
         );
     }
 

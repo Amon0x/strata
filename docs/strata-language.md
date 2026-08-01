@@ -404,6 +404,8 @@ Use `windows-x64` on Windows. For one custom module, invoke the installed compil
 strata_compile --check-module path/to/module.strata path/to/registry-v1.json path/to/module.schemas.json
 ```
 
-The schema argument is optional. Command-line diagnostics include the diagnostic code,
+Prefix repeatable `--extension-path <directory>` options when the schema selects external native
+packages. Use `--check-module-json` for the versioned `strata.diagnostics` document consumed by
+editors. The schema argument is optional. Command-line diagnostics include the diagnostic code,
 `file:line:column`, and message. Runtime diagnostic callbacks additionally carry the full source
 range, component path, expected value, and occurrence metadata.

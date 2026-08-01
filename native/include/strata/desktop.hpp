@@ -37,6 +37,7 @@ struct ApplicationConfig final {
     std::string root_name;
     SurfaceRole root_role = SurfaceRole::overlay;
     std::vector<std::string> extension_packages;
+    std::vector<std::filesystem::path> extension_search_paths;
     std::vector<FontResource> fonts{
         {"strata:fonts/default-medium", "assets/strata/fonts/medium.ttf"},
         {"strata:fonts/default", "assets/strata/fonts/default.ttf"},

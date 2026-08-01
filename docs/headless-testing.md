@@ -105,6 +105,7 @@ the initialized application and accept operations from the control stream instea
     "schemas": "assets/example/app.schemas.json",
     "root": "ExampleRoot",
     "packages": [],
+    "extensionPaths": [],
     "actions": ["example.save"]
   },
   "surface": {
@@ -147,8 +148,10 @@ rejected. Imported modules resolve relative to their importer through the shared
 resolver used by the native hosts.
 
 `application.actions` installs a generic recording handler for each declared host action. Framework
-state actions still execute in the core. Package schemas and runtime extension bundles are selected
-from the same native package definitions, so compiler and Surface capabilities cannot drift.
+state actions still execute in the core. `extensionPaths` are absolute or relative to the scenario
+document. Selected package shared libraries export both their schemas and runtime bundles, so
+compiler and Surface capabilities cannot drift; the headless host keeps them loaded through Surface
+release.
 
 ## Steps and selectors
 

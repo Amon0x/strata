@@ -218,3 +218,5 @@ std::unique_ptr<Package> demo_package() {
 }
 
 } // namespace strata::extension
+
+STRATA_EXTENSION_PACKAGE(strata::extension::demo_package)

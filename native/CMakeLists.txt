@@ -177,7 +177,11 @@ target_include_directories(
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
-target_link_libraries(strata_host_support PUBLIC strata_internal_data Strata::render_host)
+target_link_libraries(
+    strata_host_support
+    PUBLIC strata_internal_data Strata::render_host
+    PRIVATE ${CMAKE_DL_LIBS}
+)
 set_target_properties(strata_host_support PROPERTIES POSITION_INDEPENDENT_CODE ON)
 strata_target_defaults(strata_host_support)
 
@@ -428,23 +432,44 @@ target_include_directories(
     INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/generated>
 )
 
-add_library(
-    strata_extensions
-    STATIC
-        src/extensions/authoring.cpp
-        src/extensions/demo_package.cpp
-        src/extensions/packages.cpp
-)
+# Static C++ authoring support is linked into each external package. Runtime hosts consume only the
+# stable C descriptor exported by that package's shared library.
+add_library(strata_extensions STATIC src/extensions/authoring.cpp)
 add_library(Strata::extensions ALIAS strata_extensions)
 target_link_libraries(strata_extensions PUBLIC Strata::c)
+target_compile_features(strata_extensions PUBLIC cxx_std_23)
 target_include_directories(
     strata_extensions
-    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
 )
-set_target_properties(strata_extensions PROPERTIES EXPORT_NAME extensions)
+set_target_properties(
+    strata_extensions
+    PROPERTIES
+        EXPORT_NAME extensions
+        POSITION_INDEPENDENT_CODE ON
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+)
 strata_target_defaults(strata_extensions)
-# Extension selection is host plumbing, but its descriptors are projected by the package library.
-target_link_libraries(strata_host_support PUBLIC strata_extensions)
+
+add_library(strata_demo_extension SHARED src/extensions/demo_package.cpp)
+target_link_libraries(strata_demo_extension PRIVATE Strata::extensions)
+target_include_directories(strata_demo_extension PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set_target_properties(
+    strata_demo_extension
+    PROPERTIES
+        OUTPUT_NAME "strata-extension-strata.demo.v1"
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+)
+if(APPLE)
+    set_property(TARGET strata_demo_extension PROPERTY INSTALL_RPATH "@loader_path/../..")
+elseif(UNIX)
+    set_property(TARGET strata_demo_extension PROPERTY INSTALL_RPATH "$ORIGIN/../..")
+endif()
+strata_target_defaults(strata_demo_extension)
 
 if(WIN32 AND (STRATA_BUILD_DESKTOP OR STRATA_BUILD_TOOLS))
     add_library(
@@ -490,7 +515,6 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         strata_desktop_host
         PUBLIC Strata::host
         PRIVATE
-            strata_extensions
             Strata::render_host
             d3d11
             d3dcompiler
@@ -503,7 +527,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
     set_target_properties(
         strata_desktop_host
@@ -521,7 +545,8 @@ if(STRATA_BUILD_TOOLS)
         tools/compiler_check.cpp
         tools/compiler_check.hpp
     )
-    target_link_libraries(strata_compile PRIVATE Strata::core strata_extensions)
+    target_link_libraries(strata_compile PRIVATE Strata::core strata_host_support)
+    add_dependencies(strata_compile strata_demo_extension)
     target_include_directories(
         strata_compile
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/tools
@@ -623,7 +648,6 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             Strata::host
             Strata::desktop
             strata_application_contracts
-            strata_extensions
             strata_host_support
             strata_d3d11
             dxgi
@@ -690,7 +714,9 @@ if(STRATA_BUILD_TOOLS)
         add_custom_command(
             TARGET strata_validate_modules
             POST_BUILD
-            COMMAND strata_compile --check-module
+            COMMAND strata_compile
+                --extension-path $<TARGET_FILE_DIR:strata_demo_extension>
+                --check-module
                 "${STRATA_REPOSITORY_ROOT}/${source}"
                 "${STRATA_REGISTRY}"
                 "${STRATA_REPOSITORY_ROOT}/${schemas}"
@@ -700,7 +726,9 @@ if(STRATA_BUILD_TOOLS)
             add_custom_command(
                 TARGET strata_generate_artifacts
                 POST_BUILD
-                COMMAND strata_compile --emit-artifact
+                COMMAND strata_compile
+                    --extension-path $<TARGET_FILE_DIR:strata_demo_extension>
+                    --emit-artifact
                     "${STRATA_REPOSITORY_ROOT}/${source}"
                     "${STRATA_REGISTRY}"
                     "${STRATA_REPOSITORY_ROOT}/${schemas}"
@@ -711,7 +739,9 @@ if(STRATA_BUILD_TOOLS)
             add_custom_command(
                 TARGET strata_check_artifacts
                 POST_BUILD
-                COMMAND strata_compile --check-artifact
+                COMMAND strata_compile
+                    --extension-path $<TARGET_FILE_DIR:strata_demo_extension>
+                    --check-artifact
                     "${STRATA_REPOSITORY_ROOT}/${source}"
                     "${STRATA_REGISTRY}"
                     "${STRATA_REPOSITORY_ROOT}/${schemas}"
@@ -723,7 +753,9 @@ if(STRATA_BUILD_TOOLS)
         if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             add_test(
                 NAME "strata.module.${name}"
-                COMMAND strata_compile --check-module
+                COMMAND strata_compile
+                    --extension-path $<TARGET_FILE_DIR:strata_demo_extension>
+                    --check-module
                     "${STRATA_REPOSITORY_ROOT}/${source}"
                     "${STRATA_REGISTRY}"
                     "${STRATA_REPOSITORY_ROOT}/${schemas}"
@@ -731,7 +763,9 @@ if(STRATA_BUILD_TOOLS)
             if(NOT artifact STREQUAL "")
                 add_test(
                     NAME "strata.artifact.${name}"
-                    COMMAND strata_compile --check-artifact
+                    COMMAND strata_compile
+                        --extension-path $<TARGET_FILE_DIR:strata_demo_extension>
+                        --check-artifact
                         "${STRATA_REPOSITORY_ROOT}/${source}"
                         "${STRATA_REGISTRY}"
                         "${STRATA_REPOSITORY_ROOT}/${schemas}"
@@ -808,6 +842,9 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                 -DSTRATA_VALID_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/assets/strata/ui/settings_app.strata
                 -DSTRATA_VALID_SCHEMAS=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/assets/strata/ui/settings_app.schemas.json
                 -DSTRATA_TEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/compiler-diagnostics-json
+                -DSTRATA_EXTENSION_DIRECTORY=$<TARGET_FILE_DIR:strata_demo_extension>
+                -DSTRATA_EXTENSION_SOURCE=${STRATA_REPOSITORY_ROOT}/src/main/resources/assets/strata/ui/demo_surface.strata
+                -DSTRATA_EXTENSION_SCHEMAS=${STRATA_REPOSITORY_ROOT}/src/main/resources/assets/strata/ui/demo_surface.schemas.json
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/compiler_diagnostics_json.cmake
         )
         add_test(
@@ -995,7 +1032,8 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     )
 
     add_executable(strata_extension_tests tests/extension_tests.cpp)
-    target_link_libraries(strata_extension_tests PRIVATE strata_extensions)
+    target_link_libraries(strata_extension_tests PRIVATE strata_extensions strata_host_support)
+    add_dependencies(strata_extension_tests strata_demo_extension)
     strata_target_defaults(strata_extension_tests)
     add_test(
         NAME strata.extension
@@ -1123,6 +1161,11 @@ install(
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
+install(
+    TARGETS strata_demo_extension
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib/strata/extensions
+)
 if(WIN32 AND STRATA_BUILD_DESKTOP)
     install(
         TARGETS strata_desktop_host
@@ -1168,6 +1211,8 @@ install(
         samples/cpp_smoke.cpp
         samples/installed/contract.schemas.json
         samples/installed/contract_smoke.cpp
+        samples/installed/external_extension.cpp
+        samples/installed/extension_loader_smoke.cpp
         samples/desktop_app.cpp
         samples/desktop_app.json
     DESTINATION share/strata/samples

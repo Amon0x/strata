@@ -15,8 +15,9 @@ It provides:
 Install the Strata SDK or build the repository, then set `strata.compiler.path` if automatic
 discovery cannot find `strata_compile`. `strata.registry.path` and
 `strata.applicationSchemas.path` accept absolute paths, workspace-relative paths, or
-`${workspaceFolder}` placeholders. The command **Strata: Validate Current Module** saves and checks
-the active module immediately.
+`${workspaceFolder}` placeholders. External package directories go in `strata.extensions.paths` and
+are forwarded as repeatable native compiler `--extension-path` options. The command **Strata:
+Validate Current Module** saves and checks the active module immediately.
 
 Validation intentionally runs on open/save rather than against a second JavaScript parser. The
 native compiler remains the only authority for imports, schema composition, semantic types, and

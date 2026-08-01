@@ -8,6 +8,7 @@ const childProcess = require('child_process');
 const selector = { language: 'strata', scheme: 'file' };
 const core = require('./strata-completions.json');
 const schemaCache = new Map();
+const extensionSchemaCache = new Map();
 const validatedUris = new Map();
 let discoveredSchemas = [];
 let missingCompilerReported = false;
@@ -17,12 +18,22 @@ function workspaceFolder(document) {
     return folder ? folder.uri.fsPath : path.dirname(document.uri.fsPath);
 }
 
-function configuredPath(document, setting) {
-    const configured = vscode.workspace.getConfiguration('strata', document.uri).get(setting, '');
-    if (!configured) return '';
+function resolveWorkspacePath(document, configured) {
     const root = workspaceFolder(document);
     const expanded = configured.replaceAll('${workspaceFolder}', root);
     return path.isAbsolute(expanded) ? expanded : path.resolve(root, expanded);
+}
+
+function configuredPath(document, setting) {
+    const configured = vscode.workspace.getConfiguration('strata', document.uri).get(setting, '');
+    return configured ? resolveWorkspacePath(document, configured) : '';
+}
+
+function extensionPaths(document) {
+    return vscode.workspace.getConfiguration('strata', document.uri)
+        .get('extensions.paths', [])
+        .filter(value => typeof value === 'string' && value.length !== 0)
+        .map(value => resolveWorkspacePath(document, value));
 }
 
 function existing(candidates) {
@@ -87,6 +98,14 @@ function appSchema(document) {
     return readSchema(schemaPath(document));
 }
 
+function schemaDocuments(document) {
+    const application = appSchema(document);
+    return [
+        ...(application ? [application] : []),
+        ...(extensionSchemaCache.get(document.uri.toString()) || []),
+    ];
+}
+
 function typeLabel(type) {
     if (!type || typeof type !== 'object') return 'value';
     if (type.ref) return type.ref;
@@ -115,44 +134,54 @@ function widgets(document) {
         ...widget,
         parameters: widget.parameters.map(normalizeParameter),
     }));
-    for (const widget of appSchema(document)?.widgets?.definitions || []) {
-        values.push({
-            ...widget,
-            parameters: (widget.parameters || []).map(normalizeParameter),
-        });
+    for (const schema of schemaDocuments(document)) {
+        for (const widget of schema.widgets?.definitions || []) {
+            values.push({
+                ...widget,
+                parameters: (widget.parameters || []).map(normalizeParameter),
+            });
+        }
     }
     return values;
 }
 
 function behaviors(document) {
     const values = [...core.behaviors];
-    for (const behavior of appSchema(document)?.behaviors?.definitions || []) {
-        values.push({
-            id: behavior.id,
-            optionsType: typeLabel(behavior.optionsType || behavior.options),
-        });
+    for (const schema of schemaDocuments(document)) {
+        for (const behavior of schema.behaviors?.definitions || []) {
+            values.push({
+                id: behavior.id,
+                optionsType: typeLabel(behavior.optionsType || behavior.options),
+            });
+        }
+        for (const id of schema.behaviors?.ids || []) {
+            values.push({ id, optionsType: 'map of any' });
+        }
     }
     return values;
 }
 
 function actions(document) {
     const values = core.actions.map(action => ({ ...action, parameters: action.parameters.map(normalizeParameter) }));
-    const schema = appSchema(document);
-    for (const action of schema?.actions?.definitions || []) {
-        values.push({
-            id: action.id,
-            summary: action.summary || action.id,
-            dispatchPolicy: action.dispatchPolicy || 'optional',
-            payloadContract: action.payloadContract || 'no payload',
-            parameters: (action.arguments || []).map(normalizeParameter),
-        });
+    for (const schema of schemaDocuments(document)) {
+        for (const action of schema.actions?.definitions || []) {
+            values.push({
+                id: action.id,
+                summary: action.summary || action.id,
+                dispatchPolicy: action.dispatchPolicy || 'optional',
+                payloadContract: action.payloadContract || 'no payload',
+                parameters: (action.arguments || []).map(normalizeParameter),
+            });
+        }
     }
     return values;
 }
 
 function hostRoots(document) {
     const result = new Map();
-    for (const root of appSchema(document)?.host || []) result.set(root.path, root.type);
+    for (const schema of schemaDocuments(document)) {
+        for (const root of schema.host || []) result.set(root.path, root.type);
+    }
     return result;
 }
 
@@ -444,7 +473,9 @@ async function validateDocument(document, diagnostics, output, explicit) {
     }
     const compiler = compilerPath(document);
     const schema = schemaPath(document);
-    const args = ['--check-module-json', document.uri.fsPath, registry];
+    const args = [];
+    for (const directory of extensionPaths(document)) args.push('--extension-path', directory);
+    args.push('--check-module-json', document.uri.fsPath, registry);
     if (schema) args.push(schema);
     const result = await executeCompiler(compiler, args, workspaceFolder(document));
     const lines = result.stdout.trim().split(/\r?\n/);
@@ -471,6 +502,11 @@ async function validateDocument(document, diagnostics, output, explicit) {
         output.appendLine(`Invalid Strata compiler diagnostics: ${error}`);
         return;
     }
+    const entryKey = document.uri.toString();
+    extensionSchemaCache.set(
+        entryKey,
+        (report.extensionSchemas || []).filter(value => value && typeof value === 'object')
+    );
     const grouped = new Map();
     for (const record of report.diagnostics || []) {
         let file = record.range?.sourceId || document.uri.fsPath;
@@ -488,7 +524,6 @@ async function validateDocument(document, diagnostics, output, explicit) {
         if (!grouped.has(key)) grouped.set(key, { uri, values: [] });
         grouped.get(key).values.push(diagnostic);
     }
-    const entryKey = document.uri.toString();
     for (const previous of validatedUris.get(entryKey) || []) {
         diagnostics.delete(vscode.Uri.parse(previous));
     }
@@ -526,6 +561,7 @@ function activate(context) {
         }),
         vscode.commands.registerCommand('strata.reloadSchema', async () => {
             schemaCache.clear();
+            extensionSchemaCache.clear();
             await discoverApplicationSchemas();
             vscode.window.showInformationMessage('Strata schemas and completion metadata reloaded.');
         }),
@@ -546,10 +582,12 @@ function activate(context) {
                 diagnostics.delete(vscode.Uri.parse(published));
             }
             validatedUris.delete(key);
+            extensionSchemaCache.delete(key);
         }),
         vscode.workspace.onDidChangeConfiguration(event => {
             if (!event.affectsConfiguration('strata')) return;
             schemaCache.clear();
+            extensionSchemaCache.clear();
             for (const document of vscode.workspace.textDocuments) {
                 if (document.languageId === 'strata') validateDocument(document, diagnostics, output, false);
             }

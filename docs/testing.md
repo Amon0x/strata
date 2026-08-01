@@ -6,7 +6,8 @@ contract.
 ## Native unit and ABI tests
 
 CTest builds separate executables for core ownership, strict data, compiler, runtime, UI,
-input/editor, extensions, and the public ABI. Installed-package C and C++ consumers are also tested.
+input/editor, external extension loading, and the public ABI. Installed-package C and C++
+consumers also build and query an independent extension shared library.
 Run the complete platform gate from the repository root:
 
 ```bat

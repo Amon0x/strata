@@ -28,4 +28,26 @@ else()
     set(Strata_DESKTOP_RUNNER "")
 endif()
 
+function(strata_configure_extension target package_id)
+    if(NOT TARGET "${target}")
+        message(FATAL_ERROR "strata_configure_extension target '${target}' does not exist")
+    endif()
+    if(NOT package_id MATCHES "^[A-Za-z0-9][A-Za-z0-9._-]*$")
+        message(FATAL_ERROR "invalid Strata extension package id '${package_id}'")
+    endif()
+    target_link_libraries("${target}" PRIVATE Strata::extensions)
+    set_target_properties(
+        "${target}"
+        PROPERTIES
+            OUTPUT_NAME "strata-extension-${package_id}"
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN YES
+    )
+    if(APPLE)
+        set_property(TARGET "${target}" PROPERTY INSTALL_RPATH "@loader_path/../..")
+    elseif(UNIX)
+        set_property(TARGET "${target}" PROPERTY INSTALL_RPATH "$ORIGIN/../..")
+    endif()
+endfunction()
+
 check_required_components(Strata)

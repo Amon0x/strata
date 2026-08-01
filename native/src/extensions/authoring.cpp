@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <format>
+#include <mutex>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -922,51 +923,52 @@ std::vector<std::string> Package::behavior_ids() const {
     return ids;
 }
 
-Registry& Registry::instance() {
-    static Registry registry = [] {
-        Registry created;
-        register_builtin_packages(created);
-        return created;
-    }();
-    return registry;
-}
+namespace detail {
 
-void Registry::add(std::unique_ptr<Package> package) {
-    if (package == nullptr) throw std::invalid_argument("extension package must not be null");
-    if (find(package->id()) != nullptr) {
-        throw std::invalid_argument(
-            "extension package '" + package->id() + "' is already registered"
-        );
+strata_status query_plugin(
+    const PackageFactory factory,
+    const std::uint32_t requested_plugin_abi,
+    strata_extension_plugin* const output
+) noexcept {
+    if (output == nullptr || output->struct_size < sizeof(strata_extension_plugin) ||
+        factory == nullptr) {
+        return STRATA_STATUS_INVALID_ARGUMENT;
     }
-    packages_.push_back(std::move(package));
-}
-
-Package* Registry::find(const std::string_view id) noexcept {
-    for (const std::unique_ptr<Package>& package : packages_) {
-        if (package->id() == id) return package.get();
+    if (requested_plugin_abi != STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT) {
+        return STRATA_STATUS_UNSUPPORTED_ABI;
     }
-    return nullptr;
-}
-
-Package& Registry::require(const std::string_view id) {
-    Package* const package = find(id);
-    if (package != nullptr) return *package;
-    std::string known;
-    for (const std::string& registered : ids()) {
-        if (!known.empty()) known += ", ";
-        known += registered;
+    try {
+        static std::mutex mutex;
+        static PackageFactory active_factory = nullptr;
+        static std::unique_ptr<Package> package;
+        static std::string schema;
+        const std::scoped_lock lock(mutex);
+        if (active_factory != nullptr && active_factory != factory) {
+            return STRATA_STATUS_INVARIANT_FAILURE;
+        }
+        if (package == nullptr) {
+            package = factory();
+            if (package == nullptr) return STRATA_STATUS_INTERNAL_ERROR;
+            schema = package->schema_json();
+            static_cast<void>(package->bundle());
+            active_factory = factory;
+        }
+        *output = strata_extension_plugin{
+            sizeof(strata_extension_plugin),
+            STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT,
+            STRATA_ABI_VERSION_CURRENT,
+            view(package->id()),
+            view(schema),
+            &package->bundle(),
+        };
+        return STRATA_STATUS_OK;
+    } catch (const std::bad_alloc&) {
+        return STRATA_STATUS_OUT_OF_MEMORY;
+    } catch (...) {
+        return STRATA_STATUS_INTERNAL_ERROR;
     }
-    throw std::invalid_argument(
-        "unknown native extension package '" + std::string(id) + "'; registered packages: " +
-        (known.empty() ? std::string("none") : known)
-    );
 }
 
-std::vector<std::string> Registry::ids() const {
-    std::vector<std::string> result;
-    result.reserve(packages_.size());
-    for (const std::unique_ptr<Package>& package : packages_) result.push_back(package->id());
-    return result;
-}
+} // namespace detail
 
 } // namespace strata::extension
