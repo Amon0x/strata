@@ -811,13 +811,10 @@ struct Host::Impl final {
      * second contract.
      */
     void declare_materials(const strata::Runtime& runtime) {
-        for (const strata_material_declaration& declaration :
+        for (const strata::MaterialDeclaration& declaration :
              runtime.material_declarations("hlsl")) {
-            if (declaration.source.size == 0U) continue;
-            renderer.declare_material(
-                std::string_view(declaration.id.data, declaration.id.size),
-                services.text(std::string(declaration.source.data, declaration.source.size))
-            );
+            if (declaration.source.empty()) continue;
+            renderer.declare_material(declaration.id, services.text(declaration.source));
         }
     }
 

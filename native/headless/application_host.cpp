@@ -373,12 +373,13 @@ struct ApplicationHost::Impl final {
             extension_schema_views.size(),
         };
         runtime->configure_application(application);
-        for (const strata_material_declaration& material : runtime->material_declarations("hlsl")) {
-            if (material.source.size == 0U)
-                continue;
-            renderer->declare_material(std::string_view(material.id.data, material.id.size),
-                                       read_text(resource_path(std::string_view(
-                                           material.source.data, material.source.size))));
+        for (const strata::MaterialDeclaration& material :
+             runtime->material_declarations("hlsl")) {
+            if (material.source.empty()) continue;
+            renderer->declare_material(
+                material.id,
+                read_text(resource_path(material.source))
+            );
         }
 
         const strata_durable_store_adapter durable_adapter{

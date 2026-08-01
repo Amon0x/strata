@@ -63,8 +63,10 @@ host texture owner is alive, call `strata_surface_acknowledge_release_packet`, a
 `strata_surface_release`. Preparation is idempotent and terminal, but is not proof of consumption;
 out-of-order release is refused and leaves the handle recoverable. Runtime release likewise refuses
 live Surfaces. `strata_surface_abandon` is an explicit delivery-impossible fallback that may leave
-host GPU resources alive. The C++ facade requires explicit `Surface::close()` or `abandon()`; a live
-Surface reaching its destructor is a fatal ownership invariant violation.
+host GPU resources alive. The normal C++ path uses explicit `Surface::close()` or `abandon()`; a
+live Surface reaching its destructor automatically uses that abandon path and emits
+`STRATA.SURFACE.RELEASE_ABANDONED`; explicit packet consumption and `Surface::close()` remain the
+normal leak-free path.
 
 ## Platform builds
 
@@ -110,7 +112,10 @@ reconstruct package paths; `Strata_DESKTOP_RUNNER` exists only when the desktop 
 
 The installed sample project configures against only the install prefix. Its portable C and C++
 programs configure an application, activate `.strata`, create/frame a Surface, decode packet v4,
-exercise resource reload, inspect allocator telemetry, and release every handle. On Windows it also
+exercise resource reload, inspect allocator telemetry, and release every handle. The public C++
+facade is split into focused owned-value headers (`diagnostic.hpp`, `input.hpp`, `adapters.hpp`,
+`profiler.hpp`, and `config.hpp`) aggregated by `strata.hpp`; custom hosts do not need to keep
+borrowed C strings or callback bridge records alive. On Windows it also
 builds a hidden one-frame program linked through `Strata::desktop`. See
 [`docs/embedding.md`](../docs/embedding.md) for portable package and custom-renderer consumption, and
 [`docs/desktop-hosting.md`](../docs/desktop-hosting.md) for Win32 deployment.

@@ -1544,17 +1544,44 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Render packet v1 is little-endian and tightly encoded (no native padding):
- * "STRATARP", u32 version, u32 command count, u64 frame index, then repeated
- * [u32 kind, u32 payload byte count, payload]. Strings are u32 byte count + UTF-8.
- * Material parameters carry [string name, u32 value kind, string canonical JSON],
- * preserving semantic scalar kinds that have identical JSON representations.
+ * Packet v4 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
+ * [u32 kind, u32 payload byte count, payload]:
+ *
+ *   bytes[8] "STRATARP", u32 version, u32 resource count, u32 batch count,
+ *   u64 frame index, u64 geometry epoch, u32 vertex byte count, u32 index count,
+ *   u32 planned draw count, u32 skipped draw count, resource records, vertex bytes,
+ *   little-endian u32 indices, submission batch records.
+ *
+ * A vertex is 88 bytes: f32 x/y/z/u/v, u8 red/green/blue/alpha, then sixteen f32 material values.
+ * Draw payloads contain source order, a u32 framebuffer scissor, material/blend strings, optional
+ * texture id, and base-vertex/first-index/index-count. Blur payloads contain the common source
+ * order/scissor followed by f64 x/y/width/height/radius and u32 downsample. Resource payloads begin
+ * with a texture-id string. Atlas create/upload then carry u32 format (0 = R8, 1 = RGBA8) and u32
+ * x/y/width/height; upload adds u32 byte count and raw texels. Release has no additional fields.
+ * Encoded texture creation carries u32 encoding (0 = PNG), u32 sampling, u32 width/height, a u32
+ * byte count, and encoded bytes. A repeated geometry epoch has identical geometry and batch shape,
+ * allowing the backend to retain its prior upload while still applying ordered resources and the
+ * new frame index.
+ *
+ * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
+ * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v4 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
 #define STRATA_RENDER_PACKET_VERSION_3 UINT32_C(3)
 #define STRATA_RENDER_PACKET_VERSION_4 UINT32_C(4)
 #define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_4
+#define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
+
+#define STRATA_RENDER_RESOURCE_ATLAS_CREATE UINT32_C(0)
+#define STRATA_RENDER_RESOURCE_ATLAS_UPLOAD UINT32_C(1)
+#define STRATA_RENDER_RESOURCE_TEXTURE_RELEASE UINT32_C(2)
+#define STRATA_RENDER_RESOURCE_ENCODED_TEXTURE UINT32_C(3)
+
+#define STRATA_RENDER_BATCH_DRAW UINT32_C(0)
+#define STRATA_RENDER_BATCH_BLUR UINT32_C(1)
 
 #define STRATA_RENDER_COMMAND_SOLID_RECT UINT32_C(0)
 #define STRATA_RENDER_COMMAND_ROUNDED_RECT UINT32_C(1)

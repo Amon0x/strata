@@ -47,16 +47,41 @@ library.
 
 ## C++ facade
 
-The C++ wrapper converts result checks and releases into normal scope ownership:
+The C++ wrapper owns callback storage, input text, configurations, adapter state, snapshots, and
+handles while preserving the same ABI contracts:
 
 ```cpp
-strata::Runtime runtime(runtime_config);
-runtime.configure_application(application_config);
-if (runtime.activate(activation_config).status != STRATA_ACTIVATION_ACTIVATED) {
+strata::RuntimeOptions runtime_options;
+runtime_options.diagnostic = [](const strata::Diagnostic& diagnostic) {
+    log(diagnostic.code, diagnostic.message);
+};
+strata::Runtime runtime(std::move(runtime_options));
+
+runtime.configure_application(strata::ApplicationOptions{
+    .id = "example.application",
+    .registry_json = registry_json,
+});
+if (!runtime.activate(strata::SourceActivation{
+        .generation = 1,
+        .entry_source_id = "ui/main.strata",
+        .entry_text = source_text,
+    }).activated()) {
     throw std::runtime_error("source activation was rejected");
 }
 
-strata::Surface surface = runtime.create_surface(surface_config);
+strata::SurfaceOptions surface_options;
+surface_options.id = "example.surface";
+surface_options.root_role = strata::SurfaceRootRole::screen;
+surface_options.root_name = "Main";
+surface_options.environment.framebuffer_width = 1280;
+surface_options.environment.framebuffer_height = 720;
+surface_options.environment.logical_width = 1280.0;
+surface_options.environment.logical_height = 720.0;
+strata::Surface surface = runtime.create_surface(surface_options);
+
+static_cast<void>(surface.enqueue(strata::InputEvent::pointer(
+    strata::InputKind::pointer_move, strata::Point{32.0, 48.0}
+)));
 const strata_surface_frame_info frame = surface.frame(now_nanos);
 const std::vector<std::uint8_t> packet = surface.render_packet();
 const std::vector<std::uint8_t> terminal = surface.prepare_release_packet();
@@ -66,9 +91,18 @@ surface.close();
 runtime.close();
 ```
 
+`Runtime` exposes owned `std::function` adapters for resources, durability, asynchronous host data,
+clipboard, IME, and domain effects. It also provides owned diagnostics, activation results, action
+results, source-map results, and RAII runtime/application-state snapshots. `AbiError` includes the
+matching diagnostic code and message whenever the ABI reports a diagnostic identity. Owned
+runtime/Surface profiler snapshots and host-frame telemetry use the same facade. Raw C
+structures remain available as an escape hatch.
+
 A C++ `Surface` retains shared runtime ownership, so moving it out of the runtime's lexical scope is
-safe. See [cpp_smoke.cpp](../native/samples/cpp_smoke.cpp) for activation, resource reload, canonical
-frame reading, and telemetry.
+safe. Explicit release-packet consumption and `close()` remain the correct shutdown path. If a live
+Surface is forgotten, its destructor uses the delivery-impossible abandon path and emits
+`STRATA.SURFACE.RELEASE_ABANDONED` instead of terminating the process. See
+[cpp_smoke.cpp](../native/samples/cpp_smoke.cpp) for the installed typed flow.
 
 Applications that need an ordinary Win32 window should not manually consume render packets. Link
 `Strata::desktop` and use `<strata/desktop.hpp>`; it owns the production packet decoder, D3D11
@@ -178,8 +212,8 @@ safe insets, snapping, density, reduced-motion preference, and input capabilitie
 ordered batches, call `strata_surface_frame`, then read packet v4 through a bytes sink.
 
 The packet bytes are borrowed only during the sink callback. Copy them if the backend submits later;
-consume them directly if submission is synchronous. Packet v3 already contains native geometry,
-indices, scissors, materials, textures, draw/effect batches, and one-shot GPU resource operations.
+consume them directly if submission is synchronous. Packet v4 contains native geometry,
+indices, scissors, materials, textures, draw/blur batches, and one-shot GPU resource operations.
 Hosts must not redo layout, glyph generation, or batch planning.
 
 Canonical frame JSON is an optional inspection/conformance projection and is deliberately lazy. It
@@ -190,7 +224,8 @@ while the host texture owner is alive, explicitly acknowledge that consumption, 
 Surface. Preparation alone never authorizes release. Failed or out-of-order release retains the
 handle for retry, and a runtime refuses release while it still owns any Surface. Explicit abandon is
 reserved for cases where delivery is impossible and the host independently discards remaining GPU
-resources.
+resources. The C++ destructor treats a forgotten live Surface as that failure mode and reports it
+through the diagnostic sink.
 
 ## Reload and failure recovery
 

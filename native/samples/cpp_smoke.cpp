@@ -9,15 +9,12 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
 
 static_assert(STRATA_THEME_MODEL_VERSION_CURRENT == STRATA_THEME_MODEL_VERSION_3);
-
-std::int64_t smoke_clock(void* const user_data) {
-    return *static_cast<const std::int64_t*>(user_data);
-}
 
 [[nodiscard]] std::string read_file(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
@@ -43,30 +40,14 @@ int main(const int argument_count, const char* const* const arguments) {
             "style Root { width: { weight: 1 }; height: { weight: 1 }; background: #334155FF; } "
             "overlay Main { root Panel(key: \"embedded.panel\", style: Root) }";
 
-        strata_runtime_config runtime_config{};
-        runtime_config.struct_size = sizeof(runtime_config);
-        runtime_config.abi_version = STRATA_ABI_VERSION_CURRENT;
-        runtime_config.required_capabilities = STRATA_CAPABILITY_CORE_LIFECYCLE |
-            STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
-            STRATA_CAPABILITY_COMPILER_ACTIVATION |
-            STRATA_CAPABILITY_SURFACE_RUNTIME |
-            STRATA_CAPABILITY_SURFACE_RENDER_PACKET |
-            STRATA_CAPABILITY_HOST_SNAPSHOTS |
-            STRATA_CAPABILITY_ALLOCATOR_TELEMETRY |
-            STRATA_CAPABILITY_SURFACE_RESOURCE_RELOAD;
-        runtime_config.clock = strata_clock{sizeof(strata_clock), &now, &smoke_clock};
-
         strata::Surface surface = [&] {
-            strata::Runtime runtime(runtime_config);
-            const strata_application_config application{
-                sizeof(strata_application_config),
-                strata::view("installed.cpp.application"),
-                strata::view(registry),
-                {},
-                nullptr,
-                0U,
-            };
-            runtime.configure_application(application);
+            strata::RuntimeOptions runtime_options;
+            runtime_options.clock = [&now] { return now; };
+            strata::Runtime runtime(std::move(runtime_options));
+            runtime.configure_application(strata::ApplicationOptions{
+                .id = "installed.cpp.application",
+                .registry_json = registry,
+            });
             strata::host::Revision model_revision;
             strata::host::Bindings bindings(runtime, "installed.cpp.host");
             bindings.snapshot(
@@ -79,48 +60,35 @@ int main(const int argument_count, const char* const* const arguments) {
                 }
             );
             bindings.synchronize();
-            const strata_activation_config activation{
-                sizeof(strata_activation_config),
-                1U,
-                strata::view("installed/cpp/main.strata"),
-                strata::view(source),
-                nullptr,
-                nullptr,
-            };
-            if (runtime.activate(activation).status != STRATA_ACTIVATION_ACTIVATED) {
+            if (!runtime.activate(strata::SourceActivation{
+                    .generation = 1U,
+                    .entry_source_id = "installed/cpp/main.strata",
+                    .entry_text = std::string(source),
+                }).activated()) {
                 throw std::runtime_error("installed C++ source did not activate");
             }
             if (runtime.memory_info().routed_current_bytes == 0U) {
                 throw std::runtime_error("installed C++ allocator telemetry is empty");
             }
-            strata_surface_config config{};
-            config.struct_size = sizeof(config);
-            config.id = strata::view("installed.cpp.surface");
-            config.root_role = STRATA_SURFACE_ROOT_OVERLAY;
-            config.root_name = strata::view("Main");
-            config.environment = strata_surface_environment{
-                sizeof(strata_surface_environment),
-                1U,
-                800,
-                600,
-                800.0,
-                600.0,
-                1.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                STRATA_POINT_SNAP_NEAREST,
-                STRATA_RECTANGLE_SNAP_OUTWARD,
-                STRATA_SURFACE_DENSITY_COMFORTABLE,
-                STRATA_POINTER_PRECISION_FINE,
-                STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD,
-                0U,
-                0U,
-            };
-            return runtime.create_surface(config);
+            strata::SurfaceOptions surface_options;
+            surface_options.id = "installed.cpp.surface";
+            surface_options.root_role = strata::SurfaceRootRole::overlay;
+            surface_options.root_name = "Main";
+            surface_options.environment.framebuffer_width = 800;
+            surface_options.environment.framebuffer_height = 600;
+            surface_options.environment.logical_width = 800.0;
+            surface_options.environment.logical_height = 600.0;
+            surface_options.environment.rectangle_snapping = strata::RectangleSnap::outward;
+            return runtime.create_surface(surface_options);
         }();
 
+        const strata::InputEvent pointer = strata::InputEvent::pointer(
+            strata::InputKind::pointer_move,
+            strata::Point{400.0, 300.0}
+        );
+        if (surface.enqueue(pointer).accepted_event_count != 1U) {
+            throw std::runtime_error("installed C++ input facade rejected pointer input");
+        }
         static_cast<void>(surface.frame(now));
         surface.reload_resources();
         ++now;
@@ -141,7 +109,7 @@ int main(const int argument_count, const char* const* const arguments) {
         }
         surface.acknowledge_release_packet();
         surface.close();
-        std::cout << "strata_cpp_smoke: RAII runtime, compile, Surface, packet, and telemetry OK\n";
+        std::cout << "strata_cpp_smoke: typed runtime, input, Surface, packet, and telemetry OK\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "strata_cpp_smoke: " << error.what() << '\n';

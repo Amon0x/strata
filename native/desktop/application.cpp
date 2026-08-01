@@ -278,13 +278,10 @@ struct ApplicationHost::Impl final {
         runtime->configure_application(application);
         bindings = std::make_unique<strata::host::Bindings>(*runtime, config.application_id);
 
-        for (const strata_material_declaration& declaration :
+        for (const strata::MaterialDeclaration& declaration :
              runtime->material_declarations("hlsl")) {
-            if (declaration.source.size == 0U)
-                continue;
-            renderer.declare_material(
-                std::string_view(declaration.id.data, declaration.id.size),
-                services.text(std::string_view(declaration.source.data, declaration.source.size)));
+            if (declaration.source.empty()) continue;
+            renderer.declare_material(declaration.id, services.text(declaration.source));
         }
     }
 
