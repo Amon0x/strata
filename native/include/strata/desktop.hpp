@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -70,9 +72,9 @@ struct Diagnostic final {
  * Reusable Win32/D3D11 host for one application and one Surface.
  *
  * Construct the host, register actions and snapshots through bindings(), then call activate(). The
- * window procedure forwards resize/input methods and the message loop calls frame(). The host owns
- * resource loading, source imports, clipboard integration, packet decoding, D3D11 submission, and
- * the ordered Surface release barrier.
+ * window procedure delegates to handle_window_message() and the message loop calls frame(). The host
+ * owns resource loading, source imports, clipboard/IME integration, packet decoding, D3D11
+ * submission, and the ordered Surface release barrier.
  */
 class ApplicationHost final {
   public:
@@ -99,8 +101,21 @@ class ApplicationHost final {
     void key(std::uint32_t virtual_key,
              std::uint32_t action = STRATA_KEY_PRESS);
     void text(std::string utf8);
+    void ime_preedit(std::string utf8, std::size_t selection_start, std::size_t selection_end);
     void cancel_interactions() noexcept;
 
+    /**
+     * Handles resize, DPI, pointer capture/leave, wheel, keyboard, Unicode, focus cancellation,
+     * and Win32 IME messages. A value is the consumed LRESULT; nullopt means call DefWindowProcW.
+     */
+    [[nodiscard]] std::optional<std::intptr_t> handle_window_message(
+        std::uint32_t message,
+        std::uintptr_t word,
+        std::intptr_t long_value
+    );
+
+    /** Drops cached files and reloads Surface-owned fonts, textures, and other resources. */
+    void reload_resources();
     /** Synchronizes host bindings, frames the Surface, submits D3D11 work, and presents. */
     void frame();
     /** Performs the packet consumption barrier and releases all runtime ownership. */

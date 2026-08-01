@@ -355,6 +355,7 @@ struct Host::Impl final {
         display_scale = desktop_display_scale(
             framebuffer_width, framebuffer_height, dpi_scale
         );
+        services.set_surface_scale(display_scale);
         renderer.resize(
             framebuffer_width,
             framebuffer_height,
@@ -757,7 +758,7 @@ struct Host::Impl final {
             STRATA_SURFACE_DENSITY_COMFORTABLE,
             STRATA_POINTER_PRECISION_FINE,
             STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD |
-                STRATA_SURFACE_INPUT_CLIPBOARD,
+                STRATA_SURFACE_INPUT_IME | STRATA_SURFACE_INPUT_CLIPBOARD,
             0U,
             0U,
         };
@@ -843,6 +844,11 @@ struct Host::Impl final {
         strata::require_ok(
             strata_runtime_set_clipboard_adapter(result.runtime->native_handle(), &clipboard),
             "desktop clipboard adapter installation"
+        );
+        const strata_ime_adapter ime = services.ime_adapter(result.id);
+        strata::require_ok(
+            strata_runtime_set_ime_adapter(result.runtime->native_handle(), &ime),
+            "desktop IME adapter installation"
         );
 
         const std::string registry = services.text("strata/registry-v1.json");
@@ -1633,6 +1639,7 @@ struct Host::Impl final {
         framebuffer_width = next_width;
         framebuffer_height = next_height;
         display_scale = desktop_display_scale(next_width, next_height, next_scale);
+        services.set_surface_scale(display_scale);
         renderer.resize(next_width, next_height, logical_width(), logical_height());
         ++environment_generation;
         const strata_surface_environment next = environment();
@@ -1661,7 +1668,7 @@ struct Host::Impl final {
         event.modifiers = current_modifiers();
         event.text = strata::view(input_text);
         event.timestamp_nanoseconds = now();
-        event.key_action = STRATA_KEY_PRESS;
+        if (event.kind != STRATA_INPUT_KEY) event.key_action = STRATA_KEY_PRESS;
         strata_surface_input_batch_info info{sizeof(strata_surface_input_batch_info)};
         strata::require_ok(
             strata_surface_enqueue_input(session->surface->native_handle(), &event, 1U, &info),
@@ -1960,31 +1967,25 @@ void Host::scroll(
     impl_->enqueue(event);
 }
 
-void Host::key(const std::uint32_t virtual_key) {
+void Host::key(const std::uint32_t virtual_key, const std::uint32_t action) {
     impl_->flush_pointer_move();
-    if (virtual_key == VK_F6) {
-        impl_->toggle_settings();
-        return;
-    }
-    if (virtual_key == VK_F7) {
-        impl_->toggle_showcase();
-        return;
-    }
-    if (virtual_key == VK_F8) {
-        impl_->cycle_debug((GetKeyState(VK_SHIFT) & 0x8000) != 0);
-        return;
-    }
-    if (virtual_key == VK_F9) {
-        impl_->toggle_performance_hud();
-        return;
-    }
-    if (virtual_key == VK_F10) {
-        impl_->toggle_hub();
+    if (virtual_key >= VK_F6 && virtual_key <= VK_F10) {
+        if (action == STRATA_KEY_PRESS) {
+            switch (virtual_key) {
+            case VK_F6: impl_->toggle_settings(); break;
+            case VK_F7: impl_->toggle_showcase(); break;
+            case VK_F8: impl_->cycle_debug((GetKeyState(VK_SHIFT) & 0x8000) != 0); break;
+            case VK_F9: impl_->toggle_performance_hud(); break;
+            case VK_F10: impl_->toggle_hub(); break;
+            default: break;
+            }
+        }
         return;
     }
     const std::string name = key_name(virtual_key);
     strata_input_event event{};
     event.kind = STRATA_INPUT_KEY;
+    event.key_action = action;
     impl_->enqueue(event, name);
 }
 
@@ -1995,9 +1996,28 @@ void Host::text(std::string utf8) {
     impl_->enqueue(event, utf8);
 }
 
+void Host::ime_preedit(
+    std::string utf8,
+    const std::size_t selection_start,
+    const std::size_t selection_end
+) {
+    impl_->flush_pointer_move();
+    strata_input_event event{};
+    event.kind = STRATA_INPUT_IME_PREEDIT;
+    event.selection_start = selection_start;
+    event.selection_end = selection_end;
+    impl_->enqueue(event, utf8);
+}
+
 void Host::cancel_interactions() noexcept {
     impl_->pending_pointer_move.reset();
-    for (Impl::Session* session : {&impl_->showcase, &impl_->debug}) {
+    for (Impl::Session* session : {
+             &impl_->showcase,
+             &impl_->settings,
+             &impl_->debug,
+             &impl_->hub,
+             &impl_->performance_hud,
+         }) {
         if (session->surface.has_value()) {
             static_cast<void>(strata_surface_cancel_interactions(
                 session->surface->native_handle()

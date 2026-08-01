@@ -503,6 +503,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         STATIC
             desktop/application.cpp
             desktop/host_services.cpp
+            desktop/ime.cpp
             desktop/renderer.cpp
             host/extensions.cpp
             host/module_path.cpp
@@ -518,6 +519,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             Strata::render_host
             d3d11
             d3dcompiler
+            imm32
             ole32
             user32
             windowscodecs

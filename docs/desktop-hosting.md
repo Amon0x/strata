@@ -7,8 +7,9 @@ Strata ships two desktop entry points:
 - `strata_desktop.exe --application ...` is a configurable runner for viewing an application without
   writing host code. With no `--application`, the executable opens Strata's bundled showcase.
 
-Both paths use the same public C ABI, packet-v4 decoder, D3D11 renderer, resource loader, clipboard
-adapter, source-import resolver, and ordered GPU-resource release barrier.
+Both paths use the same public C ABI, packet-v4 decoder, D3D11 renderer, resource loader,
+clipboard/IMM32 adapters, source-import resolver, complete window-message translator, and ordered
+GPU-resource release barrier.
 
 ## Build and install the SDK from source
 
@@ -114,18 +115,26 @@ host.publish(
 host.activate();
 ```
 
-The window procedure forwards physical client coordinates and Win32 virtual keys:
+Forward messages through the complete Win32 integration rather than translating individual events
+in every application:
 
 ```cpp
-host.resize(framebuffer_width, framebuffer_height, dpi / 96.0);
-host.pointer(STRATA_INPUT_POINTER_MOVE, 0, x, y);
-host.scroll(x, y, delta_x, delta_y);
-host.key(virtual_key, STRATA_KEY_PRESS);
-host.key(virtual_key, STRATA_KEY_RELEASE);
-host.text(committed_utf8);
+if (const auto result = host.handle_window_message(message, wparam, lparam)) {
+    return static_cast<LRESULT>(*result);
+}
+return DefWindowProcW(window, message, wparam, lparam);
 ```
 
-The message loop calls `host.frame()`. The host synchronizes revision-watched bindings, frames the
+The handler owns DPI/client resizing, mouse-leave tracking, capture, click-to-focus, wheel routing,
+key press/repeat/release, UTF-16 surrogate and `WM_UNICHAR` conversion, focus cancellation, and IMM32
+composition/result messages. Composition selections are converted from UTF-16 positions to the
+UTF-8 byte ranges required by Strata. The installed IME adapter positions the system composition
+and candidate windows at the logical editor caret using the current Surface scale.
+
+Low-level `resize`, `pointer`, `scroll`, `key`, `text`, and `ime_preedit` methods remain available to
+applications with an existing platform translation layer. `reload_resources()` invalidates the
+file cache, advances the adapter generation, and performs the Surface reload barrier for changed
+fonts and textures. The message loop calls `host.frame()`. The host synchronizes revision-watched bindings, frames the
 Surface, decodes packet v4, submits D3D11 work, and presents. `close()` is optional during ordinary
 scope destruction; calling it explicitly reports release errors. Either path consumes and
 acknowledges the terminal resource packet before releasing the Surface.

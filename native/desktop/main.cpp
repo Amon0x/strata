@@ -22,6 +22,7 @@
 #include "data/json.hpp"
 #include "headless/scenario.hpp"
 #include "host.hpp"
+#include "ime.hpp"
 #include "performance.hpp"
 
 namespace {
@@ -45,29 +46,6 @@ std::size_t active_window_count = 0U;
     return result;
 }
 
-[[nodiscard]] std::string character_utf8(const wchar_t first, const wchar_t second = 0) {
-    const wchar_t characters[2]{first, second};
-    const int count = second == 0 ? 1 : 2;
-    const int size = WideCharToMultiByte(
-        CP_UTF8, WC_ERR_INVALID_CHARS, characters, count, nullptr, 0, nullptr, nullptr
-    );
-    if (size <= 0) throw std::runtime_error("Win32 character input is not valid Unicode");
-    std::string result(static_cast<std::size_t>(size), '\0');
-    if (WideCharToMultiByte(
-            CP_UTF8,
-            WC_ERR_INVALID_CHARS,
-            characters,
-            count,
-            result.data(),
-            size,
-            nullptr,
-            nullptr
-        ) != size) {
-        throw std::runtime_error("Win32 character conversion was incomplete");
-    }
-    return result;
-}
-
 struct WindowApplication final {
     std::unique_ptr<strata::desktop::Host> host;
     std::unique_ptr<strata::desktop::ApplicationHost> application_host;
@@ -75,6 +53,7 @@ struct WindowApplication final {
     HWND window_handle = nullptr;
     wchar_t high_surrogate = 0;
     std::uint32_t captured_buttons = 0U;
+    bool tracking_mouse_leave = false;
     bool registered = false;
 
     [[nodiscard]] bool has_host() const noexcept {
@@ -114,7 +93,7 @@ struct WindowApplication final {
 
     void key(const std::uint32_t virtual_key, const std::uint32_t action) {
         if (host != nullptr) {
-            if (action == STRATA_KEY_PRESS) host->key(virtual_key);
+            host->key(virtual_key, action);
         } else if (application_host != nullptr) {
             application_host->key(virtual_key, action);
         }
@@ -123,6 +102,27 @@ struct WindowApplication final {
     void text(std::string value) {
         if (host != nullptr) host->text(std::move(value));
         else if (application_host != nullptr) application_host->text(std::move(value));
+    }
+
+    void ime_preedit(
+        std::string value,
+        const std::size_t selection_start,
+        const std::size_t selection_end
+    ) {
+        if (host != nullptr) {
+            host->ime_preedit(std::move(value), selection_start, selection_end);
+        } else if (application_host != nullptr) {
+            application_host->ime_preedit(std::move(value), selection_start, selection_end);
+        }
+    }
+
+    void ime_composition(const std::intptr_t flags) {
+        const strata::desktop::win32::ImeUpdate update =
+            strata::desktop::win32::read_ime_update(window_handle, flags);
+        if (update.committed.has_value() && !update.committed->empty()) text(*update.committed);
+        if (update.preedit.has_value()) {
+            ime_preedit(*update.preedit, update.selection_start, update.selection_end);
+        }
     }
 
     void cancel_interactions() noexcept {
@@ -147,12 +147,14 @@ struct WindowApplication final {
         }
         if (value >= 0xDC00 && value <= 0xDFFF) {
             if (high_surrogate == 0) return;
-            text(character_utf8(high_surrogate, value));
+            text(strata::desktop::win32::utf8_character(high_surrogate, value));
             high_surrogate = 0;
             return;
         }
         high_surrogate = 0;
-        if (value >= 0x20 && value != 0x7f) text(character_utf8(value));
+        if (value >= 0x20 && value != 0x7f) {
+            text(strata::desktop::win32::utf8_character(value));
+        }
     }
 };
 
@@ -197,6 +199,13 @@ LRESULT CALLBACK window_procedure(
     WindowApplication* const app = application(window);
     if (app == nullptr) return DefWindowProcW(window, message, word, long_value);
     try {
+        if (app->application_host != nullptr && message != WM_CLOSE && message != WM_DESTROY) {
+            const std::optional<std::intptr_t> handled =
+                app->application_host->handle_window_message(message, word, long_value);
+            return handled.has_value()
+                ? static_cast<LRESULT>(*handled)
+                : DefWindowProcW(window, message, word, long_value);
+        }
         switch (message) {
         case WM_SIZE:
             app->resize(window, long_value);
@@ -218,6 +227,12 @@ LRESULT CALLBACK window_procedure(
             return 0;
         }
         case WM_MOUSEMOVE:
+            if (!app->tracking_mouse_leave) {
+                TRACKMOUSEEVENT tracking{
+                    sizeof(TRACKMOUSEEVENT), TME_LEAVE, window, HOVER_DEFAULT,
+                };
+                app->tracking_mouse_leave = TrackMouseEvent(&tracking) != FALSE;
+            }
             app->pointer(
                 STRATA_INPUT_POINTER_MOVE,
                 0,
@@ -225,11 +240,31 @@ LRESULT CALLBACK window_procedure(
                 GET_Y_LPARAM(long_value)
             );
             return 0;
+        case WM_MOUSELEAVE:
+            app->tracking_mouse_leave = false;
+            if (app->captured_buttons == 0U) {
+                app->pointer(STRATA_INPUT_POINTER_CANCEL, 0, 0.0, 0.0);
+            }
+            return 0;
+        case WM_XBUTTONDOWN: {
+            const bool first = GET_XBUTTON_WPARAM(word) == XBUTTON1;
+            app->captured_buttons |= first ? 8U : 16U;
+            SetFocus(window);
+            SetCapture(window);
+            app->pointer(
+                STRATA_INPUT_POINTER_PRESS,
+                first ? 3 : 4,
+                GET_X_LPARAM(long_value),
+                GET_Y_LPARAM(long_value)
+            );
+            return 1;
+        }
         case WM_LBUTTONDOWN:
         case WM_RBUTTONDOWN:
         case WM_MBUTTONDOWN:
             app->captured_buttons |= message == WM_LBUTTONDOWN ? 1U
                 : message == WM_RBUTTONDOWN ? 2U : 4U;
+            SetFocus(window);
             SetCapture(window);
             app->pointer(
                 STRATA_INPUT_POINTER_PRESS,
@@ -238,6 +273,18 @@ LRESULT CALLBACK window_procedure(
                 GET_Y_LPARAM(long_value)
             );
             return 0;
+        case WM_XBUTTONUP: {
+            const bool first = GET_XBUTTON_WPARAM(word) == XBUTTON1;
+            app->pointer(
+                STRATA_INPUT_POINTER_RELEASE,
+                first ? 3 : 4,
+                GET_X_LPARAM(long_value),
+                GET_Y_LPARAM(long_value)
+            );
+            app->captured_buttons &= first ? ~8U : ~16U;
+            if (app->captured_buttons == 0U && GetCapture() == window) ReleaseCapture();
+            return 1;
+        }
         case WM_LBUTTONUP:
         case WM_RBUTTONUP:
         case WM_MBUTTONUP:
@@ -249,7 +296,7 @@ LRESULT CALLBACK window_procedure(
             );
             app->captured_buttons &= message == WM_LBUTTONUP ? ~1U
                 : message == WM_RBUTTONUP ? ~2U : ~4U;
-            if (app->captured_buttons == 0U) ReleaseCapture();
+            if (app->captured_buttons == 0U && GetCapture() == window) ReleaseCapture();
             return 0;
         case WM_MOUSEWHEEL: {
             POINT point{GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value)};
@@ -274,7 +321,12 @@ LRESULT CALLBACK window_procedure(
             return 0;
         }
         case WM_KEYDOWN:
-            app->key(static_cast<std::uint32_t>(word), STRATA_KEY_PRESS);
+            app->key(
+                static_cast<std::uint32_t>(word),
+                (HIWORD(long_value) & KF_REPEAT) != 0U
+                    ? STRATA_KEY_REPEAT
+                    : STRATA_KEY_PRESS
+            );
             return 0;
         case WM_KEYUP:
             app->key(static_cast<std::uint32_t>(word), STRATA_KEY_RELEASE);
@@ -284,10 +336,20 @@ LRESULT CALLBACK window_procedure(
             // it as an application shortcut, so forwarding it to DefWindowProc would logically
             // toggle the surface and then stall visible presentation until menu mode is dismissed.
             if (word == VK_F10) {
-                app->key(VK_F10, STRATA_KEY_PRESS);
+                app->key(
+                    VK_F10,
+                    (HIWORD(long_value) & KF_REPEAT) != 0U
+                        ? STRATA_KEY_REPEAT
+                        : STRATA_KEY_PRESS
+                );
                 return 0;
             }
-            app->key(static_cast<std::uint32_t>(word), STRATA_KEY_PRESS);
+            app->key(
+                static_cast<std::uint32_t>(word),
+                (HIWORD(long_value) & KF_REPEAT) != 0U
+                    ? STRATA_KEY_REPEAT
+                    : STRATA_KEY_PRESS
+            );
             return DefWindowProcW(window, message, word, long_value);
         case WM_SYSKEYUP:
             app->key(static_cast<std::uint32_t>(word), STRATA_KEY_RELEASE);
@@ -296,10 +358,33 @@ LRESULT CALLBACK window_procedure(
         case WM_CHAR:
             if (app->host != nullptr) app->character(static_cast<wchar_t>(word));
             return 0;
+        case WM_UNICHAR:
+            if (word == UNICODE_NOCHAR) return 1;
+            if (word < 0x20U || word == 0x7FU) return 0;
+            if (const std::string value = strata::desktop::win32::utf8_code_point(
+                    static_cast<std::uint32_t>(word)
+                ); !value.empty()) {
+                app->text(value);
+            }
+            return 0;
+        case WM_IME_STARTCOMPOSITION:
+            app->ime_preedit({}, 0U, 0U);
+            return 0;
+        case WM_IME_COMPOSITION:
+            app->ime_composition(long_value);
+            return 0;
+        case WM_IME_ENDCOMPOSITION:
+            app->ime_preedit({}, 0U, 0U);
+            return 0;
+        case WM_IME_CHAR:
+            return 0;
         case WM_KILLFOCUS:
         case WM_CANCELMODE:
             app->captured_buttons = 0U;
+            app->high_surrogate = 0;
+            app->ime_preedit({}, 0U, 0U);
             app->cancel_interactions();
+            if (GetCapture() == window) ReleaseCapture();
             return 0;
         case WM_CAPTURECHANGED:
             if (app->captured_buttons != 0U) {

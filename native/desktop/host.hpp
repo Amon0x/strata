@@ -1,9 +1,12 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
+
+#include <strata/strata.h>
 
 struct HWND__;
 using HWND = HWND__*;
@@ -68,8 +71,12 @@ public:
     void resize(std::uint32_t framebuffer_width, std::uint32_t framebuffer_height, double scale);
     void pointer(std::uint32_t kind, std::int32_t button, double x, double y);
     void scroll(double x, double y, double delta_x, double delta_y);
-    void key(std::uint32_t virtual_key);
+    void key(
+        std::uint32_t virtual_key,
+        std::uint32_t action = STRATA_KEY_PRESS
+    );
     void text(std::string utf8);
+    void ime_preedit(std::string utf8, std::size_t selection_start, std::size_t selection_end);
     void cancel_interactions() noexcept;
     /** Persists the completed native move/resize immediately instead of relying on shutdown. */
     void persist_window_geometry();

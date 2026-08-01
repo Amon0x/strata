@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -10,7 +11,6 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
-#include <windowsx.h>
 
 #include <strata/desktop.hpp>
 
@@ -18,25 +18,8 @@ namespace {
 
 constexpr wchar_t window_class_name[] = L"StrataInstalledDesktopExample";
 
-[[nodiscard]] std::string character_utf8(const wchar_t first, const wchar_t second = 0) {
-    const wchar_t characters[2]{first, second};
-    const int count = second == 0 ? 1 : 2;
-    const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, characters, count, nullptr,
-                                         0, nullptr, nullptr);
-    if (size <= 0)
-        throw std::runtime_error("Win32 character input is not valid Unicode");
-    std::string result(static_cast<std::size_t>(size), '\0');
-    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, characters, count, result.data(), size,
-                            nullptr, nullptr) != size) {
-        throw std::runtime_error("Win32 character conversion was incomplete");
-    }
-    return result;
-}
-
 struct WindowState final {
     std::unique_ptr<strata::desktop::ApplicationHost> host;
-    wchar_t high_surrogate = 0;
-    std::uint32_t captured_buttons = 0U;
     std::string failure;
 
     void fail(const std::exception& error) noexcept {
@@ -46,22 +29,6 @@ struct WindowState final {
             failure = "desktop example failed without a diagnostic";
         }
         PostQuitMessage(1);
-    }
-
-    void character(const wchar_t value) {
-        if (value >= 0xD800 && value <= 0xDBFF) {
-            high_surrogate = value;
-            return;
-        }
-        if (value >= 0xDC00 && value <= 0xDFFF) {
-            if (high_surrogate != 0)
-                host->text(character_utf8(high_surrogate, value));
-            high_surrogate = 0;
-            return;
-        }
-        high_surrogate = 0;
-        if (value >= 0x20 && value != 0x7f)
-            host->text(character_utf8(value));
     }
 };
 
@@ -80,87 +47,14 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
     if (app == nullptr)
         return DefWindowProcW(window, message, word, long_value);
     try {
+        if (app->host != nullptr && message != WM_CLOSE && message != WM_DESTROY) {
+            const std::optional<std::intptr_t> handled =
+                app->host->handle_window_message(message, word, long_value);
+            return handled.has_value()
+                ? static_cast<LRESULT>(*handled)
+                : DefWindowProcW(window, message, word, long_value);
+        }
         switch (message) {
-        case WM_SIZE:
-            if (app->host != nullptr && LOWORD(long_value) != 0U && HIWORD(long_value) != 0U) {
-                const UINT dpi = GetDpiForWindow(window);
-                app->host->resize(LOWORD(long_value), HIWORD(long_value),
-                                  dpi == 0U ? 1.0 : static_cast<double>(dpi) / 96.0);
-            }
-            return 0;
-        case WM_DPICHANGED: {
-            const auto* bounds = reinterpret_cast<const RECT*>(long_value);
-            SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-                         bounds->bottom - bounds->top, SWP_NOACTIVATE | SWP_NOZORDER);
-            return 0;
-        }
-        case WM_MOUSEMOVE:
-            if (app->host != nullptr)
-                app->host->pointer(STRATA_INPUT_POINTER_MOVE, 0, GET_X_LPARAM(long_value),
-                                   GET_Y_LPARAM(long_value));
-            return 0;
-        case WM_LBUTTONDOWN:
-        case WM_RBUTTONDOWN:
-        case WM_MBUTTONDOWN:
-            app->captured_buttons |=
-                message == WM_LBUTTONDOWN ? 1U : message == WM_RBUTTONDOWN ? 2U : 4U;
-            SetCapture(window);
-            if (app->host != nullptr)
-                app->host->pointer(STRATA_INPUT_POINTER_PRESS,
-                                   message == WM_LBUTTONDOWN ? 0
-                                   : message == WM_RBUTTONDOWN ? 1 : 2,
-                                   GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value));
-            return 0;
-        case WM_LBUTTONUP:
-        case WM_RBUTTONUP:
-        case WM_MBUTTONUP:
-            if (app->host != nullptr)
-                app->host->pointer(STRATA_INPUT_POINTER_RELEASE,
-                                   message == WM_LBUTTONUP ? 0
-                                   : message == WM_RBUTTONUP ? 1 : 2,
-                                   GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value));
-            app->captured_buttons &=
-                message == WM_LBUTTONUP ? ~1U : message == WM_RBUTTONUP ? ~2U : ~4U;
-            if (app->captured_buttons == 0U)
-                ReleaseCapture();
-            return 0;
-        case WM_MOUSEWHEEL:
-        case WM_MOUSEHWHEEL: {
-            POINT point{GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value)};
-            ScreenToClient(window, &point);
-            const double delta = static_cast<double>(GET_WHEEL_DELTA_WPARAM(word)) / WHEEL_DELTA;
-            if (app->host != nullptr)
-                app->host->scroll(point.x, point.y, message == WM_MOUSEHWHEEL ? delta : 0.0,
-                                  message == WM_MOUSEWHEEL ? delta : 0.0);
-            return 0;
-        }
-        case WM_KEYDOWN:
-        case WM_SYSKEYDOWN:
-            if (app->host != nullptr)
-                app->host->key(static_cast<std::uint32_t>(word), STRATA_KEY_PRESS);
-            return message == WM_KEYDOWN ? 0 : DefWindowProcW(window, message, word, long_value);
-        case WM_KEYUP:
-        case WM_SYSKEYUP:
-            if (app->host != nullptr)
-                app->host->key(static_cast<std::uint32_t>(word), STRATA_KEY_RELEASE);
-            return message == WM_KEYUP ? 0 : DefWindowProcW(window, message, word, long_value);
-        case WM_CHAR:
-            if (app->host != nullptr)
-                app->character(static_cast<wchar_t>(word));
-            return 0;
-        case WM_KILLFOCUS:
-        case WM_CANCELMODE:
-            app->captured_buttons = 0U;
-            if (app->host != nullptr)
-                app->host->cancel_interactions();
-            return 0;
-        case WM_CAPTURECHANGED:
-            if (app->captured_buttons != 0U) {
-                app->captured_buttons = 0U;
-                if (app->host != nullptr)
-                    app->host->cancel_interactions();
-            }
-            return 0;
         case WM_CLOSE:
             DestroyWindow(window);
             return 0;
@@ -220,7 +114,26 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         app.host = std::make_unique<strata::desktop::ApplicationHost>(window, resources,
                                                                       std::move(config));
         app.host->activate();
-        if (!smoke) {
+        if (smoke) {
+            const std::optional<std::intptr_t> unicode_query =
+                app.host->handle_window_message(WM_UNICHAR, UNICODE_NOCHAR, 0);
+            const std::optional<std::intptr_t> pointer_move = app.host->handle_window_message(
+                WM_MOUSEMOVE,
+                0U,
+                MAKELPARAM(4, 4)
+            );
+            const std::optional<std::intptr_t> pointer_leave =
+                app.host->handle_window_message(WM_MOUSELEAVE, 0U, 0);
+            const std::optional<std::intptr_t> ime_start =
+                app.host->handle_window_message(WM_IME_STARTCOMPOSITION, 0U, 0);
+            const std::optional<std::intptr_t> ime_end =
+                app.host->handle_window_message(WM_IME_ENDCOMPOSITION, 0U, 0);
+            if (unicode_query != 1 || pointer_move != 0 || pointer_leave != 0 ||
+                ime_start != 0 || ime_end != 0) {
+                throw std::runtime_error("desktop window-message integration rejected smoke input");
+            }
+            app.host->reload_resources();
+        } else {
             ShowWindow(window, SW_SHOW);
             UpdateWindow(window);
         }

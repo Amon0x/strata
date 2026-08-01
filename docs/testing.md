@@ -40,7 +40,8 @@ See [Headless application testing](headless-testing.md) for the batch and intera
 
 On Windows, `strata.desktop.smoke` creates two hidden Win32 windows with independent runtimes and
 renderers. It verifies isolated host snapshots, packet submission, and lifecycle cleanup through the
-production D3D11 path.
+production D3D11 path. The installed desktop smoke also compiles and runs the public window-message
+integration that owns pointer capture/leave, Unicode, DPI, and IMM32 routing.
 
 The installed-package test stages a real CMake installation, configures a separate consumer against
 only that prefix, then builds and runs the portable C/C++ applications. Windows additionally builds
