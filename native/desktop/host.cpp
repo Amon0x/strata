@@ -933,6 +933,18 @@ struct Host::Impl final {
         };
         constexpr std::array images{
             strata_surface_image_resource{
+                strata::view("strata:brand/mark"),
+                strata::view("assets/strata/images/brand/strata-mark.svg"),
+                STRATA_IMAGE_SAMPLING_LINEAR,
+                0U,
+            },
+            strata_surface_image_resource{
+                strata::view("strata:brand/northstar-hero"),
+                strata::view("assets/strata/images/brand/northstar-hero.svg"),
+                STRATA_IMAGE_SAMPLING_LINEAR,
+                0U,
+            },
+            strata_surface_image_resource{
                 strata::view("strata:ui/icons/chevron-down"),
                 strata::view("assets/strata/images/ui/icons/chevron-down.svg"),
                 STRATA_IMAGE_SAMPLING_LINEAR,

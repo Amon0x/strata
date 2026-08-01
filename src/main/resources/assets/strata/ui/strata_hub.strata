@@ -336,10 +336,7 @@ animation ModalEnter {
 component Logo() {
   Panel(style: BrandRow) {
     Panel(style: BrandMark) {
-      Draw(style: BrandGlyph, shapes: [
-        { kind: "path", commands: "M 0.18 0.72 C 0.34 0.20 0.65 0.20 0.82 0.72 C 0.62 0.58 0.38 0.58 0.18 0.72 Z", fill: #203126FF },
-        { kind: "path", commands: "M 0.50 0.24 L 0.50 0.78", stroke: #203126FF, strokeStyle: { width: 1.5, cap: "round" } }
-      ])
+      Image(image: "strata:brand/mark", tint: #203126FF, style: BrandGlyph)
     }
     Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 1 }) {
       Text(text: "morrow", style: BrandName)
@@ -405,7 +402,9 @@ component SidebarView(section: string, setSection: action) {
 
 component CompactNavigation(section: string) {
   Panel(style: CompactNav) {
-    Panel(style: BrandMark) { Text(text: "m", style: AvatarText) }
+    Panel(style: BrandMark) {
+      Image(image: "strata:brand/mark", tint: #203126FF, style: BrandGlyph)
+    }
     NavItemView(id: "compact.home", label: "Overview", count: "", selected: section == "HOME", select: action("state.set", name: "section", value: "HOME"))
     NavItemView(id: "compact.projects", label: "Projects", count: "", selected: section == "PROJECTS", select: action("state.set", name: "section", value: "PROJECTS"))
     NavItemView(id: "compact.library", label: "Library", count: "", selected: section == "LIBRARY", select: action("state.set", name: "section", value: "LIBRARY"))
@@ -472,9 +471,9 @@ component OverviewPage(taskOne: boolean, taskTwo: boolean, taskThree: boolean, o
 
     Panel(style: env.compact ? CompactFeatureCard : FeatureCard, effect: effect("shadow", color: #20312633, radius: 20, spread: 1)) {
       Panel(style: FeatureCopy) {
-        Text(text: "FEATURED PROJECT", style: FeatureEyebrow)
+        Text(text: "FEATURED PROJECT · LIVE SVG", style: FeatureEyebrow)
         Text(text: "Northstar brand system", style: FeatureTitle)
-        Text(text: "The final identity review is ready. Three decisions remain before the handoff on Friday.", style: FeatureBody, wrapMode: "WORD")
+        Text(text: "The final vector identity is loaded as a real SVG image resource—fills, strokes, opacity and an even-odd cutout rendered at any scale.", style: FeatureBody, wrapMode: "WORD")
         Panel(style: FeatureMetaRow) {
           Panel(style: ProgressTrack) { Panel(style: ProgressFill) }
           Text(text: "72%", style: FeatureEyebrow)
@@ -487,13 +486,11 @@ component OverviewPage(taskOne: boolean, taskTwo: boolean, taskThree: boolean, o
         }
       }
       if !env.compact {
-        Draw(style: FeatureVisual, shapes: [
-          { kind: "ellipse", center: { x: 0.54, y: 0.50 }, radiusX: 0.40, radiusY: 0.40, fill: #D8F79D18, stroke: #D8F79D2B, strokeStyle: { width: 1 } },
-          { kind: "ellipse", center: { x: 0.54, y: 0.50 }, radiusX: 0.29, radiusY: 0.29, fill: #D8F79D20, stroke: #D8F79D47, strokeStyle: { width: 1 } },
-          { kind: "path", commands: "M 0.20 0.64 C 0.34 0.14 0.65 0.12 0.85 0.57 C 0.63 0.46 0.40 0.47 0.20 0.64 Z", fill: { kind: "linear", angle: 150, stops: [ { color: #D8F79DFF }, { color: #7CA94BFF } ] } },
-          { kind: "path", commands: "M 0.53 0.20 C 0.49 0.42 0.49 0.61 0.54 0.80", stroke: #F1FFD8CC, strokeStyle: { width: 2, cap: "round" } },
-          { kind: "ellipse", center: { x: 0.78, y: 0.25 }, radiusX: 0.025, radiusY: 0.025, fill: #F3FFDFFF }
-        ])
+        Image(
+          key: "overview.northstar-svg",
+          image: "strata:brand/northstar-hero",
+          style: FeatureVisual
+        )
       }
     }
 
