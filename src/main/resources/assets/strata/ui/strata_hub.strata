@@ -1,311 +1,307 @@
-// Morrow is a complete product workspace, not a framework showcase or host control panel.
-// F10 merely gives the host a convenient way to present it. Everything visible below is ordinary
-// portable .strata UI: responsive composition, local state, vector artwork, motion and controls.
+// Morrow is a complete product workspace presented by F10. Its visual language is intentionally
+// singular: an atmospheric authored material behind nested optic-glass surfaces.
 
 style Clear { background: null; border: null; }
 
+style GlassSurface {
+  background: #A9D9FF20;
+  border: { width: 1, color: #DDF2FF2C };
+  effect: effect(
+    "morrow:optic-glass",
+    blurRadius: 14,
+    downsample: 2,
+    refraction: 18,
+    tint: #BCE8FF12,
+    saturation: 1.35,
+    highlight: 0.58,
+    noise: 0.06
+  );
+}
+
 style AppBackdrop {
   kind: "OVERLAY"; width: { weight: 1 }; height: { weight: 1 };
-  padding: 18; alignItems: "CENTER"; justifyContent: "CENTER";
-  background: {
-    kind: "radial", center: { x: 0.72, y: 0.08 }, radiusX: 1.0, radiusY: 1.25,
-    stops: [
-      { color: #24344BE8, offset: 0 },
-      { color: #111823F5, offset: 0.48 },
-      { color: #090D14FC, offset: 1 }
-    ]
-  };
-  effect: effect("blur", radius: 8, downsample: 2);
+  padding: 20; alignItems: "CENTER"; justifyContent: "CENTER";
+  background: #030713FF; border: null;
 }
 
-style AppShell {
+style AppShell extends GlassSurface {
   kind: "ROW"; width: { weight: 1 }; height: { weight: 1 };
-  radius: 20; gap: 0; clip: true;
-  background: #F5F2EBFF;
-  border: { width: 1, color: #FFFFFF2E };
+  radius: 24; gap: 0; clip: true;
+  background: #08132166;
+  border: { width: 1, color: #E2F3FF38 };
 }
-
 style CompactShell extends AppShell { kind: "COLUMN"; }
 
 style Sidebar {
-  kind: "COLUMN"; width: 226; height: { weight: 1 };
-  padding: { horizontal: 16, vertical: 18 }; gap: 8;
-  background: {
-    kind: "linear", angle: 165,
-    stops: [
-      { color: #18251FFF, offset: 0 },
-      { color: #101915FF, offset: 1 }
-    ]
-  };
-  border: null;
+  kind: "COLUMN"; width: 238; height: { weight: 1 };
+  padding: { horizontal: 17, vertical: 18 }; gap: 9;
+  background: #050D186E;
+  border: { width: 1, color: #D7ECFF18 };
 }
-
 style CompactNav {
-  kind: "ROW"; width: { weight: 1 }; height: 66;
+  kind: "ROW"; width: { weight: 1 }; height: 68;
   padding: { horizontal: 14, vertical: 10 }; gap: 8; alignItems: "CENTER";
-  background: #142019FF; border: null;
+  background: #07111E70; border: { width: 1, color: #E2F3FF20 };
 }
 
 style BrandRow extends Clear {
   kind: "ROW"; width: { weight: 1 }; height: 44; gap: 10; alignItems: "CENTER";
 }
-
 style BrandMark {
-  kind: "PANEL"; width: 34; height: 34; radius: 11;
+  kind: "PANEL"; width: 35; height: 35; radius: 12;
   alignItems: "CENTER"; justifyContent: "CENTER";
   background: {
     kind: "linear", angle: 145,
-    stops: [ { color: #D6FF8CFF }, { color: #A7E25FFF } ]
+    stops: [ { color: #93E8FFFF }, { color: #A998FFFF } ]
   };
-  border: { width: 1, color: #ECFFC7A6 };
+  border: { width: 1, color: #F2FBFF70 };
 }
-
 style BrandGlyph { width: 21; height: 21; background: null; border: null; }
-style BrandName { font: "strata:fonts/default-medium"; pixelSize: 19; color: #F3F8F1FF; }
-style BrandMeta { pixelSize: 12; color: #8D9C92FF; }
-style SidebarLabel { pixelSize: 12; color: #718078FF; }
+style BrandName { font: "strata:fonts/default-medium"; pixelSize: 19; color: #F5FAFFFF; }
+style BrandMeta { pixelSize: 11; color: #8FA6BAFF; }
+style SidebarLabel { pixelSize: 11; color: #7890A6FF; }
 
 style WorkspacePicker {
-  kind: "ROW"; width: { weight: 1 }; height: 50;
-  padding: { horizontal: 10, vertical: 8 }; gap: 9; radius: 11; alignItems: "CENTER";
-  background: #FFFFFF0A; border: { width: 1, color: #FFFFFF12 };
+  kind: "ROW"; width: { weight: 1 }; height: 52;
+  padding: { horizontal: 10, vertical: 8 }; gap: 9; radius: 13; alignItems: "CENTER";
+  background: #D3EDFF12; border: { width: 1, color: #E3F3FF20 };
 }
-
 style WorkspaceIcon {
-  kind: "PANEL"; width: 30; height: 30; radius: 8;
+  kind: "PANEL"; width: 31; height: 31; radius: 10;
   alignItems: "CENTER"; justifyContent: "CENTER";
-  background: #D8F79DFF; border: null;
+  background: #B5E9FFCC; border: { width: 1, color: #F3FCFF80 };
 }
-
-style WorkspaceTitle { font: "strata:fonts/default-medium"; pixelSize: 14; color: #EFF5ECFF; }
-style WorkspaceMeta { pixelSize: 12; color: #839087FF; }
+style WorkspaceTitle { font: "strata:fonts/default-medium"; pixelSize: 14; color: #EFF8FFFF; }
+style WorkspaceMeta { pixelSize: 12; color: #8299ADFF; }
 
 style NavStack extends Clear {
-  kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 4;
-  padding: { top: 8 };
+  kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 5; padding: { top: 8 };
 }
-
 style NavItem {
-  kind: "ROW"; width: { weight: 1 }; height: 38;
-  padding: { horizontal: 10 }; gap: 10; radius: 10; alignItems: "CENTER";
+  kind: "ROW"; width: { weight: 1 }; height: 39;
+  padding: { horizontal: 11 }; gap: 10; radius: 11; alignItems: "CENTER";
   background: #FFFFFF00; border: { width: 1, color: #FFFFFF00 };
   animateChanges: { properties: ["background", "border"], policy: "standard" };
 }
-
 style NavItemSelected extends NavItem {
-  background: #D8F79D14; border: { width: 1, color: #D8F79D1F };
+  background: #BEE9FF1D; border: { width: 1, color: #E0F2FF30 };
 }
-
-style NavDot {
-  kind: "PANEL"; width: 7; height: 7; radius: 4;
-  background: #536159FF; border: null;
-}
-style NavDotSelected extends NavDot { background: #C8F17CFF; }
-style NavText { pixelSize: 14; color: #93A097FF; }
-style NavTextSelected { font: "strata:fonts/default-medium"; pixelSize: 14; color: #F1F7EEFF; }
-style NavCount { font: "strata:fonts/mono"; pixelSize: 12; color: #718078FF; }
+style NavDot { kind: "PANEL"; width: 7; height: 7; radius: 4; background: #536B80FF; border: null; }
+style NavDotSelected extends NavDot { background: #9FE7FFFF; }
+style NavText { pixelSize: 14; color: #8FA5B8FF; }
+style NavTextSelected { font: "strata:fonts/default-medium"; pixelSize: 14; color: #F4FAFFFF; }
+style NavCount { font: "strata:fonts/mono"; pixelSize: 12; color: #71899EFF; }
 
 style SidebarBottom extends Clear {
-  kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 10;
+  kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 11;
 }
-
-style InviteCard {
+style InviteCard extends GlassSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: "content";
-  padding: 12; gap: 7; radius: 12;
-  background: {
-    kind: "linear", angle: 150,
-    stops: [ { color: #27382DFF }, { color: #1C2921FF } ]
-  };
-  border: { width: 1, color: #D8F79D1A };
+  padding: 13; gap: 8; radius: 14;
+  background: #B8E3FF15; border: { width: 1, color: #DAF0FF24 };
 }
-style InviteTitle { font: "strata:fonts/default-medium"; pixelSize: 13; color: #EAF5E5FF; }
-style InviteCopy { pixelSize: 12; color: #8FA096FF; }
-
+style InviteTitle { font: "strata:fonts/default-medium"; pixelSize: 13; color: #F0F9FFFF; }
+style InviteCopy { pixelSize: 12; color: #91A9BCFF; }
 style ProfileRow extends Clear {
-  kind: "ROW"; width: { weight: 1 }; height: 42; gap: 9; alignItems: "CENTER";
+  kind: "ROW"; width: { weight: 1 }; height: 43; gap: 9; alignItems: "CENTER";
 }
 
 style MainSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: { weight: 1 };
-  background: #F5F2EBFF; border: null;
+  background: #050C1624; border: null;
 }
-
-style Topbar {
-  kind: "ROW"; width: { weight: 1 }; height: 72;
-  padding: { horizontal: 24 }; gap: 12; alignItems: "CENTER";
-  background: #F8F6F0FF; border: { width: 1, color: #DCD8CEFF };
+style Topbar extends GlassSurface {
+  kind: "ROW"; width: { weight: 1 }; height: 70;
+  margin: { left: 14, top: 14, right: 14 };
+  padding: { horizontal: 18 }; gap: 12; alignItems: "CENTER";
+  radius: 17; background: #B7DFFF18; border: { width: 1, color: #E3F2FF26 };
 }
-style CompactTopbar extends Topbar { height: 62; padding: { horizontal: 14 }; }
+style CompactTopbar extends Topbar { height: 60; padding: { horizontal: 13 }; }
 
-style PageTitle { font: "strata:fonts/default-medium"; pixelSize: 22; color: #18221DFF; }
-style PageEyebrow { pixelSize: 12; color: #687169FF; }
+style PageTitle { font: "strata:fonts/default-medium"; pixelSize: 21; color: #F4F9FFFF; }
+style PageEyebrow { pixelSize: 12; color: #8EA5B8FF; }
 style SearchStyle {
-  radius: 10; background: #EBE8E0FF; border: { width: 1, color: #DEDBD3FF };
-  pixelSize: 14; color: #243029FF; hintColor: #929990FF;
-  focusRing: { width: 2, color: #5E8124FF };
+  radius: 12; background: #07111F8C; border: { width: 1, color: #D9EDFF24 };
+  pixelSize: 14; color: #EEF8FFFF; hintColor: #71879AFF;
+  focusRing: { width: 1, color: #8CDEFF90 };
+  effect: effect(
+    "morrow:optic-glass",
+    blurRadius: 9,
+    downsample: 1,
+    refraction: 10,
+    tint: #B9E7FF0D,
+    saturation: 1.25,
+    highlight: 0.42,
+    noise: 0.04
+  );
 }
-style GreenFocus { pixelSize: 14; focusRing: { width: 2, color: #5E8124FF }; }
-style DarkSurfaceGreenFocus { pixelSize: 14; focusRing: { width: 2, color: #B7E36EFF }; }
+style GreenFocus {
+  pixelSize: 14; color: #EEF8FFFF; background: #B9E5FF18;
+  border: { width: 1, color: #DEF1FF2A }; focusRing: { width: 1, color: #8CDEFF90 };
+}
+style DarkSurfaceGreenFocus extends GreenFocus { }
 style CompactDarkSurfaceGreenFocus extends DarkSurfaceGreenFocus { pixelSize: 13; }
 
 style IconCircle {
-  kind: "PANEL"; width: 34; height: 34; radius: 17;
+  kind: "PANEL"; width: 35; height: 35; radius: 18;
   alignItems: "CENTER"; justifyContent: "CENTER";
-  background: #E9E6DDFF; border: { width: 1, color: #DAD6CCFF };
+  background: #C5E9FF20; border: { width: 1, color: #E6F4FF2E };
 }
-style AvatarGreen extends IconCircle { background: #CBEA8FFF; border: { width: 1, color: #B5D979FF }; }
-style AvatarPeach extends IconCircle { background: #F1BFA6FF; border: { width: 1, color: #DFA88DFF }; }
-style AvatarLavender extends IconCircle { background: #C9C2E8FF; border: { width: 1, color: #B4ABD9FF }; }
-style AvatarText { font: "strata:fonts/default-medium"; pixelSize: 12; color: #263129FF; }
+style AvatarGreen extends IconCircle { background: #9DE8FFCC; border: { width: 1, color: #EAFBFF78 }; }
+style AvatarPeach extends IconCircle { background: #FFB6C9C8; border: { width: 1, color: #FFE8EF70 }; }
+style AvatarLavender extends IconCircle { background: #BAA8FFD0; border: { width: 1, color: #EEE9FF70 }; }
+style AvatarText { font: "strata:fonts/default-medium"; pixelSize: 12; color: #102131FF; }
 
-style PageScroll {
-  kind: "SCROLL"; width: { weight: 1 }; height: { weight: 1 };
-  background: #F5F2EBFF; border: null;
-}
+style PageScroll { kind: "SCROLL"; width: { weight: 1 }; height: { weight: 1 }; background: null; border: null; }
 style PageContent extends Clear {
-  kind: "COLUMN"; width: { weight: 1 }; height: "content";
-  padding: 24; gap: 18;
+  kind: "COLUMN"; width: { weight: 1 }; height: "content"; padding: 24; gap: 18;
 }
 style CompactPageContent extends PageContent { padding: 14; gap: 12; }
-
 style WelcomeRow extends Clear {
   kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 14; alignItems: "END";
 }
-style HeroTitle { font: "strata:fonts/default-medium"; pixelSize: 30; color: #16211BFF; }
-style HeroSubtitle { pixelSize: 13; color: #778078FF; }
+style HeroTitle { font: "strata:fonts/default-medium"; pixelSize: 30; color: #F5FAFFFF; }
+style HeroSubtitle { pixelSize: 13; color: #91A6B8FF; }
 
-style FeatureCard {
+style FeatureCard extends GlassSurface {
   kind: "ROW"; width: { weight: 1 }; height: 188;
-  padding: 22; gap: 18; radius: 18; clip: true;
-  alignItems: "CENTER";
+  padding: 22; gap: 18; radius: 20; clip: true; alignItems: "CENTER";
   background: {
-    kind: "linear", angle: 150,
-    stops: [
-      { color: #314735FF, offset: 0 },
-      { color: #203229FF, offset: 0.55 },
-      { color: #15231CFF, offset: 1 }
-    ]
+    kind: "linear", angle: 145,
+    stops: [ { color: #7FBCFF30 }, { color: #A08CFF20 }, { color: #07132252 } ]
   };
-  border: { width: 1, color: #FFFFFF1A };
+  border: { width: 1, color: #E4F3FF30 };
 }
 style CompactFeatureCard extends FeatureCard { height: "content"; padding: 17; }
 style FeatureCopy extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 8; }
-style FeatureEyebrow { pixelSize: 12; color: #B8D881FF; }
-style FeatureTitle { font: "strata:fonts/default-medium"; pixelSize: 25; color: #F4F8F1FF; }
-style FeatureBody { pixelSize: 12; color: #A7B4AAFF; }
-style FeatureMetaRow extends Clear { kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 12; alignItems: "CENTER"; }
-style ProgressTrack {
-  kind: "PANEL"; width: { weight: 1 }; height: 5; radius: 3;
-  background: #FFFFFF14; border: null;
+style FeatureEyebrow { pixelSize: 12; color: #9FE6FFFF; }
+style FeatureTitle { font: "strata:fonts/default-medium"; pixelSize: 25; color: #F6FBFFFF; }
+style FeatureBody { pixelSize: 12; color: #A6B9C9FF; }
+style FeatureMetaRow extends Clear {
+  kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 12; alignItems: "CENTER";
 }
+style ProgressTrack { kind: "PANEL"; width: { weight: 1 }; height: 5; radius: 3; background: #FFFFFF16; border: null; }
 style ProgressFill {
   kind: "PANEL"; width: { weight: 0.72 }; height: 5; radius: 3;
-  background: #C8F17CFF; border: null;
+  background: { kind: "linear", angle: 90, stops: [ { color: #8DE4FFFF }, { color: #B59CFFFF } ] };
+  border: null;
 }
 style FeatureVisual { width: 190; height: 150; background: null; border: null; }
 
-style MetricsGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 10; }
-style MetricCard {
-  kind: "COLUMN"; width: { weight: 1 }; height: 92;
-  padding: 13; gap: 5; radius: 13;
-  background: #FAF8F3FF; border: { width: 1, color: #E1DED5FF };
+style MetricsGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 11; }
+style MetricCard extends GlassSurface {
+  kind: "COLUMN"; width: { weight: 1 }; height: 96;
+  padding: 14; gap: 5; radius: 16; background: #A9D9FF16;
 }
-style MetricLabel { pixelSize: 12; color: #687169FF; }
-style MetricValue { font: "strata:fonts/default-medium"; pixelSize: 23; color: #1E2A23FF; }
-style MetricGood { pixelSize: 12; color: #527626FF; }
-style MetricQuiet { pixelSize: 12; color: #687169FF; }
+style MetricLabel { pixelSize: 11; color: #89A0B4FF; }
+style MetricValue { font: "strata:fonts/default-medium"; pixelSize: 24; color: #F3F9FFFF; }
+style MetricGood { pixelSize: 12; color: #94E9FFFF; }
+style MetricQuiet { pixelSize: 12; color: #849AAEFF; }
 
 style ContentColumns extends Clear {
   kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 14; alignItems: "START";
 }
 style ContentStack extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 14; }
-
-style PaperCard {
+style PaperCard extends GlassSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: "content";
-  padding: 16; gap: 11; radius: 15;
-  background: #FBF9F4FF; border: { width: 1, color: #E0DDD4FF };
+  padding: 17; gap: 11; radius: 18; background: #A9D9FF14;
 }
 style CardHeader extends Clear {
   kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 10; alignItems: "CENTER";
 }
-style CardTitle { font: "strata:fonts/default-medium"; pixelSize: 16; color: #202B25FF; }
-style CardMeta { pixelSize: 12; color: #687169FF; }
+style CardTitle { font: "strata:fonts/default-medium"; pixelSize: 16; color: #EFF8FFFF; }
+style CardMeta { pixelSize: 12; color: #859CAFFF; }
 
 style TaskRow {
-  kind: "ROW"; width: { weight: 1 }; height: 46;
-  gap: 10; alignItems: "CENTER";
-  background: null; border: { width: 1, color: #E7E3DBFF };
+  kind: "ROW"; width: { weight: 1 }; height: 48; padding: { horizontal: 9 };
+  gap: 10; radius: 11; alignItems: "CENTER";
+  background: #D5ECFF0B; border: { width: 1, color: #D8EDFF16 };
 }
 style TaskText extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 2; }
-style TaskName { pixelSize: 14; color: #2E3832FF; }
-style TaskNameDone { pixelSize: 14; color: #858D86FF; }
-style TaskMeta { pixelSize: 12; color: #687169FF; }
+style TaskName { pixelSize: 14; color: #DDEAF4FF; }
+style TaskNameDone { pixelSize: 14; color: #72889BFF; }
+style TaskMeta { pixelSize: 12; color: #7F96AAFF; }
 style CheckStyle {
-  radius: 5; indicatorSize: 18; indicatorInset: 4;
-  track: #F2EFE8FF; fill: #8DB64EFF;
-  focusRing: { width: 2, color: #5E8124FF };
+  radius: 6; indicatorSize: 18; indicatorInset: 4;
+  track: #D6EDFF18; fill: #8EDFFFFF; focusRing: { width: 1, color: #8CDEFF90 };
 }
 
 style TagGreen {
-  kind: "PANEL"; width: "content"; height: 21; padding: { horizontal: 7, vertical: 3 };
-  radius: 6; background: #DDEBC8FF; border: null;
+  kind: "PANEL"; width: "content"; height: 22; padding: { horizontal: 8, vertical: 3 };
+  radius: 8; background: #8EDFFF20; border: { width: 1, color: #C9EFFF22 };
 }
-style TagPeach extends TagGreen { background: #F3DFD3FF; }
-style TagLavender extends TagGreen { background: #E2DDF0FF; }
-style TagText { pixelSize: 12; color: #53604FFF; }
+style TagPeach extends TagGreen { background: #FFB6CC20; border: { width: 1, color: #FFDCE72A }; }
+style TagLavender extends TagGreen { background: #B9A7FF24; border: { width: 1, color: #E4DDFF2A }; }
+style TagText { pixelSize: 11; color: #DCEBF6FF; }
 
 style ScheduleRow extends Clear {
-  kind: "ROW"; width: { weight: 1 }; height: 54; gap: 10; alignItems: "CENTER";
+  kind: "ROW"; width: { weight: 1 }; height: 55; gap: 10; alignItems: "CENTER";
 }
-style TimeText { font: "strata:fonts/mono"; pixelSize: 12; color: #687169FF; }
-style ScheduleRule { kind: "PANEL"; width: 3; height: 34; radius: 2; background: #A8CE69FF; border: null; }
-style ScheduleRulePeach extends ScheduleRule { background: #E5A989FF; }
-style ScheduleTitle { pixelSize: 12; color: #2C3730FF; }
+style TimeText { font: "strata:fonts/mono"; pixelSize: 12; color: #8DA3B6FF; }
+style ScheduleRule { kind: "PANEL"; width: 3; height: 34; radius: 2; background: #8DE4FFFF; border: null; }
+style ScheduleRulePeach extends ScheduleRule { background: #FFADC5FF; }
+style ScheduleTitle { pixelSize: 12; color: #DDE9F3FF; }
 
-style ProjectGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 12; }
-style ProjectCard {
-  kind: "COLUMN"; width: { weight: 1 }; height: 176;
-  padding: 15; gap: 10; radius: 15;
-  background: #FBF9F4FF; border: { width: 1, color: #DFDCD3FF };
+style ProjectGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 13; }
+style ProjectCard extends GlassSurface {
+  kind: "COLUMN"; width: { weight: 1 }; height: 180;
+  padding: 14; gap: 10; radius: 18; background: #A9D9FF14;
 }
 style ProjectCover {
-  kind: "PANEL"; width: { weight: 1 }; height: 72; radius: 10; clip: true;
+  kind: "PANEL"; width: { weight: 1 }; height: 76; radius: 13; clip: true;
   alignItems: "END"; justifyContent: "END";
-  background: { kind: "linear", angle: 140, stops: [ { color: #CBE79BFF }, { color: #42644BFF } ] };
-  border: null;
+  background: { kind: "linear", angle: 140, stops: [ { color: #79DFFFF0 }, { color: #255BA7D8 } ] };
+  border: { width: 1, color: #E5F5FF26 };
 }
 style ProjectCoverPeach extends ProjectCover {
-  background: { kind: "linear", angle: 140, stops: [ { color: #F2C6AFFF }, { color: #A65E51FF } ] };
+  background: { kind: "linear", angle: 140, stops: [ { color: #FFB8D5F0 }, { color: #9D3976D8 } ] };
 }
 style ProjectCoverLilac extends ProjectCover {
-  background: { kind: "linear", angle: 140, stops: [ { color: #D4CDEFFF }, { color: #6B628EFF } ] };
+  background: { kind: "linear", angle: 140, stops: [ { color: #C8B8FFF0 }, { color: #6149B5D8 } ] };
 }
-style ProjectTitle { font: "strata:fonts/default-medium"; pixelSize: 15; color: #27322CFF; }
+style ProjectTitle { font: "strata:fonts/default-medium"; pixelSize: 15; color: #EAF4FCFF; }
 
-style LibraryTile {
-  kind: "COLUMN"; width: { weight: 1 }; height: 166; padding: 10; gap: 8; radius: 14;
-  background: #FBF9F4FF; border: { width: 1, color: #E0DDD4FF };
+style LibraryTile extends GlassSurface {
+  kind: "COLUMN"; width: { weight: 1 }; height: 170; padding: 10; gap: 8; radius: 17;
+  background: #A9D9FF14;
 }
 style LibraryPreview {
-  kind: "PANEL"; width: { weight: 1 }; height: 98; radius: 10;
+  kind: "PANEL"; width: { weight: 1 }; height: 100; radius: 13;
   alignItems: "CENTER"; justifyContent: "CENTER";
-  background: #E4EAD8FF; border: null;
+  background: #79DFFF24; border: { width: 1, color: #DDF2FF20 };
 }
-style LibraryPreviewDark extends LibraryPreview { background: #233129FF; }
-style LibraryPreviewRose extends LibraryPreview { background: #E9D1C8FF; }
-style LibraryGlyph { font: "strata:fonts/default-medium"; pixelSize: 30; color: #52634EFF; }
-style LibraryGlyphLight { font: "strata:fonts/default-medium"; pixelSize: 30; color: #D9EDB8FF; }
+style LibraryPreviewDark extends LibraryPreview { background: #050D18A0; }
+style LibraryPreviewRose extends LibraryPreview { background: #FFAACB24; }
+style LibraryGlyph { font: "strata:fonts/default-medium"; pixelSize: 30; color: #A5EBFFFF; }
+style LibraryGlyphLight { font: "strata:fonts/default-medium"; pixelSize: 30; color: #E6F8FFFF; }
+
+style GlassAction extends GlassSurface {
+  kind: "ROW"; width: "content"; height: 36; padding: { horizontal: 13, vertical: 8 };
+  gap: 7; radius: 11; alignItems: "CENTER"; justifyContent: "CENTER";
+  background: #BDE7FF18; border: { width: 1, color: #E0F2FF2B };
+  animateChanges: { properties: ["background", "border"], policy: "fast" };
+}
+style GlassActionPrimary extends GlassAction {
+  background: {
+    kind: "linear", angle: 120,
+    stops: [ { color: #76DFFFF0 }, { color: #927CFFE8 } ]
+  };
+  border: { width: 1, color: #ECF9FF70 };
+}
+style GlassActionLabel { font: "strata:fonts/default-medium"; pixelSize: 13; color: #F4FAFFFF; }
+style GlassActionPrimaryLabel extends GlassActionLabel { color: #071321FF; }
 
 style ModalScrim {
   kind: "OVERLAY"; width: { weight: 1 }; height: { weight: 1 };
-  alignItems: "CENTER"; justifyContent: "CENTER";
-  background: #07100AB8; border: null;
+  alignItems: "CENTER"; justifyContent: "CENTER"; background: #01050BC4; border: null;
 }
-style ComposeModal {
-  kind: "COLUMN"; width: 390; height: "content"; padding: 20; gap: 13; radius: 17;
-  background: #FBF9F4FF; border: { width: 1, color: #FFFFFF66 };
+style ComposeModal extends GlassSurface {
+  kind: "COLUMN"; width: 410; height: "content"; padding: 21; gap: 13; radius: 21;
+  background: #0A1726B0; border: { width: 1, color: #E4F3FF38 };
 }
-style ModalActions extends Clear { kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 8; justifyContent: "END"; }
+style ModalActions extends Clear {
+  kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 8; justifyContent: "END";
+}
 
 animation AppEnter {
   from { opacity: 0, translateY: 12, scale: 0.985 }
@@ -331,6 +327,26 @@ animation ModalEnter {
   from { opacity: 0, scale: 0.97, translateY: 8 }
   to { opacity: 1, scale: 1, translateY: 0 }
   duration: 170ms; easing: "cubic-out"; fillMode: "FORWARDS";
+}
+
+component GlassButton(key: key, label: string, primary: boolean, activate: action) {
+  Panel(
+    key: key,
+    style: primary ? GlassActionPrimary : GlassAction,
+    visualStyle: GreenFocus,
+    motions: [{ id: "glass-action.hover", interaction: "HOVER", animation: HoverLift }],
+    behaviors: [
+      { id: "strata.focusable" },
+      { id: "strata.hoverable" },
+      { id: "strata.activate", action: activate }
+    ]
+  ) {
+    Text(
+      text: label,
+      style: primary ? GlassActionPrimaryLabel : GlassActionLabel,
+      maxLines: 1
+    )
+  }
 }
 
 component Logo() {
@@ -386,7 +402,12 @@ component SidebarView(section: string, setSection: action) {
       Panel(style: InviteCard) {
         Text(text: "Bring the room together", style: InviteTitle)
         Text(text: "Invite your team to review work and leave decisions in context.", style: InviteCopy, wrapMode: "WORD")
-        Button(key: "sidebar.invite", label: "Invite people", variant: "compact", visualStyle: CompactDarkSurfaceGreenFocus)
+        GlassButton(
+          key: "sidebar.invite",
+          label: "Invite people",
+          primary: false,
+          activate: action("notification.raise", message: "Invitation link copied")
+        )
       }
       Panel(style: ProfileRow) {
         Panel(style: AvatarPeach) { Text(text: "AM", style: AvatarText) }
@@ -426,7 +447,7 @@ component TopbarView(section: string, query: string, close: action) {
       Panel(style: IconCircle) { Text(text: "?", style: AvatarText) }
       Panel(style: AvatarGreen) { Text(text: "AM", style: AvatarText) }
     }
-    Button(key: "workspace.close", label: "Close · F10", variant: "subtle", visualStyle: GreenFocus, onClick: close)
+    GlassButton(key: "workspace.close", label: "Close · F10", primary: false, activate: close)
   }
 }
 
@@ -466,10 +487,10 @@ component OverviewPage(taskOne: boolean, taskTwo: boolean, taskThree: boolean, o
         Text(text: "Good morning, Avery.", style: HeroTitle)
         Text(text: "Here’s what is moving across the studio today.", style: HeroSubtitle)
       }
-      Button(key: "overview.new", label: "+  New project", variant: "primary", visualStyle: GreenFocus, onClick: openCompose)
+      GlassButton(key: "overview.new", label: "+  New project", primary: true, activate: openCompose)
     }
 
-    Panel(style: env.compact ? CompactFeatureCard : FeatureCard, effect: effect("shadow", color: #20312633, radius: 20, spread: 1)) {
+    Panel(style: env.compact ? CompactFeatureCard : FeatureCard) {
       Panel(style: FeatureCopy) {
         Text(text: "FEATURED PROJECT · LIVE SVG", style: FeatureEyebrow)
         Text(text: "Northstar brand system", style: FeatureTitle)
@@ -527,7 +548,12 @@ component TodayTasks(taskOne: boolean, taskTwo: boolean, taskThree: boolean) {
     TaskRowView(id: "task.identity", titleText: "Approve identity lockups", meta: "Northstar · due at 11:00", done: taskOne, change: action("state.toggle", name: "taskOne"))
     TaskRowView(id: "task.copy", titleText: "Review launch page copy", meta: "Website refresh · 8 comments", done: taskTwo, change: action("state.toggle", name: "taskTwo"))
     TaskRowView(id: "task.tokens", titleText: "Publish motion tokens", meta: "Design system · assigned to you", done: taskThree, change: action("state.toggle", name: "taskThree"))
-    Button(key: "tasks.all", label: "View all tasks  →", variant: "subtle", visualStyle: GreenFocus)
+    GlassButton(
+      key: "tasks.all",
+      label: "View all tasks  →",
+      primary: false,
+      activate: action("notification.raise", message: "All tasks are already visible")
+    )
   }
 }
 
@@ -570,7 +596,7 @@ component ProjectsPage(openCompose: action) {
         Text(text: "Projects", style: HeroTitle)
         Text(text: "Everything the studio is shaping, in one place.", style: HeroSubtitle)
       }
-      Button(key: "projects.new", label: "+  New project", variant: "primary", visualStyle: GreenFocus, onClick: openCompose)
+      GlassButton(key: "projects.new", label: "+  New project", primary: true, activate: openCompose)
     }
     Grid(columns: env.compact ? [{ weight: 1 }, { weight: 1 }] : [{ weight: 1 }, { weight: 1 }, { weight: 1 }], style: ProjectGrid) {
       ProjectCardView(titleText: "Northstar identity", category: "Brand system · 5 people", progress: 72, cover: "GREEN")
@@ -595,7 +621,7 @@ component CalendarPage() {
       }
       if !env.compact {
         Draw(style: FeatureVisual, shapes: [
-          { kind: "ellipse", center: { x: 0.5, y: 0.5 }, radiusX: 0.34, radiusY: 0.34, fill: #D8F79D19, stroke: #D8F79D70, strokeStyle: { width: 1.5 } },
+          { kind: "ellipse", center: { x: 0.5, y: 0.5 }, radiusX: 0.34, radiusY: 0.34, fill: #8DE4FF19, stroke: #8DE4FF70, strokeStyle: { width: 1.5 } },
           { kind: "path", commands: "M 0.50 0.50 L 0.50 0.27 M 0.50 0.50 L 0.68 0.59", stroke: #E9FFD0FF, strokeStyle: { width: 2, cap: "round" } }
         ])
       }
@@ -630,7 +656,12 @@ component LibraryPage() {
         Text(text: "Library", style: HeroTitle)
         Text(text: "Shared ingredients, ready when the work needs them.", style: HeroSubtitle)
       }
-      Button(key: "library.upload", label: "↑  Upload", variant: "primary", visualStyle: GreenFocus)
+      GlassButton(
+        key: "library.upload",
+        label: "↑  Upload",
+        primary: true,
+        activate: action("notification.raise", message: "Upload queue opened")
+      )
     }
     Grid(columns: env.compact ? [{ weight: 1 }, { weight: 1 }] : [{ weight: 1 }, { weight: 1 }, { weight: 1 }, { weight: 1 }], style: ProjectGrid) {
       LibraryTileView(name: "Northstar marks", meta: "12 SVG · updated today", kind: "GREEN", glyph: "N✦")
@@ -661,7 +692,7 @@ component CurrentPage(section: string, taskOne: boolean, taskTwo: boolean, taskT
 
 component NewProjectModal(closeModal: action) {
   Panel(style: ModalScrim) {
-    Panel(style: ComposeModal, transition: ModalEnter, effect: effect("shadow", color: #07100A80, radius: 28, spread: 2)) {
+    Panel(style: ComposeModal, transition: ModalEnter) {
       Panel(style: CardHeader) {
         Panel(style: Clear, layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 3 }) {
           Text(text: "Start something new", style: PageTitle)
@@ -679,13 +710,15 @@ component NewProjectModal(closeModal: action) {
           { id: "campaign", label: "Campaign" },
           { id: "editorial", label: "Editorial" }
         ],
-        selectedId: "brand", visualStyle: GreenFocus
+        selectedId: "brand", visualStyle: SearchStyle
       )
       Panel(style: ModalActions) {
-        Button(key: "project.cancel", label: "Cancel", variant: "subtle", visualStyle: GreenFocus, onClick: closeModal)
-        Button(
-          key: "project.create", label: "Create project", variant: "primary", visualStyle: GreenFocus,
-          onClick: action("state.set", name: "composeOpen", value: false)
+        GlassButton(key: "project.cancel", label: "Cancel", primary: false, activate: closeModal)
+        GlassButton(
+          key: "project.create",
+          label: "Create project",
+          primary: true,
+          activate: action("state.set", name: "composeOpen", value: false)
         )
       }
     }
@@ -700,8 +733,12 @@ component WorkspaceApp() {
   state taskTwo = false;
   state taskThree = false;
 
-  Panel(key: "morrow.backdrop", style: AppBackdrop) {
-    Panel(key: "morrow.shell", style: env.compact ? CompactShell : AppShell, transition: AppEnter, effect: effect("shadow", color: #03070A99, radius: 34, spread: 3)) {
+  Panel(
+    key: "morrow.backdrop",
+    style: AppBackdrop,
+    material: material("morrow:aurora", intensity: 0.92, tint: #A58CFFFF)
+  ) {
+    Panel(key: "morrow.shell", style: env.compact ? CompactShell : AppShell, transition: AppEnter) {
       if env.compact { CompactNavigation(section: section) }
       else { SidebarView(section: section, setSection: action("state.setFromEvent", name: "section")) }
       Panel(style: MainSurface) {

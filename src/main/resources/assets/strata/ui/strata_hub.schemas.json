@@ -204,5 +204,123 @@
         ]
       }
     }
-  ]
+  ],
+  "materials": {
+    "definitions": [
+      {
+        "id": "morrow:aurora",
+        "blendMode": "straight_alpha",
+        "fallback": "strata:rounded_rect",
+        "parameters": [
+          {
+            "name": "intensity",
+            "materialType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "tint",
+            "materialType": "COLOR",
+            "type": { "kind": "color" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "shaders": {
+          "hlsl": "assets/strata/shaders/materials/aurora.hlsl"
+        }
+      }
+    ]
+  },
+  "effects": {
+    "definitions": [
+      {
+        "id": "morrow:optic-glass",
+        "input": "BACKDROP",
+        "parameters": [
+          {
+            "name": "blurRadius",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "downsample",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "refraction",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "tint",
+            "effectType": "COLOR",
+            "type": { "kind": "color" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "saturation",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "highlight",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "noise",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "passes": [
+          {
+            "kind": "BLUR",
+            "radiusParameter": "blurRadius",
+            "downsampleParameter": "downsample"
+          },
+          {
+            "kind": "SHADER",
+            "shaders": {
+              "hlsl": "assets/strata/shaders/effects/optic-glass.hlsl"
+            }
+          }
+        ]
+      }
+    ]
+  }
 }
