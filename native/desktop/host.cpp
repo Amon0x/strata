@@ -388,9 +388,11 @@ struct Host::Impl final {
             remember_window_geometry();
         } catch (...) {
         }
+        close_session(hub);
         close_session(performance_hud);
         close_session(debug);
         close_session(settings);
+        close_session(effect_gallery);
         close_session(showcase);
         try {
             durable_writer.flush();
@@ -1007,50 +1009,58 @@ struct Host::Impl final {
         );
     }
 
-    void create_showcase() {
+    void bind_showcase_model(Session& session) {
         static constexpr std::array extension_action_ids{
             std::string_view("demo.custom.pulse"),
             std::string_view("demo.inspect.pointer"),
         };
-        static constexpr std::array extension_packages{std::string_view("strata.demo.v1")};
-        showcase = create_session(
-            "demo.desktop",
-            "assets/strata/ui/demo_surface.schemas.json",
-            extension_packages
-        );
         for (const std::string_view action_id : contracts::demo_surface::action_ids) {
-            showcase.bindings->on(action_id, [this](
+            session.bindings->on(action_id, [this](
                                                         const strata::host::ActionEvent& event
                                                     ) {
                 return showcase_model.handle(event);
             });
         }
         for (const std::string_view action_id : extension_action_ids) {
-            showcase.bindings->on(action_id, [this](const strata::host::ActionEvent& event) {
+            session.bindings->on(action_id, [this](const strata::host::ActionEvent& event) {
                 return showcase_model.handle(event);
             });
         }
-        showcase.bindings->snapshot(
+        session.bindings->snapshot(
             "demo.desktop.data.tree",
             [this] { return showcase_model.tree_revision().value(); },
             [this] { return showcase_model.tree_snapshot(); }
         );
-        showcase.bindings->snapshot(
+        session.bindings->snapshot(
             "demo.desktop.data.table",
             [this] { return showcase_model.table_revision().value(); },
             [this] { return showcase_model.table_snapshot(); }
         );
-        showcase.bindings->snapshot(
+        session.bindings->snapshot(
             "demo.desktop.data.grid",
             [this] { return showcase_model.grid_revision().value(); },
             [this] { return showcase_model.grid_snapshot(); }
         );
-        showcase.bindings->snapshot(
+        session.bindings->snapshot(
             "demo.desktop.state",
             [this] { return showcase_model.demo_revision().value(); },
             [this] { return showcase_model.demo_snapshot(); }
         );
-        showcase.bindings->synchronize();
+        session.bindings->synchronize();
+    }
+
+    void create_demo_surface(
+        Session& session,
+        std::string id,
+        const std::string_view root_name
+    ) {
+        static constexpr std::array extension_packages{std::string_view("strata.demo.v1")};
+        session = create_session(
+            std::move(id),
+            "assets/strata/ui/demo_surface.schemas.json",
+            extension_packages
+        );
+        bind_showcase_model(session);
         static constexpr std::array showcase_images{
             strata_surface_image_resource{
                 strata::view("strata:ui/icons/chevron-down"),
@@ -1060,14 +1070,26 @@ struct Host::Impl final {
             },
         };
         activate(
-            showcase,
+            session,
             "assets/strata/ui/demo_surface.strata",
-            "MainShowcase",
+            root_name,
             showcase_images
         );
+    }
+
+    void create_showcase() {
+        create_demo_surface(showcase, "demo.desktop", "MainShowcase");
         strata::require_ok(
             strata_surface_set_profiler_capture(showcase.surface->native_handle(), 1U),
             "desktop showcase profiler capture"
+        );
+    }
+
+    void create_effect_gallery() {
+        create_demo_surface(
+            effect_gallery,
+            "effects.desktop",
+            "GlassEffectShowcase"
         );
     }
 
@@ -1437,21 +1459,27 @@ struct Host::Impl final {
             area.push_back(contracts::strata_hub::HubFrameAreaItem{0.0, 1.0});
         }
 
-        const int open_count = (settings_enabled ? 1 : 0) + (showcase_enabled ? 1 : 0) +
+        const int open_count = (effect_gallery_enabled ? 1 : 0) +
+            (settings_enabled ? 1 : 0) + (showcase_enabled ? 1 : 0) +
             (debug_enabled ? 1 : 0) + (performance_hud_enabled ? 1 : 0);
         std::string status;
         if (open_count == 0) status = "No surface open";
         else if (open_count == 1) status = "1 surface open · shortcuts stay live";
         else status = std::to_string(open_count) + " surfaces open · shortcuts stay live";
 
-        const std::array<std::array<std::string_view, 4U>, 4U> entries{{
+        const std::array<std::array<std::string_view, 4U>, 5U> entries{{
+            {"hub.effects", "Effect gallery", "Authored backdrop and content programs", "F3"},
             {"hub.settings", "Settings", "Durable application state", "F6"},
             {"hub.showcase", "Component showcase", "Widgets and extensions", "F7"},
             {"hub.profiler", "Profiler overlay", "Layout and render timings", "F8"},
             {"hub.performance", "Performance HUD", "Passive frame telemetry", "F9"},
         }};
-        const std::array<bool, 4U> active{
-            settings_enabled, showcase_enabled, debug_enabled, performance_hud_enabled,
+        const std::array<bool, 5U> active{
+            effect_gallery_enabled,
+            settings_enabled,
+            showcase_enabled,
+            debug_enabled,
+            performance_hud_enabled,
         };
         std::vector<contracts::strata_hub::HubSurfacesItem> surfaces;
         surfaces.reserve(entries.size());
@@ -1483,6 +1511,8 @@ struct Host::Impl final {
             if (hub.surface.has_value()) {
                 static_cast<void>(strata_surface_cancel_interactions(hub.surface->native_handle()));
             }
+        } else if (target == "hub.effects") {
+            toggle_effect_gallery();
         } else if (target == "hub.settings") {
             toggle_settings();
         } else if (target == "hub.showcase") {
@@ -1611,6 +1641,18 @@ struct Host::Impl final {
         }
     }
 
+    void toggle_effect_gallery() {
+        if (!effect_gallery_enabled && !effect_gallery.surface.has_value()) {
+            create_effect_gallery();
+        }
+        effect_gallery_enabled = !effect_gallery_enabled;
+        if (!effect_gallery_enabled && effect_gallery.surface.has_value()) {
+            static_cast<void>(strata_surface_cancel_interactions(
+                effect_gallery.surface->native_handle()
+            ));
+        }
+    }
+
     void toggle_showcase() {
         if (!showcase_enabled && !showcase.surface.has_value()) {
             create_showcase();
@@ -1678,7 +1720,14 @@ struct Host::Impl final {
         renderer.resize(next_width, next_height, logical_width(), logical_height());
         ++environment_generation;
         const strata_surface_environment next = environment();
-        for (Session* session : {&showcase, &settings, &debug, &performance_hud, &hub}) {
+        for (Session* session : {
+                 &showcase,
+                 &effect_gallery,
+                 &settings,
+                 &debug,
+                 &performance_hud,
+                 &hub,
+             }) {
             if (!session->surface.has_value()) continue;
             std::uint32_t adopted = 0U;
             strata::require_ok(
@@ -1695,6 +1744,7 @@ struct Host::Impl final {
         Session* const session = hub_enabled ? &hub
             : debug_enabled ? &debug
             : settings_enabled ? &settings
+            : effect_gallery_enabled ? &effect_gallery
             : showcase_enabled ? &showcase
             : nullptr;
         if (session == nullptr || !session->surface.has_value()) return;
@@ -1777,11 +1827,19 @@ struct Host::Impl final {
             );
             debug_snapshot_dirty = true;
         }
-        for (Session* session : {&showcase, &settings, &debug, &performance_hud, &hub}) {
+        for (Session* session : {
+                 &showcase,
+                 &effect_gallery,
+                 &settings,
+                 &debug,
+                 &performance_hud,
+                 &hub,
+             }) {
             if (session->bindings != nullptr) session->bindings->synchronize();
         }
         frame_time = now();
         advance_async(showcase);
+        advance_async(effect_gallery);
         advance_async(settings);
         advance_async(debug);
         advance_async(hub);
@@ -1825,6 +1883,11 @@ struct Host::Impl final {
                 frame_time - showcase_hidden_at >= showcase_transition_nanos) {
                 showcase_closing = false;
             }
+        }
+        if (effect_gallery_enabled && effect_gallery.surface.has_value()) {
+            const strata_surface_frame_info info =
+                effect_gallery.surface->frame(frame_time);
+            had_draws = render_session(effect_gallery, info) || had_draws;
         }
         if (settings_enabled && settings.surface.has_value()) {
             const strata_surface_frame_info info = settings.surface->frame(frame_time);
@@ -1899,6 +1962,7 @@ struct Host::Impl final {
     DurableWriter durable_writer;
     std::string durable_read_buffer;
     Session showcase;
+    Session effect_gallery;
     Session settings;
     Session debug;
     Session performance_hud;
@@ -1932,6 +1996,7 @@ struct Host::Impl final {
     double display_scale = 1.0;
     bool showcase_enabled = false;
     bool showcase_closing = false;
+    bool effect_gallery_enabled = false;
     bool settings_enabled = false;
     bool debug_enabled = false;
     bool performance_hud_enabled = true;
@@ -2011,9 +2076,11 @@ void Host::scroll(
 
 void Host::key(const std::uint32_t virtual_key, const std::uint32_t action) {
     impl_->flush_pointer_move();
-    if (virtual_key >= VK_F6 && virtual_key <= VK_F10) {
+    if (virtual_key == VK_F3 ||
+        (virtual_key >= VK_F6 && virtual_key <= VK_F10)) {
         if (action == STRATA_KEY_PRESS) {
             switch (virtual_key) {
+            case VK_F3: impl_->toggle_effect_gallery(); break;
             case VK_F6: impl_->toggle_settings(); break;
             case VK_F7: impl_->toggle_showcase(); break;
             case VK_F8: impl_->cycle_debug((GetKeyState(VK_SHIFT) & 0x8000) != 0); break;
@@ -2055,6 +2122,7 @@ void Host::cancel_interactions() noexcept {
     impl_->pending_pointer_move.reset();
     for (Impl::Session* session : {
              &impl_->showcase,
+             &impl_->effect_gallery,
              &impl_->settings,
              &impl_->debug,
              &impl_->hub,

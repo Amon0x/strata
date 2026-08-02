@@ -103,9 +103,10 @@ After building the Windows preset:
 build\cmake\windows-x64\native\RelWithDebInfo\strata_desktop.exe src\main\resources
 ```
 
-`F6` toggles durable settings, `F7` toggles the application showcase, `F8` cycles the diagnostics
-surface, and `F9` toggles the passive frame-time HUD. `--multi-window` opens two independent hosts in
-one process; `--uncapped` disables VSync and the message-loop frame cap.
+`F3` toggles the authored effect gallery, `F6` toggles durable settings, `F7` toggles the
+application showcase, `F8` cycles the diagnostics surface, and `F9` toggles the passive frame-time
+HUD. `--multi-window` opens two independent hosts in one process; `--uncapped` disables VSync and
+the message-loop frame cap.
 
 Run an arbitrary application from a launch document instead of opening the bundled showcase:
 
