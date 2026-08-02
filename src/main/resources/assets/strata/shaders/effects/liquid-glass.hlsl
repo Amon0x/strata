@@ -39,6 +39,8 @@ float4 effect(EffectInput input) {
     float3 color = lerp(soft.rgb, refracted, clarity);
     color = adjustSaturation(color, effectFloat(7));
     color = saturate((color - 0.5) * 1.07 + 0.5);
+    float backdropLuminance = dot(refracted, float3(0.2126, 0.7152, 0.0722));
+    float darkBackdrop = 1.0 - smoothstep(0.08, 0.48, backdropLuminance);
 
     float4 tint = effectColor(3);
     color = lerp(color, tint.rgb, saturate(tint.a));
@@ -54,9 +56,17 @@ float4 effect(EffectInput input) {
     float reflected = pow(facingShade, 11.0) * innerRim * trailingGlint;
     float highlight = effectFloat(8);
 
-    color += specular * highlight * 0.52 * float3(1.0, 0.98, 0.94);
+    color += specular * highlight * (0.42 + darkBackdrop * 0.24) *
+        float3(1.0, 0.98, 0.94);
     color += reflected * highlight * 0.18 * float3(0.28, 0.56, 1.0);
-    color += hairline * 0.035 * float3(0.62, 0.84, 1.0);
+    float3 ambientEdgeColor = lerp(
+        float3(0.38, 0.62, 0.92),
+        float3(0.82, 0.94, 1.0),
+        darkBackdrop
+    );
+    color += hairline * (0.03 + darkBackdrop * 0.105) * ambientEdgeColor;
+    color += pow(edge, 4.0) * innerRim * darkBackdrop * 0.024 *
+        float3(0.28, 0.54, 0.9);
     color += innerRim * edge * float3(0.012, 0.025, 0.04);
     color -= facingShade * innerRim * 0.025;
 
