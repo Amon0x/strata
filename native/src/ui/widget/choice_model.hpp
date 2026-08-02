@@ -112,4 +112,11 @@ struct EffectiveChoice final {
     return result.has_value() ? result->id : std::string{};
 }
 
+[[nodiscard]] inline std::string choice_option_key(
+    const std::string_view select_key,
+    const std::string_view option_id
+) {
+    return std::string(select_key) + ".option." + std::string(option_id);
+}
+
 } // namespace strata::ui

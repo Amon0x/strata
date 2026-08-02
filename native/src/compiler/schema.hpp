@@ -161,6 +161,18 @@ inline constexpr std::size_t maximum_material_slots = 6U;
 struct EffectSchema final {
     std::string name;
     std::vector<SchemaParameter> parameters;
+    /** BACKDROP samples the already-rendered scene; CONTENT isolates and filters the subtree. */
+    std::string input = "BACKDROP";
+
+    struct Pass final {
+        std::string kind;
+        std::optional<std::string> radius_parameter;
+        double radius = 0.0;
+        std::optional<std::string> downsample_parameter;
+        std::uint32_t downsample = 1U;
+        MaterialShaderSources shaders;
+    };
+    std::vector<Pass> passes;
 
     [[nodiscard]] const SchemaParameter* find_parameter(std::string_view parameter_name) const noexcept;
 };

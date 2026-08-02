@@ -3,7 +3,7 @@
 `strata_headless` is a deterministic host for complete `.strata` applications. It is not a second
 UI runtime and it contains no widget-specific test hooks. The tool uses the public C ABI to compile
 and activate an application, create a normal `Surface`, enqueue ordinary input, frame it against a
-caller-owned clock, and consume render packet v4.
+caller-owned clock, and consume render packet v5.
 
 Each capture contains both views needed by automated testing:
 
@@ -11,7 +11,8 @@ Each capture contains both views needed by automated testing:
   focus/layers, events, action outcomes, diagnostics, render commands, and operation counters.
 - `<name>.png` is produced by the selected render backend. The portable CPU reference backend runs
   on Linux and Windows. Windows can instead use a windowless D3D11/WARP target sharing the desktop
-  texture store, glyph atlases, text, clipping, blending, blur, and authored-HLSL material pipeline.
+  texture store, glyph atlases, text, clipping, blending, blur, and authored-HLSL
+  material/backdrop/content-effect pipelines.
 - `result.json` summarizes the selected backend, every frame, captured host action/effect, async
   request, diagnostic, capture name, and any material that genuinely lacked a backend source.
 
@@ -41,7 +42,10 @@ build/cmake/linux-x64/native/strata_headless \
 CTest registers the portable batch/interactive scenarios as `strata.headless.portable` and
 `strata.headless.portable.interactive`. Windows additionally registers
 `strata.headless.d3d11` and `strata.headless.d3d11.interactive`, which verify authored shader
-compilation and the shared production renderer.
+compilation and the shared production renderer. `strata.headless.effects` renders the same authored
+liquid-glass/content-effect fixture through D3D11 and twice through the software approximation; it
+requires D3D shader output to differ from the approximation and both software images to be
+byte-for-byte deterministic.
 
 ## Persistent interactive control
 

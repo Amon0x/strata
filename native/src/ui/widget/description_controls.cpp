@@ -4,7 +4,10 @@
 #include <cctype>
 #include <ranges>
 #include <stdexcept>
+#include <string>
 #include <utility>
+
+#include "ui/widget/choice_model.hpp"
 
 namespace strata::ui {
 namespace {
@@ -88,9 +91,237 @@ void tabs_defaults(WidgetLayoutDefaultsScope& scope) {
 }
 
 void select_defaults(WidgetLayoutDefaultsScope& scope) {
+    if (scope.property("triggerTemplate") != nullptr) {
+        scope.set("height", runtime::Value("content"));
+        scope.set("width", runtime::Value("content"));
+        scope.padding(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
     scope.set("height", runtime::Value(32.0));
     scope.set("width", runtime::Value(180.0));
     scope.padding(10.0, 6.0, 10.0, 6.0);
+}
+
+[[nodiscard]] bool select_expanded(WidgetDescriptionScope& scope) {
+    if (const runtime::Value* value = scope.property("expanded");
+        value != nullptr && value->boolean() != nullptr) {
+        return *value->boolean();
+    }
+    if (const runtime::Value* value = scope.retained("$expanded");
+        value != nullptr && value->boolean() != nullptr) {
+        return *value->boolean();
+    }
+    return false;
+}
+
+[[nodiscard]] std::optional<std::size_t> selected_option(
+    WidgetDescriptionScope& scope,
+    const std::vector<const runtime::Value*>& options
+) {
+    const runtime::Value* retained = scope.retained("$selectedId");
+    for (const runtime::Value* candidate : {
+             scope.property("selectedId"),
+             retained,
+             scope.property("defaultSelectedId"),
+         }) {
+        const std::string* id = widget_description_string(candidate);
+        if (id == nullptr) continue;
+        for (std::size_t index = 0U; index < options.size(); ++index) {
+            const std::string* option_id =
+                widget_description_string(options[index]->field("id"));
+            if (option_id != nullptr && *option_id == *id) return index;
+        }
+    }
+    for (std::size_t index = 0U; index < options.size(); ++index) {
+        const std::string* id = widget_description_string(options[index]->field("id"));
+        const runtime::Value* enabled = options[index]->field("enabled");
+        if (id != nullptr &&
+            (enabled == nullptr || enabled->boolean() == nullptr || *enabled->boolean())) {
+            return index;
+        }
+    }
+    return options.empty() ? std::nullopt : std::optional<std::size_t>(0U);
+}
+
+[[nodiscard]] std::shared_ptr<const DescriptionNode> append_popup_children(
+    const std::shared_ptr<const DescriptionNode>& source,
+    std::vector<std::shared_ptr<const DescriptionNode>> children
+) {
+    auto result = std::make_shared<DescriptionNode>(*source);
+    std::vector<std::shared_ptr<const DescriptionNode>> merged;
+    if (source->children != nullptr) {
+        merged.reserve(source->children->size() + children.size());
+        for (std::size_t index = 0U; index < source->children->size(); ++index) {
+            merged.push_back(source->children->at(index));
+        }
+    }
+    merged.insert(
+        merged.end(),
+        std::make_move_iterator(children.begin()),
+        std::make_move_iterator(children.end())
+    );
+    result->children = std::make_shared<const EagerDescriptionChildren>(std::move(merged));
+    return result;
+}
+
+[[nodiscard]] runtime::Value select_portal_layout(
+    const DescriptionNode& popup,
+    const std::string& anchor
+) {
+    std::map<std::string, runtime::Value, std::less<>> fields{
+        {"anchorAlign", runtime::Value("START")},
+        {"anchorFlip", runtime::Value(true)},
+        {"anchorGap", runtime::Value(4.0)},
+        {"anchorShift", runtime::Value(true)},
+        {"anchorSide", runtime::Value("BOTTOM")},
+        {"anchorTarget", runtime::Value(anchor)},
+        {"detachFromParentClip", runtime::Value(true)},
+        {"height", runtime::Value("content")},
+        {"kind", runtime::Value("PORTAL")},
+        {"matchAnchorWidth", runtime::Value(true)},
+        {"portalTarget", runtime::Value("root")},
+        {"width", runtime::Value("content")},
+        {"zIndex", runtime::Value(20'000.0)},
+    };
+    const auto authored = popup.properties.find("$layout");
+    const runtime::Value* layout = authored != popup.properties.end()
+        ? authored->second.data_value()
+        : nullptr;
+    for (const std::string_view name : {
+             "anchorAlign",
+             "anchorFlip",
+             "anchorGap",
+             "anchorShift",
+             "anchorSide",
+             "matchAnchorWidth",
+         }) {
+        if (const runtime::Value* value = layout != nullptr ? layout->field(name) : nullptr;
+            value != nullptr) {
+            fields.insert_or_assign(std::string(name), *value);
+        }
+    }
+    std::vector<std::pair<std::string, runtime::Value>> values;
+    values.reserve(fields.size());
+    for (auto& [name, value] : fields) {
+        values.emplace_back(std::move(name), std::move(value));
+    }
+    return runtime::Value(std::move(values));
+}
+
+void select_expand(WidgetDescriptionScope& scope) {
+    const std::string* trigger_component =
+        widget_description_string(scope.property("triggerTemplate"));
+    const std::string* popup_component =
+        widget_description_string(scope.property("popupTemplate"));
+    const std::string* item_component =
+        widget_description_string(scope.property("itemTemplate"));
+    const bool authored_popup = popup_component != nullptr && item_component != nullptr;
+    if (trigger_component == nullptr && !authored_popup) {
+        return;
+    }
+    WidgetDescriptionExpansion& description = scope.description();
+    const std::string key = description.key.value_or("$select");
+    const std::vector<const runtime::Value*> options = scope.list("options");
+    const std::optional<std::size_t> selected = selected_option(scope, options);
+    const bool expanded = select_expanded(scope);
+    const bool enabled = scope.boolean("enabled", true);
+    const runtime::Value* selected_value = selected.has_value()
+        ? options[*selected]
+        : nullptr;
+    const std::string selected_id = selected_value != nullptr &&
+            widget_description_string(selected_value->field("id")) != nullptr
+        ? *widget_description_string(selected_value->field("id"))
+        : std::string{};
+    const std::string selected_label = selected_value != nullptr &&
+            widget_description_string(selected_value->field("label")) != nullptr
+        ? *widget_description_string(selected_value->field("label"))
+        : selected_id;
+    if (trigger_component != nullptr) {
+        std::shared_ptr<const DescriptionNode> trigger = scope.instantiate_component(
+            *trigger_component,
+            key + ".trigger",
+            WidgetTemplateArguments{
+                {"key", runtime::Value(runtime::KeyValue{key + ".trigger"})},
+                {"label", runtime::Value(selected_label)},
+                {"value", runtime::Value(selected_id)},
+                {"enabled", runtime::Value(enabled)},
+                {"expanded", runtime::Value(expanded)},
+            }
+        );
+        if (trigger == nullptr) return;
+        trigger = widget_native_presentation(trigger);
+        description.children = {std::move(trigger)};
+    }
+    if (!expanded || !authored_popup) return;
+
+    std::vector<std::shared_ptr<const DescriptionNode>> rows;
+    rows.reserve(options.size());
+    const runtime::Value* active_value = scope.retained("$choiceIndex");
+    const std::optional<std::size_t> active =
+        active_value != nullptr && active_value->number() != nullptr &&
+                *active_value->number() >= 0.0
+            ? std::optional<std::size_t>(
+                  static_cast<std::size_t>(*active_value->number())
+              )
+            : selected;
+    for (std::size_t index = 0U; index < options.size(); ++index) {
+        const runtime::Value& option = *options[index];
+        const std::string* id = widget_description_string(option.field("id"));
+        if (id == nullptr || id->empty()) continue;
+        const std::string* label = widget_description_string(option.field("label"));
+        const runtime::Value* option_enabled = option.field("enabled");
+        const bool row_enabled = enabled &&
+            (option_enabled == nullptr || option_enabled->boolean() == nullptr ||
+             *option_enabled->boolean());
+        const std::string row_key = choice_option_key(key, *id);
+        std::shared_ptr<const DescriptionNode> row = scope.instantiate_component(
+            *item_component,
+            row_key,
+            WidgetTemplateArguments{
+                {"key", runtime::Value(runtime::KeyValue{row_key})},
+                {"id", runtime::Value(*id)},
+                {"label", runtime::Value(label != nullptr ? *label : *id)},
+                {"value", runtime::Value(*id)},
+                {"index", runtime::Value(static_cast<double>(index))},
+                {"level", runtime::Value(0.0)},
+                {"enabled", runtime::Value(row_enabled)},
+                {"selected", runtime::Value(selected == index)},
+                {"active", runtime::Value(active == index)},
+                {"checked", runtime::Value(false)},
+                {"separator", runtime::Value(false)},
+                {"hasChildren", runtime::Value(false)},
+                {"shortcut", runtime::Value("")},
+            }
+        );
+        if (row != nullptr) rows.push_back(std::move(row));
+    }
+    std::shared_ptr<const DescriptionNode> popup = scope.instantiate_component(
+        *popup_component,
+        key + ".popup.surface",
+        WidgetTemplateArguments{
+            {"key", runtime::Value(runtime::KeyValue{key + ".popup.surface"})},
+            {"level", runtime::Value(0.0)},
+            {"expanded", runtime::Value(true)},
+        }
+    );
+    if (popup == nullptr) return;
+    popup = append_popup_children(popup, std::move(rows));
+    DescriptionNode::Properties portal_properties = widget_transparent_properties();
+    widget_mark_native_presentation(portal_properties);
+    portal_properties.insert_or_assign(
+        "$layout",
+        runtime::ExpressionValue(select_portal_layout(
+            *popup,
+            trigger_component != nullptr ? key + ".trigger" : key
+        ))
+    );
+    description.children.push_back(scope.node(
+        "Panel",
+        key + ".popup",
+        std::move(portal_properties),
+        {std::move(popup)}
+    ));
+    scope.synthesized();
 }
 
 void radio_group_defaults(WidgetLayoutDefaultsScope& scope) {
@@ -237,8 +468,22 @@ void combo_box_expand(WidgetDescriptionScope& scope) {
     if (const runtime::Value* max_rows = scope.property("maxVisibleRows"); max_rows != nullptr) {
         select_properties.emplace("maxVisibleRows", runtime::ExpressionValue(*max_rows));
     }
+    for (const std::string_view property : {
+             "triggerTemplate",
+             "popupTemplate",
+             "itemTemplate",
+         }) {
+        if (const runtime::Value* value = scope.property(property); value != nullptr) {
+            select_properties.emplace(
+                std::string(property),
+                runtime::ExpressionValue(*value)
+            );
+        }
+    }
     scope.apply_layout_defaults("Select", select_properties);
-    scope.set_layout(select_properties, "height", runtime::Value(32.0));
+    if (scope.property("triggerTemplate") == nullptr) {
+        scope.set_layout(select_properties, "height", runtime::Value(32.0));
+    }
 
     description.children = {
         scope.node("TextBox", *description.key + ".query", std::move(query_properties)),
@@ -272,7 +517,7 @@ void register_control_widget_descriptions(WidgetRegistry& registry) {
     add(registry, "NumberField", &number_field_defaults);
     add(registry, "Progress", &progress_defaults, &progress_expand);
     add(registry, "Tabs", &tabs_defaults);
-    add(registry, "Select", &select_defaults);
+    add(registry, "Select", &select_defaults, &select_expand);
     add(registry, "RadioGroup", &radio_group_defaults, &radio_group_expand, "RadioGroup");
     add(registry, "ComboBox", &combo_box_defaults, &combo_box_expand);
 

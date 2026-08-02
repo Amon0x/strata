@@ -205,6 +205,9 @@ Children: `false`
 | `selectedId` | string | false | true | — |
 | `enabled` | boolean | false | false | — |
 | `maxVisibleRows` | number | false | false | — |
+| `triggerTemplate` | componentTemplate | false | false | — |
+| `popupTemplate` | componentTemplate | false | false | — |
+| `itemTemplate` | componentTemplate | false | false | — |
 | `onQuery` | action | false | false | — |
 | `onChange` | action | false | false | — |
 | `bindQuery` | any | false | false | — |
@@ -330,6 +333,9 @@ Children: `true`
 | `key` | key | false | false | — |
 | `menuWidth` | number | false | false | — |
 | `rowHeight` | number | false | false | — |
+| `triggerTemplate` | componentTemplate | false | false | — |
+| `popupTemplate` | componentTemplate | false | false | — |
+| `itemTemplate` | componentTemplate | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -684,6 +690,9 @@ Children: `false`
 | `defaultOpen` | boolean | false | false | — |
 | `menuWidth` | number | false | false | — |
 | `rowHeight` | number | false | false | — |
+| `triggerTemplate` | componentTemplate | false | false | — |
+| `popupTemplate` | componentTemplate | false | false | — |
+| `itemTemplate` | componentTemplate | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -1109,6 +1118,9 @@ Children: `false`
 | `maxVisibleRows` | number | false | false | — |
 | `collapsedIcon` | image | false | false | — |
 | `expandedIcon` | image | false | false | — |
+| `triggerTemplate` | componentTemplate | false | false | — |
+| `popupTemplate` | componentTemplate | false | false | — |
+| `itemTemplate` | componentTemplate | false | false | — |
 | `enabled` | boolean | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
@@ -1691,6 +1703,7 @@ Children: `true`
 | `visible` | boolean | false | true | — |
 | `showDelay` | duration | false | false | — |
 | `hideDelay` | duration | false | false | — |
+| `contentTemplate` | componentTemplate | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -2306,6 +2319,13 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | Name | Type |
 |---|---|
 | `activeOverlay` | color |
+| `anchorAlign` | one of (CENTER, END, START) |
+| `anchorFlip` | boolean |
+| `anchorGap` | number |
+| `anchorPoint` | map of number |
+| `anchorShift` | boolean |
+| `anchorSide` | one of (BOTTOM, LEFT, RIGHT, TOP) |
+| `anchorTarget` | string |
 | `alignContent` | one of (CENTER, END, SPACE_AROUND, SPACE_BETWEEN, SPACE_EVENLY, START) |
 | `alignItems` | one of (CENTER, END, START, STRETCH) |
 | `alignSelf` | one of (CENTER, END, START, STRETCH) |
@@ -2320,6 +2340,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `clip` | boolean |
 | `color` | color |
 | `columnSpan` | number |
+| `detachFromParentClip` | boolean |
 | `disabledOpacity` | number |
 | `disclosure` | map of any |
 | `effect` | effect |
@@ -2346,6 +2367,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `lineHeightMultiplier` | number |
 | `margin` | one of (number, map of any) |
 | `material` | material |
+| `matchAnchorWidth` | boolean |
 | `maxHeight` | one of (one of (number, one of (auto, content), map of any, map of any), map of any) |
 | `maxLines` | number |
 | `maxWidth` | one of (one of (number, one of (auto, content), map of any, map of any), map of any) |
@@ -2355,6 +2377,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `overflow` | one of (CLIP, ELLIPSIS) |
 | `padding` | one of (number, map of any) |
 | `pixelSize` | number |
+| `portalTarget` | string |
 | `radius` | number |
 | `rowSpan` | number |
 | `scale` | number |
@@ -2382,12 +2405,20 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 
 | Name | Type |
 |---|---|
+| `anchorAlign` | one of (CENTER, END, START) |
+| `anchorFlip` | boolean |
+| `anchorGap` | number |
+| `anchorPoint` | map of number |
+| `anchorShift` | boolean |
+| `anchorSide` | one of (BOTTOM, LEFT, RIGHT, TOP) |
+| `anchorTarget` | string |
 | `alignContent` | one of (CENTER, END, SPACE_AROUND, SPACE_BETWEEN, SPACE_EVENLY, START) |
 | `alignItems` | one of (CENTER, END, START, STRETCH) |
 | `alignSelf` | one of (CENTER, END, START, STRETCH) |
 | `aspectRatio` | number |
 | `clip` | boolean |
 | `columnSpan` | number |
+| `detachFromParentClip` | boolean |
 | `gap` | one of (number, map of any) |
 | `gridColumn` | number |
 | `gridRow` | number |
@@ -2396,11 +2427,13 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `justifySelf` | one of (CENTER, END, START, STRETCH) |
 | `kind` | one of (COLUMN, GRID, OVERLAY, PANEL, PORTAL, ROW, SCROLL, SPACER, STACK) |
 | `margin` | one of (number, map of any) |
+| `matchAnchorWidth` | boolean |
 | `maxHeight` | one of (one of (number, one of (auto, content), map of any, map of any), map of any) |
 | `maxWidth` | one of (one of (number, one of (auto, content), map of any, map of any), map of any) |
 | `minHeight` | one of (one of (number, one of (auto, content), map of any, map of any), map of any) |
 | `minWidth` | one of (one of (number, one of (auto, content), map of any, map of any), map of any) |
 | `padding` | one of (number, map of any) |
+| `portalTarget` | string |
 | `rowSpan` | number |
 | `width` | one of (one of (number, one of (auto, content), map of any, map of any), map of any) |
 | `wrap` | boolean |

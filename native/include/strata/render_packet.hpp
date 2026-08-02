@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -8,6 +10,9 @@
 #include <vector>
 
 namespace strata::host {
+
+/** Maximum balanced CONTENT-effect nesting accepted by the packet and bundled renderers. */
+inline constexpr std::size_t maximum_content_effect_depth = 4U;
 
 inline constexpr std::uint32_t resource_create = 0U;
 inline constexpr std::uint32_t resource_upload = 1U;
@@ -19,7 +24,7 @@ inline constexpr std::uint32_t texture_format_rgba8 = 1U;
 inline constexpr std::uint32_t texture_sampling_nearest = 0U;
 inline constexpr std::uint32_t texture_sampling_linear = 1U;
 
-/** One ordered GPU-resource mutation decoded from packet v4. */
+/** One ordered GPU-resource mutation decoded from the current packet. */
 struct ResourceOperation final {
     std::uint32_t kind = 0U;
     std::string texture;
@@ -39,7 +44,7 @@ struct Scissor final {
     std::uint32_t height = 0U;
 };
 
-/** Indexed geometry submission. Vertex records are packet-v4's fixed 88-byte layout. */
+/** Indexed geometry submission. Vertex records use the fixed 88-byte layout. */
 struct DrawBatch final {
     std::uint32_t source_order = 0U;
     Scissor scissor;
@@ -62,7 +67,37 @@ struct BlurBatch final {
     std::uint32_t downsample = 1U;
 };
 
-using SubmissionBatch = std::variant<DrawBatch, BlurBatch>;
+enum class EffectBatchKind : std::uint32_t {
+    backdrop = 2U,
+    content_begin = 3U,
+};
+
+struct EffectBatch final {
+    EffectBatchKind kind = EffectBatchKind::backdrop;
+    std::uint32_t source_order = 0U;
+    Scissor scissor;
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    std::array<double, 4U> radii{};
+    std::string effect;
+    double opacity = 1.0;
+    std::array<double, 16U> parameters{};
+    std::uint32_t parameter_count = 0U;
+};
+
+struct ContentEffectEndBatch final {
+    std::uint32_t source_order = 0U;
+    Scissor scissor;
+};
+
+using SubmissionBatch = std::variant<
+    DrawBatch,
+    BlurBatch,
+    EffectBatch,
+    ContentEffectEndBatch
+>;
 
 /** Backend-ready render plan. Geometry is retained when a packet repeats its geometry epoch. */
 struct RenderPacket final {
@@ -76,7 +111,7 @@ struct RenderPacket final {
     std::vector<SubmissionBatch> batches;
 };
 
-/** Stateful packet-v4 decoder shared by custom, desktop, and headless render backends. */
+/** Stateful current-packet decoder shared by custom, desktop, and headless render backends. */
 class RenderPacketDecoder final {
   public:
     [[nodiscard]] const RenderPacket& decode(std::span<const std::uint8_t> bytes);

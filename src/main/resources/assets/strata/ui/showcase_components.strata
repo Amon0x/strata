@@ -63,6 +63,198 @@ style PageColumn extends Transparent {
   gap: 11;
 }
 
+style GlassTriggerStyle {
+  kind: "ROW";
+  width: 240;
+  height: 38;
+  padding: { horizontal: 12, vertical: 8 };
+  gap: 8;
+  alignItems: "CENTER";
+  radius: 10;
+  background: #182235E8;
+  border: { width: 1, color: #9CC7FF70 };
+}
+
+style GlassPopupStyle {
+  kind: "COLUMN";
+  width: 240;
+  height: "content";
+  padding: 6;
+  gap: 3;
+  radius: 14;
+  background: #17243AC2;
+  border: { width: 1, color: #C6E4FF80 };
+  anchorSide: "BOTTOM";
+  anchorAlign: "START";
+  anchorGap: 7;
+  anchorFlip: true;
+  anchorShift: true;
+  effect: effect(
+    "demo:liquid-glass",
+    blurRadius: 18,
+    downsample: 2,
+    refraction: 9,
+    tint: #7DB8FF35,
+    saturation: 1.18,
+    highlight: 0.16,
+    noise: 0.7
+  );
+}
+
+style GlassItemStyle extends Transparent {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 34;
+  padding: { horizontal: 10, vertical: 7 };
+  gap: 7;
+  alignItems: "CENTER";
+  radius: 8;
+}
+
+style GlassTooltipStyle {
+  kind: "PANEL";
+  width: "content";
+  height: "content";
+  padding: { horizontal: 10, vertical: 7 };
+  radius: 9;
+  background: #17243AE8;
+  border: { width: 1, color: #C6E4FF70 };
+  anchorSide: "TOP";
+  anchorAlign: "CENTER";
+  anchorGap: 8;
+  effect: effect(
+    "demo:liquid-glass",
+    blurRadius: 12,
+    downsample: 2,
+    refraction: 5,
+    tint: #7DB8FF24,
+    saturation: 1.1,
+    highlight: 0.12,
+    noise: 0.4
+  );
+}
+
+style EffectFixtureRoot extends Transparent {
+  kind: "OVERLAY";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  background: #08111FFF;
+}
+
+style EffectBackdropRow extends Transparent {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  gap: 18;
+  padding: 42;
+  alignItems: "STRETCH";
+}
+
+style EffectBlue extends Transparent {
+  radius: 28;
+  background: #1F5E8FFF;
+}
+
+style EffectMagenta extends Transparent {
+  radius: 28;
+  background: #7A315EFF;
+}
+
+style EffectGreen extends Transparent {
+  radius: 28;
+  background: #27684DFF;
+}
+
+style EffectBackdropMark {
+  width: "content";
+  height: "content";
+  margin: { left: 24, top: 74 };
+  font: "strata:fonts/default-medium";
+  pixelSize: 28;
+  color: #EAF5FF8C;
+}
+
+style EffectBackdropMarkLower extends EffectBackdropMark {
+  margin: { left: 38, top: 278 };
+  pixelSize: 38;
+  color: #FFFFFF52;
+}
+
+style EffectContent {
+  kind: "ROW";
+  width: 240;
+  height: 58;
+  padding: 10;
+  radius: 12;
+  background: #101A2ECC;
+  gap: 8;
+}
+
+style EffectGallery extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 38;
+  gap: 18;
+}
+
+style EffectDemoRow extends Transparent {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: "content";
+  gap: 16;
+  alignItems: "START";
+}
+
+style EffectControlDemo extends Transparent {
+  kind: "COLUMN";
+  width: 250;
+  height: 124;
+  gap: 12;
+}
+
+style EffectDemoCard {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: 124;
+  padding: 16;
+  gap: 8;
+  radius: 20;
+  background: #111B2BCC;
+  border: { width: 1, color: #C8E2FF66 };
+}
+
+style LiquidDemoCard extends EffectDemoCard {
+  background: #122039A8;
+  effect: effect(
+    "demo:liquid-glass",
+    blurRadius: 20,
+    downsample: 2,
+    refraction: 8,
+    tint: #76B8FF2E,
+    saturation: 1.2,
+    highlight: 0.2,
+    noise: 0.35
+  );
+}
+
+style FrostedDemoCard extends EffectDemoCard {
+  background: #D4E9FF24;
+  effect: effect("demo:frosted-backdrop", radius: 14, downsample: 2);
+}
+
+style PrismDemoCard extends EffectDemoCard {
+  effect: effect("demo:content-prism", strength: 5);
+}
+
+style SoftContentDemoCard extends EffectDemoCard {
+  effect: effect("demo:soft-content", radius: 3, downsample: 1);
+}
+
+style RoundedGlassDemoCard extends LiquidDemoCard {
+  radius: 34;
+}
+
 style CardStyle {
   kind: "COLUMN";
   width: { weight: 1 };
@@ -230,6 +422,151 @@ component DataGridItem(key: key, label: string, selected: boolean) {
   ) {
     Text(text: "◆", style: SectionText)
     Text(text: label, maxLines: 1, overflow: "ELLIPSIS")
+  }
+}
+
+component GlassChoiceTrigger(
+  key: key,
+  label: string,
+  enabled: boolean,
+  expanded: boolean
+) {
+  Panel(key: key, style: GlassTriggerStyle, variant: expanded ? "primary" : "secondary") {
+    Text(
+      text: label,
+      layout: { width: { weight: 1 }, height: "content" },
+      maxLines: 1,
+      overflow: "ELLIPSIS"
+    )
+    Text(text: expanded ? "^" : "v", style: TelemetryText)
+  }
+}
+
+component GlassPopup(key: key, level: number, expanded: boolean) {
+  Panel(key: key, style: GlassPopupStyle)
+}
+
+component GlassChoiceItem(
+  key: key,
+  id: string,
+  label: string,
+  index: number,
+  level: number,
+  enabled: boolean,
+  selected: boolean,
+  active: boolean,
+  checked: boolean,
+  separator: boolean,
+  hasChildren: boolean,
+  shortcut: string
+) {
+  Panel(
+    key: key,
+    style: GlassItemStyle,
+    variant: active ? "primary" : selected ? "secondary" : "subtle",
+    semantics: { role: "MENU_ITEM", label: label }
+  ) {
+    Text(text: checked || selected ? "*" : "", layout: { width: 14, height: "content" })
+    Text(
+      text: separator ? "------------------------" : label,
+      layout: { width: { weight: 1 }, height: "content" },
+      maxLines: 1,
+      overflow: "ELLIPSIS"
+    )
+    Text(text: shortcut != "" ? shortcut : hasChildren ? ">" : "", style: TelemetryText)
+  }
+}
+
+component GlassTooltip(key: key, text: string) {
+  Panel(key: key, style: GlassTooltipStyle) {
+    Text(text: text, style: TelemetryText, maxLines: 2, wrapMode: "WORD")
+  }
+}
+
+component GlassEffectFixture() {
+  Panel(style: EffectFixtureRoot) {
+    Panel(style: EffectBackdropRow) {
+      Panel(style: EffectBlue, layout: { width: { weight: 1 }, height: { weight: 1 } }) {
+        Text(text: "WAVES", style: EffectBackdropMark)
+        Text(text: "01", style: EffectBackdropMarkLower)
+      }
+      Panel(style: EffectMagenta, layout: { width: { weight: 1 }, height: { weight: 1 } }) {
+        Text(text: "BLUR", style: EffectBackdropMark)
+        Text(text: "02", style: EffectBackdropMarkLower)
+      }
+      Panel(style: EffectGreen, layout: { width: { weight: 1 }, height: { weight: 1 } }) {
+        Text(text: "PRISM", style: EffectBackdropMark)
+        Text(text: "03", style: EffectBackdropMarkLower)
+      }
+    }
+    Panel(style: EffectGallery) {
+      Text(text: "Authored effect gallery", style: SectionText)
+      Panel(style: EffectDemoRow) {
+        Panel(style: LiquidDemoCard) {
+          Text(text: "LIQUID GLASS", style: SectionText)
+          Text(
+            text: "Blur + refraction + tint over live backdrop",
+            style: TelemetryText,
+            wrapMode: "WORD",
+            maxLines: 2
+          )
+        }
+        Panel(style: FrostedDemoCard) {
+          Text(text: "FROSTED BACKDROP", style: SectionText)
+          Text(
+            text: "Typed blur-only program; portable and GPU paths agree",
+            style: TelemetryText,
+            wrapMode: "WORD",
+            maxLines: 2
+          )
+        }
+        Panel(style: PrismDemoCard) {
+          Text(text: "CONTENT PRISM", style: SectionText)
+          Text(
+            text: "The subtree is isolated before its authored shader runs",
+            style: TelemetryText,
+            wrapMode: "WORD",
+            maxLines: 2
+          )
+        }
+      }
+      Panel(style: EffectDemoRow) {
+        Panel(style: EffectControlDemo) {
+          Text(text: "ANCHORED GLASS CONTROL", style: SectionText)
+          Text(text: "Authored trigger, popup, and rows", style: TelemetryText)
+          Select(
+            key: "effect.fixture.select",
+            expanded: true,
+            options: [
+              { id: "glass", label: "Liquid glass" },
+              { id: "prism", label: "Content prism" },
+              { id: "software", label: "Deterministic fallback" }
+            ],
+            triggerTemplate: GlassChoiceTrigger,
+            popupTemplate: GlassPopup,
+            itemTemplate: GlassChoiceItem
+          )
+        }
+        Panel(style: RoundedGlassDemoCard) {
+          Text(text: "ROUNDED MASK", style: SectionText)
+          Text(
+            text: "One shared radius drives shader edge, border, and final composite",
+            style: TelemetryText,
+            wrapMode: "WORD",
+            maxLines: 3
+          )
+        }
+        Panel(style: SoftContentDemoCard) {
+          Text(text: "SOFT CONTENT", style: SectionText)
+          Text(
+            text: "A CONTENT blur filters only this card's subtree",
+            style: TelemetryText,
+            wrapMode: "WORD",
+            maxLines: 3
+          )
+        }
+      }
+    }
   }
 }
 
@@ -739,8 +1076,35 @@ component ExtendPage() {
           { id: "balanced", label: "Balanced" },
           { id: "quality", label: "High quality" }
         ],
+        triggerTemplate: GlassChoiceTrigger,
+        popupTemplate: GlassPopup,
+        itemTemplate: GlassChoiceItem,
         bind: basicQuality
       )
+      Menu(
+        key: "basic.actions",
+        label: "Glass actions",
+        items: [
+          { id: "refresh", label: "Refresh preview", shortcutHint: "Ctrl+R" },
+          { id: "density", label: "Density", children: [
+            { id: "compact", label: "Compact", checked: true },
+            { id: "comfortable", label: "Comfortable" }
+          ]},
+          { id: "separator", separator: true },
+          { id: "inspect", label: "Inspect surface" }
+        ],
+        triggerTemplate: GlassChoiceTrigger,
+        popupTemplate: GlassPopup,
+        itemTemplate: GlassChoiceItem,
+        onSelect: action("demo.data.collection")
+      )
+      Tooltip(
+        key: "basic.tooltip",
+        text: "This tooltip is an authored anchored portal with a backdrop shader.",
+        contentTemplate: GlassTooltip
+      ) {
+        Text(text: "Hover for authored glass", style: TelemetryText)
+      }
       RadioGroup(
         key: "basic.mode",
         options: [
@@ -961,6 +1325,9 @@ component FormsPage() {
             { id: "jungle", label: "Jungle" }, { id: "dark-oak", label: "Dark oak" }
           ],
           maxVisibleRows: 5,
+          triggerTemplate: GlassChoiceTrigger,
+          popupTemplate: GlassPopup,
+          itemTemplate: GlassChoiceItem,
           onQuery: action("demo.combo.query"),
           onChange: action("demo.combo.select")
         )

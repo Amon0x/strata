@@ -258,6 +258,11 @@ public:
         return text_->layout(*retained, *value->string());
     }
 
+    [[nodiscard]] bool focused(const std::string_view key) const {
+        const ui::RetainedNode* retained = tree_.find_key(key);
+        return retained != nullptr && input_.focused(retained->identity());
+    }
+
     [[nodiscard]] std::shared_ptr<const runtime::ActionValue> notification_action(
         std::string message
     ) const {
@@ -413,6 +418,57 @@ void test_primary_pointer_focus_default(InputFixture& fixture) {
         "contained background press escaped the active focus scope"
     );
     static_cast<void>(fixture.input_.set_focus_containment(std::nullopt, containment));
+}
+
+void test_detached_portal_hit_testing(InputFixture& fixture) {
+    ui::DescriptionNode::Properties portal{
+        {"$layout", runtime::ExpressionValue(object({
+            {"anchorGap", runtime::Value(0.0)},
+            {"anchorPoint", object({
+                {"x", runtime::Value(200.0)},
+                {"y", runtime::Value(100.0)},
+            })},
+            {"anchorSide", runtime::Value("BOTTOM")},
+            {"detachFromParentClip", runtime::Value(true)},
+            {"height", runtime::Value(30.0)},
+            {"kind", runtime::Value("PORTAL")},
+            {"width", runtime::Value(60.0)},
+        }))},
+    };
+    fixture.adopt(node(
+        "Panel",
+        "portal.root",
+        {
+            node(
+                "Panel",
+                "portal.clipped",
+                {node("Probe", "portal.control", {}, std::move(portal))},
+                {
+                    {"$layout", runtime::ExpressionValue(object({
+                        {"clip", runtime::Value(true)},
+                        {"height", runtime::Value(50.0)},
+                        {"kind", runtime::Value("PANEL")},
+                        {"width", runtime::Value(100.0)},
+                    }))},
+                }
+            ),
+        },
+        sized(640.0, 480.0)
+    ));
+    const ui::Rect bounds = fixture.bounds("portal.control").bounds;
+    check(
+        bounds.x >= 200.0 && bounds.y >= 100.0,
+        "detached portal fixture did not leave its clipped parent"
+    );
+    const ui::Point position = center(bounds);
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{position, ui::PointerEventType::press, 1, 0},
+        ui::PointerInputEvent{position, ui::PointerEventType::release, 1, 0},
+    }));
+    check(
+        fixture.focused("portal.control"),
+        "detached portal was visible outside its parent clip but could not be hit"
+    );
 }
 
 void test_rich_text_press_arm(InputFixture& fixture) {
@@ -1815,6 +1871,7 @@ int main(const int argument_count, const char* const* const arguments) {
         const std::shared_ptr<const runtime::ApplicationBundle> bundle = load_bundle();
         InputFixture fixture(bundle, resources);
         test_primary_pointer_focus_default(fixture);
+        test_detached_portal_hit_testing(fixture);
         test_rich_text_press_arm(fixture);
         test_static_text_state_partition(fixture);
         test_wrapped_static_text_navigation(fixture);

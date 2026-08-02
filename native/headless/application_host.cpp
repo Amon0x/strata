@@ -383,6 +383,23 @@ struct ApplicationHost::Impl final {
                 read_text(resource_path(material.source))
             );
         }
+        const std::string_view effect_backend =
+            renderer->backend() == "d3d11" ? "hlsl" : "reference";
+        for (const strata::EffectPassDeclaration& pass :
+             runtime->effect_pass_declarations(effect_backend)) {
+            renderer->declare_effect_pass(
+                pass.effect_id,
+                pass.index,
+                static_cast<std::uint32_t>(pass.kind),
+                pass.radius,
+                pass.downsample,
+                pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
+                pass.downsample_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
+                pass.source.empty()
+                    ? std::string{}
+                    : read_text(resource_path(pass.source))
+            );
+        }
 
         const strata_durable_store_adapter durable_adapter{
             sizeof(strata_durable_store_adapter),

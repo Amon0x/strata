@@ -7,7 +7,7 @@ Strata ships two desktop entry points:
 - `strata_desktop.exe --application ...` is a configurable runner for viewing an application without
   writing host code. With no `--application`, the executable opens Strata's bundled showcase.
 
-Both paths use the same public C ABI, packet-v4 decoder, D3D11 renderer, resource loader,
+Both paths use the same public C ABI, packet-v5 decoder, D3D11 renderer, resource loader,
 clipboard/IMM32 adapters, source-import resolver, complete window-message translator, and ordered
 GPU-resource release barrier.
 
@@ -66,7 +66,7 @@ Installed targets are:
 | `Strata::host` | C++ ownership and structured host-data/action bindings. |
 | `Strata::desktop` | Complete reusable Win32/D3D11 application host. |
 | `Strata::extensions` | Authoring support linked into independently loaded extension libraries. |
-| `Strata::render_host` | Public stateful packet-v4 decoder used by custom render backends. |
+| `Strata::render_host` | Public stateful packet-v5 decoder used by custom render backends. |
 
 The package also defines:
 
@@ -135,9 +135,15 @@ Low-level `resize`, `pointer`, `scroll`, `key`, `text`, and `ime_preedit` method
 applications with an existing platform translation layer. `reload_resources()` invalidates the
 file cache, advances the adapter generation, and performs the Surface reload barrier for changed
 fonts and PNG/SVG images. The message loop calls `host.frame()`. The host synchronizes revision-watched bindings, frames the
-Surface, decodes packet v4, submits D3D11 work, and presents. `close()` is optional during ordinary
+Surface, decodes packet v5, submits D3D11 work, and presents. `close()` is optional during ordinary
 scope destruction; calling it explicitly reports release errors. Either path consumes and
 acknowledges the terminal resource packet before releasing the Surface.
+
+At application configuration the host enumerates material declarations and ordered effect-pass
+declarations for the `hlsl` backend, resolves their resource ids, and compiles them once. Effect
+targets are retained at framebuffer size and reused by nesting depth; backdrop capture, isolated
+content, blur/shader passes, rounded masking, and premultiplied composition do not rebuild widget
+geometry.
 
 Register action handlers and required snapshots before `activate()`, because activation validates
 the configured application schema. Use `bindings().snapshot(...)` for revision-watched models and

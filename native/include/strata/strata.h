@@ -25,8 +25,9 @@ extern "C" {
 #define STRATA_ABI_VERSION_3 UINT32_C(3)
 #define STRATA_ABI_VERSION_4 UINT32_C(4)
 #define STRATA_ABI_VERSION_5 UINT32_C(5)
-#define STRATA_ABI_VERSION_CURRENT STRATA_ABI_VERSION_5
-#define STRATA_ABI_VERSION_MINIMUM STRATA_ABI_VERSION_5
+#define STRATA_ABI_VERSION_6 UINT32_C(6)
+#define STRATA_ABI_VERSION_CURRENT STRATA_ABI_VERSION_6
+#define STRATA_ABI_VERSION_MINIMUM STRATA_ABI_VERSION_6
 
 typedef uint32_t strata_status;
 
@@ -1545,7 +1546,7 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Packet v4 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * Packet v5 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
  * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
  * [u32 kind, u32 payload byte count, payload]:
  *
@@ -1557,7 +1558,12 @@ typedef struct strata_surface_frame_info {
  * A vertex is 88 bytes: f32 x/y/z/u/v, u8 red/green/blue/alpha, then sixteen f32 material values.
  * Draw payloads contain source order, a u32 framebuffer scissor, material/blend strings, optional
  * texture id, and base-vertex/first-index/index-count. Blur payloads contain the common source
- * order/scissor followed by f64 x/y/width/height/radius and u32 downsample. Resource payloads begin
+ * order/scissor followed by f64 x/y/width/height/radius and u32 downsample. Backdrop/content-begin
+ * effect payloads contain source order/scissor; f64 x/y/width/height; four f64 corner radii; the
+ * effect-id string; f64 opacity; a u32 packed-parameter count; and up to sixteen f64 values.
+ * Content-end carries only source order/scissor. The begin/end records form a validated stack
+ * with at most four simultaneously isolated CONTENT layers.
+ * Resource payloads begin
  * with a texture-id string. Atlas create/upload then carry u32 format (0 = R8, 1 = RGBA8) and u32
  * x/y/width/height; upload adds u32 byte count and raw texels. Release has no additional fields.
  * Encoded texture creation carries u32 encoding (0 = PNG), u32 sampling, u32 width/height, a u32
@@ -1567,13 +1573,14 @@ typedef struct strata_surface_frame_info {
  *
  * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
  * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
- * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v4 records.
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v5 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
 #define STRATA_RENDER_PACKET_VERSION_3 UINT32_C(3)
 #define STRATA_RENDER_PACKET_VERSION_4 UINT32_C(4)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_4
+#define STRATA_RENDER_PACKET_VERSION_5 UINT32_C(5)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_5
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 
 #define STRATA_RENDER_RESOURCE_ATLAS_CREATE UINT32_C(0)
@@ -1583,6 +1590,9 @@ typedef struct strata_surface_frame_info {
 
 #define STRATA_RENDER_BATCH_DRAW UINT32_C(0)
 #define STRATA_RENDER_BATCH_BLUR UINT32_C(1)
+#define STRATA_RENDER_BATCH_BACKDROP_EFFECT UINT32_C(2)
+#define STRATA_RENDER_BATCH_CONTENT_EFFECT_BEGIN UINT32_C(3)
+#define STRATA_RENDER_BATCH_CONTENT_EFFECT_END UINT32_C(4)
 
 #define STRATA_RENDER_COMMAND_SOLID_RECT UINT32_C(0)
 #define STRATA_RENDER_COMMAND_ROUNDED_RECT UINT32_C(1)
@@ -1599,6 +1609,9 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_COMMAND_TRANSFORM_POP UINT32_C(12)
 #define STRATA_RENDER_COMMAND_MATERIAL_PUSH UINT32_C(13)
 #define STRATA_RENDER_COMMAND_MATERIAL_POP UINT32_C(14)
+#define STRATA_RENDER_COMMAND_BACKDROP_EFFECT UINT32_C(15)
+#define STRATA_RENDER_COMMAND_CONTENT_EFFECT_PUSH UINT32_C(16)
+#define STRATA_RENDER_COMMAND_CONTENT_EFFECT_POP UINT32_C(17)
 
 #define STRATA_RENDER_VALUE_NULL UINT32_C(0)
 #define STRATA_RENDER_VALUE_BOOLEAN UINT32_C(1)
@@ -1728,6 +1741,37 @@ STRATA_API strata_result strata_runtime_read_material_declarations(
     strata_runtime* runtime,
     strata_string_view backend,
     strata_material_declaration* out_declarations,
+    size_t capacity,
+    size_t* out_count
+);
+
+#define STRATA_EFFECT_INPUT_BACKDROP UINT32_C(0)
+#define STRATA_EFFECT_INPUT_CONTENT UINT32_C(1)
+#define STRATA_EFFECT_INPUT_SHAPE UINT32_C(2)
+#define STRATA_EFFECT_PASS_BLUR UINT32_C(0)
+#define STRATA_EFFECT_PASS_SHADER UINT32_C(1)
+#define STRATA_EFFECT_PASS_SHADOW UINT32_C(2)
+#define STRATA_EFFECT_PARAMETER_NONE UINT32_MAX
+
+/** One pass in an application-declared render effect program. */
+typedef struct strata_effect_pass_declaration {
+    size_t struct_size;
+    strata_string_view effect_id;
+    uint32_t index;
+    uint32_t kind;
+    double radius;
+    uint32_t downsample;
+    uint32_t radius_parameter;
+    uint32_t downsample_parameter;
+    /* Resource id of this pass's shader for the requested backend. */
+    strata_string_view source;
+} strata_effect_pass_declaration;
+
+/** Enumerates every pass of every effect for one backend as a flat ordered table. */
+STRATA_API strata_result strata_runtime_read_effect_pass_declarations(
+    strata_runtime* runtime,
+    strata_string_view backend,
+    strata_effect_pass_declaration* out_declarations,
     size_t capacity,
     size_t* out_count
 );

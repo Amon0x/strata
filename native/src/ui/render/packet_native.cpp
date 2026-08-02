@@ -144,10 +144,27 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
         output.integer(batch.base_vertex);
         output.integer(batch.first_index);
         output.integer(batch.index_count);
-    } else {
+    } else if (batch.kind == SubmissionBatchKind::blur) {
         output.rect(batch.effect_bounds);
         output.number(batch.effect_radius);
         output.integer(batch.effect_downsample);
+    } else if (batch.kind != SubmissionBatchKind::content_effect_end) {
+        if (!batch.effect.has_value()) {
+            throw std::logic_error("render effect batch is missing effect state");
+        }
+        output.rect(batch.effect_bounds);
+        output.number(batch.effect_radii.top_left);
+        output.number(batch.effect_radii.top_right);
+        output.number(batch.effect_radii.bottom_right);
+        output.number(batch.effect_radii.bottom_left);
+        output.text(batch.effect->id);
+        output.number(batch.effect->opacity);
+        output.integer(batch.effect->packed_parameter_count);
+        for (std::uint32_t index = 0U;
+             index < batch.effect->packed_parameter_count;
+             ++index) {
+            output.number(batch.effect->packed_parameters[index]);
+        }
     }
     return std::move(output).take();
 }
@@ -197,7 +214,7 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     constexpr std::string_view magic = "STRATARP";
     output.raw(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(magic.data()),
                                              magic.size()));
-    output.integer(std::uint32_t{4U});
+    output.integer(std::uint32_t{5U});
     if (texture_resources.size() > std::numeric_limits<std::size_t>::max() - resources.size()) {
         throw std::length_error("render resource count exceeds size_t");
     }

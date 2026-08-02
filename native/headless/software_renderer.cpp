@@ -164,6 +164,27 @@ void SoftwareRenderer::set_clear_color(const std::array<std::uint8_t, 4U> rgba) 
 
 void SoftwareRenderer::declare_material(std::string_view, std::string_view) {}
 
+void SoftwareRenderer::declare_effect_pass(
+    const std::string_view effect_id,
+    const std::uint32_t index,
+    const std::uint32_t kind,
+    const double radius,
+    const std::uint32_t downsample,
+    const std::uint32_t radius_parameter,
+    const std::uint32_t downsample_parameter,
+    std::string_view
+) {
+    std::vector<EffectPass>& passes = effects_[std::string(effect_id)];
+    if (passes.size() <= index) passes.resize(static_cast<std::size_t>(index) + 1U);
+    passes[index] = EffectPass{
+        kind,
+        radius,
+        std::clamp(downsample, 1U, 8U),
+        radius_parameter,
+        downsample_parameter,
+    };
+}
+
 void SoftwareRenderer::apply(const host::ResourceOperation& operation) {
     if (operation.kind == 2U) {
         textures_.erase(operation.texture);
@@ -602,21 +623,191 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
     }
 }
 
+void SoftwareRenderer::apply_effect(const host::EffectBatch& effect) {
+    const auto program = effects_.find(effect.effect);
+    if (program == effects_.end()) return;
+    for (const EffectPass& pass : program->second) {
+        if (pass.kind != 0U) continue;
+        const double radius = pass.radius_parameter < effect.parameter_count
+            ? effect.parameters[pass.radius_parameter]
+            : pass.radius;
+        const double requested_downsample =
+            pass.downsample_parameter < effect.parameter_count
+            ? effect.parameters[pass.downsample_parameter]
+            : static_cast<double>(pass.downsample);
+        blur(host::BlurBatch{
+            effect.source_order,
+            effect.scissor,
+            effect.x,
+            effect.y,
+            effect.width,
+            effect.height,
+            std::max(0.0, radius),
+            static_cast<std::uint32_t>(std::clamp(
+                std::llround(requested_downsample), 1LL, 8LL
+            )),
+        });
+    }
+}
+
+void SoftwareRenderer::composite_effect(
+    std::vector<std::uint8_t> foreground,
+    std::vector<std::uint8_t> backdrop,
+    const host::EffectBatch& effect
+) {
+    pixels_ = std::move(backdrop);
+    const double scale_x = width_ / logical_width_;
+    const double scale_y = height_ / logical_height_;
+    const std::uint32_t effect_left = static_cast<std::uint32_t>(std::clamp(
+        std::floor(effect.x * scale_x), 0.0, static_cast<double>(width_)
+    ));
+    const std::uint32_t effect_top = static_cast<std::uint32_t>(std::clamp(
+        std::floor(effect.y * scale_y), 0.0, static_cast<double>(height_)
+    ));
+    const std::uint32_t effect_right = static_cast<std::uint32_t>(std::clamp(
+        std::ceil((effect.x + effect.width) * scale_x), 0.0,
+        static_cast<double>(width_)
+    ));
+    const std::uint32_t effect_bottom = static_cast<std::uint32_t>(std::clamp(
+        std::ceil((effect.y + effect.height) * scale_y), 0.0,
+        static_cast<double>(height_)
+    ));
+    const std::uint64_t clip_right = std::min<std::uint64_t>(
+        static_cast<std::uint64_t>(effect.scissor.x) + effect.scissor.width,
+        width_
+    );
+    const std::uint64_t clip_bottom = std::min<std::uint64_t>(
+        static_cast<std::uint64_t>(effect.scissor.y) + effect.scissor.height,
+        height_
+    );
+    const std::uint32_t left =
+        std::max(effect_left, std::min(effect.scissor.x, width_));
+    const std::uint32_t top =
+        std::max(effect_top, std::min(effect.scissor.y, height_));
+    const std::uint32_t right = std::min(
+        effect_right, static_cast<std::uint32_t>(clip_right)
+    );
+    const std::uint32_t bottom = std::min(
+        effect_bottom, static_cast<std::uint32_t>(clip_bottom)
+    );
+    const float center_x = static_cast<float>(effect_left + effect_right) * 0.5F;
+    const float center_y = static_cast<float>(effect_top + effect_bottom) * 0.5F;
+    const float half_width =
+        static_cast<float>(effect_right - effect_left) * 0.5F;
+    const float half_height =
+        static_cast<float>(effect_bottom - effect_top) * 0.5F;
+    const float radius_scale = static_cast<float>(
+        std::sqrt(std::abs(scale_x * scale_y))
+    );
+    const float radius_limit = std::max(
+        0.0F,
+        std::min(half_width, half_height)
+    );
+    std::array<float, 4U> radii{};
+    for (std::size_t index = 0U; index < radii.size(); ++index) {
+        radii[index] = std::min(
+            static_cast<float>(effect.radii[index] * radius_scale),
+            radius_limit
+        );
+    }
+    for (std::uint32_t y = top; y < bottom; ++y) {
+        for (std::uint32_t x = left; x < right; ++x) {
+            const float mask = 1.0F - smoothstep(
+                -1.0F,
+                1.0F,
+                rounded_box_sdf(
+                    static_cast<float>(x) + 0.5F - center_x,
+                    static_cast<float>(y) + 0.5F - center_y,
+                    half_width,
+                    half_height,
+                    radii
+                )
+            );
+            const std::size_t pixel =
+                (static_cast<std::size_t>(y) * width_ + x) * 4U;
+            const float coverage = mask * static_cast<float>(effect.opacity);
+            const float alpha = static_cast<float>(foreground[pixel + 3U]) /
+                255.0F * coverage;
+            for (std::size_t channel_index = 0U; channel_index < 3U;
+                 ++channel_index) {
+                const float source = static_cast<float>(
+                    foreground[pixel + channel_index]
+                );
+                const float destination = static_cast<float>(
+                    pixels_[pixel + channel_index]
+                );
+                pixels_[pixel + channel_index] = static_cast<std::uint8_t>(
+                    std::clamp(
+                        std::lround(
+                            source * coverage + destination * (1.0F - alpha)
+                        ),
+                        0L,
+                        255L
+                    )
+                );
+            }
+            const float destination_alpha =
+                static_cast<float>(pixels_[pixel + 3U]) / 255.0F;
+            pixels_[pixel + 3U] = channel(
+                alpha + destination_alpha * (1.0F - alpha)
+            );
+        }
+    }
+}
+
 void SoftwareRenderer::render(const host::RenderPacket& packet, std::int64_t) {
     if (width_ == 0U || height_ == 0U) {
         throw std::logic_error("headless renderer must be sized before rendering");
     }
     consume_resources(packet);
+    pixels_.resize(static_cast<std::size_t>(width_) * height_ * 4U);
     for (std::size_t pixel = 0U; pixel < pixels_.size(); pixel += 4U) {
         std::copy(clear_.begin(), clear_.end(),
                   pixels_.begin() + static_cast<std::ptrdiff_t>(pixel));
     }
+    std::vector<ContentEffect> content_effects;
     for (const host::SubmissionBatch& batch : packet.batches) {
         if (const auto* draw_batch = std::get_if<host::DrawBatch>(&batch); draw_batch != nullptr) {
             draw(*draw_batch, packet);
+        } else if (const auto* blur_batch = std::get_if<host::BlurBatch>(&batch);
+                   blur_batch != nullptr) {
+            blur(*blur_batch);
+        } else if (const auto* backdrop_effect = std::get_if<host::EffectBatch>(&batch);
+                   backdrop_effect != nullptr &&
+                   backdrop_effect->kind == host::EffectBatchKind::backdrop) {
+            std::vector<std::uint8_t> backdrop = pixels_;
+            apply_effect(*backdrop_effect);
+            composite_effect(std::move(pixels_), std::move(backdrop), *backdrop_effect);
+        } else if (const auto* content_effect = std::get_if<host::EffectBatch>(&batch);
+                   content_effect != nullptr &&
+                   content_effect->kind == host::EffectBatchKind::content_begin) {
+            if (content_effects.size() == host::maximum_content_effect_depth) {
+                throw std::length_error(
+                    "software content effect nesting exceeds the packet limit"
+                );
+            }
+            content_effects.push_back(ContentEffect{*content_effect, std::move(pixels_)});
+            pixels_.assign(
+                static_cast<std::size_t>(width_) * height_ * 4U,
+                std::uint8_t{0U}
+            );
         } else {
-            blur(std::get<host::BlurBatch>(batch));
+            if (!std::holds_alternative<host::ContentEffectEndBatch>(batch) ||
+                content_effects.empty()) {
+                throw std::logic_error("software content effect stack is invalid");
+            }
+            ContentEffect content = std::move(content_effects.back());
+            content_effects.pop_back();
+            apply_effect(content.effect);
+            composite_effect(
+                std::move(pixels_),
+                std::move(content.backdrop),
+                content.effect
+            );
         }
+    }
+    if (!content_effects.empty()) {
+        throw std::logic_error("software content effect stack is unbalanced");
     }
 }
 

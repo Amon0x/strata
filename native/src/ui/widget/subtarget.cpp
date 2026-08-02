@@ -13,6 +13,7 @@
 #include "ui/notification.hpp"
 #include "ui/text_geometry.hpp"
 #include "ui/tree.hpp"
+#include "ui/widget/choice_model.hpp"
 #include "ui/widget/menu_model.hpp"
 #include "ui/widget/shell_model.hpp"
 
@@ -64,6 +65,29 @@ namespace {
 [[nodiscard]] Rect root_bounds(const LayoutResult& layout, const Rect fallback) noexcept {
     const LayoutRecord* root = layout.find(layout.root_identity);
     return root != nullptr ? root->bounds : fallback;
+}
+
+[[nodiscard]] const RetainedNode* descendant_key(
+    const RetainedNode& node,
+    const std::string_view key
+) noexcept {
+    if (node.description().key.has_value() && *node.description().key == key) return &node;
+    for (const auto& child : node.children()) {
+        if (const RetainedNode* found = descendant_key(*child, key); found != nullptr) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] std::optional<Rect> descendant_bounds(
+    const RetainedNode& node,
+    const std::string_view key,
+    const LayoutResult& layout
+) noexcept {
+    const RetainedNode* child = descendant_key(node, key);
+    const LayoutRecord* record = child != nullptr ? layout.find(child->identity()) : nullptr;
+    return record != nullptr ? std::optional<Rect>(record->bounds) : std::nullopt;
 }
 
 [[nodiscard]] Rect popup_bounds(
@@ -315,15 +339,62 @@ std::vector<WidgetSubtarget> widget_subtargets(
             });
         }
     } else if (type == "Select") {
+        const std::string select_key = node.description().key.value_or("$select");
+        const Rect control_bounds = property(node, "triggerTemplate") != nullptr
+            ? descendant_bounds(node, select_key + ".trigger", layout).value_or(bounds)
+            : bounds;
         result.push_back(WidgetSubtarget{
-            node.identity(), "$control", WidgetSubtargetKind::control, 0U, bounds,
+            node.identity(), "$control", WidgetSubtargetKind::control, 0U, control_bounds,
             runtime::Value{}, {}, {}, boolean(property(node, "enabled"), true), false,
             record->z_index,
         });
         source = property(node, "options");
         if (!effective_boolean(node, "expanded", "$expanded", "defaultExpanded", false) ||
             source == nullptr || source->list() == nullptr) return result;
-        const double row_height = std::max(18.0, number(property(node, "rowHeight"), 28.0));
+        if (property(node, "itemTemplate") != nullptr) {
+            if (const std::optional<Rect> popup = descendant_bounds(
+                    node,
+                    select_key + ".popup",
+                    layout
+                );
+                popup.has_value()) {
+                WidgetSubtarget surface{
+                    node.identity(), "$popup", WidgetSubtargetKind::separator, 0U,
+                    *popup, runtime::Value{}, {}, {}, false, true,
+                    detached_overlay_menu_z,
+                };
+                surface.separator = true;
+                result.push_back(std::move(surface));
+            }
+            for (std::size_t index = 0U; index < source->list()->values.size(); ++index) {
+                const runtime::Value& entry = source->list()->values[index];
+                const std::string* id = text(entry.field("id"));
+                if (id == nullptr || id->empty()) continue;
+                const std::string* label = text(entry.field("label"));
+                const std::optional<Rect> row = descendant_bounds(
+                    node,
+                    choice_option_key(select_key, *id),
+                    layout
+                );
+                if (!row.has_value()) continue;
+                result.push_back(WidgetSubtarget{
+                    node.identity(),
+                    *id,
+                    WidgetSubtargetKind::choice,
+                    index,
+                    *row,
+                    runtime::Value(*id),
+                    label != nullptr ? *label : *id,
+                    {},
+                    boolean(property(node, "enabled"), true) &&
+                        boolean(entry.field("enabled"), true),
+                    true,
+                    detached_overlay_menu_z,
+                });
+            }
+            return result;
+        }
+        constexpr double row_height = 28.0;
         const std::size_t maximum = static_cast<std::size_t>(std::max(
             1.0, number(property(node, "maxVisibleRows"), 8.0)
         ));
@@ -337,21 +408,54 @@ std::vector<WidgetSubtarget> widget_subtargets(
             detached_overlay_menu_z
         );
     } else if (type == "Menu") {
+        const std::string menu_key = node.description().key.value_or("$menu");
+        const Rect control_bounds = property(node, "triggerTemplate") != nullptr
+            ? descendant_bounds(node, menu_key + ".trigger", layout).value_or(bounds)
+            : bounds;
         result.push_back(WidgetSubtarget{
-            node.identity(), "$control", WidgetSubtargetKind::control, 0U, bounds,
+            node.identity(), "$control", WidgetSubtargetKind::control, 0U, control_bounds,
             runtime::Value{}, {}, {}, true, false, record->z_index,
         });
         if (!effective_boolean(node, "open", "$expanded", "defaultOpen", false)) return result;
         const MenuProjection projection = project_menu(node, layout, commands);
+        if (property(node, "popupTemplate") != nullptr) {
+            for (std::size_t level = 0U; level < projection.panels.size(); ++level) {
+                const std::optional<Rect> popup = descendant_bounds(
+                    node,
+                    menu_key + ".popup." + std::to_string(level),
+                    layout
+                );
+                if (!popup.has_value()) continue;
+                WidgetSubtarget surface{
+                    node.identity(),
+                    "$popup/" + std::to_string(level),
+                    WidgetSubtargetKind::separator,
+                    level,
+                    *popup,
+                    runtime::Value{},
+                    {},
+                    {},
+                    false,
+                    true,
+                    detached_overlay_menu_z,
+                };
+                surface.separator = true;
+                result.push_back(std::move(surface));
+            }
+        }
         for (const MenuRowModel& row : projection.rows()) {
             if (row.item == nullptr) continue;
             const MenuItemModel& item = *row.item;
+            const Rect item_bounds = property(node, "itemTemplate") != nullptr
+                ? descendant_bounds(node, menu_row_key(menu_key, row.path), layout)
+                      .value_or(row.bounds)
+                : row.bounds;
             WidgetSubtarget target{
                 node.identity(), menu_row_identity(row.path),
                 item.separator ? WidgetSubtargetKind::separator
                     : !item.command_id.empty() ? WidgetSubtargetKind::command
                     : WidgetSubtargetKind::choice,
-                row.path.back(), row.bounds, runtime::Value(item.id), item.label,
+                row.path.back(), item_bounds, runtime::Value(item.id), item.label,
                 item.command_id, item.enabled, true, detached_overlay_menu_z,
             };
             target.path = row.path;
@@ -549,6 +653,22 @@ std::vector<WidgetSubtarget> widget_subtargets(
             });
         }
     } else if (type == "Tooltip") {
+        if (property(node, "contentTemplate") != nullptr) {
+            const std::string tooltip_key = node.description().key.value_or("$tooltip");
+            if (const std::optional<Rect> popup = descendant_bounds(
+                    node,
+                    tooltip_key + ".content",
+                    layout
+                );
+                popup.has_value()) {
+                result.push_back(WidgetSubtarget{
+                    node.identity(), "$tooltip", WidgetSubtargetKind::control, 0U,
+                    *popup, runtime::Value{}, {}, {}, true, true,
+                    detached_overlay_tooltip_z,
+                });
+            }
+            return result;
+        }
         const std::optional<TooltipProjection> projection = project_tooltip(
             node, layout, text_layout
         );

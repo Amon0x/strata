@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -439,8 +440,19 @@ SchemaRegistry SchemaRegistry::from_catalog(const BuiltinCatalog& catalog) {
     for (const DeclaredEffect& value : catalog.effects) {
         EffectSchema schema;
         schema.name = value.name;
+        schema.input = value.input;
         for (const DeclaredProperty& parameter : value.parameters) {
             schema.parameters.push_back(property_parameter(parameter));
+        }
+        for (const DeclaredEffect::Pass& pass : value.passes) {
+            schema.passes.push_back(EffectSchema::Pass{
+                pass.kind,
+                pass.radius_parameter,
+                pass.radius,
+                pass.downsample_parameter,
+                pass.downsample,
+                {},
+            });
         }
         if (!registry.effects_.emplace(schema.name, std::move(schema)).second) {
             throw std::logic_error("duplicate native catalog effect");
@@ -866,6 +878,151 @@ void SchemaRegistry::apply_scenario_declarations(const data::JsonValue& schemas)
                 );
             }
             materials_.insert_or_assign(schema.id, std::move(schema));
+        }
+    }
+    if (const data::JsonValue* effects = schemas.find("effects"); effects != nullptr) {
+        for (const data::JsonValue& value : array_field(*effects, "definitions")) {
+            EffectSchema schema;
+            schema.name = string_field(value, "id");
+            if (const data::JsonValue* input = value.find("input");
+                input != nullptr && input->string() != nullptr) {
+                schema.input = *input->string();
+            }
+            if (schema.input != "BACKDROP" && schema.input != "CONTENT") {
+                throw std::runtime_error(
+                    "effect '" + schema.name + "' has an unsupported input"
+                );
+            }
+            std::size_t slots = 0U;
+            for (const data::JsonValue& parameter : array_field(value, "parameters")) {
+                SchemaParameter declared = parse_parameter(parameter);
+                if (const data::JsonValue* material_type = parameter.find("effectType");
+                    material_type != nullptr && material_type->string() != nullptr) {
+                    declared.material_type = *material_type->string();
+                }
+                if (!declared.material_type.has_value() ||
+                    (*declared.material_type != "FLOAT" &&
+                     *declared.material_type != "INT" &&
+                     *declared.material_type != "FLOAT2" &&
+                     *declared.material_type != "FLOAT4" &&
+                     *declared.material_type != "COLOR")) {
+                    throw std::runtime_error(
+                        "effect '" + schema.name +
+                        "' parameter requires FLOAT, INT, FLOAT2, FLOAT4, or COLOR effectType"
+                    );
+                }
+                slots += material_parameter_width(declared.material_type);
+                schema.parameters.push_back(std::move(declared));
+            }
+            if (slots > 16U) {
+                throw std::runtime_error(
+                    "effect '" + schema.name + "' declares more than 16 parameter floats"
+                );
+            }
+            const data::JsonValue::Array& passes = array_field(value, "passes");
+            if (passes.size() > 16U) {
+                throw std::runtime_error(
+                    "effect '" + schema.name + "' declares more than 16 passes"
+                );
+            }
+            for (const data::JsonValue& pass_value : passes) {
+                EffectSchema::Pass pass;
+                pass.kind = string_field(pass_value, "kind");
+                if (pass.kind != "BLUR" && pass.kind != "SHADER") {
+                    throw std::runtime_error(
+                        "effect '" + schema.name + "' has an unsupported pass"
+                    );
+                }
+                if (const data::JsonValue* radius = pass_value.find("radius");
+                    radius != nullptr) {
+                    if (radius->number() == nullptr ||
+                        !std::isfinite(*radius->number()) || *radius->number() < 0.0) {
+                        throw std::runtime_error(
+                            "effect blur radius must be a finite non-negative number"
+                        );
+                    }
+                    pass.radius = *radius->number();
+                }
+                if (const data::JsonValue* parameter = pass_value.find("radiusParameter");
+                    parameter != nullptr && parameter->string() != nullptr) {
+                    pass.radius_parameter = *parameter->string();
+                }
+                if (const data::JsonValue* downsample = pass_value.find("downsample");
+                    downsample != nullptr) {
+                    if (downsample->integer() == nullptr ||
+                        *downsample->integer() < 1 || *downsample->integer() > 8) {
+                        throw std::runtime_error(
+                            "effect blur downsample must be an integer from 1 through 8"
+                        );
+                    }
+                    pass.downsample = static_cast<std::uint32_t>(
+                        *downsample->integer()
+                    );
+                }
+                if (const data::JsonValue* parameter =
+                        pass_value.find("downsampleParameter");
+                    parameter != nullptr && parameter->string() != nullptr) {
+                    pass.downsample_parameter = *parameter->string();
+                }
+                if (const data::JsonValue* shaders = pass_value.find("shaders");
+                    shaders != nullptr) {
+                    if (shaders->object() == nullptr) {
+                        throw std::runtime_error(
+                            "effect pass shaders must be a backend object"
+                        );
+                    }
+                    for (const auto& [backend, source] : *shaders->object()) {
+                        if (source.string() == nullptr) {
+                            throw std::runtime_error(
+                                "effect shader source must be a string"
+                            );
+                        }
+                        pass.shaders.emplace_back(backend, *source.string());
+                    }
+                }
+                const auto declared_parameter =
+                    [&schema](const std::optional<std::string>& name) {
+                        return !name.has_value() ||
+                            std::ranges::contains(
+                                schema.parameters, *name, &SchemaParameter::name
+                            );
+                    };
+                if (!declared_parameter(pass.radius_parameter) ||
+                    !declared_parameter(pass.downsample_parameter)) {
+                    throw std::runtime_error(
+                        "effect pass references an undeclared parameter"
+                    );
+                }
+                const auto scalar_parameter = [&schema](
+                                                  const std::optional<std::string>& name
+                                              ) {
+                    if (!name.has_value()) return true;
+                    const SchemaParameter* parameter = schema.find_parameter(*name);
+                    return parameter != nullptr && parameter->material_type.has_value() &&
+                        (*parameter->material_type == "FLOAT" ||
+                         *parameter->material_type == "INT");
+                };
+                if (!scalar_parameter(pass.radius_parameter) ||
+                    !scalar_parameter(pass.downsample_parameter)) {
+                    throw std::runtime_error(
+                        "effect blur controls must reference FLOAT or INT parameters"
+                    );
+                }
+                if (pass.kind == "SHADER" && pass.shaders.empty()) {
+                    throw std::runtime_error(
+                        "shader effect pass requires at least one backend source"
+                    );
+                }
+                schema.passes.push_back(std::move(pass));
+            }
+            if (schema.passes.empty()) {
+                throw std::runtime_error(
+                    "effect '" + schema.name + "' requires at least one pass"
+                );
+            }
+            if (!effects_.emplace(schema.name, std::move(schema)).second) {
+                throw std::runtime_error("effect id is declared more than once");
+            }
         }
     }
     for (const data::JsonValue& host : array_field(schemas, "host")) {

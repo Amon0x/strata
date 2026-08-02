@@ -90,6 +90,20 @@ using data::JsonValue;
     return found != node.description().properties.end() ? found->second.value() : nullptr;
 }
 
+[[nodiscard]] inline bool native_presentation_root(const RetainedNode& node) noexcept {
+    const runtime::Value* marker = scalar_property(node, "$nativePresentation");
+    return marker != nullptr && marker->boolean() != nullptr && *marker->boolean();
+}
+
+[[nodiscard]] inline bool inside_native_presentation(const RetainedNode& node) noexcept {
+    for (const RetainedNode* current = &node;
+         current != nullptr;
+         current = current->parent()) {
+        if (native_presentation_root(*current)) return true;
+    }
+    return false;
+}
+
 [[nodiscard]] inline JsonValue origin(const runtime::ActionOrigin& value) {
     const auto nullable_number = [](const std::optional<std::uint32_t> number) {
         return number.has_value()

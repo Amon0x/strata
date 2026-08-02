@@ -1,11 +1,14 @@
 #include <strata/render_packet.hpp>
+#include <algorithm>
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <cmath>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -154,14 +157,31 @@ void validate_geometry(const RenderPacket& packet) {
     }
 }
 
+[[nodiscard]] bool same_batch_shape(
+    const std::vector<SubmissionBatch>& left,
+    const std::vector<SubmissionBatch>& right
+) noexcept {
+    if (left.size() != right.size()) return false;
+    for (std::size_t index = 0U; index < left.size(); ++index) {
+        if (left[index].index() != right[index].index()) return false;
+        const EffectBatch* left_effect = std::get_if<EffectBatch>(&left[index]);
+        const EffectBatch* right_effect = std::get_if<EffectBatch>(&right[index]);
+        if (left_effect != nullptr && right_effect != nullptr &&
+            left_effect->kind != right_effect->kind) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8_t> bytes) {
     Reader input(bytes);
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
-        input.u32() != 4U) {
-        throw std::invalid_argument("native desktop requires render packet v4");
+        input.u32() != 5U) {
+        throw std::invalid_argument("native desktop requires render packet v5");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();
@@ -182,24 +202,8 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         const std::uint32_t kind = input.u32();
         resources.push_back(resource(kind, input.record()));
     }
-    if (retained_.has_value() && retained_->geometry_epoch == geometry_epoch) {
-        if (retained_->vertices.size() != vertex_bytes ||
-            retained_->indices.size() != index_count || retained_->batches.size() != batch_count ||
-            retained_->planned_draw_count != planned_draw_count ||
-            retained_->skipped_draw_count != skipped_draw_count) {
-            throw std::invalid_argument("retained render geometry epoch changed its payload shape");
-        }
-        static_cast<void>(input.raw(vertex_bytes));
-        static_cast<void>(input.raw(static_cast<std::size_t>(index_count) * sizeof(std::uint32_t)));
-        for (std::uint32_t index = 0U; index < batch_count; ++index) {
-            static_cast<void>(input.u32());
-            static_cast<void>(input.record());
-        }
-        input.exhausted("render packet");
-        retained_->frame_index = frame_index;
-        retained_->resources = std::move(resources);
-        return *retained_;
-    }
+    const bool retained_geometry =
+        retained_.has_value() && retained_->geometry_epoch == geometry_epoch;
 
     RenderPacket result;
     result.frame_index = frame_index;
@@ -248,13 +252,87 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
                 throw std::invalid_argument("render blur batch is outside the portable domain");
             }
             result.batches.emplace_back(blur);
+        } else if (kind == 2U || kind == 3U) {
+            EffectBatch effect;
+            effect.kind = kind == 2U
+                ? EffectBatchKind::backdrop
+                : EffectBatchKind::content_begin;
+            effect.source_order = source_order;
+            effect.scissor = clip;
+            effect.x = batch.number();
+            effect.y = batch.number();
+            effect.width = batch.number();
+            effect.height = batch.number();
+            for (double& radius : effect.radii) radius = batch.number();
+            effect.effect = batch.text();
+            effect.opacity = batch.number();
+            effect.parameter_count = batch.u32();
+            if (effect.effect.empty() || effect.parameter_count > effect.parameters.size() ||
+                !std::isfinite(effect.x) || !std::isfinite(effect.y) ||
+                !std::isfinite(effect.width) || !std::isfinite(effect.height) ||
+                effect.width < 0.0 || effect.height < 0.0 ||
+                !std::isfinite(effect.opacity) || effect.opacity < 0.0 ||
+                effect.opacity > 1.0 ||
+                std::ranges::any_of(effect.radii, [](const double value) {
+                    return !std::isfinite(value) || value < 0.0;
+                })) {
+                throw std::invalid_argument(
+                    "render effect batch is outside the portable domain"
+                );
+            }
+            for (std::uint32_t parameter = 0U;
+                 parameter < effect.parameter_count;
+                 ++parameter) {
+                effect.parameters[parameter] = batch.number();
+                if (!std::isfinite(effect.parameters[parameter])) {
+                    throw std::invalid_argument(
+                        "render effect parameter is not finite"
+                    );
+                }
+            }
+            result.batches.emplace_back(std::move(effect));
+        } else if (kind == 4U) {
+            result.batches.emplace_back(ContentEffectEndBatch{source_order, clip});
         } else {
             throw std::invalid_argument("render packet batch kind is unknown");
         }
         batch.exhausted("render batch");
     }
     input.exhausted("render packet");
+    std::size_t effect_depth = 0U;
+    for (const SubmissionBatch& batch : result.batches) {
+        if (const EffectBatch* effect = std::get_if<EffectBatch>(&batch);
+            effect != nullptr && effect->kind == EffectBatchKind::content_begin) {
+            if (effect_depth == maximum_content_effect_depth) {
+                throw std::invalid_argument(
+                    "render content effect stack exceeds the maximum depth"
+                );
+            }
+            ++effect_depth;
+        } else if (std::holds_alternative<ContentEffectEndBatch>(batch)) {
+            if (effect_depth == 0U) {
+                throw std::invalid_argument("render content effect stack underflow");
+            }
+            --effect_depth;
+        }
+    }
+    if (effect_depth != 0U) {
+        throw std::invalid_argument("render content effect stack is unbalanced");
+    }
     validate_geometry(result);
+    if (retained_geometry) {
+        if (result.vertices != retained_->vertices ||
+            result.indices != retained_->indices) {
+            throw std::invalid_argument(
+                "retained render geometry epoch changed its vertex or index payload"
+            );
+        }
+        if (!same_batch_shape(result.batches, retained_->batches)) {
+            throw std::invalid_argument(
+                "retained render geometry epoch changed its batch shape"
+            );
+        }
+    }
     retained_ = std::move(result);
     return *retained_;
 }

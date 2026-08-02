@@ -67,7 +67,18 @@ struct SiblingKey final {
             return false;
         }
     }
-    for (const std::string_view field : {"portalTarget", "detachFromParentClip"}) {
+    for (const std::string_view field : {
+             "portalTarget",
+             "detachFromParentClip",
+             "anchorTarget",
+             "anchorPoint",
+             "anchorSide",
+             "anchorAlign",
+             "anchorGap",
+             "anchorFlip",
+             "anchorShift",
+             "matchAnchorWidth",
+         }) {
         const runtime::Value* left = current_value != nullptr ? current_value->field(field) : nullptr;
         const runtime::Value* right = next_value != nullptr ? next_value->field(field) : nullptr;
         if ((left == nullptr) != (right == nullptr) ||

@@ -21,6 +21,7 @@ namespace {
 
 constexpr double transform_epsilon = 0.000001;
 constexpr std::uint16_t coverage_subpixel_divisions = 4U;
+constexpr std::size_t maximum_content_effect_depth = 4U;
 
 [[nodiscard]] Rect intersect(const Rect first, const Rect second) noexcept {
     const double left = std::max(first.x, second.x);
@@ -543,6 +544,7 @@ std::vector<PlannedItem> plan(
     Rect clip{0.0, 0.0, context.logical_width, context.logical_height};
     Transform transform;
     std::optional<MaterialState> material_override;
+    std::size_t content_effect_depth = 0U;
 
     for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
         if (index > std::numeric_limits<std::uint32_t>::max()) {
@@ -594,6 +596,63 @@ std::vector<PlannedItem> plan(
                         value.downsample, std::numeric_limits<std::uint32_t>::max()
                     )),
                 });
+            } else if constexpr (std::is_same_v<Type, BackdropEffectRenderCommand>) {
+                const Rect visible = intersect(clip, transform.bounds(value.bounds));
+                if (visible.empty()) {
+                    ++skipped_draws;
+                    return;
+                }
+                const double scale = std::sqrt(std::abs(
+                    transform.m00 * transform.m11 - transform.m01 * transform.m10
+                ));
+                output.emplace_back(SubmissionBatch{
+                    .kind = SubmissionBatchKind::backdrop_effect,
+                    .material = value.effect.id,
+                    .scissor = scissor(clip, context),
+                    .source_order = source_order,
+                    .effect_bounds = transform.bounds(value.bounds),
+                    .effect_radii = CornerRadii{
+                        value.radii.top_left * scale,
+                        value.radii.top_right * scale,
+                        value.radii.bottom_right * scale,
+                        value.radii.bottom_left * scale,
+                    },
+                    .effect = value.effect,
+                });
+            } else if constexpr (std::is_same_v<Type, ContentEffectPushRenderCommand>) {
+                if (content_effect_depth == maximum_content_effect_depth) {
+                    throw std::length_error(
+                        "render content effect nesting exceeds the packet limit"
+                    );
+                }
+                ++content_effect_depth;
+                const double scale = std::sqrt(std::abs(
+                    transform.m00 * transform.m11 - transform.m01 * transform.m10
+                ));
+                output.emplace_back(SubmissionBatch{
+                    .kind = SubmissionBatchKind::content_effect_begin,
+                    .material = value.effect.id,
+                    .scissor = scissor(clip, context),
+                    .source_order = source_order,
+                    .effect_bounds = transform.bounds(value.bounds),
+                    .effect_radii = CornerRadii{
+                        value.radii.top_left * scale,
+                        value.radii.top_right * scale,
+                        value.radii.bottom_right * scale,
+                        value.radii.bottom_left * scale,
+                    },
+                    .effect = value.effect,
+                });
+            } else if constexpr (std::is_same_v<Type, ContentEffectPopRenderCommand>) {
+                if (content_effect_depth == 0U) {
+                    throw std::logic_error("render content effect stack underflow");
+                }
+                --content_effect_depth;
+                output.emplace_back(SubmissionBatch{
+                    .kind = SubmissionBatchKind::content_effect_end,
+                    .scissor = scissor(clip, context),
+                    .source_order = source_order,
+                });
             } else if constexpr (std::is_same_v<Type, TextRunRenderCommand>) {
                 if (!visible_text[index]) {
                     ++skipped_draws;
@@ -627,7 +686,8 @@ std::vector<PlannedItem> plan(
             }
         }, source);
     }
-    if (!clip_stack.empty() || !transform_stack.empty() || !material_stack.empty()) {
+    if (!clip_stack.empty() || !transform_stack.empty() || !material_stack.empty() ||
+        content_effect_depth != 0U) {
         throw std::logic_error("render command state stacks are unbalanced");
     }
     return output;

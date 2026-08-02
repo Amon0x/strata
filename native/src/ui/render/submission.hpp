@@ -31,7 +31,13 @@ struct SubmissionScissor final {
     [[nodiscard]] friend bool operator==(const SubmissionScissor&, const SubmissionScissor&) = default;
 };
 
-enum class SubmissionBatchKind : std::uint32_t { draw = 0U, blur = 1U };
+enum class SubmissionBatchKind : std::uint32_t {
+    draw = 0U,
+    blur = 1U,
+    backdrop_effect = 2U,
+    content_effect_begin = 3U,
+    content_effect_end = 4U,
+};
 
 struct SubmissionBatch final {
     SubmissionBatchKind kind = SubmissionBatchKind::draw;
@@ -46,6 +52,8 @@ struct SubmissionBatch final {
     Rect effect_bounds;
     double effect_radius = 0.0;
     std::uint32_t effect_downsample = 1U;
+    CornerRadii effect_radii;
+    std::optional<EffectState> effect;
 };
 
 struct RenderSubmission final {

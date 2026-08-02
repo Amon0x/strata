@@ -86,6 +86,45 @@ Use named styles and `theme.*` tokens for a design system. Explicit call-site pr
 component defaults and styles. Control skins are still ordinary built-ins; changing toggle track/
 thumb geometry or checkbox indicators does not justify another widget implementation.
 
+### Anchored overlays and authored controls
+
+`PORTAL` layout is out of parent flow and can be anchored to any stable widget key. `anchorSide`,
+`anchorAlign`, `anchorGap`, `anchorFlip`, `anchorShift`, and `matchAnchorWidth` control placement;
+`portalTarget` and `detachFromParentClip` control the detached render root. Flip chooses the side
+with more room and shift keeps the result inside the root viewport. `anchorPoint: { x, y }`
+replaces the target rectangle for pointer-positioned overlays.
+
+`Menu` and `Select` accept typed `triggerTemplate`, `popupTemplate`, and `itemTemplate` components.
+The trigger can be replaced independently; supply `popupTemplate` and `itemTemplate` together.
+The popup component is the authored surface/container; Strata injects
+the materialized item components as its children and places it through an anchored portal. The
+typed item context includes stable key/id/value/index, label, enabled, selected/active/checked
+state, separator status, nesting level, shortcut, and child disclosure. Template instances are
+visual presentation owned by the parent control: nested focusable or clickable widgets do not
+create competing interaction targets. `ComboBox` forwards the same templates to its choice popup.
+`Tooltip.contentTemplate` authors its detached content.
+
+The application therefore owns rows, icons, badges, padding, borders, effects, and motion. Native
+code still owns open state, outside dismissal, focus, pointer routing, keyboard navigation,
+typeahead, selection/action dispatch, accessibility, and viewport collision:
+
+```strata
+component ChoicePopup(key: key, level: number, expanded: boolean) {
+  Panel(key: key, style: GlassPopup) // injected item children are appended here
+}
+
+Select(
+  key: "quality",
+  options: [{ id: "fast", label: "Fast" }, { id: "best", label: "Best" }],
+  triggerTemplate: ChoiceTrigger,
+  popupTemplate: ChoicePopup,
+  itemTemplate: ChoiceItem
+)
+```
+
+See `showcase_components.strata` for a complete liquid-glass Menu, Select, ComboBox, and Tooltip
+skin built from the same mechanism.
+
 Named timelines attach through `transition`, `enter`/`exit`, `move`, `contentTransition`, or motion
 channels. Boolean/numeric/color retargeting interrupts from the displayed value. Content-size and
 disclosure motion use the same retained layout/focus/input system. Reduced-motion surfaces resolve
@@ -148,6 +187,12 @@ The copyable examples are:
 The desktop and headless application hosts demonstrate the boundary: construct snapshot JSON and
 handle domain effects while compilation, state, retained UI, layout, input, semantics, and render
 planning remain in the runtime.
+
+Render effects are also application declarations, not native widgets. A typed ordered effect
+program can filter the already-rendered backdrop or isolate and filter a component subtree. D3D11
+executes blur and authored HLSL passes; the software host runs the declared blur subset and applies
+the same bounds, rounded mask, opacity, and content composition deterministically. See
+[the language guide](strata-language.md#authored-render-effects).
 
 ## 3. Native extensions
 

@@ -2,7 +2,9 @@
 #include "ui/widget/menu_model.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <ranges>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -123,6 +125,71 @@ void close_menu(WidgetInputScope& scope) {
     return current;
 }
 
+[[nodiscard]] std::string lower_ascii(std::string value) {
+    std::ranges::transform(value, value.begin(), [](const unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    return value;
+}
+
+[[nodiscard]] bool menu_typeahead(
+    WidgetInputScope& scope,
+    const MenuProjection& projection,
+    const bool open
+) {
+    if (scope.key().size() != 1U ||
+        !std::isalnum(static_cast<unsigned char>(scope.key().front()))) {
+        return false;
+    }
+    constexpr std::int64_t timeout = 700'000'000;
+    std::string query;
+    const runtime::Value* deadline = scope.retained("$menuTypeaheadDeadline");
+    if (deadline != nullptr && deadline->number() != nullptr &&
+        static_cast<double>(scope.frame_time_nanos()) <= *deadline->number()) {
+        const runtime::Value* retained = scope.retained("$menuTypeahead");
+        if (retained != nullptr && retained->string() != nullptr) {
+            query = *retained->string();
+        }
+    }
+    query += lower_ascii(std::string(scope.key()));
+
+    std::vector<std::size_t> path = projection.active_path;
+    std::vector<std::size_t> parent;
+    if (!path.empty()) parent.assign(path.begin(), path.end() - 1);
+    const std::vector<MenuItemModel>* items = projection.level_at(parent);
+    if (items == nullptr || items->empty()) return false;
+    const std::size_t current = path.empty() ? items->size() - 1U : path.back();
+    const auto match = [&items, current](const std::string& prefix) {
+        for (std::size_t offset = 1U; offset <= items->size(); ++offset) {
+            const std::size_t index = (current + offset) % items->size();
+            const MenuItemModel& item = (*items)[index];
+            if (item.enabled && !item.separator &&
+                lower_ascii(item.label).starts_with(prefix)) {
+                return std::optional<std::size_t>(index);
+            }
+        }
+        return std::optional<std::size_t>{};
+    };
+    std::optional<std::size_t> selected = match(query);
+    if (!selected.has_value() && query.size() > 1U) {
+        query = lower_ascii(std::string(scope.key()));
+        selected = match(query);
+    }
+    scope.set_retained("$menuTypeahead", runtime::Value(query), DirtyReason::input);
+    scope.set_retained(
+        "$menuTypeaheadDeadline",
+        runtime::Value(static_cast<double>(scope.frame_time_nanos() + timeout)),
+        DirtyReason::input
+    );
+    if (!selected.has_value()) return true;
+    parent.push_back(*selected);
+    if (!open) {
+        scope.set_retained("$expanded", runtime::Value(true), DirtyReason::properties);
+    }
+    set_menu_path(scope, parent);
+    return true;
+}
+
 [[nodiscard]] bool activate_menu_target(
     WidgetInputScope& scope,
     const WidgetSubtarget& target
@@ -203,6 +270,7 @@ bool menu_key(WidgetInputScope& scope) {
     }
     std::optional<MenuProjection> projection = menu_projection(scope);
     if (!projection.has_value() || projection->items.empty()) return false;
+    if (menu_typeahead(scope, *projection, open)) return true;
     if (!open) {
         if (scope.key() != "enter" && scope.key() != "space" && scope.key() != "down") {
             return false;

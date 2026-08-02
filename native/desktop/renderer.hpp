@@ -44,6 +44,16 @@ class Renderer final {
      * to the built-in unified shader rather than failing the frame.
      */
     void declare_material(std::string_view id, std::string_view hlsl_source);
+    void declare_effect_pass(
+        std::string_view effect_id,
+        std::uint32_t index,
+        std::uint32_t kind,
+        double radius,
+        std::uint32_t downsample,
+        std::uint32_t radius_parameter,
+        std::uint32_t downsample_parameter,
+        std::string_view hlsl_source
+    );
 
     void resize(std::uint32_t framebuffer_width, std::uint32_t framebuffer_height,
                 double logical_width, double logical_height);

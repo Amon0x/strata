@@ -1,10 +1,12 @@
 #include "ui/widget/description.hpp"
 
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 #include "runtime/action.hpp"
 #include "runtime/registry.hpp"
+#include "ui/widget/shell_model.hpp"
 
 namespace strata::ui {
 namespace {
@@ -24,6 +26,94 @@ void toolbar_defaults(WidgetLayoutDefaultsScope& scope) {
 void banner_defaults(WidgetLayoutDefaultsScope& scope) {
     scope.set("height", runtime::Value(46.0));
     scope.set("width", widget_fill());
+}
+
+void tooltip_defaults(WidgetLayoutDefaultsScope& scope) {
+    scope.set("height", runtime::Value("content"));
+    scope.set("kind", runtime::Value("PANEL"));
+    scope.set("width", runtime::Value("content"));
+}
+
+[[nodiscard]] runtime::Value tooltip_portal_layout(
+    const DescriptionNode& content
+) {
+    std::map<std::string, runtime::Value, std::less<>> fields{
+        {"anchorAlign", runtime::Value("CENTER")},
+        {"anchorFlip", runtime::Value(true)},
+        {"anchorGap", runtime::Value(6.0)},
+        {"anchorShift", runtime::Value(true)},
+        {"anchorSide", runtime::Value("BOTTOM")},
+        {"anchorTarget", runtime::Value("parent")},
+        {"detachFromParentClip", runtime::Value(true)},
+        {"height", runtime::Value("content")},
+        {"kind", runtime::Value("PORTAL")},
+        {"portalTarget", runtime::Value("root")},
+        {"width", runtime::Value("content")},
+        {"zIndex", runtime::Value(22'000.0)},
+    };
+    const auto authored = content.properties.find("$layout");
+    const runtime::Value* layout = authored != content.properties.end()
+        ? authored->second.data_value()
+        : nullptr;
+    for (const std::string_view name : {
+             "anchorAlign",
+             "anchorFlip",
+             "anchorGap",
+             "anchorShift",
+             "anchorSide",
+             "matchAnchorWidth",
+         }) {
+        if (const runtime::Value* value = layout != nullptr ? layout->field(name) : nullptr;
+            value != nullptr) {
+            fields.insert_or_assign(std::string(name), *value);
+        }
+    }
+    std::vector<std::pair<std::string, runtime::Value>> values;
+    values.reserve(fields.size());
+    for (auto& [name, value] : fields) {
+        values.emplace_back(std::move(name), std::move(value));
+    }
+    return runtime::Value(std::move(values));
+}
+
+void tooltip_expand(WidgetDescriptionScope& scope) {
+    const std::string* component =
+        widget_description_string(scope.property("contentTemplate"));
+    if (component == nullptr) return;
+    bool visible = false;
+    if (const runtime::Value* controlled = scope.property("visible");
+        controlled != nullptr && controlled->boolean() != nullptr) {
+        visible = *controlled->boolean();
+    } else if (const runtime::Value* retained = scope.retained(tooltip_shown_state);
+               retained != nullptr && retained->boolean() != nullptr) {
+        visible = *retained->boolean();
+    }
+    if (!visible) return;
+    WidgetDescriptionExpansion& description = scope.description();
+    const std::string key = description.key.value_or("$tooltip");
+    const std::string text = scope.string("text");
+    std::shared_ptr<const DescriptionNode> content = scope.instantiate_component(
+        *component,
+        key + ".content",
+        WidgetTemplateArguments{
+            {"key", runtime::Value(runtime::KeyValue{key + ".content"})},
+            {"text", runtime::Value(text)},
+        }
+    );
+    if (content == nullptr) return;
+    DescriptionNode::Properties portal = widget_transparent_properties();
+    widget_mark_native_presentation(portal);
+    portal.insert_or_assign(
+        "$layout",
+        runtime::ExpressionValue(tooltip_portal_layout(*content))
+    );
+    description.children.push_back(scope.node(
+        "Panel",
+        key + ".popup",
+        std::move(portal),
+        {std::move(content)}
+    ));
+    scope.synthesized();
 }
 
 void banner_expand(WidgetDescriptionScope& scope) {
@@ -337,6 +427,7 @@ void register_shell_widget_descriptions(WidgetRegistry& registry) {
     add(registry, "Command", &hidden_defaults, nullptr, false);
     add(registry, "CommandPalette", &hidden_defaults);
     add(registry, "ToastRegion", &hidden_defaults);
+    add(registry, "Tooltip", &tooltip_defaults, &tooltip_expand);
 
     WidgetCommandPhase command;
     command.declaration = true;

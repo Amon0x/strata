@@ -902,5 +902,176 @@
         }
       }
     ]
+  },
+  "effects": {
+    "definitions": [
+      {
+        "id": "demo:liquid-glass",
+        "input": "BACKDROP",
+        "parameters": [
+          {
+            "name": "blurRadius",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "downsample",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "refraction",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "tint",
+            "effectType": "COLOR",
+            "type": { "kind": "color" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "saturation",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "highlight",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "noise",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "passes": [
+          {
+            "kind": "BLUR",
+            "radiusParameter": "blurRadius",
+            "downsampleParameter": "downsample"
+          },
+          {
+            "kind": "SHADER",
+            "shaders": {
+              "hlsl": "assets/strata/shaders/effects/liquid-glass.hlsl"
+            }
+          }
+        ]
+      },
+      {
+        "id": "demo:frosted-backdrop",
+        "input": "BACKDROP",
+        "parameters": [
+          {
+            "name": "radius",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "downsample",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "passes": [
+          {
+            "kind": "BLUR",
+            "radiusParameter": "radius",
+            "downsampleParameter": "downsample"
+          }
+        ]
+      },
+      {
+        "id": "demo:content-prism",
+        "input": "CONTENT",
+        "parameters": [
+          {
+            "name": "strength",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "passes": [
+          {
+            "kind": "SHADER",
+            "shaders": {
+              "hlsl": "assets/strata/shaders/effects/content-prism.hlsl"
+            }
+          }
+        ]
+      },
+      {
+        "id": "demo:soft-content",
+        "input": "CONTENT",
+        "parameters": [
+          {
+            "name": "radius",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "downsample",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "passes": [
+          {
+            "kind": "BLUR",
+            "radiusParameter": "radius",
+            "downsampleParameter": "downsample"
+          }
+        ]
+      }
+    ]
   }
 }

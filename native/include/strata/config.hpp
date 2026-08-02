@@ -128,6 +128,19 @@ struct MaterialDeclaration final {
     std::string source{};
 };
 
+enum class EffectPassKind { blur, shader, shadow };
+
+struct EffectPassDeclaration final {
+    std::string effect_id{};
+    std::uint32_t index = 0U;
+    EffectPassKind kind = EffectPassKind::blur;
+    double radius = 0.0;
+    std::uint32_t downsample = 1U;
+    std::optional<std::uint32_t> radius_parameter{};
+    std::optional<std::uint32_t> downsample_parameter{};
+    std::string source{};
+};
+
 enum class SurfaceRootRole { screen, overlay };
 
 struct FontResource final {

@@ -12,16 +12,17 @@ const runtime::Value* visual_value(
     const RetainedNode& node,
     const std::string_view name
 ) noexcept {
+    // Presence is significant: an explicit null removes themed/style chrome.
     const auto direct = node.description().properties.find(name);
-    const runtime::Value* direct_value = direct != node.description().properties.end()
-                                             ? direct->second.value()
-                                             : nullptr;
+    if (direct != node.description().properties.end()) {
+        return direct->second.value();
+    }
     const auto layout = node.description().properties.find("$layout");
     const runtime::Value* style = layout != node.description().properties.end()
                                       ? layout->second.value()
                                       : nullptr;
     const runtime::Value* nested = style != nullptr ? style->field(name) : nullptr;
-    return nested != nullptr ? nested : direct_value;
+    return nested;
 }
 
 std::optional<double> visual_number(

@@ -78,7 +78,8 @@ struct RenderEngine::Impl final {
             bool render_portals = false;
             std::vector<RenderCommand> prefix;
             std::vector<RenderCommand> suffix;
-            std::vector<const RetainedNode*> ordered_children;
+            /** Stable retained identities; raw node pointers become invalid under virtualization. */
+            std::vector<std::uint64_t> ordered_children;
             std::vector<std::uint64_t> ordered_child_layout_generations;
             std::optional<Rect> child_render_clip;
             MotionTransform effective_transform;

@@ -29,6 +29,14 @@ public:
     ) const;
     /** Returns packet-safe state, dropping invalid fields; an unknown material has no safe state. */
     [[nodiscard]] std::optional<MaterialState> sanitize_state(const MaterialState& state) const;
+    [[nodiscard]] std::vector<runtime::RuntimeDiagnostic> validate_effect_state(
+        const EffectState& state,
+        bool report_diagnostics = true
+    ) const;
+    /** Returns packet-safe effect state with its declared input and valid parameters only. */
+    [[nodiscard]] std::optional<EffectState> sanitize_effect_state(
+        const EffectState& state
+    ) const;
     /** Rearms once-per-fingerprint warning publication after the diagnostic store is cleared. */
     void clear_diagnostics() noexcept;
 

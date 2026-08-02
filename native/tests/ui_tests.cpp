@@ -739,6 +739,18 @@ void test_render_packet_batches_every_portable_command() {
     });
     commands.append(BlurRegionRenderCommand{});
     commands.append(ShadowRenderCommand{});
+    EffectState effect{
+        "fixture.effect",
+        EffectInput::backdrop,
+        0.8,
+        {MaterialParameter{"amount", strata::runtime::Value(0.5)}},
+    };
+    effect.packed_parameters[0U] = 0.5;
+    effect.packed_parameter_count = 1U;
+    commands.append(BackdropEffectRenderCommand{{}, {}, effect});
+    effect.input = EffectInput::content;
+    commands.append(ContentEffectPushRenderCommand{{}, {}, effect});
+    commands.append(ContentEffectPopRenderCommand{});
     commands.append(ClipPushRenderCommand{});
     commands.append(ClipPopRenderCommand{});
     commands.append(TransformPushRenderCommand{});
@@ -754,9 +766,9 @@ void test_render_packet_batches_every_portable_command() {
     );
     std::size_t offset = 8U;
     check(packet_u32(packet, offset) == 2U, "render packet version changed");
-    check(packet_u32(packet, offset) == 16U, "render packet command count changed");
+    check(packet_u32(packet, offset) == 19U, "render packet command count changed");
     check(packet_u64(packet, offset) == 42U, "render packet frame identity changed");
-    for (std::uint32_t expected_kind = 0U; expected_kind < 16U; ++expected_kind) {
+    for (std::uint32_t expected_kind = 0U; expected_kind < 19U; ++expected_kind) {
         check(packet_u32(packet, offset) == expected_kind, "render packet command kind changed");
         const std::uint32_t payload_size = packet_u32(packet, offset);
         check(offset + payload_size <= packet.size(), "render packet command payload escaped its record");
@@ -1147,7 +1159,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
             ) == "STRATARP",
         "surface teardown packet lost its fixed magic"
     );
-    check(packet_u32(release_packet, release_offset) == 4U,
+    check(packet_u32(release_packet, release_offset) == 5U,
           "surface teardown did not use the host render packet protocol");
     check(packet_u32(release_packet, release_offset) == 2U,
           "surface teardown did not combine its live atlas and static texture releases");
@@ -1205,7 +1217,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
     const std::vector<std::uint8_t>& after_reload = reload_cache.encode(
         commands, 2U, textures, reload_atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
     std::size_t after_offset = 8U;
-    check(packet_u32(after_reload, after_offset) == 4U,
+    check(packet_u32(after_reload, after_offset) == 5U,
           "static image reload packet version changed");
     check(packet_u32(after_reload, after_offset) == 2U,
           "repeated static image reload dropped its pending release or replacement");
@@ -1957,6 +1969,97 @@ void test_variable_virtual_extents_and_stable_anchor() {
             inserted->virtual_item_keys.size() < inserted->virtual_items->count(),
         "virtual layout retained an all-item key snapshot instead of an observed key window"
     );
+}
+
+void test_anchored_portal_is_out_of_flow_and_flips() {
+    using namespace strata;
+    using namespace strata::ui;
+
+    const auto anchor = node(
+        "Panel",
+        "anchor",
+        {},
+        layout_properties(object({
+            {"height", runtime::Value(20.0)},
+            {"width", runtime::Value(100.0)},
+        }))
+    );
+    const auto popup = node(
+        "Panel",
+        "popup",
+        {},
+        layout_properties(object({
+            {"anchorAlign", runtime::Value("END")},
+            {"anchorFlip", runtime::Value(true)},
+            {"anchorGap", runtime::Value(5.0)},
+            {"anchorShift", runtime::Value(true)},
+            {"anchorSide", runtime::Value("BOTTOM")},
+            {"anchorTarget", runtime::Value("anchor")},
+            {"height", runtime::Value(40.0)},
+            {"kind", runtime::Value("PORTAL")},
+            {"matchAnchorWidth", runtime::Value(true)},
+            {"width", runtime::Value(80.0)},
+        }))
+    );
+    const auto point_popup = node(
+        "Panel",
+        "point.popup",
+        {},
+        layout_properties(object({
+            {"anchorFlip", runtime::Value(true)},
+            {"anchorGap", runtime::Value(5.0)},
+            {"anchorPoint", object({
+                {"x", runtime::Value(190.0)},
+                {"y", runtime::Value(95.0)},
+            })},
+            {"anchorShift", runtime::Value(true)},
+            {"anchorSide", runtime::Value("BOTTOM")},
+            {"height", runtime::Value(20.0)},
+            {"kind", runtime::Value("PORTAL")},
+            {"width", runtime::Value(30.0)},
+        }))
+    );
+    const auto root = node(
+        "Panel",
+        "root",
+        {popup, point_popup, anchor},
+        layout_properties(object({
+            {"alignItems", runtime::Value("START")},
+            {"height", runtime::Value(100.0)},
+            {"justifyContent", runtime::Value("END")},
+            {"kind", runtime::Value("COLUMN")},
+            {"width", runtime::Value(200.0)},
+        }))
+    );
+
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(root));
+    LayoutEngine layout;
+    const LayoutEnvironment environment{
+        0U, Rect{0.0, 0.0, 200.0, 100.0}, 1.0, {},
+        PointSnapPolicy::nearest, RectangleSnapPolicy::outward, false,
+    };
+    const LayoutResult& result = layout.layout(tree, environment);
+    const LayoutRecord* anchor_record = result.find(tree.find_key("anchor")->identity());
+    const LayoutRecord* popup_record = result.find(tree.find_key("popup")->identity());
+    const LayoutRecord* point_record = result.find(tree.find_key("point.popup")->identity());
+    check(anchor_record != nullptr && popup_record != nullptr,
+          "anchored portal fixture did not arrange both records");
+    check_near(anchor_record->bounds.y, 80.0,
+               "portal participated in its parent's column flow");
+    check_near(popup_record->bounds.x, 0.0,
+               "matched portal width did not preserve END alignment");
+    check_near(popup_record->bounds.width, 100.0,
+               "portal did not match its anchor width before arrangement");
+    check_near(popup_record->bounds.y, 35.0,
+               "portal did not flip to the larger collision-free side");
+    check(popup_record->detached_from_parent_clip,
+          "anchored portal stopped detaching from its parent clip");
+    check(point_record != nullptr, "point-anchored portal was not arranged");
+    check_near(point_record->bounds.x, 170.0,
+               "point-anchored portal did not shift inside the viewport");
+    check_near(point_record->bounds.y, 70.0,
+               "point-anchored portal did not flip above its pointer anchor");
 }
 
 void test_virtualization_cache_queries_only_observed_keys() {
@@ -5929,6 +6032,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_lazy_range_convergence_state_machine();
         test_materialization_publication_identity_and_eviction();
         test_variable_virtual_extents_and_stable_anchor();
+        test_anchored_portal_is_out_of_flow_and_flips();
         test_virtualization_cache_queries_only_observed_keys();
         test_retained_layout_cache_scale_and_invalidation();
         test_retained_layout_cache_translates_unchanged_subtrees();

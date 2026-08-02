@@ -1,6 +1,7 @@
 #include "ui/widget/input.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -114,6 +115,72 @@ bool select_click(WidgetInputScope& scope) {
     return true;
 }
 
+[[nodiscard]] std::string lower_ascii(std::string value) {
+    std::ranges::transform(value, value.begin(), [](const unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    return value;
+}
+
+[[nodiscard]] bool select_typeahead(
+    WidgetInputScope& scope,
+    const runtime::ValueList& options,
+    const std::size_t current,
+    const bool expanded
+) {
+    if (scope.key().size() != 1U ||
+        !std::isalnum(static_cast<unsigned char>(scope.key().front()))) {
+        return false;
+    }
+    constexpr std::int64_t timeout = 700'000'000;
+    std::string query;
+    const runtime::Value* deadline = scope.retained("$choiceTypeaheadDeadline");
+    if (deadline != nullptr && deadline->number() != nullptr &&
+        static_cast<double>(scope.frame_time_nanos()) <= *deadline->number()) {
+        const runtime::Value* retained = scope.retained("$choiceTypeahead");
+        if (retained != nullptr && retained->string() != nullptr) {
+            query = *retained->string();
+        }
+    }
+    query += lower_ascii(std::string(scope.key()));
+    const auto match = [&options, current](const std::string& prefix) {
+        for (std::size_t offset = 1U; offset <= options.values.size(); ++offset) {
+            const std::size_t index = (current + offset) % options.values.size();
+            const runtime::Value& option = options.values[index];
+            const std::string* label = choice_id(option.field("label"));
+            if (label != nullptr && choice_option_enabled(option) &&
+                lower_ascii(*label).starts_with(prefix)) {
+                return std::optional<std::size_t>(index);
+            }
+        }
+        return std::optional<std::size_t>{};
+    };
+    std::optional<std::size_t> selected = match(query);
+    if (!selected.has_value() && query.size() > 1U) {
+        query = lower_ascii(std::string(scope.key()));
+        selected = match(query);
+    }
+    scope.set_retained("$choiceTypeahead", runtime::Value(query), DirtyReason::input);
+    scope.set_retained(
+        "$choiceTypeaheadDeadline",
+        runtime::Value(static_cast<double>(scope.frame_time_nanos() + timeout)),
+        DirtyReason::input
+    );
+    if (!selected.has_value()) return true;
+    const std::size_t index = *selected;
+    scope.set_retained(
+        "$choiceIndex", runtime::Value(static_cast<double>(index)), DirtyReason::input
+    );
+    if (expanded) return true;
+    const std::string* id = choice_option_id(options.values[index]);
+    if (id == nullptr) return true;
+    if (!choice_is_controlled(scope.node())) {
+        scope.set_retained("$selectedId", runtime::Value(*id), DirtyReason::properties);
+    }
+    scope.value_changed("onChange", "selection-changed", runtime::Value(*id));
+    return true;
+}
+
 bool choice_key(WidgetInputScope& scope) {
     const runtime::ValueList* options = choice_options(scope.node());
     const std::optional<EffectiveChoice> selected = effective_choice(scope.node());
@@ -155,6 +222,9 @@ bool choice_key(WidgetInputScope& scope) {
             scope.value_changed("onChange", "selection-changed", runtime::Value(*id));
         }
         scope.set_retained("$expanded", runtime::Value(false), DirtyReason::properties);
+        return true;
+    }
+    if (select_widget && select_typeahead(scope, *options, current, expanded)) {
         return true;
     }
     int direction = 0;

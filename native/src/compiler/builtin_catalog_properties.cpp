@@ -4,6 +4,13 @@ namespace strata::compiler {
 
 void add_builtin_properties(BuiltinCatalog& catalog) {
     catalog.layout_properties = {
+        DeclaredProperty{.name = "anchorAlign", .type = declared_type_reference("t162")},
+        DeclaredProperty{.name = "anchorFlip", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "anchorGap", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "anchorPoint", .type = declared_type_reference("t139")},
+        DeclaredProperty{.name = "anchorShift", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "anchorSide", .type = declared_type_reference("t161")},
+        DeclaredProperty{.name = "anchorTarget", .type = declared_type_reference("t0")},
         DeclaredProperty{.name = "alignContent", .type = declared_type_reference("t42")},
         DeclaredProperty{.name = "alignItems", .type = declared_type_reference("t37")},
         DeclaredProperty{
@@ -12,6 +19,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
             .name = "aspectRatio", .type = declared_type_reference("t3"), .nullable = true},
         DeclaredProperty{.name = "clip", .type = declared_type_reference("t2")},
         DeclaredProperty{.name = "columnSpan", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "detachFromParentClip", .type = declared_type_reference("t2")},
         DeclaredProperty{.name = "gap", .type = declared_type_reference("t61")},
         DeclaredProperty{
             .name = "gridColumn", .type = declared_type_reference("t3"), .nullable = true},
@@ -23,6 +31,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
             .name = "justifySelf", .type = declared_type_reference("t37"), .nullable = true},
         DeclaredProperty{.name = "kind", .type = declared_type_reference("t44")},
         DeclaredProperty{.name = "margin", .type = declared_type_reference("t61")},
+        DeclaredProperty{.name = "matchAnchorWidth", .type = declared_type_reference("t2")},
         DeclaredProperty{
             .name = "maxHeight", .type = declared_type_reference("t45"), .nullable = true},
         DeclaredProperty{
@@ -32,6 +41,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{
             .name = "minWidth", .type = declared_type_reference("t45"), .nullable = true},
         DeclaredProperty{.name = "padding", .type = declared_type_reference("t61")},
+        DeclaredProperty{.name = "portalTarget", .type = declared_type_reference("t0")},
         DeclaredProperty{.name = "rowSpan", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "width", .type = declared_type_reference("t45")},
         DeclaredProperty{.name = "wrap", .type = declared_type_reference("t2")},
@@ -40,6 +50,13 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
     catalog.style_properties = {
         DeclaredProperty{
             .name = "activeOverlay", .type = declared_type_reference("t8"), .nullable = true},
+        DeclaredProperty{.name = "anchorAlign", .type = declared_type_reference("t162")},
+        DeclaredProperty{.name = "anchorFlip", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "anchorGap", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "anchorPoint", .type = declared_type_reference("t139")},
+        DeclaredProperty{.name = "anchorShift", .type = declared_type_reference("t2")},
+        DeclaredProperty{.name = "anchorSide", .type = declared_type_reference("t161")},
+        DeclaredProperty{.name = "anchorTarget", .type = declared_type_reference("t0")},
         DeclaredProperty{.name = "alignContent", .type = declared_type_reference("t42")},
         DeclaredProperty{.name = "alignItems", .type = declared_type_reference("t37")},
         DeclaredProperty{
@@ -61,6 +78,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "clip", .type = declared_type_reference("t2")},
         DeclaredProperty{.name = "color", .type = declared_type_reference("t8")},
         DeclaredProperty{.name = "columnSpan", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "detachFromParentClip", .type = declared_type_reference("t2")},
         DeclaredProperty{.name = "disabledOpacity", .type = declared_type_reference("t3")},
         DeclaredProperty{
             .name = "disclosure", .type = declared_type_reference("t80"), .nullable = true},
@@ -99,6 +117,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "margin", .type = declared_type_reference("t61")},
         DeclaredProperty{
             .name = "material", .type = declared_type_reference("t51"), .nullable = true},
+        DeclaredProperty{.name = "matchAnchorWidth", .type = declared_type_reference("t2")},
         DeclaredProperty{
             .name = "maxHeight", .type = declared_type_reference("t45"), .nullable = true},
         DeclaredProperty{
@@ -113,6 +132,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "overflow", .type = declared_type_reference("t55")},
         DeclaredProperty{.name = "padding", .type = declared_type_reference("t61")},
         DeclaredProperty{.name = "pixelSize", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "portalTarget", .type = declared_type_reference("t0")},
         DeclaredProperty{.name = "radius", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "rowSpan", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "scale", .type = declared_type_reference("t3")},
@@ -337,14 +357,22 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
                        .parameters = {DeclaredProperty{.name = "downsample",
                                                        .type = declared_type_reference("t3")},
                                       DeclaredProperty{.name = "radius",
-                                                       .type = declared_type_reference("t3")}}},
+                                                       .type = declared_type_reference("t3")}},
+                       .input = "BACKDROP",
+                       .passes = {DeclaredEffect::Pass{
+                           .kind = "BLUR",
+                           .radius_parameter = "radius",
+                           .downsample_parameter = "downsample",
+                       }}},
         DeclaredEffect{
             .name = "shadow",
             .parameters = {DeclaredProperty{.name = "color", .type = declared_type_reference("t8")},
                            DeclaredProperty{.name = "radius",
                                             .type = declared_type_reference("t3")},
                            DeclaredProperty{.name = "spread",
-                                            .type = declared_type_reference("t3")}}},
+                                            .type = declared_type_reference("t3")}},
+            .input = "SHAPE",
+            .passes = {DeclaredEffect::Pass{.kind = "SHADOW"}}},
     };
 }
 

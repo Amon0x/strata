@@ -2372,6 +2372,41 @@
   ],
   "layoutProperties": [
     {
+      "name": "anchorAlign",
+      "nullable": false,
+      "type": "one of (CENTER, END, START)"
+    },
+    {
+      "name": "anchorFlip",
+      "nullable": false,
+      "type": "boolean"
+    },
+    {
+      "name": "anchorGap",
+      "nullable": false,
+      "type": "number"
+    },
+    {
+      "name": "anchorPoint",
+      "nullable": false,
+      "type": "map of number"
+    },
+    {
+      "name": "anchorShift",
+      "nullable": false,
+      "type": "boolean"
+    },
+    {
+      "name": "anchorSide",
+      "nullable": false,
+      "type": "one of (BOTTOM, LEFT, RIGHT, TOP)"
+    },
+    {
+      "name": "anchorTarget",
+      "nullable": false,
+      "type": "string"
+    },
+    {
       "name": "alignContent",
       "nullable": false,
       "type": "one of (CENTER, END, SPACE_AROUND, SPACE_BETWEEN, SPACE_EVENLY, START)"
@@ -2400,6 +2435,11 @@
       "name": "columnSpan",
       "nullable": false,
       "type": "number"
+    },
+    {
+      "name": "detachFromParentClip",
+      "nullable": false,
+      "type": "boolean"
     },
     {
       "name": "gap",
@@ -2442,6 +2482,11 @@
       "type": "one of (number, map of any)"
     },
     {
+      "name": "matchAnchorWidth",
+      "nullable": false,
+      "type": "boolean"
+    },
+    {
       "name": "maxHeight",
       "nullable": true,
       "type": "one of (one of (number, one of (auto, content), map of any, map of any), map of any)"
@@ -2465,6 +2510,11 @@
       "name": "padding",
       "nullable": false,
       "type": "one of (number, map of any)"
+    },
+    {
+      "name": "portalTarget",
+      "nullable": false,
+      "type": "string"
     },
     {
       "name": "rowSpan",
@@ -2493,6 +2543,41 @@
       "name": "activeOverlay",
       "nullable": true,
       "type": "color"
+    },
+    {
+      "name": "anchorAlign",
+      "nullable": false,
+      "type": "one of (CENTER, END, START)"
+    },
+    {
+      "name": "anchorFlip",
+      "nullable": false,
+      "type": "boolean"
+    },
+    {
+      "name": "anchorGap",
+      "nullable": false,
+      "type": "number"
+    },
+    {
+      "name": "anchorPoint",
+      "nullable": false,
+      "type": "map of number"
+    },
+    {
+      "name": "anchorShift",
+      "nullable": false,
+      "type": "boolean"
+    },
+    {
+      "name": "anchorSide",
+      "nullable": false,
+      "type": "one of (BOTTOM, LEFT, RIGHT, TOP)"
+    },
+    {
+      "name": "anchorTarget",
+      "nullable": false,
+      "type": "string"
     },
     {
       "name": "alignContent",
@@ -2563,6 +2648,11 @@
       "name": "columnSpan",
       "nullable": false,
       "type": "number"
+    },
+    {
+      "name": "detachFromParentClip",
+      "nullable": false,
+      "type": "boolean"
     },
     {
       "name": "disabledOpacity",
@@ -2695,6 +2785,11 @@
       "type": "material"
     },
     {
+      "name": "matchAnchorWidth",
+      "nullable": false,
+      "type": "boolean"
+    },
+    {
       "name": "maxHeight",
       "nullable": true,
       "type": "one of (one of (number, one of (auto, content), map of any, map of any), map of any)"
@@ -2738,6 +2833,11 @@
       "name": "pixelSize",
       "nullable": false,
       "type": "number"
+    },
+    {
+      "name": "portalTarget",
+      "nullable": false,
+      "type": "string"
     },
     {
       "name": "radius",
@@ -4240,6 +4340,30 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "triggerTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "popupTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "itemTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "onQuery",
           "nullable": false,
           "required": false,
@@ -5109,6 +5233,30 @@
           "nullable": false,
           "required": false,
           "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "triggerTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "popupTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "itemTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
         },
         {
           "aliases": [],
@@ -7544,6 +7692,30 @@
           "nullable": false,
           "required": false,
           "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "triggerTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "popupTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "itemTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
         },
         {
           "aliases": [],
@@ -10485,6 +10657,30 @@
           "nullable": false,
           "required": false,
           "type": "image"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "triggerTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "popupTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "itemTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
         },
         {
           "aliases": [],
@@ -14655,6 +14851,14 @@
           "nullable": false,
           "required": false,
           "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
         },
         {
           "aliases": [],

@@ -685,12 +685,11 @@ overlay Main { root ShellFixture() }
         "Left at the root menu level changed the preserved consume-without-close behavior"
     );
     static_cast<void>(surface.input().key("right"));
-    static_cast<void>(surface.input().key("down"));
-    static_cast<void>(surface.input().key("right"));
+    static_cast<void>(surface.input().key("m"));
     menu_targets = surface.input().subtargets(menu->identity());
     check(
         target(menu_targets, "$menu/0/2/0") != nullptr,
-        "keyboard traversal did not open the recursive submenu"
+        "menu typeahead did not select and open the matching recursive submenu"
     );
     static_cast<void>(surface.input().key("escape"));
 

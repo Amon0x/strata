@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -59,7 +60,8 @@ void LayoutEngine::arrange(
     const auto cached = arrangement_cache_.find(identity);
     const std::shared_ptr<const MeasuredNode> cached_measured =
         cached != arrangement_cache_.end() ? cached->second.measured.lock() : nullptr;
-    if (cached != arrangement_cache_.end() && cached_measured == measured_ptr &&
+    if (!measured.subtree_portals &&
+        cached != arrangement_cache_.end() && cached_measured == measured_ptr &&
         cached->second.bounds == arrangement_bounds &&
         cached->second.inherited_clip == inherited_clip &&
         cached->second.pin_context == cache_pin_context &&
@@ -88,7 +90,8 @@ void LayoutEngine::arrange(
         arrangement_bounds.y -
             (cached != arrangement_cache_.end() ? cached->second.bounds.y : arrangement_bounds.y),
     };
-    const bool translated_cache_hit = cached != arrangement_cache_.end() &&
+    const bool translated_cache_hit = !measured.subtree_portals &&
+        cached != arrangement_cache_.end() &&
         cached_measured == measured_ptr && translation != Point{} &&
         cached->second.bounds.width == arrangement_bounds.width &&
         cached->second.bounds.height == arrangement_bounds.height &&
@@ -189,21 +192,14 @@ void LayoutEngine::arrange(
         record.arranged_child_order.push_back(child->node->identity());
         record.materialized_child_indices.push_back(child->node->source_index());
     }
+    const std::span<const MeasuredNodePtr> flow_children{
+        measured.children.data(),
+        measured.flow_child_count,
+    };
 
     if ((style.kind == LayoutKind::row || style.kind == LayoutKind::column) && style.wrap) {
         const bool horizontal = style.kind == LayoutKind::row;
-        std::vector<Size> child_sizes;
-        child_sizes.reserve(measured.children.size());
-        for (const MeasuredNodePtr& child : measured.children) {
-            child_sizes.push_back(child->measured_size);
-        }
-        const LinearLayoutResolution linear = resolve_linear_layout(
-            child_sizes,
-            horizontal,
-            true,
-            horizontal ? content_bounds.width : content_bounds.height,
-            style.gap
-        );
+        const LinearLayoutResolution& linear = *measured.linear;
         const double available_main = horizontal ? content_bounds.width : content_bounds.height;
         const double available_cross = horizontal ? content_bounds.height : content_bounds.width;
         const double main_gap = horizontal ? style.gap.x : style.gap.y;
@@ -273,13 +269,13 @@ void LayoutEngine::arrange(
         }
     } else if (style.kind == LayoutKind::row) {
         double used = 0.0;
-        for (const MeasuredNodePtr& child : measured.children) {
+        for (const MeasuredNodePtr& child : flow_children) {
             used += child->measured_size.width;
         }
-        if (!measured.children.empty()) used += style.gap.x * static_cast<double>(measured.children.size() - 1U);
-        const Distribution spacing = distribution(used, content_bounds.width, measured.children.size(), style.justify_content);
+        if (!flow_children.empty()) used += style.gap.x * static_cast<double>(flow_children.size() - 1U);
+        const Distribution spacing = distribution(used, content_bounds.width, flow_children.size(), style.justify_content);
         double cursor = content_bounds.x + spacing.start;
-        for (const MeasuredNodePtr& child : measured.children) {
+        for (const MeasuredNodePtr& child : flow_children) {
             const LayoutAlign child_align = child->style.align_self.value_or(style.align_items);
             const double height = child->style.height.kind == LayoutSize::Kind::fill
                                       ? content_bounds.height
@@ -290,13 +286,13 @@ void LayoutEngine::arrange(
         }
     } else if (style.kind == LayoutKind::column) {
         double used = 0.0;
-        for (const MeasuredNodePtr& child : measured.children) {
+        for (const MeasuredNodePtr& child : flow_children) {
             used += child->measured_size.height;
         }
-        if (!measured.children.empty()) used += style.gap.y * static_cast<double>(measured.children.size() - 1U);
-        const Distribution spacing = distribution(used, content_bounds.height, measured.children.size(), style.justify_content);
+        if (!flow_children.empty()) used += style.gap.y * static_cast<double>(flow_children.size() - 1U);
+        const Distribution spacing = distribution(used, content_bounds.height, flow_children.size(), style.justify_content);
         double cursor = content_bounds.y + spacing.start;
-        for (const MeasuredNodePtr& child : measured.children) {
+        for (const MeasuredNodePtr& child : flow_children) {
             const LayoutAlign child_align = child->style.align_self.value_or(style.align_items);
             const double width = child->style.width.kind == LayoutSize::Kind::fill
                                      ? content_bounds.width
@@ -377,8 +373,8 @@ void LayoutEngine::arrange(
             const VirtualListSpec& virtual_list = *style.virtual_list;
             std::vector<collection::VirtualMeasurement> measurements;
             if (virtual_list.measure_item_extents) {
-                measurements.reserve(measured.children.size());
-                for (const MeasuredNodePtr& child : measured.children) {
+                measurements.reserve(flow_children.size());
+                for (const MeasuredNodePtr& child : flow_children) {
                     const std::optional<std::string>& materialization_key =
                         child->node->description().materialization_key;
                     measurements.push_back(collection::VirtualMeasurement{
@@ -419,11 +415,11 @@ void LayoutEngine::arrange(
             record.virtual_overscan = virtual_list.overscan;
         }
         Size scroll_content;
-        for (const MeasuredNodePtr& child : measured.children) {
+        for (const MeasuredNodePtr& child : flow_children) {
             scroll_content.width = std::max(scroll_content.width, child->measured_size.width);
             scroll_content.height += child->measured_size.height;
         }
-        if (!measured.children.empty()) scroll_content.height += style.gap.y * static_cast<double>(measured.children.size() - 1U);
+        if (!flow_children.empty()) scroll_content.height += style.gap.y * static_cast<double>(flow_children.size() - 1U);
         if (style.virtual_list.has_value()) {
             const VirtualListSpec& virtual_list = *style.virtual_list;
             const double virtual_extent = virtual_extents->extents.total();
@@ -450,7 +446,7 @@ void LayoutEngine::arrange(
         double cursor = content_bounds.y - record.scroll_offset.y;
         std::size_t first_visible = std::numeric_limits<std::size_t>::max();
         std::size_t last_visible = 0U;
-        for (const MeasuredNodePtr& child : measured.children) {
+        for (const MeasuredNodePtr& child : flow_children) {
             // A lazy provider can change count before Surface converges its retained realization.
             // Rows from the previous provider are transiently stale and must not index the new
             // extent table or participate in this layout pass.
@@ -531,7 +527,7 @@ void LayoutEngine::arrange(
             record.visible_range = VisibleRange{};
         }
     } else if (style.kind != LayoutKind::spacer) {
-        std::vector<MeasuredNodePtr> ordered = measured.children;
+        std::vector<MeasuredNodePtr> ordered(flow_children.begin(), flow_children.end());
         std::ranges::stable_sort(ordered, {}, [](const MeasuredNodePtr& child) {
             return child->style.z_index;
         });
@@ -558,6 +554,15 @@ void LayoutEngine::arrange(
                 result
             );
         }
+    }
+    for (std::size_t index = measured.flow_child_count;
+         index < measured.children.size();
+         ++index) {
+        pending_portals_.push_back(PendingPortal{
+            measured.children[index],
+            child_clip,
+            pin_context,
+        });
     }
     record.render_generation = advance_render_generation();
     result.records.insert_or_assign(record.identity, std::move(record));

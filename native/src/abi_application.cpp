@@ -1,8 +1,10 @@
 #include <strata/strata.h>
 
 #include <memory>
+#include <limits>
 #include <new>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -560,6 +562,93 @@ strata_result strata_runtime_read_material_declarations(
             STRATA_STATUS_INTERNAL_ERROR,
             "STRATA.ABI.UNCAUGHT_EXCEPTION",
             "Reading material declarations failed inside the C ABI exception boundary."
+        );
+    }
+}
+
+strata_result strata_runtime_read_effect_pass_declarations(
+    strata_runtime* const runtime,
+    const strata_string_view backend,
+    strata_effect_pass_declaration* const out_declarations,
+    const size_t capacity,
+    size_t* const out_count
+) {
+    if (runtime == nullptr || out_count == nullptr) return invalid_argument();
+    if (!runtime->core.has_application()) {
+        return runtime_failure(
+            *runtime,
+            STRATA_STATUS_NOT_FOUND,
+            "STRATA.APPLICATION.NOT_CONFIGURED",
+            "The runtime has no configured application."
+        );
+    }
+    if (!valid_view(backend, false)) return invalid_argument();
+    const std::string_view backend_id(backend.data, backend.size);
+    try {
+        const strata::compiler::SchemaRegistry& schemas =
+            runtime->core.application().bundle()->schema_registry();
+        std::size_t written = 0U;
+        std::size_t declared = 0U;
+        for (const std::string& id : schemas.effect_names()) {
+            const strata::compiler::EffectSchema* schema = schemas.effect(id);
+            if (schema == nullptr) continue;
+            const auto parameter_slot = [schema](const std::optional<std::string>& name) {
+                if (!name.has_value()) return STRATA_EFFECT_PARAMETER_NONE;
+                std::size_t slot = 0U;
+                for (const strata::compiler::SchemaParameter& parameter :
+                     schema->parameters) {
+                    if (parameter.name == *name) {
+                        return slot <= std::numeric_limits<std::uint32_t>::max()
+                            ? static_cast<std::uint32_t>(slot)
+                            : STRATA_EFFECT_PARAMETER_NONE;
+                    }
+                    slot += strata::compiler::material_parameter_width(
+                        parameter.material_type
+                    );
+                }
+                return STRATA_EFFECT_PARAMETER_NONE;
+            };
+            for (std::size_t index = 0U; index < schema->passes.size(); ++index) {
+                const strata::compiler::EffectSchema::Pass& pass =
+                    schema->passes[index];
+                ++declared;
+                if (out_declarations == nullptr || written >= capacity) continue;
+                const auto source = std::ranges::find(
+                    pass.shaders,
+                    backend_id,
+                    &std::pair<std::string, std::string>::first
+                );
+                const std::uint32_t kind = pass.kind == "SHADER"
+                    ? STRATA_EFFECT_PASS_SHADER
+                    : pass.kind == "SHADOW"
+                        ? STRATA_EFFECT_PASS_SHADOW
+                        : STRATA_EFFECT_PASS_BLUR;
+                out_declarations[written] = strata_effect_pass_declaration{
+                    sizeof(strata_effect_pass_declaration),
+                    strata_string_view{schema->name.data(), schema->name.size()},
+                    static_cast<std::uint32_t>(index),
+                    kind,
+                    pass.radius,
+                    pass.downsample,
+                    parameter_slot(pass.radius_parameter),
+                    parameter_slot(pass.downsample_parameter),
+                    source == pass.shaders.end()
+                        ? strata_string_view{nullptr, 0U}
+                        : strata_string_view{
+                              source->second.data(), source->second.size(),
+                          },
+                };
+                ++written;
+            }
+        }
+        *out_count = declared;
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (...) {
+        return runtime_failure(
+            *runtime,
+            STRATA_STATUS_INTERNAL_ERROR,
+            "STRATA.ABI.UNCAUGHT_EXCEPTION",
+            "Reading effect declarations failed inside the C ABI exception boundary."
         );
     }
 }

@@ -185,6 +185,28 @@ void Renderer::declare_material(const std::string_view id, const std::string_vie
     impl_->renderer->declare_material(id, hlsl_source);
 }
 
+void Renderer::declare_effect_pass(
+    const std::string_view effect_id,
+    const std::uint32_t index,
+    const std::uint32_t kind,
+    const double radius,
+    const std::uint32_t downsample,
+    const std::uint32_t radius_parameter,
+    const std::uint32_t downsample_parameter,
+    const std::string_view hlsl_source
+) {
+    impl_->renderer->declare_effect_pass(
+        effect_id,
+        index,
+        kind,
+        radius,
+        downsample,
+        radius_parameter,
+        downsample_parameter,
+        hlsl_source
+    );
+}
+
 void Renderer::resize(const std::uint32_t framebuffer_width, const std::uint32_t framebuffer_height,
                       const double logical_width, const double logical_height) {
     impl_->resize(framebuffer_width, framebuffer_height, logical_width, logical_height);

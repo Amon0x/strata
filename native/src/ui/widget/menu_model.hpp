@@ -68,5 +68,9 @@ struct MenuProjection final {
 [[nodiscard]] runtime::Value menu_path_value(const std::vector<std::size_t>& path);
 [[nodiscard]] std::size_t first_enabled_menu_item(const std::vector<MenuItemModel>& items);
 [[nodiscard]] std::string menu_row_identity(const std::vector<std::size_t>& path);
+[[nodiscard]] std::string menu_row_key(
+    std::string_view menu_key,
+    const std::vector<std::size_t>& path
+);
 
 } // namespace strata::ui

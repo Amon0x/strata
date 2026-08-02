@@ -1463,6 +1463,68 @@ void test_target10_compile_diagnostics() {
     );
 }
 
+void test_authored_effect_schema_and_semantics() {
+    using namespace strata;
+    compiler::SchemaRegistry schema = compiler::SchemaRegistry::builtins();
+    schema.apply_scenario_declarations(data::parse_json(R"({
+      "widgets":{"registry":"test","required":[],"definitions":[]},
+      "actions":{"registry":"test","required":[],"definitions":[]},
+      "host":[],
+      "effects":{"definitions":[{
+        "id":"test:glass",
+        "input":"BACKDROP",
+        "parameters":[
+          {"name":"radius","effectType":"FLOAT","type":{"kind":"number"},
+           "required":true,"nullable":false,"aliases":[],"default":null},
+          {"name":"tint","effectType":"COLOR","type":{"kind":"color"},
+           "required":true,"nullable":false,"aliases":[],"default":null}
+        ],
+        "passes":[
+          {"kind":"BLUR","radiusParameter":"radius","downsample":2},
+          {"kind":"SHADER","shaders":{"hlsl":"test/glass.hlsl"}}
+        ]
+      }]}
+    })"));
+    const compiler::EffectSchema* declared = schema.effect("test:glass");
+    check(
+        declared != nullptr && declared->input == "BACKDROP" &&
+            declared->parameters.size() == 2U && declared->passes.size() == 2U &&
+            declared->passes[0U].radius_parameter == std::optional<std::string>("radius") &&
+            declared->passes[1U].shaders.size() == 1U,
+        "authored effect declaration lost its typed ordered pass program"
+    );
+
+    const auto validate = [&schema](const std::string_view source) {
+        const compiler::ParseResult parsed =
+            compiler::parse_source("effect.strata", std::string(source));
+        check(parsed.diagnostics.empty(), "authored effect semantic fixture did not parse");
+        return compiler::validate_semantics(parsed.file, schema);
+    };
+    const compiler::SemanticResult valid = validate(R"(
+      overlay Main {
+        root Panel(effect: effect("test:glass", radius: 12, tint: #7DB8FF44))
+      }
+    )");
+    check(valid.diagnostics.empty(), "valid authored effect call produced diagnostics");
+
+    const compiler::SemanticResult invalid = validate(R"(
+      overlay Main {
+        root Panel(effect: effect("test:glass", tint: 4, unknown: 1))
+      }
+    )");
+    const auto has = [&invalid](const std::string_view code) {
+        return std::ranges::any_of(invalid.diagnostics, [code](const compiler::Diagnostic& value) {
+            return value.code == code;
+        });
+    };
+    check(
+        has("STRATA.DSL.SEMANTIC_MISSING_ARGUMENT") &&
+            has("STRATA.DSL.SEMANTIC_UNKNOWN_ARGUMENT") &&
+            has("STRATA.DSL.SEMANTIC_TYPE_MISMATCH"),
+        "authored effect calls did not enforce required, known, typed parameters"
+    );
+}
+
 void test_durability_round_trip_migration_and_corruption() {
     using namespace strata::runtime;
     std::optional<std::string> bytes;
@@ -1848,6 +1910,7 @@ int main(const int argument_count, const char* const* const arguments) {
         });
         run("animation validation", [&] { test_animation_validation_is_total(); });
         run("Target 10 compile diagnostics", [&] { test_target10_compile_diagnostics(); });
+        run("authored effect schema", [&] { test_authored_effect_schema_and_semantics(); });
         run("application isolation", [&] { test_application_bundle_and_runtime_isolation(); });
         run("portable expression runtime", [&] { test_portable_ir_expression_runtime(); });
         if (argument_count >= 2 && std::string_view(arguments[1]).size() != 0U) {

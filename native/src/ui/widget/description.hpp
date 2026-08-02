@@ -114,6 +114,10 @@ private:
 [[nodiscard]] runtime::Value widget_fill();
 [[nodiscard]] const std::string* widget_description_string(const runtime::Value* value) noexcept;
 [[nodiscard]] DescriptionNode::Properties widget_transparent_properties();
+void widget_mark_native_presentation(DescriptionNode::Properties& properties);
+[[nodiscard]] std::shared_ptr<const DescriptionNode> widget_native_presentation(
+    const std::shared_ptr<const DescriptionNode>& node
+);
 [[nodiscard]] DescriptionNode::Properties widget_text_properties(
     std::string text,
     runtime::Value layout = runtime::Value{}

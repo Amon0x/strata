@@ -188,9 +188,9 @@ void test_negotiation() {
     );
     check(info.minimum_abi_version == STRATA_ABI_VERSION_MINIMUM, "minimum ABI changed");
     check(
-        strata_get_api_info(STRATA_ABI_VERSION_4, &info).status ==
+        strata_get_api_info(STRATA_ABI_VERSION_5, &info).status ==
             STRATA_STATUS_UNSUPPORTED_ABI,
-        "pre-native-catalog ABI remained falsely negotiable"
+        "pre-effect-program ABI remained falsely negotiable"
     );
     check(info.capabilities == strata_capability_bits(), "capability reports disagree");
     check(

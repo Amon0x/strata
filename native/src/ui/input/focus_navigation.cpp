@@ -33,6 +33,10 @@ void collect_focus_entries(
     std::vector<FocusEntry>& result,
     std::size_t& order
 ) {
+    if (native_presentation_root(node)) {
+        ++order;
+        return;
+    }
     if (accepts(node)) {
         const runtime::Value* authored = scalar_property(node, "tabIndex");
         result.push_back(FocusEntry{

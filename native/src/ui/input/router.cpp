@@ -324,6 +324,7 @@ bool InputRouter::tabbable(const RetainedNode& node) const noexcept {
 
 RetainedNode* InputRouter::focusable_ancestor(RetainedNode* node) const noexcept {
     for (RetainedNode* current = node; current != nullptr; current = current->parent()) {
+        if (inside_native_presentation(*current)) continue;
         if (focusable(*current)) return current;
     }
     return nullptr;
@@ -336,6 +337,7 @@ bool InputRouter::passive_pointer_path(
     for (const RetainedNode* current = pointer_target;
          current != nullptr && current != &owner;
          current = current->parent()) {
+        if (inside_native_presentation(*current)) continue;
         const WidgetLifecycle* lifecycle = widgets_.find(current->description().type);
         const bool static_text = lifecycle != nullptr &&
             lifecycle->input.text_edit_mode == WidgetTextEditMode::static_text;
@@ -362,6 +364,7 @@ bool InputRouter::passive_pointer_path(
 RetainedNode* InputRouter::pointer_focusable_ancestor(RetainedNode* node) const noexcept {
     RetainedNode* static_text_fallback = nullptr;
     for (RetainedNode* current = node; current != nullptr; current = current->parent()) {
+        if (inside_native_presentation(*current)) continue;
         if (!focusable(*current)) continue;
         const WidgetLifecycle* lifecycle = widgets_.find(current->description().type);
         const bool static_text = lifecycle != nullptr &&
@@ -774,6 +777,7 @@ void InputRouter::focus(
     const std::string_view reason,
     InputOperationResult& result
 ) {
+    if (inside_native_presentation(node)) return;
     if (!within_focus_containment(node)) return;
     if (focused_ == node.identity()) return;
     if (focused_.has_value()) {

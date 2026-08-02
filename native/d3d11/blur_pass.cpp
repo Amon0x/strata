@@ -266,7 +266,7 @@ struct BlurPass::Impl final {
         descriptor.Height = target_height;
         descriptor.MipLevels = 1U;
         descriptor.ArraySize = 1U;
-        descriptor.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        descriptor.Format = format;
         descriptor.SampleDesc.Count = 1U;
         descriptor.Usage = D3D11_USAGE_DEFAULT;
         descriptor.BindFlags =
@@ -285,8 +285,9 @@ struct BlurPass::Impl final {
         return result;
     }
 
-    void resize(const std::uint32_t next_width, const std::uint32_t next_height) {
-        if (next_width == width && next_height == height)
+    void resize(const std::uint32_t next_width, const std::uint32_t next_height,
+                const DXGI_FORMAT next_format) {
+        if (next_width == width && next_height == height && next_format == format)
             return;
         context->OMSetRenderTargets(0U, nullptr, nullptr);
         ID3D11ShaderResourceView* const none = nullptr;
@@ -295,6 +296,7 @@ struct BlurPass::Impl final {
         retained_pixels = 0U;
         width = next_width;
         height = next_height;
+        format = next_format;
     }
 
     [[nodiscard]] TargetSet& acquire(const TargetKey& key) {
@@ -378,7 +380,7 @@ struct BlurPass::Impl final {
             throw std::invalid_argument("D3D11 blur requires live source and destination targets");
         }
         if (framebuffer_width != width || framebuffer_height != height) {
-            resize(framebuffer_width, framebuffer_height);
+            resize(framebuffer_width, framebuffer_height, format);
         }
         TargetSet& target = acquire(blur->targets);
 
@@ -440,14 +442,22 @@ struct BlurPass::Impl final {
     std::uint64_t usage_clock = 0U;
     std::uint32_t width = 0U;
     std::uint32_t height = 0U;
+    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
 };
 
 BlurPass::BlurPass(ID3D11Device* const device, ID3D11DeviceContext* const context)
     : impl_(std::make_unique<Impl>(device, context)) {}
 BlurPass::~BlurPass() = default;
 
-void BlurPass::resize(const std::uint32_t width, const std::uint32_t height) {
-    impl_->resize(width, height);
+void BlurPass::resize(const std::uint32_t width, const std::uint32_t height,
+                      const DXGI_FORMAT format) {
+    if ((width == 0U) != (height == 0U)) {
+        throw std::invalid_argument("D3D11 blur target dimensions must both be empty or positive");
+    }
+    if ((width == 0U) != (format == DXGI_FORMAT_UNKNOWN)) {
+        throw std::invalid_argument("D3D11 blur target format does not match its dimensions");
+    }
+    impl_->resize(width, height, format);
 }
 
 BlurPassTelemetry BlurPass::execute(const BlurBatch& batch, ID3D11Texture2D* const back_buffer,

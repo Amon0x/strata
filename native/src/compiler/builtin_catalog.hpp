@@ -156,6 +156,15 @@ struct DeclaredMaterial final {
 struct DeclaredEffect final {
     std::string name;
     std::vector<DeclaredProperty> parameters;
+    std::string input = "BACKDROP";
+    struct Pass final {
+        std::string kind;
+        std::optional<std::string> radius_parameter;
+        double radius = 0.0;
+        std::optional<std::string> downsample_parameter;
+        std::uint32_t downsample = 1U;
+    };
+    std::vector<Pass> passes;
 };
 
 /** Canonical immutable source for all built-in compiler/runtime/authoring declarations. */

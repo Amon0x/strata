@@ -1235,6 +1235,51 @@ public:
         return declarations;
     }
 
+    /** Ordered passes for every render effect declared by this application. */
+    [[nodiscard]] std::vector<EffectPassDeclaration> effect_pass_declarations(
+        const std::string_view backend
+    ) const {
+        const strata_string_view backend_view{backend.data(), backend.size()};
+        std::size_t count = 0U;
+        require(
+            strata_runtime_read_effect_pass_declarations(
+                native_handle(), backend_view, nullptr, 0U, &count
+            ),
+            "effect declaration count"
+        );
+        if (count == 0U) return {};
+        std::vector<strata_effect_pass_declaration> native(count);
+        require(
+            strata_runtime_read_effect_pass_declarations(
+                native_handle(), backend_view, native.data(), native.size(), &count
+            ),
+            "effect declaration read"
+        );
+        std::vector<EffectPassDeclaration> declarations;
+        declarations.reserve(count);
+        for (std::size_t index = 0U; index < count; ++index) {
+            declarations.push_back(EffectPassDeclaration{
+                detail::copied(native[index].effect_id),
+                native[index].index,
+                native[index].kind == STRATA_EFFECT_PASS_SHADER
+                    ? EffectPassKind::shader
+                    : native[index].kind == STRATA_EFFECT_PASS_SHADOW
+                        ? EffectPassKind::shadow
+                        : EffectPassKind::blur,
+                native[index].radius,
+                native[index].downsample,
+                native[index].radius_parameter == STRATA_EFFECT_PARAMETER_NONE
+                    ? std::nullopt
+                    : std::optional(native[index].radius_parameter),
+                native[index].downsample_parameter == STRATA_EFFECT_PARAMETER_NONE
+                    ? std::nullopt
+                    : std::optional(native[index].downsample_parameter),
+                detail::copied(native[index].source),
+            });
+        }
+        return declarations;
+    }
+
     void configure_application(const ApplicationOptions& options) {
         std::vector<strata_string_view> extension_schemas;
         extension_schemas.reserve(options.extension_schemas_json.size());

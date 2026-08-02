@@ -168,6 +168,26 @@ using data::JsonValue;
     });
 }
 
+[[nodiscard]] JsonValue effect(const EffectState& value) {
+    std::vector<JsonValue> parameters;
+    parameters.reserve(value.parameters.size());
+    for (const MaterialParameter& parameter : value.parameters) {
+        parameters.push_back(object({
+            {"name", JsonValue(parameter.name)},
+            {"value", material_parameter(parameter.value)},
+        }));
+    }
+    const std::string_view input = value.input == EffectInput::content
+        ? "CONTENT"
+        : value.input == EffectInput::shape ? "SHAPE" : "BACKDROP";
+    return object({
+        {"id", JsonValue(value.id)},
+        {"input", JsonValue(std::string(input))},
+        {"opacity", JsonValue(value.opacity)},
+        {"parameters", array(std::move(parameters))},
+    });
+}
+
 [[nodiscard]] JsonValue draw(
     const std::string& kind,
     std::initializer_list<JsonValue::ObjectEntry> fields
@@ -353,6 +373,21 @@ JsonValue render_command_json(const RenderCommand& command) {
                 {"radius", JsonValue(value.radius)},
                 {"spread", JsonValue(value.spread)},
             });
+        } else if constexpr (std::is_same_v<Type, BackdropEffectRenderCommand>) {
+            return draw("backdrop_effect", {
+                {"bounds", rectangle(value.bounds)},
+                {"effect", effect(value.effect)},
+                {"radii", radii(value.radii)},
+            });
+        } else if constexpr (std::is_same_v<Type, ContentEffectPushRenderCommand>) {
+            return object({
+                {"bounds", rectangle(value.bounds)},
+                {"effect", effect(value.effect)},
+                {"kind", JsonValue("content_effect_push")},
+                {"radii", radii(value.radii)},
+            });
+        } else if constexpr (std::is_same_v<Type, ContentEffectPopRenderCommand>) {
+            return object({{"kind", JsonValue("content_effect_pop")}});
         } else if constexpr (std::is_same_v<Type, ClipPushRenderCommand>) {
             return object({{"kind", JsonValue("clip_push")}, {"rect", rectangle(value.rect)}});
         } else if constexpr (std::is_same_v<Type, ClipPopRenderCommand>) {

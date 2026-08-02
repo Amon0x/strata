@@ -71,6 +71,28 @@ DescriptionNode::Properties widget_transparent_properties() {
     };
 }
 
+void widget_mark_native_presentation(DescriptionNode::Properties& properties) {
+    properties.insert_or_assign(
+        "$nativePresentation",
+        runtime::ExpressionValue(runtime::Value(true))
+    );
+    properties.insert_or_assign(
+        "semantics",
+        runtime::ExpressionValue(widget_object({
+            {"decorative", runtime::Value(true)},
+        }))
+    );
+}
+
+std::shared_ptr<const DescriptionNode> widget_native_presentation(
+    const std::shared_ptr<const DescriptionNode>& node
+) {
+    if (node == nullptr) return nullptr;
+    auto result = std::make_shared<DescriptionNode>(*node);
+    widget_mark_native_presentation(result->properties);
+    return result;
+}
+
 DescriptionNode::Properties widget_text_properties(std::string text, runtime::Value layout) {
     DescriptionNode::Properties result{
         {"text", runtime::ExpressionValue(runtime::Value(std::move(text)))},

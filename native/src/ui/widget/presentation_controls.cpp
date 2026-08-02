@@ -424,6 +424,10 @@ void tabs_content(WidgetRenderScope& scope) {
 }
 
 void select_content(WidgetRenderScope& scope) {
+    if (scope.property("triggerTemplate") != nullptr) {
+        scope.focus(scope.layout().bounds);
+        return;
+    }
     const runtime::ValueList* options = scope.list("options");
     if (options == nullptr || options->values.empty()) return;
     const std::optional<EffectiveChoice> selected = effective_choice(scope.node());
@@ -480,6 +484,10 @@ void select_content(WidgetRenderScope& scope) {
 }
 
 void select_overlay(WidgetRenderScope& scope) {
+    if (scope.property("popupTemplate") != nullptr &&
+        scope.property("itemTemplate") != nullptr) {
+        return;
+    }
     const std::vector<WidgetSubtarget> targets = scope.input().subtargets(scope.node().identity());
     std::vector<WidgetSubtarget> rows;
     for (const WidgetSubtarget& target : targets) {

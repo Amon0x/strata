@@ -96,6 +96,8 @@ enum class LayoutKind { stack, row, column, grid, panel, overlay, spacer, scroll
 enum class LayoutAlign { start, center, end, stretch };
 enum class LayoutJustify { start, center, end, space_between, space_around, space_evenly };
 enum class LayoutAxis { horizontal, vertical };
+enum class LayoutAnchorSide { bottom, top, right, left };
+enum class LayoutAnchorAlign { start, center, end };
 
 struct LayoutSize final {
     enum class Kind { automatic, content, fixed, percent, fill, clamp };
@@ -174,6 +176,14 @@ struct LayoutStyle final {
     std::optional<VirtualListSpec> virtual_list;
     std::string portal_target = "root";
     bool detach_from_parent_clip = true;
+    std::string anchor_target;
+    std::optional<Point> anchor_point;
+    LayoutAnchorSide anchor_side = LayoutAnchorSide::bottom;
+    LayoutAnchorAlign anchor_align = LayoutAnchorAlign::start;
+    double anchor_gap = 0.0;
+    bool anchor_flip = true;
+    bool anchor_shift = true;
+    bool match_anchor_width = false;
 
     [[nodiscard]] friend bool operator==(const LayoutStyle&, const LayoutStyle&) = default;
 };
@@ -392,8 +402,11 @@ private:
         bool content_motion_snapped_by_reduced_motion = false;
         bool subtree_pins_horizontal = false;
         bool subtree_pins_vertical = false;
+        bool subtree_portals = false;
         Size content_motion_target_size;
         std::vector<MeasuredNodePtr> children;
+        /** Prefix of children participating in parent flow; portals follow this prefix. */
+        std::size_t flow_child_count = 0U;
         std::optional<LinearLayoutResolution> linear;
         std::optional<GridLayoutResolution> grid;
     };
@@ -410,6 +423,12 @@ private:
         std::optional<double> horizontal_offset;
         std::optional<double> vertical_offset;
         [[nodiscard]] friend bool operator==(const PinContext&, const PinContext&) = default;
+    };
+
+    struct PendingPortal final {
+        MeasuredNodePtr measured;
+        std::optional<Rect> inherited_clip;
+        PinContext pin_context;
     };
 
     struct ArrangementCacheEntry final {
@@ -444,6 +463,7 @@ private:
     IntrinsicMeasure intrinsic_measure_;
     std::map<std::uint64_t, MeasurementCacheEntry> measurement_cache_;
     std::map<std::uint64_t, ArrangementCacheEntry> arrangement_cache_;
+    std::vector<PendingPortal> pending_portals_;
     LayoutResult result_;
     const RetainedTree* last_tree_ = nullptr;
     std::uint64_t last_invalidation_generation_ = 0U;

@@ -307,6 +307,25 @@ void validate_catalog(const BuiltinCatalog& catalog) {
         for (const DeclaredProperty& parameter : effect.parameters) {
             validate_type(parameter.type, type_ids);
         }
+        if (effect.input != "BACKDROP" && effect.input != "CONTENT" &&
+            effect.input != "SHAPE") {
+            throw std::logic_error("built-in effect has an unsupported input");
+        }
+        for (const DeclaredEffect::Pass& pass : effect.passes) {
+            if (pass.kind != "BLUR" && pass.kind != "SHADOW") {
+                throw std::logic_error("built-in effect has an unsupported pass");
+            }
+            const auto has_parameter = [&effect](const std::optional<std::string>& name) {
+                return !name.has_value() ||
+                    std::ranges::contains(effect.parameters, *name, &DeclaredProperty::name);
+            };
+            if (!has_parameter(pass.radius_parameter) ||
+                !has_parameter(pass.downsample_parameter)) {
+                throw std::logic_error(
+                    "built-in effect pass references an undeclared parameter"
+                );
+            }
+        }
     }
 }
 
@@ -509,9 +528,30 @@ data::JsonValue export_builtin_registry(const BuiltinCatalog& catalog) {
         for (const DeclaredProperty& parameter : effect.parameters) {
             parameters.push_back(encode_property(parameter, true));
         }
+        std::vector<JsonValue> passes;
+        for (const DeclaredEffect::Pass& pass : effect.passes) {
+            JsonValue::Object encoded{
+                {"downsample", JsonValue(static_cast<std::int64_t>(pass.downsample))},
+                {"kind", JsonValue(pass.kind)},
+                {"radius", JsonValue(pass.radius)},
+            };
+            if (pass.downsample_parameter.has_value()) {
+                encoded.emplace_back(
+                    "downsampleParameter", JsonValue(*pass.downsample_parameter)
+                );
+            }
+            if (pass.radius_parameter.has_value()) {
+                encoded.emplace_back(
+                    "radiusParameter", JsonValue(*pass.radius_parameter)
+                );
+            }
+            passes.emplace_back(std::move(encoded));
+        }
         effects.push_back(object({
+            {"input", JsonValue(effect.input)},
             {"name", JsonValue(effect.name)},
             {"parameters", array(std::move(parameters))},
+            {"passes", array(std::move(passes))},
         }));
     }
     return object({

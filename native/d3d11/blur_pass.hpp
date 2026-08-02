@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <memory>
 
+#include <dxgiformat.h>
+
 struct ID3D11Device;
 struct ID3D11DeviceContext;
 struct ID3D11RenderTargetView;
@@ -30,7 +32,7 @@ class BlurPass final {
     BlurPass(const BlurPass&) = delete;
     BlurPass& operator=(const BlurPass&) = delete;
 
-    void resize(std::uint32_t width, std::uint32_t height);
+    void resize(std::uint32_t width, std::uint32_t height, DXGI_FORMAT format);
     [[nodiscard]] BlurPassTelemetry
     execute(const host::BlurBatch& batch, ID3D11Texture2D* back_buffer,
             ID3D11RenderTargetView* target, std::uint32_t framebuffer_width,

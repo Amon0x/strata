@@ -315,6 +315,27 @@ LayoutStyle layout_style(const DescriptionNode& description) {
         style.portal_target = *target->string();
     }
     style.detach_from_parent_clip = boolean(field(layout, "detachFromParentClip"), true);
+    if (const runtime::Value* target = field(layout, "anchorTarget");
+        target != nullptr && target->string() != nullptr) {
+        style.anchor_target = *target->string();
+    }
+    if (const runtime::Value* point = field(layout, "anchorPoint");
+        point != nullptr && point->object() != nullptr) {
+        const double x = number(point->field("x"));
+        const double y = number(point->field("y"));
+        if (std::isfinite(x) && std::isfinite(y)) style.anchor_point = Point{x, y};
+    }
+    const std::string_view anchor_side = text(field(layout, "anchorSide"));
+    if (anchor_side == "TOP") style.anchor_side = LayoutAnchorSide::top;
+    else if (anchor_side == "RIGHT") style.anchor_side = LayoutAnchorSide::right;
+    else if (anchor_side == "LEFT") style.anchor_side = LayoutAnchorSide::left;
+    const std::string_view anchor_align = text(field(layout, "anchorAlign"));
+    if (anchor_align == "CENTER") style.anchor_align = LayoutAnchorAlign::center;
+    else if (anchor_align == "END") style.anchor_align = LayoutAnchorAlign::end;
+    style.anchor_gap = non_negative_number(field(layout, "anchorGap"));
+    style.anchor_flip = boolean(field(layout, "anchorFlip"), true);
+    style.anchor_shift = boolean(field(layout, "anchorShift"), true);
+    style.match_anchor_width = boolean(field(layout, "matchAnchorWidth"));
     return style;
 }
 } // namespace strata::ui

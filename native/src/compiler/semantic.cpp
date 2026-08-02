@@ -2548,7 +2548,7 @@ private:
                 if (registry_.effect(*name) == nullptr) {
                     report(
                         "STRATA.DSL.SEMANTIC_UNKNOWN_EFFECT",
-                        "Effect '" + *name + "' is not built in.",
+                        "Effect '" + *name + "' is not declared.",
                         expression.span,
                         component_path,
                         expected_names(registry_.effect_names())
@@ -2574,7 +2574,7 @@ private:
                 if (name != nullptr && effect == nullptr) {
                     report(
                         "STRATA.DSL.SEMANTIC_UNKNOWN_EFFECT",
-                        "Effect '" + *name + "' is not built in.",
+                        "Effect '" + *name + "' is not declared.",
                         call->arguments.front().span,
                         component_path,
                         expected_names(registry_.effect_names())
@@ -2630,6 +2630,20 @@ private:
                             component_path + "." + parameter->name,
                             scope
                         );
+                    }
+                }
+                if (effect != nullptr) {
+                    for (const SchemaParameter& parameter : effect->parameters) {
+                        if (parameter.required && !seen.contains(parameter.name)) {
+                            report(
+                                "STRATA.DSL.SEMANTIC_MISSING_ARGUMENT",
+                                "Effect '" + *name + "' requires parameter '" +
+                                    parameter.name + "'.",
+                                expression.span,
+                                component_path,
+                                parameter.name
+                            );
+                        }
                     }
                 }
                 return;

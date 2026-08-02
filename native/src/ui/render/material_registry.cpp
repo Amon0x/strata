@@ -43,6 +43,35 @@ namespace {
            value == "straight_alpha" || value == "additive" || value == "multiply";
 }
 
+[[nodiscard]] std::size_t pack_effect_parameter(
+    std::array<double, 16U>& output,
+    const std::size_t slot,
+    const runtime::Value& value,
+    const std::optional<std::string>& type
+) noexcept {
+    const std::size_t width = compiler::material_parameter_width(type);
+    if (slot + width > output.size()) return 0U;
+    if (value.number() != nullptr) {
+        output[slot] = *value.number();
+        return 1U;
+    }
+    if (value.color() != nullptr) {
+        output[slot] = static_cast<double>(value.color()->red) / 255.0;
+        output[slot + 1U] = static_cast<double>(value.color()->green) / 255.0;
+        output[slot + 2U] = static_cast<double>(value.color()->blue) / 255.0;
+        output[slot + 3U] = static_cast<double>(value.color()->alpha) / 255.0;
+        return 4U;
+    }
+    if (value.list() != nullptr && (width == 2U || width == 4U)) {
+        for (std::size_t index = 0U; index < width; ++index) {
+            if (value.list()->values[index].number() == nullptr) return 0U;
+            output[slot + index] = *value.list()->values[index].number();
+        }
+        return width;
+    }
+    return 0U;
+}
+
 [[nodiscard]] std::string material_slot_name(const std::size_t slot) {
     return "@" + std::to_string(slot);
 }
@@ -188,6 +217,131 @@ std::optional<MaterialState> MaterialRegistry::sanitize_state(const MaterialStat
         );
     }
     result.parameters = std::move(parameters);
+    return result;
+}
+
+std::vector<runtime::RuntimeDiagnostic> MaterialRegistry::validate_effect_state(
+    const EffectState& state,
+    const bool report_diagnostics
+) const {
+    std::vector<runtime::RuntimeDiagnostic> diagnostics;
+    const compiler::EffectSchema* schema =
+        schemas_ != nullptr ? schemas_->effect(state.id) : nullptr;
+    if (schema == nullptr) {
+        diagnostics.push_back(warning(
+            "STRATA.RENDER2D.EFFECT_UNKNOWN",
+            "Effect '" + state.id + "' is not registered.",
+            "effect/" + state.id,
+            "declared effect id"
+        ));
+    } else {
+        if (!std::isfinite(state.opacity) || state.opacity < 0.0 || state.opacity > 1.0) {
+            diagnostics.push_back(warning(
+                "STRATA.RENDER2D.EFFECT_OPACITY",
+                "Effect '" + state.id + "' opacity must be finite and between zero and one.",
+                "effect/" + state.id + "/opacity",
+                "finite number in [0, 1]"
+            ));
+        }
+        std::set<std::string, std::less<>> seen;
+        for (const MaterialParameter& parameter : state.parameters) {
+            if (!seen.insert(parameter.name).second) {
+                diagnostics.push_back(warning(
+                    "STRATA.RENDER2D.EFFECT_PARAMETER_DUPLICATE",
+                    "Effect '" + state.id + "' supplies parameter '" + parameter.name +
+                        "' more than once.",
+                    "effect/" + state.id + "/" + parameter.name,
+                    "unique parameter name"
+                ));
+                continue;
+            }
+            const compiler::SchemaParameter* expected =
+                schema->find_parameter(parameter.name);
+            if (expected == nullptr) {
+                diagnostics.push_back(warning(
+                    "STRATA.RENDER2D.EFFECT_PARAMETER_UNKNOWN",
+                    "Effect '" + state.id + "' does not define '" + parameter.name + "'.",
+                    "effect/" + state.id + "/" + parameter.name,
+                    "declared effect parameter"
+                ));
+            } else if (!accepts_material_type(parameter.value, expected->material_type)) {
+                diagnostics.push_back(warning(
+                    "STRATA.RENDER2D.EFFECT_PARAMETER_TYPE",
+                    "Effect '" + state.id + "' parameter '" + parameter.name +
+                        "' expected " +
+                        expected->material_type.value_or(expected->type->diagnostic_name()) +
+                        ".",
+                    "effect/" + state.id + "/" + parameter.name,
+                    expected->material_type.value_or(expected->type->diagnostic_name())
+                ));
+            }
+        }
+        for (const compiler::SchemaParameter& expected : schema->parameters) {
+            if (expected.required && !seen.contains(expected.name)) {
+                diagnostics.push_back(warning(
+                    "STRATA.RENDER2D.EFFECT_PARAMETER_REQUIRED",
+                    "Effect '" + state.id + "' requires parameter '" + expected.name + "'.",
+                    "effect/" + state.id + "/" + expected.name,
+                    expected.material_type.value_or(expected.type->diagnostic_name())
+                ));
+            }
+        }
+    }
+    if (report_diagnostics) {
+        for (const runtime::RuntimeDiagnostic& diagnostic : diagnostics) {
+            publish_once(diagnostic, diagnostic.code + ":" + diagnostic.path);
+        }
+    }
+    return diagnostics;
+}
+
+std::optional<EffectState> MaterialRegistry::sanitize_effect_state(
+    const EffectState& state
+) const {
+    static_cast<void>(validate_effect_state(state, true));
+    if (schemas_ == nullptr) return std::nullopt;
+    const compiler::EffectSchema* schema = schemas_->effect(state.id);
+    if (schema == nullptr) return std::nullopt;
+    EffectState result = state;
+    result.opacity = std::isfinite(result.opacity)
+        ? std::clamp(result.opacity, 0.0, 1.0)
+        : 1.0;
+    result.input = schema->input == "CONTENT"
+        ? EffectInput::content
+        : schema->input == "SHAPE" ? EffectInput::shape : EffectInput::backdrop;
+    std::vector<MaterialParameter> parameters;
+    parameters.reserve(result.parameters.size());
+    std::set<std::string, std::less<>> seen;
+    for (const MaterialParameter& parameter : result.parameters) {
+        const compiler::SchemaParameter* expected =
+            schema->find_parameter(parameter.name);
+        if (!seen.insert(parameter.name).second || expected == nullptr ||
+            !accepts_material_type(parameter.value, expected->material_type)) {
+            continue;
+        }
+        parameters.push_back(parameter);
+    }
+    result.parameters = std::move(parameters);
+    std::size_t slot = 0U;
+    for (const compiler::SchemaParameter& expected : schema->parameters) {
+        const auto supplied = std::ranges::find(
+            result.parameters, expected.name, &MaterialParameter::name
+        );
+        const std::size_t width =
+            compiler::material_parameter_width(expected.material_type);
+        if (supplied != result.parameters.end()) {
+            static_cast<void>(pack_effect_parameter(
+                result.packed_parameters,
+                slot,
+                supplied->value,
+                expected.material_type
+            ));
+        }
+        slot += width;
+    }
+    result.packed_parameter_count = static_cast<std::uint32_t>(
+        std::min(slot, result.packed_parameters.size())
+    );
     return result;
 }
 

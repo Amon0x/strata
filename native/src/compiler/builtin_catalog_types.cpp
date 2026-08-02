@@ -1640,6 +1640,63 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
                                                          .label = "path fill rule",
                                                          .values = {"evenodd", "nonzero"}})},
+        DeclaredNamedType{.id = "t161",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
+                                                         .label = "anchor side",
+                                                         .values = {"BOTTOM", "LEFT", "RIGHT",
+                                                                    "TOP"}})},
+        DeclaredNamedType{.id = "t162",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
+                                                         .label = "anchor alignment",
+                                                         .values = {"CENTER", "END", "START"}})},
+        DeclaredNamedType{
+            .id = "t163",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::component_template,
+                .parameters =
+                    {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+                     DeclaredParameter{.name = "label", .type = declared_type_reference("t0")},
+                     DeclaredParameter{.name = "value", .type = declared_type_reference("t7")},
+                     DeclaredParameter{.name = "enabled", .type = declared_type_reference("t2")},
+                     DeclaredParameter{.name = "expanded", .type = declared_type_reference("t2")}}})},
+        DeclaredNamedType{
+            .id = "t164",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::component_template,
+                .parameters =
+                    {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+                     DeclaredParameter{.name = "level", .type = declared_type_reference("t3")},
+                     DeclaredParameter{.name = "expanded", .type = declared_type_reference("t2")}}})},
+        DeclaredNamedType{
+            .id = "t165",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::component_template,
+                .parameters =
+                    {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+                     DeclaredParameter{.name = "id", .type = declared_type_reference("t0")},
+                     DeclaredParameter{.name = "label", .type = declared_type_reference("t0")},
+                     DeclaredParameter{.name = "value", .type = declared_type_reference("t7")},
+                     DeclaredParameter{.name = "index", .type = declared_type_reference("t3")},
+                     DeclaredParameter{.name = "level", .type = declared_type_reference("t3")},
+                     DeclaredParameter{.name = "enabled", .type = declared_type_reference("t2")},
+                     DeclaredParameter{.name = "selected", .type = declared_type_reference("t2")},
+                     DeclaredParameter{.name = "active", .type = declared_type_reference("t2")},
+                     DeclaredParameter{.name = "checked", .type = declared_type_reference("t2")},
+                     DeclaredParameter{.name = "separator",
+                                       .type = declared_type_reference("t2")},
+                     DeclaredParameter{.name = "hasChildren",
+                                       .type = declared_type_reference("t2")},
+                     DeclaredParameter{.name = "shortcut",
+                                       .type = declared_type_reference("t0")}}})},
+        DeclaredNamedType{
+            .id = "t166",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::component_template,
+                .parameters =
+                    {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+                     DeclaredParameter{.name = "text", .type = declared_type_reference("t0")}}})},
     };
 }
 

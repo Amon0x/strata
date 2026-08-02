@@ -110,7 +110,7 @@ installed `desktop_app.cpp` sample is a complete window loop. See
 [Win32 desktop hosting](desktop-hosting.md).
 
 Linux deliberately has no bundled GUI backend. A Vulkan, OpenGL, or other renderer links
-`Strata::render_host` and includes `<strata/render_packet.hpp>` instead of duplicating packet-v4
+`Strata::render_host` and includes `<strata/render_packet.hpp>` instead of duplicating packet-v5
 parsing:
 
 ```cpp
@@ -129,9 +129,18 @@ for (const strata::host::SubmissionBatch& batch : plan.batches) {
 The decoder is stateful because settled packets can retain an earlier geometry epoch while updating
 the frame index and resource operations. Keep one decoder per Surface/backend stream and call
 `reset()` when discarding that stream. `RenderPacket` exposes ordered texture mutations, fixed-layout
-vertex bytes, indices, scissors, material/blend/texture bindings, draw batches, and blur batches;
-the consumer remains responsible for GPU resources, shader/material implementation, presentation,
-and the Surface release-packet barrier.
+vertex bytes, indices, scissors, material/blend/texture bindings, draw batches, blur batches,
+backdrop/content effect batches, and content stack markers. The consumer remains responsible for
+GPU resources, shader/material implementation, presentation, and the Surface release-packet
+barrier.
+
+Before framing, enumerate `Runtime::material_declarations(shaderBackend)` and
+`Runtime::effect_pass_declarations(shaderBackend)`. Effect declarations are a flat table ordered by
+effect id/pass index and carry blur constants or parameter slots plus the requested backend's
+shader resource id. A custom backend retains its compiled programs and executes each packet effect
+against the bounded sixteen-float parameter block. The C equivalents are
+`strata_runtime_read_material_declarations` and
+`strata_runtime_read_effect_pass_declarations`.
 
 ## Typed C++ host models
 
@@ -193,8 +202,8 @@ runtime.
   per runtime so an inactive sibling Surface cannot disable the active Surface; releasing focus or
   the owning Surface deactivates it.
 - The effect adapter receives only explicit domain effects emitted through
-  `strata_runtime_emit_effect_json`. The authoring-language `effect(...)` value is a visual material
-  instruction consumed by native rendering and never calls the host effect adapter.
+  `strata_runtime_emit_effect_json`. The authoring-language `effect(...)` value is a visual render
+  program consumed by the backend and never calls the host effect adapter.
 - Diagnostics use the size- and version-tagged `strata_diagnostic` payload. The callback carries
   stable identity/sequence, severity, complete source range, component path, expected/recovery
   text, first/latest frame, occurrence count, and the canonical store's dropped-record count.
@@ -208,11 +217,11 @@ runtime.
 
 Adopt a complete Surface environment generation atomically: framebuffer and logical sizes, scale,
 safe insets, snapping, density, reduced-motion preference, and input capabilities. Enqueue input in
-ordered batches, call `strata_surface_frame`, then read packet v4 through a bytes sink.
+ordered batches, call `strata_surface_frame`, then read packet v5 through a bytes sink.
 
 The packet bytes are borrowed only during the sink callback. Copy them if the backend submits later;
-consume them directly if submission is synchronous. Packet v4 contains native geometry,
-indices, scissors, materials, textures, draw/blur batches, and one-shot GPU resource operations.
+consume them directly if submission is synchronous. Packet v5 contains native geometry,
+indices, scissors, materials, textures, draw/blur/effect batches, and one-shot GPU resource operations.
 Hosts must not redo layout, glyph generation, or batch planning.
 
 Canonical frame JSON is an optional inspection/conformance projection and is deliberately lazy. It

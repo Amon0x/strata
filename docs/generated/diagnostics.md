@@ -239,6 +239,12 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.INPUT.INVALID_EVENT` | `native/src/surface_abi.cpp` |
 | `STRATA.INSPECT.INVALID_TARGET` | `native/src/surface_inspector_abi.cpp` |
 | `STRATA.PROFILER.MISUSE` | `native/src/runtime/services.cpp` |
+| `STRATA.RENDER2D.EFFECT_OPACITY` | `native/src/ui/render/material_registry.cpp` |
+| `STRATA.RENDER2D.EFFECT_PARAMETER_DUPLICATE` | `native/src/ui/render/material_registry.cpp` |
+| `STRATA.RENDER2D.EFFECT_PARAMETER_REQUIRED` | `native/src/ui/render/material_registry.cpp` |
+| `STRATA.RENDER2D.EFFECT_PARAMETER_TYPE` | `native/src/ui/render/material_registry.cpp` |
+| `STRATA.RENDER2D.EFFECT_PARAMETER_UNKNOWN` | `native/src/ui/render/material_registry.cpp` |
+| `STRATA.RENDER2D.EFFECT_UNKNOWN` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.MATERIAL_BLEND_MODE` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.MATERIAL_OPACITY` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.MATERIAL_PARAMETER_DUPLICATE` | `native/src/ui/render/material_registry.cpp` |

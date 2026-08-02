@@ -521,6 +521,7 @@ if(WIN32 AND (STRATA_BUILD_DESKTOP OR STRATA_BUILD_TOOLS))
         strata_d3d11
         STATIC
             d3d11/blur_pass.cpp
+            d3d11/effect_pass.cpp
             d3d11/render_context.cpp
             d3d11/texture_store.cpp
     )
@@ -553,6 +554,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             host/extensions.cpp
             host/module_path.cpp
             d3d11/blur_pass.cpp
+            d3d11/effect_pass.cpp
             d3d11/render_context.cpp
             d3d11/texture_store.cpp
     )
@@ -1008,6 +1010,20 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dynamic-session
     )
 
+    add_executable(strata_render_packet_tests tests/render_packet_tests.cpp)
+    target_link_libraries(
+        strata_render_packet_tests
+        PRIVATE Strata::core Strata::render_host
+    )
+    target_include_directories(
+        strata_render_packet_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    strata_target_defaults(strata_render_packet_tests)
+    add_test(
+        NAME strata.render_packet
+        COMMAND strata_render_packet_tests ${STRATA_RESOURCE_ROOT}
+    )
+
     add_executable(strata_text_font_residual_tests tests/text_font_residual_tests.cpp)
     target_link_libraries(strata_text_font_residual_tests PRIVATE Strata::core)
     target_include_directories(
@@ -1168,6 +1184,16 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                     -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/showcase.json
                     -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-d3d11-interactive
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_interactive.cmake
+            )
+            add_test(
+                NAME strata.headless.effects
+                COMMAND ${CMAKE_COMMAND}
+                    -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>
+                    -DSTRATA_RESOURCES=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
+                    -DSTRATA_D3D11_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/effects.json
+                    -DSTRATA_PORTABLE_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/effects-portable.json
+                    -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-effects
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_effects.cmake
             )
         endif()
     endif()

@@ -128,6 +128,28 @@ struct D3D11Renderer::Impl final {
         declared_materials.emplace(id);
     }
 
+    void declare_effect_pass(
+        const std::string_view effect_id,
+        const std::uint32_t index,
+        const std::uint32_t kind,
+        const double radius,
+        const std::uint32_t downsample,
+        const std::uint32_t radius_parameter,
+        const std::uint32_t downsample_parameter,
+        const std::string_view source
+    ) {
+        renderer->declare_effect_pass(
+            effect_id,
+            index,
+            kind,
+            radius,
+            downsample,
+            radius_parameter,
+            downsample_parameter,
+            source
+        );
+    }
+
     void render(const host::RenderPacket& packet, const std::int64_t time_nanoseconds) {
         if (target == nullptr || staging == nullptr) {
             throw std::logic_error("headless D3D11 renderer must be sized before rendering");
@@ -195,6 +217,28 @@ void D3D11Renderer::set_clear_color(const std::array<std::uint8_t, 4U> rgba) noe
 
 void D3D11Renderer::declare_material(const std::string_view id, const std::string_view source) {
     impl_->declare_material(id, source);
+}
+
+void D3D11Renderer::declare_effect_pass(
+    const std::string_view effect_id,
+    const std::uint32_t index,
+    const std::uint32_t kind,
+    const double radius,
+    const std::uint32_t downsample,
+    const std::uint32_t radius_parameter,
+    const std::uint32_t downsample_parameter,
+    const std::string_view source
+) {
+    impl_->declare_effect_pass(
+        effect_id,
+        index,
+        kind,
+        radius,
+        downsample,
+        radius_parameter,
+        downsample_parameter,
+        source
+    );
 }
 
 void D3D11Renderer::render(const host::RenderPacket& packet, const std::int64_t time_nanoseconds) {

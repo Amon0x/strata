@@ -785,15 +785,32 @@ void InputRouter::prepare_pointer_geometry() const {
     projected_subtargets_.clear();
     detached_subtargets_.clear();
     pointer_hit_entries_.reserve(layout_->records.size());
+    std::vector<RetainedNode*> portals;
+    const auto collect_portals = [this, &portals](
+                                     const auto& self,
+                                     RetainedNode& node,
+                                     const bool inside_portal
+                                 ) -> void {
+        const LayoutRecord* record = layout_->find(node.identity());
+        if (record == nullptr) return;
+        const bool portal = record->kind == LayoutKind::portal;
+        if (portal && !inside_portal) portals.push_back(&node);
+        for (const auto& child : node.children()) {
+            self(self, *child, inside_portal || portal);
+        }
+    };
+    collect_portals(collect_portals, *tree_->root(), false);
     const auto visit = [this](
                            const auto& self,
                            RetainedNode& node,
+                           const bool visit_portals,
                            const MotionTransform inherited,
                            const std::optional<Rect> traversal_clip
                        ) -> void {
         if (node.lifecycle() == RetainedLifecycle::exiting) return;
         const LayoutRecord* record = layout_->find(node.identity());
         if (record == nullptr) return;
+        if (!visit_portals && record->kind == LayoutKind::portal) return;
         const MotionTransform transform = motion_ != nullptr
             ? concatenate_presentation_transform(
                   inherited, local_presentation_transform(node, *motion_)
@@ -819,7 +836,7 @@ void InputRouter::prepare_pointer_geometry() const {
             }
         );
         for (auto child = children.rbegin(); child != children.rend(); ++child) {
-            self(self, **child, transform, child_clip);
+            self(self, **child, visit_portals, transform, child_clip);
         }
         const Rect bounds = hit_bounds_resolver_
             ? hit_bounds_resolver_(node, *record)
@@ -830,7 +847,12 @@ void InputRouter::prepare_pointer_geometry() const {
             traversal_clip,
         });
     };
-    visit(visit, *tree_->root(), MotionTransform{}, std::nullopt);
+    // Detached portal roots occupy the final render plane. Visit them first in reverse paint
+    // order so hit testing observes the same topmost-first order as rendering.
+    for (auto portal = portals.rbegin(); portal != portals.rend(); ++portal) {
+        visit(visit, **portal, true, MotionTransform{}, std::nullopt);
+    }
+    visit(visit, *tree_->root(), false, MotionTransform{}, std::nullopt);
     pointer_geometry_tree_ = tree_;
     pointer_geometry_layout_ = layout_;
     pointer_geometry_motion_ = motion_;
@@ -848,7 +870,7 @@ const std::vector<WidgetSubtarget>& InputRouter::projected_subtargets(
     prepare_pointer_geometry();
     const auto found = projected_subtargets_.find(node.identity());
     if (found != projected_subtargets_.end()) return found->second;
-    if (!node_participates(node) ||
+    if (inside_native_presentation(node) || !node_participates(node) ||
         !widget_projects_subtargets(node.description().type)) {
         return projected_subtargets_.emplace(
             node.identity(), std::vector<WidgetSubtarget>{}
@@ -920,7 +942,10 @@ const RetainedNode* InputRouter::inspection_target(const Point position) const n
 std::vector<WidgetSubtarget> InputRouter::subtargets(const std::uint64_t identity) const {
     if (tree_ == nullptr || layout_ == nullptr) return {};
     const RetainedNode* node = tree_->find_identity(identity);
-    if (node == nullptr || !node_participates(*node)) return {};
+    if (node == nullptr || inside_native_presentation(*node) ||
+        !node_participates(*node)) {
+        return {};
+    }
     const std::string* query = edited_text(identity);
     return widget_subtargets(
         *node,
@@ -962,6 +987,7 @@ std::optional<WidgetSubtarget> InputRouter::hit_subtarget(
     std::optional<WidgetSubtarget> best;
     for (const RetainedNode* current = ordinary_target; current != nullptr;
          current = current->parent()) {
+        if (inside_native_presentation(*current)) continue;
         if (!node_participates(*current)) continue;
         const std::vector<WidgetSubtarget>& projected = projected_subtargets(*current);
         for (auto candidate = projected.rbegin(); candidate != projected.rend(); ++candidate) {
@@ -1003,6 +1029,7 @@ void InputRouter::set_hovered_subtarget(const std::optional<WidgetSubtarget>& ta
 
 RetainedNode* InputRouter::interactive_ancestor(RetainedNode* node) const noexcept {
     for (RetainedNode* current = node; current != nullptr; current = current->parent()) {
+        if (inside_native_presentation(*current)) continue;
         const WidgetLifecycle* lifecycle = widgets_.find(current->description().type);
         if (lifecycle != nullptr && (lifecycle->input.event != nullptr ||
             lifecycle->input.pointer != nullptr || lifecycle->input.click != nullptr ||

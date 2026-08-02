@@ -47,7 +47,8 @@ std::optional<runtime::ActionDispatchOutcome> InputRouter::execute_surface_actio
     if (id == "focus.request") {
         const std::string* key = string_value(action.payload.field("key"));
         RetainedNode* target = key != nullptr && tree_ != nullptr ? tree_->find_key(*key) : nullptr;
-        if (target == nullptr || !focusable(*target)) {
+        if (target == nullptr || inside_native_presentation(*target) ||
+            !focusable(*target)) {
             return surface_outcome(
                 runtime::ActionDispatchStatus::failed,
                 "Focus target '" + std::string(key != nullptr ? *key : "") +

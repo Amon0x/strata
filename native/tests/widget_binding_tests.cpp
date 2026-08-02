@@ -398,6 +398,43 @@ void test_range_and_choice_control_defaults(
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
 ) {
     constexpr std::string_view source = R"(
+style TransparentPresentation {
+  background: null;
+  border: null;
+}
+
+component InteractiveChoiceTrigger(
+  key: key,
+  label: string,
+  enabled: boolean,
+  expanded: boolean
+) {
+  Button(
+    key: key,
+    label: label,
+    enabled: enabled,
+    layout: { width: 180, height: 32 }
+  )
+}
+
+component InteractiveChoicePopup(key: key, level: number, expanded: boolean) {
+  Panel(key: key, style: TransparentPresentation)
+}
+
+component InteractiveChoiceItem(
+  key: key,
+  id: string,
+  label: string,
+  index: number,
+  enabled: boolean,
+  selected: boolean,
+  active: boolean
+) {
+  Panel(key: key, style: TransparentPresentation) {
+    Text(text: label)
+  }
+}
+
 component ControlDefaults() {
   state quality = "balanced";
   state mode = "windowed";
@@ -419,6 +456,14 @@ component ControlDefaults() {
         { id: "fullscreen", label: "Fullscreen" }
       ],
       bind: mode
+    )
+    Select(
+      key: "defaults.custom-select",
+      options: [{ id: "custom", label: "Custom" }],
+      expanded: true,
+      triggerTemplate: InteractiveChoiceTrigger,
+      popupTemplate: InteractiveChoicePopup,
+      itemTemplate: InteractiveChoiceItem
     )
   }
 }
@@ -474,6 +519,64 @@ overlay Main { root ControlDefaults() }
         select_layout != nullptr && select_layout->bounds.height == 32.0 &&
             radio_layout != nullptr && radio != nullptr && radio->children().size() == 3U,
         "range/choice defaults lost their standard control geometry"
+    );
+    const strata::ui::RetainedNode* custom_popup =
+        surface.tree().find_key("defaults.custom-select.popup");
+    const strata::ui::LayoutRecord* custom_popup_layout = custom_popup != nullptr
+        ? surface.layout().find(custom_popup->identity())
+        : nullptr;
+    check(custom_popup_layout != nullptr, "authored Select popup wrapper was not retained");
+    const bool wrapper_drew_theme_chrome = std::ranges::any_of(
+        surface.render_commands().commands(),
+        [custom_popup_layout](const strata::ui::RenderCommand& command) {
+            if (const auto* rounded =
+                    std::get_if<strata::ui::RoundedRectRenderCommand>(&command);
+                rounded != nullptr) {
+                return rounded->bounds == custom_popup_layout->bounds;
+            }
+            const auto* border =
+                std::get_if<strata::ui::BorderRenderCommand>(&command);
+            return border != nullptr && border->bounds == custom_popup_layout->bounds;
+        }
+    );
+    check(
+        !wrapper_drew_theme_chrome,
+        "transparent authored-popup wrapper inherited default theme chrome"
+    );
+    static_cast<void>(surface.input().click("defaults.select"));
+    static_cast<void>(surface.input().key("h"));
+    static_cast<void>(surface.input().key("enter"));
+    static_cast<void>(surface.frame(2'000'000));
+    select = surface.tree().find_key("defaults.select");
+    check(
+        string_property(select, "selectedId") != nullptr &&
+            *string_property(select, "selectedId") == "quality",
+        "Select typeahead did not move and commit the matching option"
+    );
+    static_cast<void>(surface.input().click("defaults.custom-select"));
+    static_cast<void>(surface.input().key("tab"));
+    check(
+        !surface.input().focused_key().has_value() ||
+            *surface.input().focused_key() != "defaults.custom-select.trigger",
+        "authored Select presentation introduced a competing keyboard focus target"
+    );
+    static_cast<void>(surface.dispatch_action(
+        "focus.request",
+        strata::runtime::Value(
+            std::vector<std::pair<std::string, strata::runtime::Value>>{
+                {"key", strata::runtime::Value(strata::runtime::KeyValue{
+                    "defaults.custom-select.trigger"
+                })},
+            }
+        ),
+        "test",
+        std::nullopt,
+        strata::runtime::Value{}
+    ));
+    check(
+        !surface.input().focused_key().has_value() ||
+            *surface.input().focused_key() != "defaults.custom-select.trigger",
+        "programmatic focus escaped into authored Select presentation"
     );
     for (const auto& child : radio->children()) {
         const strata::ui::LayoutRecord* row = surface.layout().find(child->identity());

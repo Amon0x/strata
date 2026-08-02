@@ -269,6 +269,32 @@ void add_layout(ValueFields& fields, const ThemeWidgetLayoutStyle& style) {
     }));
     fields.insert_or_assign("portalTarget", runtime::Value(style.portal_target));
     fields.insert_or_assign("detachFromParentClip", runtime::Value(style.detach_from_parent_clip));
+    fields.insert_or_assign("anchorTarget", runtime::Value(style.anchor_target));
+    fields.insert_or_assign(
+        "anchorPoint",
+        style.anchor_point.has_value() ? point(*style.anchor_point) : runtime::Value{}
+    );
+    fields.insert_or_assign(
+        "anchorSide",
+        runtime::Value(
+            style.anchor_side == LayoutAnchorSide::top ? "TOP"
+                : style.anchor_side == LayoutAnchorSide::right ? "RIGHT"
+                : style.anchor_side == LayoutAnchorSide::left ? "LEFT"
+                : "BOTTOM"
+        )
+    );
+    fields.insert_or_assign(
+        "anchorAlign",
+        runtime::Value(
+            style.anchor_align == LayoutAnchorAlign::center ? "CENTER"
+                : style.anchor_align == LayoutAnchorAlign::end ? "END"
+                : "START"
+        )
+    );
+    fields.insert_or_assign("anchorGap", runtime::Value(style.anchor_gap));
+    fields.insert_or_assign("anchorFlip", runtime::Value(style.anchor_flip));
+    fields.insert_or_assign("anchorShift", runtime::Value(style.anchor_shift));
+    fields.insert_or_assign("matchAnchorWidth", runtime::Value(style.match_anchor_width));
     if (!style.virtual_list.has_value()) return;
     const VirtualListSpec& list = *style.virtual_list;
     fields.insert_or_assign("virtualAxis", runtime::Value(list.axis == LayoutAxis::horizontal ? "HORIZONTAL" : "VERTICAL"));
@@ -910,6 +936,8 @@ void validate_theme_layout(const ThemeWidgetLayoutStyle& style) {
     if (style.kind > LayoutKind::portal || style.align_items > LayoutAlign::stretch ||
         style.justify_content > LayoutJustify::space_evenly ||
         style.align_content > LayoutJustify::space_evenly ||
+        style.anchor_side > LayoutAnchorSide::left ||
+        style.anchor_align > LayoutAnchorAlign::end ||
         (style.align_self.has_value() && *style.align_self > LayoutAlign::stretch) ||
         (style.justify_self.has_value() && *style.justify_self > LayoutAlign::stretch)) {
         throw std::invalid_argument("theme layout enum is invalid");
@@ -949,6 +977,14 @@ void validate_theme_layout(const ThemeWidgetLayoutStyle& style) {
     if (blank(style.portal_target) || !core::valid_utf8(style.portal_target)) {
         throw std::invalid_argument("theme portal target must be non-blank valid UTF-8");
     }
+    if (!style.anchor_target.empty() && !core::valid_utf8(style.anchor_target)) {
+        throw std::invalid_argument("theme anchor target must be valid UTF-8");
+    }
+    if (style.anchor_point.has_value()) {
+        validate_finite(style.anchor_point->x, "theme anchor point x");
+        validate_finite(style.anchor_point->y, "theme anchor point y");
+    }
+    validate_non_negative(style.anchor_gap, "theme anchor gap");
     if (!style.virtual_list.has_value()) return;
     const VirtualListSpec& list = *style.virtual_list;
     if (list.items == nullptr) throw std::invalid_argument("theme virtual list requires items");

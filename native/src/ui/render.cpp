@@ -49,6 +49,43 @@ namespace {
     return result;
 }
 
+[[nodiscard]] std::optional<EffectState> effect_state(const runtime::Value* value) {
+    if (value == nullptr) return std::nullopt;
+    if (value->string() != nullptr && !value->string()->empty()) {
+        return EffectState{*value->string()};
+    }
+    if (value->object() == nullptr) return std::nullopt;
+    const runtime::Value* id_value = value->field("id");
+    if (id_value == nullptr) id_value = value->field("name");
+    if (id_value == nullptr || id_value->string() == nullptr ||
+        id_value->string()->empty()) {
+        return std::nullopt;
+    }
+    EffectState result;
+    result.id = *id_value->string();
+    if (const runtime::Value* opacity = value->field("opacity");
+        opacity != nullptr && opacity->number() != nullptr) {
+        result.opacity = std::clamp(*opacity->number(), 0.0, 1.0);
+    }
+    const runtime::Value* parameters = value->field("parameters");
+    if (parameters == nullptr) parameters = value->field("arguments");
+    if (parameters != nullptr && parameters->object() != nullptr) {
+        result.parameters.reserve(parameters->object()->fields.size());
+        for (const auto& [name, parameter] : parameters->object()->fields) {
+            result.parameters.push_back(MaterialParameter{name, parameter});
+        }
+    }
+    return result;
+}
+
+[[nodiscard]] const runtime::Value* effect_parameter(
+    const EffectState& effect,
+    const std::string_view name
+) noexcept {
+    const auto found = std::ranges::find(effect.parameters, name, &MaterialParameter::name);
+    return found != effect.parameters.end() ? &found->value : nullptr;
+}
+
 void append_fragment(
     RenderCommandBuffer& output,
     const std::vector<RenderCommand>& fragment,
@@ -140,6 +177,11 @@ RenderCommand render_command_with_opacity(RenderCommand command, const double op
                 value.opacity *= opacity;
             } else if constexpr (std::is_same_v<Command, MaterialPushRenderCommand>) {
                 value.material.opacity *= opacity;
+            } else if constexpr (
+                std::is_same_v<Command, BackdropEffectRenderCommand> ||
+                std::is_same_v<Command, ContentEffectPushRenderCommand>
+            ) {
+                value.effect.opacity *= opacity;
             }
         },
         command
@@ -410,7 +452,7 @@ RenderOperationCounters RenderEngine::render(
                      index < retained.ordered_children.size();
                      ++index) {
                     const LayoutRecord* child_record = layout.find(
-                        retained.ordered_children[index]->identity()
+                        retained.ordered_children[index]
                     );
                     retained.ordered_child_layout_generations[index] =
                         child_record != nullptr ? child_record->render_generation : 0U;
@@ -430,9 +472,11 @@ RenderOperationCounters RenderEngine::render(
                  child_layout_matches && index < retained.ordered_children.size();
                  ++index) {
                 const LayoutRecord* child_record = layout.find(
-                    retained.ordered_children[index]->identity()
+                    retained.ordered_children[index]
                 );
-                child_layout_matches = child_record != nullptr &&
+                child_layout_matches =
+                    tree.find_identity(retained.ordered_children[index]) != nullptr &&
+                    child_record != nullptr &&
                     child_record->render_generation ==
                         retained.ordered_child_layout_generations[index];
             }
@@ -452,7 +496,13 @@ RenderOperationCounters RenderEngine::render(
                 found->second.visited = true;
                 ++counters.fragments_reused;
                 append_fragment(output, retained.prefix, counters);
-                for (const RetainedNode* child : retained.ordered_children) {
+                for (const std::uint64_t child_identity : retained.ordered_children) {
+                    const RetainedNode* child = tree.find_identity(child_identity);
+                    if (child == nullptr) {
+                        throw std::logic_error(
+                            "retained render composition referenced a detached child"
+                        );
+                    }
                     self(
                         self,
                         *child,
@@ -474,16 +524,17 @@ RenderOperationCounters RenderEngine::render(
             ? input.status_feedback().generation()
             : 0U;
         const auto style_value = [&node](const std::string_view name) -> const runtime::Value* {
+            // Explicit properties, including null, override the merged style object.
             const auto direct_property = node.description().properties.find(name);
-            const runtime::Value* direct = direct_property != node.description().properties.end()
-                                               ? direct_property->second.value()
-                                               : nullptr;
+            if (direct_property != node.description().properties.end()) {
+                return direct_property->second.value();
+            }
             const auto style_property = node.description().properties.find("$layout");
             const runtime::Value* style = style_property != node.description().properties.end()
                                               ? style_property->second.value()
                                               : nullptr;
             const runtime::Value* nested = style != nullptr ? style->field(name) : nullptr;
-            return nested != nullptr ? nested : direct;
+            return nested;
         };
         const MotionComputedValues* computed = motion.computed_values(node.identity());
         const MotionTransform transform = local_presentation_transform(node, motion);
@@ -505,6 +556,21 @@ RenderOperationCounters RenderEngine::render(
         const std::optional<MaterialState> local_material = authored_material.has_value()
             ? materials.sanitize_state(*authored_material)
             : std::nullopt;
+        const std::optional<EffectState> authored_effect = effect_state(style_value("effect"));
+        const std::optional<EffectState> local_effect = authored_effect.has_value()
+            ? materials.sanitize_effect_state(*authored_effect)
+            : std::nullopt;
+        const bool isolates_content = local_effect.has_value() &&
+            local_effect->input == EffectInput::content;
+        std::optional<EffectState> rendered_effect = local_effect;
+        if (rendered_effect.has_value()) {
+            rendered_effect->opacity *= descendant_opacity;
+        }
+        const double body_descendant_opacity =
+            isolates_content ? 1.0 : descendant_opacity;
+        const double presentation_inherited_opacity = isolates_content
+            ? (local_opacity > 0.0 ? 1.0 / local_opacity : 1.0)
+            : inherited_opacity;
         std::optional<Rect> scope_clip_rect = inherited_render_clip;
         if (!record->local_clip.has_value()) {
             scope_clip_rect = intersect_clip(scope_clip_rect, record->clip);
@@ -585,6 +651,51 @@ RenderOperationCounters RenderEngine::render(
             });
             ++counters.commands_emitted;
         }
+        if (rendered_effect.has_value()) {
+            const double radius = std::max(
+                0.0, visual_number(node, "radius").value_or(0.0)
+            );
+            if (rendered_effect->input == EffectInput::shape &&
+                rendered_effect->id == "shadow") {
+                const runtime::Value* color_value =
+                    effect_parameter(*rendered_effect, "color");
+                const runtime::Value* blur_value =
+                    effect_parameter(*rendered_effect, "radius");
+                const runtime::Value* spread_value =
+                    effect_parameter(*rendered_effect, "spread");
+                const RenderColor color = color_value != nullptr &&
+                        color_value->color() != nullptr
+                    ? widget_opacity(*color_value->color(), rendered_effect->opacity)
+                    : RenderColor{0U, 0U, 0U,
+                                  static_cast<std::uint8_t>(
+                                      std::lround(105.0 * rendered_effect->opacity)
+                                  )};
+                output.append(ShadowRenderCommand{
+                    record->bounds,
+                    CornerRadii::all(radius),
+                    color,
+                    blur_value != nullptr && blur_value->number() != nullptr
+                        ? std::max(0.0, *blur_value->number()) : 8.0,
+                    spread_value != nullptr && spread_value->number() != nullptr
+                        ? *spread_value->number() : 0.0,
+                });
+                ++counters.commands_emitted;
+            } else if (rendered_effect->input == EffectInput::backdrop) {
+                output.append(BackdropEffectRenderCommand{
+                    record->bounds,
+                    CornerRadii::all(radius),
+                    *rendered_effect,
+                });
+                ++counters.commands_emitted;
+            } else if (rendered_effect->input == EffectInput::content) {
+                output.append(ContentEffectPushRenderCommand{
+                    record->bounds,
+                    CornerRadii::all(radius),
+                    *rendered_effect,
+                });
+                ++counters.commands_emitted;
+            }
+        }
         if (local_material.has_value()) {
             output.append(MaterialPushRenderCommand{*local_material});
             ++counters.commands_emitted;
@@ -600,7 +711,12 @@ RenderOperationCounters RenderEngine::render(
             });
             ++counters.commands_emitted;
         }
-        append_fragment(output, found->second.commands, counters, descendant_opacity);
+        append_fragment(
+            output,
+            found->second.commands,
+            counters,
+            body_descendant_opacity
+        );
         if (has_fragment_translation) {
             output.append(TransformPopRenderCommand{});
             ++counters.commands_emitted;
@@ -669,12 +785,15 @@ RenderOperationCounters RenderEngine::render(
                 render_portals,
                 child_render_clip,
                 effective_transform,
-                descendant_opacity
+                body_descendant_opacity
             );
         }
         std::vector<std::uint64_t> ordered_child_layout_generations;
+        std::vector<std::uint64_t> ordered_child_identities;
+        ordered_child_identities.reserve(ordered_children.size());
         ordered_child_layout_generations.reserve(ordered_children.size());
         for (const RetainedNode* child : ordered_children) {
+            ordered_child_identities.push_back(child->identity());
             const LayoutRecord* child_record = layout.find(child->identity());
             ordered_child_layout_generations.push_back(
                 child_record != nullptr ? child_record->render_generation : 0U
@@ -709,7 +828,8 @@ RenderOperationCounters RenderEngine::render(
             retained_presentation->focus_visible == focus_visible &&
             retained_presentation->hovered == hovered &&
             retained_presentation->active == active &&
-            retained_presentation->inherited_opacity == inherited_opacity;
+            retained_presentation->inherited_opacity ==
+                presentation_inherited_opacity;
         const bool retained_presentation_layout_matches =
             retained_presentation_state_matches &&
             Impl::matches(retained_presentation->layout, node, *record, layout);
@@ -725,7 +845,7 @@ RenderOperationCounters RenderEngine::render(
             std::vector<RenderCommand> presentation;
             append_widget_foreground(
                 widgets, node, *record, layout, input, commands, text, svg_images, &motion,
-                inherited_opacity, presentation
+                presentation_inherited_opacity, presentation
             );
             bool local_overlay_rendered = false;
             if (lifecycle != nullptr && lifecycle->present.overlay != nullptr &&
@@ -733,7 +853,7 @@ RenderOperationCounters RenderEngine::render(
                 const std::size_t before = presentation.size();
                 std::vector<RenderCommand> overlay = build_widget_overlay(
                     widgets, node, *record, layout, input, commands, text, svg_images, &motion,
-                    inherited_opacity
+                    presentation_inherited_opacity
                 );
                 presentation.insert(
                     presentation.end(),
@@ -753,7 +873,7 @@ RenderOperationCounters RenderEngine::render(
                 text,
                 svg_images,
                 &motion,
-                inherited_opacity,
+                presentation_inherited_opacity,
                 false,
                 presentation
             );
@@ -770,7 +890,7 @@ RenderOperationCounters RenderEngine::render(
                     focus_visible,
                     hovered,
                     active,
-                    inherited_opacity,
+                    presentation_inherited_opacity,
                     Impl::snapshot(node, *record, layout),
                     std::move(presentation),
                     local_overlay_rendered,
@@ -796,6 +916,10 @@ RenderOperationCounters RenderEngine::render(
         }
         const bool local_overlay_rendered = presentation.local_overlay_rendered;
         if (local_overlay_rendered) ++counters.overlays_rendered;
+        if (isolates_content) {
+            output.append(ContentEffectPopRenderCommand{});
+            ++counters.commands_emitted;
+        }
         if (!transform.identity()) {
             output.append(TransformPopRenderCommand{});
             ++counters.commands_emitted;
@@ -830,11 +954,11 @@ RenderOperationCounters RenderEngine::render(
             command_slice(
                 output, composition_suffix_begin, composition_suffix_end
             ),
-            std::move(ordered_children),
+            std::move(ordered_child_identities),
             std::move(ordered_child_layout_generations),
             child_render_clip,
             effective_transform,
-            descendant_opacity,
+            body_descendant_opacity,
             local_overlay_rendered,
         };
         Impl::CachedFragment::CompositionPlan& composition =
@@ -857,8 +981,8 @@ RenderOperationCounters RenderEngine::render(
             !record->visible_range.has_value();
         composition.subtree_contains_clip =
             scope_clip_changed || descendant_local_clip.has_value();
-        for (const RetainedNode* child : composition.ordered_children) {
-            const auto child_fragment = implementation_->fragments.find(child->identity());
+        for (const std::uint64_t child_identity : composition.ordered_children) {
+            const auto child_fragment = implementation_->fragments.find(child_identity);
             if (child_fragment == implementation_->fragments.end() ||
                 !child_fragment->second.composition.has_value()) {
                 composition.subtree_translation_safe = false;

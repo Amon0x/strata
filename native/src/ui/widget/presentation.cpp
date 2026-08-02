@@ -410,11 +410,16 @@ const runtime::Value* WidgetRenderScope::property(const std::string_view name) c
 }
 
 const runtime::Value* WidgetRenderScope::style(const std::string_view name) const noexcept {
+    // Generated presentation wrappers use explicit null to suppress default theme chrome.
+    const auto direct = node_.description().properties.find(name);
+    if (direct != node_.description().properties.end()) {
+        return direct->second.data_value();
+    }
     const runtime::Value* layout = property("$layout");
     if (layout != nullptr && layout->object() != nullptr) {
         if (const runtime::Value* field = layout->field(name); field != nullptr) return field;
     }
-    return property(name);
+    return nullptr;
 }
 
 const runtime::Value* WidgetRenderScope::retained(const std::string_view name) const noexcept {

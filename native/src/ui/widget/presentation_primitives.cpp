@@ -138,6 +138,12 @@ void rich_text_content(WidgetRenderScope& scope) {
 
 void button_content(WidgetRenderScope& scope) {
     const bool context_menu = scope.string("$authoringType") == "ContextMenu";
+    const bool authored_menu = scope.node().description().type == "Menu" &&
+        scope.property("triggerTemplate") != nullptr;
+    if (authored_menu) {
+        scope.focus(scope.layout().bounds);
+        return;
+    }
     if (!context_menu) {
         if (scope.visual().background.has_value()) {
             scope.rounded_rect(
@@ -202,6 +208,10 @@ void draw_content(WidgetRenderScope& scope) {
 }
 
 void menu_overlay(WidgetRenderScope& scope) {
+    if (scope.property("popupTemplate") != nullptr &&
+        scope.property("itemTemplate") != nullptr) {
+        return;
+    }
     if (!scope.effective_boolean("open", "$expanded", "defaultOpen", false)) return;
     const MenuProjection projection = project_menu(
         scope.node(), scope.layout_result(), &scope.command_index()

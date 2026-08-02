@@ -22,6 +22,7 @@
 #include <wrl/client.h>
 
 #include "blur_pass.hpp"
+#include "effect_pass.hpp"
 #include <strata/render_packet.hpp>
 #include "shaders.hpp"
 #include "texture_store.hpp"
@@ -31,6 +32,8 @@ namespace {
 
 using host::BlurBatch;
 using host::DrawBatch;
+using host::EffectBatch;
+using host::EffectBatchKind;
 using host::RenderPacket;
 using host::ResourceOperation;
 using host::SubmissionBatch;
@@ -96,6 +99,7 @@ struct RenderContext::Impl final {
         create_pipeline();
         textures = std::make_unique<TextureStore>(device, context);
         blur = std::make_unique<BlurPass>(device, context);
+        effects = std::make_unique<EffectPassRenderer>(device, context);
     }
 
     void create_pipeline() {
@@ -167,7 +171,21 @@ struct RenderContext::Impl final {
         height = next_height;
         logical_width = next_logical_width;
         logical_height = next_logical_height;
-        blur->resize(width, height);
+        D3D11_TEXTURE2D_DESC target_description{};
+        next_texture->GetDesc(&target_description);
+        if (target_description.Width != width || target_description.Height != height) {
+            throw std::invalid_argument(
+                "D3D11 render target dimensions do not match its texture"
+            );
+        }
+        D3D11_RENDER_TARGET_VIEW_DESC target_view_description{};
+        next_target->GetDesc(&target_view_description);
+        const DXGI_FORMAT target_format =
+            target_view_description.Format != DXGI_FORMAT_UNKNOWN
+            ? target_view_description.Format
+            : target_description.Format;
+        blur->resize(width, height, target_format);
+        effects->resize(width, height, target_format);
     }
 
     void release_target() {
@@ -179,6 +197,8 @@ struct RenderContext::Impl final {
         height = 0U;
         logical_width = 0.0;
         logical_height = 0.0;
+        blur->resize(0U, 0U, DXGI_FORMAT_UNKNOWN);
+        effects->resize(0U, 0U, DXGI_FORMAT_UNKNOWN);
     }
 
     void ensure_buffer(ComPtr<ID3D11Buffer>& buffer, std::uint32_t& capacity,
@@ -256,6 +276,28 @@ struct RenderContext::Impl final {
         material_shaders.insert_or_assign(std::string(id), std::move(shader));
     }
 
+    void declare_effect_pass(
+        const std::string_view effect_id,
+        const std::uint32_t index,
+        const std::uint32_t kind,
+        const double radius,
+        const std::uint32_t downsample,
+        const std::uint32_t radius_parameter,
+        const std::uint32_t downsample_parameter,
+        const std::string_view hlsl_source
+    ) {
+        effects->declare_pass(
+            effect_id,
+            index,
+            kind,
+            radius,
+            downsample,
+            radius_parameter,
+            downsample_parameter,
+            hlsl_source
+        );
+    }
+
     void draw(const DrawBatch& batch) {
         if (batch.index_count == 0U)
             return;
@@ -280,8 +322,13 @@ struct RenderContext::Impl final {
                              static_cast<INT>(batch.base_vertex));
     }
 
-    void bind_draw_pipeline(const GeometryBuffers& buffers) const {
-        ID3D11RenderTargetView* const target_view = target.Get();
+    void bind_draw_pipeline(
+        const GeometryBuffers& buffers,
+        ID3D11RenderTargetView* const target_view
+    ) const {
+        if (target_view == nullptr) {
+            throw std::invalid_argument("D3D11 draw pipeline requires a render target");
+        }
         context->OMSetRenderTargets(1U, &target_view, nullptr);
         const D3D11_VIEWPORT viewport{
             0.0F, 0.0F, static_cast<float>(width), static_cast<float>(height), 0.0F, 1.0F,
@@ -323,6 +370,7 @@ struct RenderContext::Impl final {
         std::memcpy(mapped.pData, frame_values.data(), sizeof(frame_values));
         context->Unmap(viewport_buffer.Get(), 0U);
         context->ClearRenderTargetView(target.Get(), clear_color.data());
+        current_frame_seconds = frame_seconds;
     }
 
     [[nodiscard]] RenderLayerTelemetry render_layer(const std::string_view id,
@@ -342,13 +390,42 @@ struct RenderContext::Impl final {
             upload(retained.indices.Get(), packet.indices.data(), index_bytes);
             retained.epoch = packet.geometry_epoch;
         }
-        bind_draw_pipeline(retained);
+        bind_draw_pipeline(retained, target.Get());
+        struct ContentLayer final {
+            EffectBatch effect;
+            ID3D11Texture2D* parent_texture = nullptr;
+            ID3D11RenderTargetView* parent_target = nullptr;
+            std::size_t depth = 0U;
+        };
+        std::vector<ContentLayer> content_layers;
+        ID3D11Texture2D* active_texture = target_texture.Get();
+        ID3D11RenderTargetView* active_target = target.Get();
+        const auto add_effect_telemetry =
+            [&telemetry](const EffectPassTelemetry& measured) {
+                telemetry.effect_passes += measured.passes;
+                telemetry.effect_target_width =
+                    std::max(telemetry.effect_target_width, measured.target_width);
+                telemetry.effect_target_height =
+                    std::max(telemetry.effect_target_height, measured.target_height);
+                telemetry.effect_nanos += measured.nanos;
+                // The public ABI's blur telemetry is the aggregate filtered-region budget.
+                // Authored effect programs participate in that same budget so existing hosts
+                // observe their GPU cost without a parallel instrumentation channel.
+                telemetry.blur_passes += measured.passes;
+                telemetry.blur_target_width =
+                    std::max(telemetry.blur_target_width, measured.target_width);
+                telemetry.blur_target_height =
+                    std::max(telemetry.blur_target_height, measured.target_height);
+                telemetry.blur_nanos += measured.nanos;
+            };
         for (const SubmissionBatch& batch : packet.batches) {
-            if (const auto* value = std::get_if<DrawBatch>(&batch); value != nullptr) {
-                draw(*value);
-            } else {
+            if (const auto* draw_batch = std::get_if<DrawBatch>(&batch);
+                draw_batch != nullptr) {
+                draw(*draw_batch);
+            } else if (const auto* blur_batch = std::get_if<BlurBatch>(&batch);
+                       blur_batch != nullptr) {
                 const BlurPassTelemetry measured =
-                    blur->execute(std::get<BlurBatch>(batch), target_texture.Get(), target.Get(),
+                    blur->execute(*blur_batch, active_texture, active_target,
                                   width, height, logical_width, logical_height);
                 telemetry.blur_passes += measured.passes;
                 telemetry.blur_target_width =
@@ -356,8 +433,53 @@ struct RenderContext::Impl final {
                 telemetry.blur_target_height =
                     std::max(telemetry.blur_target_height, measured.target_height);
                 telemetry.blur_nanos += measured.nanos;
-                bind_draw_pipeline(retained);
+                bind_draw_pipeline(retained, active_target);
+            } else if (const auto* backdrop_effect = std::get_if<EffectBatch>(&batch);
+                       backdrop_effect != nullptr &&
+                       backdrop_effect->kind == EffectBatchKind::backdrop) {
+                add_effect_telemetry(effects->apply_backdrop(
+                    content_layers.size(),
+                    *backdrop_effect,
+                    active_texture,
+                    active_target,
+                    logical_width,
+                    logical_height,
+                    current_frame_seconds
+                ));
+                bind_draw_pipeline(retained, active_target);
+            } else if (const auto* content_effect = std::get_if<EffectBatch>(&batch);
+                       content_effect != nullptr &&
+                       content_effect->kind == EffectBatchKind::content_begin) {
+                const std::size_t depth = content_layers.size();
+                content_layers.push_back(ContentLayer{
+                    *content_effect, active_texture, active_target, depth,
+                });
+                active_target = effects->begin_content(depth);
+                active_texture = effects->content_texture(depth);
+                bind_draw_pipeline(retained, active_target);
+            } else {
+                if (!std::holds_alternative<host::ContentEffectEndBatch>(batch) ||
+                    content_layers.empty()) {
+                    throw std::logic_error("D3D11 content effect stack is invalid");
+                }
+                ContentLayer layer = std::move(content_layers.back());
+                content_layers.pop_back();
+                add_effect_telemetry(effects->finish_content(
+                    layer.depth,
+                    layer.effect,
+                    layer.parent_texture,
+                    layer.parent_target,
+                    logical_width,
+                    logical_height,
+                    current_frame_seconds
+                ));
+                active_texture = layer.parent_texture;
+                active_target = layer.parent_target;
+                bind_draw_pipeline(retained, active_target);
             }
+        }
+        if (!content_layers.empty()) {
+            throw std::logic_error("D3D11 content effect stack is unbalanced");
         }
         return telemetry;
     }
@@ -375,11 +497,13 @@ struct RenderContext::Impl final {
     std::uint32_t height = 0U;
     double logical_width = 0.0;
     double logical_height = 0.0;
+    double current_frame_seconds = 0.0;
     std::map<std::string, GeometryBuffers, std::less<>> geometry;
     std::map<std::string, ComPtr<ID3D11BlendState>, std::less<>> blends;
     std::map<std::string, ComPtr<ID3D11PixelShader>, std::less<>> material_shaders;
     std::unique_ptr<TextureStore> textures;
     std::unique_ptr<BlurPass> blur;
+    std::unique_ptr<EffectPassRenderer> effects;
 };
 
 RenderContext::RenderContext(ID3D11Device* const device, ID3D11DeviceContext* const context)
@@ -402,6 +526,28 @@ void RenderContext::release_target() {
 void RenderContext::declare_material(const std::string_view id,
                                      const std::string_view hlsl_source) {
     impl_->declare_material(id, hlsl_source);
+}
+
+void RenderContext::declare_effect_pass(
+    const std::string_view effect_id,
+    const std::uint32_t index,
+    const std::uint32_t kind,
+    const double radius,
+    const std::uint32_t downsample,
+    const std::uint32_t radius_parameter,
+    const std::uint32_t downsample_parameter,
+    const std::string_view hlsl_source
+) {
+    impl_->declare_effect_pass(
+        effect_id,
+        index,
+        kind,
+        radius,
+        downsample,
+        radius_parameter,
+        downsample_parameter,
+        hlsl_source
+    );
 }
 
 void RenderContext::consume_resources(const host::RenderPacket& packet) {

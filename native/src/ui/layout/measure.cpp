@@ -105,14 +105,20 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
     content_constraints.max_width = available_content_width;
     content_constraints.max_height = available_content_height;
     std::vector<const RetainedNode*> retained_children;
+    std::vector<const RetainedNode*> portal_children;
     retained_children.reserve(node.children().size());
+    portal_children.reserve(node.children().size());
     for (const auto& child : node.children()) {
         if (resolved_style(*child).participates &&
             child->lifecycle() != RetainedLifecycle::exiting) {
-            retained_children.push_back(child.get());
+            if (resolved_style(*child).kind == LayoutKind::portal) {
+                portal_children.push_back(child.get());
+            } else {
+                retained_children.push_back(child.get());
+            }
         }
     }
-    measured.children.reserve(retained_children.size());
+    measured.children.reserve(retained_children.size() + portal_children.size());
 
     if (measured.style.kind == LayoutKind::row || measured.style.kind == LayoutKind::column) {
         const bool horizontal = measured.style.kind == LayoutKind::row;
@@ -333,6 +339,20 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
             measured.children.push_back(measure(*child, child_constraints, environment, operations));
         }
     }
+    measured.flow_child_count = measured.children.size();
+    for (const RetainedNode* portal : portal_children) {
+        measured.children.push_back(measure(
+            *portal,
+            Constraints{
+                0.0,
+                environment.viewport.width,
+                0.0,
+                environment.viewport.height,
+            },
+            environment,
+            operations
+        ));
+    }
     measured.subtree_pins_horizontal = measured.style.pin_horizontal ||
         std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
             return child->subtree_pins_horizontal;
@@ -340,6 +360,10 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
     measured.subtree_pins_vertical = measured.style.pin_vertical ||
         std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
             return child->subtree_pins_vertical;
+        });
+    measured.subtree_portals = measured.style.kind == LayoutKind::portal ||
+        std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
+            return child->subtree_portals;
         });
 
     const auto intrinsic_children = [
@@ -353,8 +377,9 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
                 return measured.linear->intrinsic_size;
             }
             std::vector<Size> child_sizes;
-            child_sizes.reserve(measured.children.size());
-            for (const MeasuredNodePtr& child : measured.children) {
+            child_sizes.reserve(measured.flow_child_count);
+            for (std::size_t index = 0U; index < measured.flow_child_count; ++index) {
+                const MeasuredNodePtr& child = measured.children[index];
                 if (attached_only &&
                     child->node->lifecycle() == RetainedLifecycle::exiting) {
                     continue;
@@ -375,7 +400,8 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
         }
         Size result;
         std::size_t count = 0U;
-        for (const MeasuredNodePtr& child : measured.children) {
+        for (std::size_t index = 0U; index < measured.flow_child_count; ++index) {
+            const MeasuredNodePtr& child = measured.children[index];
             if (attached_only && child->node->lifecycle() == RetainedLifecycle::exiting) continue;
             ++count;
             if (measured.style.kind == LayoutKind::scroll) {

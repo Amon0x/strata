@@ -605,6 +605,7 @@ void toast_region_overlay(WidgetRenderScope& scope) {
 }
 
 void tooltip_overlay(WidgetRenderScope& scope) {
+    if (scope.property("contentTemplate") != nullptr) return;
     if (scope.text_engine() == nullptr) return;
     const std::optional<std::string_view> value = scope.node_text();
     if (!value.has_value() || value->empty()) return;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -115,6 +116,22 @@ struct MaterialState final {
     [[nodiscard]] friend bool operator==(const MaterialState&, const MaterialState&) = default;
 };
 
+enum class EffectInput : std::uint32_t {
+    backdrop = 0U,
+    content = 1U,
+    shape = 2U,
+};
+
+struct EffectState final {
+    std::string id;
+    EffectInput input = EffectInput::backdrop;
+    double opacity = 1.0;
+    std::vector<MaterialParameter> parameters{};
+    std::array<double, 16U> packed_parameters{};
+    std::uint32_t packed_parameter_count = 0U;
+    [[nodiscard]] friend bool operator==(const EffectState&, const EffectState&) = default;
+};
+
 struct SolidRectRenderCommand final {
     Rect bounds;
     Paint fill;
@@ -207,6 +224,32 @@ struct ShadowRenderCommand final {
     double spread = 0.0;
     [[nodiscard]] friend bool operator==(const ShadowRenderCommand&, const ShadowRenderCommand&) = default;
 };
+/** Filters the framebuffer already rendered behind this node. */
+struct BackdropEffectRenderCommand final {
+    Rect bounds;
+    CornerRadii radii;
+    EffectState effect;
+    [[nodiscard]] friend bool operator==(
+        const BackdropEffectRenderCommand&,
+        const BackdropEffectRenderCommand&
+    ) = default;
+};
+/** Begins an isolated subtree whose pixels are filtered when the matching end is reached. */
+struct ContentEffectPushRenderCommand final {
+    Rect bounds;
+    CornerRadii radii;
+    EffectState effect;
+    [[nodiscard]] friend bool operator==(
+        const ContentEffectPushRenderCommand&,
+        const ContentEffectPushRenderCommand&
+    ) = default;
+};
+struct ContentEffectPopRenderCommand final {
+    [[nodiscard]] friend bool operator==(
+        ContentEffectPopRenderCommand,
+        ContentEffectPopRenderCommand
+    ) = default;
+};
 struct ClipPushRenderCommand final {
     Rect rect;
     [[nodiscard]] friend bool operator==(const ClipPushRenderCommand&, const ClipPushRenderCommand&) = default;
@@ -245,6 +288,9 @@ using RenderCommand = std::variant<
     PathRenderCommand,
     BlurRegionRenderCommand,
     ShadowRenderCommand,
+    BackdropEffectRenderCommand,
+    ContentEffectPushRenderCommand,
+    ContentEffectPopRenderCommand,
     ClipPushRenderCommand,
     ClipPopRenderCommand,
     TransformPushRenderCommand,

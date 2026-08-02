@@ -47,8 +47,8 @@ struct HostRenderResourceInvalidationPlan final {
 };
 
 /**
- * Packet v4: v3 geometry plus a retained geometry epoch for host-side decode/upload reuse. The logical v1
- * encoder remains available only to headless command consumers and inspection tooling.
+ * Packet v5: retained geometry epochs plus ordered application effect programs. The
+ * logical v1 encoder remains available only to headless command consumers and inspection tooling.
  */
 class HostRenderPacketCache final {
 public:
@@ -58,7 +58,7 @@ public:
     HostRenderPacketCache(HostRenderPacketCache&&) = delete;
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
-    /** A null TextEngine selects the v4 non-text path; text runs are then rejected. */
+    /** A null TextEngine selects the packet-v5 non-text path; text runs are then rejected. */
     [[nodiscard]] const std::vector<std::uint8_t>& encode(
         const RenderCommandBuffer& commands,
         std::uint64_t frame_index,

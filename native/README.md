@@ -6,11 +6,11 @@ rather than exposing implementation classes.
 
 ## ABI and ownership
 
-- ABI v5 uses opaque runtime, snapshot, registration, and Surface handles with paired release
+- ABI v6 uses opaque runtime, snapshot, registration, and Surface handles with paired release
   functions and exposes modality-aware focus presentation, durable-state, and typed asynchronous
-  host-data contracts. Built-in language declarations are native and no longer cross the
-  application configuration boundary as JSON. Releasing `NULL` is harmless; v5 is the minimum
-  negotiable host contract.
+  host-data contracts. Built-in language declarations are native, and typed visual effect programs
+  are enumerable by render backends. Releasing `NULL` is harmless; v6 is the minimum negotiable host
+  contract.
 - All public structures start with `struct_size`; reserved fields are zeroed. Required capabilities
   are negotiated before construction and fail explicitly when unsupported.
 - Public text is length-delimited UTF-8. Callback strings/bytes are borrowed only for the callback.
@@ -40,7 +40,7 @@ rather than exposing implementation classes.
 
 ## Surface and packet lifetime
 
-`strata_surface_frame` updates a Surface and prepares packet v4. A bytes sink borrows the packet only
+`strata_surface_frame` updates a Surface and prepares packet v5. A bytes sink borrows the packet only
 for its callback. Resource create/upload/release operations are one-shot; settled geometry is
 cached and the frame index is updated in place. Reading canonical frame JSON is optional and lazily
 materialized.
@@ -88,7 +88,7 @@ single-configuration tree. Both enable tools, samples, tests, strict
 warnings, and installed-package acceptance. ASan uses a separate build with
 `-DSTRATA_ENABLE_ASAN=ON`; MSVC does not claim UBSan support.
 
-`strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v4
+`strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v5
 boundary as other hosts, but supplies a deterministic clock, scripted input/services, and canonical
 frame capture. On Windows it can use offscreen D3D11/WARP through the desktop host's shared
 production texture, blur, and HLSL material pipeline. Linux builds only the CPU reference backend;
@@ -116,7 +116,7 @@ authoring support linked into independently loaded package libraries; the instal
 reconstruct package paths; `Strata_DESKTOP_RUNNER` exists only when the desktop runner was installed.
 
 The installed sample project configures against only the install prefix. Its portable C and C++
-programs configure an application, activate `.strata`, create/frame a Surface, decode packet v4,
+programs configure an application, activate `.strata`, create/frame a Surface, decode packet v5,
 exercise resource reload, inspect allocator telemetry, and release every handle. The public C++
 facade is split into focused owned-value headers (`diagnostic.hpp`, `input.hpp`, `adapters.hpp`,
 `profiler.hpp`, and `config.hpp`) aggregated by `strata.hpp`; custom hosts do not need to keep

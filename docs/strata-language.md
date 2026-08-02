@@ -109,6 +109,38 @@ Panel(style: style(CardStyle, padding: 8))
 The generated reference separates general style properties, layout properties/size forms, text
 properties, theme tokens, and enum values.
 
+### Anchored portals
+
+A portal is measured against the root viewport, excluded from its parent's row/column/grid flow,
+and rendered as a detached root. `anchorTarget` names a stable widget key (or `"parent"`/`"root"`).
+`anchorPoint: { x, y }` supplies an absolute logical point instead and is used by pointer-positioned
+context menus.
+Placement is backend-independent:
+
+```strata
+Panel(
+  layout: {
+    kind: "PORTAL",
+    portalTarget: "root",
+    detachFromParentClip: true,
+    anchorTarget: "account.trigger",
+    anchorSide: "BOTTOM",
+    anchorAlign: "END",
+    anchorGap: 6,
+    anchorFlip: true,
+    anchorShift: true,
+    matchAnchorWidth: true
+  }
+) {
+  AccountPopup()
+}
+```
+
+Sides are `TOP`, `BOTTOM`, `LEFT`, and `RIGHT`; alignment is `START`, `CENTER`, or `END`. Flip
+changes the main-axis side when the preferred side cannot fit and the opposite side has more room.
+Shift clamps the cross-axis result to the root viewport. Anchored portals participate normally in
+retained rendering, hit testing, focus, semantics, clipping, motion, and nested portal placement.
+
 ## Paints and gradients
 
 `background`, `fill`, `track` and `scrim` take a paint: a colour, or a gradient authored in the
@@ -219,6 +251,60 @@ The declaration is backend-neutral: a host compiles the source key it implements
 rest as approximations. The Win32 desktop and headless D3D11 hosts implement `hlsl`; a backend that
 lacks the declared source draws the solid approximation and reports
 `STRATA.RENDER2D.MATERIAL_APPROXIMATED` once per material.
+
+## Authored render effects
+
+Materials shade one fill. Effects filter a framebuffer input and may therefore implement glass,
+refraction, color grading, or subtree post-processing. Effects are typed ordered programs in the
+same application schema:
+
+```json
+"effects": {
+  "definitions": [{
+    "id": "demo:liquid-glass",
+    "input": "BACKDROP",
+    "parameters": [
+      { "name": "blurRadius", "effectType": "FLOAT", "type": { "kind": "number" },
+        "required": true, "nullable": false, "aliases": [], "default": null },
+      { "name": "tint", "effectType": "COLOR", "type": { "kind": "color" },
+        "required": true, "nullable": false, "aliases": [], "default": null }
+    ],
+    "passes": [
+      { "kind": "BLUR", "radiusParameter": "blurRadius", "downsample": 2 },
+      { "kind": "SHADER",
+        "shaders": { "hlsl": "assets/shaders/effects/liquid-glass.hlsl" } }
+    ]
+  }]
+}
+```
+
+`input` is `BACKDROP` (pixels already behind the widget) or `CONTENT` (an isolated rendering of the
+widget subtree). Passes execute in declaration order and are `BLUR` or `SHADER`. Blur accepts
+literal `radius`/`downsample` values or parameter references. Parameters occupy at most sixteen
+floats in declaration order; `FLOAT`, `INT`, `FLOAT2`, `FLOAT4`, and `COLOR` use one, one, two, four,
+and four slots respectively. Missing, unknown, duplicate, and wrongly typed arguments are compile
+errors.
+
+Apply the program through the ordinary widget/style effect field:
+
+```strata
+Panel(effect: effect("demo:liquid-glass", blurRadius: 18, tint: #7DB8FF35))
+```
+
+An HLSL pass defines `float4 effect(EffectInput input)`. The host prelude provides
+`sampleEffectSource`, `sampleEffectBackdrop`, `effectFloat`, `effectFloat2`, `effectFloat4`,
+`effectColor`, `effectTime`, `effectOpacity`, `effectDistance`, and `effectMask`. `EffectInput`
+carries framebuffer `uv`/`pixel`,
+logical pixels, and `localUv` within the affected widget. Samples are straight-alpha values; the
+host premultiplies pass output, applies the rounded widget mask and effect opacity once at final
+composition, and clips work to the intersection of the effect bounds and inherited scissor.
+
+The D3D11 desktop and headless hosts execute the full pass program. The reference software backend
+executes declared blur passes, ignores authored shader stages, and then applies the same rounded
+mask, opacity, and backdrop/content composition. This approximation is intentionally deterministic
+rather than a claim of shader fidelity. Packet v5 carries ordered backdrop/content-begin/content-end
+batches and a bounded sixteen-float parameter block; the public decoder rejects malformed or
+unbalanced content stacks and caps nested `CONTENT` isolation at four levels.
 
 ## Local retained and derived state
 

@@ -117,7 +117,7 @@ namespace {
                 ? *text(entry.field("shortcutHint"))
                 : std::string{};
         item.enabled = !separator && boolean(entry.field("enabled"), true) &&
-            (command_id == nullptr || command != nullptr) &&
+            (commands == nullptr || command_id == nullptr || command != nullptr) &&
             (command == nullptr || command->enabled);
         item.separator = separator;
         if (const runtime::Value* checked = entry.field("checked");
@@ -301,6 +301,16 @@ std::size_t first_enabled_menu_item(const std::vector<MenuItemModel>& items) {
 std::string menu_row_identity(const std::vector<std::size_t>& path) {
     std::string result = "$menu";
     for (const std::size_t index : path) result += "/" + std::to_string(index);
+    return result;
+}
+
+std::string menu_row_key(
+    const std::string_view menu_key,
+    const std::vector<std::size_t>& path
+) {
+    std::string result(menu_key);
+    result += ".item";
+    for (const std::size_t index : path) result += "." + std::to_string(index);
     return result;
 }
 

@@ -8,3 +8,7 @@ overlay MainShowcase {
 overlay PushedShowcase {
   root PushedScreen()
 }
+
+overlay GlassEffectShowcase {
+  root GlassEffectFixture()
+}

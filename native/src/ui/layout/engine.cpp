@@ -14,6 +14,79 @@
 
 namespace strata::ui {
 using namespace layout_detail;
+namespace {
+
+[[nodiscard]] const RetainedNode* anchored_node(
+    const RetainedTree& tree,
+    const RetainedNode& portal,
+    const std::string_view target
+) noexcept {
+    if (target == "parent") return portal.parent();
+    if (target == "root") return tree.root();
+    return target.empty() ? nullptr : tree.find_key(target);
+}
+
+[[nodiscard]] Rect anchor_placement(
+    const Rect anchor,
+    const Rect viewport,
+    const Size size,
+    const LayoutStyle& style
+) noexcept {
+    const auto aligned = [alignment = style.anchor_align](
+                             const double start,
+                             const double extent,
+                             const double popup_extent
+                         ) {
+        if (alignment == LayoutAnchorAlign::center) {
+            return start + (extent - popup_extent) * 0.5;
+        }
+        if (alignment == LayoutAnchorAlign::end) {
+            return start + extent - popup_extent;
+        }
+        return start;
+    };
+    LayoutAnchorSide side = style.anchor_side;
+    if (style.anchor_flip) {
+        if (side == LayoutAnchorSide::bottom) {
+            const double following = viewport.bottom() - anchor.bottom() - style.anchor_gap;
+            const double preceding = anchor.y - viewport.y - style.anchor_gap;
+            if (size.height > following && preceding > following) side = LayoutAnchorSide::top;
+        } else if (side == LayoutAnchorSide::top) {
+            const double preceding = anchor.y - viewport.y - style.anchor_gap;
+            const double following = viewport.bottom() - anchor.bottom() - style.anchor_gap;
+            if (size.height > preceding && following > preceding) side = LayoutAnchorSide::bottom;
+        } else if (side == LayoutAnchorSide::right) {
+            const double following = viewport.right() - anchor.right() - style.anchor_gap;
+            const double preceding = anchor.x - viewport.x - style.anchor_gap;
+            if (size.width > following && preceding > following) side = LayoutAnchorSide::left;
+        } else {
+            const double preceding = anchor.x - viewport.x - style.anchor_gap;
+            const double following = viewport.right() - anchor.right() - style.anchor_gap;
+            if (size.width > preceding && following > preceding) side = LayoutAnchorSide::right;
+        }
+    }
+
+    double x = anchor.x;
+    double y = anchor.y;
+    if (side == LayoutAnchorSide::bottom || side == LayoutAnchorSide::top) {
+        x = aligned(anchor.x, anchor.width, size.width);
+        y = side == LayoutAnchorSide::bottom
+            ? anchor.bottom() + style.anchor_gap
+            : anchor.y - style.anchor_gap - size.height;
+    } else {
+        x = side == LayoutAnchorSide::right
+            ? anchor.right() + style.anchor_gap
+            : anchor.x - style.anchor_gap - size.width;
+        y = aligned(anchor.y, anchor.height, size.height);
+    }
+    if (style.anchor_shift) {
+        x = std::clamp(x, viewport.x, std::max(viewport.x, viewport.right() - size.width));
+        y = std::clamp(y, viewport.y, std::max(viewport.y, viewport.bottom() - size.height));
+    }
+    return Rect{x, y, size.width, size.height};
+}
+
+} // namespace
 
 LayoutEngine::LayoutEngine(IntrinsicMeasure intrinsic_measure)
     : intrinsic_measure_(intrinsic_measure ? std::move(intrinsic_measure) : IntrinsicMeasure(default_intrinsic)) {}
@@ -95,7 +168,84 @@ const LayoutResult& LayoutEngine::layout(
         environment,
         next.operations
     );
+    pending_portals_.clear();
     arrange(measured, root_bounds, std::nullopt, {}, environment, next);
+    for (std::size_t index = 0U; index < pending_portals_.size(); ++index) {
+        PendingPortal pending = pending_portals_[index];
+        const LayoutStyle& style = pending.measured->style;
+        const RetainedNode* anchor_node = anchored_node(
+            tree,
+            *pending.measured->node,
+            style.anchor_target
+        );
+        const LayoutRecord* anchor_record = anchor_node != nullptr
+            ? next.find(anchor_node->identity())
+            : nullptr;
+        const std::optional<Rect> point_anchor = style.anchor_point.has_value()
+            ? std::optional<Rect>(Rect{
+                  style.anchor_point->x,
+                  style.anchor_point->y,
+                  0.0,
+                  0.0,
+              })
+            : std::nullopt;
+        const RetainedNode* parent = pending.measured->node->parent();
+        const LayoutRecord* parent_record = parent != nullptr
+            ? next.find(parent->identity())
+            : nullptr;
+        const LayoutRecord* root_record = next.find(next.root_identity);
+        const Rect viewport = root_record != nullptr ? root_record->bounds : root_bounds;
+        if (pending.measured->measured_size.width > viewport.width ||
+            pending.measured->measured_size.height > viewport.height) {
+            pending.measured = measure(
+                *pending.measured->node,
+                Constraints{0.0, viewport.width, 0.0, viewport.height},
+                environment,
+                next.operations
+            );
+        }
+        Rect portal_bounds{
+            parent_record != nullptr ? parent_record->content_bounds.x : viewport.x,
+            parent_record != nullptr ? parent_record->content_bounds.y : viewport.y,
+            pending.measured->measured_size.width,
+            pending.measured->measured_size.height,
+        };
+        if (anchor_record != nullptr || point_anchor.has_value()) {
+            if (style.match_anchor_width &&
+                anchor_record != nullptr &&
+                anchor_record->bounds.width != pending.measured->measured_size.width) {
+                pending.measured = measure(
+                    *pending.measured->node,
+                    Constraints{
+                        anchor_record->bounds.width,
+                        anchor_record->bounds.width,
+                        0.0,
+                        viewport.height,
+                    },
+                    environment,
+                    next.operations
+                );
+            }
+            const Rect anchor_bounds = point_anchor.has_value()
+                ? *point_anchor
+                : anchor_record->bounds;
+            portal_bounds = anchor_placement(
+                anchor_bounds,
+                viewport,
+                pending.measured->measured_size,
+                style
+            );
+        }
+        arrange(
+            pending.measured,
+            portal_bounds,
+            pending.inherited_clip,
+            pending.pin_context,
+            environment,
+            next
+        );
+    }
+    pending_portals_.clear();
     const auto retain_exit_layout = [&](const auto& self, const RetainedNode& node) -> void {
         if (node.lifecycle() == RetainedLifecycle::exiting) {
             const auto retain_subtree = [&](const auto& retain, const RetainedNode& exiting) -> void {
