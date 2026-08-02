@@ -25,21 +25,22 @@ float4 material(PixelInput input) {
         cos(position.x * 1.4 - time * 0.8) * 0.06
     );
 
-    float cyan = band(position, time, -0.18, 0.18);
-    float violet = band(position, 2.1 - time * 0.72, -0.32, 0.15);
-    float pink = band(position, 4.7 + time * 0.51, 0.03, 0.12);
+    float cyan = band(position, time, -0.12, 0.13);
+    float violet = band(position, 2.1 - time * 0.72, -0.31, 0.1);
+    float pink = band(position, 4.7 + time * 0.51, 0.05, 0.09);
 
     float3 color = lerp(float3(0.008, 0.014, 0.055), input.color.rgb, 0.35);
-    color += cyan * float3(0.02, 0.55, 0.95) * 0.9 * intensity;
-    color += violet * lerp(float3(0.35, 0.08, 0.92), tint, 0.32) * 0.78 * intensity;
-    color += pink * float3(0.95, 0.08, 0.48) * 0.54 * intensity;
+    color += cyan * float3(0.02, 0.55, 0.95) * 0.68 * intensity;
+    color += violet * lerp(float3(0.35, 0.08, 0.92), tint, 0.32) * 0.52 * intensity;
+    color += pink * float3(0.95, 0.08, 0.48) * 0.34 * intensity;
 
     float2 orbPosition = position - float2(
         sin(time * 0.67) * aspect * 0.23,
         -0.14 + cos(time * 0.53) * 0.17
     );
     float orb = exp(-dot(orbPosition, orbPosition) * 2.8);
-    color += orb * float3(0.22, 0.48, 1.0) * 0.34 * intensity;
+    color += orb * float3(0.22, 0.48, 1.0) * 0.18 * intensity;
+    color = color / (1.0 + color * 0.55) * 1.12;
 
     float2 starCell = floor(input.position.xy);
     float stars = step(0.9975, hash21(starCell));
