@@ -24,16 +24,18 @@ float4 effect(EffectInput input) {
     float2 normal = glassNormal(input.pixel);
     float2 texel = 1.0 / max(effectTargetSize, 1.0);
 
-    float edgeWidth = max(min(effectBounds.z, effectBounds.w) * 0.24, 10.0);
+    float edgeWidth = max(min(effectBounds.z, effectBounds.w) * 0.14, 7.0);
     float edge = 1.0 - smoothstep(0.0, edgeWidth, max(-distance, 0.0));
-    float lens = pow(saturate(edge), 1.35);
+    float lens = pow(saturate(edge), 1.08);
     float refraction = effectFloat(2);
     float2 offset = normal * refraction * lens * texel;
+    float2 centered = input.localUv - 0.5;
+    offset -= centered * refraction * 0.28 * (1.0 - edge) * texel;
 
     float4 soft = sampleEffectSource(input.uv + offset * 0.28);
     float3 refracted = sampleEffectBackdrop(input.uv + offset).rgb;
 
-    float clarity = 0.54 + edge * 0.22;
+    float clarity = 0.34 + edge * 0.42;
     float3 color = lerp(soft.rgb, refracted, clarity);
     color = adjustSaturation(color, effectFloat(7));
     color = saturate((color - 0.5) * 1.07 + 0.5);

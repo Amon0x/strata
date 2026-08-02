@@ -71,17 +71,17 @@ style GlassTriggerStyle {
   gap: 8;
   alignItems: "CENTER";
   radius: 10;
-  background: #D9EEFF18;
+  background: #D9EEFF22;
   border: { width: 1, color: #D8EEFF24 };
   focusRing: { width: 1, color: #C9E8FF34 };
   effect: effect(
     "demo:liquid-glass",
     blurRadius: 12,
     downsample: 1,
-    refraction: 11,
-    tint: #B8E4FF0D,
-    saturation: 1.24,
-    highlight: 0.5,
+    refraction: 16,
+    tint: #B8E4FF14,
+    saturation: 1.42,
+    highlight: 0.62,
     noise: 0.1
   );
 }
@@ -93,7 +93,7 @@ style GlassPopupStyle {
   padding: 6;
   gap: 3;
   radius: 14;
-  background: #B9DDFF24;
+  background: #B9DDFF2C;
   border: { width: 1, color: #D9EEFF26 };
   anchorSide: "BOTTOM";
   anchorAlign: "START";
@@ -104,10 +104,10 @@ style GlassPopupStyle {
     "demo:liquid-glass",
     blurRadius: 14,
     downsample: 2,
-    refraction: 15,
-    tint: #B8E3FF0F,
-    saturation: 1.28,
-    highlight: 0.54,
+    refraction: 22,
+    tint: #B8E3FF16,
+    saturation: 1.45,
+    highlight: 0.68,
     noise: 0.1
   );
 }
@@ -144,7 +144,7 @@ style GlassTooltipStyle {
   height: "content";
   padding: { horizontal: 10, vertical: 7 };
   radius: 9;
-  background: #C4E2FF20;
+  background: #C4E2FF26;
   border: { width: 1, color: #DDF1FF24 };
   anchorSide: "TOP";
   anchorAlign: "CENTER";
@@ -153,10 +153,10 @@ style GlassTooltipStyle {
     "demo:liquid-glass",
     blurRadius: 10,
     downsample: 1,
-    refraction: 10,
-    tint: #C2E8FF0E,
-    saturation: 1.24,
-    highlight: 0.48,
+    refraction: 16,
+    tint: #C2E8FF14,
+    saturation: 1.4,
+    highlight: 0.6,
     noise: 0.08
   );
 }
@@ -219,16 +219,16 @@ style EffectDemoCard {
 }
 
 style LiquidDemoCard extends EffectDemoCard {
-  background: #C6E7FF14;
+  background: #C6E7FF1C;
   border: { width: 1, color: #DDEFFF22 };
   effect: effect(
     "demo:liquid-glass",
     blurRadius: 14,
     downsample: 2,
-    refraction: 18,
-    tint: #BCE7FF0D,
-    saturation: 1.28,
-    highlight: 0.56,
+    refraction: 26,
+    tint: #BCE7FF18,
+    saturation: 1.5,
+    highlight: 0.72,
     noise: 0.08
   );
 }
