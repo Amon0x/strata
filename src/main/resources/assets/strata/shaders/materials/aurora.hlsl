@@ -1,42 +1,58 @@
-// Authored material: cool light moving through a dark header surface. Motion must remain readable
-// at a glance: a broad travelling window carries two independently moving ribbons, while the
-// unlit part stays close to the authored surface colour.
-// Declared parameters, in declaration order: intensity (float, slot 8), tint (color, slots 9..12).
+float hash21(float2 value) {
+    value = frac(value * float2(123.34, 456.21));
+    value += dot(value, value + 45.32);
+    return frac(value.x * value.y);
+}
 
-float ribbon(float2 position, float phase, float thickness, float amplitude) {
-    const float wave = sin(position.x * 1.45 + phase) * amplitude +
-                       sin(position.x * 3.6 - phase * 0.7) * amplitude * 0.30;
-    const float distance = abs(position.y - wave);
-    return smoothstep(thickness, 0.0, distance) * 0.45 +
-           smoothstep(thickness * 3.0, 0.0, distance) * 0.55;
+float band(float2 position, float phase, float offset, float width) {
+    float wave = sin(position.x * 1.15 + phase) * 0.18;
+    wave += sin(position.x * 2.7 - phase * 0.63) * 0.055;
+    float distance = abs(position.y - wave - offset);
+    return exp(-distance * distance / max(width * width, 0.0001));
 }
 
 float4 material(PixelInput input) {
-    const float2 size = max(materialSize(input), 1.0);
-    const float intensity = saturate(materialFloat(input, 8));
-    const float4 tint = materialFloat4(input, 9);
-    const float2 uv = input.uv;
-    const float time = materialTime();
+    float2 size = max(materialSize(input), 1.0);
+    float2 uv = input.uv;
+    float time = materialTime() * 0.24;
+    float intensity = saturate(materialFloat(input, 8));
+    float3 tint = materialFloat4(input, 9).rgb;
 
-    // Aspect-correct x keeps waves the same physical size as the header changes width.
-    const float aspect = size.x / size.y;
-    const float2 position = float2(uv.x * aspect, uv.y - 0.5);
+    float aspect = size.x / size.y;
+    float2 position = (uv - 0.5) * float2(aspect, 1.0);
+    position += float2(
+        sin(position.y * 2.2 + time) * 0.07,
+        cos(position.x * 1.4 - time * 0.8) * 0.06
+    );
 
-    // These speeds move the ribbons by roughly half a header-height per second. The previous
-    // near-static phase shift was technically animated but visually indistinguishable from noise.
-    float glow = ribbon(position, 0.6 + time * 0.82, 0.18, 0.11);
-    glow += ribbon(position, 2.4 - time * 0.47, 0.12, 0.15) * 0.62;
+    float cyan = band(position, time, 0.08, 0.19);
+    float violet = band(position, 2.1 - time * 0.72, -0.13, 0.16);
+    float pink = band(position, 4.7 + time * 0.51, 0.28, 0.13);
 
-    // A broad light window crosses the complete header every eighteen seconds. The seam is wrapped
-    // and soft, so the animation loops without a pop.
-    const float travel = abs(frac(uv.x - time * 0.055 + 0.5) - 0.5);
-    const float movingWindow = smoothstep(0.34, 0.04, travel);
-    glow *= 0.28 + movingWindow * 0.72;
-    glow = saturate(glow * intensity);
+    float3 color = lerp(float3(0.008, 0.014, 0.055), input.color.rgb, 0.35);
+    color += cyan * float3(0.02, 0.55, 0.95) * 0.72 * intensity;
+    color += violet * lerp(float3(0.35, 0.08, 0.92), tint, 0.32) * 0.64 * intensity;
+    color += pink * float3(0.95, 0.08, 0.48) * 0.42 * intensity;
 
-    const float sheen = smoothstep(0.09, 0.0, uv.y) * intensity * 0.10;
+    float2 orbPosition = position - float2(
+        sin(time * 0.67) * aspect * 0.23,
+        cos(time * 0.53) * 0.24
+    );
+    float orb = exp(-dot(orbPosition, orbPosition) * 2.8);
+    color += orb * float3(0.22, 0.48, 1.0) * 0.34 * intensity;
 
-    const float3 light = lerp(float3(0.62, 0.72, 1.0), tint.rgb, saturate(tint.a));
-    const float3 shaded = input.color.rgb + light * (glow * 0.22 + sheen);
-    return float4(saturate(shaded), input.color.a * materialCoverage(input) * materialOpacity(input));
+    float2 starCell = floor(input.position.xy);
+    float stars = step(0.9975, hash21(starCell));
+    stars *= saturate(0.5 + 0.5 * sin(hash21(starCell) * 20.0 + time * 5.0));
+    color += stars * 0.32;
+
+    float grain = hash21(input.position.xy + floor(time * 30.0)) - 0.5;
+    color += grain * 0.018;
+
+    float vignette = saturate(1.0 - dot(uv - 0.5, uv - 0.5) * 1.55);
+    color *= 0.62 + vignette * 0.38;
+    return float4(
+        saturate(color),
+        input.color.a * materialCoverage(input) * materialOpacity(input)
+    );
 }

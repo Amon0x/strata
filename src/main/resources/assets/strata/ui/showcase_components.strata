@@ -155,46 +155,13 @@ style EffectFixtureRoot extends Transparent {
   kind: "OVERLAY";
   width: { weight: 1 };
   height: { weight: 1 };
-  background: #08111FFF;
+  background: #030511FF;
 }
 
-style EffectBackdropRow extends Transparent {
-  kind: "ROW";
+style EffectWallpaper {
   width: { weight: 1 };
   height: { weight: 1 };
-  gap: 18;
-  padding: 42;
-  alignItems: "STRETCH";
-}
-
-style EffectBlue extends Transparent {
-  radius: 28;
-  background: #1F5E8FFF;
-}
-
-style EffectMagenta extends Transparent {
-  radius: 28;
-  background: #7A315EFF;
-}
-
-style EffectGreen extends Transparent {
-  radius: 28;
-  background: #27684DFF;
-}
-
-style EffectBackdropMark {
-  width: "content";
-  height: "content";
-  margin: { left: 24, top: 74 };
-  font: "strata:fonts/default-medium";
-  pixelSize: 28;
-  color: #EAF5FF8C;
-}
-
-style EffectBackdropMarkLower extends EffectBackdropMark {
-  margin: { left: 38, top: 278 };
-  pixelSize: 38;
-  color: #FFFFFF52;
+  background: #050819FF;
 }
 
 style EffectContent {
@@ -237,8 +204,8 @@ style EffectDemoCard {
   padding: 16;
   gap: 8;
   radius: 20;
-  background: #111B2BCC;
-  border: { width: 1, color: #C8E2FF66 };
+  background: #08101CBD;
+  border: { width: 1, color: #C8E2FF52 };
 }
 
 style LiquidDemoCard extends EffectDemoCard {
@@ -526,20 +493,10 @@ component GlassTooltip(key: key, text: string) {
 
 component GlassEffectFixture() {
   Panel(style: EffectFixtureRoot) {
-    Panel(style: EffectBackdropRow) {
-      Panel(style: EffectBlue, layout: { width: { weight: 1 }, height: { weight: 1 } }) {
-        Text(text: "WAVES", style: EffectBackdropMark)
-        Text(text: "01", style: EffectBackdropMarkLower)
-      }
-      Panel(style: EffectMagenta, layout: { width: { weight: 1 }, height: { weight: 1 } }) {
-        Text(text: "BLUR", style: EffectBackdropMark)
-        Text(text: "02", style: EffectBackdropMarkLower)
-      }
-      Panel(style: EffectGreen, layout: { width: { weight: 1 }, height: { weight: 1 } }) {
-        Text(text: "PRISM", style: EffectBackdropMark)
-        Text(text: "03", style: EffectBackdropMarkLower)
-      }
-    }
+    Panel(
+      style: EffectWallpaper,
+      material: material("demo:aurora", intensity: 1, tint: #7C6BFFFF)
+    )
     Panel(style: EffectGallery) {
       Text(text: "Authored effect gallery", style: SectionText)
       Panel(style: EffectDemoRow) {
