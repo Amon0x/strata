@@ -121,19 +121,29 @@ style CompactTopbar extends Topbar { height: 60; padding: { horizontal: 13 }; }
 style PageTitle { font: "strata:fonts/default-medium"; pixelSize: 21; color: #F4F9FFFF; }
 style PageEyebrow { pixelSize: 12; color: #8EA5B8FF; }
 style SearchStyle {
-  radius: 12; background: #07111F8C; border: { width: 1, color: #D9EDFF24 };
+  radius: 18; background: #C3D5E610; border: { width: 1, color: #E1EDF526 };
   pixelSize: 14; color: #EEF8FFFF; hintColor: #71879AFF;
   focusRing: { width: 1, color: #8CDEFF90 };
+}
+style SearchShell extends GlassSurface {
+  kind: "ROW"; width: { weight: 1 }; height: 40;
+  padding: { horizontal: 2 }; radius: 20; alignItems: "CENTER";
+  background: #CFDCE80E; border: { width: 1, color: #EAF3FA2C };
   effect: effect(
     "morrow:optic-glass",
-    blurRadius: 9,
+    blurRadius: 7,
     downsample: 1,
-    refraction: 10,
-    tint: #C4D8E608,
-    saturation: 1.08,
-    highlight: 0.36,
+    refraction: 8,
+    tint: #D1E2EC08,
+    saturation: 1.05,
+    highlight: 0.32,
     noise: 0.04
   );
+}
+style SearchEditorStyle {
+  radius: 18; background: null; border: null;
+  pixelSize: 14; color: #EEF8FFFF; hintColor: #7F92A4FF;
+  focusRing: null;
 }
 style GreenFocus {
   pixelSize: 14; color: #EEF8FFFF; background: #B9E5FF18;
@@ -349,6 +359,23 @@ component GlassButton(key: key, label: string, primary: boolean, activate: actio
   }
 }
 
+component GlassSearch(query: string, change: action) {
+  Panel(
+    key: "workspace.search.shell",
+    style: SearchShell,
+    material: material("morrow:aurora", intensity: 0.16, tint: #B7C9E8FF)
+  ) {
+    TextBox(
+      key: "workspace.search",
+      text: query,
+      hint: "Search projects, files, people…",
+      onChange: change,
+      visualStyle: SearchEditorStyle,
+      layout: { width: { weight: 1 }, height: 36 }
+    )
+  }
+}
+
 component Logo() {
   Panel(style: BrandRow) {
     Panel(style: BrandMark) {
@@ -438,11 +465,7 @@ component TopbarView(section: string, query: string, close: action) {
       Text(text: section == "HOME" ? "Overview" : title(lower(section)), style: PageTitle)
       if !env.compact { Text(text: "Wednesday, 24 July", style: PageEyebrow) }
     }
-    TextBox(
-      key: "workspace.search", text: query, hint: "Search projects, files, people…",
-      onChange: action("state.setFromEvent", name: "query"), visualStyle: SearchStyle,
-      layout: { width: { weight: 1 }, height: 36 }
-    )
+    GlassSearch(query: query, change: action("state.setFromEvent", name: "query"))
     if !env.compact {
       Panel(style: IconCircle) { Text(text: "?", style: AvatarText) }
       Panel(style: AvatarGreen) { Text(text: "AM", style: AvatarText) }
