@@ -1,4 +1,4 @@
-// F2 Control Deck: a dark, focused configuration surface authored entirely in .strata.
+// F2 Control Deck: grounded dark chrome shaped by restrained optic-glass lenses.
 
 style Clear { background: null; border: null; }
 
@@ -9,9 +9,17 @@ style DeckRoot {
   padding: 30;
   alignItems: "CENTER";
   justifyContent: "CENTER";
-  background: #050608B8;
+  background: {
+    kind: "linear",
+    angle: 145,
+    stops: [
+      { color: #040609B8 },
+      { color: #0C11189C },
+      { color: #05070BB0 }
+    ]
+  };
   border: null;
-  effect: effect("blur", radius: 8, downsample: 2);
+  effect: effect("blur", radius: 7, downsample: 2);
 }
 
 style DeckShell {
@@ -20,10 +28,27 @@ style DeckShell {
   height: { weight: 1 };
   maxWidth: 1080;
   maxHeight: 690;
-  radius: 15;
+  radius: 22;
   clip: true;
-  background: #0E0F11F8;
-  border: { width: 1, color: #41444BFF };
+  background: {
+    kind: "linear",
+    angle: 155,
+    stops: [
+      { color: #171D24B8 },
+      { color: #0B0F15C8 }
+    ]
+  };
+  border: { width: 1, color: #D9E3EA36 };
+  effect: effect(
+    "deck:optic-glass",
+    blurRadius: 15,
+    downsample: 2,
+    refraction: 20,
+    tint: #A7B7C20A,
+    saturation: 0.82,
+    highlight: 0.52,
+    noise: 0.045
+  );
 }
 
 style DeckHeader {
@@ -34,15 +59,29 @@ style DeckHeader {
   gap: 12;
   alignItems: "CENTER";
   radius: 0;
-  background: null;
+  background: #11171D70;
   border: null;
 }
 
-style DeckHeaderRule { width: { weight: 1 }; height: 1; background: #24262BFF; border: null; }
+style DeckHeaderRule { width: { weight: 1 }; height: 1; background: #DCE4E91A; border: null; }
+style DeckLensGlint {
+  width: { weight: 1 };
+  height: 1;
+  background: {
+    kind: "linear",
+    angle: 90,
+    stops: [
+      { color: #F4FAFF00 },
+      { color: #EEF8FF42 },
+      { color: #F4FAFF00 }
+    ]
+  };
+  border: null;
+}
 
-style DeckTitle { font: "strata:fonts/default-medium"; pixelSize: 23; color: #F1F2F4FF; }
-style DeckScope { font: "strata:fonts/mono"; pixelSize: 13; color: #6B9EFFFF; }
-style DeckHint { font: "strata:fonts/mono"; pixelSize: 11; color: #686B72FF; }
+style DeckTitle { font: "strata:fonts/default-medium"; pixelSize: 23; color: #EFF2F4FF; }
+style DeckScope { font: "strata:fonts/mono"; pixelSize: 12; color: #9FB3C0FF; }
+style DeckHint { font: "strata:fonts/mono"; pixelSize: 11; color: #737F88FF; }
 
 style DeckBody extends Clear {
   kind: "ROW";
@@ -56,8 +95,8 @@ style DeckSidebar {
   height: { weight: 1 };
   padding: { horizontal: 12, vertical: 16 };
   gap: 8;
-  background: #0D0E10FF;
-  border: { width: 1, color: #24262AFF };
+  background: #090D12B8;
+  border: { width: 1, color: #D9E3EA17 };
 }
 
 style CategoryItem {
@@ -68,16 +107,16 @@ style CategoryItem {
   gap: 11;
   alignItems: "CENTER";
   radius: 8;
-  background: #20242B00;
-  border: { width: 1, color: #2E354000 };
-  hoverOverlay: #416FCF14;
-  activeOverlay: #416FCF20;
+  background: #C5D4DF00;
+  border: { width: 1, color: #D7E1E800 };
+  hoverOverlay: #C3D3DF0D;
+  activeOverlay: #C3D3DF16;
   animateChanges: { properties: ["background", "border"], policy: "fast" };
 }
 
 style CategoryItemSelected extends CategoryItem {
-  background: #20242BFF;
-  border: { width: 1, color: #2E3540FF };
+  background: #AFC0CC18;
+  border: { width: 1, color: #D8E2E92A };
 }
 
 style CategoryMark {
@@ -87,16 +126,16 @@ style CategoryMark {
   radius: 8;
   alignItems: "CENTER";
   justifyContent: "CENTER";
-  background: #17191DFF;
-  border: { width: 1, color: #35383EFF };
+  background: #141A20B8;
+  border: { width: 1, color: #D5DEE524 };
 }
 style CategoryMarkSelected extends CategoryMark {
-  background: #416FCFFF;
-  border: { width: 1, color: #75A0FFFF };
+  background: #A7BBC82B;
+  border: { width: 1, color: #E0E7EC52 };
 }
 style CategoryIconDraw extends Clear { width: 18; height: 18; }
-style CategoryLabel { pixelSize: 14; color: #8D9097FF; }
-style CategoryLabelSelected { font: "strata:fonts/default-medium"; pixelSize: 14; color: #76A3FFFF; }
+style CategoryLabel { pixelSize: 14; color: #929CA4FF; }
+style CategoryLabelSelected { font: "strata:fonts/default-medium"; pixelSize: 14; color: #E2E9EDFF; }
 
 style SidebarFoot extends Clear {
   kind: "COLUMN";
@@ -105,8 +144,8 @@ style SidebarFoot extends Clear {
   padding: 10;
   gap: 5;
 }
-style SidebarFootTitle { font: "strata:fonts/default-medium"; pixelSize: 12; color: #C8CAD0FF; }
-style SidebarFootCopy { pixelSize: 11; color: #666A72FF; }
+style SidebarFootTitle { font: "strata:fonts/default-medium"; pixelSize: 12; color: #C8D0D5FF; }
+style SidebarFootCopy { pixelSize: 11; color: #707B83FF; }
 
 style ContentHost {
   kind: "COLUMN";
@@ -114,7 +153,7 @@ style ContentHost {
   height: { weight: 1 };
   padding: 18;
   gap: 15;
-  background: #141517FF;
+  background: #10151AB5;
   border: null;
 }
 
@@ -125,8 +164,8 @@ style ContentHeader extends Clear {
   gap: 12;
   alignItems: "CENTER";
 }
-style ContentTitle { font: "strata:fonts/default-medium"; pixelSize: 18; color: #E3E4E7FF; }
-style ContentSubtitle { pixelSize: 12; color: #74777EFF; }
+style ContentTitle { font: "strata:fonts/default-medium"; pixelSize: 18; color: #E7EBEEFF; }
+style ContentSubtitle { pixelSize: 12; color: #7E8991FF; }
 
 style SegmentRail extends Clear {
   kind: "ROW";
@@ -142,15 +181,15 @@ style Segment {
   alignItems: "CENTER";
   justifyContent: "CENTER";
   radius: 7;
-  background: #1D1F22FF;
-  border: { width: 1, color: #282A2EFF };
+  background: #141A20B8;
+  border: { width: 1, color: #D3DDE31B };
 }
 style SegmentSelected extends Segment {
-  background: #202630FF;
-  border: { width: 1, color: #303947FF };
+  background: #AABCC817;
+  border: { width: 1, color: #DAE3E92E };
 }
-style SegmentText { font: "strata:fonts/default-medium"; pixelSize: 13; color: #A1A4AAFF; }
-style SegmentTextSelected { font: "strata:fonts/default-medium"; pixelSize: 13; color: #6F9FFFFF; }
+style SegmentText { font: "strata:fonts/default-medium"; pixelSize: 13; color: #9AA4ABFF; }
+style SegmentTextSelected { font: "strata:fonts/default-medium"; pixelSize: 13; color: #E1E8ECFF; }
 
 style DeckScroll {
   kind: "SCROLL";
@@ -180,8 +219,8 @@ style SectionHeadingRow extends Clear {
   gap: 12;
   alignItems: "CENTER";
 }
-style SectionHeading { font: "strata:fonts/default-medium"; pixelSize: 12; color: #B8BAC0FF; }
-style SectionRule { kind: "PANEL"; width: { weight: 1 }; height: 1; background: #282A2EFF; border: null; }
+style SectionHeading { font: "strata:fonts/default-medium"; pixelSize: 12; color: #B7C0C6FF; }
+style SectionRule { kind: "PANEL"; width: { weight: 1 }; height: 1; background: #D7E0E51A; border: null; }
 
 style SettingsCard {
   kind: "COLUMN";
@@ -189,9 +228,16 @@ style SettingsCard {
   height: "content";
   padding: 14;
   gap: 9;
-  radius: 10;
-  background: #18191BFF;
-  border: { width: 1, color: #2B2D31FF };
+  radius: 12;
+  background: {
+    kind: "linear",
+    angle: 150,
+    stops: [
+      { color: #192028C2 },
+      { color: #11161BCF }
+    ]
+  };
+  border: { width: 1, color: #D9E2E720 };
 }
 
 style CheckRow extends Clear {
@@ -201,9 +247,9 @@ style CheckRow extends Clear {
   gap: 9;
   alignItems: "CENTER";
 }
-style CheckText { pixelSize: 14; color: #BFC1C6FF; }
-style CheckTextHover { pixelSize: 14; color: #E4E6EAFF; }
-style CheckMeta { pixelSize: 11; color: #676A70FF; }
+style CheckText { pixelSize: 14; color: #C2C9CEFF; }
+style CheckTextHover { pixelSize: 14; color: #EDF1F3FF; }
+style CheckMeta { pixelSize: 11; color: #727D85FF; }
 style CheckFocusShell {
   kind: "PANEL";
   width: 26;
@@ -211,13 +257,13 @@ style CheckFocusShell {
   radius: 6;
   alignItems: "CENTER";
   justifyContent: "CENTER";
-  background: #6B9EFF00;
-  border: { width: 1, color: #6B9EFF00 };
+  background: #A8BFCE00;
+  border: { width: 1, color: #A8BFCE00 };
   animateChanges: { properties: ["background", "border"], policy: "fast" };
 }
 style CheckFocusShellOn extends CheckFocusShell {
-  background: #6B9EFF16;
-  border: { width: 1, color: #6B9EFFA0 };
+  background: #A8BFCE14;
+  border: { width: 1, color: #B8CCD878 };
 }
 style AuthoredCheck {
   kind: "PANEL";
@@ -226,29 +272,29 @@ style AuthoredCheck {
   radius: 4;
   alignItems: "CENTER";
   justifyContent: "CENTER";
-  background: #202226FF;
-  border: { width: 1, color: #4A4D54FF };
+  background: #171D22FF;
+  border: { width: 1, color: #56636CFF };
   animateChanges: { properties: ["background", "border"], policy: "fast" };
 }
 style AuthoredCheckHover extends AuthoredCheck {
-  background: #292D34FF;
-  border: { width: 1, color: #7198E6FF };
+  background: #222A30FF;
+  border: { width: 1, color: #8FA6B5FF };
 }
 style AuthoredCheckPressed extends AuthoredCheck {
-  background: #30394AFF;
-  border: { width: 1, color: #82A9F5FF };
+  background: #2A353DFF;
+  border: { width: 1, color: #A6BAC7FF };
 }
 style AuthoredCheckOn extends AuthoredCheck {
-  background: #4F7DD7FF;
-  border: { width: 1, color: #7AA4F4FF };
+  background: #6E899BFF;
+  border: { width: 1, color: #AFC2CEFF };
 }
 style AuthoredCheckOnHover extends AuthoredCheck {
-  background: #618CE4FF;
-  border: { width: 1, color: #9ABBFFFF };
+  background: #7D97A8FF;
+  border: { width: 1, color: #CBD8E0FF };
 }
 style AuthoredCheckOnPressed extends AuthoredCheck {
-  background: #426BBEFF;
-  border: { width: 1, color: #789DE6FF };
+  background: #5D7687FF;
+  border: { width: 1, color: #A8BAC6FF };
 }
 
 style ChoiceRow extends Clear {
@@ -264,8 +310,8 @@ style ChoiceCopy extends Clear {
   height: "content";
   gap: 3;
 }
-style ChoiceLabel { font: "strata:fonts/default-medium"; pixelSize: 13; color: #BFC1C6FF; }
-style ChoiceDescription { pixelSize: 11; color: #676A70FF; }
+style ChoiceLabel { font: "strata:fonts/default-medium"; pixelSize: 13; color: #C5CCD1FF; }
+style ChoiceDescription { pixelSize: 11; color: #727D85FF; }
 
 style DeckSelectTrigger {
   kind: "ROW";
@@ -274,10 +320,10 @@ style DeckSelectTrigger {
   padding: { horizontal: 14, vertical: 10 };
   gap: 10;
   alignItems: "CENTER";
-  radius: 7;
-  background: #202123FF;
-  border: { width: 1, color: #2C2E32FF };
-  focusRing: { width: 1, color: #6B9EFFA0 };
+  radius: 10;
+  background: #151B21D4;
+  border: { width: 1, color: #D6E0E625 };
+  focusRing: { width: 1, color: #AEC3D078 };
 }
 style DeckSelectPopup {
   kind: "COLUMN";
@@ -285,14 +331,24 @@ style DeckSelectPopup {
   height: "content";
   padding: 6;
   gap: 3;
-  radius: 9;
-  background: #161719F7;
-  border: { width: 1, color: #33363BFF };
+  radius: 13;
+  background: #11171DEC;
+  border: { width: 1, color: #DCE5EA32 };
   anchorSide: "BOTTOM";
   anchorAlign: "START";
   anchorGap: 5;
   anchorFlip: true;
   anchorShift: true;
+  effect: effect(
+    "deck:optic-glass",
+    blurRadius: 12,
+    downsample: 2,
+    refraction: 12,
+    tint: #53616B38,
+    saturation: 0.76,
+    highlight: 0.42,
+    noise: 0.035
+  );
 }
 style DeckSelectItem {
   kind: "ROW";
@@ -302,25 +358,25 @@ style DeckSelectItem {
   gap: 9;
   alignItems: "CENTER";
   radius: 6;
-  background: #252A3200;
-  border: { width: 1, color: #343B4700 };
+  background: #BBCBD700;
+  border: { width: 1, color: #DCE4E900 };
   animateChanges: { properties: ["background", "border"], policy: "fast" };
 }
 style DeckSelectItemSelected extends DeckSelectItem {
-  background: #416FCF24;
-  border: { width: 1, color: #668FE044 };
+  background: #A8BCC919;
+  border: { width: 1, color: #D4E0E82C };
 }
 style DeckSelectItemActive extends DeckSelectItem {
-  background: #252A32FF;
-  border: { width: 1, color: #343B47FF };
+  background: #B7C8D31C;
+  border: { width: 1, color: #DCE5EA26 };
 }
 style DeckSelectItemSelectedActive extends DeckSelectItem {
-  background: #34445FFF;
-  border: { width: 1, color: #5879B3FF };
+  background: #AFC2CE2B;
+  border: { width: 1, color: #E1E8EC3D };
 }
-style SelectValue { font: "strata:fonts/default-medium"; pixelSize: 13; color: #E0E1E4FF; }
-style SelectMeta { font: "strata:fonts/mono"; pixelSize: 10; color: #70747BFF; }
-style SelectedMark { kind: "PANEL"; width: 6; height: 6; radius: 3; background: #6F9FFFFF; border: null; }
+style SelectValue { font: "strata:fonts/default-medium"; pixelSize: 13; color: #E3E8EBFF; }
+style SelectMeta { font: "strata:fonts/mono"; pixelSize: 10; color: #7C8992FF; }
+style SelectedMark { kind: "PANEL"; width: 6; height: 6; radius: 3; background: #BDD1DEFF; border: null; }
 style EmptyMark extends Clear { width: 6; height: 6; }
 
 style StatusCard {
@@ -330,13 +386,13 @@ style StatusCard {
   padding: { horizontal: 14, vertical: 12 };
   gap: 11;
   alignItems: "CENTER";
-  radius: 9;
-  background: #17181AFF;
-  border: { width: 1, color: #2C2E32FF };
+  radius: 11;
+  background: #12181DC7;
+  border: { width: 1, color: #D8E1E620 };
 }
 style StatusDot { kind: "PANEL"; width: 8; height: 8; radius: 4; background: #55C869FF; border: null; }
-style StatusTitle { font: "strata:fonts/default-medium"; pixelSize: 13; color: #C9CBD0FF; }
-style StatusMeta { pixelSize: 11; color: #696C73FF; }
+style StatusTitle { font: "strata:fonts/default-medium"; pixelSize: 13; color: #CCD3D7FF; }
+style StatusMeta { pixelSize: 11; color: #747F87FF; }
 
 style ProfileGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 10; }
 style ProfileCard {
@@ -345,23 +401,23 @@ style ProfileCard {
   height: 116;
   padding: 14;
   gap: 8;
-  radius: 9;
-  background: #191A1CFF;
-  border: { width: 1, color: #2C2E32FF };
+  radius: 12;
+  background: #141A20C9;
+  border: { width: 1, color: #D9E2E720 };
 }
-style ProfileCardSelected extends ProfileCard { border: { width: 1, color: #4C76C9FF }; background: #1A1E25FF; }
-style ProfileTitle { font: "strata:fonts/default-medium"; pixelSize: 14; color: #D6D8DCFF; }
-style ProfileMeta { pixelSize: 11; color: #6F7279FF; }
+style ProfileCardSelected extends ProfileCard { border: { width: 1, color: #C3D3DD48 }; background: #AFC1CC15; }
+style ProfileTitle { font: "strata:fonts/default-medium"; pixelSize: 14; color: #D9DFE3FF; }
+style ProfileMeta { pixelSize: 11; color: #78838BFF; }
 style ProfileBadge {
   kind: "PANEL";
   width: "content";
   height: 20;
   padding: { horizontal: 7, vertical: 3 };
   radius: 5;
-  background: #416FCF24;
-  border: { width: 1, color: #557ED036 };
+  background: #AFC3D01C;
+  border: { width: 1, color: #D5E0E72E };
 }
-style ProfileBadgeText { font: "strata:fonts/mono"; pixelSize: 9; color: #78A4FFFF; }
+style ProfileBadgeText { font: "strata:fonts/mono"; pixelSize: 9; color: #BFD1DDFF; }
 
 animation DeckEnter {
   from { opacity: 0, translateY: 10, scale: 0.985 }
@@ -876,6 +932,7 @@ component ControlDeck() {
 
   Panel(style: DeckRoot) {
     Panel(style: DeckShell, enter: DeckEnter) {
+      Panel(style: DeckLensGlint)
       Panel(style: DeckHeader) {
         Text(text: "Lattice", style: DeckTitle)
         Text(text: "CONTROL DECK", style: DeckScope)
