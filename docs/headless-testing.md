@@ -43,7 +43,7 @@ CTest registers the portable batch/interactive scenarios as `strata.headless.por
 `strata.headless.portable.interactive`. Windows additionally registers
 `strata.headless.d3d11` and `strata.headless.d3d11.interactive`, which verify authored shader
 compilation and the shared production renderer. `strata.headless.effects` renders the same authored
-liquid-glass/content-effect fixture through D3D11 and twice through the software approximation; it
+optic-glass/content-effect fixture through D3D11 and twice through the software approximation; it
 requires D3D shader output to differ from the approximation and both software images to be
 byte-for-byte deterministic.
 

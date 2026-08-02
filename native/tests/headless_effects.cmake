@@ -18,7 +18,7 @@ function(run_effect_scenario scenario output)
     if(NOT status EQUAL 0)
         message(FATAL_ERROR "headless effect scenario failed (${status})\n${stdout}\n${stderr}")
     endif()
-    foreach(artifact liquid_glass.png liquid_glass.json result.json)
+    foreach(artifact optic_glass.png optic_glass.json result.json)
         if(NOT EXISTS "${output}/${artifact}")
             message(FATAL_ERROR "headless effect scenario did not create ${artifact}")
         endif()
@@ -40,13 +40,13 @@ file(READ "${d3d_output}/result.json" d3d_result)
 if(NOT d3d_result MATCHES "\\\"backend\\\": \\\"d3d11\\\"")
     message(FATAL_ERROR "authored effect scenario did not use D3D11")
 endif()
-file(READ "${d3d_output}/liquid_glass.json" d3d_frame)
+file(READ "${d3d_output}/optic_glass.json" d3d_frame)
 if(NOT d3d_frame MATCHES "effect.fixture.select.option.glass" OR
    NOT d3d_frame MATCHES "effect.fixture.select.popup")
     message(FATAL_ERROR "authored Select templates were not materialized into the portal tree")
 endif()
 foreach(effect_id
-        "demo:liquid-glass"
+        "demo:optic-glass"
         "demo:frosted-backdrop"
         "demo:content-prism"
         "demo:soft-content")
@@ -59,9 +59,9 @@ if(NOT portable_result MATCHES "\\\"backend\\\": \\\"reference\\\"")
     message(FATAL_ERROR "authored effect fallback did not use the software renderer")
 endif()
 
-file(SHA256 "${d3d_output}/liquid_glass.png" d3d_hash)
-file(SHA256 "${portable_output}/liquid_glass.png" portable_hash)
-file(SHA256 "${portable_repeat_output}/liquid_glass.png" portable_repeat_hash)
+file(SHA256 "${d3d_output}/optic_glass.png" d3d_hash)
+file(SHA256 "${portable_output}/optic_glass.png" portable_hash)
+file(SHA256 "${portable_repeat_output}/optic_glass.png" portable_repeat_hash)
 if(d3d_hash STREQUAL portable_hash)
     message(FATAL_ERROR "D3D11 authored shader output unexpectedly matches the software approximation")
 endif()

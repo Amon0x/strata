@@ -261,7 +261,7 @@ same application schema:
 ```json
 "effects": {
   "definitions": [{
-    "id": "demo:liquid-glass",
+    "id": "demo:optic-glass",
     "input": "BACKDROP",
     "parameters": [
       { "name": "blurRadius", "effectType": "FLOAT", "type": { "kind": "number" },
@@ -272,7 +272,7 @@ same application schema:
     "passes": [
       { "kind": "BLUR", "radiusParameter": "blurRadius", "downsample": 2 },
       { "kind": "SHADER",
-        "shaders": { "hlsl": "assets/shaders/effects/liquid-glass.hlsl" } }
+        "shaders": { "hlsl": "assets/shaders/effects/optic-glass.hlsl" } }
     ]
   }]
 }
@@ -288,7 +288,7 @@ errors.
 Apply the program through the ordinary widget/style effect field:
 
 ```strata
-Panel(effect: effect("demo:liquid-glass", blurRadius: 18, tint: #7DB8FF35))
+Panel(effect: effect("demo:optic-glass", blurRadius: 18, tint: #7DB8FF35))
 ```
 
 An HLSL pass defines `float4 effect(EffectInput input)`. The host prelude provides

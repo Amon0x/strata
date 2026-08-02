@@ -906,7 +906,7 @@
   "effects": {
     "definitions": [
       {
-        "id": "demo:liquid-glass",
+        "id": "demo:optic-glass",
         "input": "BACKDROP",
         "parameters": [
           {
@@ -982,7 +982,7 @@
           {
             "kind": "SHADER",
             "shaders": {
-              "hlsl": "assets/strata/shaders/effects/liquid-glass.hlsl"
+              "hlsl": "assets/strata/shaders/effects/optic-glass.hlsl"
             }
           }
         ]

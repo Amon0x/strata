@@ -122,7 +122,7 @@ Select(
 )
 ```
 
-See `showcase_components.strata` for a complete liquid-glass Menu, Select, ComboBox, and Tooltip
+See `showcase_components.strata` for a complete optic-glass Menu, Select, ComboBox, and Tooltip
 skin built from the same mechanism.
 
 Named timelines attach through `transition`, `enter`/`exit`, `move`, `contentTransition`, or motion

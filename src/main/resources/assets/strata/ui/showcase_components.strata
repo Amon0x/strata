@@ -75,7 +75,7 @@ style GlassTriggerStyle {
   border: { width: 1, color: #D8EEFF24 };
   focusRing: { width: 1, color: #C9E8FF34 };
   effect: effect(
-    "demo:liquid-glass",
+    "demo:optic-glass",
     blurRadius: 12,
     downsample: 1,
     refraction: 16,
@@ -101,7 +101,7 @@ style GlassPopupStyle {
   anchorFlip: true;
   anchorShift: true;
   effect: effect(
-    "demo:liquid-glass",
+    "demo:optic-glass",
     blurRadius: 14,
     downsample: 2,
     refraction: 22,
@@ -127,7 +127,7 @@ style GlassItemSelected extends GlassItemStyle {
   background: #B9E4FF1E;
   border: { width: 1, color: #DCEFFF24 };
   effect: effect(
-    "demo:liquid-glass",
+    "demo:optic-glass",
     blurRadius: 6,
     downsample: 1,
     refraction: 8,
@@ -142,7 +142,7 @@ style GlassItemActive extends GlassItemStyle {
   background: #D5EEFF2B;
   border: { width: 1, color: #E8F5FF38 };
   effect: effect(
-    "demo:liquid-glass",
+    "demo:optic-glass",
     blurRadius: 8,
     downsample: 1,
     refraction: 12,
@@ -181,7 +181,7 @@ style GlassTooltipStyle {
   anchorAlign: "CENTER";
   anchorGap: 8;
   effect: effect(
-    "demo:liquid-glass",
+    "demo:optic-glass",
     blurRadius: 10,
     downsample: 1,
     refraction: 16,
@@ -253,7 +253,7 @@ style LiquidDemoCard extends EffectDemoCard {
   background: #C6E7FF1C;
   border: { width: 1, color: #DDEFFF22 };
   effect: effect(
-    "demo:liquid-glass",
+    "demo:optic-glass",
     blurRadius: 14,
     downsample: 2,
     refraction: 26,
@@ -543,7 +543,7 @@ component GlassEffectFixture() {
       Text(text: "Authored effect gallery", style: SectionText)
       Panel(style: EffectDemoRow) {
         Panel(style: LiquidDemoCard) {
-          Text(text: "LIQUID GLASS", style: SectionText)
+          Text(text: "OPTIC GLASS", style: SectionText)
           Text(
             text: "Blur + refraction + tint over live backdrop",
             style: TelemetryText,
@@ -578,7 +578,7 @@ component GlassEffectFixture() {
             key: "effect.fixture.select",
             defaultExpanded: true,
             options: [
-              { id: "glass", label: "Liquid glass" },
+              { id: "glass", label: "Optic glass" },
               { id: "prism", label: "Content prism" },
               { id: "software", label: "Deterministic fallback" }
             ],
