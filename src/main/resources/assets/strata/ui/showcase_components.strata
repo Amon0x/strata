@@ -72,8 +72,8 @@ style GlassTriggerStyle {
   alignItems: "CENTER";
   radius: 10;
   background: #D9EEFF28;
-  border: { width: 1, color: #E4F4FF78 };
-  focusRing: { width: 1, color: #D9F0FFB0 };
+  border: { width: 1, color: #D8EEFF30 };
+  focusRing: { width: 1, color: #C9E8FF4A };
   effect: effect(
     "demo:liquid-glass",
     blurRadius: 12,
@@ -81,7 +81,7 @@ style GlassTriggerStyle {
     refraction: 11,
     tint: #B8E4FF14,
     saturation: 1.38,
-    highlight: 0.72,
+    highlight: 0.5,
     noise: 0.25
   );
 }
@@ -94,7 +94,7 @@ style GlassPopupStyle {
   gap: 3;
   radius: 14;
   background: #B9DDFF38;
-  border: { width: 1, color: #E3F3FF82 };
+  border: { width: 1, color: #D9EEFF32 };
   anchorSide: "BOTTOM";
   anchorAlign: "START";
   anchorGap: 7;
@@ -107,7 +107,7 @@ style GlassPopupStyle {
     refraction: 15,
     tint: #B8E3FF18,
     saturation: 1.42,
-    highlight: 0.78,
+    highlight: 0.54,
     noise: 0.22
   );
 }
@@ -145,7 +145,7 @@ style GlassTooltipStyle {
   padding: { horizontal: 10, vertical: 7 };
   radius: 9;
   background: #C4E2FF32;
-  border: { width: 1, color: #E6F5FF80 };
+  border: { width: 1, color: #DDF1FF32 };
   anchorSide: "TOP";
   anchorAlign: "CENTER";
   anchorGap: 8;
@@ -156,7 +156,7 @@ style GlassTooltipStyle {
     refraction: 10,
     tint: #C2E8FF16,
     saturation: 1.35,
-    highlight: 0.7,
+    highlight: 0.48,
     noise: 0.2
   );
 }
@@ -220,7 +220,7 @@ style EffectDemoCard {
 
 style LiquidDemoCard extends EffectDemoCard {
   background: #C6E7FF20;
-  border: { width: 1, color: #E7F5FF82 };
+  border: { width: 1, color: #DDEFFF32 };
   effect: effect(
     "demo:liquid-glass",
     blurRadius: 14,
@@ -228,7 +228,7 @@ style LiquidDemoCard extends EffectDemoCard {
     refraction: 18,
     tint: #BCE7FF18,
     saturation: 1.48,
-    highlight: 0.82,
+    highlight: 0.56,
     noise: 0.2
   );
 }

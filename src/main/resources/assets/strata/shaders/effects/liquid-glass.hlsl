@@ -44,20 +44,22 @@ float4 effect(EffectInput input) {
     float4 tint = effectColor(3);
     color = lerp(color, tint.rgb, saturate(tint.a));
 
-    float innerRim = 1.0 - smoothstep(0.0, 9.0, max(-distance, 0.0));
-    float hairline = 1.0 - smoothstep(0.7, 2.2, abs(distance + 0.8));
+    float innerRim = 1.0 - smoothstep(0.0, 4.0, max(-distance, 0.0));
+    float hairline = 1.0 - smoothstep(0.35, 1.15, abs(distance + 0.4));
     float2 lightDirection = normalize(float2(-0.58, -0.82));
     float facingLight = saturate(dot(normal, lightDirection));
     float facingShade = saturate(dot(normal, -lightDirection));
-    float specular = pow(facingLight, 5.0) * innerRim;
-    float reflected = pow(facingShade, 9.0) * innerRim;
+    float leadingGlint = pow(saturate(1.0 - input.localUv.x), 1.7);
+    float trailingGlint = pow(saturate(input.localUv.x), 2.2);
+    float specular = pow(facingLight, 8.0) * innerRim * leadingGlint;
+    float reflected = pow(facingShade, 11.0) * innerRim * trailingGlint;
     float highlight = effectFloat(8);
 
-    color += specular * highlight * float3(1.0, 0.98, 0.92);
-    color += reflected * highlight * 0.34 * float3(0.32, 0.62, 1.0);
-    color += hairline * highlight * 0.46;
-    color += innerRim * edge * float3(0.035, 0.075, 0.12);
-    color -= facingShade * innerRim * 0.055;
+    color += specular * highlight * 0.52 * float3(1.0, 0.98, 0.94);
+    color += reflected * highlight * 0.18 * float3(0.28, 0.56, 1.0);
+    color += hairline * 0.035 * float3(0.62, 0.84, 1.0);
+    color += innerRim * edge * float3(0.012, 0.025, 0.04);
+    color -= facingShade * innerRim * 0.025;
 
     float noise = (hash21(input.logicalPixel + floor(effectTime() * 24.0)) - 0.5) *
         effectFloat(9) * 0.012;
