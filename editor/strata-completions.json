@@ -10637,6 +10637,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "defaultExpanded",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "maxVisibleRows",
           "nullable": false,
           "required": false,

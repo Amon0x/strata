@@ -115,6 +115,22 @@ bool select_click(WidgetInputScope& scope) {
     return true;
 }
 
+bool select_pointer(WidgetInputScope& scope) {
+    const PointerInputEvent* pointer = scope.pointer();
+    const WidgetSubtarget* target = scope.subtarget();
+    if (pointer == nullptr || pointer->type != PointerEventType::move ||
+        target == nullptr || target->kind != WidgetSubtargetKind::choice ||
+        !target->enabled) {
+        return false;
+    }
+    scope.set_retained(
+        "$choiceIndex",
+        runtime::Value(static_cast<double>(target->index)),
+        DirtyReason::input
+    );
+    return true;
+}
+
 [[nodiscard]] std::string lower_ascii(std::string value) {
     std::ranges::transform(value, value.begin(), [](const unsigned char character) {
         return static_cast<char>(std::tolower(character));
@@ -379,6 +395,7 @@ void register_control_widget_inputs(WidgetRegistry& registry) {
     select.popup_retained = "$expanded";
     select.popup_initial = "defaultExpanded";
     select.click = &select_click;
+    select.pointer = &select_pointer;
     select.key = &choice_key;
     registry.register_input_phase("Select", std::move(select));
 }

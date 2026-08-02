@@ -1068,6 +1068,12 @@ struct Host::Impl final {
                 STRATA_IMAGE_SAMPLING_LINEAR,
                 0U,
             },
+            strata_surface_image_resource{
+                strata::view("strata:ui/icons/chevron-up"),
+                strata::view("assets/strata/images/ui/icons/chevron-up.svg"),
+                STRATA_IMAGE_SAMPLING_LINEAR,
+                0U,
+            },
         };
         activate(
             session,

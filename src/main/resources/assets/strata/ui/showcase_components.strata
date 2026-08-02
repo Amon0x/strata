@@ -71,8 +71,9 @@ style GlassTriggerStyle {
   gap: 8;
   alignItems: "CENTER";
   radius: 10;
-  background: #182235E8;
-  border: { width: 1, color: #9CC7FF70 };
+  background: #142036EC;
+  border: { width: 1, color: #9FCBFF66 };
+  focusRing: { width: 1, color: #B8DCFF8A };
 }
 
 style GlassPopupStyle {
@@ -82,8 +83,8 @@ style GlassPopupStyle {
   padding: 6;
   gap: 3;
   radius: 14;
-  background: #17243AC2;
-  border: { width: 1, color: #C6E4FF80 };
+  background: #142137D9;
+  border: { width: 1, color: #B9DBFF70 };
   anchorSide: "BOTTOM";
   anchorAlign: "START";
   anchorGap: 7;
@@ -109,6 +110,22 @@ style GlassItemStyle extends Transparent {
   gap: 7;
   alignItems: "CENTER";
   radius: 8;
+  animateChanges: { properties: ["background", "border"], policy: "fast" };
+}
+
+style GlassItemSelected extends GlassItemStyle {
+  background: #28445FA8;
+  border: { width: 1, color: #8FC8FF3D };
+}
+
+style GlassItemActive extends GlassItemStyle {
+  background: #365E83D6;
+  border: { width: 1, color: #B7DBFF70 };
+}
+
+style GlassChevron extends Transparent {
+  width: 14;
+  height: 14;
 }
 
 style GlassTooltipStyle {
@@ -341,6 +358,22 @@ animation ExtensionHoverMotion {
   easing: "cubic-out";
 }
 
+animation GlassPopupEnter {
+  from { opacity: 0, translateY: -7, scale: 0.975 }
+  to { opacity: 1, translateY: 0, scale: 1 }
+  duration: 145ms;
+  easing: "cubic-out";
+  fillMode: "FORWARDS";
+}
+
+animation GlassPopupExit {
+  from { opacity: 1, translateY: 0, scale: 1 }
+  to { opacity: 0, translateY: -5, scale: 0.985 }
+  duration: 105ms;
+  easing: "cubic-in";
+  fillMode: "FORWARDS";
+}
+
 component Card(title: string) {
   defaults: { Button: { variant: "compact" } }
   Panel(style: CardStyle, transition: ContentMotion) {
@@ -438,12 +471,21 @@ component GlassChoiceTrigger(
       maxLines: 1,
       overflow: "ELLIPSIS"
     )
-    Text(text: expanded ? "^" : "v", style: TelemetryText)
+    Image(
+      image: expanded ? "strata:ui/icons/chevron-up" : "strata:ui/icons/chevron-down",
+      tint: #D8E9FFFF,
+      style: GlassChevron
+    )
   }
 }
 
 component GlassPopup(key: key, level: number, expanded: boolean) {
-  Panel(key: key, style: GlassPopupStyle)
+  Panel(
+    key: key,
+    style: GlassPopupStyle,
+    enter: GlassPopupEnter,
+    exit: GlassPopupExit
+  )
 }
 
 component GlassChoiceItem(
@@ -462,8 +504,7 @@ component GlassChoiceItem(
 ) {
   Panel(
     key: key,
-    style: GlassItemStyle,
-    variant: active ? "primary" : selected ? "secondary" : "subtle",
+    style: active ? GlassItemActive : selected ? GlassItemSelected : GlassItemStyle,
     semantics: { role: "MENU_ITEM", label: label }
   ) {
     Text(text: checked || selected ? "*" : "", layout: { width: 14, height: "content" })
@@ -536,7 +577,7 @@ component GlassEffectFixture() {
           Text(text: "Authored trigger, popup, and rows", style: TelemetryText)
           Select(
             key: "effect.fixture.select",
-            expanded: true,
+            defaultExpanded: true,
             options: [
               { id: "glass", label: "Liquid glass" },
               { id: "prism", label: "Content prism" },

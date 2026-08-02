@@ -1115,6 +1115,7 @@ Children: `false`
 | `selectedId` | string | false | true | — |
 | `defaultSelectedId` | string | false | true | — |
 | `expanded` | boolean | false | true | — |
+| `defaultExpanded` | boolean | false | false | — |
 | `maxVisibleRows` | number | false | false | — |
 | `collapsedIcon` | image | false | false | — |
 | `expandedIcon` | image | false | false | — |

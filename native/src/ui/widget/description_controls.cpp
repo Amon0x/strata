@@ -111,6 +111,10 @@ void select_defaults(WidgetLayoutDefaultsScope& scope) {
         value != nullptr && value->boolean() != nullptr) {
         return *value->boolean();
     }
+    if (const runtime::Value* value = scope.property("defaultExpanded");
+        value != nullptr && value->boolean() != nullptr) {
+        return *value->boolean();
+    }
     return false;
 }
 
