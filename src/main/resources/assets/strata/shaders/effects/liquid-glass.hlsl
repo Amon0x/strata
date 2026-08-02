@@ -9,26 +9,59 @@ float hash21(float2 value) {
     return frac(value.x * value.y);
 }
 
-float4 effect(EffectInput input) {
-    float2 centered = input.localUv * 2.0 - 1.0;
-    float distance = effectDistance(input.pixel);
-    float edgeRange = max(min(effectBounds.z, effectBounds.w) * 0.42, 1.0);
-    float edge = saturate(1.0 + distance / edgeRange);
-    float2 normal = normalize(centered + float2(0.0001, 0.0001));
-    float refraction = effectFloat(2);
-    float noise = (hash21(input.logicalPixel + effectTime() * 17.0) - 0.5) * effectFloat(9);
-    float2 offset = normal * edge * refraction / max(effectTargetSize, 1.0);
-    offset += noise / max(effectTargetSize, 1.0);
+float2 glassNormal(float2 pixel) {
+    float2 gradient = float2(
+        effectDistance(pixel + float2(1.0, 0.0)) -
+            effectDistance(pixel - float2(1.0, 0.0)),
+        effectDistance(pixel + float2(0.0, 1.0)) -
+            effectDistance(pixel - float2(0.0, 1.0))
+    );
+    return normalize(gradient + float2(0.0001, 0.0001));
+}
 
-    float4 glass = sampleEffectSource(input.uv + offset);
-    float4 backdrop = sampleEffectBackdrop(input.uv - offset * 0.35);
-    glass.rgb = adjustSaturation(lerp(glass.rgb, backdrop.rgb, 0.16), effectFloat(7));
+float4 effect(EffectInput input) {
+    float distance = effectDistance(input.pixel);
+    float2 normal = glassNormal(input.pixel);
+    float2 texel = 1.0 / max(effectTargetSize, 1.0);
+
+    float edgeWidth = max(min(effectBounds.z, effectBounds.w) * 0.24, 10.0);
+    float edge = 1.0 - smoothstep(0.0, edgeWidth, max(-distance, 0.0));
+    float lens = pow(saturate(edge), 1.35);
+    float refraction = effectFloat(2);
+    float2 offset = normal * refraction * lens * texel;
+
+    float4 soft = sampleEffectSource(input.uv + offset * 0.28);
+    float3 refracted;
+    refracted.r = sampleEffectBackdrop(input.uv + offset * 1.16).r;
+    refracted.g = sampleEffectBackdrop(input.uv + offset).g;
+    refracted.b = sampleEffectBackdrop(input.uv + offset * 0.84).b;
+
+    float clarity = 0.42 + edge * 0.38;
+    float3 color = lerp(soft.rgb, refracted, clarity);
+    color = adjustSaturation(color, effectFloat(7));
+    color = saturate((color - 0.5) * 1.07 + 0.5);
 
     float4 tint = effectColor(3);
-    glass.rgb = lerp(glass.rgb, tint.rgb, saturate(tint.a));
-    float rim = pow(saturate(1.0 + distance / 7.0), 3.0) * effectFloat(8);
-    float directional = saturate(1.0 - input.localUv.y) * 0.35 + 0.65;
-    glass.rgb += rim * directional;
-    glass.a = 1.0;
-    return glass;
+    color = lerp(color, tint.rgb, saturate(tint.a));
+
+    float innerRim = 1.0 - smoothstep(0.0, 9.0, max(-distance, 0.0));
+    float hairline = 1.0 - smoothstep(0.7, 2.2, abs(distance + 0.8));
+    float2 lightDirection = normalize(float2(-0.58, -0.82));
+    float facingLight = saturate(dot(normal, lightDirection));
+    float facingShade = saturate(dot(normal, -lightDirection));
+    float specular = pow(facingLight, 5.0) * innerRim;
+    float reflected = pow(facingShade, 9.0) * innerRim;
+    float highlight = effectFloat(8);
+
+    color += specular * highlight * float3(1.0, 0.98, 0.92);
+    color += reflected * highlight * 0.34 * float3(0.32, 0.62, 1.0);
+    color += hairline * highlight * 0.46;
+    color += innerRim * edge * float3(0.035, 0.075, 0.12);
+    color -= facingShade * innerRim * 0.055;
+
+    float noise = (hash21(input.logicalPixel + floor(effectTime() * 24.0)) - 0.5) *
+        effectFloat(9) * 0.012;
+    color += noise;
+
+    return float4(saturate(color), 1.0);
 }

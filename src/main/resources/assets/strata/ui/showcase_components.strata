@@ -71,9 +71,19 @@ style GlassTriggerStyle {
   gap: 8;
   alignItems: "CENTER";
   radius: 10;
-  background: #142036EC;
-  border: { width: 1, color: #9FCBFF66 };
-  focusRing: { width: 1, color: #B8DCFF8A };
+  background: #D9EEFF28;
+  border: { width: 1, color: #E4F4FF78 };
+  focusRing: { width: 1, color: #D9F0FFB0 };
+  effect: effect(
+    "demo:liquid-glass",
+    blurRadius: 12,
+    downsample: 1,
+    refraction: 11,
+    tint: #B8E4FF14,
+    saturation: 1.38,
+    highlight: 0.72,
+    noise: 0.25
+  );
 }
 
 style GlassPopupStyle {
@@ -83,8 +93,8 @@ style GlassPopupStyle {
   padding: 6;
   gap: 3;
   radius: 14;
-  background: #142137D9;
-  border: { width: 1, color: #B9DBFF70 };
+  background: #B9DDFF38;
+  border: { width: 1, color: #E3F3FF82 };
   anchorSide: "BOTTOM";
   anchorAlign: "START";
   anchorGap: 7;
@@ -92,13 +102,13 @@ style GlassPopupStyle {
   anchorShift: true;
   effect: effect(
     "demo:liquid-glass",
-    blurRadius: 18,
+    blurRadius: 14,
     downsample: 2,
-    refraction: 9,
-    tint: #7DB8FF35,
-    saturation: 1.18,
-    highlight: 0.16,
-    noise: 0.7
+    refraction: 15,
+    tint: #B8E3FF18,
+    saturation: 1.42,
+    highlight: 0.78,
+    noise: 0.22
   );
 }
 
@@ -134,20 +144,20 @@ style GlassTooltipStyle {
   height: "content";
   padding: { horizontal: 10, vertical: 7 };
   radius: 9;
-  background: #17243AE8;
-  border: { width: 1, color: #C6E4FF70 };
+  background: #C4E2FF32;
+  border: { width: 1, color: #E6F5FF80 };
   anchorSide: "TOP";
   anchorAlign: "CENTER";
   anchorGap: 8;
   effect: effect(
     "demo:liquid-glass",
-    blurRadius: 12,
-    downsample: 2,
-    refraction: 5,
-    tint: #7DB8FF24,
-    saturation: 1.1,
-    highlight: 0.12,
-    noise: 0.4
+    blurRadius: 10,
+    downsample: 1,
+    refraction: 10,
+    tint: #C2E8FF16,
+    saturation: 1.35,
+    highlight: 0.7,
+    noise: 0.2
   );
 }
 
@@ -209,16 +219,17 @@ style EffectDemoCard {
 }
 
 style LiquidDemoCard extends EffectDemoCard {
-  background: #122039A8;
+  background: #C6E7FF20;
+  border: { width: 1, color: #E7F5FF82 };
   effect: effect(
     "demo:liquid-glass",
-    blurRadius: 20,
+    blurRadius: 14,
     downsample: 2,
-    refraction: 8,
-    tint: #76B8FF2E,
-    saturation: 1.2,
-    highlight: 0.2,
-    noise: 0.35
+    refraction: 18,
+    tint: #BCE7FF18,
+    saturation: 1.48,
+    highlight: 0.82,
+    noise: 0.2
   );
 }
 
