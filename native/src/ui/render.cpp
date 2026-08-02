@@ -542,15 +542,7 @@ RenderOperationCounters RenderEngine::render(
             inherited_transform,
             transform
         );
-        const double local_opacity = std::clamp(
-            computed != nullptr
-                ? computed->number(MotionProperty::opacity).value_or(
-                      visual_number(node, "opacity").value_or(1.0)
-                  )
-                : visual_number(node, "opacity").value_or(1.0),
-            0.0,
-            1.0
-        );
+        const double local_opacity = local_presentation_opacity(node, &motion);
         const double descendant_opacity = inherited_opacity * local_opacity;
         const std::optional<MaterialState> authored_material = material_state(style_value("material"));
         const std::optional<MaterialState> local_material = authored_material.has_value()

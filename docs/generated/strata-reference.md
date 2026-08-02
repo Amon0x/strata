@@ -121,10 +121,12 @@ Children: `false`
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
 | `label` | string | false | false | — |
+| `description` | string | false | false | — |
 | `key` | key | false | false | — |
 | `checked` | boolean | false | true | — |
 | `defaultChecked` | boolean | false | false | — |
 | `enabled` | boolean | false | false | — |
+| `presentationTemplate` | componentTemplate | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |

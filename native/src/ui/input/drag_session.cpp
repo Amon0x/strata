@@ -367,6 +367,7 @@ InputOperationResult InputRouter::advance_frame() {
         static_cast<void>(auto_scroll_drag(session, result));
     }
     route_active_lifecycle_hooks(false, result);
+    synchronize_authored_presentations();
     return result;
 }
 

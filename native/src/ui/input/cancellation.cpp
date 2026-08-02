@@ -7,7 +7,8 @@ namespace strata::ui {
 InputOperationResult InputRouter::cancel_interactions() {
     InputOperationResult result;
 
-    clear_focus("invalid_target", result);
+    dismiss_transient_popups(nullptr, result, true, false);
+    clear_focus("invalid_target", result, false);
     static_cast<void>(cancel_active_drag(result));
 
     if (tree_ != nullptr) {
@@ -69,6 +70,7 @@ InputOperationResult InputRouter::cancel_interactions() {
     queued_inputs_.clear();
     input_queue_overflow_reported_ = false;
 
+    synchronize_authored_presentations();
     if (frame_invalidator_) frame_invalidator_();
     return result;
 }

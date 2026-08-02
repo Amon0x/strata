@@ -45,6 +45,7 @@ void icon_button_content(WidgetRenderScope& scope) {
 }
 
 void checkbox_content(WidgetRenderScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) return;
     const bool checked = scope.effective_boolean(
         "checked", "$checked", "defaultChecked", false
     );

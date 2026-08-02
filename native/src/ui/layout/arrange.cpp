@@ -26,6 +26,43 @@ namespace {
     return value.has_value() ? std::optional<Rect>(translated_rect(*value, delta)) : std::nullopt;
 }
 
+[[nodiscard]] double arranged_axis_size(
+    const LayoutStyle& style,
+    const Size measured_size,
+    const bool horizontal,
+    const double available,
+    const LayoutAlign alignment
+) noexcept {
+    const LayoutSize& authored = horizontal ? style.width : style.height;
+    const double measured = horizontal ? measured_size.width : measured_size.height;
+    // Fill is resolved and min/max-clamped during measurement. Stretching it back to the raw
+    // parent slot here discards that result, leaving descendants constrained while the widget's
+    // painted and hit bounds escape their authored maximum.
+    double result = authored.kind == LayoutSize::Kind::fill
+        ? std::min(measured, std::max(0.0, available))
+        : cross_size(measured, available, alignment);
+    const std::optional<LayoutSize>& maximum =
+        horizontal ? style.max_width : style.max_height;
+    if (maximum.has_value()) {
+        const double margin = horizontal
+            ? style.margin.horizontal()
+            : style.margin.vertical();
+        const double padding = horizontal
+            ? style.padding.horizontal()
+            : style.padding.vertical();
+        const double border_available = std::max(0.0, available - margin);
+        const double intrinsic_content = std::max(0.0, measured - margin - padding);
+        const double maximum_content = resolve_content_size(
+            *maximum,
+            intrinsic_content,
+            border_available,
+            padding
+        );
+        result = std::min(result, maximum_content + margin + padding);
+    }
+    return result;
+}
+
 void translate_record(
     LayoutRecord& record,
     const Point delta,
@@ -223,19 +260,13 @@ void LayoutEngine::arrange(
             for (const std::size_t child_index : line.children) {
                 const MeasuredNode& child = *measured.children[child_index];
                 const LayoutAlign alignment = child.style.align_self.value_or(style.align_items);
-                const double measured_cross = horizontal
-                                                  ? child.measured_size.height
-                                                  : child.measured_size.width;
-                const LayoutSize& authored_cross = horizontal
-                                                       ? child.style.height
-                                                       : child.style.width;
-                const double child_cross = authored_cross.kind == LayoutSize::Kind::fill
-                                               ? line.cross_size
-                                               : cross_size(
-                                                     measured_cross,
-                                                     line.cross_size,
-                                                     alignment
-                                                 );
+                const double child_cross = arranged_axis_size(
+                    child.style,
+                    child.measured_size,
+                    !horizontal,
+                    line.cross_size,
+                    alignment
+                );
                 const double child_cross_offset = cross_offset(
                     line.cross_size, child_cross, alignment
                 );
@@ -277,9 +308,13 @@ void LayoutEngine::arrange(
         double cursor = content_bounds.x + spacing.start;
         for (const MeasuredNodePtr& child : flow_children) {
             const LayoutAlign child_align = child->style.align_self.value_or(style.align_items);
-            const double height = child->style.height.kind == LayoutSize::Kind::fill
-                                      ? content_bounds.height
-                                      : cross_size(child->measured_size.height, content_bounds.height, child_align);
+            const double height = arranged_axis_size(
+                child->style,
+                child->measured_size,
+                false,
+                content_bounds.height,
+                child_align
+            );
             const double y = content_bounds.y + cross_offset(content_bounds.height, height, child_align);
             arrange(child, Rect{cursor, y, child->measured_size.width, height}, child_clip, pin_context, environment, result);
             cursor += child->measured_size.width + style.gap.x + spacing.between;
@@ -294,9 +329,13 @@ void LayoutEngine::arrange(
         double cursor = content_bounds.y + spacing.start;
         for (const MeasuredNodePtr& child : flow_children) {
             const LayoutAlign child_align = child->style.align_self.value_or(style.align_items);
-            const double width = child->style.width.kind == LayoutSize::Kind::fill
-                                     ? content_bounds.width
-                                     : cross_size(child->measured_size.width, content_bounds.width, child_align);
+            const double width = arranged_axis_size(
+                child->style,
+                child->measured_size,
+                true,
+                content_bounds.width,
+                child_align
+            );
             const double x = content_bounds.x + cross_offset(content_bounds.width, width, child_align);
             arrange(child, Rect{x, cursor, width, child->measured_size.height}, child_clip, pin_context, environment, result);
             cursor += child->measured_size.height + style.gap.y + spacing.between;
@@ -342,11 +381,19 @@ void LayoutEngine::arrange(
             const LayoutAlign vertical = child.style.align_self.value_or(
                 LayoutAlign::stretch
             );
-            const double width = cross_size(
-                child.measured_size.width, cell_width, horizontal
+            const double width = arranged_axis_size(
+                child.style,
+                child.measured_size,
+                true,
+                cell_width,
+                horizontal
             );
-            const double height = cross_size(
-                child.measured_size.height, cell_height, vertical
+            const double height = arranged_axis_size(
+                child.style,
+                child.measured_size,
+                false,
+                cell_height,
+                vertical
             );
             arrange(
                 measured.children[placement->child_index],
@@ -534,12 +581,20 @@ void LayoutEngine::arrange(
         for (const MeasuredNodePtr& child : ordered) {
             const LayoutAlign horizontal = child->style.justify_self.value_or(style.align_items);
             const LayoutAlign vertical = child->style.align_self.value_or(style.align_items);
-            const double width = child->style.width.kind == LayoutSize::Kind::fill
-                                     ? content_bounds.width
-                                     : cross_size(child->measured_size.width, content_bounds.width, horizontal);
-            const double height = child->style.height.kind == LayoutSize::Kind::fill
-                                      ? content_bounds.height
-                                      : cross_size(child->measured_size.height, content_bounds.height, vertical);
+            const double width = arranged_axis_size(
+                child->style,
+                child->measured_size,
+                true,
+                content_bounds.width,
+                horizontal
+            );
+            const double height = arranged_axis_size(
+                child->style,
+                child->measured_size,
+                false,
+                content_bounds.height,
+                vertical
+            );
             arrange(
                 child,
                 Rect{

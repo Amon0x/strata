@@ -322,6 +322,7 @@ InputOperationResult InputRouter::process_queued() {
         }, std::move(input)));
     }
     if (queued_inputs_.empty()) input_queue_overflow_reported_ = false;
+    synchronize_authored_presentations();
     return result;
 }
 

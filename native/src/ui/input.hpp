@@ -479,6 +479,7 @@ private:
     [[nodiscard]] bool tooltip_engaged(const RetainedNode& node) const noexcept;
     [[nodiscard]] bool tooltip_disclosures_need_frame() const noexcept;
     void update_tooltip_disclosures();
+    void synchronize_authored_presentations();
     [[nodiscard]] bool focusable(const RetainedNode& node) const noexcept;
     [[nodiscard]] bool tabbable(const RetainedNode& node) const noexcept;
     [[nodiscard]] RetainedNode* focusable_ancestor(RetainedNode* node) const noexcept;
@@ -495,14 +496,23 @@ private:
     ) const noexcept;
     [[nodiscard]] RetainedNode* focus_boundary() const noexcept;
     [[nodiscard]] bool within_focus_containment(const RetainedNode& node) const noexcept;
-    void dismiss_transient_popups(const RetainedNode* target, InputOperationResult& result);
+    void dismiss_transient_popups(
+        const RetainedNode* target,
+        InputOperationResult& result,
+        bool include_modal = true,
+        bool restore_modal_focus = true
+    );
     [[nodiscard]] data::JsonValue source(const RetainedNode& node) const;
     void focus(
         const RetainedNode& node,
         std::string_view reason,
         InputOperationResult& result
     );
-    void clear_focus(std::string_view reason, InputOperationResult& result);
+    void clear_focus(
+        std::string_view reason,
+        InputOperationResult& result,
+        bool dismiss_popups = true
+    );
     void hover_route(const RetainedNode* target);
     runtime::ActionDispatchOutcome emit(
         data::JsonValue event,
@@ -618,6 +628,7 @@ private:
         RetainedNode* node = nullptr;
         Rect bounds;
         std::optional<Rect> traversal_clip;
+        MotionTransform transform;
     };
     void prepare_pointer_geometry() const;
     [[nodiscard]] const std::vector<WidgetSubtarget>& projected_subtargets(
@@ -922,6 +933,7 @@ private:
     bool focus_highlight_visible_ = true;
     std::optional<std::uint64_t> synchronized_modal_;
     std::optional<std::uint64_t> focus_before_modal_;
+    bool dismissing_transient_popups_ = false;
     std::optional<std::string> focus_containment_key_;
     std::optional<std::uint64_t> focus_before_containment_;
     std::set<std::uint64_t> hovered_;

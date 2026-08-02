@@ -392,6 +392,7 @@ struct Host::Impl final {
         close_session(performance_hud);
         close_session(debug);
         close_session(settings);
+        close_session(control_deck);
         close_session(effect_gallery);
         close_session(showcase);
         try {
@@ -1099,6 +1100,19 @@ struct Host::Impl final {
         );
     }
 
+    void create_control_deck() {
+        if (control_deck.surface.has_value()) return;
+        control_deck = create_session(
+            "control-deck.desktop",
+            "assets/strata/ui/control_deck.schemas.json"
+        );
+        activate(
+            control_deck,
+            "assets/strata/ui/control_deck.strata",
+            "ControlDeckMenu"
+        );
+    }
+
     [[nodiscard]] static TimingSummary summarize(const TimingWindow& timings) {
         return TimingSummary{timings.last(), timings.p95(), timings.maximum()};
     }
@@ -1465,7 +1479,8 @@ struct Host::Impl final {
             area.push_back(contracts::strata_hub::HubFrameAreaItem{0.0, 1.0});
         }
 
-        const int open_count = (effect_gallery_enabled ? 1 : 0) +
+        const int open_count = (control_deck_enabled ? 1 : 0) +
+            (effect_gallery_enabled ? 1 : 0) +
             (settings_enabled ? 1 : 0) + (showcase_enabled ? 1 : 0) +
             (debug_enabled ? 1 : 0) + (performance_hud_enabled ? 1 : 0);
         std::string status;
@@ -1473,14 +1488,16 @@ struct Host::Impl final {
         else if (open_count == 1) status = "1 surface open · shortcuts stay live";
         else status = std::to_string(open_count) + " surfaces open · shortcuts stay live";
 
-        const std::array<std::array<std::string_view, 4U>, 5U> entries{{
+        const std::array<std::array<std::string_view, 4U>, 6U> entries{{
+            {"hub.control-deck", "Control Deck", "Dark authored configuration menu", "F2"},
             {"hub.effects", "Effect gallery", "Authored backdrop and content programs", "F3"},
             {"hub.settings", "Settings", "Durable application state", "F6"},
             {"hub.showcase", "Component showcase", "Widgets and extensions", "F7"},
             {"hub.profiler", "Profiler overlay", "Layout and render timings", "F8"},
             {"hub.performance", "Performance HUD", "Passive frame telemetry", "F9"},
         }};
-        const std::array<bool, 5U> active{
+        const std::array<bool, 6U> active{
+            control_deck_enabled,
             effect_gallery_enabled,
             settings_enabled,
             showcase_enabled,
@@ -1517,6 +1534,8 @@ struct Host::Impl final {
             if (hub.surface.has_value()) {
                 static_cast<void>(strata_surface_cancel_interactions(hub.surface->native_handle()));
             }
+        } else if (target == "hub.control-deck") {
+            toggle_control_deck();
         } else if (target == "hub.effects") {
             toggle_effect_gallery();
         } else if (target == "hub.settings") {
@@ -1659,6 +1678,18 @@ struct Host::Impl final {
         }
     }
 
+    void toggle_control_deck() {
+        if (!control_deck_enabled && !control_deck.surface.has_value()) {
+            create_control_deck();
+        }
+        control_deck_enabled = !control_deck_enabled;
+        if (!control_deck_enabled && control_deck.surface.has_value()) {
+            static_cast<void>(strata_surface_cancel_interactions(
+                control_deck.surface->native_handle()
+            ));
+        }
+    }
+
     void toggle_showcase() {
         if (!showcase_enabled && !showcase.surface.has_value()) {
             create_showcase();
@@ -1728,6 +1759,7 @@ struct Host::Impl final {
         const strata_surface_environment next = environment();
         for (Session* session : {
                  &showcase,
+                 &control_deck,
                  &effect_gallery,
                  &settings,
                  &debug,
@@ -1750,6 +1782,7 @@ struct Host::Impl final {
         Session* const session = hub_enabled ? &hub
             : debug_enabled ? &debug
             : settings_enabled ? &settings
+            : control_deck_enabled ? &control_deck
             : effect_gallery_enabled ? &effect_gallery
             : showcase_enabled ? &showcase
             : nullptr;
@@ -1835,6 +1868,7 @@ struct Host::Impl final {
         }
         for (Session* session : {
                  &showcase,
+                 &control_deck,
                  &effect_gallery,
                  &settings,
                  &debug,
@@ -1845,6 +1879,7 @@ struct Host::Impl final {
         }
         frame_time = now();
         advance_async(showcase);
+        advance_async(control_deck);
         advance_async(effect_gallery);
         advance_async(settings);
         advance_async(debug);
@@ -1894,6 +1929,11 @@ struct Host::Impl final {
             const strata_surface_frame_info info =
                 effect_gallery.surface->frame(frame_time);
             had_draws = render_session(effect_gallery, info) || had_draws;
+        }
+        if (control_deck_enabled && control_deck.surface.has_value()) {
+            const strata_surface_frame_info info =
+                control_deck.surface->frame(frame_time);
+            had_draws = render_session(control_deck, info) || had_draws;
         }
         if (settings_enabled && settings.surface.has_value()) {
             const strata_surface_frame_info info = settings.surface->frame(frame_time);
@@ -1968,6 +2008,7 @@ struct Host::Impl final {
     DurableWriter durable_writer;
     std::string durable_read_buffer;
     Session showcase;
+    Session control_deck;
     Session effect_gallery;
     Session settings;
     Session debug;
@@ -2002,6 +2043,7 @@ struct Host::Impl final {
     double display_scale = 1.0;
     bool showcase_enabled = false;
     bool showcase_closing = false;
+    bool control_deck_enabled = false;
     bool effect_gallery_enabled = false;
     bool settings_enabled = false;
     bool debug_enabled = false;
@@ -2082,10 +2124,11 @@ void Host::scroll(
 
 void Host::key(const std::uint32_t virtual_key, const std::uint32_t action) {
     impl_->flush_pointer_move();
-    if (virtual_key == VK_F3 ||
+    if (virtual_key == VK_F2 || virtual_key == VK_F3 ||
         (virtual_key >= VK_F6 && virtual_key <= VK_F10)) {
         if (action == STRATA_KEY_PRESS) {
             switch (virtual_key) {
+            case VK_F2: impl_->toggle_control_deck(); break;
             case VK_F3: impl_->toggle_effect_gallery(); break;
             case VK_F6: impl_->toggle_settings(); break;
             case VK_F7: impl_->toggle_showcase(); break;
@@ -2126,8 +2169,9 @@ void Host::ime_preedit(
 
 void Host::cancel_interactions() noexcept {
     impl_->pending_pointer_move.reset();
-    for (Impl::Session* session : {
+        for (Impl::Session* session : {
              &impl_->showcase,
+             &impl_->control_deck,
              &impl_->effect_gallery,
              &impl_->settings,
              &impl_->debug,

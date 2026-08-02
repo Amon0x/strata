@@ -73,6 +73,23 @@ MotionTransform local_presentation_transform(
     };
 }
 
+double local_presentation_opacity(
+    const RetainedNode& node,
+    const MotionRuntime* const motion
+) noexcept {
+    const MotionComputedValues* computed =
+        motion != nullptr ? motion->computed_values(node.identity()) : nullptr;
+    return std::clamp(
+        computed != nullptr
+            ? computed->number(MotionProperty::opacity).value_or(
+                  visual_number(node, "opacity").value_or(1.0)
+              )
+            : visual_number(node, "opacity").value_or(1.0),
+        0.0,
+        1.0
+    );
+}
+
 MotionTransform concatenate_presentation_transform(
     const MotionTransform& parent,
     const MotionTransform& local

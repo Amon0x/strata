@@ -1,0 +1,13 @@
+{
+  "widgets": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "actions": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "host": []
+}

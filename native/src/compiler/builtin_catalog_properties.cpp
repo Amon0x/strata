@@ -251,6 +251,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "boolean", .type = declared_type_reference("t2")},
         DeclaredProperty{.name = "borderStroke", .type = declared_type_reference("t38")},
         DeclaredProperty{.name = "breadcrumbItems", .type = declared_type_reference("t39")},
+        DeclaredProperty{.name = "checkboxState", .type = declared_type_reference("t168")},
         DeclaredProperty{.name = "color", .type = declared_type_reference("t8")},
         DeclaredProperty{.name = "duration", .type = declared_type_reference("t9")},
         DeclaredProperty{.name = "easing", .type = declared_type_reference("t10")},

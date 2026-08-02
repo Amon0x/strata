@@ -23,6 +23,12 @@ class RetainedNode;
     const MotionRuntime& motion
 ) noexcept;
 
+/** Effective local opacity shared by rendering and presentation-aware input hit testing. */
+[[nodiscard]] double local_presentation_opacity(
+    const RetainedNode& node,
+    const MotionRuntime* motion
+) noexcept;
+
 [[nodiscard]] MotionTransform concatenate_presentation_transform(
     const MotionTransform& parent,
     const MotionTransform& local

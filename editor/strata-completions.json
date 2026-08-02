@@ -3730,6 +3730,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "description",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "key",
           "nullable": false,
           "required": false,
@@ -3758,6 +3766,14 @@
           "nullable": false,
           "required": false,
           "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "presentationTemplate",
+          "nullable": false,
+          "required": false,
+          "type": "componentTemplate"
         },
         {
           "aliases": [],

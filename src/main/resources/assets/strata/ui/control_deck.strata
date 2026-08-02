@@ -1,0 +1,825 @@
+// F2 Control Deck: a dark, focused configuration surface authored entirely in .strata.
+
+style Clear { background: null; border: null; }
+
+style DeckRoot {
+  kind: "OVERLAY";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 30;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  background: #050608B8;
+  border: null;
+  effect: effect("blur", radius: 8, downsample: 2);
+}
+
+style DeckShell {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  maxWidth: 1080;
+  maxHeight: 690;
+  radius: 15;
+  clip: true;
+  background: #0E0F11F8;
+  border: { width: 1, color: #41444BFF };
+}
+
+style DeckHeader {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 61;
+  padding: { horizontal: 20, vertical: 14 };
+  gap: 12;
+  alignItems: "CENTER";
+  radius: 0;
+  background: null;
+  border: null;
+}
+
+style DeckHeaderRule { width: { weight: 1 }; height: 1; background: #24262BFF; border: null; }
+
+style DeckTitle { font: "strata:fonts/default-medium"; pixelSize: 23; color: #F1F2F4FF; }
+style DeckScope { font: "strata:fonts/mono"; pixelSize: 13; color: #6B9EFFFF; }
+style DeckHint { font: "strata:fonts/mono"; pixelSize: 11; color: #686B72FF; }
+
+style DeckBody extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: { weight: 1 };
+}
+
+style DeckSidebar {
+  kind: "COLUMN";
+  width: 190;
+  height: { weight: 1 };
+  padding: { horizontal: 12, vertical: 16 };
+  gap: 8;
+  background: #0D0E10FF;
+  border: { width: 1, color: #24262AFF };
+}
+
+style CategoryItem {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 48;
+  padding: { horizontal: 12, vertical: 9 };
+  gap: 11;
+  alignItems: "CENTER";
+  radius: 8;
+  background: #20242B00;
+  border: { width: 1, color: #2E354000 };
+  hoverOverlay: #416FCF14;
+  activeOverlay: #416FCF20;
+  animateChanges: { properties: ["background", "border"], policy: "fast" };
+}
+
+style CategoryItemSelected extends CategoryItem {
+  background: #20242BFF;
+  border: { width: 1, color: #2E3540FF };
+}
+
+style CategoryMark {
+  kind: "PANEL";
+  width: 28;
+  height: 28;
+  radius: 8;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  background: #17191DFF;
+  border: { width: 1, color: #35383EFF };
+}
+style CategoryMarkSelected extends CategoryMark {
+  background: #416FCFFF;
+  border: { width: 1, color: #75A0FFFF };
+}
+style CategoryCode { font: "strata:fonts/mono"; pixelSize: 10; color: #A6A9B0FF; }
+style CategoryCodeSelected { font: "strata:fonts/mono"; pixelSize: 10; color: #FFFFFFFF; }
+style CategoryLabel { pixelSize: 14; color: #8D9097FF; }
+style CategoryLabelSelected { font: "strata:fonts/default-medium"; pixelSize: 14; color: #76A3FFFF; }
+
+style SidebarFoot extends Clear {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: 10;
+  gap: 5;
+}
+style SidebarFootTitle { font: "strata:fonts/default-medium"; pixelSize: 12; color: #C8CAD0FF; }
+style SidebarFootCopy { pixelSize: 11; color: #666A72FF; }
+
+style ContentHost {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 18;
+  gap: 15;
+  background: #141517FF;
+  border: null;
+}
+
+style ContentHeader extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 50;
+  gap: 12;
+  alignItems: "CENTER";
+}
+style ContentTitle { font: "strata:fonts/default-medium"; pixelSize: 18; color: #E3E4E7FF; }
+style ContentSubtitle { pixelSize: 12; color: #74777EFF; }
+
+style SegmentRail extends Clear {
+  kind: "ROW";
+  width: "content";
+  height: 42;
+  gap: 8;
+}
+style Segment {
+  kind: "ROW";
+  width: 138;
+  height: 42;
+  padding: { horizontal: 16, vertical: 10 };
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  radius: 7;
+  background: #1D1F22FF;
+  border: { width: 1, color: #282A2EFF };
+}
+style SegmentSelected extends Segment {
+  background: #202630FF;
+  border: { width: 1, color: #303947FF };
+}
+style SegmentText { font: "strata:fonts/default-medium"; pixelSize: 13; color: #A1A4AAFF; }
+style SegmentTextSelected { font: "strata:fonts/default-medium"; pixelSize: 13; color: #6F9FFFFF; }
+
+style DeckScroll {
+  kind: "SCROLL";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  background: null;
+  border: null;
+}
+style SettingsStack extends Clear {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 17;
+  padding: { right: 8, bottom: 8 };
+}
+
+style SectionBlock extends Clear {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 9;
+}
+style SectionHeadingRow extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 28;
+  gap: 12;
+  alignItems: "CENTER";
+}
+style SectionHeading { font: "strata:fonts/default-medium"; pixelSize: 12; color: #B8BAC0FF; }
+style SectionRule { kind: "PANEL"; width: { weight: 1 }; height: 1; background: #282A2EFF; border: null; }
+
+style SettingsCard {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: 14;
+  gap: 9;
+  radius: 10;
+  background: #18191BFF;
+  border: { width: 1, color: #2B2D31FF };
+}
+
+style CheckRow extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 40;
+  gap: 9;
+  alignItems: "CENTER";
+}
+style CheckText { pixelSize: 14; color: #BFC1C6FF; }
+style CheckTextHover { pixelSize: 14; color: #E4E6EAFF; }
+style CheckMeta { pixelSize: 11; color: #676A70FF; }
+style CheckFocusShell {
+  kind: "PANEL";
+  width: 26;
+  height: 26;
+  radius: 6;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  background: #6B9EFF00;
+  border: { width: 1, color: #6B9EFF00 };
+  animateChanges: { properties: ["background", "border"], policy: "fast" };
+}
+style CheckFocusShellOn extends CheckFocusShell {
+  background: #6B9EFF16;
+  border: { width: 1, color: #6B9EFFA0 };
+}
+style AuthoredCheck {
+  kind: "PANEL";
+  width: 20;
+  height: 20;
+  radius: 4;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  background: #202226FF;
+  border: { width: 1, color: #4A4D54FF };
+  animateChanges: { properties: ["background", "border"], policy: "fast" };
+}
+style AuthoredCheckHover extends AuthoredCheck {
+  background: #292D34FF;
+  border: { width: 1, color: #7198E6FF };
+}
+style AuthoredCheckPressed extends AuthoredCheck {
+  background: #30394AFF;
+  border: { width: 1, color: #82A9F5FF };
+}
+style AuthoredCheckOn extends AuthoredCheck {
+  background: #4F7DD7FF;
+  border: { width: 1, color: #7AA4F4FF };
+}
+style AuthoredCheckOnHover extends AuthoredCheck {
+  background: #618CE4FF;
+  border: { width: 1, color: #9ABBFFFF };
+}
+style AuthoredCheckOnPressed extends AuthoredCheck {
+  background: #426BBEFF;
+  border: { width: 1, color: #789DE6FF };
+}
+
+style ChoiceRow extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 54;
+  gap: 16;
+  alignItems: "CENTER";
+}
+style ChoiceCopy extends Clear {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 3;
+}
+style ChoiceLabel { font: "strata:fonts/default-medium"; pixelSize: 13; color: #BFC1C6FF; }
+style ChoiceDescription { pixelSize: 11; color: #676A70FF; }
+
+style DeckSelectTrigger {
+  kind: "ROW";
+  width: 340;
+  height: 44;
+  padding: { horizontal: 14, vertical: 10 };
+  gap: 10;
+  alignItems: "CENTER";
+  radius: 7;
+  background: #202123FF;
+  border: { width: 1, color: #2C2E32FF };
+  focusRing: { width: 1, color: #6B9EFFA0 };
+}
+style DeckSelectPopup {
+  kind: "COLUMN";
+  width: 340;
+  height: "content";
+  padding: 6;
+  gap: 3;
+  radius: 9;
+  background: #161719F7;
+  border: { width: 1, color: #33363BFF };
+  anchorSide: "BOTTOM";
+  anchorAlign: "START";
+  anchorGap: 5;
+  anchorFlip: true;
+  anchorShift: true;
+}
+style DeckSelectItem {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 38;
+  padding: { horizontal: 11, vertical: 9 };
+  gap: 9;
+  alignItems: "CENTER";
+  radius: 6;
+  background: #252A3200;
+  border: { width: 1, color: #343B4700 };
+  animateChanges: { properties: ["background", "border"], policy: "fast" };
+}
+style DeckSelectItemSelected extends DeckSelectItem {
+  background: #416FCF24;
+  border: { width: 1, color: #668FE044 };
+}
+style DeckSelectItemActive extends DeckSelectItem {
+  background: #252A32FF;
+  border: { width: 1, color: #343B47FF };
+}
+style DeckSelectItemSelectedActive extends DeckSelectItem {
+  background: #34445FFF;
+  border: { width: 1, color: #5879B3FF };
+}
+style SelectValue { font: "strata:fonts/default-medium"; pixelSize: 13; color: #E0E1E4FF; }
+style SelectMeta { font: "strata:fonts/mono"; pixelSize: 10; color: #70747BFF; }
+style SelectedMark { kind: "PANEL"; width: 6; height: 6; radius: 3; background: #6F9FFFFF; border: null; }
+style EmptyMark extends Clear { width: 6; height: 6; }
+
+style StatusCard {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 58;
+  padding: { horizontal: 14, vertical: 12 };
+  gap: 11;
+  alignItems: "CENTER";
+  radius: 9;
+  background: #17181AFF;
+  border: { width: 1, color: #2C2E32FF };
+}
+style StatusDot { kind: "PANEL"; width: 8; height: 8; radius: 4; background: #55C869FF; border: null; }
+style StatusTitle { font: "strata:fonts/default-medium"; pixelSize: 13; color: #C9CBD0FF; }
+style StatusMeta { pixelSize: 11; color: #696C73FF; }
+
+style ProfileGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 10; }
+style ProfileCard {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: 116;
+  padding: 14;
+  gap: 8;
+  radius: 9;
+  background: #191A1CFF;
+  border: { width: 1, color: #2C2E32FF };
+}
+style ProfileCardSelected extends ProfileCard { border: { width: 1, color: #4C76C9FF }; background: #1A1E25FF; }
+style ProfileTitle { font: "strata:fonts/default-medium"; pixelSize: 14; color: #D6D8DCFF; }
+style ProfileMeta { pixelSize: 11; color: #6F7279FF; }
+style ProfileBadge {
+  kind: "PANEL";
+  width: "content";
+  height: 20;
+  padding: { horizontal: 7, vertical: 3 };
+  radius: 5;
+  background: #416FCF24;
+  border: { width: 1, color: #557ED036 };
+}
+style ProfileBadgeText { font: "strata:fonts/mono"; pixelSize: 9; color: #78A4FFFF; }
+
+animation DeckEnter {
+  from { opacity: 0, translateY: 10, scale: 0.985 }
+  to { opacity: 1, translateY: 0, scale: 1 }
+  duration: 180ms;
+  easing: "cubic-out";
+  fillMode: "FORWARDS";
+}
+animation PopupTransition {
+  from { opacity: 0, translateY: -4 }
+  to { opacity: 1, translateY: 0 }
+  duration: 120ms;
+  easing: "cubic-out";
+  fillMode: "FORWARDS";
+}
+
+component CategoryButton(id: string, code: string, label: string, selected: boolean, activate: action) {
+  Panel(
+    key: id,
+    style: selected ? CategoryItemSelected : CategoryItem,
+    behaviors: [
+      { id: "strata.focusable" },
+      { id: "strata.hoverable" },
+      { id: "strata.activate", action: activate }
+    ]
+  ) {
+    Panel(style: selected ? CategoryMarkSelected : CategoryMark) {
+      Text(text: code, style: selected ? CategoryCodeSelected : CategoryCode)
+    }
+    Text(
+      text: label,
+      style: selected ? CategoryLabelSelected : CategoryLabel,
+      layout: { width: { weight: 1 }, height: "content" }
+    )
+  }
+}
+
+component SegmentButton(id: string, label: string, selected: boolean, activate: action) {
+  Panel(
+    key: id,
+    style: selected ? SegmentSelected : Segment,
+    behaviors: [
+      { id: "strata.focusable" },
+      { id: "strata.hoverable" },
+      { id: "strata.activate", action: activate }
+    ]
+  ) {
+    Text(text: label, style: selected ? SegmentTextSelected : SegmentText)
+  }
+}
+
+component DeckChoiceTrigger(key: key, label: string, enabled: boolean, expanded: boolean) {
+  Panel(key: key, style: DeckSelectTrigger) {
+    Text(text: label, style: SelectValue, layout: { width: { weight: 1 }, height: "content" })
+    Text(text: expanded ? "⌃" : "⌄", style: SelectMeta)
+  }
+}
+
+component DeckChoicePopup(key: key, level: number, expanded: boolean) {
+  Panel(key: key, style: DeckSelectPopup, transition: PopupTransition)
+}
+
+component DeckChoiceItem(
+  key: key,
+  id: string,
+  label: string,
+  value: any,
+  index: number,
+  level: number,
+  enabled: boolean,
+  selected: boolean,
+  active: boolean,
+  checked: boolean,
+  separator: boolean,
+  hasChildren: boolean,
+  shortcut: string
+) {
+  Panel(
+    key: key,
+    style: active && selected
+      ? DeckSelectItemSelectedActive
+      : active ? DeckSelectItemActive
+      : selected ? DeckSelectItemSelected
+      : DeckSelectItem
+  ) {
+    Panel(style: selected ? SelectedMark : EmptyMark)
+    Text(text: label, style: SelectValue, layout: { width: { weight: 1 }, height: "content" })
+  }
+}
+
+component ChoiceSetting(
+  key: key,
+  label: string,
+  description: string,
+  options: selectItems,
+  initial: string
+) {
+  Panel(style: ChoiceRow) {
+    Panel(style: ChoiceCopy) {
+      Text(text: label, style: ChoiceLabel)
+      Text(text: description, style: ChoiceDescription)
+    }
+    Select(
+      key: key,
+      options: options,
+      defaultSelectedId: initial,
+      triggerTemplate: DeckChoiceTrigger,
+      popupTemplate: DeckChoicePopup,
+      itemTemplate: DeckChoiceItem
+    )
+  }
+}
+
+component DeckCheckboxPresentation(
+  key: key,
+  label: string,
+  description: string,
+  control: checkboxState
+) {
+  Panel(
+    key: key,
+    style: CheckRow
+  ) {
+    Panel(style: control.focusVisible ? CheckFocusShellOn : CheckFocusShell) {
+      Panel(
+        style: control.checked
+          ? control.pressed ? AuthoredCheckOnPressed
+            : control.hovered ? AuthoredCheckOnHover
+            : AuthoredCheckOn
+          : control.pressed ? AuthoredCheckPressed
+            : control.hovered ? AuthoredCheckHover
+            : AuthoredCheck
+      ) {
+        if control.checked {
+          Draw(
+            style: Clear,
+            layout: { width: 12, height: 12 },
+            shapes: [
+              {
+                kind: "path",
+                commands: "M 0.10 0.52 L 0.39 0.80 L 0.91 0.19",
+                stroke: #FFFFFFFF,
+                strokeStyle: { width: 2, cap: "round", join: "round" }
+              }
+            ]
+          )
+        }
+      }
+    }
+    Panel(style: ChoiceCopy) {
+      Text(text: label, style: control.hovered ? CheckTextHover : CheckText)
+      if !isEmpty(description) { Text(text: description, style: CheckMeta) }
+    }
+  }
+}
+
+component CheckSetting(key: key, label: string, detail: string, checked: boolean) {
+  Checkbox(
+    key: key,
+    label: label,
+    description: detail,
+    defaultChecked: checked,
+    presentationTemplate: DeckCheckboxPresentation,
+    layout: { width: { weight: 1 }, height: 40 }
+  )
+}
+
+component SectionTitle(label: string) {
+  Panel(style: SectionHeadingRow) {
+    Text(text: label, style: SectionHeading)
+    Panel(style: SectionRule)
+  }
+}
+
+component GeneralPage(tab: string) {
+  Panel(style: SettingsStack) {
+    SectionTitle(label: tab == "WORKSPACE" ? "SESSION" : "RUNTIME")
+    Panel(style: SettingsCard) {
+      if tab == "WORKSPACE" {
+        CheckSetting(key: "deck.restore", label: "Restore previous workspace", detail: "Reopen the last project and tool layout", checked: true)
+        CheckSetting(key: "deck.autosave", label: "Continuous save", detail: "Persist document changes while editing", checked: true)
+        CheckSetting(key: "deck.recent", label: "Show recent activity", detail: "Surface updates from collaborators", checked: false)
+      } else {
+        CheckSetting(key: "deck.background", label: "Background processing", detail: "Continue exports when the window is inactive", checked: true)
+        CheckSetting(key: "deck.telemetry", label: "Local performance telemetry", detail: "Collect frame timing without network upload", checked: true)
+        CheckSetting(key: "deck.experimental", label: "Preview features", detail: "Enable incomplete workflow experiments", checked: false)
+      }
+    }
+
+    SectionTitle(label: "PRESENTATION")
+    Panel(style: SettingsCard) {
+      ChoiceSetting(
+        key: "deck.backend",
+        label: "Rendering backend",
+        description: "Graphics path used for the workspace",
+        options: [
+          { id: "hardware", label: "Hardware" },
+          { id: "compatibility", label: "Compatibility" },
+          { id: "reference", label: "Reference" }
+        ],
+        initial: "hardware"
+      )
+      ChoiceSetting(
+        key: "deck.pacing",
+        label: "Frame pacing",
+        description: "Balance latency and visual stability",
+        options: [
+          { id: "smooth", label: "Smooth" },
+          { id: "responsive", label: "Responsive" },
+          { id: "unbounded", label: "Unbounded" }
+        ],
+        initial: "smooth"
+      )
+      ChoiceSetting(
+        key: "deck.quality",
+        label: "Surface quality",
+        description: "Controls effects and text raster detail",
+        options: [
+          { id: "high", label: "High" },
+          { id: "balanced", label: "Balanced" },
+          { id: "efficient", label: "Efficient" }
+        ],
+        initial: "high"
+      )
+    }
+
+    Panel(style: StatusCard) {
+      Panel(style: StatusDot)
+      Panel(style: ChoiceCopy) {
+        Text(text: "D3D11 adapter ready", style: StatusTitle)
+        Text(text: "Hardware effects · low-latency presentation", style: StatusMeta)
+      }
+      Text(text: "ACTIVE", style: DeckScope)
+    }
+  }
+}
+
+component DisplayPage() {
+  Panel(style: SettingsStack) {
+    SectionTitle(label: "WORKSPACE DISPLAY")
+    Panel(style: SettingsCard) {
+      ChoiceSetting(
+        key: "deck.scale",
+        label: "Interface scale",
+        description: "Logical density for controls and text",
+        options: [
+          { id: "auto", label: "Automatic" },
+          { id: "compact", label: "Compact" },
+          { id: "comfortable", label: "Comfortable" }
+        ],
+        initial: "auto"
+      )
+      ChoiceSetting(
+        key: "deck.motion",
+        label: "Motion profile",
+        description: "Transition character across the workspace",
+        options: [
+          { id: "fluid", label: "Fluid" },
+          { id: "precise", label: "Precise" },
+          { id: "reduced", label: "Reduced" }
+        ],
+        initial: "fluid"
+      )
+      CheckSetting(key: "deck.contrast", label: "Adaptive glass contrast", detail: "Raise edge energy over dark imagery", checked: true)
+      CheckSetting(key: "deck.snap", label: "Pixel-aligned geometry", detail: "Snap thin strokes at the current scale", checked: true)
+    }
+    SectionTitle(label: "OVERLAYS")
+    Panel(style: SettingsCard) {
+      CheckSetting(key: "deck.hints", label: "Keyboard hints", detail: "Show shortcuts beside available commands", checked: true)
+      CheckSetting(key: "deck.status", label: "Status indicators", detail: "Keep passive system state visible", checked: true)
+      CheckSetting(key: "deck.bounds", label: "Safe-area guides", detail: "Display authoring bounds while arranging", checked: false)
+    }
+  }
+}
+
+component InputPage() {
+  Panel(style: SettingsStack) {
+    SectionTitle(label: "POINTER & KEYBOARD")
+    Panel(style: SettingsCard) {
+      ChoiceSetting(
+        key: "deck.pointer",
+        label: "Pointer response",
+        description: "Precision profile for authored controls",
+        options: [
+          { id: "precise", label: "Precise" },
+          { id: "direct", label: "Direct" },
+          { id: "relaxed", label: "Relaxed" }
+        ],
+        initial: "precise"
+      )
+      ChoiceSetting(
+        key: "deck.navigation",
+        label: "Focus navigation",
+        description: "How directional movement selects targets",
+        options: [
+          { id: "spatial", label: "Spatial" },
+          { id: "document", label: "Document order" },
+          { id: "hybrid", label: "Hybrid" }
+        ],
+        initial: "spatial"
+      )
+      CheckSetting(key: "deck.accelerators", label: "Command accelerators", detail: "Enable application keyboard shortcuts", checked: true)
+      CheckSetting(key: "deck.wrapFocus", label: "Wrap focus", detail: "Continue from the opposite edge", checked: false)
+    }
+  }
+}
+
+component AudioPage() {
+  Panel(style: SettingsStack) {
+    SectionTitle(label: "FEEDBACK")
+    Panel(style: SettingsCard) {
+      ChoiceSetting(
+        key: "deck.feedback",
+        label: "Interaction feedback",
+        description: "Sound profile for confirmations and alerts",
+        options: [
+          { id: "subtle", label: "Subtle" },
+          { id: "full", label: "Full" },
+          { id: "silent", label: "Silent" }
+        ],
+        initial: "subtle"
+      )
+      ChoiceSetting(
+        key: "deck.output",
+        label: "Output device",
+        description: "Destination used for workspace audio",
+        options: [
+          { id: "system", label: "System default" },
+          { id: "headset", label: "Studio headset" },
+          { id: "speakers", label: "Desk speakers" }
+        ],
+        initial: "system"
+      )
+      CheckSetting(key: "deck.alerts", label: "Completion alerts", detail: "Notify when long operations finish", checked: true)
+      CheckSetting(key: "deck.focusAudio", label: "Mute during focus mode", detail: "Suppress non-critical workspace sounds", checked: true)
+    }
+  }
+}
+
+component ProfilesPage() {
+  Panel(style: SettingsStack) {
+    SectionTitle(label: "CONFIGURATION PROFILES")
+    Grid(columns: [{ weight: 1 }, { weight: 1 }, { weight: 1 }], style: ProfileGrid) {
+      Panel(style: ProfileCardSelected) {
+        Panel(style: ProfileBadge) { Text(text: "ACTIVE", style: ProfileBadgeText) }
+        Text(text: "Studio", style: ProfileTitle)
+        Text(text: "High quality · fluid motion · spatial input", style: ProfileMeta, wrapMode: "WORD")
+      }
+      Panel(style: ProfileCard) {
+        Text(text: "Presentation", style: ProfileTitle)
+        Text(text: "Reduced chrome · precise pacing · quiet feedback", style: ProfileMeta, wrapMode: "WORD")
+      }
+      Panel(style: ProfileCard) {
+        Text(text: "Portable", style: ProfileTitle)
+        Text(text: "Balanced effects · compact density · efficient output", style: ProfileMeta, wrapMode: "WORD")
+      }
+    }
+    SectionTitle(label: "PROFILE BEHAVIOR")
+    Panel(style: SettingsCard) {
+      CheckSetting(key: "deck.profileSync", label: "Sync profile with workspace", detail: "Restore the profile associated with each project", checked: true)
+      CheckSetting(key: "deck.profilePrompt", label: "Confirm automatic changes", detail: "Ask before a workspace switches profile", checked: false)
+    }
+  }
+}
+
+component AdvancedPage() {
+  Panel(style: SettingsStack) {
+    SectionTitle(label: "DIAGNOSTICS")
+    Panel(style: SettingsCard) {
+      CheckSetting(key: "deck.diagnostics", label: "Runtime diagnostics", detail: "Capture actionable warnings from active surfaces", checked: true)
+      CheckSetting(key: "deck.frameMarkers", label: "Frame markers", detail: "Publish host and renderer timing boundaries", checked: false)
+      CheckSetting(key: "deck.resourceTrace", label: "Resource tracing", detail: "Record image, font, and shader resolution", checked: false)
+    }
+    SectionTitle(label: "COMPATIBILITY")
+    Panel(style: SettingsCard) {
+      ChoiceSetting(
+        key: "deck.fallback",
+        label: "Effect fallback",
+        description: "Behavior when a shader backend is unavailable",
+        options: [
+          { id: "deterministic", label: "Deterministic" },
+          { id: "omit", label: "Omit unsupported stage" },
+          { id: "strict", label: "Require native backend" }
+        ],
+        initial: "deterministic"
+      )
+      CheckSetting(key: "deck.validation", label: "Strict packet validation", detail: "Reject malformed render data before submission", checked: true)
+    }
+  }
+}
+
+component ControlDeck() {
+  state category = "GENERAL";
+  state generalTab = "WORKSPACE";
+
+  Panel(style: DeckRoot) {
+    Panel(style: DeckShell, enter: DeckEnter) {
+      Panel(style: DeckHeader) {
+        Text(text: "Lattice", style: DeckTitle)
+        Text(text: "CONTROL DECK", style: DeckScope)
+        Panel(style: Clear, layout: { width: { weight: 1 }, height: 1 })
+        Text(text: "F2 · close", style: DeckHint)
+      }
+      Panel(style: DeckHeaderRule)
+      Panel(style: DeckBody) {
+        Panel(style: DeckSidebar) {
+          CategoryButton(id: "deck.general", code: "01", label: "General", selected: category == "GENERAL", activate: action("state.set", name: "category", value: "GENERAL"))
+          CategoryButton(id: "deck.display", code: "02", label: "Display", selected: category == "DISPLAY", activate: action("state.set", name: "category", value: "DISPLAY"))
+          CategoryButton(id: "deck.input", code: "03", label: "Input", selected: category == "INPUT", activate: action("state.set", name: "category", value: "INPUT"))
+          CategoryButton(id: "deck.audio", code: "04", label: "Audio", selected: category == "AUDIO", activate: action("state.set", name: "category", value: "AUDIO"))
+          CategoryButton(id: "deck.profiles", code: "05", label: "Profiles", selected: category == "PROFILES", activate: action("state.set", name: "category", value: "PROFILES"))
+          CategoryButton(id: "deck.advanced", code: "06", label: "Advanced", selected: category == "ADVANCED", activate: action("state.set", name: "category", value: "ADVANCED"))
+          Panel(style: Clear, layout: { width: { weight: 1 }, height: { weight: 1 } })
+          Panel(style: SidebarFoot) {
+            Text(text: "Configuration is local", style: SidebarFootTitle)
+            Text(text: "Examples are retained by this surface only.", style: SidebarFootCopy, wrapMode: "WORD")
+          }
+        }
+
+        Panel(style: ContentHost) {
+          Panel(style: ContentHeader) {
+            Panel(style: ChoiceCopy) {
+              Text(
+                text: category == "GENERAL" ? "General" : category == "DISPLAY" ? "Display" : category == "INPUT" ? "Input" : category == "AUDIO" ? "Audio" : category == "PROFILES" ? "Profiles" : "Advanced",
+                style: ContentTitle
+              )
+              Text(text: "Workspace configuration and behavior", style: ContentSubtitle)
+            }
+            if category == "GENERAL" {
+              Panel(style: SegmentRail) {
+                SegmentButton(id: "deck.tab.workspace", label: "Workspace", selected: generalTab == "WORKSPACE", activate: action("state.set", name: "generalTab", value: "WORKSPACE"))
+                SegmentButton(id: "deck.tab.runtime", label: "Runtime", selected: generalTab == "RUNTIME", activate: action("state.set", name: "generalTab", value: "RUNTIME"))
+              }
+            }
+          }
+
+          Scroll(key: "deck.settings.scroll", vertical: true, horizontal: false, style: DeckScroll) {
+            if category == "DISPLAY" {
+              DisplayPage()
+            } else if category == "INPUT" {
+              InputPage()
+            } else if category == "AUDIO" {
+              AudioPage()
+            } else if category == "PROFILES" {
+              ProfilesPage()
+            } else if category == "ADVANCED" {
+              AdvancedPage()
+            } else {
+              GeneralPage(tab: generalTab)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+overlay ControlDeckMenu {
+  root ControlDeck()
+}

@@ -161,10 +161,14 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
                                              : 0.0;
                 Constraints child_constraints = content_constraints;
                 if (horizontal) {
-                    child_constraints.min_width = allocated;
+                    child_constraints.min_width = child_style.max_width.has_value()
+                                                      ? 0.0
+                                                      : allocated;
                     child_constraints.max_width = allocated;
                 } else {
-                    child_constraints.min_height = allocated;
+                    child_constraints.min_height = child_style.max_height.has_value()
+                                                       ? 0.0
+                                                       : allocated;
                     child_constraints.max_height = allocated;
                 }
                 staged[index] = measure(*retained_children[index], child_constraints, environment, operations);
@@ -203,12 +207,18 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
                     const double weight = main_size.value > 0.0 ? main_size.value : 1.0;
                     const double allocated = natural_main +
                                              line_remaining * weight / line_fill_weight;
+                    const LayoutStyle& child_style =
+                        measured.children[child_index]->style;
                     Constraints child_constraints = content_constraints;
                     if (horizontal) {
-                        child_constraints.min_width = allocated;
+                        child_constraints.min_width = child_style.max_width.has_value()
+                                                          ? 0.0
+                                                          : allocated;
                         child_constraints.max_width = allocated;
                     } else {
-                        child_constraints.min_height = allocated;
+                        child_constraints.min_height = child_style.max_height.has_value()
+                                                           ? 0.0
+                                                           : allocated;
                         child_constraints.max_height = allocated;
                     }
                     measured.children[child_index] = measure(
@@ -294,12 +304,14 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
                 LayoutAlign::stretch
             );
             Constraints child_constraints = content_constraints;
-            child_constraints.min_width = horizontal_alignment == LayoutAlign::stretch
+            child_constraints.min_width = horizontal_alignment == LayoutAlign::stretch &&
+                                                   !child_style.max_width.has_value()
                                               ? cell_width
                                               : 0.0;
             child_constraints.max_width = cell_width;
             child_constraints.min_height = definite_height &&
-                                                   vertical_alignment == LayoutAlign::stretch
+                                                   vertical_alignment == LayoutAlign::stretch &&
+                                                   !child_style.max_height.has_value()
                                                ? cell_height
                                                : 0.0;
             child_constraints.max_height = definite_height

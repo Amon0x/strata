@@ -101,6 +101,10 @@ struct WidgetSubtarget final {
     bool has_children = false;
     std::optional<bool> checked = std::nullopt;
     std::optional<std::uint64_t> notification_id = std::nullopt;
+    /** Retained node whose animated presentation determines whether this region can be hit. */
+    std::optional<std::uint64_t> presentation_identity = std::nullopt;
+    /** Presented ancestor clip resolved for an authored detached target. */
+    std::optional<Rect> presentation_clip = std::nullopt;
 };
 
 /** True when this widget type can project presenter-owned pointer regions. */

@@ -31,6 +31,7 @@ namespace {
 
 constexpr std::string_view tooltip_pending_state = "strata.tooltip.pending";
 constexpr std::string_view tooltip_deadline_state = "strata.tooltip.deadline";
+constexpr std::string_view authored_presentation_state = "$presentationState";
 
 [[nodiscard]] bool retained_boolean(
     const RetainedNode& node,
@@ -270,6 +271,38 @@ void InputRouter::update_tooltip_disclosures() {
         }
     }
     if (changed && frame_invalidator_) frame_invalidator_();
+}
+
+void InputRouter::synchronize_authored_presentations() {
+    if (tree_ == nullptr || tree_->root() == nullptr) return;
+    bool changed = false;
+    const auto visit = [this, &changed](const auto& self, RetainedNode& node) -> void {
+        const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
+        if (lifecycle != nullptr &&
+            !lifecycle->describe.authored_presentation_property.empty() &&
+            scalar_property(
+                node,
+                lifecycle->describe.authored_presentation_property
+            ) != nullptr) {
+            runtime::Value state(std::vector<std::pair<std::string, runtime::Value>>{
+                {"focused", runtime::Value(focused(node.identity()))},
+                {"focusVisible", runtime::Value(focus_visible(node.identity()))},
+                {"hovered", runtime::Value(hovered(node.identity()))},
+                {"pressed", runtime::Value(active(node.identity()))},
+            });
+            changed = tree_->set_retained_value(
+                node.identity(),
+                std::string(authored_presentation_state),
+                std::move(state),
+                DirtyReason::properties
+            ) || changed;
+        }
+        for (const std::unique_ptr<RetainedNode>& child : node.children()) {
+            self(self, *child);
+        }
+    };
+    visit(visit, *tree_->root());
+    if (changed && description_invalidator_) description_invalidator_();
 }
 
 bool InputRouter::hover_ready(
@@ -782,6 +815,9 @@ void InputRouter::focus(
     if (focused_ == node.identity()) return;
     if (focused_.has_value()) {
         if (RetainedNode* previous = tree_->find_identity(*focused_); previous != nullptr) {
+            if (reason != "pointer" && !descendant_of(node, *previous)) {
+                dismiss_transient_popups(&node, result, false);
+            }
             static_cast<void>(route_event(
                 previous, nullptr, InputEventKind::blur,
                 nullptr, nullptr, nullptr, nullptr, nullptr, result
@@ -821,8 +857,12 @@ void InputRouter::focus(
 
 void InputRouter::clear_focus(
     const std::string_view reason,
-    InputOperationResult& result
+    InputOperationResult& result,
+    const bool dismiss_popups
 ) {
+    if (dismiss_popups && reason != "pointer") {
+        dismiss_transient_popups(nullptr, result, false);
+    }
     // Hiding/cancelling a Surface may prevent any later after_layout publication. Releasing here
     // is synchronous and HostServices ignores inactive sibling owners.
     host_services_->request_ime(host_service_owner_, std::nullopt);

@@ -863,6 +863,12 @@ if(STRATA_BUILD_TOOLS)
         "src/main/resources/assets/strata/ui/strata_hub.schemas.json"
         "src/main/resources/assets/strata/ui/strata_hub.compiled.bin"
     )
+    strata_register_bundled_module(
+        control_deck
+        "src/main/resources/assets/strata/ui/control_deck.strata"
+        "src/main/resources/assets/strata/ui/control_deck.schemas.json"
+        "src/main/resources/assets/strata/ui/control_deck.compiled.bin"
+    )
 endif()
 
 if(WIN32 AND STRATA_BUILD_DESKTOP)

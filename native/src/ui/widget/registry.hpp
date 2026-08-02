@@ -92,6 +92,8 @@ struct WidgetDescribePhase final {
     std::string implicit_key_prefix{};
     bool starts_unmaterialized = false;
     WidgetDefaultActionFactory default_action_factory = nullptr;
+    /** Template property whose authored subtree consumes projected control interaction state. */
+    std::string authored_presentation_property;
 };
 
 struct WidgetInputPhase final {

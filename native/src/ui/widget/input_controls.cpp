@@ -123,6 +123,13 @@ bool select_click(WidgetInputScope& scope) {
         const bool next = !scope.effective_boolean(
             "expanded", "$expanded", "defaultExpanded", false
         );
+        if (next) {
+            if (const std::optional<EffectiveChoice> selected =
+                    effective_choice(scope.node());
+                selected.has_value()) {
+                set_choice_cursor(scope, selected->index);
+            }
+        }
         scope.set_retained("$expanded", runtime::Value(next), DirtyReason::properties);
         return true;
     }
@@ -228,6 +235,7 @@ bool choice_key(WidgetInputScope& scope) {
         }
     }
     if (scope.key() == "escape" && select_widget) {
+        set_choice_cursor(scope, selected->index);
         scope.set_retained("$expanded", runtime::Value(false), DirtyReason::properties);
         return true;
     }

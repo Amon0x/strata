@@ -20,11 +20,66 @@ void icon_button_defaults(WidgetLayoutDefaultsScope& scope) {
 }
 
 void checkbox_defaults(WidgetLayoutDefaultsScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) {
+        scope.set("height", runtime::Value("content"));
+        scope.set("width", widget_fill());
+        scope.padding(0.0, 0.0, 0.0, 0.0);
+        scope.intrinsic(20.0, 20.0);
+        return;
+    }
     scope.set("height", runtime::Value(24.0));
     scope.set("width", runtime::Value("content"));
     scope.set("alignItems", runtime::Value("CENTER"));
     scope.padding(24.0, 4.0, 4.0, 4.0);
     scope.intrinsic(16.0, 16.0);
+}
+
+[[nodiscard]] bool checkbox_checked(WidgetDescriptionScope& scope) {
+    if (const runtime::Value* value = scope.property("checked");
+        value != nullptr && value->boolean() != nullptr) {
+        return *value->boolean();
+    }
+    if (const runtime::Value* value = scope.retained("$checked");
+        value != nullptr && value->boolean() != nullptr) {
+        return *value->boolean();
+    }
+    return scope.boolean("defaultChecked", false);
+}
+
+void checkbox_expand(WidgetDescriptionScope& scope) {
+    if (scope.property("presentationTemplate") == nullptr) return;
+    WidgetDescriptionExpansion& description = scope.description();
+    const std::string key = description.key.value_or("$checkbox");
+    const runtime::Value* interaction = scope.retained("$presentationState");
+    const auto interaction_flag = [interaction](
+                                      const std::string_view name
+                                  ) {
+        const runtime::Value* value = interaction != nullptr
+            ? interaction->field(name)
+            : nullptr;
+        return value != nullptr && value->boolean() != nullptr && *value->boolean();
+    };
+    std::shared_ptr<const DescriptionNode> presentation = scope.instantiate(
+        "presentationTemplate",
+        key + ".presentation",
+        WidgetTemplateArguments{
+            {"key", runtime::Value(runtime::KeyValue{key + ".presentation"})},
+            {"label", runtime::Value(scope.string("label"))},
+            {"description", runtime::Value(scope.string("description"))},
+            {"control",
+             widget_object({
+                 {"checked", runtime::Value(checkbox_checked(scope))},
+                 {"enabled", runtime::Value(scope.boolean("enabled", true))},
+                 {"hovered", runtime::Value(interaction_flag("hovered"))},
+                 {"pressed", runtime::Value(interaction_flag("pressed"))},
+                 {"focused", runtime::Value(interaction_flag("focused"))},
+                 {"focusVisible", runtime::Value(interaction_flag("focusVisible"))},
+             })},
+        }
+    );
+    if (presentation == nullptr) return;
+    description.children = {widget_native_presentation(presentation)};
+    scope.synthesized();
 }
 
 void toggle_defaults(WidgetLayoutDefaultsScope& scope) {
@@ -501,11 +556,16 @@ void add(
     std::string type,
     const WidgetLayoutDefaultsHook defaults = nullptr,
     const WidgetDescriptionHook expand = nullptr,
-    std::string default_action = {}
+    std::string default_action = {},
+    std::string authored_presentation_property = {}
 ) {
+    WidgetDescribePhase phase{
+        defaults, expand, {}, std::move(default_action), true
+    };
+    phase.authored_presentation_property = std::move(authored_presentation_property);
     registry.register_describe_phase(
         std::move(type),
-        WidgetDescribePhase{defaults, expand, {}, std::move(default_action), true}
+        std::move(phase)
     );
 }
 
@@ -513,7 +573,14 @@ void add(
 
 void register_control_widget_descriptions(WidgetRegistry& registry) {
     add(registry, "IconButton", &icon_button_defaults);
-    add(registry, "Checkbox", &checkbox_defaults);
+    add(
+        registry,
+        "Checkbox",
+        &checkbox_defaults,
+        &checkbox_expand,
+        {},
+        "presentationTemplate"
+    );
     add(registry, "Toggle", &toggle_defaults);
     add(registry, "Slider", &slider_defaults);
     add(registry, "TextBox", &text_box_defaults);

@@ -86,6 +86,12 @@ Use named styles and `theme.*` tokens for a design system. Explicit call-site pr
 component defaults and styles. Control skins are still ordinary built-ins; changing toggle track/
 thumb geometry or checkbox indicators does not justify another widget implementation.
 
+`Checkbox.presentationTemplate` separates its input contract from its authored skin. The native
+control continues to own checked state, pointer and keyboard activation, focus, and semantics while
+the template receives `key`, `label`, `description`, and one typed `checkboxState` record. Read
+`control.checked`, `control.enabled`, `control.hovered`, `control.pressed`, `control.focused`, and
+`control.focusVisible` inside the template rather than reimplementing a checkbox with Panel state.
+
 Editable controls separate mechanics from optional chrome. Use `appearance: "BARE"` on `TextBox`,
 `TextArea`, or `NumberField` when an authored component owns the surrounding surface:
 

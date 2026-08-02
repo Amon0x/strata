@@ -19,6 +19,7 @@
 #include "ui/motion.hpp"
 #include "ui/status.hpp"
 #include "ui/widget/input.hpp"
+#include "ui/widget/choice_model.hpp"
 #include "ui/widget/registry.hpp"
 
 namespace strata::ui {
@@ -88,11 +89,17 @@ const DescriptionBehavior* InputRouter::behavior(
 
 void InputRouter::dismiss_transient_popups(
     const RetainedNode* const target,
-    InputOperationResult& result
+    InputOperationResult& result,
+    const bool include_modal,
+    const bool restore_modal_focus
 ) {
-    if (tree_ == nullptr || tree_->root() == nullptr) return;
+    if (tree_ == nullptr || tree_->root() == nullptr ||
+        dismissing_transient_popups_) {
+        return;
+    }
+    dismissing_transient_popups_ = true;
     bool modal_dismissed = false;
-    const auto visit = [this, target, &result, &modal_dismissed](
+    const auto visit = [this, target, include_modal, &result, &modal_dismissed](
                            auto&& self,
                            RetainedNode& node
                        ) -> void {
@@ -108,6 +115,7 @@ void InputRouter::dismiss_transient_popups(
         }
         const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
         if (lifecycle != nullptr && !lifecycle->input.popup_retained.empty() &&
+            (include_modal || node.description().type != "CommandPalette") &&
             (target == nullptr || !descendant_of(*target, node))) {
             const WidgetInputPhase& input = lifecycle->input;
             const auto value = [&node](const std::string& name) -> const runtime::Value* {
@@ -123,12 +131,24 @@ void InputRouter::dismiss_transient_popups(
                 open = value(input.popup_initial);
             }
             if (open != nullptr && open->boolean() != nullptr && *open->boolean()) {
-                const bool changed = tree_->set_retained_value(
+                bool changed = tree_->set_retained_value(
                     node.identity(),
                     input.popup_retained,
                     runtime::Value(false),
                     DirtyReason::properties
                 );
+                if (node.description().type == "Select") {
+                    if (const std::optional<EffectiveChoice> selected =
+                            effective_choice(node);
+                        selected.has_value()) {
+                        changed = tree_->set_retained_value(
+                            node.identity(),
+                            "$choiceIndex",
+                            runtime::Value(static_cast<double>(selected->index)),
+                            DirtyReason::properties
+                        ) || changed;
+                    }
+                }
                 if (changed && description_invalidator_) description_invalidator_();
                 modal_dismissed = modal_dismissed ||
                     (changed && node.description().type == "CommandPalette");
@@ -147,7 +167,8 @@ void InputRouter::dismiss_transient_popups(
         for (const auto& child : node.children()) self(self, *child);
     };
     visit(visit, *tree_->root());
-    if (modal_dismissed) sync_modal_focus(result);
+    if (modal_dismissed && restore_modal_focus) sync_modal_focus(result);
+    dismissing_transient_popups_ = false;
 }
 
 InputOperationResult InputRouter::click(const std::string_view key) {
@@ -158,6 +179,7 @@ InputOperationResult InputRouter::click(const std::string_view key) {
     InputOperationResult result;
     append(result, pointer(PointerInputEvent{center, PointerEventType::press, 0, 0}));
     append(result, pointer(PointerInputEvent{center, PointerEventType::release, 0, 0}));
+    synchronize_authored_presentations();
     return result;
 }
 

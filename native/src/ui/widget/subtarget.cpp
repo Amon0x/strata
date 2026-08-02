@@ -352,18 +352,26 @@ std::vector<WidgetSubtarget> widget_subtargets(
         if (!effective_boolean(node, "expanded", "$expanded", "defaultExpanded", false) ||
             source == nullptr || source->list() == nullptr) return result;
         if (property(node, "itemTemplate") != nullptr) {
-            if (const std::optional<Rect> popup = descendant_bounds(
-                    node,
-                    select_key + ".popup",
-                    layout
-                );
-                popup.has_value()) {
+            const RetainedNode* popup_node = descendant_key(
+                node,
+                select_key + ".popup"
+            );
+            const RetainedNode* popup_presentation = descendant_key(
+                node,
+                select_key + ".popup.surface"
+            );
+            const LayoutRecord* popup_layout =
+                popup_node != nullptr ? layout.find(popup_node->identity()) : nullptr;
+            if (popup_layout != nullptr) {
                 WidgetSubtarget surface{
                     node.identity(), "$popup", WidgetSubtargetKind::separator, 0U,
-                    *popup, runtime::Value{}, {}, {}, false, true,
+                    popup_layout->bounds, runtime::Value{}, {}, {}, false, true,
                     detached_overlay_menu_z,
                 };
                 surface.separator = true;
+                surface.presentation_identity = popup_presentation != nullptr
+                    ? popup_presentation->identity()
+                    : popup_node->identity();
                 result.push_back(std::move(surface));
             }
             for (std::size_t index = 0U; index < source->list()->values.size(); ++index) {
@@ -371,26 +379,29 @@ std::vector<WidgetSubtarget> widget_subtargets(
                 const std::string* id = text(entry.field("id"));
                 if (id == nullptr || id->empty()) continue;
                 const std::string* label = text(entry.field("label"));
-                const std::optional<Rect> row = descendant_bounds(
+                const RetainedNode* row_node = descendant_key(
                     node,
-                    choice_option_key(select_key, *id),
-                    layout
+                    choice_option_key(select_key, *id)
                 );
-                if (!row.has_value()) continue;
-                result.push_back(WidgetSubtarget{
+                const LayoutRecord* row_layout =
+                    row_node != nullptr ? layout.find(row_node->identity()) : nullptr;
+                if (row_layout == nullptr) continue;
+                WidgetSubtarget row{
                     node.identity(),
                     *id,
                     WidgetSubtargetKind::choice,
                     index,
-                    *row,
+                    row_layout->bounds,
                     runtime::Value(*id),
                     label != nullptr ? *label : *id,
                     {},
                     boolean(property(node, "enabled"), true) &&
-                        boolean(entry.field("enabled"), true),
+                    boolean(entry.field("enabled"), true),
                     true,
                     detached_overlay_menu_z,
-                });
+                };
+                row.presentation_identity = row_node->identity();
+                result.push_back(std::move(row));
             }
             return result;
         }
@@ -420,18 +431,23 @@ std::vector<WidgetSubtarget> widget_subtargets(
         const MenuProjection projection = project_menu(node, layout, commands);
         if (property(node, "popupTemplate") != nullptr) {
             for (std::size_t level = 0U; level < projection.panels.size(); ++level) {
-                const std::optional<Rect> popup = descendant_bounds(
+                const RetainedNode* popup_node = descendant_key(
                     node,
-                    menu_key + ".popup." + std::to_string(level),
-                    layout
+                    menu_key + ".popup." + std::to_string(level)
                 );
-                if (!popup.has_value()) continue;
+                const RetainedNode* popup_presentation = descendant_key(
+                    node,
+                    menu_key + ".popup.surface." + std::to_string(level)
+                );
+                const LayoutRecord* popup_layout =
+                    popup_node != nullptr ? layout.find(popup_node->identity()) : nullptr;
+                if (popup_layout == nullptr) continue;
                 WidgetSubtarget surface{
                     node.identity(),
                     "$popup/" + std::to_string(level),
                     WidgetSubtargetKind::separator,
                     level,
-                    *popup,
+                    popup_layout->bounds,
                     runtime::Value{},
                     {},
                     {},
@@ -440,15 +456,24 @@ std::vector<WidgetSubtarget> widget_subtargets(
                     detached_overlay_menu_z,
                 };
                 surface.separator = true;
+                surface.presentation_identity = popup_presentation != nullptr
+                    ? popup_presentation->identity()
+                    : popup_node->identity();
                 result.push_back(std::move(surface));
             }
         }
         for (const MenuRowModel& row : projection.rows()) {
             if (row.item == nullptr) continue;
             const MenuItemModel& item = *row.item;
-            const Rect item_bounds = property(node, "itemTemplate") != nullptr
-                ? descendant_bounds(node, menu_row_key(menu_key, row.path), layout)
-                      .value_or(row.bounds)
+            const bool authored_item = property(node, "itemTemplate") != nullptr;
+            const RetainedNode* row_node = authored_item
+                ? descendant_key(node, menu_row_key(menu_key, row.path))
+                : nullptr;
+            const LayoutRecord* row_layout =
+                row_node != nullptr ? layout.find(row_node->identity()) : nullptr;
+            if (authored_item && row_layout == nullptr) continue;
+            const Rect item_bounds = row_layout != nullptr
+                ? row_layout->bounds
                 : row.bounds;
             WidgetSubtarget target{
                 node.identity(), menu_row_identity(row.path),
@@ -463,6 +488,7 @@ std::vector<WidgetSubtarget> widget_subtargets(
             target.separator = item.separator;
             target.has_children = !item.children.empty();
             if (item.has_checked) target.checked = item.checked;
+            if (row_node != nullptr) target.presentation_identity = row_node->identity();
             result.push_back(std::move(target));
         }
     } else if (type == "Breadcrumbs") {

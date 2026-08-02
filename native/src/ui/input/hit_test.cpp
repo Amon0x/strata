@@ -805,12 +805,16 @@ void InputRouter::prepare_pointer_geometry() const {
                            RetainedNode& node,
                            const bool visit_portals,
                            const MotionTransform inherited,
+                           const double inherited_opacity,
                            const std::optional<Rect> traversal_clip
                        ) -> void {
         if (node.lifecycle() == RetainedLifecycle::exiting) return;
         const LayoutRecord* record = layout_->find(node.identity());
         if (record == nullptr) return;
         if (!visit_portals && record->kind == LayoutKind::portal) return;
+        const double opacity =
+            inherited_opacity * local_presentation_opacity(node, motion_);
+        if (opacity <= 1.0e-3) return;
         const MotionTransform transform = motion_ != nullptr
             ? concatenate_presentation_transform(
                   inherited, local_presentation_transform(node, *motion_)
@@ -836,7 +840,7 @@ void InputRouter::prepare_pointer_geometry() const {
             }
         );
         for (auto child = children.rbegin(); child != children.rend(); ++child) {
-            self(self, **child, visit_portals, transform, child_clip);
+            self(self, **child, visit_portals, transform, opacity, child_clip);
         }
         const Rect bounds = hit_bounds_resolver_
             ? hit_bounds_resolver_(node, *record)
@@ -845,14 +849,15 @@ void InputRouter::prepare_pointer_geometry() const {
             &node,
             transform_presentation_bounds(bounds, transform),
             traversal_clip,
+            transform,
         });
     };
     // Detached portal roots occupy the final render plane. Visit them first in reverse paint
     // order so hit testing observes the same topmost-first order as rendering.
     for (auto portal = portals.rbegin(); portal != portals.rend(); ++portal) {
-        visit(visit, **portal, true, MotionTransform{}, std::nullopt);
+        visit(visit, **portal, true, MotionTransform{}, 1.0, std::nullopt);
     }
-    visit(visit, *tree_->root(), false, MotionTransform{}, std::nullopt);
+    visit(visit, *tree_->root(), false, MotionTransform{}, 1.0, std::nullopt);
     pointer_geometry_tree_ = tree_;
     pointer_geometry_layout_ = layout_;
     pointer_geometry_motion_ = motion_;
@@ -917,7 +922,25 @@ void InputRouter::prepare_detached_subtargets() const {
             [](const WidgetSubtarget* target) { return target->z_index; }
         );
         for (auto target = detached.rbegin(); target != detached.rend(); ++target) {
-            detached_subtargets_.push_back(**target);
+            WidgetSubtarget presented = **target;
+            if (presented.presentation_identity.has_value()) {
+                const auto entry = std::ranges::find(
+                    pointer_hit_entries_,
+                    *presented.presentation_identity,
+                    [](const PointerHitEntry& candidate) {
+                        return candidate.node != nullptr
+                            ? candidate.node->identity()
+                            : 0U;
+                    }
+                );
+                if (entry == pointer_hit_entries_.end()) continue;
+                presented.bounds = transform_presentation_bounds(
+                    presented.bounds,
+                    entry->transform
+                );
+                presented.presentation_clip = entry->traversal_clip;
+            }
+            detached_subtargets_.push_back(std::move(presented));
         }
     }
     detached_subtargets_ready_ = true;
@@ -981,7 +1004,11 @@ std::optional<WidgetSubtarget> InputRouter::hit_subtarget(
     if (tree_ == nullptr || tree_->root() == nullptr || layout_ == nullptr) return std::nullopt;
     prepare_detached_subtargets();
     for (const WidgetSubtarget& target : detached_subtargets_) {
-        if (contains(target.bounds, position)) return target;
+        if ((!target.presentation_clip.has_value() ||
+             contains(*target.presentation_clip, position)) &&
+            contains(target.bounds, position)) {
+            return target;
+        }
     }
 
     std::optional<WidgetSubtarget> best;

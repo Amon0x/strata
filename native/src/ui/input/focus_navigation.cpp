@@ -15,6 +15,7 @@
 #include "ui/input/detail.hpp"
 #include "ui/motion.hpp"
 #include "ui/presentation_geometry.hpp"
+#include "ui/widget/choice_model.hpp"
 #include "ui/widget/registry.hpp"
 
 namespace strata::ui {
@@ -230,14 +231,27 @@ bool InputRouter::dismiss_topmost(InputOperationResult& result) {
     const WidgetLifecycle* lifecycle = widgets_.find(node->description().type);
     if (lifecycle == nullptr) return false;
     const WidgetInputPhase& input = lifecycle->input;
+    bool changed = false;
     if (!input.popup_retained.empty()) {
         const runtime::Value* controlled = scalar_property(*node, input.popup_controlled);
         if (controlled == nullptr || controlled->boolean() == nullptr) {
-            static_cast<void>(tree_->set_retained_value(
+            changed = tree_->set_retained_value(
                 node->identity(), input.popup_retained, runtime::Value(false), DirtyReason::properties
-            ));
+            ) || changed;
         }
     }
+    if (node->description().type == "Select") {
+        if (const std::optional<EffectiveChoice> selected = effective_choice(*node);
+            selected.has_value()) {
+            changed = tree_->set_retained_value(
+                node->identity(),
+                "$choiceIndex",
+                runtime::Value(static_cast<double>(selected->index)),
+                DirtyReason::properties
+            ) || changed;
+        }
+    }
+    if (changed && description_invalidator_) description_invalidator_();
     if (node->description().type == "CommandPalette") {
         static_cast<void>(tree_->set_retained_value(
             node->identity(), "$paletteActive", runtime::Value(0.0), DirtyReason::input
