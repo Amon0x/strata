@@ -403,6 +403,10 @@ style TransparentPresentation {
   border: null;
 }
 
+style ActiveChoicePresentation extends TransparentPresentation {
+  opacity: 0.45;
+}
+
 component InteractiveChoiceTrigger(
   key: key,
   label: string,
@@ -430,7 +434,10 @@ component InteractiveChoiceItem(
   selected: boolean,
   active: boolean
 ) {
-  Panel(key: key, style: TransparentPresentation) {
+  Panel(
+    key: key,
+    style: active ? ActiveChoicePresentation : TransparentPresentation
+  ) {
     Text(text: label)
   }
 }
@@ -459,7 +466,10 @@ component ControlDefaults() {
     )
     Select(
       key: "defaults.custom-select",
-      options: [{ id: "custom", label: "Custom" }],
+      options: [
+        { id: "custom", label: "Custom" },
+        { id: "alternate", label: "Alternate" }
+      ],
       expanded: true,
       triggerTemplate: InteractiveChoiceTrigger,
       popupTemplate: InteractiveChoicePopup,
@@ -542,6 +552,48 @@ overlay Main { root ControlDefaults() }
     check(
         !wrapper_drew_theme_chrome,
         "transparent authored-popup wrapper inherited default theme chrome"
+    );
+    const strata::ui::RetainedNode* custom_select =
+        surface.tree().find_key("defaults.custom-select");
+    const std::vector<strata::ui::WidgetSubtarget> custom_targets =
+        surface.input().subtargets(custom_select->identity());
+    const auto alternate = std::ranges::find_if(
+        custom_targets,
+        [](const strata::ui::WidgetSubtarget& target) {
+            return target.kind == strata::ui::WidgetSubtargetKind::choice &&
+                target.index == 1U;
+        }
+    );
+    check(
+        alternate != custom_targets.end(),
+        "authored Select did not publish its alternate option hit target"
+    );
+    static_cast<void>(surface.input().enqueue_pointer(strata::ui::PointerInputEvent{
+        {
+            alternate->bounds.x + alternate->bounds.width * 0.5,
+            alternate->bounds.y + alternate->bounds.height * 0.5,
+        },
+        strata::ui::PointerEventType::move,
+        0,
+        0,
+    }));
+    const strata::ui::SurfaceFrame hover_frame = surface.frame(1'500'000);
+    const strata::ui::RetainedNode* alternate_row =
+        surface.tree().find_key("defaults.custom-select.option.alternate");
+    const strata::runtime::Value* alternate_layout = nullptr;
+    if (alternate_row != nullptr) {
+        const auto layout = alternate_row->description().properties.find("$layout");
+        if (layout != alternate_row->description().properties.end()) {
+            alternate_layout = layout->second.value();
+        }
+    }
+    const strata::runtime::Value* alternate_opacity =
+        alternate_layout != nullptr ? alternate_layout->field("opacity") : nullptr;
+    check(
+        hover_frame.operations.rebuilds == 1U &&
+            alternate_opacity != nullptr && alternate_opacity->number() != nullptr &&
+            *alternate_opacity->number() == 0.45,
+        "authored Select hover did not rematerialize its active item on pointer movement"
     );
     static_cast<void>(surface.input().click("defaults.select"));
     static_cast<void>(surface.input().key("h"));

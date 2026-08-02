@@ -13,6 +13,22 @@
 namespace strata::ui {
 namespace {
 
+[[nodiscard]] DirtyReason choice_cursor_reason(const WidgetInputScope& scope) noexcept {
+    return scope.node().description().type == "Select" &&
+            scope.property("popupTemplate") != nullptr &&
+            scope.property("itemTemplate") != nullptr
+        ? DirtyReason::properties
+        : DirtyReason::input;
+}
+
+void set_choice_cursor(WidgetInputScope& scope, const std::size_t index) {
+    scope.set_retained(
+        "$choiceIndex",
+        runtime::Value(static_cast<double>(index)),
+        choice_cursor_reason(scope)
+    );
+}
+
 bool toggle(WidgetInputScope& scope) {
     const bool next = !scope.effective_boolean(
         "checked", "$checked", "defaultChecked", false
@@ -95,7 +111,7 @@ bool choose(WidgetInputScope& scope) {
     if (!choice_is_controlled(scope.node())) {
         scope.set_retained("$selectedId", target->value, DirtyReason::properties);
     }
-    scope.set_retained("$choiceIndex", runtime::Value(static_cast<double>(target->index)), DirtyReason::input);
+    set_choice_cursor(scope, target->index);
     scope.value_changed("onChange", "selection-changed", target->value);
     return true;
 }
@@ -123,11 +139,7 @@ bool select_pointer(WidgetInputScope& scope) {
         !target->enabled) {
         return false;
     }
-    scope.set_retained(
-        "$choiceIndex",
-        runtime::Value(static_cast<double>(target->index)),
-        DirtyReason::input
-    );
+    set_choice_cursor(scope, target->index);
     return true;
 }
 
@@ -184,9 +196,7 @@ bool select_pointer(WidgetInputScope& scope) {
     );
     if (!selected.has_value()) return true;
     const std::size_t index = *selected;
-    scope.set_retained(
-        "$choiceIndex", runtime::Value(static_cast<double>(index)), DirtyReason::input
-    );
+    set_choice_cursor(scope, index);
     if (expanded) return true;
     const std::string* id = choice_option_id(options.values[index]);
     if (id == nullptr) return true;
@@ -223,10 +233,7 @@ bool choice_key(WidgetInputScope& scope) {
     }
     if ((scope.key() == "enter" || scope.key() == "space") && select_widget) {
         if (!expanded) {
-            scope.set_retained(
-                "$choiceIndex", runtime::Value(static_cast<double>(selected->index)),
-                DirtyReason::input
-            );
+            set_choice_cursor(scope, selected->index);
             scope.set_retained("$expanded", runtime::Value(true), DirtyReason::properties);
             return true;
         }
@@ -260,7 +267,7 @@ bool choice_key(WidgetInputScope& scope) {
     }
     if (!next.has_value()) return true;
     current = *next;
-    scope.set_retained("$choiceIndex", runtime::Value(static_cast<double>(current)), DirtyReason::input);
+    set_choice_cursor(scope, current);
     if (select_widget) {
         scope.set_retained("$expanded", runtime::Value(true), DirtyReason::properties);
         return true;
