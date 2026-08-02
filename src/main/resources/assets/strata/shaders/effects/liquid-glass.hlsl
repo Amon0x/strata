@@ -28,7 +28,7 @@ float4 effect(EffectInput input) {
     float edge = 1.0 - smoothstep(0.0, edgeWidth, max(-distance, 0.0));
     float lens = pow(saturate(edge), 1.08);
     float refraction = effectFloat(2);
-    float2 offset = normal * refraction * lens * texel;
+    float2 offset = -normal * refraction * lens * texel;
     float2 centered = input.localUv - 0.5;
     offset -= centered * refraction * 0.28 * (1.0 - edge) * texel;
 
