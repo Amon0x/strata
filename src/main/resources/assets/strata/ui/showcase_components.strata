@@ -115,22 +115,53 @@ style GlassPopupStyle {
 style GlassItemStyle extends Transparent {
   kind: "ROW";
   width: { weight: 1 };
-  height: 34;
-  padding: { horizontal: 10, vertical: 7 };
-  gap: 7;
+  height: 36;
+  padding: { horizontal: 11, vertical: 8 };
+  gap: 9;
   alignItems: "CENTER";
-  radius: 8;
+  radius: 10;
   animateChanges: { properties: ["background", "border"], policy: "fast" };
 }
 
 style GlassItemSelected extends GlassItemStyle {
-  background: #28445FA8;
-  border: { width: 1, color: #8FC8FF3D };
+  background: #B9E4FF1E;
+  border: { width: 1, color: #DCEFFF24 };
+  effect: effect(
+    "demo:liquid-glass",
+    blurRadius: 6,
+    downsample: 1,
+    refraction: 8,
+    tint: #C4EAFF0A,
+    saturation: 1.28,
+    highlight: 0.38,
+    noise: 0.04
+  );
 }
 
 style GlassItemActive extends GlassItemStyle {
-  background: #365E83D6;
-  border: { width: 1, color: #B7DBFF70 };
+  background: #D5EEFF2B;
+  border: { width: 1, color: #E8F5FF38 };
+  effect: effect(
+    "demo:liquid-glass",
+    blurRadius: 8,
+    downsample: 1,
+    refraction: 12,
+    tint: #D5F1FF10,
+    saturation: 1.35,
+    highlight: 0.48,
+    noise: 0.04
+  );
+}
+
+style GlassItemMarker extends Transparent {
+  width: 8;
+  height: 8;
+  radius: 4;
+}
+
+style GlassItemMarkerSelected extends GlassItemMarker {
+  background: #EAF8FFFF;
+  border: { width: 1, color: #FFFFFFA0 };
 }
 
 style GlassChevron extends Transparent {
@@ -485,7 +516,7 @@ component GlassChoiceItem(
     style: active ? GlassItemActive : selected ? GlassItemSelected : GlassItemStyle,
     semantics: { role: "MENU_ITEM", label: label }
   ) {
-    Text(text: checked || selected ? "*" : "", layout: { width: 14, height: "content" })
+    Panel(style: checked || selected ? GlassItemMarkerSelected : GlassItemMarker)
     Text(
       text: separator ? "------------------------" : label,
       layout: { width: { weight: 1 }, height: "content" },
