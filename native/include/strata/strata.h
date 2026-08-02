@@ -1546,12 +1546,12 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Packet v5 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * Packet v6 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
  * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
  * [u32 kind, u32 payload byte count, payload]:
  *
  *   bytes[8] "STRATARP", u32 version, u32 resource count, u32 batch count,
- *   u64 frame index, u64 geometry epoch, u32 vertex byte count, u32 index count,
+ *   u64 frame index, u64 geometry epoch, u32 flags, u32 vertex byte count, u32 index count,
  *   u32 planned draw count, u32 skipped draw count, resource records, vertex bytes,
  *   little-endian u32 indices, submission batch records.
  *
@@ -1569,19 +1569,25 @@ typedef struct strata_surface_frame_info {
  * Encoded texture creation carries u32 encoding (0 = PNG), u32 sampling, u32 width/height, a u32
  * byte count, and encoded bytes. A repeated geometry epoch has identical geometry and batch shape,
  * allowing the backend to retain its prior upload while still applying ordered resources and the
- * new frame index.
+ * new frame index. When STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD is absent, batch and geometry
+ * counts are zero and the decoder retains the complete geometry/batch plan previously received
+ * for that epoch while still applying this packet's resources and frame index. Packets form one
+ * ordered Surface/backend stream: consume every framed packet, retain geometry until its epoch
+ * changes, and discard decoder state only when discarding the stream.
  *
  * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
  * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
- * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v5 records.
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v6 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
 #define STRATA_RENDER_PACKET_VERSION_3 UINT32_C(3)
 #define STRATA_RENDER_PACKET_VERSION_4 UINT32_C(4)
 #define STRATA_RENDER_PACKET_VERSION_5 UINT32_C(5)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_5
+#define STRATA_RENDER_PACKET_VERSION_6 UINT32_C(6)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_6
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
+#define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 
 #define STRATA_RENDER_RESOURCE_ATLAS_CREATE UINT32_C(0)
 #define STRATA_RENDER_RESOURCE_ATLAS_UPLOAD UINT32_C(1)

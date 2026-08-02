@@ -110,7 +110,7 @@ installed `desktop_app.cpp` sample is a complete window loop. See
 [Win32 desktop hosting](desktop-hosting.md).
 
 Linux deliberately has no bundled GUI backend. A Vulkan, OpenGL, or other renderer links
-`Strata::render_host` and includes `<strata/render_packet.hpp>` instead of duplicating packet-v5
+`Strata::render_host` and includes `<strata/render_packet.hpp>` instead of duplicating packet-v6
 parsing:
 
 ```cpp
@@ -127,12 +127,13 @@ for (const strata::host::SubmissionBatch& batch : plan.batches) {
 ```
 
 The decoder is stateful because settled packets can retain an earlier geometry epoch while updating
-the frame index and resource operations. Keep one decoder per Surface/backend stream and call
-`reset()` when discarding that stream. `RenderPacket` exposes ordered texture mutations, fixed-layout
-vertex bytes, indices, scissors, material/blend/texture bindings, draw batches, blur batches,
-backdrop/content effect batches, and content stack markers. The consumer remains responsible for
-GPU resources, shader/material implementation, presentation, and the Surface release-packet
-barrier.
+the frame index and resource operations. Consume every framed packet in order with one decoder per
+Surface/backend stream. Compact packets are deltas and cannot initialize a fresh decoder; call
+`reset()` only when discarding the stream, not while continuing to consume it. `RenderPacket`
+exposes ordered texture mutations, fixed-layout vertex bytes, indices, scissors,
+material/blend/texture bindings, draw batches, blur batches, backdrop/content effect batches, and
+content stack markers. The consumer remains responsible for GPU resources, shader/material
+implementation, presentation, and the Surface release-packet barrier.
 
 Before framing, enumerate `Runtime::material_declarations(shaderBackend)` and
 `Runtime::effect_pass_declarations(shaderBackend)`. Effect declarations are a flat table ordered by
@@ -217,12 +218,13 @@ runtime.
 
 Adopt a complete Surface environment generation atomically: framebuffer and logical sizes, scale,
 safe insets, snapping, density, reduced-motion preference, and input capabilities. Enqueue input in
-ordered batches, call `strata_surface_frame`, then read packet v5 through a bytes sink.
+ordered batches, call `strata_surface_frame`, then read packet v6 through a bytes sink.
 
 The packet bytes are borrowed only during the sink callback. Copy them if the backend submits later;
-consume them directly if submission is synchronous. Packet v5 contains native geometry,
-indices, scissors, materials, textures, draw/blur/effect batches, and one-shot GPU resource operations.
-Hosts must not redo layout, glyph generation, or batch planning.
+consume them directly if submission is synchronous. Packet-v6 full packets contain native geometry,
+indices, scissors, materials, textures, and draw/blur/effect batches. Compact packets reference the
+last full geometry epoch in the ordered stream; both forms can carry one-shot GPU resource
+operations. Hosts must not redo layout, glyph generation, or batch planning.
 
 Canonical frame JSON is an optional inspection/conformance projection and is deliberately lazy. It
 is not required for normal rendering.

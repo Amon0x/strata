@@ -47,8 +47,9 @@ struct HostRenderResourceInvalidationPlan final {
 };
 
 /**
- * Packet v5: retained geometry epochs plus ordered application effect programs. The
- * logical v1 encoder remains available only to headless command consumers and inspection tooling.
+ * Packet v6: retained geometry epochs, compact geometry references, and ordered application
+ * effect programs. The
+ * logical v2 encoder remains available only to command-stream inspection tooling.
  */
 class HostRenderPacketCache final {
 public:
@@ -58,7 +59,7 @@ public:
     HostRenderPacketCache(HostRenderPacketCache&&) = delete;
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
-    /** A null TextEngine selects the packet-v5 non-text path; text runs are then rejected. */
+    /** A null TextEngine selects the packet-v6 non-text path; text runs are then rejected. */
     [[nodiscard]] const std::vector<std::uint8_t>& encode(
         const RenderCommandBuffer& commands,
         std::uint64_t frame_index,
@@ -84,7 +85,7 @@ public:
         double logical_width,
         double logical_height
     );
-    /** Reuses settled geometry and updates only the packet frame index. */
+    /** Emits a compact packet referencing the settled geometry epoch. */
     [[nodiscard]] bool reuse(std::uint64_t frame_index);
     /** Plans release records for raster images already published by this cache. */
     [[nodiscard]] HostRenderResourceInvalidationPlan plan_resource_invalidation() const;
@@ -118,11 +119,14 @@ private:
     // resource payloads have been consumed by the host.
     std::vector<resource::TextureResourceDescriptor> texture_descriptors_;
     std::vector<std::uint8_t> geometry_packet_;
+    std::vector<std::uint8_t> reuse_packet_;
     std::vector<std::uint8_t> resource_packet_;
     const std::vector<std::uint8_t>* current_packet_ = &geometry_packet_;
     HostRenderPacketTelemetry telemetry_;
+    std::size_t planned_draws_ = 0U;
+    std::size_t skipped_draws_ = 0U;
     std::vector<font::AtlasOperation> pending_static_releases_;
-    // A failed v4 encode must be retried even if the retained UI becomes settled meanwhile.
+    // A failed packet encode must be retried even if the retained UI becomes settled meanwhile.
     bool frame_encoding_incomplete_ = false;
     bool terminal_release_prepared_ = false;
     std::uint64_t geometry_epoch_ = 0U;

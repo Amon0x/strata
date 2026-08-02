@@ -180,13 +180,18 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     Reader input(bytes);
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
-        input.u32() != 5U) {
-        throw std::invalid_argument("native desktop requires render packet v5");
+        input.u32() != 6U) {
+        throw std::invalid_argument("render packet decoder requires protocol v6");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();
     const std::uint64_t frame_index = input.u64();
     const std::uint64_t geometry_epoch = input.u64();
+    const std::uint32_t flags = input.u32();
+    if ((flags & ~packet_flag_geometry_payload) != 0U) {
+        throw std::invalid_argument("render packet flags are outside the supported domain");
+    }
+    const bool has_geometry_payload = (flags & packet_flag_geometry_payload) != 0U;
     const std::uint32_t vertex_bytes = input.count();
     const std::uint32_t index_count = input.count();
     const std::uint32_t planned_draw_count = input.count();
@@ -204,6 +209,24 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     }
     const bool retained_geometry =
         retained_.has_value() && retained_->geometry_epoch == geometry_epoch;
+    if (!has_geometry_payload) {
+        if (batch_count != 0U || vertex_bytes != 0U || index_count != 0U) {
+            throw std::invalid_argument(
+                "retained render packet unexpectedly carries geometry counts"
+            );
+        }
+        input.exhausted("retained render packet");
+        if (!retained_geometry) {
+            throw std::invalid_argument(
+                "retained render packet references an unavailable geometry epoch"
+            );
+        }
+        retained_->frame_index = frame_index;
+        retained_->planned_draw_count = planned_draw_count;
+        retained_->skipped_draw_count = skipped_draw_count;
+        retained_->resources = std::move(resources);
+        return *retained_;
+    }
 
     RenderPacket result;
     result.frame_index = frame_index;

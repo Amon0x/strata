@@ -18,6 +18,7 @@ inline constexpr std::uint32_t resource_create = 0U;
 inline constexpr std::uint32_t resource_upload = 1U;
 inline constexpr std::uint32_t resource_release = 2U;
 inline constexpr std::uint32_t resource_encoded_image = 3U;
+inline constexpr std::uint32_t packet_flag_geometry_payload = 1U;
 
 inline constexpr std::uint32_t texture_format_r8 = 0U;
 inline constexpr std::uint32_t texture_format_rgba8 = 1U;
@@ -111,7 +112,11 @@ struct RenderPacket final {
     std::vector<SubmissionBatch> batches;
 };
 
-/** Stateful current-packet decoder shared by custom, desktop, and headless render backends. */
+/**
+ * Stateful decoder for one ordered Surface/backend packet stream. Compact packets depend on the
+ * latest full geometry epoch, so consume every framed packet and reset only when discarding the
+ * stream.
+ */
 class RenderPacketDecoder final {
   public:
     [[nodiscard]] const RenderPacket& decode(std::span<const std::uint8_t> bytes);

@@ -54,9 +54,9 @@ std::uint32_t u32(const std::vector<std::uint8_t>& bytes, const std::size_t offs
 std::vector<std::size_t> batch_kind_offsets(const std::vector<std::uint8_t>& bytes) {
     const std::uint32_t resource_count = u32(bytes, 12U);
     const std::uint32_t batch_count = u32(bytes, 16U);
-    const std::uint32_t vertex_bytes = u32(bytes, 36U);
-    const std::uint32_t index_count = u32(bytes, 40U);
-    std::size_t offset = 52U;
+    const std::uint32_t vertex_bytes = u32(bytes, 40U);
+    const std::uint32_t index_count = u32(bytes, 44U);
+    std::size_t offset = 56U;
     for (std::uint32_t index = 0U; index < resource_count; ++index) {
         offset += sizeof(std::uint32_t);
         const std::uint32_t record_size = u32(bytes, offset);
@@ -95,8 +95,8 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
 
     host::RenderPacketDecoder decoder;
     const std::vector<std::uint8_t> encoded = encode(commands, resources);
-    check(encoded.size() > 12U && encoded[8U] == 5U,
-          "effect packet did not use render protocol v5");
+    check(encoded.size() > 12U && encoded[8U] == 6U,
+          "effect packet did not use render protocol v6");
     const host::RenderPacket packet = decoder.decode(encoded);
     check(packet.batches.size() == 4U, "effect packet changed its ordered batch count");
     const auto* backdrop = std::get_if<host::EffectBatch>(&packet.batches[0U]);

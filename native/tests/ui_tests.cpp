@@ -1159,7 +1159,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
             ) == "STRATARP",
         "surface teardown packet lost its fixed magic"
     );
-    check(packet_u32(release_packet, release_offset) == 5U,
+    check(packet_u32(release_packet, release_offset) == 6U,
           "surface teardown did not use the host render packet protocol");
     check(packet_u32(release_packet, release_offset) == 2U,
           "surface teardown did not combine its live atlas and static texture releases");
@@ -1169,6 +1169,8 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
           "surface teardown packet lost its frame identity");
     check(packet_u64(release_packet, release_offset) != 0U,
           "surface teardown packet lost its geometry epoch");
+    check(packet_u32(release_packet, release_offset) == 1U,
+          "surface teardown packet lost its full-geometry marker");
     check(packet_u32(release_packet, release_offset) == 0U &&
               packet_u32(release_packet, release_offset) == 0U &&
               packet_u32(release_packet, release_offset) == 0U &&
@@ -1217,7 +1219,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
     const std::vector<std::uint8_t>& after_reload = reload_cache.encode(
         commands, 2U, textures, reload_atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
     std::size_t after_offset = 8U;
-    check(packet_u32(after_reload, after_offset) == 5U,
+    check(packet_u32(after_reload, after_offset) == 6U,
           "static image reload packet version changed");
     check(packet_u32(after_reload, after_offset) == 2U,
           "repeated static image reload dropped its pending release or replacement");
@@ -1225,7 +1227,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
     static_cast<void>(packet_u64(after_reload, after_offset));
     check(packet_u64(after_reload, after_offset) > before_epoch,
           "resource invalidation reused a prior geometry epoch");
-    for (std::size_t field = 0U; field < 4U; ++field) {
+    for (std::size_t field = 0U; field < 5U; ++field) {
         static_cast<void>(packet_u32(after_reload, after_offset));
     }
     check(packet_u32(after_reload, after_offset) == 2U,
