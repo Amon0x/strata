@@ -141,6 +141,26 @@ changes the main-axis side when the preferred side cannot fit and the opposite s
 Shift clamps the cross-axis result to the root viewport. Anchored portals participate normally in
 retained rendering, hit testing, focus, semantics, clipping, motion, and nested portal placement.
 
+### Exterior shadows
+
+`shadows` adds up to four ordered exterior shadow layers to any styled widget. Each layer is
+rendered behind the widget and its backdrop effect, outside the source silhouette rather than
+darkening translucent content:
+
+```strata
+style FloatingGlass {
+  radius: 18;
+  shadows: [
+    { color: #0000002E, radius: 18, spread: 1, offsetY: 7 },
+    { color: #00000018, radius: 5, spread: 0, offsetY: 2 }
+  ];
+}
+```
+
+`radius` is the blur extent; `spread` expands or contracts the shadow silhouette; `offsetX` and
+`offsetY` move it in logical pixels. A widget's own clip does not cut off its shadow, while an
+ancestor clip still constrains the composed subtree.
+
 ## Paints and gradients
 
 `background`, `fill`, `track` and `scrim` take a paint: a colour, or a gradient authored in the

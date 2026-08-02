@@ -142,6 +142,8 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
             .name = "scrim", .type = declared_type_reference("t145"), .nullable = true},
         DeclaredProperty{
             .name = "selection", .type = declared_type_reference("t8"), .nullable = true},
+        DeclaredProperty{
+            .name = "shadows", .type = declared_type_reference("t171"), .nullable = true},
         DeclaredProperty{.name = "selectionColor", .type = declared_type_reference("t8")},
         DeclaredProperty{.name = "thumb", .type = declared_type_reference("t8"), .nullable = true},
         DeclaredProperty{

@@ -142,13 +142,20 @@ float4 strataShade(PixelInput input) {
         float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
         color.a *= saturate(signedDistance * screenPxRange + 0.5);
     } else if (mode == 6) {
-        float2 size = max(input.drawData0.xy, 1.0);
+        float2 shapeSize = max(input.drawData0.xy, 1.0);
+        float2 quadSize = max(input.drawData2.xy, shapeSize);
         float blurRadius = max(input.drawData0.z, 0.5);
-        float spread = max(input.drawData0.w, 0.0);
-        float4 radii = max(input.drawData1 + spread, 0.0);
-        float2 p = (input.uv - 0.5) * size;
-        float distance = roundedBoxSdf(p, size * 0.5 - blurRadius, radii);
-        color.a *= 1.0 - smoothstep(-blurRadius, blurRadius, distance);
+        float spread = input.drawData0.w;
+        float4 radii = max(input.drawData1, 0.0);
+        float2 p = (input.uv - 0.5) * quadSize;
+        float distance = roundedBoxSdf(p, shapeSize * 0.5, radii);
+        float outside = smoothstep(-1.0, 1.0, distance);
+        float falloff = 1.0 - smoothstep(
+            0.0,
+            blurRadius,
+            max(distance - spread, 0.0)
+        );
+        color.a *= outside * falloff;
     }
     color.a *= input.drawData3.w;
     return color;

@@ -873,6 +873,57 @@ float submission_vertex_component(const std::vector<std::uint8_t>& vertices,
     return result;
 }
 
+void test_shadow_submission_extends_beyond_the_source_shape() {
+    using namespace strata;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::ShadowRenderCommand{
+        ui::Rect{100.0, 50.0, 40.0, 20.0},
+        ui::CornerRadii::all(8.0),
+        ui::RenderColor{0U, 0U, 0U, 96U},
+        10.0,
+        2.0,
+    });
+    font::GlyphAtlas atlas("shadow-outset-test");
+    const ui::RenderSubmission submission =
+        ui::build_render_submission(commands, atlas, nullptr, 1.0, 640, 480, 640.0, 480.0);
+    check(submission.vertex_bytes.size() == 4U * 88U && submission.indices.size() == 6U,
+          "exterior shadow did not produce one expanded quad");
+    float minimum_x = std::numeric_limits<float>::max();
+    float minimum_y = std::numeric_limits<float>::max();
+    float maximum_x = std::numeric_limits<float>::lowest();
+    float maximum_y = std::numeric_limits<float>::lowest();
+    for (std::size_t vertex = 0U; vertex < 4U; ++vertex) {
+        const float x = submission_vertex_component(submission.vertex_bytes, vertex, 0U);
+        const float y = submission_vertex_component(submission.vertex_bytes, vertex, 1U);
+        minimum_x = std::min(minimum_x, x);
+        minimum_y = std::min(minimum_y, y);
+        maximum_x = std::max(maximum_x, x);
+        maximum_y = std::max(maximum_y, y);
+    }
+    check(
+        std::abs(minimum_x - 88.0F) < 0.0001F &&
+            std::abs(maximum_x - 152.0F) < 0.0001F &&
+            std::abs(minimum_y - 38.0F) < 0.0001F &&
+            std::abs(maximum_y - 82.0F) < 0.0001F,
+        "shadow geometry remained clipped to its source rectangle"
+    );
+    constexpr std::size_t draw_data_offset = 24U;
+    const auto draw_data = [&submission](const std::size_t component) {
+        float result = 0.0F;
+        std::memcpy(
+            &result,
+            submission.vertex_bytes.data() + draw_data_offset + component * sizeof(float),
+            sizeof(result)
+        );
+        return result;
+    };
+    check(
+        draw_data(0U) == 40.0F && draw_data(1U) == 20.0F &&
+            draw_data(8U) == 64.0F && draw_data(9U) == 44.0F,
+        "shadow submission lost its independent source and expanded dimensions"
+    );
+}
+
 void check_translation_reused_geometry(const strata::ui::RenderSubmission& actual,
                                        const strata::ui::RenderSubmission& expected) {
     constexpr std::size_t vertex_bytes = 88U;
@@ -5275,6 +5326,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_active_work_scheduler_and_detach_cleanup();
         test_render_packet_batches_every_portable_command();
         test_authored_material_scope_is_fill_local();
+        test_shadow_submission_extends_beyond_the_source_shape();
         test_gradient_paint_authoring_and_tessellation();
         test_vector_shape_tessellation();
         test_svg_image_projection_and_compound_fill();

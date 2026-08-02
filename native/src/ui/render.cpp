@@ -98,6 +98,50 @@ namespace {
     return found != effect.parameters.end() ? &found->value : nullptr;
 }
 
+struct StyleShadow final {
+    RenderColor color;
+    double radius = 0.0;
+    double spread = 0.0;
+    double offset_x = 0.0;
+    double offset_y = 0.0;
+};
+
+[[nodiscard]] std::vector<StyleShadow> style_shadows(
+    const runtime::Value* value,
+    const double opacity
+) {
+    std::vector<StyleShadow> result;
+    if (value == nullptr || value->list() == nullptr) return result;
+    result.reserve(std::min<std::size_t>(value->list()->values.size(), 4U));
+    for (const runtime::Value& entry : value->list()->values) {
+        if (result.size() == 4U) break;
+        const runtime::ColorValue* color = entry.field("color") != nullptr
+            ? entry.field("color")->color()
+            : nullptr;
+        const double* radius = entry.field("radius") != nullptr
+            ? entry.field("radius")->number()
+            : nullptr;
+        if (color == nullptr || radius == nullptr || !std::isfinite(*radius) || *radius < 0.0) {
+            continue;
+        }
+        const auto number = [&entry](const std::string_view name) {
+            const runtime::Value* field = entry.field(name);
+            return field != nullptr && field->number() != nullptr &&
+                    std::isfinite(*field->number())
+                ? *field->number()
+                : 0.0;
+        };
+        result.push_back(StyleShadow{
+            widget_opacity(*color, opacity),
+            *radius,
+            number("spread"),
+            number("offsetX"),
+            number("offsetY"),
+        });
+    }
+    return result;
+}
+
 void append_fragment(RenderCommandBuffer& output, const std::vector<RenderCommand>& fragment,
                      RenderOperationCounters& counters, const double opacity = 1.0) {
     if (opacity == 1.0) {
@@ -580,8 +624,24 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             });
             ++counters.commands_emitted;
         }
+        const double radius = std::max(0.0, visual_number(node, "radius").value_or(0.0));
+        for (const StyleShadow& shadow : style_shadows(style_value("shadows"),
+                                                       descendant_opacity)) {
+            output.append(ShadowRenderCommand{
+                Rect{
+                    record->bounds.x + shadow.offset_x,
+                    record->bounds.y + shadow.offset_y,
+                    record->bounds.width,
+                    record->bounds.height,
+                },
+                CornerRadii::all(radius),
+                shadow.color,
+                shadow.radius,
+                shadow.spread,
+            });
+            ++counters.commands_emitted;
+        }
         if (rendered_effect.has_value()) {
-            const double radius = std::max(0.0, visual_number(node, "radius").value_or(0.0));
             if (rendered_effect->input == EffectInput::shape && rendered_effect->id == "shadow") {
                 const runtime::Value* color_value = effect_parameter(*rendered_effect, "color");
                 const runtime::Value* blur_value = effect_parameter(*rendered_effect, "radius");

@@ -70,13 +70,20 @@ void main() {
         float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
         color.a *= clamp(signedDistance * screenPxRange + 0.5, 0.0, 1.0);
     } else if (mode == 6) {
-        vec2 size = max(drawData0.xy, vec2(1.0));
+        vec2 shapeSize = max(drawData0.xy, vec2(1.0));
+        vec2 quadSize = max(drawData2.xy, shapeSize);
         float blurRadius = max(drawData0.z, 0.5);
-        float spread = max(drawData0.w, 0.0);
-        vec4 radii = max(drawData1 + vec4(spread), vec4(0.0));
-        vec2 p = (texCoord0 - vec2(0.5)) * size;
-        float distance = roundedBoxSdf(p, size * 0.5 - vec2(blurRadius), radii);
-        color.a *= 1.0 - smoothstep(-blurRadius, blurRadius, distance);
+        float spread = drawData0.w;
+        vec4 radii = max(drawData1, vec4(0.0));
+        vec2 p = (texCoord0 - vec2(0.5)) * quadSize;
+        float distance = roundedBoxSdf(p, shapeSize * 0.5, radii);
+        float outside = smoothstep(-1.0, 1.0, distance);
+        float falloff = 1.0 - smoothstep(
+            0.0,
+            blurRadius,
+            max(distance - spread, 0.0)
+        );
+        color.a *= outside * falloff;
     }
 
     color.a *= drawData3.w;

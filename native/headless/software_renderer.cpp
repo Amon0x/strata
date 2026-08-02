@@ -521,12 +521,25 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.alpha *= saturate(outer - inner);
                     } else {
                         const float radius = std::max(data[2U], 0.5F);
-                        const float spread = std::max(data[3U], 0.0F);
-                        for (float& value : radii)
-                            value = std::max(value + spread, 0.0F);
-                        const float distance = rounded_box_sdf(px, py, shape_width * 0.5F - radius,
-                                                               shape_height * 0.5F - radius, radii);
-                        source.alpha *= 1.0F - smoothstep(-radius, radius, distance);
+                        const float spread = data[3U];
+                        const float quad_width = std::max(data[8U], shape_width);
+                        const float quad_height = std::max(data[9U], shape_height);
+                        const float shadow_x = (u - 0.5F) * quad_width;
+                        const float shadow_y = (v - 0.5F) * quad_height;
+                        const float distance = rounded_box_sdf(
+                            shadow_x,
+                            shadow_y,
+                            shape_width * 0.5F,
+                            shape_height * 0.5F,
+                            radii
+                        );
+                        const float outside = smoothstep(-1.0F, 1.0F, distance);
+                        const float falloff = 1.0F - smoothstep(
+                            0.0F,
+                            radius,
+                            std::max(distance - spread, 0.0F)
+                        );
+                        source.alpha *= outside * falloff;
                     }
                 } else if (mode == 4) {
                     source.alpha *= texture_sample(u, v).red;

@@ -159,11 +159,13 @@ void parameter_data(
             radii_data(values, command.radii);
             color_data(values, 8U, command.border.color);
         } else if constexpr (std::is_same_v<Type, ShadowRenderCommand>) {
-            values[0] = static_cast<float>(draw.local_bounds.width);
-            values[1] = static_cast<float>(draw.local_bounds.height);
+            values[0] = static_cast<float>(command.bounds.width);
+            values[1] = static_cast<float>(command.bounds.height);
             values[2] = static_cast<float>(command.radius);
             values[3] = static_cast<float>(command.spread);
             radii_data(values, command.radii);
+            values[8] = static_cast<float>(draw.local_bounds.width);
+            values[9] = static_cast<float>(draw.local_bounds.height);
         } else if constexpr (std::is_same_v<Type, PreparedTextPtr>) {
             if (command != nullptr) {
                 values[0] = static_cast<float>(command->atlas_pixel_range);
@@ -500,7 +502,7 @@ void geometry(
         } else if constexpr (std::is_same_v<Type, CustomMeshRenderCommand>) {
             custom_mesh_geometry(output, draw, command, data, batch_base_vertex);
         } else if constexpr (std::is_same_v<Type, ShadowRenderCommand>) {
-            quad(output, draw, command.bounds, command.color, full_uv, data, batch_base_vertex);
+            quad(output, draw, draw.local_bounds, command.color, full_uv, data, batch_base_vertex);
         }
     }, draw.command);
 }

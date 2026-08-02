@@ -1745,6 +1745,39 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                        .type = declared_type_reference("t0")},
                      DeclaredParameter{.name = "control",
                                        .type = declared_type_reference("t168")}}})},
+        DeclaredNamedType{
+            .id = "t170",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "shadow",
+                .fields =
+                    {DeclaredTypeField{.name = "color",
+                                       .type = declared_type_reference("t8"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "radius",
+                                       .type = declared_type_reference("t3"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "spread",
+                                       .type = declared_type_reference("t3"),
+                                       .required = false,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "offsetX",
+                                       .type = declared_type_reference("t3"),
+                                       .required = false,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "offsetY",
+                                       .type = declared_type_reference("t3"),
+                                       .required = false,
+                                       .nullable = false}},
+                .value = declared_type_reference("t7")})},
+        DeclaredNamedType{
+            .id = "t171",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::list,
+                .element = declared_type_reference("t170"),
+                .maximum_items = std::size_t{4U}})},
     };
 }
 

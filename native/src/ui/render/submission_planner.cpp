@@ -80,6 +80,15 @@ constexpr std::size_t maximum_content_effect_depth = 4U;
                 bottom = std::max(bottom, value->origin.y + glyph.bounds.bottom());
             }
             return Rect{left, top, right - left, bottom - top};
+        } else if constexpr (std::is_same_v<Type, ShadowRenderCommand>) {
+            const double outset =
+                std::max(0.0, value.radius + std::max(value.spread, 0.0));
+            return Rect{
+                value.bounds.x - outset,
+                value.bounds.y - outset,
+                value.bounds.width + outset * 2.0,
+                value.bounds.height + outset * 2.0,
+            };
         } else {
             return value.bounds;
         }
