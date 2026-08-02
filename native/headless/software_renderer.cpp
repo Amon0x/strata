@@ -559,8 +559,14 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
     bottom = std::min(bottom, static_cast<std::uint32_t>(clip_bottom));
     if (left >= right || top >= bottom)
         return;
+    const double physical_radius = std::clamp(
+        batch.radius * std::max(scale_x, scale_y),
+        0.5,
+        32.0
+    );
     const std::uint32_t radius = static_cast<std::uint32_t>(
-        std::clamp(std::ceil(batch.radius * std::max(scale_x, scale_y)), 1.0, 32.0));
+        std::ceil(physical_radius)
+    );
     const std::uint32_t source_left = left > radius ? left - radius : 0U;
     const std::uint32_t source_top = top > radius ? top - radius : 0U;
     const std::uint32_t source_right = static_cast<std::uint32_t>(
@@ -569,55 +575,82 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
         std::min<std::uint64_t>(static_cast<std::uint64_t>(bottom) + radius, height_));
     const std::uint32_t source_width = source_right - source_left;
     const std::uint32_t source_height = source_bottom - source_top;
+    const double sigma = std::max(physical_radius / 3.0, 0.5);
+    const double inverse_two_sigma_squared = 0.5 / (sigma * sigma);
+    std::vector<double> weights(radius + 1U);
+    for (std::uint32_t offset = 0U; offset <= radius; ++offset) {
+        const double distance = static_cast<double>(offset);
+        const double coverage = std::clamp(
+            physical_radius + 0.5 - distance,
+            0.0,
+            1.0
+        );
+        weights[offset] =
+            std::exp(-distance * distance * inverse_two_sigma_squared) * coverage;
+    }
     std::vector<std::uint8_t> horizontal(static_cast<std::size_t>(source_width) * source_height *
                                          4U);
-    std::vector<std::uint64_t> prefix(static_cast<std::size_t>(source_width + 1U) * 4U);
     for (std::uint32_t row = 0U; row < source_height; ++row) {
-        std::fill(prefix.begin(), prefix.end(), 0U);
         for (std::uint32_t column = 0U; column < source_width; ++column) {
-            const std::size_t source =
-                (static_cast<std::size_t>(source_top + row) * width_ + source_left + column) * 4U;
-            for (std::size_t component = 0U; component < 4U; ++component) {
-                prefix[(static_cast<std::size_t>(column) + 1U) * 4U + component] =
-                    prefix[static_cast<std::size_t>(column) * 4U + component] +
-                    pixels_[source + component];
-            }
-        }
-        for (std::uint32_t column = 0U; column < source_width; ++column) {
-            const std::uint32_t begin = column > radius ? column - radius : 0U;
-            const std::uint32_t end = std::min(source_width, column + radius + 1U);
-            const std::uint64_t count = end - begin;
             const std::size_t target = (static_cast<std::size_t>(row) * source_width + column) * 4U;
+            std::array<double, 4U> sums{};
+            double total_weight = 0.0;
+            for (std::int64_t offset = -static_cast<std::int64_t>(radius);
+                 offset <= static_cast<std::int64_t>(radius);
+                 ++offset) {
+                const std::uint32_t sample_column = static_cast<std::uint32_t>(
+                    std::clamp<std::int64_t>(
+                        static_cast<std::int64_t>(column) + offset,
+                        0,
+                        static_cast<std::int64_t>(source_width) - 1
+                    )
+                );
+                const double weight = weights[static_cast<std::size_t>(std::abs(offset))];
+                const std::size_t source =
+                    (static_cast<std::size_t>(source_top + row) * width_ +
+                     source_left + sample_column) *
+                    4U;
+                for (std::size_t component = 0U; component < 4U; ++component) {
+                    sums[component] += static_cast<double>(pixels_[source + component]) * weight;
+                }
+                total_weight += weight;
+            }
             for (std::size_t component = 0U; component < 4U; ++component) {
-                const std::uint64_t sum = prefix[static_cast<std::size_t>(end) * 4U + component] -
-                                          prefix[static_cast<std::size_t>(begin) * 4U + component];
-                horizontal[target + component] = static_cast<std::uint8_t>(sum / count);
+                horizontal[target + component] = static_cast<std::uint8_t>(
+                    std::clamp(std::lround(sums[component] / total_weight), 0L, 255L)
+                );
             }
         }
     }
-    prefix.resize(static_cast<std::size_t>(source_height + 1U) * 4U);
     for (std::uint32_t column = left; column < right; ++column) {
-        std::fill(prefix.begin(), prefix.end(), 0U);
         const std::uint32_t local_x = column - source_left;
-        for (std::uint32_t row = 0U; row < source_height; ++row) {
-            const std::size_t source =
-                (static_cast<std::size_t>(row) * source_width + local_x) * 4U;
-            for (std::size_t component = 0U; component < 4U; ++component) {
-                prefix[(static_cast<std::size_t>(row) + 1U) * 4U + component] =
-                    prefix[static_cast<std::size_t>(row) * 4U + component] +
-                    horizontal[source + component];
-            }
-        }
         for (std::uint32_t row = top; row < bottom; ++row) {
             const std::uint32_t local_y = row - source_top;
-            const std::uint32_t begin = local_y > radius ? local_y - radius : 0U;
-            const std::uint32_t end = std::min(source_height, local_y + radius + 1U);
-            const std::uint64_t count = end - begin;
             const std::size_t target = (static_cast<std::size_t>(row) * width_ + column) * 4U;
+            std::array<double, 4U> sums{};
+            double total_weight = 0.0;
+            for (std::int64_t offset = -static_cast<std::int64_t>(radius);
+                 offset <= static_cast<std::int64_t>(radius);
+                 ++offset) {
+                const std::uint32_t sample_row = static_cast<std::uint32_t>(
+                    std::clamp<std::int64_t>(
+                        static_cast<std::int64_t>(local_y) + offset,
+                        0,
+                        static_cast<std::int64_t>(source_height) - 1
+                    )
+                );
+                const double weight = weights[static_cast<std::size_t>(std::abs(offset))];
+                const std::size_t source =
+                    (static_cast<std::size_t>(sample_row) * source_width + local_x) * 4U;
+                for (std::size_t component = 0U; component < 4U; ++component) {
+                    sums[component] += static_cast<double>(horizontal[source + component]) * weight;
+                }
+                total_weight += weight;
+            }
             for (std::size_t component = 0U; component < 4U; ++component) {
-                const std::uint64_t sum = prefix[static_cast<std::size_t>(end) * 4U + component] -
-                                          prefix[static_cast<std::size_t>(begin) * 4U + component];
-                pixels_[target + component] = static_cast<std::uint8_t>(sum / count);
+                pixels_[target + component] = static_cast<std::uint8_t>(
+                    std::clamp(std::lround(sums[component] / total_weight), 0L, 255L)
+                );
             }
         }
     }

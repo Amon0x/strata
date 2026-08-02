@@ -265,7 +265,7 @@ style PrismDemoCard extends EffectDemoCard {
 }
 
 style SoftContentDemoCard extends EffectDemoCard {
-  effect: effect("demo:soft-content", radius: 3, downsample: 1);
+  effect: effect("demo:soft-content", radius: 6, downsample: 1);
 }
 
 style RoundedGlassDemoCard extends LiquidDemoCard {

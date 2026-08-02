@@ -42,19 +42,25 @@ float4 main(PixelInput input) : SV_TARGET {
         return Texture0.Sample(Sampler0, sampleUv);
     }
     const int maximumRadius = 32;
-    int activeRadius = (int)clamp(round(max(radius, 1.0)), 1.0, (float)maximumRadius);
+    float boundedRadius = clamp(radius, 0.5, (float)maximumRadius);
+    int activeRadius = (int)ceil(boundedRadius);
+    float sigma = max(boundedRadius / 3.0, 0.5);
+    float inverseTwoSigmaSquared = 0.5 / (sigma * sigma);
     float4 color = 0.0;
-    float weight = 0.0;
+    float totalWeight = 0.0;
     [loop]
     for (int sampleOffset = -maximumRadius; sampleOffset <= maximumRadius; ++sampleOffset) {
         if (abs(sampleOffset) > activeRadius) continue;
+        float distance = (float)abs(sampleOffset);
+        float coverage = saturate(boundedRadius + 0.5 - distance);
+        float weight = exp(-distance * distance * inverseTwoSigmaSquared) * coverage;
         color += Texture0.Sample(
             Sampler0,
             sampleUv + direction * texel * (float)sampleOffset
-        );
-        weight += 1.0;
+        ) * weight;
+        totalWeight += weight;
     }
-    return color / max(weight, 1.0);
+    return color / max(totalWeight, 0.0001);
 }
 )hlsl";
 
