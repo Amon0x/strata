@@ -38,14 +38,14 @@ authoring and render packets carry only logical or Surface-scoped ids.
 
 ## Rendering model
 
-PNG bytes are inspected at Surface creation, transferred once through packet v6, decoded by the
+PNG bytes are inspected at Surface creation, transferred once through packet v7, decoded by the
 host, and sampled as ordinary textures. SVG documents are parsed at Surface creation into immutable
 display lists. During widget presentation, Strata projects their curves, fills, strokes,
 transforms, `viewBox`, and `preserveAspectRatio` into ordinary clipped path commands. Submission
 then tessellates those paths at the current logical size and device scale.
 
 SVG is therefore resolution-independent and needs no SVG feature in D3D11, the CPU reference
-renderer, or a custom packet-v6 backend. Both desktop and headless rendering consume the same
+renderer, or a custom packet-v7 backend. Both desktop and headless rendering consume the same
 vertices, indices, materials, and scissors. Resource reload parses candidate PNG/SVG images before
 atomically replacing the live font/image set; malformed candidates leave prior resources active.
 

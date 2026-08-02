@@ -35,11 +35,13 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
 }
 
 [[nodiscard]] std::string utf8(const wchar_t* value) {
-    if (value == nullptr || *value == L'\0') return {};
+    if (value == nullptr || *value == L'\0')
+        return {};
     const int length = lstrlenW(value);
     const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, length, nullptr, 0,
                                          nullptr, nullptr);
-    if (size <= 0) return {};
+    if (size <= 0)
+        return {};
     std::string result(static_cast<std::size_t>(size), '\0');
     if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value, length, result.data(), size,
                             nullptr, nullptr) != size) {
@@ -109,17 +111,14 @@ struct Renderer::Impl final {
         LARGE_INTEGER driver{};
         if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &driver))) {
             const std::uint64_t encoded = static_cast<std::uint64_t>(driver.QuadPart);
-            info.driver_version =
-                std::to_string((encoded >> 48U) & 0xFFFFU) + "." +
-                std::to_string((encoded >> 32U) & 0xFFFFU) + "." +
-                std::to_string((encoded >> 16U) & 0xFFFFU) + "." +
-                std::to_string(encoded & 0xFFFFU);
+            info.driver_version = std::to_string((encoded >> 48U) & 0xFFFFU) + "." +
+                                  std::to_string((encoded >> 32U) & 0xFFFFU) + "." +
+                                  std::to_string((encoded >> 16U) & 0xFFFFU) + "." +
+                                  std::to_string(encoded & 0xFFFFU);
         }
         info.vendor_id = description.VendorId;
         info.device_id = description.DeviceId;
-        info.dedicated_video_memory = static_cast<std::uint64_t>(
-            description.DedicatedVideoMemory
-        );
+        info.dedicated_video_memory = static_cast<std::uint64_t>(description.DedicatedVideoMemory);
         info.vsync = vsync;
     }
 
@@ -148,15 +147,16 @@ struct Renderer::Impl final {
     }
 
     void begin_frame() {
-        const float elapsed =
-            std::chrono::duration<float>(std::chrono::steady_clock::now() - started_at).count();
+        const double elapsed =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - started_at).count();
         constexpr std::array<float, 4U> clear{0.035F, 0.043F, 0.059F, 1.0F};
         renderer->begin_frame(clear, elapsed);
     }
 
     [[nodiscard]] bool end_frame() {
         const HRESULT result = swap_chain->Present(vsync ? 1U : 0U, 0U);
-        if (result == DXGI_STATUS_OCCLUDED) return false;
+        if (result == DXGI_STATUS_OCCLUDED)
+            return false;
         require_hresult(result, "swap-chain presentation");
         return true;
     }
@@ -185,26 +185,14 @@ void Renderer::declare_material(const std::string_view id, const std::string_vie
     impl_->renderer->declare_material(id, hlsl_source);
 }
 
-void Renderer::declare_effect_pass(
-    const std::string_view effect_id,
-    const std::uint32_t index,
-    const std::uint32_t kind,
-    const double radius,
-    const std::uint32_t downsample,
-    const std::uint32_t radius_parameter,
-    const std::uint32_t downsample_parameter,
-    const std::string_view hlsl_source
-) {
-    impl_->renderer->declare_effect_pass(
-        effect_id,
-        index,
-        kind,
-        radius,
-        downsample,
-        radius_parameter,
-        downsample_parameter,
-        hlsl_source
-    );
+void Renderer::declare_effect_pass(const std::string_view effect_id, const std::uint32_t index,
+                                   const std::uint32_t kind, const double radius,
+                                   const std::uint32_t downsample,
+                                   const std::uint32_t radius_parameter,
+                                   const std::uint32_t downsample_parameter,
+                                   const std::string_view hlsl_source) {
+    impl_->renderer->declare_effect_pass(effect_id, index, kind, radius, downsample,
+                                         radius_parameter, downsample_parameter, hlsl_source);
 }
 
 void Renderer::resize(const std::uint32_t framebuffer_width, const std::uint32_t framebuffer_height,
@@ -225,6 +213,10 @@ RenderLayerTelemetry Renderer::render_layer(const std::string_view id,
     return impl_->renderer->render_layer(id, packet);
 }
 
+void Renderer::release_layer(const std::string_view id) noexcept {
+    impl_->renderer->release_layer(id);
+}
+
 bool Renderer::end_frame() {
     return impl_->end_frame();
 }
@@ -235,6 +227,8 @@ void Renderer::render(const host::RenderPacket& packet) {
     static_cast<void>(end_frame());
 }
 
-RendererInfo Renderer::info() const { return impl_->info; }
+RendererInfo Renderer::info() const {
+    return impl_->info;
+}
 
 } // namespace strata::desktop

@@ -110,7 +110,7 @@ installed `desktop_app.cpp` sample is a complete window loop. See
 [Win32 desktop hosting](desktop-hosting.md).
 
 Linux deliberately has no bundled GUI backend. A Vulkan, OpenGL, or other renderer links
-`Strata::render_host` and includes `<strata/render_packet.hpp>` instead of duplicating packet-v6
+`Strata::render_host` and includes `<strata/render_packet.hpp>` instead of duplicating packet-v7
 parsing:
 
 ```cpp
@@ -132,7 +132,9 @@ Surface/backend stream. Compact packets are deltas and cannot initialize a fresh
 `reset()` only when discarding the stream, not while continuing to consume it. `RenderPacket`
 exposes ordered texture mutations, fixed-layout vertex bytes, indices, scissors,
 material/blend/texture bindings, draw batches, blur batches, backdrop/content effect batches, and
-content stack markers. The consumer remains responsible for GPU resources, shader/material
+content stack markers. Effect batches carry a maximum refresh rate; custom backends may retain the
+latest filtered sample between deadlines while continuing to composite every frame. The consumer
+remains responsible for GPU resources, shader/material
 implementation, presentation, and the Surface release-packet barrier.
 
 Before framing, enumerate `Runtime::material_declarations(shaderBackend)` and
@@ -218,10 +220,10 @@ runtime.
 
 Adopt a complete Surface environment generation atomically: framebuffer and logical sizes, scale,
 safe insets, snapping, density, reduced-motion preference, and input capabilities. Enqueue input in
-ordered batches, call `strata_surface_frame`, then read packet v6 through a bytes sink.
+ordered batches, call `strata_surface_frame`, then read packet v7 through a bytes sink.
 
 The packet bytes are borrowed only during the sink callback. Copy them if the backend submits later;
-consume them directly if submission is synchronous. Packet-v6 full packets contain native geometry,
+consume them directly if submission is synchronous. Packet-v7 full packets contain native geometry,
 indices, scissors, materials, textures, and draw/blur/effect batches. Compact packets reference the
 last full geometry epoch in the ordered stream; both forms can carry one-shot GPU resource
 operations. Hosts must not redo layout, glyph generation, or batch planning.

@@ -25,6 +25,7 @@ strata::ui::EffectState effect(const strata::ui::EffectInput input) {
     result.id = "test:effect";
     result.input = input;
     result.opacity = 0.75;
+    result.refresh_rate = 120.0;
     result.parameters.push_back(
         strata::ui::MaterialParameter{"radius", strata::runtime::Value(12.0)});
     result.packed_parameters[0U] = 12.0;
@@ -95,20 +96,49 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
 
     host::RenderPacketDecoder decoder;
     const std::vector<std::uint8_t> encoded = encode(commands, resources);
-    check(encoded.size() > 12U && encoded[8U] == 6U,
-          "effect packet did not use render protocol v6");
+    check(encoded.size() > 12U && encoded[8U] == 7U,
+          "effect packet did not use render protocol v7");
     const host::RenderPacket packet = decoder.decode(encoded);
     check(packet.batches.size() == 4U, "effect packet changed its ordered batch count");
     const auto* backdrop = std::get_if<host::EffectBatch>(&packet.batches[0U]);
     const auto* content = std::get_if<host::EffectBatch>(&packet.batches[1U]);
     check(backdrop != nullptr && backdrop->kind == host::EffectBatchKind::backdrop &&
               backdrop->effect == "test:effect" && backdrop->parameter_count == 1U &&
-              backdrop->parameters[0U] == 12.0,
+              backdrop->parameters[0U] == 12.0 && backdrop->refresh_rate == 120.0,
           "backdrop effect batch lost its typed program state");
     check(content != nullptr && content->kind == host::EffectBatchKind::content_begin &&
               std::holds_alternative<host::DrawBatch>(packet.batches[2U]) &&
               std::holds_alternative<host::ContentEffectEndBatch>(packet.batches[3U]),
           "content effect isolation markers did not round-trip in order");
+}
+
+void test_invalid_effect_refresh_rate_is_rejected(const std::filesystem::path& resources) {
+    using namespace strata;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::BackdropEffectRenderCommand{
+        ui::Rect{0.0, 0.0, 20.0, 20.0},
+        {},
+        effect(ui::EffectInput::backdrop),
+    });
+    std::vector<std::uint8_t> encoded = encode(commands, resources);
+    const std::vector<std::size_t> offsets = batch_kind_offsets(encoded);
+    check(offsets.size() == 1U, "refresh-rate fixture changed its batch shape");
+    const std::size_t effect_record = offsets.front() + 2U * sizeof(std::uint32_t);
+    const std::size_t effect_id_length_offset =
+        effect_record + sizeof(std::uint32_t) + 4U * sizeof(std::uint32_t) + 8U * sizeof(double);
+    const std::size_t opacity_offset =
+        effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
+    const double invalid_refresh_rate = -1.0;
+    std::memcpy(encoded.data() + opacity_offset + sizeof(double), &invalid_refresh_rate,
+                sizeof(invalid_refresh_rate));
+    bool rejected = false;
+    try {
+        host::RenderPacketDecoder decoder;
+        static_cast<void>(decoder.decode(encoded));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    check(rejected, "packet decoder accepted a negative effect refresh rate");
 }
 
 void test_unbalanced_content_effect_is_rejected(const std::filesystem::path& resources) {
@@ -234,6 +264,7 @@ int main(const int argument_count, const char* const* const arguments) {
         if (argument_count < 2)
             throw std::invalid_argument("resource root is required");
         test_effect_batches_round_trip(arguments[1]);
+        test_invalid_effect_refresh_rate_is_rejected(arguments[1]);
         test_unbalanced_content_effect_is_rejected(arguments[1]);
         test_repeated_epoch_still_validates_batches(arguments[1]);
         test_content_effect_depth_is_bounded(arguments[1]);

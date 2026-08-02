@@ -1654,6 +1654,7 @@ struct Host::Impl final {
         session.bindings.reset();
         session.runtime.reset();
         session.decoder.reset();
+        renderer.release_layer(session.id);
     }
 
     void toggle_settings() {

@@ -179,6 +179,46 @@ float4 main(PixelInput input) : SV_TARGET {
 }
 )hlsl";
 
+constexpr std::string_view cached_composite_pixel = R"hlsl(
+cbuffer EffectData : register(b0) {
+    float2 effectLogicalSize;
+    float2 effectTargetSize;
+    float4 effectBounds;
+    float4 effectRadii;
+    float4 effectParameters[4];
+    float effectOpacityValue;
+    float effectTimeValue;
+    float2 effectCacheOrigin;
+};
+Texture2D EffectSource : register(t0);
+SamplerState EffectSampler : register(s0);
+struct PixelInput { float4 position : SV_POSITION; float2 uv : TEXCOORD0; };
+float cornerRadius(float2 centered) {
+    bool right = centered.x >= 0.0;
+    bool bottom = centered.y >= 0.0;
+    return bottom ? (right ? effectRadii.z : effectRadii.w)
+                  : (right ? effectRadii.y : effectRadii.x);
+}
+float mask(float2 pixel) {
+    float2 halfSize = effectBounds.zw * 0.5;
+    float2 centered = pixel - (effectBounds.xy + halfSize);
+    float radius = min(cornerRadius(centered), min(halfSize.x, halfSize.y));
+    float2 q = abs(centered) - halfSize + radius;
+    float distance = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius;
+    return 1.0 - smoothstep(-1.0, 1.0, distance);
+}
+float4 main(PixelInput input) : SV_TARGET {
+    uint width;
+    uint height;
+    EffectSource.GetDimensions(width, height);
+    float2 uv = (input.position.xy - effectCacheOrigin) /
+        max(float2(width, height), 1.0);
+    float4 color = EffectSource.Sample(EffectSampler, clamp(uv, 0.0, 1.0));
+    color *= mask(input.position.xy) * effectOpacityValue;
+    return color;
+}
+)hlsl";
+
 struct EffectConstants final {
     float logical_size[2]{};
     float target_size[2]{};
@@ -237,6 +277,29 @@ struct EffectPassRenderer::Impl final {
         std::uint32_t downsample_parameter = UINT32_MAX;
         ComPtr<ID3D11PixelShader> shader;
     };
+    struct CacheKey final {
+        std::string layer;
+        std::uint32_t source_order = 0U;
+        bool content = false;
+        [[nodiscard]] friend bool operator<(const CacheKey& left, const CacheKey& right) noexcept {
+            if (left.layer != right.layer)
+                return left.layer < right.layer;
+            if (left.source_order != right.source_order) {
+                return left.source_order < right.source_order;
+            }
+            return left.content < right.content;
+        }
+    };
+    struct CachedSample final {
+        ComPtr<ID3D11Texture2D> texture;
+        ComPtr<ID3D11ShaderResourceView> view;
+        std::uint32_t width = 0U;
+        std::uint32_t height = 0U;
+        LONG left = 0;
+        LONG top = 0;
+        double sampled_seconds = 0.0;
+        host::EffectBatch effect;
+    };
 
     Impl(ID3D11Device* const source_device, ID3D11DeviceContext* const source_context)
         : device(source_device), context(source_context), blur(source_device, source_context) {
@@ -252,6 +315,12 @@ struct EffectPassRenderer::Impl final {
                                                   composite_code->GetBufferSize(), nullptr,
                                                   &composite),
                         "D3D11 effect composite shader creation");
+        const ComPtr<ID3DBlob> cached_composite_code =
+            compile_shader(cached_composite_pixel, "main", "ps_5_0");
+        require_hresult(device->CreatePixelShader(cached_composite_code->GetBufferPointer(),
+                                                  cached_composite_code->GetBufferSize(), nullptr,
+                                                  &cached_composite),
+                        "D3D11 cached effect composite shader creation");
         D3D11_BUFFER_DESC constants_descriptor{};
         constants_descriptor.ByteWidth = sizeof(EffectConstants);
         constants_descriptor.Usage = D3D11_USAGE_DYNAMIC;
@@ -300,7 +369,19 @@ struct EffectPassRenderer::Impl final {
         format = next_format;
         content_targets.clear();
         processing.reset();
+        cached_samples.clear();
+        layer_epochs.clear();
         blur.resize(width, height, format);
+    }
+
+    void begin_layer(const std::string_view layer_id, const std::uint64_t geometry_epoch) {
+        const std::string layer(layer_id);
+        const auto found = layer_epochs.find(layer);
+        if (found != layer_epochs.end() && found->second == geometry_epoch)
+            return;
+        layer_epochs.insert_or_assign(layer, geometry_epoch);
+        std::erase_if(cached_samples,
+                      [&layer](const auto& entry) { return entry.first.layer == layer; });
     }
 
     [[nodiscard]] Target target() const {
@@ -322,6 +403,31 @@ struct EffectPassRenderer::Impl final {
         require_hresult(
             device->CreateShaderResourceView(result.texture.Get(), nullptr, &result.view),
             "D3D11 effect source view creation");
+        return result;
+    }
+
+    [[nodiscard]] CachedSample cached_sample(const std::uint32_t sample_width,
+                                             const std::uint32_t sample_height, const LONG left,
+                                             const LONG top) const {
+        D3D11_TEXTURE2D_DESC descriptor{};
+        descriptor.Width = sample_width;
+        descriptor.Height = sample_height;
+        descriptor.MipLevels = 1U;
+        descriptor.ArraySize = 1U;
+        descriptor.Format = format;
+        descriptor.SampleDesc.Count = 1U;
+        descriptor.Usage = D3D11_USAGE_DEFAULT;
+        descriptor.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        CachedSample result;
+        result.width = sample_width;
+        result.height = sample_height;
+        result.left = left;
+        result.top = top;
+        require_hresult(device->CreateTexture2D(&descriptor, nullptr, &result.texture),
+                        "D3D11 cached effect texture creation");
+        require_hresult(
+            device->CreateShaderResourceView(result.texture.Get(), nullptr, &result.view),
+            "D3D11 cached effect view creation");
         return result;
     }
 
@@ -352,7 +458,9 @@ struct EffectPassRenderer::Impl final {
     }
 
     void upload_constants(const host::EffectBatch& effect, const double logical_width,
-                          const double logical_height, const double frame_seconds) const {
+                          const double logical_height, const double frame_seconds,
+                          const float cache_origin_x = 0.0F,
+                          const float cache_origin_y = 0.0F) const {
         const double scale_x = logical_width > 0.0 ? width / logical_width : 1.0;
         const double scale_y = logical_height > 0.0 ? height / logical_height : 1.0;
         EffectConstants value;
@@ -373,11 +481,43 @@ struct EffectPassRenderer::Impl final {
         }
         value.opacity = static_cast<float>(effect.opacity);
         value.time = static_cast<float>(frame_seconds);
+        value.padding[0] = cache_origin_x;
+        value.padding[1] = cache_origin_y;
         D3D11_MAPPED_SUBRESOURCE mapped{};
         require_hresult(context->Map(constants.Get(), 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped),
                         "D3D11 effect constant mapping");
         std::memcpy(mapped.pData, &value, sizeof(value));
         context->Unmap(constants.Get(), 0U);
+    }
+
+    void draw_cached(const CachedSample& sample, ID3D11RenderTargetView* const destination,
+                     const host::EffectBatch& effect, const double logical_width,
+                     const double logical_height, const double frame_seconds) const {
+        upload_constants(effect, logical_width, logical_height, frame_seconds,
+                         static_cast<float>(sample.left), static_cast<float>(sample.top));
+        ID3D11ShaderResourceView* resources[]{sample.view.Get(), nullptr};
+        ID3D11Buffer* constant_buffers[]{constants.Get()};
+        ID3D11SamplerState* samplers[]{sampler.Get()};
+        const D3D11_VIEWPORT viewport{
+            0.0F, 0.0F, static_cast<float>(width), static_cast<float>(height), 0.0F, 1.0F,
+        };
+        const D3D11_RECT clip =
+            effect_scissor(effect, width, height, logical_width, logical_height);
+        context->OMSetRenderTargets(1U, &destination, nullptr);
+        context->OMSetBlendState(composite_blend.Get(), nullptr, UINT32_MAX);
+        context->RSSetState(rasterizer.Get());
+        context->RSSetViewports(1U, &viewport);
+        context->RSSetScissorRects(1U, &clip);
+        context->IASetInputLayout(nullptr);
+        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context->VSSetShader(vertex.Get(), nullptr, 0U);
+        context->PSSetShader(cached_composite.Get(), nullptr, 0U);
+        context->PSSetConstantBuffers(0U, 1U, constant_buffers);
+        context->PSSetSamplers(0U, 1U, samplers);
+        context->PSSetShaderResources(0U, 2U, resources);
+        context->Draw(3U, 0U);
+        ID3D11ShaderResourceView* cleared[]{nullptr, nullptr};
+        context->PSSetShaderResources(0U, 2U, cleared);
     }
 
     void draw_pass(ID3D11PixelShader* const shader, ID3D11ShaderResourceView* const source,
@@ -417,11 +557,52 @@ struct EffectPassRenderer::Impl final {
     }
 
     [[nodiscard]] EffectPassTelemetry
-    apply(const std::size_t depth, const host::EffectBatch& effect,
-          ID3D11Texture2D* const source_texture, ID3D11RenderTargetView* const source_target,
-          ID3D11Texture2D* const backdrop_texture, ID3D11RenderTargetView* const destination,
-          const double logical_width, const double logical_height, const double frame_seconds) {
+    apply(const std::string_view layer_id, const bool content, const std::size_t depth,
+          const host::EffectBatch& effect, ID3D11Texture2D* const source_texture,
+          ID3D11RenderTargetView* const source_target, ID3D11Texture2D* const backdrop_texture,
+          ID3D11RenderTargetView* const destination, const double logical_width,
+          const double logical_height, const double frame_seconds) {
         const auto started = std::chrono::steady_clock::now();
+        const D3D11_RECT clip =
+            effect_scissor(effect, width, height, logical_width, logical_height);
+        const std::uint32_t sample_width =
+            static_cast<std::uint32_t>(std::max<LONG>(0, clip.right - clip.left));
+        const std::uint32_t sample_height =
+            static_cast<std::uint32_t>(std::max<LONG>(0, clip.bottom - clip.top));
+        if (sample_width == 0U || sample_height == 0U)
+            return {};
+        const bool rate_limited = effect.refresh_rate > 0.0;
+        const CacheKey cache_key{
+            std::string(layer_id),
+            effect.source_order,
+            content,
+        };
+        auto cached = cached_samples.find(cache_key);
+        if (!rate_limited && cached != cached_samples.end()) {
+            cached_samples.erase(cached);
+            cached = cached_samples.end();
+        }
+        const bool dimensions_match =
+            cached != cached_samples.end() && cached->second.width == sample_width &&
+            cached->second.height == sample_height && cached->second.left == clip.left &&
+            cached->second.top == clip.top;
+        const bool signature_matches = dimensions_match && cached->second.effect == effect;
+        const double interval = rate_limited ? 1.0 / effect.refresh_rate : 0.0;
+        const bool refresh_due =
+            !rate_limited || !signature_matches || frame_seconds < cached->second.sampled_seconds ||
+            frame_seconds - cached->second.sampled_seconds + 1.0e-9 >= interval;
+        if (!refresh_due) {
+            draw_cached(cached->second, destination, effect, logical_width, logical_height,
+                        frame_seconds);
+            return EffectPassTelemetry{
+                1U,
+                static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::steady_clock::now() - started)
+                                               .count()),
+                width,
+                height,
+            };
+        }
         Workspace& work = processing_workspace(depth);
         context->OMSetRenderTargets(0U, nullptr, nullptr);
         ID3D11ShaderResourceView* cleared[]{nullptr, nullptr};
@@ -463,8 +644,29 @@ struct EffectPassRenderer::Impl final {
                 }
             }
         }
-        draw_pass(composite.Get(), current->view.Get(), backdrop, destination, effect,
-                  logical_width, logical_height, frame_seconds, composite_blend.Get());
+        if (rate_limited) {
+            context->OMSetRenderTargets(0U, nullptr, nullptr);
+            ID3D11ShaderResourceView* unbound[]{nullptr, nullptr};
+            context->PSSetShaderResources(0U, 2U, unbound);
+            if (!dimensions_match) {
+                CachedSample sample =
+                    cached_sample(sample_width, sample_height, clip.left, clip.top);
+                cached = cached_samples.insert_or_assign(cache_key, std::move(sample)).first;
+            }
+            const D3D11_BOX source_box{
+                static_cast<UINT>(clip.left),  static_cast<UINT>(clip.top),    0U,
+                static_cast<UINT>(clip.right), static_cast<UINT>(clip.bottom), 1U,
+            };
+            context->CopySubresourceRegion(cached->second.texture.Get(), 0U, 0U, 0U, 0U,
+                                           current->texture.Get(), 0U, &source_box);
+            cached->second.sampled_seconds = frame_seconds;
+            cached->second.effect = effect;
+            draw_cached(cached->second, destination, effect, logical_width, logical_height,
+                        frame_seconds);
+        } else {
+            draw_pass(composite.Get(), current->view.Get(), backdrop, destination, effect,
+                      logical_width, logical_height, frame_seconds, composite_blend.Get());
+        }
         ++telemetry.passes;
         telemetry.target_width = width;
         telemetry.target_height = height;
@@ -484,6 +686,7 @@ struct EffectPassRenderer::Impl final {
     BlurPass blur;
     ComPtr<ID3D11VertexShader> vertex;
     ComPtr<ID3D11PixelShader> composite;
+    ComPtr<ID3D11PixelShader> cached_composite;
     ComPtr<ID3D11Buffer> constants;
     ComPtr<ID3D11SamplerState> sampler;
     ComPtr<ID3D11RasterizerState> rasterizer;
@@ -492,6 +695,8 @@ struct EffectPassRenderer::Impl final {
     std::vector<Target> content_targets;
     std::optional<Workspace> processing;
     std::map<std::string, std::vector<Pass>, std::less<>> programs;
+    std::map<CacheKey, CachedSample> cached_samples;
+    std::map<std::string, std::uint64_t, std::less<>> layer_epochs;
 };
 
 EffectPassRenderer::EffectPassRenderer(ID3D11Device* const device,
@@ -513,6 +718,24 @@ void EffectPassRenderer::resize(const std::uint32_t width, const std::uint32_t h
         throw std::invalid_argument("D3D11 effect targets require a concrete texture format");
     }
     impl_->resize(width, height, format);
+}
+
+void EffectPassRenderer::invalidate_cache() noexcept {
+    impl_->cached_samples.clear();
+    impl_->layer_epochs.clear();
+}
+
+void EffectPassRenderer::begin_layer(const std::string_view layer_id,
+                                     const std::uint64_t geometry_epoch) {
+    impl_->begin_layer(layer_id, geometry_epoch);
+}
+
+void EffectPassRenderer::release_layer(const std::string_view layer_id) noexcept {
+    const auto epoch = impl_->layer_epochs.find(layer_id);
+    if (epoch != impl_->layer_epochs.end())
+        impl_->layer_epochs.erase(epoch);
+    std::erase_if(impl_->cached_samples,
+                  [layer_id](const auto& entry) { return entry.first.layer == layer_id; });
 }
 
 void EffectPassRenderer::declare_pass(const std::string_view effect_id, const std::uint32_t index,
@@ -542,6 +765,7 @@ void EffectPassRenderer::declare_pass(const std::string_view effect_id, const st
     if (program.size() <= index)
         program.resize(static_cast<std::size_t>(index) + 1U);
     program[index] = std::move(pass);
+    impl_->cached_samples.clear();
 }
 
 ID3D11RenderTargetView* EffectPassRenderer::begin_content(const std::size_t depth) {
@@ -555,21 +779,20 @@ ID3D11Texture2D* EffectPassRenderer::content_texture(const std::size_t depth) {
     return impl_->content_target(depth).texture.Get();
 }
 
-EffectPassTelemetry
-EffectPassRenderer::apply_backdrop(const std::size_t depth, const host::EffectBatch& effect,
-                                   ID3D11Texture2D* const target_texture,
-                                   ID3D11RenderTargetView* const target, const double logical_width,
-                                   const double logical_height, const double frame_seconds) {
-    return impl_->apply(depth, effect, target_texture, target, target_texture, target,
-                        logical_width, logical_height, frame_seconds);
+EffectPassTelemetry EffectPassRenderer::apply_backdrop(
+    const std::string_view layer_id, const std::size_t depth, const host::EffectBatch& effect,
+    ID3D11Texture2D* const target_texture, ID3D11RenderTargetView* const target,
+    const double logical_width, const double logical_height, const double frame_seconds) {
+    return impl_->apply(layer_id, false, depth, effect, target_texture, target, target_texture,
+                        target, logical_width, logical_height, frame_seconds);
 }
 
 EffectPassTelemetry EffectPassRenderer::finish_content(
-    const std::size_t depth, const host::EffectBatch& effect,
+    const std::string_view layer_id, const std::size_t depth, const host::EffectBatch& effect,
     ID3D11Texture2D* const backdrop_texture, ID3D11RenderTargetView* const destination,
     const double logical_width, const double logical_height, const double frame_seconds) {
     Impl::Target& content = impl_->content_target(depth);
-    return impl_->apply(depth, effect, content.texture.Get(), content.target.Get(),
+    return impl_->apply(layer_id, true, depth, effect, content.texture.Get(), content.target.Get(),
                         backdrop_texture, destination, logical_width, logical_height,
                         frame_seconds);
 }

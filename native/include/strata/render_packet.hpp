@@ -19,6 +19,7 @@ inline constexpr std::uint32_t resource_upload = 1U;
 inline constexpr std::uint32_t resource_release = 2U;
 inline constexpr std::uint32_t resource_encoded_image = 3U;
 inline constexpr std::uint32_t packet_flag_geometry_payload = 1U;
+inline constexpr double default_effect_refresh_rate = 240.0;
 
 inline constexpr std::uint32_t texture_format_r8 = 0U;
 inline constexpr std::uint32_t texture_format_rgba8 = 1U;
@@ -43,6 +44,7 @@ struct Scissor final {
     std::uint32_t y = 0U;
     std::uint32_t width = 0U;
     std::uint32_t height = 0U;
+    [[nodiscard]] friend bool operator==(const Scissor&, const Scissor&) = default;
 };
 
 /** Indexed geometry submission. Vertex records use the fixed 88-byte layout. */
@@ -84,8 +86,11 @@ struct EffectBatch final {
     std::array<double, 4U> radii{};
     std::string effect;
     double opacity = 1.0;
+    /** Maximum cached-result refresh rate; zero requests per-frame evaluation. */
+    double refresh_rate = default_effect_refresh_rate;
     std::array<double, 16U> parameters{};
     std::uint32_t parameter_count = 0U;
+    [[nodiscard]] friend bool operator==(const EffectBatch&, const EffectBatch&) = default;
 };
 
 struct ContentEffectEndBatch final {
@@ -93,12 +98,7 @@ struct ContentEffectEndBatch final {
     Scissor scissor;
 };
 
-using SubmissionBatch = std::variant<
-    DrawBatch,
-    BlurBatch,
-    EffectBatch,
-    ContentEffectEndBatch
->;
+using SubmissionBatch = std::variant<DrawBatch, BlurBatch, EffectBatch, ContentEffectEndBatch>;
 
 /** Backend-ready render plan. Geometry is retained when a packet repeats its geometry epoch. */
 struct RenderPacket final {

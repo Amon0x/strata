@@ -1546,7 +1546,7 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Packet v6 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * Packet v7 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
  * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
  * [u32 kind, u32 payload byte count, payload]:
  *
@@ -1560,7 +1560,8 @@ typedef struct strata_surface_frame_info {
  * texture id, and base-vertex/first-index/index-count. Blur payloads contain the common source
  * order/scissor followed by f64 x/y/width/height/radius and u32 downsample. Backdrop/content-begin
  * effect payloads contain source order/scissor; f64 x/y/width/height; four f64 corner radii; the
- * effect-id string; f64 opacity; a u32 packed-parameter count; and up to sixteen f64 values.
+ * effect-id string; f64 opacity; f64 maximum refresh rate (zero = unbounded); a u32
+ * packed-parameter count; and up to sixteen f64 values.
  * Content-end carries only source order/scissor. The begin/end records form a validated stack
  * with at most four simultaneously isolated CONTENT layers.
  * Resource payloads begin
@@ -1577,7 +1578,7 @@ typedef struct strata_surface_frame_info {
  *
  * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
  * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
- * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v6 records.
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v7 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
@@ -1585,9 +1586,11 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_4 UINT32_C(4)
 #define STRATA_RENDER_PACKET_VERSION_5 UINT32_C(5)
 #define STRATA_RENDER_PACKET_VERSION_6 UINT32_C(6)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_6
+#define STRATA_RENDER_PACKET_VERSION_7 UINT32_C(7)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_7
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
+#define STRATA_EFFECT_DEFAULT_REFRESH_RATE 240.0
 
 #define STRATA_RENDER_RESOURCE_ATLAS_CREATE UINT32_C(0)
 #define STRATA_RENDER_RESOURCE_ATLAS_UPLOAD UINT32_C(1)

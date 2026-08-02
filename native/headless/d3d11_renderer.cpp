@@ -128,26 +128,13 @@ struct D3D11Renderer::Impl final {
         declared_materials.emplace(id);
     }
 
-    void declare_effect_pass(
-        const std::string_view effect_id,
-        const std::uint32_t index,
-        const std::uint32_t kind,
-        const double radius,
-        const std::uint32_t downsample,
-        const std::uint32_t radius_parameter,
-        const std::uint32_t downsample_parameter,
-        const std::string_view source
-    ) {
-        renderer->declare_effect_pass(
-            effect_id,
-            index,
-            kind,
-            radius,
-            downsample,
-            radius_parameter,
-            downsample_parameter,
-            source
-        );
+    void declare_effect_pass(const std::string_view effect_id, const std::uint32_t index,
+                             const std::uint32_t kind, const double radius,
+                             const std::uint32_t downsample, const std::uint32_t radius_parameter,
+                             const std::uint32_t downsample_parameter,
+                             const std::string_view source) {
+        renderer->declare_effect_pass(effect_id, index, kind, radius, downsample, radius_parameter,
+                                      downsample_parameter, source);
     }
 
     void render(const host::RenderPacket& packet, const std::int64_t time_nanoseconds) {
@@ -167,9 +154,7 @@ struct D3D11Renderer::Impl final {
         for (std::size_t index = 0U; index < clear.size(); ++index) {
             clear_float[index] = static_cast<float>(clear[index]) / 255.0F;
         }
-        renderer->begin_frame(
-            clear_float,
-            static_cast<float>(static_cast<double>(time_nanoseconds) / 1'000'000'000.0));
+        renderer->begin_frame(clear_float, static_cast<double>(time_nanoseconds) / 1'000'000'000.0);
         static_cast<void>(renderer->render_layer("headless", packet));
         context->OMSetRenderTargets(0U, nullptr, nullptr);
         context->CopyResource(staging.Get(), target.Get());
@@ -219,26 +204,14 @@ void D3D11Renderer::declare_material(const std::string_view id, const std::strin
     impl_->declare_material(id, source);
 }
 
-void D3D11Renderer::declare_effect_pass(
-    const std::string_view effect_id,
-    const std::uint32_t index,
-    const std::uint32_t kind,
-    const double radius,
-    const std::uint32_t downsample,
-    const std::uint32_t radius_parameter,
-    const std::uint32_t downsample_parameter,
-    const std::string_view source
-) {
-    impl_->declare_effect_pass(
-        effect_id,
-        index,
-        kind,
-        radius,
-        downsample,
-        radius_parameter,
-        downsample_parameter,
-        source
-    );
+void D3D11Renderer::declare_effect_pass(const std::string_view effect_id, const std::uint32_t index,
+                                        const std::uint32_t kind, const double radius,
+                                        const std::uint32_t downsample,
+                                        const std::uint32_t radius_parameter,
+                                        const std::uint32_t downsample_parameter,
+                                        const std::string_view source) {
+    impl_->declare_effect_pass(effect_id, index, kind, radius, downsample, radius_parameter,
+                               downsample_parameter, source);
 }
 
 void D3D11Renderer::render(const host::RenderPacket& packet, const std::int64_t time_nanoseconds) {

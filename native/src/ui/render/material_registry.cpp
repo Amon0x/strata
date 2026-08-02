@@ -18,39 +18,39 @@ namespace {
            std::ranges::all_of(list->values, finite_number);
 }
 
-[[nodiscard]] bool accepts_material_type(
-    const runtime::Value& value,
-    const std::optional<std::string>& type
-) noexcept {
-    if (!type.has_value()) return true;
-    if (*type == "FLOAT") return finite_number(value);
+[[nodiscard]] bool accepts_material_type(const runtime::Value& value,
+                                         const std::optional<std::string>& type) noexcept {
+    if (!type.has_value())
+        return true;
+    if (*type == "FLOAT")
+        return finite_number(value);
     if (*type == "INT") {
         const double* number = value.number();
         return number != nullptr && std::isfinite(*number) && std::trunc(*number) == *number;
     }
-    if (*type == "FLOAT2") return finite_vector(value, 2U);
-    if (*type == "FLOAT4") return finite_vector(value, 4U);
-    if (*type == "COLOR") return value.color() != nullptr;
+    if (*type == "FLOAT2")
+        return finite_vector(value, 2U);
+    if (*type == "FLOAT4")
+        return finite_vector(value, 4U);
+    if (*type == "COLOR")
+        return value.color() != nullptr;
     if (*type == "TEXTURE") {
-        return value.image() != nullptr ||
-               (value.string() != nullptr && !value.string()->empty());
+        return value.image() != nullptr || (value.string() != nullptr && !value.string()->empty());
     }
     return false;
 }
 
 [[nodiscard]] bool valid_blend_mode(const std::string_view value) noexcept {
-    return value == "opaque" || value == "premultiplied_alpha" ||
-           value == "straight_alpha" || value == "additive" || value == "multiply";
+    return value == "opaque" || value == "premultiplied_alpha" || value == "straight_alpha" ||
+           value == "additive" || value == "multiply";
 }
 
-[[nodiscard]] std::size_t pack_effect_parameter(
-    std::array<double, 16U>& output,
-    const std::size_t slot,
-    const runtime::Value& value,
-    const std::optional<std::string>& type
-) noexcept {
+[[nodiscard]] std::size_t pack_effect_parameter(std::array<double, 16U>& output,
+                                                const std::size_t slot, const runtime::Value& value,
+                                                const std::optional<std::string>& type) noexcept {
     const std::size_t width = compiler::material_parameter_width(type);
-    if (slot + width > output.size()) return 0U;
+    if (slot + width > output.size())
+        return 0U;
     if (value.number() != nullptr) {
         output[slot] = *value.number();
         return 1U;
@@ -64,7 +64,8 @@ namespace {
     }
     if (value.list() != nullptr && (width == 2U || width == 4U)) {
         for (std::size_t index = 0U; index < width; ++index) {
-            if (value.list()->values[index].number() == nullptr) return 0U;
+            if (value.list()->values[index].number() == nullptr)
+                return 0U;
             output[slot + index] = *value.list()->values[index].number();
         }
         return width;
@@ -76,12 +77,9 @@ namespace {
     return "@" + std::to_string(slot);
 }
 
-[[nodiscard]] runtime::RuntimeDiagnostic warning(
-    std::string code,
-    std::string message,
-    std::string path,
-    std::optional<std::string> expected = std::nullopt
-) {
+[[nodiscard]] runtime::RuntimeDiagnostic
+warning(std::string code, std::string message, std::string path,
+        std::optional<std::string> expected = std::nullopt) {
     return runtime::RuntimeDiagnostic{
         std::move(code),
         std::move(message),
@@ -94,86 +92,70 @@ namespace {
 
 } // namespace
 
-MaterialRegistry::MaterialRegistry(
-    std::vector<std::string> material_ids,
-    runtime::DiagnosticReporter reporter
-) : material_ids_(material_ids.begin(), material_ids.end()), reporter_(std::move(reporter)) {}
+MaterialRegistry::MaterialRegistry(std::vector<std::string> material_ids,
+                                   runtime::DiagnosticReporter reporter)
+    : material_ids_(material_ids.begin(), material_ids.end()), reporter_(std::move(reporter)) {}
 
-MaterialRegistry::MaterialRegistry(
-    const compiler::SchemaRegistry& schemas,
-    runtime::DiagnosticReporter reporter
-) : MaterialRegistry(schemas.material_ids(), std::move(reporter)) {
+MaterialRegistry::MaterialRegistry(const compiler::SchemaRegistry& schemas,
+                                   runtime::DiagnosticReporter reporter)
+    : MaterialRegistry(schemas.material_ids(), std::move(reporter)) {
     schemas_ = &schemas;
 }
 
-void MaterialRegistry::publish_once(
-    const runtime::RuntimeDiagnostic& diagnostic,
-    std::string fingerprint
-) const {
-    if (reporter_ && published_.insert(std::move(fingerprint)).second) reporter_(diagnostic);
+void MaterialRegistry::publish_once(const runtime::RuntimeDiagnostic& diagnostic,
+                                    std::string fingerprint) const {
+    if (reporter_ && published_.insert(std::move(fingerprint)).second)
+        reporter_(diagnostic);
 }
 
-std::vector<runtime::RuntimeDiagnostic> MaterialRegistry::validate_state(
-    const MaterialState& state,
-    const bool report_diagnostics
-) const {
+std::vector<runtime::RuntimeDiagnostic>
+MaterialRegistry::validate_state(const MaterialState& state, const bool report_diagnostics) const {
     std::vector<runtime::RuntimeDiagnostic> diagnostics;
-    const compiler::MaterialSchema* schema = schemas_ != nullptr ? schemas_->material(state.id) : nullptr;
+    const compiler::MaterialSchema* schema =
+        schemas_ != nullptr ? schemas_->material(state.id) : nullptr;
     if (!material_ids_.contains(state.id)) {
-        diagnostics.push_back(warning(
-            "STRATA.RENDER2D.MATERIAL_UNKNOWN",
-            "Material '" + state.id + "' is not registered.",
-            "material/" + state.id,
-            "registered material id"
-        ));
+        diagnostics.push_back(warning("STRATA.RENDER2D.MATERIAL_UNKNOWN",
+                                      "Material '" + state.id + "' is not registered.",
+                                      "material/" + state.id, "registered material id"));
     } else {
         if (!valid_blend_mode(state.blend_mode)) {
             diagnostics.push_back(warning(
                 "STRATA.RENDER2D.MATERIAL_BLEND_MODE",
                 "Material '" + state.id + "' uses unknown blend mode '" + state.blend_mode + "'.",
                 "material/" + state.id + "/blendMode",
-                "opaque, premultiplied_alpha, straight_alpha, additive, multiply"
-            ));
+                "opaque, premultiplied_alpha, straight_alpha, additive, multiply"));
         }
         if (!std::isfinite(state.opacity) || state.opacity < 0.0 || state.opacity > 1.0) {
             diagnostics.push_back(warning(
                 "STRATA.RENDER2D.MATERIAL_OPACITY",
                 "Material '" + state.id + "' opacity must be finite and between zero and one.",
-                "material/" + state.id + "/opacity",
-                "finite number in [0, 1]"
-            ));
+                "material/" + state.id + "/opacity", "finite number in [0, 1]"));
         }
         std::set<std::string, std::less<>> seen;
         for (const MaterialParameter& parameter : state.parameters) {
             if (!seen.insert(parameter.name).second) {
-                diagnostics.push_back(warning(
-                    "STRATA.RENDER2D.MATERIAL_PARAMETER_DUPLICATE",
-                    "Material '" + state.id + "' supplies parameter '" + parameter.name +
-                        "' more than once.",
-                    "material/" + state.id + "/" + parameter.name,
-                    "unique parameter name"
-                ));
+                diagnostics.push_back(warning("STRATA.RENDER2D.MATERIAL_PARAMETER_DUPLICATE",
+                                              "Material '" + state.id + "' supplies parameter '" +
+                                                  parameter.name + "' more than once.",
+                                              "material/" + state.id + "/" + parameter.name,
+                                              "unique parameter name"));
                 continue;
             }
-            if (schema == nullptr) continue;
+            if (schema == nullptr)
+                continue;
             const compiler::SchemaParameter* expected = schema->find_parameter(parameter.name);
             if (expected == nullptr) {
                 diagnostics.push_back(warning(
                     "STRATA.RENDER2D.MATERIAL_PARAMETER_UNKNOWN",
                     "Material '" + state.id + "' does not define '" + parameter.name + "'.",
-                    "material/" + state.id + "/" + parameter.name,
-                    "declared material parameter"
-                ));
+                    "material/" + state.id + "/" + parameter.name, "declared material parameter"));
             } else if (!accepts_material_type(parameter.value, expected->material_type)) {
                 diagnostics.push_back(warning(
                     "STRATA.RENDER2D.MATERIAL_PARAMETER_TYPE",
-                    "Material '" + state.id + "' parameter '" + parameter.name +
-                        "' expected " + expected->material_type.value_or(
-                            expected->type->diagnostic_name()
-                        ) + ".",
+                    "Material '" + state.id + "' parameter '" + parameter.name + "' expected " +
+                        expected->material_type.value_or(expected->type->diagnostic_name()) + ".",
                     "material/" + state.id + "/" + parameter.name,
-                    expected->material_type.value_or(expected->type->diagnostic_name())
-                ));
+                    expected->material_type.value_or(expected->type->diagnostic_name())));
             }
         }
     }
@@ -187,14 +169,19 @@ std::vector<runtime::RuntimeDiagnostic> MaterialRegistry::validate_state(
 
 std::optional<MaterialState> MaterialRegistry::sanitize_state(const MaterialState& state) const {
     static_cast<void>(validate_state(state, true));
-    if (!material_ids_.contains(state.id)) return std::nullopt;
+    if (!material_ids_.contains(state.id))
+        return std::nullopt;
     MaterialState result = state;
-    if (!valid_blend_mode(result.blend_mode)) result.blend_mode = "straight_alpha";
-    if (!std::isfinite(result.opacity)) result.opacity = 1.0;
+    if (!valid_blend_mode(result.blend_mode))
+        result.blend_mode = "straight_alpha";
+    if (!std::isfinite(result.opacity))
+        result.opacity = 1.0;
     result.opacity = std::clamp(result.opacity, 0.0, 1.0);
-    if (schemas_ == nullptr) return result;
+    if (schemas_ == nullptr)
+        return result;
     const compiler::MaterialSchema* schema = schemas_->material(result.id);
-    if (schema == nullptr) return std::nullopt;
+    if (schema == nullptr)
+        return std::nullopt;
     std::vector<MaterialParameter> parameters;
     parameters.reserve(result.parameters.size());
     std::set<std::string, std::less<>> seen;
@@ -207,83 +194,72 @@ std::optional<MaterialState> MaterialRegistry::sanitize_state(const MaterialStat
         // An authored material declares its own parameters, so the name carries no meaning past
         // this point: it is rewritten to the draw-data float the shader reads it from. Built-in
         // materials keep their names, which the shared unified shader knows by contract.
-        const std::optional<std::size_t> slot = schema->shaders.empty()
-            ? std::nullopt
-            : schema->packing_slot(parameter.name);
-        parameters.push_back(
-            slot.has_value()
-                ? MaterialParameter{material_slot_name(*slot), parameter.value}
-                : parameter
-        );
+        const std::optional<std::size_t> slot =
+            schema->shaders.empty() ? std::nullopt : schema->packing_slot(parameter.name);
+        parameters.push_back(slot.has_value()
+                                 ? MaterialParameter{material_slot_name(*slot), parameter.value}
+                                 : parameter);
     }
     result.parameters = std::move(parameters);
     return result;
 }
 
-std::vector<runtime::RuntimeDiagnostic> MaterialRegistry::validate_effect_state(
-    const EffectState& state,
-    const bool report_diagnostics
-) const {
+std::vector<runtime::RuntimeDiagnostic>
+MaterialRegistry::validate_effect_state(const EffectState& state,
+                                        const bool report_diagnostics) const {
     std::vector<runtime::RuntimeDiagnostic> diagnostics;
     const compiler::EffectSchema* schema =
         schemas_ != nullptr ? schemas_->effect(state.id) : nullptr;
     if (schema == nullptr) {
-        diagnostics.push_back(warning(
-            "STRATA.RENDER2D.EFFECT_UNKNOWN",
-            "Effect '" + state.id + "' is not registered.",
-            "effect/" + state.id,
-            "declared effect id"
-        ));
+        diagnostics.push_back(warning("STRATA.RENDER2D.EFFECT_UNKNOWN",
+                                      "Effect '" + state.id + "' is not registered.",
+                                      "effect/" + state.id, "declared effect id"));
     } else {
         if (!std::isfinite(state.opacity) || state.opacity < 0.0 || state.opacity > 1.0) {
             diagnostics.push_back(warning(
                 "STRATA.RENDER2D.EFFECT_OPACITY",
                 "Effect '" + state.id + "' opacity must be finite and between zero and one.",
-                "effect/" + state.id + "/opacity",
-                "finite number in [0, 1]"
-            ));
+                "effect/" + state.id + "/opacity", "finite number in [0, 1]"));
+        }
+        if (!state.refresh_rate_valid || !std::isfinite(state.refresh_rate) ||
+            state.refresh_rate < 0.0) {
+            diagnostics.push_back(warning(
+                "STRATA.RENDER2D.EFFECT_REFRESH_RATE",
+                "Effect '" + state.id + "' refreshRate must be a positive number or \"UNBOUNDED\".",
+                "effect/" + state.id + "/refreshRate", "positive number or UNBOUNDED"));
         }
         std::set<std::string, std::less<>> seen;
         for (const MaterialParameter& parameter : state.parameters) {
             if (!seen.insert(parameter.name).second) {
-                diagnostics.push_back(warning(
-                    "STRATA.RENDER2D.EFFECT_PARAMETER_DUPLICATE",
-                    "Effect '" + state.id + "' supplies parameter '" + parameter.name +
-                        "' more than once.",
-                    "effect/" + state.id + "/" + parameter.name,
-                    "unique parameter name"
-                ));
+                diagnostics.push_back(warning("STRATA.RENDER2D.EFFECT_PARAMETER_DUPLICATE",
+                                              "Effect '" + state.id + "' supplies parameter '" +
+                                                  parameter.name + "' more than once.",
+                                              "effect/" + state.id + "/" + parameter.name,
+                                              "unique parameter name"));
                 continue;
             }
-            const compiler::SchemaParameter* expected =
-                schema->find_parameter(parameter.name);
+            const compiler::SchemaParameter* expected = schema->find_parameter(parameter.name);
             if (expected == nullptr) {
                 diagnostics.push_back(warning(
                     "STRATA.RENDER2D.EFFECT_PARAMETER_UNKNOWN",
                     "Effect '" + state.id + "' does not define '" + parameter.name + "'.",
-                    "effect/" + state.id + "/" + parameter.name,
-                    "declared effect parameter"
-                ));
+                    "effect/" + state.id + "/" + parameter.name, "declared effect parameter"));
             } else if (!accepts_material_type(parameter.value, expected->material_type)) {
                 diagnostics.push_back(warning(
                     "STRATA.RENDER2D.EFFECT_PARAMETER_TYPE",
-                    "Effect '" + state.id + "' parameter '" + parameter.name +
-                        "' expected " +
-                        expected->material_type.value_or(expected->type->diagnostic_name()) +
-                        ".",
+                    "Effect '" + state.id + "' parameter '" + parameter.name + "' expected " +
+                        expected->material_type.value_or(expected->type->diagnostic_name()) + ".",
                     "effect/" + state.id + "/" + parameter.name,
-                    expected->material_type.value_or(expected->type->diagnostic_name())
-                ));
+                    expected->material_type.value_or(expected->type->diagnostic_name())));
             }
         }
         for (const compiler::SchemaParameter& expected : schema->parameters) {
             if (expected.required && !seen.contains(expected.name)) {
-                diagnostics.push_back(warning(
-                    "STRATA.RENDER2D.EFFECT_PARAMETER_REQUIRED",
-                    "Effect '" + state.id + "' requires parameter '" + expected.name + "'.",
-                    "effect/" + state.id + "/" + expected.name,
-                    expected.material_type.value_or(expected.type->diagnostic_name())
-                ));
+                diagnostics.push_back(
+                    warning("STRATA.RENDER2D.EFFECT_PARAMETER_REQUIRED",
+                            "Effect '" + state.id + "' requires parameter '" + expected.name + "'.",
+                            "effect/" + state.id + "/" + expected.name,
+                            expected.material_type.value_or(expected.type->diagnostic_name())));
             }
         }
     }
@@ -295,26 +271,28 @@ std::vector<runtime::RuntimeDiagnostic> MaterialRegistry::validate_effect_state(
     return diagnostics;
 }
 
-std::optional<EffectState> MaterialRegistry::sanitize_effect_state(
-    const EffectState& state
-) const {
+std::optional<EffectState> MaterialRegistry::sanitize_effect_state(const EffectState& state) const {
     static_cast<void>(validate_effect_state(state, true));
-    if (schemas_ == nullptr) return std::nullopt;
+    if (schemas_ == nullptr)
+        return std::nullopt;
     const compiler::EffectSchema* schema = schemas_->effect(state.id);
-    if (schema == nullptr) return std::nullopt;
+    if (schema == nullptr)
+        return std::nullopt;
     EffectState result = state;
-    result.opacity = std::isfinite(result.opacity)
-        ? std::clamp(result.opacity, 0.0, 1.0)
-        : 1.0;
-    result.input = schema->input == "CONTENT"
-        ? EffectInput::content
-        : schema->input == "SHAPE" ? EffectInput::shape : EffectInput::backdrop;
+    result.opacity = std::isfinite(result.opacity) ? std::clamp(result.opacity, 0.0, 1.0) : 1.0;
+    if (!result.refresh_rate_valid || !std::isfinite(result.refresh_rate) ||
+        result.refresh_rate < 0.0) {
+        result.refresh_rate = default_effect_refresh_rate;
+    }
+    result.refresh_rate_valid = true;
+    result.input = schema->input == "CONTENT" ? EffectInput::content
+                   : schema->input == "SHAPE" ? EffectInput::shape
+                                              : EffectInput::backdrop;
     std::vector<MaterialParameter> parameters;
     parameters.reserve(result.parameters.size());
     std::set<std::string, std::less<>> seen;
     for (const MaterialParameter& parameter : result.parameters) {
-        const compiler::SchemaParameter* expected =
-            schema->find_parameter(parameter.name);
+        const compiler::SchemaParameter* expected = schema->find_parameter(parameter.name);
         if (!seen.insert(parameter.name).second || expected == nullptr ||
             !accepts_material_type(parameter.value, expected->material_type)) {
             continue;
@@ -324,27 +302,22 @@ std::optional<EffectState> MaterialRegistry::sanitize_effect_state(
     result.parameters = std::move(parameters);
     std::size_t slot = 0U;
     for (const compiler::SchemaParameter& expected : schema->parameters) {
-        const auto supplied = std::ranges::find(
-            result.parameters, expected.name, &MaterialParameter::name
-        );
-        const std::size_t width =
-            compiler::material_parameter_width(expected.material_type);
+        const auto supplied =
+            std::ranges::find(result.parameters, expected.name, &MaterialParameter::name);
+        const std::size_t width = compiler::material_parameter_width(expected.material_type);
         if (supplied != result.parameters.end()) {
-            static_cast<void>(pack_effect_parameter(
-                result.packed_parameters,
-                slot,
-                supplied->value,
-                expected.material_type
-            ));
+            static_cast<void>(pack_effect_parameter(result.packed_parameters, slot, supplied->value,
+                                                    expected.material_type));
         }
         slot += width;
     }
-    result.packed_parameter_count = static_cast<std::uint32_t>(
-        std::min(slot, result.packed_parameters.size())
-    );
+    result.packed_parameter_count =
+        static_cast<std::uint32_t>(std::min(slot, result.packed_parameters.size()));
     return result;
 }
 
-void MaterialRegistry::clear_diagnostics() noexcept { published_.clear(); }
+void MaterialRegistry::clear_diagnostics() noexcept {
+    published_.clear();
+}
 
 } // namespace strata::ui

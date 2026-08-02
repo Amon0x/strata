@@ -27,7 +27,7 @@ struct RenderLayerTelemetry final {
     std::uint64_t effect_nanos = 0U;
 };
 
-/** Shared D3D11 packet-v6 pipeline for swap-chain and offscreen targets. */
+/** Shared D3D11 packet-v7 pipeline for swap-chain and offscreen targets. */
 class RenderContext final {
   public:
     RenderContext(ID3D11Device* device, ID3D11DeviceContext* context);
@@ -41,20 +41,15 @@ class RenderContext final {
                     double logical_width, double logical_height);
     void release_target();
     void declare_material(std::string_view id, std::string_view hlsl_source);
-    void declare_effect_pass(
-        std::string_view effect_id,
-        std::uint32_t index,
-        std::uint32_t kind,
-        double radius,
-        std::uint32_t downsample,
-        std::uint32_t radius_parameter,
-        std::uint32_t downsample_parameter,
-        std::string_view hlsl_source
-    );
+    void declare_effect_pass(std::string_view effect_id, std::uint32_t index, std::uint32_t kind,
+                             double radius, std::uint32_t downsample,
+                             std::uint32_t radius_parameter, std::uint32_t downsample_parameter,
+                             std::string_view hlsl_source);
     void consume_resources(const host::RenderPacket& packet);
-    void begin_frame(std::array<float, 4U> clear_color, float frame_seconds);
+    void begin_frame(std::array<float, 4U> clear_color, double frame_seconds);
     [[nodiscard]] RenderLayerTelemetry render_layer(std::string_view id,
                                                     const host::RenderPacket& packet);
+    void release_layer(std::string_view id) noexcept;
 
   private:
     struct Impl;

@@ -37,6 +37,38 @@ struct Vertex final {
     std::array<float, 16U> data{};
 };
 
+struct PixelRect final {
+    std::uint32_t left = 0U;
+    std::uint32_t top = 0U;
+    std::uint32_t right = 0U;
+    std::uint32_t bottom = 0U;
+};
+
+[[nodiscard]] PixelRect effect_region(const host::EffectBatch& effect, const std::uint32_t width,
+                                      const std::uint32_t height, const double logical_width,
+                                      const double logical_height) noexcept {
+    const double scale_x = logical_width > 0.0 ? width / logical_width : 1.0;
+    const double scale_y = logical_height > 0.0 ? height / logical_height : 1.0;
+    const std::uint32_t effect_left = static_cast<std::uint32_t>(
+        std::clamp(std::floor(effect.x * scale_x), 0.0, static_cast<double>(width)));
+    const std::uint32_t effect_top = static_cast<std::uint32_t>(
+        std::clamp(std::floor(effect.y * scale_y), 0.0, static_cast<double>(height)));
+    const std::uint32_t effect_right = static_cast<std::uint32_t>(std::clamp(
+        std::ceil((effect.x + effect.width) * scale_x), 0.0, static_cast<double>(width)));
+    const std::uint32_t effect_bottom = static_cast<std::uint32_t>(std::clamp(
+        std::ceil((effect.y + effect.height) * scale_y), 0.0, static_cast<double>(height)));
+    const std::uint64_t clip_right = std::min<std::uint64_t>(
+        static_cast<std::uint64_t>(effect.scissor.x) + effect.scissor.width, width);
+    const std::uint64_t clip_bottom = std::min<std::uint64_t>(
+        static_cast<std::uint64_t>(effect.scissor.y) + effect.scissor.height, height);
+    return PixelRect{
+        std::max(effect_left, std::min(effect.scissor.x, width)),
+        std::max(effect_top, std::min(effect.scissor.y, height)),
+        std::min(effect_right, static_cast<std::uint32_t>(clip_right)),
+        std::min(effect_bottom, static_cast<std::uint32_t>(clip_bottom)),
+    };
+}
+
 [[nodiscard]] float read_float(const std::span<const std::uint8_t> bytes,
                                const std::size_t offset) {
     if (offset > bytes.size() || sizeof(float) > bytes.size() - offset) {
@@ -135,6 +167,53 @@ struct Vertex final {
     return result;
 }
 
+template <typename Source>
+void composite_filtered_pixels(std::vector<std::uint8_t>& destination,
+                               const host::EffectBatch& effect, const std::uint32_t width,
+                               const std::uint32_t height, const double logical_width,
+                               const double logical_height, Source&& source) {
+    const double scale_x = width / logical_width;
+    const double scale_y = height / logical_height;
+    const double exact_left = effect.x * scale_x;
+    const double exact_top = effect.y * scale_y;
+    const double exact_right = (effect.x + effect.width) * scale_x;
+    const double exact_bottom = (effect.y + effect.height) * scale_y;
+    const PixelRect region = effect_region(effect, width, height, logical_width, logical_height);
+    const float center_x = static_cast<float>((exact_left + exact_right) * 0.5);
+    const float center_y = static_cast<float>((exact_top + exact_bottom) * 0.5);
+    const float half_width = static_cast<float>((exact_right - exact_left) * 0.5);
+    const float half_height = static_cast<float>((exact_bottom - exact_top) * 0.5);
+    const float radius_scale = static_cast<float>(std::sqrt(std::abs(scale_x * scale_y)));
+    const float radius_limit = std::max(0.0F, std::min(half_width, half_height));
+    std::array<float, 4U> radii{};
+    for (std::size_t index = 0U; index < radii.size(); ++index) {
+        radii[index] =
+            std::min(static_cast<float>(effect.radii[index] * radius_scale), radius_limit);
+    }
+    for (std::uint32_t y = region.top; y < region.bottom; ++y) {
+        for (std::uint32_t x = region.left; x < region.right; ++x) {
+            const float mask =
+                1.0F - smoothstep(-1.0F, 1.0F,
+                                  rounded_box_sdf(static_cast<float>(x) + 0.5F - center_x,
+                                                  static_cast<float>(y) + 0.5F - center_y,
+                                                  half_width, half_height, radii));
+            const std::size_t pixel = (static_cast<std::size_t>(y) * width + x) * 4U;
+            const float coverage = mask * static_cast<float>(effect.opacity);
+            const float alpha = static_cast<float>(source(x, y, 3U)) / 255.0F * coverage;
+            for (std::size_t channel_index = 0U; channel_index < 3U; ++channel_index) {
+                const float source_value = static_cast<float>(source(x, y, channel_index));
+                const float destination_value =
+                    static_cast<float>(destination[pixel + channel_index]);
+                destination[pixel + channel_index] = static_cast<std::uint8_t>(std::clamp(
+                    std::lround(source_value * coverage + destination_value * (1.0F - alpha)), 0L,
+                    255L));
+            }
+            const float destination_alpha = static_cast<float>(destination[pixel + 3U]) / 255.0F;
+            destination[pixel + 3U] = channel(alpha + destination_alpha * (1.0F - alpha));
+        }
+    }
+}
+
 } // namespace
 
 SoftwareRenderer::SoftwareRenderer(const ImageCodec& image_codec) : image_codec_(image_codec) {}
@@ -156,6 +235,8 @@ void SoftwareRenderer::resize(const std::uint32_t framebuffer_width,
     logical_width_ = logical_width;
     logical_height_ = logical_height;
     pixels_.resize(static_cast<std::size_t>(byte_count));
+    cached_effects_.clear();
+    has_cached_effect_epoch_ = false;
 }
 
 void SoftwareRenderer::set_clear_color(const std::array<std::uint8_t, 4U> rgba) noexcept {
@@ -164,25 +245,19 @@ void SoftwareRenderer::set_clear_color(const std::array<std::uint8_t, 4U> rgba) 
 
 void SoftwareRenderer::declare_material(std::string_view, std::string_view) {}
 
-void SoftwareRenderer::declare_effect_pass(
-    const std::string_view effect_id,
-    const std::uint32_t index,
-    const std::uint32_t kind,
-    const double radius,
-    const std::uint32_t downsample,
-    const std::uint32_t radius_parameter,
-    const std::uint32_t downsample_parameter,
-    std::string_view
-) {
+void SoftwareRenderer::declare_effect_pass(const std::string_view effect_id,
+                                           const std::uint32_t index, const std::uint32_t kind,
+                                           const double radius, const std::uint32_t downsample,
+                                           const std::uint32_t radius_parameter,
+                                           const std::uint32_t downsample_parameter,
+                                           std::string_view) {
     std::vector<EffectPass>& passes = effects_[std::string(effect_id)];
-    if (passes.size() <= index) passes.resize(static_cast<std::size_t>(index) + 1U);
+    if (passes.size() <= index)
+        passes.resize(static_cast<std::size_t>(index) + 1U);
     passes[index] = EffectPass{
-        kind,
-        radius,
-        std::clamp(downsample, 1U, 8U),
-        radius_parameter,
-        downsample_parameter,
+        kind, radius, std::clamp(downsample, 1U, 8U), radius_parameter, downsample_parameter,
     };
+    cached_effects_.clear();
 }
 
 void SoftwareRenderer::apply(const host::ResourceOperation& operation) {
@@ -559,14 +634,8 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
     bottom = std::min(bottom, static_cast<std::uint32_t>(clip_bottom));
     if (left >= right || top >= bottom)
         return;
-    const double physical_radius = std::clamp(
-        batch.radius * std::max(scale_x, scale_y),
-        0.5,
-        32.0
-    );
-    const std::uint32_t radius = static_cast<std::uint32_t>(
-        std::ceil(physical_radius)
-    );
+    const double physical_radius = std::clamp(batch.radius * std::max(scale_x, scale_y), 0.5, 32.0);
+    const std::uint32_t radius = static_cast<std::uint32_t>(std::ceil(physical_radius));
     const std::uint32_t source_left = left > radius ? left - radius : 0U;
     const std::uint32_t source_top = top > radius ? top - radius : 0U;
     const std::uint32_t source_right = static_cast<std::uint32_t>(
@@ -580,13 +649,8 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
     std::vector<double> weights(radius + 1U);
     for (std::uint32_t offset = 0U; offset <= radius; ++offset) {
         const double distance = static_cast<double>(offset);
-        const double coverage = std::clamp(
-            physical_radius + 0.5 - distance,
-            0.0,
-            1.0
-        );
-        weights[offset] =
-            std::exp(-distance * distance * inverse_two_sigma_squared) * coverage;
+        const double coverage = std::clamp(physical_radius + 0.5 - distance, 0.0, 1.0);
+        weights[offset] = std::exp(-distance * distance * inverse_two_sigma_squared) * coverage;
     }
     std::vector<std::uint8_t> horizontal(static_cast<std::size_t>(source_width) * source_height *
                                          4U);
@@ -596,20 +660,14 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
             std::array<double, 4U> sums{};
             double total_weight = 0.0;
             for (std::int64_t offset = -static_cast<std::int64_t>(radius);
-                 offset <= static_cast<std::int64_t>(radius);
-                 ++offset) {
+                 offset <= static_cast<std::int64_t>(radius); ++offset) {
                 const std::uint32_t sample_column = static_cast<std::uint32_t>(
-                    std::clamp<std::int64_t>(
-                        static_cast<std::int64_t>(column) + offset,
-                        0,
-                        static_cast<std::int64_t>(source_width) - 1
-                    )
-                );
+                    std::clamp<std::int64_t>(static_cast<std::int64_t>(column) + offset, 0,
+                                             static_cast<std::int64_t>(source_width) - 1));
                 const double weight = weights[static_cast<std::size_t>(std::abs(offset))];
-                const std::size_t source =
-                    (static_cast<std::size_t>(source_top + row) * width_ +
-                     source_left + sample_column) *
-                    4U;
+                const std::size_t source = (static_cast<std::size_t>(source_top + row) * width_ +
+                                            source_left + sample_column) *
+                                           4U;
                 for (std::size_t component = 0U; component < 4U; ++component) {
                     sums[component] += static_cast<double>(pixels_[source + component]) * weight;
                 }
@@ -617,8 +675,7 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
             }
             for (std::size_t component = 0U; component < 4U; ++component) {
                 horizontal[target + component] = static_cast<std::uint8_t>(
-                    std::clamp(std::lround(sums[component] / total_weight), 0L, 255L)
-                );
+                    std::clamp(std::lround(sums[component] / total_weight), 0L, 255L));
             }
         }
     }
@@ -630,15 +687,10 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
             std::array<double, 4U> sums{};
             double total_weight = 0.0;
             for (std::int64_t offset = -static_cast<std::int64_t>(radius);
-                 offset <= static_cast<std::int64_t>(radius);
-                 ++offset) {
+                 offset <= static_cast<std::int64_t>(radius); ++offset) {
                 const std::uint32_t sample_row = static_cast<std::uint32_t>(
-                    std::clamp<std::int64_t>(
-                        static_cast<std::int64_t>(local_y) + offset,
-                        0,
-                        static_cast<std::int64_t>(source_height) - 1
-                    )
-                );
+                    std::clamp<std::int64_t>(static_cast<std::int64_t>(local_y) + offset, 0,
+                                             static_cast<std::int64_t>(source_height) - 1));
                 const double weight = weights[static_cast<std::size_t>(std::abs(offset))];
                 const std::size_t source =
                     (static_cast<std::size_t>(sample_row) * source_width + local_x) * 4U;
@@ -649,8 +701,7 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
             }
             for (std::size_t component = 0U; component < 4U; ++component) {
                 pixels_[target + component] = static_cast<std::uint8_t>(
-                    std::clamp(std::lround(sums[component] / total_weight), 0L, 255L)
-                );
+                    std::clamp(std::lround(sums[component] / total_weight), 0L, 255L));
             }
         }
     }
@@ -658,16 +709,17 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
 
 void SoftwareRenderer::apply_effect(const host::EffectBatch& effect) {
     const auto program = effects_.find(effect.effect);
-    if (program == effects_.end()) return;
+    if (program == effects_.end())
+        return;
     for (const EffectPass& pass : program->second) {
-        if (pass.kind != 0U) continue;
+        if (pass.kind != 0U)
+            continue;
         const double radius = pass.radius_parameter < effect.parameter_count
-            ? effect.parameters[pass.radius_parameter]
-            : pass.radius;
-        const double requested_downsample =
-            pass.downsample_parameter < effect.parameter_count
-            ? effect.parameters[pass.downsample_parameter]
-            : static_cast<double>(pass.downsample);
+                                  ? effect.parameters[pass.radius_parameter]
+                                  : pass.radius;
+        const double requested_downsample = pass.downsample_parameter < effect.parameter_count
+                                                ? effect.parameters[pass.downsample_parameter]
+                                                : static_cast<double>(pass.downsample);
         blur(host::BlurBatch{
             effect.source_order,
             effect.scissor,
@@ -676,123 +728,94 @@ void SoftwareRenderer::apply_effect(const host::EffectBatch& effect) {
             effect.width,
             effect.height,
             std::max(0.0, radius),
-            static_cast<std::uint32_t>(std::clamp(
-                std::llround(requested_downsample), 1LL, 8LL
-            )),
+            static_cast<std::uint32_t>(std::clamp(std::llround(requested_downsample), 1LL, 8LL)),
         });
     }
 }
 
-void SoftwareRenderer::composite_effect(
-    std::vector<std::uint8_t> foreground,
-    std::vector<std::uint8_t> backdrop,
-    const host::EffectBatch& effect
-) {
-    pixels_ = std::move(backdrop);
-    const double scale_x = width_ / logical_width_;
-    const double scale_y = height_ / logical_height_;
-    const std::uint32_t effect_left = static_cast<std::uint32_t>(std::clamp(
-        std::floor(effect.x * scale_x), 0.0, static_cast<double>(width_)
-    ));
-    const std::uint32_t effect_top = static_cast<std::uint32_t>(std::clamp(
-        std::floor(effect.y * scale_y), 0.0, static_cast<double>(height_)
-    ));
-    const std::uint32_t effect_right = static_cast<std::uint32_t>(std::clamp(
-        std::ceil((effect.x + effect.width) * scale_x), 0.0,
-        static_cast<double>(width_)
-    ));
-    const std::uint32_t effect_bottom = static_cast<std::uint32_t>(std::clamp(
-        std::ceil((effect.y + effect.height) * scale_y), 0.0,
-        static_cast<double>(height_)
-    ));
-    const std::uint64_t clip_right = std::min<std::uint64_t>(
-        static_cast<std::uint64_t>(effect.scissor.x) + effect.scissor.width,
-        width_
-    );
-    const std::uint64_t clip_bottom = std::min<std::uint64_t>(
-        static_cast<std::uint64_t>(effect.scissor.y) + effect.scissor.height,
-        height_
-    );
-    const std::uint32_t left =
-        std::max(effect_left, std::min(effect.scissor.x, width_));
-    const std::uint32_t top =
-        std::max(effect_top, std::min(effect.scissor.y, height_));
-    const std::uint32_t right = std::min(
-        effect_right, static_cast<std::uint32_t>(clip_right)
-    );
-    const std::uint32_t bottom = std::min(
-        effect_bottom, static_cast<std::uint32_t>(clip_bottom)
-    );
-    const float center_x = static_cast<float>(effect_left + effect_right) * 0.5F;
-    const float center_y = static_cast<float>(effect_top + effect_bottom) * 0.5F;
-    const float half_width =
-        static_cast<float>(effect_right - effect_left) * 0.5F;
-    const float half_height =
-        static_cast<float>(effect_bottom - effect_top) * 0.5F;
-    const float radius_scale = static_cast<float>(
-        std::sqrt(std::abs(scale_x * scale_y))
-    );
-    const float radius_limit = std::max(
-        0.0F,
-        std::min(half_width, half_height)
-    );
-    std::array<float, 4U> radii{};
-    for (std::size_t index = 0U; index < radii.size(); ++index) {
-        radii[index] = std::min(
-            static_cast<float>(effect.radii[index] * radius_scale),
-            radius_limit
-        );
+bool SoftwareRenderer::effect_refresh_due(const host::EffectBatch& effect, const bool content,
+                                          const std::int64_t time_nanoseconds) const {
+    if (effect.refresh_rate <= 0.0)
+        return true;
+    const std::uint64_t key = static_cast<std::uint64_t>(effect.source_order) |
+                              (static_cast<std::uint64_t>(content) << 32U);
+    const auto cached = cached_effects_.find(key);
+    if (cached == cached_effects_.end() || cached->second.effect != effect ||
+        time_nanoseconds < cached->second.sampled_nanoseconds) {
+        return true;
     }
-    for (std::uint32_t y = top; y < bottom; ++y) {
-        for (std::uint32_t x = left; x < right; ++x) {
-            const float mask = 1.0F - smoothstep(
-                -1.0F,
-                1.0F,
-                rounded_box_sdf(
-                    static_cast<float>(x) + 0.5F - center_x,
-                    static_cast<float>(y) + 0.5F - center_y,
-                    half_width,
-                    half_height,
-                    radii
-                )
-            );
-            const std::size_t pixel =
-                (static_cast<std::size_t>(y) * width_ + x) * 4U;
-            const float coverage = mask * static_cast<float>(effect.opacity);
-            const float alpha = static_cast<float>(foreground[pixel + 3U]) /
-                255.0F * coverage;
-            for (std::size_t channel_index = 0U; channel_index < 3U;
-                 ++channel_index) {
-                const float source = static_cast<float>(
-                    foreground[pixel + channel_index]
-                );
-                const float destination = static_cast<float>(
-                    pixels_[pixel + channel_index]
-                );
-                pixels_[pixel + channel_index] = static_cast<std::uint8_t>(
-                    std::clamp(
-                        std::lround(
-                            source * coverage + destination * (1.0F - alpha)
-                        ),
-                        0L,
-                        255L
-                    )
-                );
-            }
-            const float destination_alpha =
-                static_cast<float>(pixels_[pixel + 3U]) / 255.0F;
-            pixels_[pixel + 3U] = channel(
-                alpha + destination_alpha * (1.0F - alpha)
-            );
-        }
-    }
+    const long double interval = 1'000'000'000.0L / static_cast<long double>(effect.refresh_rate);
+    return static_cast<long double>(time_nanoseconds - cached->second.sampled_nanoseconds) + 0.5L >=
+           interval;
 }
 
-void SoftwareRenderer::render(const host::RenderPacket& packet, std::int64_t) {
+void SoftwareRenderer::capture_effect(const host::EffectBatch& effect, const bool content,
+                                      const std::int64_t time_nanoseconds) {
+    const PixelRect region =
+        effect_region(effect, width_, height_, logical_width_, logical_height_);
+    CachedEffect sample;
+    sample.left = region.left;
+    sample.top = region.top;
+    sample.width = region.right >= region.left ? region.right - region.left : 0U;
+    sample.height = region.bottom >= region.top ? region.bottom - region.top : 0U;
+    sample.sampled_nanoseconds = time_nanoseconds;
+    sample.effect = effect;
+    sample.pixels.resize(static_cast<std::size_t>(sample.width) * sample.height * 4U);
+    for (std::uint32_t row = 0U; row < sample.height; ++row) {
+        const std::size_t source =
+            (static_cast<std::size_t>(sample.top + row) * width_ + sample.left) * 4U;
+        const std::size_t destination = static_cast<std::size_t>(row) * sample.width * 4U;
+        std::copy_n(pixels_.begin() + static_cast<std::ptrdiff_t>(source),
+                    static_cast<std::size_t>(sample.width) * 4U,
+                    sample.pixels.begin() + static_cast<std::ptrdiff_t>(destination));
+    }
+    const std::uint64_t key = static_cast<std::uint64_t>(effect.source_order) |
+                              (static_cast<std::uint64_t>(content) << 32U);
+    cached_effects_.insert_or_assign(key, std::move(sample));
+}
+
+void SoftwareRenderer::composite_cached_effect(const host::EffectBatch& effect,
+                                               const bool content) {
+    const std::uint64_t key = static_cast<std::uint64_t>(effect.source_order) |
+                              (static_cast<std::uint64_t>(content) << 32U);
+    const auto cached = cached_effects_.find(key);
+    if (cached == cached_effects_.end()) {
+        throw std::logic_error("software effect cache is unavailable");
+    }
+    const CachedEffect& sample = cached->second;
+    composite_filtered_pixels(
+        pixels_, effect, width_, height_, logical_width_, logical_height_,
+        [&sample](const std::uint32_t x, const std::uint32_t y, const std::size_t channel_index) {
+            const std::size_t pixel =
+                (static_cast<std::size_t>(y - sample.top) * sample.width + (x - sample.left)) * 4U;
+            return sample.pixels[pixel + channel_index];
+        });
+}
+
+void SoftwareRenderer::composite_effect(std::vector<std::uint8_t> foreground,
+                                        std::vector<std::uint8_t> backdrop,
+                                        const host::EffectBatch& effect) {
+    pixels_ = std::move(backdrop);
+    composite_filtered_pixels(pixels_, effect, width_, height_, logical_width_, logical_height_,
+                              [&foreground, this](const std::uint32_t x, const std::uint32_t y,
+                                                  const std::size_t channel_index) {
+                                  const std::size_t pixel =
+                                      (static_cast<std::size_t>(y) * width_ + x) * 4U;
+                                  return foreground[pixel + channel_index];
+                              });
+}
+
+void SoftwareRenderer::render(const host::RenderPacket& packet,
+                              const std::int64_t time_nanoseconds) {
     if (width_ == 0U || height_ == 0U) {
         throw std::logic_error("headless renderer must be sized before rendering");
     }
     consume_resources(packet);
+    if (!has_cached_effect_epoch_ || cached_effect_epoch_ != packet.geometry_epoch) {
+        cached_effects_.clear();
+        cached_effect_epoch_ = packet.geometry_epoch;
+        has_cached_effect_epoch_ = true;
+    }
     pixels_.resize(static_cast<std::size_t>(width_) * height_ * 4U);
     for (std::size_t pixel = 0U; pixel < pixels_.size(); pixel += 4U) {
         std::copy(clear_.begin(), clear_.end(),
@@ -808,22 +831,24 @@ void SoftwareRenderer::render(const host::RenderPacket& packet, std::int64_t) {
         } else if (const auto* backdrop_effect = std::get_if<host::EffectBatch>(&batch);
                    backdrop_effect != nullptr &&
                    backdrop_effect->kind == host::EffectBatchKind::backdrop) {
-            std::vector<std::uint8_t> backdrop = pixels_;
-            apply_effect(*backdrop_effect);
-            composite_effect(std::move(pixels_), std::move(backdrop), *backdrop_effect);
+            if (effect_refresh_due(*backdrop_effect, false, time_nanoseconds)) {
+                std::vector<std::uint8_t> backdrop = pixels_;
+                apply_effect(*backdrop_effect);
+                if (backdrop_effect->refresh_rate > 0.0) {
+                    capture_effect(*backdrop_effect, false, time_nanoseconds);
+                }
+                composite_effect(std::move(pixels_), std::move(backdrop), *backdrop_effect);
+            } else {
+                composite_cached_effect(*backdrop_effect, false);
+            }
         } else if (const auto* content_effect = std::get_if<host::EffectBatch>(&batch);
                    content_effect != nullptr &&
                    content_effect->kind == host::EffectBatchKind::content_begin) {
             if (content_effects.size() == host::maximum_content_effect_depth) {
-                throw std::length_error(
-                    "software content effect nesting exceeds the packet limit"
-                );
+                throw std::length_error("software content effect nesting exceeds the packet limit");
             }
             content_effects.push_back(ContentEffect{*content_effect, std::move(pixels_)});
-            pixels_.assign(
-                static_cast<std::size_t>(width_) * height_ * 4U,
-                std::uint8_t{0U}
-            );
+            pixels_.assign(static_cast<std::size_t>(width_) * height_ * 4U, std::uint8_t{0U});
         } else {
             if (!std::holds_alternative<host::ContentEffectEndBatch>(batch) ||
                 content_effects.empty()) {
@@ -831,12 +856,16 @@ void SoftwareRenderer::render(const host::RenderPacket& packet, std::int64_t) {
             }
             ContentEffect content = std::move(content_effects.back());
             content_effects.pop_back();
-            apply_effect(content.effect);
-            composite_effect(
-                std::move(pixels_),
-                std::move(content.backdrop),
-                content.effect
-            );
+            if (effect_refresh_due(content.effect, true, time_nanoseconds)) {
+                apply_effect(content.effect);
+                if (content.effect.refresh_rate > 0.0) {
+                    capture_effect(content.effect, true, time_nanoseconds);
+                }
+                composite_effect(std::move(pixels_), std::move(content.backdrop), content.effect);
+            } else {
+                pixels_ = std::move(content.backdrop);
+                composite_cached_effect(content.effect, true);
+            }
         }
     }
     if (!content_effects.empty()) {

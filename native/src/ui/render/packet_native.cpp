@@ -159,10 +159,9 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
         output.number(batch.effect_radii.bottom_left);
         output.text(batch.effect->id);
         output.number(batch.effect->opacity);
+        output.number(batch.effect->refresh_rate);
         output.integer(batch.effect->packed_parameter_count);
-        for (std::uint32_t index = 0U;
-             index < batch.effect->packed_parameter_count;
-             ++index) {
+        for (std::uint32_t index = 0U; index < batch.effect->packed_parameter_count; ++index) {
             output.number(batch.effect->packed_parameters[index]);
         }
     }
@@ -219,30 +218,22 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     constexpr std::string_view magic = "STRATARP";
     output.raw(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(magic.data()),
                                              magic.size()));
-    output.integer(std::uint32_t{6U});
+    output.integer(std::uint32_t{7U});
     if (texture_resources.size() > std::numeric_limits<std::size_t>::max() - resources.size()) {
         throw std::length_error("render resource count exceeds size_t");
     }
     output.integer(
         checked_count(texture_resources.size() + resources.size(), "render resource count"));
-    output.integer(
-        include_geometry
-            ? checked_count(submission.batches.size(), "render batch count")
-            : 0U
-    );
+    output.integer(include_geometry ? checked_count(submission.batches.size(), "render batch count")
+                                    : 0U);
     output.integer(frame_index);
     output.integer(geometry_epoch);
     output.integer(include_geometry ? geometry_payload_flag : std::uint32_t{0U});
-    output.integer(
-        include_geometry
-            ? checked_count(submission.vertex_bytes.size(), "render vertex byte count")
-            : 0U
-    );
-    output.integer(
-        include_geometry
-            ? checked_count(submission.indices.size(), "render index count")
-            : 0U
-    );
+    output.integer(include_geometry
+                       ? checked_count(submission.vertex_bytes.size(), "render vertex byte count")
+                       : 0U);
+    output.integer(include_geometry ? checked_count(submission.indices.size(), "render index count")
+                                    : 0U);
     output.integer(checked_count(submission.planned_draws, "render planned draw count"));
     output.integer(checked_count(submission.skipped_draws, "render skipped draw count"));
     // Releases queued by a resource reload must precede creates that may reuse the same
@@ -362,14 +353,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
             current_packet_ = &geometry_packet_;
         } else {
             if (reuse_packet_.empty()) {
-                reuse_packet_ = encode_packet(
-                    submission,
-                    frame_index,
-                    encoded_geometry_epoch,
-                    {},
-                    {},
-                    false
-                );
+                reuse_packet_ =
+                    encode_packet(submission, frame_index, encoded_geometry_epoch, {}, {}, false);
             } else {
                 write_frame_index(reuse_packet_, frame_index);
             }
@@ -380,14 +365,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                                                  ? std::chrono::steady_clock::now()
                                                  : std::chrono::steady_clock::time_point{};
         std::vector<std::uint8_t> next_resources =
-            encode_packet(
-                submission,
-                frame_index,
-                encoded_geometry_epoch,
-                texture_resources,
-                resources,
-                geometry_changed
-            );
+            encode_packet(submission, frame_index, encoded_geometry_epoch, texture_resources,
+                          resources, geometry_changed);
         static_assert(noexcept(resource_packet_.swap(next_resources)));
         resource_packet_.swap(next_resources);
         current_packet_ = &resource_packet_;
@@ -429,14 +408,8 @@ bool HostRenderPacketCache::reuse(const std::uint64_t frame_index) {
         RenderSubmission retained_submission;
         retained_submission.planned_draws = planned_draws_;
         retained_submission.skipped_draws = skipped_draws_;
-        reuse_packet_ = encode_packet(
-            retained_submission,
-            frame_index,
-            geometry_epoch_,
-            {},
-            {},
-            false
-        );
+        reuse_packet_ =
+            encode_packet(retained_submission, frame_index, geometry_epoch_, {}, {}, false);
     } else {
         write_frame_index(reuse_packet_, frame_index);
     }

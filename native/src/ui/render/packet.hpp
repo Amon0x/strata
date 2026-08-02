@@ -32,10 +32,8 @@ class RenderCommandBuffer;
 class TextEngine;
 
 /** Little-endian logical-command packet v2 used by command-stream inspection/tests. */
-[[nodiscard]] std::vector<std::uint8_t> encode_render_packet(
-    const RenderCommandBuffer& commands,
-    std::uint64_t frame_index
-);
+[[nodiscard]] std::vector<std::uint8_t> encode_render_packet(const RenderCommandBuffer& commands,
+                                                             std::uint64_t frame_index);
 
 } // namespace strata::ui
 
@@ -47,44 +45,32 @@ struct HostRenderResourceInvalidationPlan final {
 };
 
 /**
- * Packet v6: retained geometry epochs, compact geometry references, and ordered application
- * effect programs. The
+ * Packet v7: retained geometry epochs, compact geometry references, rate-limited effects, and
+ * ordered application effect programs. The
  * logical v2 encoder remains available only to command-stream inspection tooling.
  */
 class HostRenderPacketCache final {
-public:
+  public:
     HostRenderPacketCache() = default;
     HostRenderPacketCache(const HostRenderPacketCache&) = delete;
     HostRenderPacketCache& operator=(const HostRenderPacketCache&) = delete;
     HostRenderPacketCache(HostRenderPacketCache&&) = delete;
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
-    /** A null TextEngine selects the packet-v6 non-text path; text runs are then rejected. */
-    [[nodiscard]] const std::vector<std::uint8_t>& encode(
-        const RenderCommandBuffer& commands,
-        std::uint64_t frame_index,
-        std::span<const resource::EncodedTextureResource> texture_resources,
-        font::GlyphAtlas& glyph_atlas,
-        const TextEngine* text_engine,
-        double display_scale,
-        std::int64_t framebuffer_width,
-        std::int64_t framebuffer_height,
-        double logical_width,
-        double logical_height
-    );
+    /** A null TextEngine selects the packet-v7 non-text path; text runs are then rejected. */
+    [[nodiscard]] const std::vector<std::uint8_t>&
+    encode(const RenderCommandBuffer& commands, std::uint64_t frame_index,
+           std::span<const resource::EncodedTextureResource> texture_resources,
+           font::GlyphAtlas& glyph_atlas, const TextEngine* text_engine, double display_scale,
+           std::int64_t framebuffer_width, std::int64_t framebuffer_height, double logical_width,
+           double logical_height);
     /** Compatibility overload for text-backed surfaces. */
-    [[nodiscard]] const std::vector<std::uint8_t>& encode(
-        const RenderCommandBuffer& commands,
-        std::uint64_t frame_index,
-        std::span<const resource::EncodedTextureResource> texture_resources,
-        font::GlyphAtlas& glyph_atlas,
-        const TextEngine& text_engine,
-        double display_scale,
-        std::int64_t framebuffer_width,
-        std::int64_t framebuffer_height,
-        double logical_width,
-        double logical_height
-    );
+    [[nodiscard]] const std::vector<std::uint8_t>&
+    encode(const RenderCommandBuffer& commands, std::uint64_t frame_index,
+           std::span<const resource::EncodedTextureResource> texture_resources,
+           font::GlyphAtlas& glyph_atlas, const TextEngine& text_engine, double display_scale,
+           std::int64_t framebuffer_width, std::int64_t framebuffer_height, double logical_width,
+           double logical_height);
     /** Emits a compact packet referencing the settled geometry epoch. */
     [[nodiscard]] bool reuse(std::uint64_t frame_index);
     /** Plans release records for raster images already published by this cache. */
@@ -96,24 +82,20 @@ public:
      * static texture descriptor already retained by this cache. Call prepare_resource_release()
      * when teardown must also cover textures that have never reached a frame.
      */
-    [[nodiscard]] const std::vector<std::uint8_t>& prepare_atlas_release(
-        std::uint64_t frame_index,
-        font::GlyphAtlas& glyph_atlas
-    );
+    [[nodiscard]] const std::vector<std::uint8_t>&
+    prepare_atlas_release(std::uint64_t frame_index, font::GlyphAtlas& glyph_atlas);
     /**
      * Encodes terminal releases for every supplied surface-owned static texture together with the
      * atlas. The encoded packet is retained before either resource set is committed/drained.
      */
-    [[nodiscard]] const std::vector<std::uint8_t>& prepare_resource_release(
-        std::uint64_t frame_index,
-        font::GlyphAtlas& glyph_atlas,
-        std::span<const resource::EncodedTextureResource> static_textures
-    );
+    [[nodiscard]] const std::vector<std::uint8_t>&
+    prepare_resource_release(std::uint64_t frame_index, font::GlyphAtlas& glyph_atlas,
+                             std::span<const resource::EncodedTextureResource> static_textures);
     void clear() noexcept;
     [[nodiscard]] const std::vector<std::uint8_t>& packet() const noexcept;
     [[nodiscard]] const HostRenderPacketTelemetry& telemetry() const noexcept;
 
-private:
+  private:
     RenderSubmissionCache submission_cache_;
     // Submission planning still needs the complete descriptor table after one-shot encoded
     // resource payloads have been consumed by the host.

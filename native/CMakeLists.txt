@@ -1030,6 +1030,17 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         COMMAND strata_render_packet_tests ${STRATA_RESOURCE_ROOT}
     )
 
+    if(TARGET strata_headless_host)
+        add_executable(strata_effect_refresh_tests tests/effect_refresh_tests.cpp)
+        target_link_libraries(strata_effect_refresh_tests PRIVATE strata_headless_host)
+        target_include_directories(
+            strata_effect_refresh_tests
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/headless
+        )
+        strata_target_defaults(strata_effect_refresh_tests)
+        add_test(NAME strata.effect_refresh COMMAND strata_effect_refresh_tests)
+    endif()
+
     add_executable(strata_text_font_residual_tests tests/text_font_residual_tests.cpp)
     target_link_libraries(strata_text_font_residual_tests PRIVATE Strata::core)
     target_include_directories(
