@@ -31,12 +31,9 @@ float4 effect(EffectInput input) {
     float2 offset = normal * refraction * lens * texel;
 
     float4 soft = sampleEffectSource(input.uv + offset * 0.28);
-    float3 refracted;
-    refracted.r = sampleEffectBackdrop(input.uv + offset * 1.16).r;
-    refracted.g = sampleEffectBackdrop(input.uv + offset).g;
-    refracted.b = sampleEffectBackdrop(input.uv + offset * 0.84).b;
+    float3 refracted = sampleEffectBackdrop(input.uv + offset).rgb;
 
-    float clarity = 0.42 + edge * 0.38;
+    float clarity = 0.54 + edge * 0.22;
     float3 color = lerp(soft.rgb, refracted, clarity);
     color = adjustSaturation(color, effectFloat(7));
     color = saturate((color - 0.5) * 1.07 + 0.5);
