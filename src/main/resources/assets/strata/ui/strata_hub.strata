@@ -141,9 +141,7 @@ style SearchShell extends GlassSurface {
   );
 }
 style SearchEditorStyle {
-  radius: 18; background: null; border: null;
   pixelSize: 14; color: #EEF8FFFF; hintColor: #7F92A4FF;
-  focusRing: null;
 }
 style GreenFocus {
   pixelSize: 14; color: #EEF8FFFF; background: #B9E5FF18;
@@ -369,6 +367,7 @@ component GlassSearch(query: string, change: action) {
       key: "workspace.search",
       text: query,
       hint: "Search projects, files, people…",
+      appearance: "BARE",
       onChange: change,
       visualStyle: SearchEditorStyle,
       layout: { width: { weight: 1 }, height: 36 }

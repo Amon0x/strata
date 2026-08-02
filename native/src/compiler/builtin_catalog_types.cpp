@@ -1697,6 +1697,12 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                 .parameters =
                     {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
                      DeclaredParameter{.name = "text", .type = declared_type_reference("t0")}}})},
+        DeclaredNamedType{
+            .id = "t167",
+            .definition =
+                declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
+                                           .label = "control appearance",
+                                           .values = {"BARE", "DEFAULT"}})},
     };
 }
 

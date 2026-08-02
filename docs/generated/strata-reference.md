@@ -806,6 +806,7 @@ Children: `false`
 | `max` | number | false | true | — |
 | `step` | number | false | false | — |
 | `enabled` | boolean | false | false | — |
+| `appearance` | one of (BARE, DEFAULT) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -1458,6 +1459,7 @@ Children: `false`
 | `hint` | string | false | false | — |
 | `enabled` | boolean | false | false | — |
 | `readOnly` | boolean | false | false | — |
+| `appearance` | one of (BARE, DEFAULT) | false | false | — |
 | `maxLength` | number | false | true | — |
 | `filter` | one of (ALPHANUMERIC, ANY, DECIMAL, INTEGER, LETTERS) | false | false | — |
 | `commitFormat` | one of (LOWERCASE, NONE, TRIM, UPPERCASE) | false | false | — |
@@ -1507,6 +1509,7 @@ Children: `false`
 | `hint` | string | false | false | — |
 | `enabled` | boolean | false | false | — |
 | `readOnly` | boolean | false | false | — |
+| `appearance` | one of (BARE, DEFAULT) | false | false | — |
 | `password` | boolean | false | false | — |
 | `maxLength` | number | false | true | — |
 | `filter` | one of (ALPHANUMERIC, ANY, DECIMAL, INTEGER, LETTERS) | false | false | — |

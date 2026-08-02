@@ -86,6 +86,19 @@ Use named styles and `theme.*` tokens for a design system. Explicit call-site pr
 component defaults and styles. Control skins are still ordinary built-ins; changing toggle track/
 thumb geometry or checkbox indicators does not justify another widget implementation.
 
+Editable controls separate mechanics from optional chrome. Use `appearance: "BARE"` on `TextBox`,
+`TextArea`, or `NumberField` when an authored component owns the surrounding surface:
+
+```strata
+Panel(style: SearchGlass) {
+  TextBox(key: "search.editor", bind: query, appearance: "BARE", hint: "Search…")
+}
+```
+
+The editor keeps focus, selection, caret, IME, undo, semantics, and input routing while suppressing
+its native background, border, focus ring, and interaction overlays. This is preferable to encoding
+presentation suppression through nullable paint fields.
+
 ### Anchored overlays and authored controls
 
 `PORTAL` layout is out of parent flow and can be anchored to any stable widget key. `anchorSide`,

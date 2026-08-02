@@ -207,6 +207,13 @@ namespace {
             result.opacity = std::clamp(*value, 0.0, 1.0);
         }
     }
+    if (scope.string("appearance", "DEFAULT") == "BARE") {
+        result.background.reset();
+        result.border.reset();
+        result.focus_ring.reset();
+        result.hover_overlay.reset();
+        result.active_overlay.reset();
+    }
     return result;
 }
 

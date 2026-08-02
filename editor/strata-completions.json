@@ -8498,6 +8498,17 @@
         },
         {
           "aliases": [],
+          "enumValues": [
+            "BARE",
+            "DEFAULT"
+          ],
+          "name": "appearance",
+          "nullable": false,
+          "required": false,
+          "type": "one of (BARE, DEFAULT)"
+        },
+        {
+          "aliases": [],
           "enumValues": [],
           "name": "layout",
           "nullable": false,
@@ -13120,6 +13131,17 @@
         },
         {
           "aliases": [],
+          "enumValues": [
+            "BARE",
+            "DEFAULT"
+          ],
+          "name": "appearance",
+          "nullable": false,
+          "required": false,
+          "type": "one of (BARE, DEFAULT)"
+        },
+        {
+          "aliases": [],
           "enumValues": [],
           "name": "maxLength",
           "nullable": true,
@@ -13497,6 +13519,17 @@
           "nullable": false,
           "required": false,
           "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "BARE",
+            "DEFAULT"
+          ],
+          "name": "appearance",
+          "nullable": false,
+          "required": false,
+          "type": "one of (BARE, DEFAULT)"
         },
         {
           "aliases": [],
