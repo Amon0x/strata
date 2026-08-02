@@ -71,18 +71,19 @@ style GlassTriggerStyle {
   gap: 8;
   alignItems: "CENTER";
   radius: 10;
-  background: #D9EEFF22;
-  border: { width: 1, color: #D8EEFF24 };
+  background: #EAE6E01C;
+  border: { width: 1, color: #FFFFFF58 };
   focusRing: { width: 1, color: #C9E8FF34 };
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 24,
+    blurRadius: 14,
     downsample: 2,
-    refraction: 8,
-    tint: #B8E4FF14,
-    saturation: 1.02,
-    highlight: 0.62,
-    noise: 0.045
+    refraction: 18,
+    tint: #E6E1D914,
+    saturation: 0.82,
+    highlight: 0.82,
+    noise: 0.045,
+    transparency: 0.82
   );
 }
 
@@ -93,8 +94,8 @@ style GlassPopupStyle {
   padding: 6;
   gap: 3;
   radius: 14;
-  background: #B9DDFF2C;
-  border: { width: 1, color: #D9EEFF26 };
+  background: #E3DDD52C;
+  border: { width: 1, color: #FFFFFF5C };
   anchorSide: "BOTTOM";
   anchorAlign: "START";
   anchorGap: 7;
@@ -102,13 +103,14 @@ style GlassPopupStyle {
   anchorShift: true;
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 30,
+    blurRadius: 16,
     downsample: 2,
-    refraction: 10,
-    tint: #B8E3FF16,
-    saturation: 1.02,
-    highlight: 0.68,
-    noise: 0.045
+    refraction: 22,
+    tint: #E1DAD116,
+    saturation: 0.80,
+    highlight: 0.84,
+    noise: 0.045,
+    transparency: 0.74
   );
 }
 
@@ -124,32 +126,34 @@ style GlassItemStyle extends Transparent {
 }
 
 style GlassItemSelected extends GlassItemStyle {
-  background: #B9E4FF1E;
-  border: { width: 1, color: #DCEFFF24 };
+  background: #F0ECE61E;
+  border: { width: 1, color: #FFFFFF44 };
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 18,
+    blurRadius: 10,
     downsample: 2,
-    refraction: 5,
-    tint: #C4EAFF0A,
-    saturation: 1.0,
-    highlight: 0.38,
-    noise: 0.04
+    refraction: 12,
+    tint: #E8E3DC0A,
+    saturation: 0.82,
+    highlight: 0.55,
+    noise: 0.04,
+    transparency: 0.76
   );
 }
 
 style GlassItemActive extends GlassItemStyle {
-  background: #D5EEFF2B;
-  border: { width: 1, color: #E8F5FF38 };
+  background: #F2EEE82B;
+  border: { width: 1, color: #FFFFFF52 };
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 20,
+    blurRadius: 12,
     downsample: 2,
-    refraction: 6,
-    tint: #D5F1FF10,
-    saturation: 1.02,
-    highlight: 0.48,
-    noise: 0.04
+    refraction: 14,
+    tint: #EBE6DF10,
+    saturation: 0.84,
+    highlight: 0.64,
+    noise: 0.04,
+    transparency: 0.84
   );
 }
 
@@ -175,20 +179,21 @@ style GlassTooltipStyle {
   height: "content";
   padding: { horizontal: 10, vertical: 7 };
   radius: 9;
-  background: #C4E2FF26;
-  border: { width: 1, color: #DDF1FF24 };
+  background: #E9E4DD26;
+  border: { width: 1, color: #FFFFFF54 };
   anchorSide: "TOP";
   anchorAlign: "CENTER";
   anchorGap: 8;
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 22,
+    blurRadius: 12,
     downsample: 2,
-    refraction: 8,
-    tint: #C2E8FF14,
-    saturation: 1.02,
-    highlight: 0.6,
-    noise: 0.04
+    refraction: 18,
+    tint: #E7E1D914,
+    saturation: 0.82,
+    highlight: 0.78,
+    noise: 0.04,
+    transparency: 0.78
   );
 }
 
@@ -250,17 +255,18 @@ style EffectDemoCard {
 }
 
 style LiquidDemoCard extends EffectDemoCard {
-  background: #C6E7FF1C;
-  border: { width: 1, color: #DDEFFF22 };
+  background: #E9E4DC1C;
+  border: { width: 1, color: #FFFFFF58 };
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 32,
+    blurRadius: 16,
     downsample: 2,
-    refraction: 12,
-    tint: #BCE7FF18,
-    saturation: 1.04,
-    highlight: 0.72,
-    noise: 0.045
+    refraction: 26,
+    tint: #E5DFD618,
+    saturation: 0.82,
+    highlight: 0.88,
+    noise: 0.045,
+    transparency: 0.82
   );
 }
 
@@ -537,7 +543,7 @@ component GlassEffectFixture() {
   Panel(style: EffectFixtureRoot) {
     Panel(
       style: EffectWallpaper,
-      material: material("demo:aurora", intensity: 1, tint: #7C6BFFFF)
+      material: material("demo:color-bath")
     )
     Panel(style: EffectGallery) {
       Text(text: "Authored effect gallery", style: SectionText)

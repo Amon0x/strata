@@ -5,16 +5,17 @@ style Clear { background: null; border: null; }
 
 style GlassSurface {
   background: #AFC6D814;
-  border: { width: 1, color: #DDEBF526 };
+  border: { width: 1, color: #EAF5FC48 };
   effect: effect(
     "morrow:optic-glass",
-    blurRadius: 30,
+    blurRadius: 14,
     downsample: 2,
-    refraction: 10,
+    refraction: 18,
     tint: #C4D8E60A,
     saturation: 0.96,
-    highlight: 0.48,
-    noise: 0.06
+    highlight: 0.66,
+    noise: 0.06,
+    transparency: 0.82
   );
 }
 
@@ -27,7 +28,7 @@ style AppBackdrop {
 style AppShell extends GlassSurface {
   kind: "ROW"; width: { weight: 1 }; height: { weight: 1 };
   radius: 24; gap: 0; clip: true;
-  background: #08111D70;
+  background: #08111D46;
   border: { width: 1, color: #E2EDF52E };
 }
 style CompactShell extends AppShell { kind: "COLUMN"; }
@@ -35,7 +36,7 @@ style CompactShell extends AppShell { kind: "COLUMN"; }
 style Sidebar {
   kind: "COLUMN"; width: 238; height: { weight: 1 };
   padding: { horizontal: 17, vertical: 18 }; gap: 9;
-  background: #050D186E;
+  background: #050D184C;
   border: { width: 1, color: #D7ECFF18 };
 }
 style CompactNav {
@@ -108,7 +109,7 @@ style ProfileRow extends Clear {
 
 style MainSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: { weight: 1 };
-  background: #050C1624; border: null;
+  background: #050C1616; border: null;
 }
 style Topbar extends GlassSurface {
   kind: "ROW"; width: { weight: 1 }; height: 70;
@@ -131,13 +132,14 @@ style SearchShell extends GlassSurface {
   background: #CFDCE80E; border: { width: 1, color: #EAF3FA2C };
   effect: effect(
     "morrow:optic-glass",
-    blurRadius: 22,
+    blurRadius: 10,
     downsample: 2,
-    refraction: 5,
+    refraction: 10,
     tint: #D1E2EC08,
     saturation: 0.96,
-    highlight: 0.32,
-    noise: 0.04
+    highlight: 0.50,
+    noise: 0.04,
+    transparency: 0.88
   );
 }
 style SearchEditorStyle {
@@ -176,7 +178,7 @@ style FeatureCard extends GlassSurface {
   padding: 22; gap: 18; radius: 20; clip: true; alignItems: "CENTER";
   background: {
     kind: "linear", angle: 145,
-    stops: [ { color: #698CA51D }, { color: #7D719E16 }, { color: #07132258 } ]
+    stops: [ { color: #698CA51D }, { color: #7D719E16 }, { color: #07132238 } ]
   };
   border: { width: 1, color: #E4F3FF30 };
 }
@@ -758,7 +760,7 @@ component WorkspaceApp() {
   Panel(
     key: "morrow.backdrop",
     style: AppBackdrop,
-    material: material("morrow:aurora", intensity: 0.6, tint: #8795B5FF)
+    material: material("morrow:aurora", intensity: 0.82, tint: #927FC4FF)
   ) {
     Panel(key: "morrow.shell", style: env.compact ? CompactShell : AppShell, transition: AppEnter) {
       if env.compact { CompactNavigation(section: section) }

@@ -34,20 +34,21 @@ style DeckShell {
     kind: "linear",
     angle: 155,
     stops: [
-      { color: #171D24B8 },
-      { color: #0B0F15C8 }
+      { color: #171D2478 },
+      { color: #0B0F1590 }
     ]
   };
   border: { width: 1, color: #D9E3EA36 };
   effect: effect(
     "deck:optic-glass",
-    blurRadius: 34,
+    blurRadius: 18,
     downsample: 2,
-    refraction: 12,
+    refraction: 20,
     tint: #A7B7C20A,
     saturation: 0.82,
-    highlight: 0.52,
-    noise: 0.045
+    highlight: 0.65,
+    noise: 0.045,
+    transparency: 0.66
   );
 }
 
@@ -332,7 +333,7 @@ style DeckSelectPopup {
   padding: 6;
   gap: 3;
   radius: 13;
-  background: #11171DEC;
+  background: #11171DA8;
   border: { width: 1, color: #DCE5EA32 };
   anchorSide: "BOTTOM";
   anchorAlign: "START";
@@ -341,13 +342,14 @@ style DeckSelectPopup {
   anchorShift: true;
   effect: effect(
     "deck:optic-glass",
-    blurRadius: 28,
+    blurRadius: 14,
     downsample: 2,
-    refraction: 8,
+    refraction: 16,
     tint: #53616B38,
     saturation: 0.76,
-    highlight: 0.42,
-    noise: 0.035
+    highlight: 0.56,
+    noise: 0.035,
+    transparency: 0.72
   );
 }
 style DeckSelectItem {

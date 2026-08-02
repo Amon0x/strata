@@ -900,6 +900,15 @@
         "shaders": {
           "hlsl": "assets/strata/shaders/materials/aurora.hlsl"
         }
+      },
+      {
+        "id": "demo:color-bath",
+        "blendMode": "straight_alpha",
+        "fallback": "strata:rounded_rect",
+        "parameters": [],
+        "shaders": {
+          "hlsl": "assets/strata/shaders/materials/color-bath.hlsl"
+        }
       }
     ]
   },
@@ -965,6 +974,15 @@
           },
           {
             "name": "noise",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "transparency",
             "effectType": "FLOAT",
             "type": { "kind": "number" },
             "required": true,

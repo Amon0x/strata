@@ -78,6 +78,15 @@
             "nullable": false,
             "aliases": [],
             "default": null
+          },
+          {
+            "name": "transparency",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
           }
         ],
         "passes": [
