@@ -76,13 +76,13 @@ style GlassTriggerStyle {
   focusRing: { width: 1, color: #C9E8FF34 };
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 12,
-    downsample: 1,
-    refraction: 16,
+    blurRadius: 24,
+    downsample: 2,
+    refraction: 8,
     tint: #B8E4FF14,
-    saturation: 1.42,
+    saturation: 1.02,
     highlight: 0.62,
-    noise: 0.1
+    noise: 0.045
   );
 }
 
@@ -102,13 +102,13 @@ style GlassPopupStyle {
   anchorShift: true;
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 14,
+    blurRadius: 30,
     downsample: 2,
-    refraction: 22,
+    refraction: 10,
     tint: #B8E3FF16,
-    saturation: 1.45,
+    saturation: 1.02,
     highlight: 0.68,
-    noise: 0.1
+    noise: 0.045
   );
 }
 
@@ -128,11 +128,11 @@ style GlassItemSelected extends GlassItemStyle {
   border: { width: 1, color: #DCEFFF24 };
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 6,
-    downsample: 1,
-    refraction: 8,
+    blurRadius: 18,
+    downsample: 2,
+    refraction: 5,
     tint: #C4EAFF0A,
-    saturation: 1.28,
+    saturation: 1.0,
     highlight: 0.38,
     noise: 0.04
   );
@@ -143,11 +143,11 @@ style GlassItemActive extends GlassItemStyle {
   border: { width: 1, color: #E8F5FF38 };
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 8,
-    downsample: 1,
-    refraction: 12,
+    blurRadius: 20,
+    downsample: 2,
+    refraction: 6,
     tint: #D5F1FF10,
-    saturation: 1.35,
+    saturation: 1.02,
     highlight: 0.48,
     noise: 0.04
   );
@@ -182,13 +182,13 @@ style GlassTooltipStyle {
   anchorGap: 8;
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 10,
-    downsample: 1,
-    refraction: 16,
+    blurRadius: 22,
+    downsample: 2,
+    refraction: 8,
     tint: #C2E8FF14,
-    saturation: 1.4,
+    saturation: 1.02,
     highlight: 0.6,
-    noise: 0.08
+    noise: 0.04
   );
 }
 
@@ -254,13 +254,13 @@ style LiquidDemoCard extends EffectDemoCard {
   border: { width: 1, color: #DDEFFF22 };
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 14,
+    blurRadius: 32,
     downsample: 2,
-    refraction: 26,
+    refraction: 12,
     tint: #BCE7FF18,
-    saturation: 1.5,
+    saturation: 1.04,
     highlight: 0.72,
-    noise: 0.08
+    noise: 0.045
   );
 }
 

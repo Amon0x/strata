@@ -41,9 +41,9 @@ style DeckShell {
   border: { width: 1, color: #D9E3EA36 };
   effect: effect(
     "deck:optic-glass",
-    blurRadius: 15,
+    blurRadius: 34,
     downsample: 2,
-    refraction: 20,
+    refraction: 12,
     tint: #A7B7C20A,
     saturation: 0.82,
     highlight: 0.52,
@@ -341,9 +341,9 @@ style DeckSelectPopup {
   anchorShift: true;
   effect: effect(
     "deck:optic-glass",
-    blurRadius: 12,
+    blurRadius: 28,
     downsample: 2,
-    refraction: 12,
+    refraction: 8,
     tint: #53616B38,
     saturation: 0.76,
     highlight: 0.42,

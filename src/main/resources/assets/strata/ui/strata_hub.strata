@@ -8,11 +8,11 @@ style GlassSurface {
   border: { width: 1, color: #DDEBF526 };
   effect: effect(
     "morrow:optic-glass",
-    blurRadius: 14,
+    blurRadius: 30,
     downsample: 2,
-    refraction: 18,
+    refraction: 10,
     tint: #C4D8E60A,
-    saturation: 1.12,
+    saturation: 0.96,
     highlight: 0.48,
     noise: 0.06
   );
@@ -131,11 +131,11 @@ style SearchShell extends GlassSurface {
   background: #CFDCE80E; border: { width: 1, color: #EAF3FA2C };
   effect: effect(
     "morrow:optic-glass",
-    blurRadius: 7,
-    downsample: 1,
-    refraction: 8,
+    blurRadius: 22,
+    downsample: 2,
+    refraction: 5,
     tint: #D1E2EC08,
-    saturation: 1.05,
+    saturation: 0.96,
     highlight: 0.32,
     noise: 0.04
   );

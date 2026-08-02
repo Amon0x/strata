@@ -3,6 +3,10 @@ float3 adjustSaturation(float3 color, float saturation) {
     return lerp(luminance.xxx, color, saturation);
 }
 
+float luminance(float3 color) {
+    return dot(color, float3(0.2126, 0.7152, 0.0722));
+}
+
 float hash21(float2 value) {
     value = frac(value * float2(123.34, 456.21));
     value += dot(value, value + 45.32);
@@ -19,59 +23,75 @@ float2 glassNormal(float2 pixel) {
     return normalize(gradient + float2(0.0001, 0.0001));
 }
 
+float3 refractBlurredField(float2 uv, float2 offset, float dispersion) {
+    float red = sampleEffectSource(uv + offset * (1.0 + dispersion)).r;
+    float green = sampleEffectSource(uv + offset).g;
+    float blue = sampleEffectSource(uv + offset * (1.0 - dispersion)).b;
+    return float3(red, green, blue);
+}
+
 float4 effect(EffectInput input) {
     float distance = effectDistance(input.pixel);
+    float insideDistance = max(-distance, 0.0);
     float2 normal = glassNormal(input.pixel);
     float2 texel = 1.0 / max(effectTargetSize, 1.0);
 
-    float edgeWidth = max(min(effectBounds.z, effectBounds.w) * 0.14, 7.0);
-    float edge = 1.0 - smoothstep(0.0, edgeWidth, max(-distance, 0.0));
-    float lens = pow(saturate(edge), 1.08);
-    float refraction = effectFloat(2);
+    // A stable center and a curved boundary read as a lens without warping the
+    // entire field. Both samples come from the filtered source: raw backdrop
+    // detail must never be reintroduced after the blur pass.
+    float minimumExtent = max(min(effectBounds.z, effectBounds.w), 1.0);
+    float lensWidth = clamp(minimumExtent * 0.105, 7.0, 24.0);
+    float edgeProximity = 1.0 - smoothstep(0.0, lensWidth, insideDistance);
+    float lens = pow(saturate(edgeProximity), 1.35);
+    float refraction = max(effectFloat(2), 0.0);
     float2 offset = -normal * refraction * lens * texel;
-    float2 centered = input.localUv - 0.5;
-    offset -= centered * refraction * 0.28 * (1.0 - edge) * texel;
+    float dispersion = 0.055 * lens;
 
-    float4 soft = sampleEffectSource(input.uv + offset * 0.28);
-    float3 refracted = sampleEffectBackdrop(input.uv + offset).rgb;
-
-    float clarity = 0.34 + edge * 0.42;
-    float3 color = lerp(soft.rgb, refracted, clarity);
+    float3 base = sampleEffectSource(input.uv).rgb;
+    float3 refracted = refractBlurredField(input.uv, offset, dispersion);
+    float3 color = lerp(base, refracted, lens * 0.82);
     color = adjustSaturation(color, effectFloat(7));
-    color = saturate((color - 0.5) * 1.07 + 0.5);
-    float backdropLuminance = dot(refracted, float3(0.2126, 0.7152, 0.0722));
-    float darkBackdrop = 1.0 - smoothstep(0.08, 0.48, backdropLuminance);
+    color = saturate((color - 0.5) * 1.04 + 0.5);
 
     float4 tint = effectColor(3);
     color = lerp(color, tint.rgb, saturate(tint.a));
 
-    float innerRim = 1.0 - smoothstep(0.0, 4.0, max(-distance, 0.0));
-    float hairline = 1.0 - smoothstep(0.35, 1.15, abs(distance + 0.4));
-    float2 lightDirection = normalize(float2(-0.58, -0.82));
-    float facingLight = saturate(dot(normal, lightDirection));
-    float facingShade = saturate(dot(normal, -lightDirection));
-    float leadingGlint = pow(saturate(1.0 - input.localUv.x), 1.7);
-    float trailingGlint = pow(saturate(input.localUv.x), 2.2);
-    float specular = pow(facingLight, 8.0) * innerRim * leadingGlint;
-    float reflected = pow(facingShade, 11.0) * innerRim * trailingGlint;
-    float highlight = effectFloat(8);
+    // The boundary has an ambient response on every side. A coherent virtual
+    // overhead light adds shape, while the opposing lobe stays broad and dim.
+    // Rounded corners choose their own response through the SDF normal.
+    float innerRim = 1.0 - smoothstep(0.0, 4.5, insideDistance);
+    float hairline = 1.0 - smoothstep(0.3, 1.2, abs(distance + 0.42));
+    float fresnel = pow(saturate(edgeProximity), 3.2) * innerRim;
+    float2 lightDirection = normalize(float2(-0.22, -0.98));
+    float keyFacing = saturate(dot(normal, lightDirection));
+    float opposingFacing = saturate(dot(normal, -lightDirection));
+    float keyLobe = pow(keyFacing, 4.5) * innerRim;
+    float opposingLobe = pow(opposingFacing, 3.2) * innerRim;
 
-    color += specular * highlight * (0.42 + darkBackdrop * 0.24) *
-        float3(1.0, 0.98, 0.94);
-    color += reflected * highlight * 0.18 * float3(0.28, 0.56, 1.0);
-    float3 ambientEdgeColor = lerp(
-        float3(0.38, 0.62, 0.92),
-        float3(0.82, 0.94, 1.0),
+    float3 environment = sampleEffectSource(input.uv - normal * 3.0 * texel).rgb;
+    float environmentLuminance = luminance(environment);
+    float darkBackdrop = 1.0 - smoothstep(0.08, 0.5, environmentLuminance);
+    float3 neutralRim = lerp(
+        float3(0.60, 0.67, 0.72),
+        float3(0.90, 0.94, 0.96),
         darkBackdrop
     );
-    color += hairline * (0.03 + darkBackdrop * 0.105) * ambientEdgeColor;
-    color += pow(edge, 4.0) * innerRim * darkBackdrop * 0.024 *
-        float3(0.28, 0.54, 0.9);
-    color += innerRim * edge * float3(0.012, 0.025, 0.04);
-    color -= facingShade * innerRim * 0.025;
+    float3 bledRim = adjustSaturation(environment, 0.55);
+    float3 ambientRimColor = lerp(neutralRim, bledRim, 0.20);
+    float highlight = max(effectFloat(8), 0.0);
 
-    float noise = (hash21(input.logicalPixel + floor(effectTime() * 24.0)) - 0.5) *
-        effectFloat(9) * 0.012;
+    color += hairline * highlight * (0.045 + darkBackdrop * 0.075) * ambientRimColor;
+    color += fresnel * highlight * 0.025 * ambientRimColor;
+    color += keyLobe * highlight * (0.24 + darkBackdrop * 0.16) *
+        float3(1.0, 0.985, 0.955);
+    color += opposingLobe * highlight * 0.055 *
+        lerp(float3(0.48, 0.56, 0.62), ambientRimColor, 0.45);
+    color -= opposingLobe * (0.012 + (1.0 - darkBackdrop) * 0.012);
+
+    // Static grain prevents banding without turning temporal sampling into a
+    // shimmer. It is deliberately subordinate to the material lighting.
+    float noise = (hash21(floor(input.logicalPixel)) - 0.5) *
+        max(effectFloat(9), 0.0) * 0.01;
     color += noise;
 
     return float4(saturate(color), 1.0);
