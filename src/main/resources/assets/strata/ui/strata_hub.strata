@@ -4,16 +4,16 @@
 style Clear { background: null; border: null; }
 
 style GlassSurface {
-  background: #A9D9FF20;
-  border: { width: 1, color: #DDF2FF2C };
+  background: #AFC6D814;
+  border: { width: 1, color: #DDEBF526 };
   effect: effect(
     "morrow:optic-glass",
     blurRadius: 14,
     downsample: 2,
     refraction: 18,
-    tint: #BCE8FF12,
-    saturation: 1.35,
-    highlight: 0.58,
+    tint: #C4D8E60A,
+    saturation: 1.12,
+    highlight: 0.48,
     noise: 0.06
   );
 }
@@ -27,8 +27,8 @@ style AppBackdrop {
 style AppShell extends GlassSurface {
   kind: "ROW"; width: { weight: 1 }; height: { weight: 1 };
   radius: 24; gap: 0; clip: true;
-  background: #08132166;
-  border: { width: 1, color: #E2F3FF38 };
+  background: #08111D70;
+  border: { width: 1, color: #E2EDF52E };
 }
 style CompactShell extends AppShell { kind: "COLUMN"; }
 
@@ -114,7 +114,7 @@ style Topbar extends GlassSurface {
   kind: "ROW"; width: { weight: 1 }; height: 70;
   margin: { left: 14, top: 14, right: 14 };
   padding: { horizontal: 18 }; gap: 12; alignItems: "CENTER";
-  radius: 17; background: #B7DFFF18; border: { width: 1, color: #E3F2FF26 };
+  radius: 17; background: #B7CAD714; border: { width: 1, color: #E3EDF422 };
 }
 style CompactTopbar extends Topbar { height: 60; padding: { horizontal: 13 }; }
 
@@ -129,9 +129,9 @@ style SearchStyle {
     blurRadius: 9,
     downsample: 1,
     refraction: 10,
-    tint: #B9E7FF0D,
-    saturation: 1.25,
-    highlight: 0.42,
+    tint: #C4D8E608,
+    saturation: 1.08,
+    highlight: 0.36,
     noise: 0.04
   );
 }
@@ -168,7 +168,7 @@ style FeatureCard extends GlassSurface {
   padding: 22; gap: 18; radius: 20; clip: true; alignItems: "CENTER";
   background: {
     kind: "linear", angle: 145,
-    stops: [ { color: #7FBCFF30 }, { color: #A08CFF20 }, { color: #07132252 } ]
+    stops: [ { color: #698CA51D }, { color: #7D719E16 }, { color: #07132258 } ]
   };
   border: { width: 1, color: #E4F3FF30 };
 }
@@ -183,7 +183,7 @@ style FeatureMetaRow extends Clear {
 style ProgressTrack { kind: "PANEL"; width: { weight: 1 }; height: 5; radius: 3; background: #FFFFFF16; border: null; }
 style ProgressFill {
   kind: "PANEL"; width: { weight: 0.72 }; height: 5; radius: 3;
-  background: { kind: "linear", angle: 90, stops: [ { color: #8DE4FFFF }, { color: #B59CFFFF } ] };
+  background: { kind: "linear", angle: 90, stops: [ { color: #83C8DCFF }, { color: #9B8BCFFF } ] };
   border: null;
 }
 style FeatureVisual { width: 190; height: 150; background: null; border: null; }
@@ -191,7 +191,7 @@ style FeatureVisual { width: 190; height: 150; background: null; border: null; }
 style MetricsGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 11; }
 style MetricCard extends GlassSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: 96;
-  padding: 14; gap: 5; radius: 16; background: #A9D9FF16;
+  padding: 14; gap: 5; radius: 16; background: #AFBFCA10;
 }
 style MetricLabel { pixelSize: 11; color: #89A0B4FF; }
 style MetricValue { font: "strata:fonts/default-medium"; pixelSize: 24; color: #F3F9FFFF; }
@@ -204,7 +204,7 @@ style ContentColumns extends Clear {
 style ContentStack extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 14; }
 style PaperCard extends GlassSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: "content";
-  padding: 17; gap: 11; radius: 18; background: #A9D9FF14;
+  padding: 17; gap: 11; radius: 18; background: #AFBFCA10;
 }
 style CardHeader extends Clear {
   kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 10; alignItems: "CENTER";
@@ -245,7 +245,7 @@ style ScheduleTitle { pixelSize: 12; color: #DDE9F3FF; }
 style ProjectGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 13; }
 style ProjectCard extends GlassSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: 180;
-  padding: 14; gap: 10; radius: 18; background: #A9D9FF14;
+  padding: 14; gap: 10; radius: 18; background: #AFBFCA10;
 }
 style ProjectCover {
   kind: "PANEL"; width: { weight: 1 }; height: 76; radius: 13; clip: true;
@@ -263,7 +263,7 @@ style ProjectTitle { font: "strata:fonts/default-medium"; pixelSize: 15; color: 
 
 style LibraryTile extends GlassSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: 170; padding: 10; gap: 8; radius: 17;
-  background: #A9D9FF14;
+  background: #AFBFCA10;
 }
 style LibraryPreview {
   kind: "PANEL"; width: { weight: 1 }; height: 100; radius: 13;
@@ -284,7 +284,7 @@ style GlassAction extends GlassSurface {
 style GlassActionPrimary extends GlassAction {
   background: {
     kind: "linear", angle: 120,
-    stops: [ { color: #76DFFFF0 }, { color: #927CFFE8 } ]
+    stops: [ { color: #75B4CADC }, { color: #8176B8D8 } ]
   };
   border: { width: 1, color: #ECF9FF70 };
 }
@@ -736,7 +736,7 @@ component WorkspaceApp() {
   Panel(
     key: "morrow.backdrop",
     style: AppBackdrop,
-    material: material("morrow:aurora", intensity: 0.92, tint: #A58CFFFF)
+    material: material("morrow:aurora", intensity: 0.6, tint: #8795B5FF)
   ) {
     Panel(key: "morrow.shell", style: env.compact ? CompactShell : AppShell, transition: AppEnter) {
       if env.compact { CompactNavigation(section: section) }
