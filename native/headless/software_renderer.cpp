@@ -143,6 +143,59 @@ struct PixelRect final {
            radius;
 }
 
+[[nodiscard]] float rounded_clip_coverage(
+    const std::span<const host::RoundedClip> clips,
+    const float logical_x,
+    const float logical_y,
+    const float logical_pixel_width,
+    const float logical_pixel_height
+) noexcept {
+    const auto distance = [](const host::RoundedClip& clip, const float x, const float y) {
+        const auto local = [&clip](const float logical_x_value, const float logical_y_value) {
+            return std::array<float, 2U>{
+                static_cast<float>(
+                    clip.inverse_transform[0U] * logical_x_value +
+                    clip.inverse_transform[1U] * logical_y_value +
+                    clip.inverse_transform[2U]
+                ),
+                static_cast<float>(
+                    clip.inverse_transform[3U] * logical_x_value +
+                    clip.inverse_transform[4U] * logical_y_value +
+                    clip.inverse_transform[5U]
+                ),
+            };
+        };
+        const std::array<float, 2U> point = local(x, y);
+        const float half_width = static_cast<float>(clip.width * 0.5);
+        const float half_height = static_cast<float>(clip.height * 0.5);
+        std::array<float, 4U> radii{};
+        const float radius_limit = std::max(0.0F, std::min(half_width, half_height));
+        for (std::size_t index = 0U; index < radii.size(); ++index) {
+            radii[index] = std::min(static_cast<float>(clip.radii[index]), radius_limit);
+        }
+        return rounded_box_sdf(
+            point[0U] - static_cast<float>(clip.x) - half_width,
+            point[1U] - static_cast<float>(clip.y) - half_height,
+            half_width,
+            half_height,
+            radii
+        );
+    };
+    float coverage = 1.0F;
+    for (const host::RoundedClip& clip : clips) {
+        const float center = distance(clip, logical_x, logical_y);
+        const float derivative =
+            std::abs(distance(clip, logical_x + logical_pixel_width, logical_y) - center) +
+            std::abs(distance(clip, logical_x, logical_y + logical_pixel_height) - center);
+        coverage *= 1.0F - smoothstep(
+            -std::max(derivative, 0.0001F),
+            std::max(derivative, 0.0001F),
+            center
+        );
+    }
+    return coverage;
+}
+
 [[nodiscard]] std::uint8_t channel(const float value) noexcept {
     return static_cast<std::uint8_t>(std::lround(saturate(value) * 255.0F));
 }
@@ -192,13 +245,21 @@ void composite_filtered_pixels(std::vector<std::uint8_t>& destination,
     }
     for (std::uint32_t y = region.top; y < region.bottom; ++y) {
         for (std::uint32_t x = region.left; x < region.right; ++x) {
-            const float mask =
+            const float effect_mask =
                 1.0F - smoothstep(-1.0F, 1.0F,
                                   rounded_box_sdf(static_cast<float>(x) + 0.5F - center_x,
                                                   static_cast<float>(y) + 0.5F - center_y,
                                                   half_width, half_height, radii));
+            const float clip_mask = rounded_clip_coverage(
+                effect.rounded_clips,
+                static_cast<float>((static_cast<double>(x) + 0.5) / scale_x),
+                static_cast<float>((static_cast<double>(y) + 0.5) / scale_y),
+                static_cast<float>(1.0 / scale_x),
+                static_cast<float>(1.0 / scale_y)
+            );
             const std::size_t pixel = (static_cast<std::size_t>(y) * width + x) * 4U;
-            const float coverage = mask * static_cast<float>(effect.opacity);
+            const float coverage =
+                effect_mask * clip_mask * static_cast<float>(effect.opacity);
             const float alpha = static_cast<float>(source(x, y, 3U)) / 255.0F * coverage;
             for (std::size_t channel_index = 0U; channel_index < 3U; ++channel_index) {
                 const float source_value = static_cast<float>(source(x, y, channel_index));
@@ -566,6 +627,33 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                 source.alpha *= data[15U];
                 if (source.alpha <= 0.000001F)
                     continue;
+                const float clip_mask = rounded_clip_coverage(
+                    batch.rounded_clips,
+                    (static_cast<float>(x) + 0.5F) / scale_x,
+                    (static_cast<float>(y) + 0.5F) / scale_y,
+                    1.0F / scale_x,
+                    1.0F / scale_y
+                );
+                const bool clipped = !batch.rounded_clips.empty();
+                if (clipped && batch.blend_mode == "multiply") {
+                    source.red *= clip_mask;
+                    source.green *= clip_mask;
+                    source.blue *= clip_mask;
+                    source.alpha = clip_mask;
+                } else if (clipped && batch.blend_mode == "opaque") {
+                    source.alpha *= clip_mask;
+                } else if (batch.blend_mode == "opaque" || batch.blend_mode == "multiply") {
+                    if (clip_mask < 0.5F) continue;
+                } else if (batch.blend_mode == "premultiplied_alpha") {
+                    source.red *= clip_mask;
+                    source.green *= clip_mask;
+                    source.blue *= clip_mask;
+                    source.alpha *= clip_mask;
+                } else {
+                    source.alpha *= clip_mask;
+                }
+                if (source.alpha <= 0.000001F)
+                    continue;
 
                 const std::size_t pixel =
                     (static_cast<std::size_t>(y) * width_ + static_cast<std::size_t>(x)) * 4U;
@@ -576,9 +664,10 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                     static_cast<float>(pixels_[pixel + 3U]) / 255.0F,
                 };
                 Color output;
-                if (batch.blend_mode == "opaque") {
+                if (batch.blend_mode == "opaque" && !clipped) {
                     output = source;
-                } else if (batch.blend_mode == "straight_alpha") {
+                } else if (batch.blend_mode == "straight_alpha" ||
+                           (batch.blend_mode == "opaque" && clipped)) {
                     const float inverse = 1.0F - source.alpha;
                     output = Color{
                         source.red * source.alpha + destination.red * inverse,
@@ -601,11 +690,21 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.blue * source.alpha + destination.blue,
                         source.alpha + destination.alpha * (1.0F - source.alpha),
                     };
-                } else if (batch.blend_mode == "multiply") {
+                } else if (batch.blend_mode == "multiply" && !clipped) {
                     output = Color{
                         source.red * destination.red,
                         source.green * destination.green,
                         source.blue * destination.blue,
+                        source.alpha + destination.alpha * (1.0F - source.alpha),
+                    };
+                } else if (batch.blend_mode == "multiply" && clipped) {
+                    output = Color{
+                        source.red * destination.red +
+                            destination.red * (1.0F - source.alpha),
+                        source.green * destination.green +
+                            destination.green * (1.0F - source.alpha),
+                        source.blue * destination.blue +
+                            destination.blue * (1.0F - source.alpha),
                         source.alpha + destination.alpha * (1.0F - source.alpha),
                     };
                 } else {
@@ -647,6 +746,24 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
     bottom = std::min(bottom, static_cast<std::uint32_t>(clip_bottom));
     if (left >= right || top >= bottom)
         return;
+    std::vector<std::uint8_t> clipped_original;
+    const std::uint32_t clipped_width = right - left;
+    if (!batch.rounded_clips.empty()) {
+        clipped_original.resize(
+            static_cast<std::size_t>(clipped_width) * (bottom - top) * 4U
+        );
+        for (std::uint32_t row = top; row < bottom; ++row) {
+            const std::size_t source =
+                (static_cast<std::size_t>(row) * width_ + left) * 4U;
+            const std::size_t destination =
+                static_cast<std::size_t>(row - top) * clipped_width * 4U;
+            std::copy_n(
+                pixels_.begin() + static_cast<std::ptrdiff_t>(source),
+                static_cast<std::size_t>(clipped_width) * 4U,
+                clipped_original.begin() + static_cast<std::ptrdiff_t>(destination)
+            );
+        }
+    }
     const double physical_radius = std::clamp(batch.radius * std::max(scale_x, scale_y), 0.5, 32.0);
     const std::uint32_t radius = static_cast<std::uint32_t>(std::ceil(physical_radius));
     const std::uint32_t source_left = left > radius ? left - radius : 0U;
@@ -712,9 +829,34 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
                 }
                 total_weight += weight;
             }
+            const float clip_coverage = clipped_original.empty()
+                ? 1.0F
+                : rounded_clip_coverage(
+                      batch.rounded_clips,
+                      static_cast<float>(
+                          (static_cast<double>(column) + 0.5) / scale_x
+                      ),
+                      static_cast<float>((static_cast<double>(row) + 0.5) / scale_y),
+                      static_cast<float>(1.0 / scale_x),
+                      static_cast<float>(1.0 / scale_y)
+                  );
             for (std::size_t component = 0U; component < 4U; ++component) {
+                const double blurred = sums[component] / total_weight;
+                if (clipped_original.empty()) {
+                    pixels_[target + component] = static_cast<std::uint8_t>(
+                        std::clamp(std::lround(blurred), 0L, 255L)
+                    );
+                    continue;
+                }
+                const std::size_t original =
+                    (static_cast<std::size_t>(row - top) * clipped_width +
+                     (column - left)) * 4U + component;
+                const double composed =
+                    static_cast<double>(clipped_original[original]) * (1.0 - clip_coverage) +
+                    blurred * clip_coverage;
                 pixels_[target + component] = static_cast<std::uint8_t>(
-                    std::clamp(std::lround(sums[component] / total_weight), 0L, 255L));
+                    std::clamp(std::lround(composed), 0L, 255L)
+                );
             }
         }
     }

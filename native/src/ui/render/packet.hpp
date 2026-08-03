@@ -31,7 +31,7 @@ struct HostRenderPacketTelemetry final {
 class RenderCommandBuffer;
 class TextEngine;
 
-/** Little-endian logical-command packet v2 used by command-stream inspection/tests. */
+/** Little-endian logical-command packet v3 used by command-stream inspection/tests. */
 [[nodiscard]] std::vector<std::uint8_t> encode_render_packet(const RenderCommandBuffer& commands,
                                                              std::uint64_t frame_index);
 
@@ -45,9 +45,9 @@ struct HostRenderResourceInvalidationPlan final {
 };
 
 /**
- * Packet v7: retained geometry epochs, compact geometry references, rate-limited effects, and
- * ordered application effect programs. The
- * logical v2 encoder remains available only to command-stream inspection tooling.
+ * Packet v8: retained geometry epochs, compact geometry references, rate-limited effects,
+ * ordered application effect programs, and rounded descendant masks. The
+ * logical v3 encoder remains available only to command-stream inspection tooling.
  */
 class HostRenderPacketCache final {
   public:
@@ -57,7 +57,7 @@ class HostRenderPacketCache final {
     HostRenderPacketCache(HostRenderPacketCache&&) = delete;
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
-    /** A null TextEngine selects the packet-v7 non-text path; text runs are then rejected. */
+    /** A null TextEngine selects the packet-v8 non-text path; text runs are then rejected. */
     [[nodiscard]] const std::vector<std::uint8_t>&
     encode(const RenderCommandBuffer& commands, std::uint64_t frame_index,
            std::span<const resource::EncodedTextureResource> texture_resources,

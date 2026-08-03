@@ -2645,6 +2645,11 @@
       "type": "color"
     },
     {
+      "name": "contentEffect",
+      "nullable": true,
+      "type": "effect"
+    },
+    {
       "name": "columnSpan",
       "nullable": false,
       "type": "number"
@@ -2873,6 +2878,11 @@
       "name": "selection",
       "nullable": true,
       "type": "color"
+    },
+    {
+      "name": "shadows",
+      "nullable": true,
+      "type": "list of map of any"
     },
     {
       "name": "selectionColor",

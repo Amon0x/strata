@@ -23,6 +23,11 @@ constexpr double transform_epsilon = 0.000001;
 constexpr std::uint16_t coverage_subpixel_divisions = 4U;
 constexpr std::size_t maximum_content_effect_depth = 4U;
 
+[[nodiscard]] bool rounded(const CornerRadii radii) noexcept {
+    return radii.top_left > 0.0 || radii.top_right > 0.0 ||
+           radii.bottom_right > 0.0 || radii.bottom_left > 0.0;
+}
+
 [[nodiscard]] Rect intersect(const Rect first, const Rect second) noexcept {
     const double left = std::max(first.x, second.x);
     const double top = std::max(first.y, second.y);
@@ -318,6 +323,7 @@ void append_draw(
     const std::uint32_t source_order,
     const Transform& transform,
     const Rect clip,
+    const std::vector<SubmissionRoundedClip>& rounded_clips,
     const std::optional<MaterialState>& material_override,
     const SubmissionContext& context,
     std::size_t& skipped_draws
@@ -341,6 +347,7 @@ void append_draw(
         std::move(material),
         std::move(texture),
         resolved_scissor,
+        rounded_clips,
         false,
     });
 }
@@ -372,6 +379,26 @@ Transform Transform::concatenate(const Transform& next) const noexcept {
         m10 * next.m01 + m11 * next.m11,
         m10 * next.m02 + m11 * next.m12 + m12,
     };
+}
+
+std::optional<Transform> Transform::inverse() const noexcept {
+    const double determinant = m00 * m11 - m01 * m10;
+    if (!std::isfinite(determinant) ||
+        std::abs(determinant) <= std::numeric_limits<double>::epsilon()) {
+        return std::nullopt;
+    }
+    const double inverse_determinant = 1.0 / determinant;
+    Transform result{
+        m11 * inverse_determinant,
+        -m01 * inverse_determinant,
+        0.0,
+        -m10 * inverse_determinant,
+        m00 * inverse_determinant,
+        0.0,
+    };
+    result.m02 = -(result.m00 * m02 + result.m01 * m12);
+    result.m12 = -(result.m10 * m02 + result.m11 * m12);
+    return result;
 }
 
 bool Transform::axis_aligned_translation() const noexcept {
@@ -548,12 +575,26 @@ std::vector<PlannedItem> plan(
     std::vector<PlannedItem> output;
     output.reserve(commands.size());
     std::vector<Rect> clip_stack;
+    std::vector<bool> rounded_clip_stack;
+    std::vector<SubmissionRoundedClip> active_rounded_clips;
     std::vector<Transform> transform_stack;
     std::vector<std::optional<MaterialState>> material_stack;
     Rect clip{0.0, 0.0, context.logical_width, context.logical_height};
     Transform transform;
     std::optional<MaterialState> material_override;
     std::size_t content_effect_depth = 0U;
+    std::vector<std::size_t> content_clip_baselines;
+    const auto batch_rounded_clips = [&]() {
+        const std::size_t begin =
+            content_clip_baselines.empty() ? 0U : content_clip_baselines.back();
+        if (begin > active_rounded_clips.size()) {
+            throw std::logic_error("render rounded clip crossed a content effect boundary");
+        }
+        return std::vector<SubmissionRoundedClip>(
+            active_rounded_clips.begin() + static_cast<std::ptrdiff_t>(begin),
+            active_rounded_clips.end()
+        );
+    };
 
     for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
         if (index > std::numeric_limits<std::uint32_t>::max()) {
@@ -565,9 +606,58 @@ std::vector<PlannedItem> plan(
             using Type = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<Type, ClipPushRenderCommand>) {
                 clip_stack.push_back(clip);
-                clip = intersect(clip, transform.bounds(value.rect));
+                const Rect presented = transform.bounds(value.rect);
+                clip = intersect(clip, presented);
+                const CornerRadii safe_radii{
+                    std::max(0.0, value.radii.top_left),
+                    std::max(0.0, value.radii.top_right),
+                    std::max(0.0, value.radii.bottom_right),
+                    std::max(0.0, value.radii.bottom_left),
+                };
+                const bool has_rounded_geometry = rounded(safe_radii) && !clip.empty();
+                rounded_clip_stack.push_back(has_rounded_geometry);
+                if (has_rounded_geometry) {
+                    if (active_rounded_clips.size() == maximum_rounded_clip_depth) {
+                        throw std::length_error(
+                            "render rounded clip nesting exceeds the packet limit"
+                        );
+                    }
+                    const std::optional<Transform> inverse = transform.inverse();
+                    if (!inverse.has_value()) {
+                        clip = Rect{};
+                        rounded_clip_stack.back() = false;
+                    } else {
+                        active_rounded_clips.push_back(SubmissionRoundedClip{
+                            value.rect,
+                            safe_radii,
+                            {
+                                inverse->m00,
+                                inverse->m01,
+                                inverse->m02,
+                                inverse->m10,
+                                inverse->m11,
+                                inverse->m12,
+                            },
+                        });
+                    }
+                }
             } else if constexpr (std::is_same_v<Type, ClipPopRenderCommand>) {
-                if (clip_stack.empty()) throw std::logic_error("render clip stack underflow");
+                if (clip_stack.empty() || rounded_clip_stack.empty()) {
+                    throw std::logic_error("render clip stack underflow");
+                }
+                if (rounded_clip_stack.back()) {
+                    if (active_rounded_clips.empty()) {
+                        throw std::logic_error("render rounded clip stack is invalid");
+                    }
+                    if (!content_clip_baselines.empty() &&
+                        active_rounded_clips.size() <= content_clip_baselines.back()) {
+                        throw std::logic_error(
+                            "render rounded clip crossed a content effect boundary"
+                        );
+                    }
+                    active_rounded_clips.pop_back();
+                }
+                rounded_clip_stack.pop_back();
                 clip = clip_stack.back();
                 clip_stack.pop_back();
             } else if constexpr (std::is_same_v<Type, TransformPushRenderCommand>) {
@@ -604,6 +694,9 @@ std::vector<PlannedItem> plan(
                     static_cast<std::uint32_t>(std::min<std::size_t>(
                         value.downsample, std::numeric_limits<std::uint32_t>::max()
                     )),
+                    {},
+                    std::nullopt,
+                    batch_rounded_clips(),
                 });
             } else if constexpr (std::is_same_v<Type, BackdropEffectRenderCommand>) {
                 const Rect visible = intersect(clip, transform.bounds(value.bounds));
@@ -627,6 +720,7 @@ std::vector<PlannedItem> plan(
                         value.radii.bottom_left * scale,
                     },
                     .effect = value.effect,
+                    .rounded_clips = batch_rounded_clips(),
                 });
             } else if constexpr (std::is_same_v<Type, ContentEffectPushRenderCommand>) {
                 if (content_effect_depth == maximum_content_effect_depth) {
@@ -635,6 +729,8 @@ std::vector<PlannedItem> plan(
                     );
                 }
                 ++content_effect_depth;
+                const std::vector<SubmissionRoundedClip> composite_clips =
+                    batch_rounded_clips();
                 const double scale = std::sqrt(std::abs(
                     transform.m00 * transform.m11 - transform.m01 * transform.m10
                 ));
@@ -651,16 +747,20 @@ std::vector<PlannedItem> plan(
                         value.radii.bottom_left * scale,
                     },
                     .effect = value.effect,
+                    .rounded_clips = composite_clips,
                 });
+                content_clip_baselines.push_back(active_rounded_clips.size());
             } else if constexpr (std::is_same_v<Type, ContentEffectPopRenderCommand>) {
-                if (content_effect_depth == 0U) {
+                if (content_effect_depth == 0U || content_clip_baselines.empty()) {
                     throw std::logic_error("render content effect stack underflow");
                 }
                 --content_effect_depth;
+                content_clip_baselines.pop_back();
                 output.emplace_back(SubmissionBatch{
                     .kind = SubmissionBatchKind::content_effect_end,
                     .scissor = scissor(clip, context),
                     .source_order = source_order,
+                    .rounded_clips = batch_rounded_clips(),
                 });
             } else if constexpr (std::is_same_v<Type, TextRunRenderCommand>) {
                 if (!visible_text[index]) {
@@ -684,19 +784,20 @@ std::vector<PlannedItem> plan(
                 for (const PreparedTextPtr& group : groups) {
                     append_draw(
                         output, PreparedCommand{group}, source_order, positioned,
-                        clip, material_override, context, skipped_draws
+                        clip, batch_rounded_clips(), material_override, context, skipped_draws
                     );
                 }
             } else {
                 append_draw(
                     output, PreparedCommand{value}, source_order, transform, clip,
-                    material_override, context, skipped_draws
+                    batch_rounded_clips(), material_override, context, skipped_draws
                 );
             }
         }, source);
     }
-    if (!clip_stack.empty() || !transform_stack.empty() || !material_stack.empty() ||
-        content_effect_depth != 0U) {
+    if (!clip_stack.empty() || !rounded_clip_stack.empty() || !active_rounded_clips.empty() ||
+        !transform_stack.empty() || !material_stack.empty() || content_effect_depth != 0U ||
+        !content_clip_baselines.empty()) {
         throw std::logic_error("render command state stacks are unbalanced");
     }
     return output;

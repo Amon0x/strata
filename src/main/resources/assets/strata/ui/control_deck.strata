@@ -9,17 +9,8 @@ style DeckRoot {
   padding: 30;
   alignItems: "CENTER";
   justifyContent: "CENTER";
-  background: {
-    kind: "linear",
-    angle: 145,
-    stops: [
-      { color: #040609B8 },
-      { color: #0C11189C },
-      { color: #05070BB0 }
-    ]
-  };
+  background: #050819FF;
   border: null;
-  effect: effect("blur", radius: 7, downsample: 2);
 }
 
 style DeckShell {
@@ -30,15 +21,8 @@ style DeckShell {
   maxHeight: 690;
   radius: 22;
   clip: true;
-  background: {
-    kind: "linear",
-    angle: 155,
-    stops: [
-      { color: #171D2478 },
-      { color: #0B0F1590 }
-    ]
-  };
-  border: { width: 1, color: #D9E3EA1C };
+  background: null;
+  border: null;
   effect: effect(
     "deck:optic-glass",
     blurRadius: 18,
@@ -47,11 +31,11 @@ style DeckShell {
     tint: #151B2218,
     saturation: 0.82,
     highlight: 0.65,
-    noise: 0.045,
+    noise: 0.1,
     transparency: 0.66,
     thickness: 1.1,
-    scattering: 0.72,
-    edgeContrast: 0.82,
+    metallic: 0.82,
+    edgeContrast: 0.94,
     contrast: 0.88,
     luminosity: 0.98
   );
@@ -338,8 +322,8 @@ style DeckSelectPopup {
   padding: 6;
   gap: 3;
   radius: 13;
-  background: #11171DA8;
-  border: { width: 1, color: #DCE5EA1A };
+  background: null;
+  border: null;
   anchorSide: "BOTTOM";
   anchorAlign: "START";
   anchorGap: 5;
@@ -353,11 +337,11 @@ style DeckSelectPopup {
     tint: #53616B38,
     saturation: 0.76,
     highlight: 0.56,
-    noise: 0.035,
+    noise: 0.08,
     transparency: 0.72,
     thickness: 1.0,
-    scattering: 0.72,
-    edgeContrast: 0.92,
+    metallic: 0.82,
+    edgeContrast: 1.04,
     contrast: 0.88,
     luminosity: 1.0
   );
@@ -942,7 +926,7 @@ component ControlDeck() {
   state category = "GENERAL";
   state generalTab = "WORKSPACE";
 
-  Panel(style: DeckRoot) {
+  Panel(style: DeckRoot, material: material("deck:color-bath")) {
     Panel(style: DeckShell, enter: DeckEnter) {
       Panel(style: DeckLensGlint)
       Panel(style: DeckHeader) {

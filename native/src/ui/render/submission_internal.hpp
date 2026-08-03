@@ -29,6 +29,7 @@ struct Transform final {
     [[nodiscard]] Point apply(Point point) const noexcept;
     [[nodiscard]] Rect bounds(Rect rect) const noexcept;
     [[nodiscard]] Transform concatenate(const Transform& next) const noexcept;
+    [[nodiscard]] std::optional<Transform> inverse() const noexcept;
     [[nodiscard]] bool axis_aligned_translation() const noexcept;
     [[nodiscard]] friend bool operator==(const Transform&, const Transform&) = default;
 };
@@ -72,6 +73,7 @@ struct PreparedDraw final {
     MaterialState material;
     std::optional<std::string> texture;
     SubmissionScissor scissor;
+    std::vector<SubmissionRoundedClip> rounded_clips;
     bool texture_sampled = false;
     [[nodiscard]] friend bool operator==(const PreparedDraw&, const PreparedDraw&) = default;
 };

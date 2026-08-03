@@ -91,6 +91,8 @@ scope and stable identity; component parameters and state remain private.
 Styles compose left to right. A derived style overrides its bases in declaration order; inline
 composition applies named styles first and named overrides last. Unknown bases and cycles are
 compile errors. `theme.*` values remain symbolic until the surface resolves its effective theme.
+When `clip: true` is set, descendants are clipped to the same authored `radius` as the container;
+the rounded clip follows presentation transforms rather than degrading to its axis-aligned bounds.
 
 ```strata
 style Transparent { background: null; border: null; }
@@ -335,9 +337,10 @@ composition, and clips work to the intersection of the effect bounds and inherit
 The D3D11 desktop and headless hosts execute the full pass program. The reference software backend
 executes declared blur passes, ignores authored shader stages, and then applies the same rounded
 mask, opacity, and backdrop/content composition. This approximation is intentionally deterministic
-rather than a claim of shader fidelity. Packet v7 carries ordered backdrop/content-begin/content-end
-batches, their refresh-rate policy, and a bounded sixteen-float parameter block; the public decoder rejects malformed or
-unbalanced content stacks and caps nested `CONTENT` isolation at four levels.
+rather than a claim of shader fidelity. Packet v8 carries ordered backdrop/content batches, active
+rounded-clip geometry, effect refresh-rate policy, and a bounded sixteen-float parameter block.
+The public decoder rejects malformed clip/effect state, caps nested `CONTENT` effects at four
+levels, and caps rounded clip stacks at sixteen.
 
 ## Local retained and derived state
 

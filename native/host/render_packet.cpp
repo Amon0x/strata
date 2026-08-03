@@ -150,6 +150,40 @@ class Reader final {
     return Scissor{input.u32(), input.u32(), input.u32(), input.u32()};
 }
 
+[[nodiscard]] std::vector<RoundedClip> rounded_clips(Reader& input) {
+    const std::uint32_t count = input.count();
+    if (count > maximum_rounded_clip_depth) {
+        throw std::invalid_argument("render rounded clip stack exceeds the maximum depth");
+    }
+    std::vector<RoundedClip> result(count);
+    for (RoundedClip& clip : result) {
+        clip.x = input.number();
+        clip.y = input.number();
+        clip.width = input.number();
+        clip.height = input.number();
+        for (double& radius : clip.radii) radius = input.number();
+        for (double& value : clip.inverse_transform) value = input.number();
+        const double determinant =
+            clip.inverse_transform[0U] * clip.inverse_transform[4U] -
+            clip.inverse_transform[1U] * clip.inverse_transform[3U];
+        if (!std::isfinite(clip.x) || !std::isfinite(clip.y) ||
+            !std::isfinite(clip.width) || !std::isfinite(clip.height) ||
+            clip.width < 0.0 || clip.height < 0.0 ||
+            !std::isfinite(determinant) || determinant == 0.0 ||
+            std::ranges::any_of(
+                clip.radii,
+                [](const double value) { return !std::isfinite(value) || value < 0.0; }) ||
+            std::ranges::any_of(
+                clip.inverse_transform,
+                [](const double value) { return !std::isfinite(value); })) {
+            throw std::invalid_argument(
+                "render rounded clip is outside the portable domain"
+            );
+        }
+    }
+    return result;
+}
+
 void validate_geometry(const RenderPacket& packet) {
     const std::size_t vertex_count = packet.vertices.size() / 88U;
     for (const SubmissionBatch& batch : packet.batches) {
@@ -193,8 +227,8 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     Reader input(bytes);
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
-        input.u32() != 7U) {
-        throw std::invalid_argument("render packet decoder requires protocol v7");
+        input.u32() != 8U) {
+        throw std::invalid_argument("render packet decoder requires protocol v8");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();
@@ -255,10 +289,12 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         Reader batch = input.record();
         const std::uint32_t source_order = batch.u32();
         const Scissor clip = scissor(batch);
+        std::vector<RoundedClip> rounded = rounded_clips(batch);
         if (kind == 0U) {
             DrawBatch draw;
             draw.source_order = source_order;
             draw.scissor = clip;
+            draw.rounded_clips = std::move(rounded);
             draw.material = batch.text();
             draw.blend_mode = batch.text();
             if (draw.material.empty() || draw.blend_mode.empty()) {
@@ -275,6 +311,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             BlurBatch blur;
             blur.source_order = source_order;
             blur.scissor = clip;
+            blur.rounded_clips = std::move(rounded);
             blur.x = batch.number();
             blur.y = batch.number();
             blur.width = batch.number();
@@ -292,6 +329,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             effect.kind = kind == 2U ? EffectBatchKind::backdrop : EffectBatchKind::content_begin;
             effect.source_order = source_order;
             effect.scissor = clip;
+            effect.rounded_clips = std::move(rounded);
             effect.x = batch.number();
             effect.y = batch.number();
             effect.width = batch.number();
@@ -321,7 +359,9 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             }
             result.batches.emplace_back(std::move(effect));
         } else if (kind == 4U) {
-            result.batches.emplace_back(ContentEffectEndBatch{source_order, clip});
+            result.batches.emplace_back(
+                ContentEffectEndBatch{source_order, clip, std::move(rounded)}
+            );
         } else {
             throw std::invalid_argument("render packet batch kind is unknown");
         }

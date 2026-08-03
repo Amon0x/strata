@@ -3,9 +3,12 @@
 
 style Clear { background: null; border: null; }
 
+// Optic glass is reserved for chrome that floats over other content: the topbar, the search
+// field, actions, and modals. Content surfaces that make up the page itself use PanelSurface, so
+// the interface never stacks glass on glass and every panel keeps a real contrast budget.
 style GlassSurface {
-  background: #AFC6D814;
-  border: { width: 1, color: #EAF5FC1C };
+  background: null;
+  border: null;
   effect: effect(
     "morrow:optic-glass",
     blurRadius: 14,
@@ -14,11 +17,11 @@ style GlassSurface {
     tint: #18233412,
     saturation: 0.96,
     highlight: 0.66,
-    noise: 0.06,
+    noise: 0.1,
     transparency: 0.82,
     thickness: 1.05,
-    scattering: 0.72,
-    edgeContrast: 0.85,
+    metallic: 0.82,
+    edgeContrast: 0.97,
     contrast: 0.90,
     luminosity: 1.0
   );
@@ -30,11 +33,18 @@ style AppBackdrop {
   background: #030713FF; border: null;
 }
 
-style AppShell extends GlassSurface {
+style PanelSurface {
+  background: #9FB4C812;
+  border: { width: 1, color: #D8E8F61C };
+}
+
+// The shell is the substrate the whole workspace is built on, not floating chrome, so it stays
+// dense. Everything above it depends on it for contrast.
+style AppShell {
   kind: "ROW"; width: { weight: 1 }; height: { weight: 1 };
   radius: 24; gap: 0; clip: true;
-  background: #08111D46;
-  border: { width: 1, color: #E2EDF52E };
+  background: #070E1AE8;
+  border: { width: 1, color: #DCEAF624 };
 }
 style CompactShell extends AppShell { kind: "COLUMN"; }
 
@@ -101,7 +111,7 @@ style NavCount { font: "strata:fonts/mono"; pixelSize: 12; color: #71899EFF; }
 style SidebarBottom extends Clear {
   kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 11;
 }
-style InviteCard extends GlassSurface {
+style InviteCard extends PanelSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: "content";
   padding: 13; gap: 8; radius: 14;
   background: #B8E3FF15; border: { width: 1, color: #DAF0FF24 };
@@ -120,7 +130,7 @@ style Topbar extends GlassSurface {
   kind: "ROW"; width: { weight: 1 }; height: 70;
   margin: { left: 14, top: 14, right: 14 };
   padding: { horizontal: 18 }; gap: 12; alignItems: "CENTER";
-  radius: 17; background: #B7CAD714; border: { width: 1, color: #E3EDF422 };
+  radius: 17; background: null; border: null;
 }
 style CompactTopbar extends Topbar { height: 60; padding: { horizontal: 13 }; }
 
@@ -134,7 +144,7 @@ style SearchStyle {
 style SearchShell extends GlassSurface {
   kind: "ROW"; width: { weight: 1 }; height: 40;
   padding: { horizontal: 2 }; radius: 20; alignItems: "CENTER";
-  background: #CFDCE80E; border: { width: 1, color: #EAF3FA2C };
+  background: null; border: null;
   effect: effect(
     "morrow:optic-glass",
     blurRadius: 10,
@@ -143,11 +153,11 @@ style SearchShell extends GlassSurface {
     tint: #20293810,
     saturation: 0.96,
     highlight: 0.50,
-    noise: 0.04,
+    noise: 0.09,
     transparency: 0.88,
     thickness: 0.8,
-    scattering: 0.58,
-    edgeContrast: 0.72,
+    metallic: 0.72,
+    edgeContrast: 0.84,
     contrast: 0.92,
     luminosity: 1.02
   );
@@ -183,7 +193,7 @@ style WelcomeRow extends Clear {
 style HeroTitle { font: "strata:fonts/default-medium"; pixelSize: 30; color: #F5FAFFFF; }
 style HeroSubtitle { pixelSize: 13; color: #91A6B8FF; }
 
-style FeatureCard extends GlassSurface {
+style FeatureCard extends PanelSurface {
   kind: "ROW"; width: { weight: 1 }; height: 188;
   padding: 22; gap: 18; radius: 20; clip: true; alignItems: "CENTER";
   background: {
@@ -209,7 +219,7 @@ style ProgressFill {
 style FeatureVisual { width: 190; height: 150; background: null; border: null; }
 
 style MetricsGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 11; }
-style MetricCard extends GlassSurface {
+style MetricCard extends PanelSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: 96;
   padding: 14; gap: 5; radius: 16; background: #AFBFCA10;
 }
@@ -222,7 +232,7 @@ style ContentColumns extends Clear {
   kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 14; alignItems: "START";
 }
 style ContentStack extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 14; }
-style PaperCard extends GlassSurface {
+style PaperCard extends PanelSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: "content";
   padding: 17; gap: 11; radius: 18; background: #AFBFCA10;
 }
@@ -263,7 +273,7 @@ style ScheduleRulePeach extends ScheduleRule { background: #FFADC5FF; }
 style ScheduleTitle { pixelSize: 12; color: #DDE9F3FF; }
 
 style ProjectGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 13; }
-style ProjectCard extends GlassSurface {
+style ProjectCard extends PanelSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: 180;
   padding: 14; gap: 10; radius: 18; background: #AFBFCA10;
 }
@@ -281,7 +291,7 @@ style ProjectCoverLilac extends ProjectCover {
 }
 style ProjectTitle { font: "strata:fonts/default-medium"; pixelSize: 15; color: #EAF4FCFF; }
 
-style LibraryTile extends GlassSurface {
+style LibraryTile extends PanelSurface {
   kind: "COLUMN"; width: { weight: 1 }; height: 170; padding: 10; gap: 8; radius: 17;
   background: #AFBFCA10;
 }
@@ -298,10 +308,11 @@ style LibraryGlyphLight { font: "strata:fonts/default-medium"; pixelSize: 30; co
 style GlassAction extends GlassSurface {
   kind: "ROW"; width: "content"; height: 36; padding: { horizontal: 13, vertical: 8 };
   gap: 7; radius: 11; alignItems: "CENTER"; justifyContent: "CENTER";
-  background: #BDE7FF18; border: { width: 1, color: #E0F2FF2B };
+  background: null; border: null;
   animateChanges: { properties: ["background", "border"], policy: "fast" };
 }
 style GlassActionPrimary extends GlassAction {
+  effect: null;
   background: {
     kind: "linear", angle: 120,
     stops: [ { color: #75B4CADC }, { color: #8176B8D8 } ]
@@ -317,7 +328,7 @@ style ModalScrim {
 }
 style ComposeModal extends GlassSurface {
   kind: "COLUMN"; width: 410; height: "content"; padding: 21; gap: 13; radius: 21;
-  background: #0A1726B0; border: { width: 1, color: #E4F3FF38 };
+  background: null; border: null;
 }
 style ModalActions extends Clear {
   kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 8; justifyContent: "END";

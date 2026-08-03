@@ -22,6 +22,7 @@
 
 #include "blur_pass.hpp"
 #include "blur_shaders.hpp"
+#include "clip_mask.hpp"
 
 namespace strata::d3d11 {
 namespace {
@@ -175,7 +176,9 @@ float mask(float2 pixel) {
 float4 main(PixelInput input) : SV_TARGET {
     float4 color = EffectSource.Sample(EffectSampler, clamp(input.uv, 0.0, 1.0));
     color *= mask(input.position.xy) * effectOpacityValue;
-    return color;
+    float2 logicalPixel =
+        input.position.xy * effectLogicalSize / max(effectTargetSize, 1.0);
+    return strataApplyRoundedClips(color, logicalPixel);
 }
 )hlsl";
 
@@ -215,7 +218,9 @@ float4 main(PixelInput input) : SV_TARGET {
         max(float2(width, height), 1.0);
     float4 color = EffectSource.Sample(EffectSampler, clamp(uv, 0.0, 1.0));
     color *= mask(input.position.xy) * effectOpacityValue;
-    return color;
+    float2 logicalPixel =
+        input.position.xy * effectLogicalSize / max(effectTargetSize, 1.0);
+    return strataApplyRoundedClips(color, logicalPixel);
 }
 )hlsl";
 
@@ -307,16 +312,25 @@ struct EffectPassRenderer::Impl final {
             throw std::invalid_argument("D3D11 effects require a device and context");
         }
         const ComPtr<ID3DBlob> vertex_code = compile_shader(blur_shaders::vertex, "main", "vs_5_0");
+        rounded_clips = std::make_unique<RoundedClipBuffer>(device, context);
         require_hresult(device->CreateVertexShader(vertex_code->GetBufferPointer(),
                                                    vertex_code->GetBufferSize(), nullptr, &vertex),
                         "D3D11 effect vertex shader creation");
-        const ComPtr<ID3DBlob> composite_code = compile_shader(composite_pixel, "main", "ps_5_0");
+        const ComPtr<ID3DBlob> composite_code = compile_shader(
+            std::string(rounded_clip_hlsl) + std::string(composite_pixel),
+            "main",
+            "ps_5_0"
+        );
         require_hresult(device->CreatePixelShader(composite_code->GetBufferPointer(),
                                                   composite_code->GetBufferSize(), nullptr,
                                                   &composite),
                         "D3D11 effect composite shader creation");
         const ComPtr<ID3DBlob> cached_composite_code =
-            compile_shader(cached_composite_pixel, "main", "ps_5_0");
+            compile_shader(
+                std::string(rounded_clip_hlsl) + std::string(cached_composite_pixel),
+                "main",
+                "ps_5_0"
+            );
         require_hresult(device->CreatePixelShader(cached_composite_code->GetBufferPointer(),
                                                   cached_composite_code->GetBufferSize(), nullptr,
                                                   &cached_composite),
@@ -512,6 +526,10 @@ struct EffectPassRenderer::Impl final {
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context->VSSetShader(vertex.Get(), nullptr, 0U);
         context->PSSetShader(cached_composite.Get(), nullptr, 0U);
+        rounded_clips->bind(
+            effect.rounded_clips,
+            RoundedClipMode::premultiplied_alpha
+        );
         context->PSSetConstantBuffers(0U, 1U, constant_buffers);
         context->PSSetSamplers(0U, 1U, samplers);
         context->PSSetShaderResources(0U, 2U, resources);
@@ -543,6 +561,10 @@ struct EffectPassRenderer::Impl final {
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context->VSSetShader(vertex.Get(), nullptr, 0U);
         context->PSSetShader(shader, nullptr, 0U);
+        rounded_clips->bind(
+            effect.rounded_clips,
+            RoundedClipMode::premultiplied_alpha
+        );
         context->PSSetConstantBuffers(0U, 1U, constant_buffers);
         context->PSSetSamplers(0U, 1U, samplers);
         context->PSSetShaderResources(0U, 2U, resources);
@@ -692,6 +714,7 @@ struct EffectPassRenderer::Impl final {
     ComPtr<ID3D11RasterizerState> rasterizer;
     ComPtr<ID3D11BlendState> replace_blend;
     ComPtr<ID3D11BlendState> composite_blend;
+    std::unique_ptr<RoundedClipBuffer> rounded_clips;
     std::vector<Target> content_targets;
     std::optional<Workspace> processing;
     std::map<std::string, std::vector<Pass>, std::less<>> programs;
@@ -753,8 +776,9 @@ void EffectPassRenderer::declare_pass(const std::string_view effect_id, const st
     pass.radius_parameter = radius_parameter;
     pass.downsample_parameter = downsample_parameter;
     if (kind == 1U && !hlsl_source.empty()) {
-        const std::string source =
-            std::string(effect_prelude) + std::string(hlsl_source) + std::string(effect_entry);
+        const std::string source = std::string(effect_prelude) +
+            std::string(rounded_clip_hlsl) + std::string(hlsl_source) +
+            std::string(effect_entry);
         const ComPtr<ID3DBlob> bytecode = compile_shader(source, "main", "ps_5_0");
         require_hresult(impl_->device->CreatePixelShader(bytecode->GetBufferPointer(),
                                                          bytecode->GetBufferSize(), nullptr,

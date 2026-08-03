@@ -404,7 +404,11 @@ JsonValue render_command_json(const RenderCommand& command) {
             } else if constexpr (std::is_same_v<Type, ContentEffectPopRenderCommand>) {
                 return object({{"kind", JsonValue("content_effect_pop")}});
             } else if constexpr (std::is_same_v<Type, ClipPushRenderCommand>) {
-                return object({{"kind", JsonValue("clip_push")}, {"rect", rectangle(value.rect)}});
+                return object({
+                    {"kind", JsonValue("clip_push")},
+                    {"radii", radii(value.radii)},
+                    {"rect", rectangle(value.rect)},
+                });
             } else if constexpr (std::is_same_v<Type, ClipPopRenderCommand>) {
                 return object({{"kind", JsonValue("clip_pop")}});
             } else if constexpr (std::is_same_v<Type, TransformPushRenderCommand>) {

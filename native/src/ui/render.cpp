@@ -732,14 +732,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         const std::optional<Rect> lifecycle_clip =
             widget_descendant_clip(widgets, node, *record, layout, input, commands, text,
                                    svg_images, &motion, inherited_opacity);
-        std::optional<Rect> descendant_local_clip = lifecycle_clip;
-        if (record->local_clip.has_value()) {
-            descendant_local_clip =
-                descendant_local_clip.has_value()
-                    ? std::optional<Rect>(
-                          descendant_local_clip->clip_intersection(*record->local_clip))
-                    : record->local_clip;
-        }
+        const std::optional<Rect> descendant_local_clip =
+            intersect_clip(lifecycle_clip, record->local_clip);
         const std::optional<Rect> child_render_clip =
             descendant_local_clip.has_value()
                 ? intersect_clip(scope_clip_rect, descendant_local_clip)
@@ -748,9 +742,17 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         // A translated cached subtree then moves this raw clip while the live outer clip stack
         // recomputes their intersection. Retaining the pre-intersected rectangle can preserve an
         // empty/offscreen clip after scrolling and blank newly visible content.
-        if (descendant_local_clip.has_value()) {
+        if (lifecycle_clip.has_value()) {
             output.append(ClipPushRenderCommand{
-                inverse_presentation_bounds(*descendant_local_clip, effective_transform),
+                inverse_presentation_bounds(*lifecycle_clip, effective_transform),
+                {},
+            });
+            ++counters.commands_emitted;
+        }
+        if (record->local_clip.has_value()) {
+            output.append(ClipPushRenderCommand{
+                inverse_presentation_bounds(*record->local_clip, effective_transform),
+                CornerRadii::all(radius),
             });
             ++counters.commands_emitted;
         }
@@ -793,7 +795,11 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 child_record != nullptr ? child_record->render_generation : 0U);
         }
         const std::size_t composition_suffix_begin = output.size();
-        if (descendant_local_clip.has_value()) {
+        if (record->local_clip.has_value()) {
+            output.append(ClipPopRenderCommand{});
+            ++counters.commands_emitted;
+        }
+        if (lifecycle_clip.has_value()) {
             output.append(ClipPopRenderCommand{});
             ++counters.commands_emitted;
         }

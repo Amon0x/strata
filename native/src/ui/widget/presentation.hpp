@@ -149,7 +149,7 @@ public:
         double radius,
         double spread = 0.0
     );
-    void push_clip(Rect bounds);
+    void push_clip(Rect bounds, CornerRadii radii = {});
     void pop_clip();
     void push_transform(double scale, Point translation);
     void pop_transform();

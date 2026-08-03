@@ -20,7 +20,7 @@ The native framework supports two platform profiles:
 - **Windows x64:** the portable framework plus `strata_desktop`, the production Win32/D3D11 host.
   The headless host can use D3D11/WARP for production-renderer fidelity.
 - **Linux x64:** the platform-neutral framework, C/C++ host APIs, extensions, compiler/authoring
-  tools, public packet-v7 decoder, and CPU reference headless host. Strata does not ship a Linux GUI
+  tools, public packet-v8 decoder, and CPU reference headless host. Strata does not ship a Linux GUI
   backend; consumers can implement Vulkan/OpenGL submission on top of `Strata::render_host`.
 
 ## Build and test
@@ -88,7 +88,7 @@ exports these portable targets:
 | `Strata::c` | Stable shared C ABI. |
 | `Strata::host` | C++ ownership and structured host-data/action bindings. |
 | `Strata::extensions` | Authoring support linked into independently loaded extension libraries. |
-| `Strata::render_host` | Stateful public packet-v7 decoder for custom render backends. |
+| `Strata::render_host` | Stateful public packet-v8 decoder for custom render backends. |
 | `Strata::svg` | Dependency-free static SVG parser and deterministic CPU rasterizer. |
 
 Windows additionally exports `Strata::desktop`. See [Embedding](docs/embedding.md) for custom
@@ -123,7 +123,7 @@ complete Win32 window/input example is
 ## Headless application testing
 
 `strata_headless` runs complete applications with a deterministic clock and ordinary input routing.
-It emits canonical state/semantics/inspection JSON and renders packet-v7 geometry to PNG. Linux uses
+It emits canonical state/semantics/inspection JSON and renders packet-v8 geometry to PNG. Linux uses
 the portable CPU reference backend; Windows also tests the shared production D3D11/WARP texture,
 blur, and authored-HLSL material pipeline.
 

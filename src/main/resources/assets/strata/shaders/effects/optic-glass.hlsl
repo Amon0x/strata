@@ -1,16 +1,19 @@
+// Liquid optic glass.
+//
+// Body: the transmitted scene is remapped into a bounded luminance band while its chroma is carried
+// through, so the backdrop still reads as colour and structure but foreground text keeps a stable
+// contrast floor over white, black, and saturated content alike.
+//
+// Edge: refraction is confined to a narrow bevel. A wide, weak lens smears background text across
+// the whole surface; a narrow, steep one reads as real glass thickness and cannot ghost inward.
+//
+// Rim: a thin metal band that reflects the immediate surroundings, so it belongs to whatever is
+// behind the element instead of imposing a fixed colour. EffectSource is blurred only inside the
+// effect rect, so sampling outward returns the unfiltered neighbourhood - exactly what a polished
+// edge shows - while every inward sample stays filtered.
+
 float luminance(float3 color) {
     return dot(color, float3(0.2126, 0.7152, 0.0722));
-}
-
-float3 adjustSaturation(float3 color, float saturation) {
-    return lerp(luminance(color).xxx, color, saturation);
-}
-
-float3 softLight(float3 base, float3 blend) {
-    return saturate(
-        (1.0 - 2.0 * blend) * base * base +
-        2.0 * blend * base
-    );
 }
 
 float hash21(float2 value) {
@@ -29,172 +32,203 @@ float2 shapeNormal(float2 pixel) {
     return normalize(gradient + float2(0.0001, 0.0001));
 }
 
-float4 effect(EffectInput input) {
-    float signedDistance = effectDistance(input.pixel);
-    float insideDistance = max(-signedDistance, 0.0);
-    float2 normal2d = shapeNormal(input.pixel);
-    float2 texel = 1.0 / max(effectTargetSize, 1.0);
+float3 sourceAt(float2 uv) {
+    return sampleEffectSource(uv).rgb;
+}
 
+float4 effect(EffectInput input) {
+    float2 texel = 1.0 / max(effectTargetSize, 1.0);
+    float insideDistance = max(-effectDistance(input.pixel), 0.0);
+    float2 normal = shapeNormal(input.pixel);
+
+    float refractionAmount = max(effectFloat(2), 0.0);
+    float4 tint = effectColor(3);
+    float vibrancy = max(effectFloat(7), 0.0);
+    float highlight = max(effectFloat(8), 0.0);
+    float dither = max(effectFloat(9), 0.0);
     float transparency = saturate(effectFloat(10));
     float thickness = max(effectFloat(11), 0.05);
-    float scattering = saturate(effectFloat(12));
+    float metallic = saturate(effectFloat(12));
     float edgeContrast = max(effectFloat(13), 0.0);
     float bodyContrast = max(effectFloat(14), 0.0);
     float luminosity = max(effectFloat(15), 0.0);
 
     float minimumExtent = max(min(effectBounds.z, effectBounds.w), 1.0);
-    float sizeFactor = smoothstep(48.0, 260.0, minimumExtent);
-    float bendZone = clamp(
-        minimumExtent * 0.24 * thickness,
-        10.0,
-        90.0
-    );
-    float bendCoordinate = saturate(insideDistance / bendZone);
-    float surfaceCurve = pow(1.0 - bendCoordinate, 1.35);
-    float refractionField = pow(1.0 - bendCoordinate, 2.0);
+    float sizeFactor = smoothstep(40.0, 260.0, minimumExtent);
 
-    float displacementPixels = bendZone * 0.35 *
-        max(effectFloat(2), 0.0);
-    float2 refractedOffset = -normal2d * displacementPixels *
-        refractionField * texel;
-    float chromaticFraction =
-        1.2 / max(displacementPixels, 1.0) *
-        smoothstep(0.0, 2.5, insideDistance);
+    // Edge lens. The bevel is a quarter-round profile: its slope is near zero across the interior
+    // and rises steeply at the boundary, so displacement is concentrated in a few pixels.
+    float lensWidth = clamp(minimumExtent * 0.17 * thickness, 5.0, 26.0);
+    float rise = 1.0 - saturate(insideDistance / lensWidth);
+    float slope = rise * rise / (sqrt(saturate(1.0 - rise * rise)) + 0.19);
+    float lens = saturate(slope * 0.6);
+    float displacement = min(lensWidth * 0.46 * refractionAmount * slope, lensWidth * 1.15);
+    float2 lensUv = input.uv + normal * displacement * texel;
 
-    float2 surfaceCenter = (
-        effectBounds.xy + effectBounds.zw * 0.5
-    ) / max(effectTargetSize, 1.0);
-    float magnification = lerp(
-        0.01,
-        0.03,
-        saturate((thickness - 0.45) / 1.35)
-    );
-    magnification *= lerp(0.78, 1.12, sizeFactor);
-    float2 bodyUv = surfaceCenter +
-        (input.uv - surfaceCenter) * (1.0 - magnification);
-    float3 body = sampleEffectSource(bodyUv).rgb;
-    // EffectBackdrop is vertically inverted relative to EffectSource/input.uv
-    // in the render-target path. Flip only offset deltas so both samplers move
-    // through their images in the same visual direction.
-    float2 backdropDelta = refractedOffset * float2(1.0, -1.0);
-    float3 rawRefraction = float3(
-        sampleEffectBackdrop(
-            input.uv + backdropDelta * (1.0 - chromaticFraction)
-        ).r,
-        sampleEffectBackdrop(
-            input.uv + backdropDelta
-        ).g,
-        sampleEffectBackdrop(
-            input.uv + backdropDelta * (1.0 + chromaticFraction)
-        ).b
-    );
-    float2 rimSoftness = 2.5 * texel;
-    float3 softenedRefraction = (
-        sampleEffectBackdrop(
-            input.uv + backdropDelta + float2(rimSoftness.x, 0.0)
-        ).rgb +
-        sampleEffectBackdrop(
-            input.uv + backdropDelta - float2(rimSoftness.x, 0.0)
-        ).rgb +
-        sampleEffectBackdrop(
-            input.uv + backdropDelta + float2(0.0, rimSoftness.y)
-        ).rgb +
-        sampleEffectBackdrop(
-            input.uv + backdropDelta - float2(0.0, rimSoftness.y)
-        ).rgb
-    ) * 0.25;
-    rawRefraction = lerp(rawRefraction, softenedRefraction, 1.0);
-    float3 color = lerp(
-        body,
-        rawRefraction,
-        refractionField * 0.96
+    // Dispersion stays inside the outermost band, where the image is compressed anyway, so it never
+    // doubles legible background text.
+    float2 dispersion = normal * displacement * 0.09 * lens * texel;
+    float3 transmitted = float3(
+        sourceAt(lensUv - dispersion).r,
+        sourceAt(lensUv).g,
+        sourceAt(lensUv + dispersion).b
     );
 
-    float saturation = max(effectFloat(7), 0.0);
-    color = adjustSaturation(color, saturation);
-    body = adjustSaturation(body, saturation);
+    // Local backdrop average. The surface adapts to what is directly behind it rather than to one
+    // element-wide constant, so a single card can cross black and white and stay coherent.
+    float2 neighbourStep = clamp(minimumExtent * 0.16, 9.0, 34.0) * texel;
+    float3 neighbourhood = (
+        sourceAt(input.uv) +
+        sourceAt(input.uv + float2(neighbourStep.x, 0.0)) +
+        sourceAt(input.uv - float2(neighbourStep.x, 0.0)) +
+        sourceAt(input.uv + float2(0.0, neighbourStep.y)) +
+        sourceAt(input.uv - float2(0.0, neighbourStep.y))
+    ) * 0.2;
+    float meanLuma = luminance(neighbourhood);
+    float brightField = smoothstep(0.10, 0.62, meanLuma);
 
-    // The filtered scene is the transmitted layer and tint is the authored
-    // surface layer. Transparency attenuates transmission; tint alpha remains
-    // the minimum surface density at full transmission.
-    float4 tint = effectColor(3);
-    float tintAmount = saturate(tint.a);
-    float surfaceOpacity = saturate(
-        tintAmount +
-        (1.0 - transparency) * (1.0 - tintAmount) *
-            lerp(0.42, 0.58, sizeFactor)
-    );
-    float3 tintedSurface = softLight(color, tint.rgb);
-    color = lerp(color, tintedSurface, surfaceOpacity);
-    float3 tonalAnchor = lerp(
-        body,
-        softLight(body, tint.rgb),
-        surfaceOpacity
-    );
-    float effectiveContrast = bodyContrast * lerp(0.72, 1.0, transparency);
-    color = tonalAnchor + (color - tonalAnchor) * effectiveContrast;
-    color *= luminosity;
+    // Bounded band. The transmitted scene is tone-compressed into [floor, ceiling] rather than
+    // blended back toward its own brightness, so the surface can never run away on a white backdrop.
+    // The floor is lifted over dark content and dropped under bright content, so the element always
+    // separates itself from what it sits on instead of dissolving into a black backdrop.
+    // `transparency` sets the knee: an open surface keeps more of the scene's contrast.
+    float bandLow = 0.028 + lerp(0.085, 0.010, brightField);
+    float bandHigh = lerp(0.36, 0.30, brightField) * lerp(0.90, 1.0, sizeFactor);
+    float knee = lerp(2.8, 1.05, transparency) + saturate(tint.a) * 2.5;
+    float normalizer = 1.0 + knee;
 
-    // The supplied controls share a two-pixel bright boundary followed by a
-    // one-pixel darker contact seam. Interpolation toward white reproduces the
-    // same response on colored, dark, and already-white surfaces.
-    float brightBoundary = 1.0 - smoothstep(
-        0.9,
-        2.25,
-        insideDistance
+    float sceneLuma = luminance(transmitted);
+    float3 chroma = transmitted - sceneLuma;
+    float bodyLuma = lerp(
+        bandLow,
+        bandHigh,
+        saturate(sceneLuma / (sceneLuma + knee) * normalizer)
     );
-    float contactSeam = smoothstep(1.75, 2.35, insideDistance) *
-        (1.0 - smoothstep(2.9, 3.65, insideDistance));
-    float lowerFacing = normal2d.y * 0.5 + 0.5;
-    float seamStrength = lerp(0.08, 0.22, lowerFacing);
-    float highlight = max(effectFloat(8), 0.0);
-    float3 compressedBackground = saturate(rawRefraction * 1.14);
-    float3 refractedRim = 1.0 -
-        (1.0 - color) * (1.0 - compressedBackground);
-    color = lerp(
-        color,
-        refractedRim,
-        saturate(brightBoundary * edgeContrast * 0.24)
+    float anchor = lerp(
+        bandLow,
+        bandHigh,
+        saturate(meanLuma / (meanLuma + knee) * normalizer)
     );
+    bodyLuma = anchor + (bodyLuma - anchor) * bodyContrast;
 
-    // The virtual light is fixed in surface space, so moving or morphing a
-    // glass element changes the reflected lobe without autonomous shimmer.
-    float2 lightVector = float2(0.24, 0.08) - surfaceCenter;
-    float3 lightDirection = normalize(float3(lightVector * 0.85, 0.78));
-    float3 surfaceNormal = normalize(float3(
-        normal2d * surfaceCurve * 1.18,
-        1.0
-    ));
-    float3 halfDirection = normalize(
-        lightDirection + float3(0.0, 0.0, 1.0)
-    );
-    float specularLobe = pow(
-        saturate(dot(surfaceNormal, halfDirection)),
-        96.0
-    ) * refractionField;
-    float2 planarLight = normalize(lightVector + float2(0.0001, 0.0001));
-    float lightFacing = pow(saturate(dot(normal2d, planarLight)), 5.0);
-    float counterFacing = pow(saturate(dot(normal2d, -planarLight)), 7.0);
-    float whiteGlint = brightBoundary * lightFacing *
-        edgeContrast * highlight * 0.34;
-    color = lerp(
-        color,
-        1.0,
-        saturate(specularLobe * highlight * 0.62 + whiteGlint)
-    );
-    color = lerp(
-        color,
-        compressedBackground,
-        saturate(
-            brightBoundary * counterFacing *
-            edgeContrast * 0.11
-        )
-    );
-    color *= 1.0 - contactSeam * edgeContrast * seamStrength;
+    // Chroma is rescaled with the luminance change so saturation survives the compression instead
+    // of collapsing to grey, then `vibrancy` lifts it the way tinted glass exaggerates colour.
+    float chromaScale = clamp(bodyLuma / max(sceneLuma, 0.02), 0.0, 1.7);
+    float3 body = bodyLuma + chroma * lerp(1.0, chromaScale, 0.85) * vibrancy * 1.15;
 
-    float noise = (hash21(floor(input.logicalPixel)) - 0.5) *
-        max(effectFloat(9), 0.0) * 0.01;
-    color += noise;
+    // Bounding luminance alone is not enough: a saturated backdrop can hold its luminance inside the
+    // band while a single channel runs away, which is how tinted glass turns into coloured plastic.
+    // Scaling the whole triple back keeps the hue and restores the ceiling.
+    float peak = max(body.r, max(body.g, body.b));
+    body *= min(1.0, bandHigh * 1.55 / max(peak, 0.0001));
 
+    // The tint colours the glass as a normalised gain, so it filters the scene rather than painting
+    // an opaque layer over it.
+    // Bounded, because normalising by luminance alone makes a darker or more saturated tint push
+    // harder - the opposite of what picking a subtle dark tint should do.
+    float3 tintGain = clamp(tint.rgb / max(luminance(tint.rgb), 0.05), 0.72, 1.28);
+    body *= lerp(1.0, tintGain, saturate(tint.a * 6.0));
+
+    // A fixed virtual key light. It is fixed in surface space, so moving or resizing an element
+    // changes which part of its perimeter is lit without introducing autonomous shimmer.
+    float facing = dot(normal, normalize(float2(-0.30, -0.95)));
+    float keyArc = smoothstep(0.05, 0.92, facing);
+    float counterArc = smoothstep(0.10, 0.98, -facing);
+
+    // Volume. A soft top-lit sheen keeps the surface reading as a slab instead of a flat scrim.
+    float2 halfExtent = max(effectBounds.zw * 0.5, 1.0);
+    float2 local = (input.pixel - (effectBounds.xy + halfExtent)) / halfExtent;
+    body *= 1.0 + (1.0 - smoothstep(-1.0, 0.30, local.y)) * 0.075 * highlight;
+    body *= 1.0 - smoothstep(0.20, 1.0, local.y) * 0.05;
+    body *= luminosity;
+
+    // The lensed band catches a broad highlight of its own, peaking between the rim and the flat
+    // interior. That is what makes the edge read as a curved shoulder with thickness behind it,
+    // rather than a flat panel with a stroke around it.
+    float shoulder = saturate(lens * (1.0 - lens) * 4.0);
+    body += shoulder * (0.25 + saturate(facing) * 0.75) * 0.14 * highlight;
+
+    // Metal rim. The reflection is taken from outside the silhouette, partially desaturated and
+    // contrast-expanded: metal keeps some of the environment's hue but compresses its value range.
+    float rimWidth = clamp(minimumExtent * 0.045, 1.5, 3.4) * lerp(0.90, 1.15, thickness);
+    float reflectDistance = insideDistance + rimWidth * 1.6 + 3.0;
+    float2 reflectUv = input.uv + normal * reflectDistance * texel;
+    // The reflection is dispersed along the normal: a curved polished edge separates wavelengths by
+    // reflection depth, so sampling each channel from a different depth produces a fringe made of
+    // the actual surroundings rather than a painted-on gradient. It stays inside the chamfer, so it
+    // never reaches anything legible.
+    // The split is blended back against the undispersed reflection rather than used raw: where the
+    // reflection happens to straddle a hard black/white boundary, a raw split fringes into a
+    // saturated stripe that reads as a rendering fault. Blending bounds the worst case to a tint
+    // while a smooth environment still separates visibly.
+    float2 dispersionStep = normal * (rimWidth * 0.25 + 0.5) * texel;
+    float3 flatReflection = sourceAt(reflectUv);
+    float3 environment = lerp(
+        flatReflection,
+        float3(
+            sourceAt(reflectUv - dispersionStep).r,
+            flatReflection.g,
+            sourceAt(reflectUv + dispersionStep).b
+        ),
+        0.35
+    );
+    // Conductors keep their chroma under reflection, so the desaturation stays mild. The peak is
+    // rescaled rather than clipped, because clipping each channel at 1.0 independently is exactly
+    // what collapses a bright coloured reflection into white.
+    float3 metal = max(lerp(luminance(environment).xxx, environment, 0.68) * 1.22 + 0.015, 0.0);
+    metal *= min(1.0, 1.0 / max(max(metal.r, max(metal.g, metal.b)), 0.0001));
+
+    // The key light splits the perimeter into a lit arc, a dimmer counter-reflection, and darker
+    // flanks. That uneven distribution is what separates metal from a uniformly bright border.
+    float angularGain = 0.42 + keyArc * 0.80 + counterArc * 0.45;
+    // A small ambient term keeps the unlit flanks present, so the element reads as a closed ring
+    // rather than a highlight strip. It leans on dark backdrops, where there is nothing to reflect.
+    float rimAmbient = 0.030 + 0.055 * (1.0 - brightField);
+
+    // Bevel profile. A chamfer reads as metal because of how fast it changes: a tight specular line
+    // just inside the silhouette, a reflective mid-tone body, then an occluded line where the metal
+    // meets the glass. A single smooth ramp across the same width reads as plastic instead.
+    float rimDepth = saturate(insideDistance / rimWidth);
+    float specularLine = exp(-pow((rimDepth - 0.28) / 0.34, 2.0));
+    float reflectiveBody = 1.0 - smoothstep(0.25, 0.95, rimDepth);
+    float occlusion = smoothstep(0.62, 1.0, rimDepth);
+
+    float3 rimColor = (metal * angularGain + rimAmbient) * lerp(0.30, 0.95, reflectiveBody);
+
+    // A conductor's specular carries colour - a white highlight is the dielectric signature, and is
+    // what makes a metal rim read as plastic. Normalising the reflection to unit brightness keeps
+    // its hue at full specular intensity, and the surface's own tint takes over as the reflection
+    // runs out of energy, so the outline still reads with nothing bright behind it.
+    float3 metalTint = tint.rgb / max(luminance(tint.rgb), 0.06);
+    float3 environmentHue = lerp(1.0, metal / max(luminance(metal), 0.05), 0.65);
+    float environmentEnergy = saturate(luminance(metal) * 2.4);
+    float3 specularTone = lerp(metalTint, environmentHue, environmentEnergy) * 0.82;
+    rimColor += specularTone * specularLine * (0.40 + keyArc * 0.50) * highlight;
+
+    // A faint warm-to-cool split across the chamfer. The two ends of the curvature reflect from
+    // different angles, and that fringe is what stops the rim reading as a flat grey stroke.
+    rimColor *= lerp(float3(1.045, 0.995, 0.955), float3(0.955, 0.995, 1.055), rimDepth);
+    rimColor *= 1.0 - occlusion * 0.55;
+
+    // Rescale the rim toward a ceiling instead of clipping it: clipping the channels independently
+    // discards the hue at exactly the brightest point, which is what makes a lit arc read as a hot
+    // white stroke rather than as lit metal. The ceiling follows the light actually available to
+    // the surface, so a dark interface gets a restrained edge instead of the same blown highlight
+    // it would get against white.
+    float rimCeiling = lerp(0.46, 0.88, max(brightField, environmentEnergy * 0.7));
+    float rimPeak = max(rimColor.r, max(rimColor.g, rimColor.b));
+    rimColor *= min(1.0, rimCeiling / max(rimPeak, 0.0001));
+
+    // A crisp termination, closed by a contact seam. Metal needs a hard inner boundary; a soft
+    // falloff reads as a glow instead of an edge.
+    float rimMask = 1.0 - smoothstep(rimWidth * 0.80, rimWidth * 1.05, insideDistance);
+    float seam = smoothstep(rimWidth * 0.85, rimWidth * 1.15, insideDistance) *
+        (1.0 - smoothstep(rimWidth * 1.15, rimWidth * 1.9 + 1.2, insideDistance));
+
+    float rimStrength = saturate(edgeContrast * metallic);
+    float3 color = lerp(body, max(rimColor, 0.0), rimMask * rimStrength);
+    color *= 1.0 - seam * rimStrength * 0.35;
+
+    color += (hash21(floor(input.logicalPixel)) - 0.5) * dither * 0.01;
     return float4(saturate(color), 1.0);
 }

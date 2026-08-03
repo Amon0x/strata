@@ -259,6 +259,7 @@ struct ContentEffectPopRenderCommand final {
 };
 struct ClipPushRenderCommand final {
     Rect rect;
+    CornerRadii radii;
     [[nodiscard]] friend bool operator==(const ClipPushRenderCommand&,
                                          const ClipPushRenderCommand&) = default;
 };

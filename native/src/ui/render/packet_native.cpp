@@ -128,6 +128,8 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
     });
 }
 
+[[nodiscard]] std::uint32_t checked_count(std::size_t value, const char* label);
+
 [[nodiscard]] Bytes batch_payload(const SubmissionBatch& batch) {
     Writer output;
     output.integer(batch.source_order);
@@ -135,6 +137,15 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
     output.integer(batch.scissor.y);
     output.integer(batch.scissor.width);
     output.integer(batch.scissor.height);
+    output.integer(checked_count(batch.rounded_clips.size(), "rounded clip count"));
+    for (const SubmissionRoundedClip& clip : batch.rounded_clips) {
+        output.rect(clip.bounds);
+        output.number(clip.radii.top_left);
+        output.number(clip.radii.top_right);
+        output.number(clip.radii.bottom_right);
+        output.number(clip.radii.bottom_left);
+        for (const double value : clip.inverse_transform) output.number(value);
+    }
     if (batch.kind == SubmissionBatchKind::draw) {
         output.text(batch.material);
         output.text(batch.blend_mode);
@@ -218,7 +229,7 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     constexpr std::string_view magic = "STRATARP";
     output.raw(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(magic.data()),
                                              magic.size()));
-    output.integer(std::uint32_t{7U});
+    output.integer(std::uint32_t{8U});
     if (texture_resources.size() > std::numeric_limits<std::size_t>::max() - resources.size()) {
         throw std::length_error("render resource count exceeds size_t");
     }

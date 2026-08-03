@@ -2345,6 +2345,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `caretColor` | color |
 | `clip` | boolean |
 | `color` | color |
+| `contentEffect` | effect |
 | `columnSpan` | number |
 | `detachFromParentClip` | boolean |
 | `disabledOpacity` | number |
@@ -2391,6 +2392,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `scaleY` | number |
 | `scrim` | one of (color, map of any) |
 | `selection` | color |
+| `shadows` | list of map of any |
 | `selectionColor` | color |
 | `thumb` | color |
 | `thumbRadius` | number |

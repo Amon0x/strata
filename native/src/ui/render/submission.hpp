@@ -31,6 +31,20 @@ struct SubmissionScissor final {
     [[nodiscard]] friend bool operator==(const SubmissionScissor&, const SubmissionScissor&) = default;
 };
 
+inline constexpr std::size_t maximum_rounded_clip_depth = 16U;
+
+/**
+ * One rounded clip in its authored coordinate space. The inverse transform maps presented
+ * logical pixels back into that space, preserving corners under scale, reflection and rotation.
+ */
+struct SubmissionRoundedClip final {
+    Rect bounds;
+    CornerRadii radii;
+    std::array<double, 6U> inverse_transform{1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+    [[nodiscard]] friend bool operator==(const SubmissionRoundedClip&,
+                                         const SubmissionRoundedClip&) = default;
+};
+
 enum class SubmissionBatchKind : std::uint32_t {
     draw = 0U,
     blur = 1U,
@@ -54,6 +68,7 @@ struct SubmissionBatch final {
     std::uint32_t effect_downsample = 1U;
     CornerRadii effect_radii;
     std::optional<EffectState> effect;
+    std::vector<SubmissionRoundedClip> rounded_clips;
 };
 
 struct RenderSubmission final {

@@ -34,12 +34,13 @@ struct BatchKey final {
     std::string blend_mode;
     std::optional<std::string> texture;
     SubmissionScissor scissor;
+    std::vector<SubmissionRoundedClip> rounded_clips;
     bool texture_sampled = false;
 };
 
 [[nodiscard]] bool compatible(const BatchKey& left, const BatchKey& right) noexcept {
     if (left.material != right.material || left.blend_mode != right.blend_mode ||
-        left.scissor != right.scissor) return false;
+        left.scissor != right.scissor || left.rounded_clips != right.rounded_clips) return false;
     return !(left.texture_sampled && right.texture_sampled && left.texture != right.texture);
 }
 
@@ -514,6 +515,7 @@ void geometry(
         draw.material.blend_mode,
         sampled ? draw.texture : std::nullopt,
         draw.scissor,
+        draw.rounded_clips,
         sampled,
     };
 }
@@ -629,7 +631,10 @@ void encode(
                     open_key->blend_mode != next.blend_mode) {
                     ++output.material_batch_breaks;
                 }
-                if (open_key->scissor != next.scissor) ++output.clip_batch_breaks;
+                if (open_key->scissor != next.scissor ||
+                    open_key->rounded_clips != next.rounded_clips) {
+                    ++output.clip_batch_breaks;
+                }
                 if (open_key->texture_sampled && next.texture_sampled &&
                     open_key->texture != next.texture) {
                     ++output.texture_batch_breaks;
@@ -653,6 +658,8 @@ void encode(
                 0U,
                 draw.source_order,
                 {}, 0.0, 1U,
+                {}, std::nullopt,
+                next.rounded_clips,
             });
             open_batch_index = output.batches.size() - 1U;
             open_key = std::move(next);

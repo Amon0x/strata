@@ -244,6 +244,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.RENDER2D.EFFECT_PARAMETER_REQUIRED` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.EFFECT_PARAMETER_TYPE` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.EFFECT_PARAMETER_UNKNOWN` | `native/src/ui/render/material_registry.cpp` |
+| `STRATA.RENDER2D.EFFECT_REFRESH_RATE` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.EFFECT_UNKNOWN` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.MATERIAL_BLEND_MODE` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.MATERIAL_OPACITY` | `native/src/ui/render/material_registry.cpp` |

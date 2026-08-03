@@ -20,3 +20,7 @@ overlay GlassRefractionShowcase {
 overlay GlassDensityShowcase {
   root GlassDensityFixture()
 }
+
+overlay GlassLabShowcase {
+  root GlassLabFixture()
+}

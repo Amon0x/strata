@@ -13,6 +13,7 @@ namespace strata::host {
 
 /** Maximum balanced CONTENT-effect nesting accepted by the packet and bundled renderers. */
 inline constexpr std::size_t maximum_content_effect_depth = 4U;
+inline constexpr std::size_t maximum_rounded_clip_depth = 16U;
 
 inline constexpr std::uint32_t resource_create = 0U;
 inline constexpr std::uint32_t resource_upload = 1U;
@@ -47,6 +48,17 @@ struct Scissor final {
     [[nodiscard]] friend bool operator==(const Scissor&, const Scissor&) = default;
 };
 
+/** A rounded clip plus the affine map from presented logical pixels into its local bounds. */
+struct RoundedClip final {
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    std::array<double, 4U> radii{};
+    std::array<double, 6U> inverse_transform{1.0, 0.0, 0.0, 0.0, 1.0, 0.0};
+    [[nodiscard]] friend bool operator==(const RoundedClip&, const RoundedClip&) = default;
+};
+
 /** Indexed geometry submission. Vertex records use the fixed 88-byte layout. */
 struct DrawBatch final {
     std::uint32_t source_order = 0U;
@@ -57,6 +69,7 @@ struct DrawBatch final {
     std::uint32_t base_vertex = 0U;
     std::uint32_t first_index = 0U;
     std::uint32_t index_count = 0U;
+    std::vector<RoundedClip> rounded_clips;
 };
 
 struct BlurBatch final {
@@ -68,6 +81,7 @@ struct BlurBatch final {
     double height = 0.0;
     double radius = 0.0;
     std::uint32_t downsample = 1U;
+    std::vector<RoundedClip> rounded_clips;
 };
 
 enum class EffectBatchKind : std::uint32_t {
@@ -90,12 +104,14 @@ struct EffectBatch final {
     double refresh_rate = default_effect_refresh_rate;
     std::array<double, 16U> parameters{};
     std::uint32_t parameter_count = 0U;
+    std::vector<RoundedClip> rounded_clips;
     [[nodiscard]] friend bool operator==(const EffectBatch&, const EffectBatch&) = default;
 };
 
 struct ContentEffectEndBatch final {
     std::uint32_t source_order = 0U;
     Scissor scissor;
+    std::vector<RoundedClip> rounded_clips;
 };
 
 using SubmissionBatch = std::variant<DrawBatch, BlurBatch, EffectBatch, ContentEffectEndBatch>;

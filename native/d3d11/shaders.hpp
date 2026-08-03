@@ -7,8 +7,9 @@ namespace strata::d3d11::shaders {
 constexpr std::string_view vertex = R"hlsl(
 cbuffer FrameData : register(b0) {
     float2 logicalSize;
+    float2 framebufferSize;
     float frameSeconds;
-    float frameReserved;
+    float3 frameReserved;
 };
 
 struct VertexInput {
@@ -61,8 +62,9 @@ SamplerState Sampler0 : register(s0);
 
 cbuffer FrameData : register(b0) {
     float2 logicalSize;
+    float2 framebufferSize;
     float frameSeconds;
-    float frameReserved;
+    float3 frameReserved;
 };
 
 struct PixelInput {
@@ -166,6 +168,9 @@ float4 strataShade(PixelInput input) {
 constexpr std::string_view builtin_entry = R"hlsl(
 float4 main(PixelInput input) : SV_TARGET {
     float4 color = strataShade(input);
+    float2 logicalPixel =
+        input.position.xy * logicalSize / max(framebufferSize, 1.0);
+    color = strataApplyRoundedClips(color, logicalPixel);
     clip(color.a - 0.000001);
     return color;
 }
@@ -232,6 +237,9 @@ float4 main(PixelInput input) : SV_TARGET {
     // shadows drawn inside its scope keep the built-in shading: handing a material glyph coverage
     // to shade as though it were a rounded rectangle is what turns legible text into a smear.
     float4 color = (mode == 0 || mode == 2) ? material(input) : strataShade(input);
+    float2 logicalPixel =
+        input.position.xy * logicalSize / max(framebufferSize, 1.0);
+    color = strataApplyRoundedClips(color, logicalPixel);
     clip(color.a - 0.000001);
     return color;
 }

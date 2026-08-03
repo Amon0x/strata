@@ -71,8 +71,8 @@ style GlassTriggerStyle {
   gap: 8;
   alignItems: "CENTER";
   radius: 10;
-  background: #24272C10;
-  border: { width: 1, color: #FFFFFF20 };
+  background: null;
+  border: null;
   focusRing: { width: 1, color: #C9E8FF34 };
   effect: effect(
     "demo:optic-glass",
@@ -82,11 +82,11 @@ style GlassTriggerStyle {
     tint: #34373C14,
     saturation: 0.82,
     highlight: 0.82,
-    noise: 0.045,
+    noise: 0.1,
     transparency: 0.82,
     thickness: 0.95,
-    scattering: 0.72,
-    edgeContrast: 0.95,
+    metallic: 0.82,
+    edgeContrast: 1.07,
     contrast: 0.88,
     luminosity: 1.02
   );
@@ -99,8 +99,8 @@ style GlassPopupStyle {
   padding: 6;
   gap: 3;
   radius: 14;
-  background: #25272C14;
-  border: { width: 1, color: #FFFFFF22 };
+  background: null;
+  border: null;
   anchorSide: "BOTTOM";
   anchorAlign: "START";
   anchorGap: 7;
@@ -114,11 +114,11 @@ style GlassPopupStyle {
     tint: #3432361A,
     saturation: 0.80,
     highlight: 0.84,
-    noise: 0.045,
+    noise: 0.1,
     transparency: 0.74,
     thickness: 1.15,
-    scattering: 0.78,
-    edgeContrast: 1.0,
+    metallic: 0.82,
+    edgeContrast: 1.12,
     contrast: 0.86,
     luminosity: 1.0
   );
@@ -136,8 +136,8 @@ style GlassItemStyle extends Transparent {
 }
 
 style GlassItemSelected extends GlassItemStyle {
-  background: #F0ECE61E;
-  border: { width: 1, color: #FFFFFF18 };
+  background: #F0ECE60E;
+  border: null;
   effect: effect(
     "demo:optic-glass",
     blurRadius: 10,
@@ -146,19 +146,19 @@ style GlassItemSelected extends GlassItemStyle {
     tint: #6E70760E,
     saturation: 0.82,
     highlight: 0.55,
-    noise: 0.04,
+    noise: 0.09,
     transparency: 0.76,
     thickness: 0.8,
-    scattering: 0.62,
-    edgeContrast: 0.82,
+    metallic: 0.55,
+    edgeContrast: 0.94,
     contrast: 0.90,
     luminosity: 1.02
   );
 }
 
 style GlassItemActive extends GlassItemStyle {
-  background: #F2EEE82B;
-  border: { width: 1, color: #FFFFFF20 };
+  background: #F2EEE818;
+  border: null;
   effect: effect(
     "demo:optic-glass",
     blurRadius: 12,
@@ -167,11 +167,11 @@ style GlassItemActive extends GlassItemStyle {
     tint: #888A9014,
     saturation: 0.84,
     highlight: 0.64,
-    noise: 0.04,
+    noise: 0.09,
     transparency: 0.84,
     thickness: 0.8,
-    scattering: 0.65,
-    edgeContrast: 0.90,
+    metallic: 0.60,
+    edgeContrast: 1.02,
     contrast: 0.90,
     luminosity: 1.02
   );
@@ -199,8 +199,8 @@ style GlassTooltipStyle {
   height: "content";
   padding: { horizontal: 10, vertical: 7 };
   radius: 9;
-  background: #E9E4DD26;
-  border: { width: 1, color: #FFFFFF20 };
+  background: null;
+  border: null;
   anchorSide: "TOP";
   anchorAlign: "CENTER";
   anchorGap: 8;
@@ -212,11 +212,11 @@ style GlassTooltipStyle {
     tint: #34383E18,
     saturation: 0.82,
     highlight: 0.78,
-    noise: 0.04,
+    noise: 0.09,
     transparency: 0.78,
     thickness: 0.9,
-    scattering: 0.70,
-    edgeContrast: 0.95,
+    metallic: 0.78,
+    edgeContrast: 1.07,
     contrast: 0.88,
     luminosity: 1.02
   );
@@ -281,21 +281,21 @@ style EffectDemoCard {
 
 style LiquidDemoCard extends EffectDemoCard {
   radius: 62;
-  background: #25282D10;
-  border: { width: 1, color: #FFFFFF20 };
+  background: null;
+  border: null;
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 3,
-    downsample: 1,
+    blurRadius: 16,
+    downsample: 2,
     refraction: 1.35,
     tint: #34383E08,
     saturation: 0.96,
     highlight: 0.96,
-    noise: 0.045,
+    noise: 0.1,
     transparency: 0.90,
     thickness: 1.0,
-    scattering: 0.42,
-    edgeContrast: 1.0,
+    metallic: 0.88,
+    edgeContrast: 1.12,
     contrast: 0.94,
     luminosity: 1.02
   );
@@ -339,6 +339,78 @@ style RefractionDiagnosticPill extends LiquidDemoCard {
   height: 92;
   padding: 0;
   radius: 999;
+}
+
+// Universality lab: the same glass over black, over white, over saturated hue, and over a
+// high-frequency stripe band, all in one frame.
+style LabLayout extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: { horizontal: 24, vertical: 22 };
+  gap: 16;
+  alignItems: "CENTER";
+}
+
+style LabRow extends Transparent {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: "content";
+  gap: 16;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+}
+
+style LabPill extends LiquidDemoCard {
+  kind: "ROW";
+  width: 190;
+  height: 46;
+  padding: { horizontal: 16, vertical: 0 };
+  radius: 999;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+}
+
+style LabCircle extends LiquidDemoCard {
+  width: 74;
+  height: 74;
+  padding: 0;
+  radius: 999;
+}
+
+style LabChip extends LiquidDemoCard {
+  kind: "ROW";
+  width: 140;
+  height: 46;
+  padding: { horizontal: 12, vertical: 0 };
+  radius: 16;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+}
+
+style LabWideCard extends LiquidDemoCard {
+  width: { weight: 1 };
+  height: 120;
+  padding: { horizontal: 20, vertical: 16 };
+  gap: 6;
+  radius: 30;
+}
+
+style LabHalfCard extends LiquidDemoCard {
+  width: 300;
+  height: 96;
+  padding: { horizontal: 18, vertical: 14 };
+  gap: 5;
+  radius: 26;
+}
+
+style LabStripeBar extends LiquidDemoCard {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 62;
+  padding: { horizontal: 20, vertical: 0 };
+  radius: 999;
+  alignItems: "CENTER";
 }
 
 style DensityBackdrop extends Transparent {
@@ -745,6 +817,48 @@ component GlassRefractionFixture() {
       Text(text: "PERMANENT REFRACTION GRID", style: SectionText)
       Panel(style: RefractionDiagnosticCard)
       Panel(style: RefractionDiagnosticPill)
+    }
+  }
+}
+
+component GlassLabFixture() {
+  Panel(style: EffectFixtureRoot) {
+    Panel(
+      style: EffectWallpaper,
+      material: material("demo:luminance-lab")
+    )
+    Panel(style: LabLayout) {
+      Panel(style: LabRow) {
+        Panel(style: LabPill) {
+          Text(text: "PILL ON HUE", style: SectionText)
+        }
+        Panel(style: LabCircle)
+        Panel(style: LabChip) {
+          Text(text: "CHIP", style: SectionText)
+        }
+      }
+      Panel(style: LabWideCard) {
+        Text(text: "LIQUID GLASS", style: SectionText)
+        Text(
+          text: "One surface crossing every luminance stop the ramp provides.",
+          style: TelemetryText,
+          wrapMode: "WORD",
+          maxLines: 2
+        )
+      }
+      Panel(style: LabRow) {
+        Panel(style: LabHalfCard) {
+          Text(text: "OVER WHITE", style: SectionText)
+          Text(text: "legibility floor", style: TelemetryText)
+        }
+        Panel(style: LabHalfCard) {
+          Text(text: "OVER BLACK", style: SectionText)
+          Text(text: "no grey wash", style: TelemetryText)
+        }
+      }
+      Panel(style: LabStripeBar) {
+        Text(text: "HIGH FREQUENCY BAND — GHOSTING CHECK", style: SectionText)
+      }
     }
   }
 }

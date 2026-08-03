@@ -911,6 +911,15 @@
         }
       },
       {
+        "id": "demo:luminance-lab",
+        "blendMode": "straight_alpha",
+        "fallback": "strata:rounded_rect",
+        "parameters": [],
+        "shaders": {
+          "hlsl": "assets/strata/shaders/materials/luminance-lab.hlsl"
+        }
+      },
+      {
         "id": "demo:refraction-grid",
         "blendMode": "straight_alpha",
         "fallback": "strata:rounded_rect",
@@ -1009,7 +1018,7 @@
             "default": null
           },
           {
-            "name": "scattering",
+            "name": "metallic",
             "effectType": "FLOAT",
             "type": { "kind": "number" },
             "required": true,

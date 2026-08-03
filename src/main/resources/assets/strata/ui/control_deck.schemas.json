@@ -10,6 +10,19 @@
     "definitions": []
   },
   "host": [],
+  "materials": {
+    "definitions": [
+      {
+        "id": "deck:color-bath",
+        "blendMode": "straight_alpha",
+        "fallback": "strata:rounded_rect",
+        "parameters": [],
+        "shaders": {
+          "hlsl": "assets/strata/shaders/materials/color-bath.hlsl"
+        }
+      }
+    ]
+  },
   "effects": {
     "definitions": [
       {
@@ -98,7 +111,7 @@
             "default": null
           },
           {
-            "name": "scattering",
+            "name": "metallic",
             "effectType": "FLOAT",
             "type": { "kind": "number" },
             "required": true,

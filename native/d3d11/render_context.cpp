@@ -22,6 +22,7 @@
 #include <wrl/client.h>
 
 #include "blur_pass.hpp"
+#include "clip_mask.hpp"
 #include "effect_pass.hpp"
 #include "shaders.hpp"
 #include "texture_store.hpp"
@@ -97,6 +98,7 @@ struct RenderContext::Impl final {
             throw std::invalid_argument("D3D11 render context requires a device and context");
         }
         create_pipeline();
+        rounded_clips = std::make_unique<RoundedClipBuffer>(device, context);
         textures = std::make_unique<TextureStore>(device, context);
         blur = std::make_unique<BlurPass>(device, context);
         effects = std::make_unique<EffectPassRenderer>(device, context);
@@ -105,7 +107,9 @@ struct RenderContext::Impl final {
     void create_pipeline() {
         const ComPtr<ID3DBlob> vertex_bytecode = compile_shader(shaders::vertex, "main", "vs_5_0");
         const ComPtr<ID3DBlob> pixel_bytecode =
-            compile_shader(std::string(shaders::pixel_common) + std::string(shaders::builtin_entry),
+            compile_shader(std::string(shaders::pixel_common) +
+                               std::string(rounded_clip_hlsl) +
+                               std::string(shaders::builtin_entry),
                            "main", "ps_5_0");
         require_hresult(device->CreateVertexShader(vertex_bytecode->GetBufferPointer(),
                                                    vertex_bytecode->GetBufferSize(), nullptr,
@@ -137,7 +141,7 @@ struct RenderContext::Impl final {
                         "D3D11 vertex input layout creation");
 
         D3D11_BUFFER_DESC constant_desc{};
-        constant_desc.ByteWidth = 16U;
+        constant_desc.ByteWidth = 32U;
         constant_desc.Usage = D3D11_USAGE_DYNAMIC;
         constant_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         constant_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -248,6 +252,9 @@ struct RenderContext::Impl final {
             } else if (id == "multiply") {
                 target_blend.SrcBlend = D3D11_BLEND_DEST_COLOR;
                 target_blend.DestBlend = D3D11_BLEND_ZERO;
+            } else if (id == "rounded_multiply") {
+                target_blend.SrcBlend = D3D11_BLEND_DEST_COLOR;
+                target_blend.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
             } else {
                 throw std::invalid_argument("D3D11 renderer received an unknown blend mode");
             }
@@ -266,6 +273,7 @@ struct RenderContext::Impl final {
 
     void declare_material(const std::string_view id, const std::string_view hlsl_source) {
         const std::string source = std::string(shaders::pixel_common) +
+                                   std::string(rounded_clip_hlsl) +
                                    std::string(shaders::material_prelude) +
                                    std::string(hlsl_source) + std::string(shaders::material_entry);
         const ComPtr<ID3DBlob> bytecode = compile_shader(source, "main", "ps_5_0");
@@ -303,7 +311,23 @@ struct RenderContext::Impl final {
             static_cast<LONG>(std::min<std::uint64_t>(bottom, height)),
         };
         context->RSSetScissorRects(1U, &scissor);
-        context->OMSetBlendState(blend_state(batch.blend_mode), nullptr, 0xffffffffU);
+        const bool clipped = !batch.rounded_clips.empty();
+        const std::string_view resolved_blend =
+            clipped && batch.blend_mode == "opaque"
+                ? std::string_view("straight_alpha")
+                : clipped && batch.blend_mode == "multiply"
+                    ? std::string_view("rounded_multiply")
+                    : std::string_view(batch.blend_mode);
+        context->OMSetBlendState(blend_state(resolved_blend), nullptr, 0xffffffffU);
+        const RoundedClipMode clip_mode =
+            batch.blend_mode == "premultiplied_alpha"
+                ? RoundedClipMode::premultiplied_alpha
+                : clipped && batch.blend_mode == "multiply"
+                    ? RoundedClipMode::multiply
+                    : !clipped || batch.blend_mode == "multiply"
+                        ? RoundedClipMode::hard
+                        : RoundedClipMode::straight_alpha;
+        rounded_clips->bind(batch.rounded_clips, clip_mode);
         textures->bind(batch);
         context->DrawIndexed(batch.index_count, batch.first_index,
                              static_cast<INT>(batch.base_vertex));
@@ -346,10 +370,14 @@ struct RenderContext::Impl final {
         require_hresult(
             context->Map(viewport_buffer.Get(), 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped),
             "D3D11 viewport constant mapping");
-        const std::array<float, 4U> frame_values{
+        const std::array<float, 8U> frame_values{
             static_cast<float>(logical_width),
             static_cast<float>(logical_height),
+            static_cast<float>(width),
+            static_cast<float>(height),
             static_cast<float>(frame_seconds),
+            0.0F,
+            0.0F,
             0.0F,
         };
         std::memcpy(mapped.pData, frame_values.data(), sizeof(frame_values));
@@ -484,6 +512,7 @@ struct RenderContext::Impl final {
     std::map<std::string, ComPtr<ID3D11BlendState>, std::less<>> blends;
     std::map<std::string, ComPtr<ID3D11PixelShader>, std::less<>> material_shaders;
     std::unique_ptr<TextureStore> textures;
+    std::unique_ptr<RoundedClipBuffer> rounded_clips;
     std::unique_ptr<BlurPass> blur;
     std::unique_ptr<EffectPassRenderer> effects;
 };

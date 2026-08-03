@@ -257,6 +257,7 @@ void command_payload(Bytes& output, const RenderCommand& command) {
             number(output, value.spread);
         } else if constexpr (std::is_same_v<Command, ClipPushRenderCommand>) {
             rect(output, value.rect);
+            radii(output, value.radii);
         } else if constexpr (std::is_same_v<Command, TransformPushRenderCommand>) {
             number(output, value.m00);
             number(output, value.m01);
@@ -287,18 +288,18 @@ std::vector<std::uint8_t> encode_render_packet(
     const std::uint64_t frame_index
 ) {
     if (commands.size() > std::numeric_limits<std::uint32_t>::max()) {
-        throw std::length_error("render command count exceeds the packet-v2 limit");
+        throw std::length_error("render command count exceeds the packet-v3 limit");
     }
     Bytes output;
     constexpr std::string_view magic = "STRATARP";
     output.insert(output.end(), magic.begin(), magic.end());
-    integer(output, std::uint32_t{2U});
+    integer(output, std::uint32_t{3U});
     integer(output, static_cast<std::uint32_t>(commands.size()));
     integer(output, frame_index);
     for (const RenderCommand& command : commands.commands()) {
         Bytes payload = detail::encode_command_payload_v2(command);
         if (payload.size() > std::numeric_limits<std::uint32_t>::max()) {
-            throw std::length_error("render command payload exceeds the packet-v2 limit");
+            throw std::length_error("render command payload exceeds the packet-v3 limit");
         }
         integer(output, static_cast<std::uint32_t>(command.index()));
         integer(output, static_cast<std::uint32_t>(payload.size()));

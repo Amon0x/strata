@@ -606,8 +606,8 @@ void WidgetRenderScope::shadow(
     });
 }
 
-void WidgetRenderScope::push_clip(const Rect bounds) {
-    output_.emplace_back(ClipPushRenderCommand{bounds});
+void WidgetRenderScope::push_clip(const Rect bounds, const CornerRadii radii) {
+    output_.emplace_back(ClipPushRenderCommand{bounds, radii});
 }
 
 void WidgetRenderScope::pop_clip() { output_.emplace_back(ClipPopRenderCommand{}); }

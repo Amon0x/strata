@@ -24,6 +24,7 @@
 #include <wrl/client.h>
 
 #include "blur_shaders.hpp"
+#include "clip_mask.hpp"
 #include <strata/render_packet.hpp>
 
 namespace strata::d3d11 {
@@ -222,7 +223,11 @@ struct BlurPass::Impl final {
             throw std::invalid_argument("D3D11 blur requires a device and context");
         }
         const ComPtr<ID3DBlob> vertex_code = compile_shader(blur_shaders::vertex, "vs_5_0");
-        const ComPtr<ID3DBlob> pixel_code = compile_shader(blur_shaders::pixel, "ps_5_0");
+        const ComPtr<ID3DBlob> pixel_code = compile_shader(
+            std::string(rounded_clip_hlsl) + std::string(blur_shaders::pixel),
+            "ps_5_0"
+        );
+        rounded_clips = std::make_unique<RoundedClipBuffer>(device, context);
         require_hresult(device->CreateVertexShader(vertex_code->GetBufferPointer(),
                                                    vertex_code->GetBufferSize(), nullptr,
                                                    &vertex_shader),
@@ -233,7 +238,7 @@ struct BlurPass::Impl final {
                         "blur pixel shader creation");
 
         D3D11_BUFFER_DESC constant_desc{};
-        constant_desc.ByteWidth = 48U;
+        constant_desc.ByteWidth = 80U;
         constant_desc.Usage = D3D11_USAGE_DYNAMIC;
         constant_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         constant_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -327,20 +332,30 @@ struct BlurPass::Impl final {
 
     void bind_constants(const std::uint32_t input_width, const std::uint32_t input_height,
                         const float direction_x, const float direction_y, const float radius,
-                        const UvRect source_uv) const {
-        const std::array<float, 12U> values{
+                        const UvRect source_uv, const UvRect original_uv,
+                        const bool composite_clipped, const double logical_width,
+                        const double logical_height) const {
+        const std::array<float, 20U> values{
             1.0F / static_cast<float>(input_width),
             1.0F / static_cast<float>(input_height),
             direction_x,
             direction_y,
             radius,
-            0.0F,
+            composite_clipped ? 1.0F : 0.0F,
             0.0F,
             0.0F,
             source_uv.u,
             source_uv.v,
             source_uv.width,
             source_uv.height,
+            original_uv.u,
+            original_uv.v,
+            original_uv.width,
+            original_uv.height,
+            static_cast<float>(logical_width),
+            static_cast<float>(logical_height),
+            static_cast<float>(width),
+            static_cast<float>(height),
         };
         D3D11_MAPPED_SUBRESOURCE mapped{};
         require_hresult(context->Map(constants.Get(), 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped),
@@ -352,19 +367,26 @@ struct BlurPass::Impl final {
     }
 
     void pass(ID3D11RenderTargetView* const output, ID3D11ShaderResourceView* const input,
+              ID3D11ShaderResourceView* const original,
               const PixelRect output_rect, const PixelRect scissor, const std::uint32_t input_width,
               const std::uint32_t input_height, const float direction_x, const float direction_y,
-              const float radius, const UvRect source_uv = {}) const {
+              const float radius, const UvRect source_uv = {}, const UvRect original_uv = {},
+              const bool composite_clipped = false, const double logical_width = 1.0,
+              const double logical_height = 1.0) const {
         context->OMSetRenderTargets(1U, &output, nullptr);
         const D3D11_VIEWPORT output_viewport = viewport(output_rect);
         context->RSSetViewports(1U, &output_viewport);
         const D3D11_RECT output_scissor = d3d_rect(scissor);
         context->RSSetScissorRects(1U, &output_scissor);
-        bind_constants(input_width, input_height, direction_x, direction_y, radius, source_uv);
-        context->PSSetShaderResources(0U, 1U, &input);
+        bind_constants(
+            input_width, input_height, direction_x, direction_y, radius, source_uv,
+            original_uv, composite_clipped, logical_width, logical_height
+        );
+        ID3D11ShaderResourceView* resources[]{input, original};
+        context->PSSetShaderResources(0U, 2U, resources);
         context->Draw(3U, 0U);
-        ID3D11ShaderResourceView* const none = nullptr;
-        context->PSSetShaderResources(0U, 1U, &none);
+        ID3D11ShaderResourceView* const none[]{nullptr, nullptr};
+        context->PSSetShaderResources(0U, 2U, none);
     }
 
     [[nodiscard]] BlurPassTelemetry
@@ -405,11 +427,11 @@ struct BlurPass::Impl final {
             blur->targets.target_width,
             blur->targets.target_height,
         };
-        pass(target.read.target.Get(), target.source.view.Get(), whole_target, whole_target,
+        pass(target.read.target.Get(), target.source.view.Get(), nullptr, whole_target, whole_target,
              blur->targets.source_width, blur->targets.source_height, 0.0F, 0.0F, 0.0F);
-        pass(target.write.target.Get(), target.read.view.Get(), whole_target, whole_target,
+        pass(target.write.target.Get(), target.read.view.Get(), nullptr, whole_target, whole_target,
              blur->targets.target_width, blur->targets.target_height, 1.0F, 0.0F, blur->radius);
-        pass(target.read.target.Get(), target.write.view.Get(), whole_target, whole_target,
+        pass(target.read.target.Get(), target.write.view.Get(), nullptr, whole_target, whole_target,
              blur->targets.target_width, blur->targets.target_height, 0.0F, 1.0F, blur->radius);
         const UvRect effect_uv{
             static_cast<float>(blur->scaled_effect.x) / blur->targets.target_width,
@@ -417,8 +439,21 @@ struct BlurPass::Impl final {
             static_cast<float>(blur->scaled_effect.width) / blur->targets.target_width,
             static_cast<float>(blur->scaled_effect.height) / blur->targets.target_height,
         };
-        pass(output, target.read.view.Get(), blur->effect, blur->effect, blur->targets.target_width,
-             blur->targets.target_height, 0.0F, 0.0F, 0.0F, effect_uv);
+        const UvRect original_uv{
+            static_cast<float>(blur->effect.x - blur->source.x) / blur->source.width,
+            static_cast<float>(blur->effect.y - blur->source.y) / blur->source.height,
+            static_cast<float>(blur->effect.width) / blur->source.width,
+            static_cast<float>(blur->effect.height) / blur->source.height,
+        };
+        rounded_clips->bind(
+            batch.rounded_clips,
+            RoundedClipMode::premultiplied_alpha
+        );
+        pass(
+            output, target.read.view.Get(), target.source.view.Get(), blur->effect, blur->effect,
+            blur->targets.target_width, blur->targets.target_height, 0.0F, 0.0F, 0.0F,
+            effect_uv, original_uv, !batch.rounded_clips.empty(), logical_width, logical_height
+        );
         return BlurPassTelemetry{
             4U,
             blur->targets.target_width,
@@ -437,6 +472,7 @@ struct BlurPass::Impl final {
     ComPtr<ID3D11Buffer> constants;
     ComPtr<ID3D11SamplerState> sampler;
     ComPtr<ID3D11RasterizerState> rasterizer;
+    std::unique_ptr<RoundedClipBuffer> rounded_clips;
     std::map<TargetKey, TargetSet> targets;
     std::uint64_t retained_pixels = 0U;
     std::uint64_t usage_clock = 0U;

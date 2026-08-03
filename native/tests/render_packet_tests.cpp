@@ -96,8 +96,8 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
 
     host::RenderPacketDecoder decoder;
     const std::vector<std::uint8_t> encoded = encode(commands, resources);
-    check(encoded.size() > 12U && encoded[8U] == 7U,
-          "effect packet did not use render protocol v7");
+    check(encoded.size() > 12U && encoded[8U] == 8U,
+          "effect packet did not use render protocol v8");
     const host::RenderPacket packet = decoder.decode(encoded);
     check(packet.batches.size() == 4U, "effect packet changed its ordered batch count");
     const auto* backdrop = std::get_if<host::EffectBatch>(&packet.batches[0U]);
@@ -110,6 +110,101 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
               std::holds_alternative<host::DrawBatch>(packet.batches[2U]) &&
               std::holds_alternative<host::ContentEffectEndBatch>(packet.batches[3U]),
           "content effect isolation markers did not round-trip in order");
+}
+
+void test_rounded_clip_batches_round_trip(const std::filesystem::path& resources) {
+    using namespace strata;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::TransformPushRenderCommand{
+        2.0, 0.0, 5.0,
+        0.0, 0.5, 7.0,
+    });
+    commands.append(ui::ClipPushRenderCommand{
+        ui::Rect{8.0, 10.0, 120.0, 80.0},
+        ui::CornerRadii::all(14.0),
+    });
+    commands.append(ui::SolidRectRenderCommand{
+        ui::Rect{8.0, 10.0, 120.0, 80.0},
+        ui::RenderColor{30U, 80U, 140U, 255U},
+    });
+    commands.append(ui::BlurRegionRenderCommand{
+        ui::Rect{8.0, 10.0, 120.0, 80.0},
+        2.0,
+        1U,
+    });
+    commands.append(ui::BackdropEffectRenderCommand{
+        ui::Rect{8.0, 10.0, 120.0, 80.0},
+        {},
+        effect(ui::EffectInput::backdrop),
+    });
+    commands.append(ui::ContentEffectPushRenderCommand{
+        ui::Rect{8.0, 10.0, 120.0, 80.0},
+        {},
+        effect(ui::EffectInput::content),
+    });
+    commands.append(ui::SolidRectRenderCommand{
+        ui::Rect{8.0, 10.0, 120.0, 80.0},
+        ui::RenderColor{50U, 90U, 160U, 255U},
+    });
+    commands.append(ui::ContentEffectPopRenderCommand{});
+    commands.append(ui::ClipPopRenderCommand{});
+    commands.append(ui::TransformPopRenderCommand{});
+
+    host::RenderPacketDecoder decoder;
+    const host::RenderPacket packet = decoder.decode(encode(commands, resources));
+    check(packet.batches.size() == 6U,
+          "rounded clipping introduced an unnecessary isolation batch");
+    const auto* draw = std::get_if<host::DrawBatch>(&packet.batches.front());
+    check(draw != nullptr && draw->rounded_clips.size() == 1U,
+          "rounded clip did not remain attached to its descendant draw");
+    const host::RoundedClip& clip = draw->rounded_clips.front();
+    check(clip.x == 8.0 && clip.y == 10.0 && clip.width == 120.0 &&
+              clip.height == 80.0 &&
+              clip.radii == std::array<double, 4U>{14.0, 14.0, 14.0, 14.0} &&
+              clip.inverse_transform ==
+                  std::array<double, 6U>{0.5, 0.0, -2.5, 0.0, 2.0, -14.0},
+          "rounded clip geometry did not survive submission packet planning");
+    const auto* blur = std::get_if<host::BlurBatch>(&packet.batches[1U]);
+    const auto* backdrop = std::get_if<host::EffectBatch>(&packet.batches[2U]);
+    check(blur != nullptr && blur->rounded_clips == draw->rounded_clips &&
+              backdrop != nullptr && backdrop->rounded_clips == draw->rounded_clips,
+          "rounded clip state did not reach blur/effect batches");
+    const auto* content = std::get_if<host::EffectBatch>(&packet.batches[3U]);
+    const auto* content_draw = std::get_if<host::DrawBatch>(&packet.batches[4U]);
+    check(content != nullptr && content->kind == host::EffectBatchKind::content_begin &&
+              content->rounded_clips == draw->rounded_clips &&
+              content_draw != nullptr && content_draw->rounded_clips.empty() &&
+              std::holds_alternative<host::ContentEffectEndBatch>(packet.batches[5U]),
+          "content isolation applied an inherited rounded clip to both input and composite");
+}
+
+void test_large_scale_rounded_clip_round_trip(const std::filesystem::path& resources) {
+    using namespace strata;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::TransformPushRenderCommand{
+        100'000'000.0, 0.0, 0.0,
+        0.0, 100'000'000.0, 0.0,
+    });
+    commands.append(ui::ClipPushRenderCommand{
+        ui::Rect{0.0, 0.0, 0.000001, 0.000001},
+        ui::CornerRadii::all(0.0000002),
+    });
+    commands.append(ui::SolidRectRenderCommand{
+        ui::Rect{0.0, 0.0, 0.000001, 0.000001},
+        ui::RenderColor{255U, 255U, 255U, 255U},
+    });
+    commands.append(ui::ClipPopRenderCommand{});
+    commands.append(ui::TransformPopRenderCommand{});
+
+    host::RenderPacketDecoder decoder;
+    const host::RenderPacket packet = decoder.decode(encode(commands, resources));
+    const auto* draw = packet.batches.size() == 1U
+        ? std::get_if<host::DrawBatch>(&packet.batches.front())
+        : nullptr;
+    check(draw != nullptr && draw->rounded_clips.size() == 1U &&
+              draw->rounded_clips.front().inverse_transform[0U] == 0.00000001 &&
+              draw->rounded_clips.front().inverse_transform[4U] == 0.00000001,
+          "packet decoder rejected or changed a valid large-scale affine clip");
 }
 
 void test_invalid_effect_refresh_rate_is_rejected(const std::filesystem::path& resources) {
@@ -125,7 +220,8 @@ void test_invalid_effect_refresh_rate_is_rejected(const std::filesystem::path& r
     check(offsets.size() == 1U, "refresh-rate fixture changed its batch shape");
     const std::size_t effect_record = offsets.front() + 2U * sizeof(std::uint32_t);
     const std::size_t effect_id_length_offset =
-        effect_record + sizeof(std::uint32_t) + 4U * sizeof(std::uint32_t) + 8U * sizeof(double);
+        effect_record + 2U * sizeof(std::uint32_t) +
+        4U * sizeof(std::uint32_t) + 8U * sizeof(double);
     const std::size_t opacity_offset =
         effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
     const double invalid_refresh_rate = -1.0;
@@ -175,7 +271,8 @@ void test_repeated_epoch_still_validates_batches(const std::filesystem::path& re
     check(offsets.size() == 2U, "repeated-epoch fixture changed its batch shape");
     const std::size_t effect_record = offsets.front() + 2U * sizeof(std::uint32_t);
     const std::size_t effect_id_length_offset =
-        effect_record + sizeof(std::uint32_t) + 4U * sizeof(std::uint32_t) + 8U * sizeof(double);
+        effect_record + 2U * sizeof(std::uint32_t) +
+        4U * sizeof(std::uint32_t) + 8U * sizeof(double);
     const std::size_t opacity_offset =
         effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
     const double changed_opacity = 0.25;
@@ -264,6 +361,8 @@ int main(const int argument_count, const char* const* const arguments) {
         if (argument_count < 2)
             throw std::invalid_argument("resource root is required");
         test_effect_batches_round_trip(arguments[1]);
+        test_rounded_clip_batches_round_trip(arguments[1]);
+        test_large_scale_rounded_clip_round_trip(arguments[1]);
         test_invalid_effect_refresh_rate_is_rejected(arguments[1]);
         test_unbalanced_content_effect_is_rejected(arguments[1]);
         test_repeated_epoch_still_validates_batches(arguments[1]);

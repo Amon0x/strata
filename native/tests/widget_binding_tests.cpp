@@ -630,6 +630,16 @@ overlay Main { root ControlDefaults() }
             *surface.input().focused_key() != "defaults.custom-select.trigger",
         "programmatic focus escaped into authored Select presentation"
     );
+    // The preceding state changes may reconcile the component subtree. Retained identities are
+    // stable across that work; raw node/layout addresses are frame-local observations.
+    radio = surface.tree().find_key("defaults.radio");
+    radio_layout = radio != nullptr
+        ? surface.layout().find(radio->identity())
+        : nullptr;
+    check(
+        radio != nullptr && radio_layout != nullptr,
+        "RadioGroup disappeared after sibling Select reconciliation"
+    );
     for (const auto& child : radio->children()) {
         const strata::ui::LayoutRecord* row = surface.layout().find(child->identity());
         const auto style = child->description().properties.find("$layout");
@@ -678,6 +688,12 @@ void test_scrolled_clipped_subtree_render_cache(
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
 ) {
     constexpr std::string_view source = R"(
+style RoundedCachePanel {
+  width: 240;
+  height: 160;
+  clip: true;
+  radius: 12;
+}
 overlay Main {
   root Scroll(
     key: "cache.scroll",
@@ -688,7 +704,7 @@ overlay Main {
     Panel(key: "cache.top", layout: { width: 240, height: 160, clip: true }) {
       Text(text: "Top clipped content")
     }
-    Panel(key: "cache.bottom", layout: { width: 240, height: 160, clip: true }) {
+    Panel(key: "cache.bottom", style: RoundedCachePanel) {
       Text(text: "Bottom clipped content")
     }
   }
@@ -757,6 +773,7 @@ overlay Main {
     std::vector<strata::ui::Point> translation_stack;
     std::vector<strata::ui::Rect> clip_stack;
     bool emitted_current_clip = false;
+    bool emitted_rounded_current_clip = false;
     bool reused_translated_clip = false;
     for (const strata::ui::RenderCommand& command : surface.render_commands().commands()) {
         if (const auto* transform_push =
@@ -787,6 +804,8 @@ overlay Main {
             effective_clip = effective_clip.clip_intersection(translated);
             if (translated == *bottom_layout->local_clip) {
                 emitted_current_clip = effective_clip == *bottom_layout->clip;
+                emitted_rounded_current_clip =
+                    clip_push->radii == strata::ui::CornerRadii::all(12.0);
                 reused_translated_clip = translation != strata::ui::Point{};
             }
         } else if (std::holds_alternative<strata::ui::ClipPopRenderCommand>(command)) {
@@ -802,6 +821,10 @@ overlay Main {
     check(
         emitted_current_clip,
         "retained subtree translation did not recompute the visible clip intersection"
+    );
+    check(
+        emitted_rounded_current_clip,
+        "layout clipping discarded the authored descendant corner radius"
     );
     check(
         reused_translated_clip,

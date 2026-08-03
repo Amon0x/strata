@@ -1546,7 +1546,7 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Packet v7 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * Packet v8 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
  * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
  * [u32 kind, u32 payload byte count, payload]:
  *
@@ -1556,14 +1556,17 @@ typedef struct strata_surface_frame_info {
  *   little-endian u32 indices, submission batch records.
  *
  * A vertex is 88 bytes: f32 x/y/z/u/v, u8 red/green/blue/alpha, then sixteen f32 material values.
- * Draw payloads contain source order, a u32 framebuffer scissor, material/blend strings, optional
- * texture id, and base-vertex/first-index/index-count. Blur payloads contain the common source
- * order/scissor followed by f64 x/y/width/height/radius and u32 downsample. Backdrop/content-begin
- * effect payloads contain source order/scissor; f64 x/y/width/height; four f64 corner radii; the
+ * Every batch payload begins with source order, a u32 framebuffer scissor, and a u32 rounded-clip
+ * count. Each rounded clip contains f64 x/y/width/height, four f64 corner radii, and a six-f64
+ * inverse affine transform from presented logical pixels into that clip's local space. Draw
+ * payloads continue with material/blend strings, optional texture id, and
+ * base-vertex/first-index/index-count. Blur payloads continue with f64 x/y/width/height/radius and
+ * u32 downsample. Backdrop/content-begin effect payloads continue with f64 x/y/width/height; four
+ * f64 corner radii; the
  * effect-id string; f64 opacity; f64 maximum refresh rate (zero = unbounded); a u32
  * packed-parameter count; and up to sixteen f64 values.
- * Content-end carries only source order/scissor. The begin/end records form a validated stack
- * with at most four simultaneously isolated CONTENT layers.
+ * Content-end carries only the common prefix. Rounded clip stacks are limited to sixteen entries;
+ * authored CONTENT effect isolation is limited to four layers.
  * Resource payloads begin
  * with a texture-id string. Atlas create/upload then carry u32 format (0 = R8, 1 = RGBA8) and u32
  * x/y/width/height; upload adds u32 byte count and raw texels. Release has no additional fields.
@@ -1578,7 +1581,7 @@ typedef struct strata_surface_frame_info {
  *
  * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
  * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
- * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v7 records.
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v8 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
@@ -1587,7 +1590,8 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_5 UINT32_C(5)
 #define STRATA_RENDER_PACKET_VERSION_6 UINT32_C(6)
 #define STRATA_RENDER_PACKET_VERSION_7 UINT32_C(7)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_7
+#define STRATA_RENDER_PACKET_VERSION_8 UINT32_C(8)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_8
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_EFFECT_DEFAULT_REFRESH_RATE 240.0
