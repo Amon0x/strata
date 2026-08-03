@@ -1,0 +1,1110 @@
+// F4 Tuning Panel: a dense real-time tuning overlay. Unlike the Control Deck, which uses optic
+// glass as a restrained accent over solid chrome, every surface here is glass: the shell, the
+// category rail, each module card, the readout column, and the select popup. Modules expose the
+// optic-glass material's own parameters, so the panel is a control surface for the material it is
+// made of.
+
+style Clear { background: null; border: null; }
+
+style TuneRoot {
+  kind: "OVERLAY";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 26;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  background: #04070FFF;
+  border: null;
+}
+
+style TuneShell {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  maxWidth: 1200;
+  maxHeight: 730;
+  radius: 24;
+  clip: true;
+  background: null;
+  border: null;
+  effect: effect(
+    "tune:optic-glass",
+    blurRadius: 22,
+    downsample: 2,
+    refraction: 1.15,
+    tint: #10161E1C,
+    saturation: 0.86,
+    highlight: 0.72,
+    noise: 0.1,
+    transparency: 0.62,
+    thickness: 1.2,
+    metallic: 0.86,
+    edgeContrast: 1.0,
+    contrast: 0.88,
+    luminosity: 0.99
+  );
+}
+
+// One glass identity shared by every inner surface, so the panel reads as a single material at two
+// depths rather than a collection of unrelated treatments.
+style GlassPane {
+  background: null;
+  border: null;
+  effect: effect(
+    "tune:optic-glass",
+    blurRadius: 12,
+    downsample: 2,
+    refraction: 0.95,
+    tint: #16202A14,
+    saturation: 0.94,
+    highlight: 0.82,
+    noise: 0.09,
+    transparency: 0.9,
+    thickness: 0.85,
+    metallic: 0.76,
+    edgeContrast: 1.0,
+    contrast: 0.93,
+    luminosity: 1.02
+  );
+}
+
+style TuneHeader {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 58;
+  padding: { horizontal: 20, vertical: 12 };
+  gap: 12;
+  alignItems: "CENTER";
+  background: #0B10175E;
+  border: null;
+}
+style TuneHeaderRule { width: { weight: 1 }; height: 1; background: #DCE4E918; border: null; }
+style TuneGlint {
+  width: { weight: 1 };
+  height: 1;
+  background: {
+    kind: "linear",
+    angle: 90,
+    stops: [ { color: #F4FAFF00 }, { color: #EEF8FF4A }, { color: #F4FAFF00 } ]
+  };
+  border: null;
+}
+
+style TuneTitle { font: "strata:fonts/default-medium"; pixelSize: 21; color: #EEF3F7FF; }
+style TuneScope { font: "strata:fonts/mono"; pixelSize: 11; color: #8FA6B6FF; }
+style TuneHint { font: "strata:fonts/mono"; pixelSize: 11; color: #6E7C86FF; }
+
+style HeaderChip extends GlassPane {
+  kind: "ROW";
+  width: "content";
+  height: 28;
+  padding: { horizontal: 10, vertical: 5 };
+  gap: 7;
+  radius: 999;
+  alignItems: "CENTER";
+}
+style ChipText { font: "strata:fonts/mono"; pixelSize: 10; color: #C4D6E2FF; }
+style ChipDot { kind: "PANEL"; width: 6; height: 6; radius: 3; background: #6FE3A6FF; border: null; }
+
+style TuneBody extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 14;
+  gap: 14;
+}
+
+style TuneRail extends Clear {
+  kind: "COLUMN";
+  width: 176;
+  height: { weight: 1 };
+  gap: 6;
+}
+
+style RailItem {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 42;
+  padding: { horizontal: 11, vertical: 8 };
+  gap: 10;
+  alignItems: "CENTER";
+  radius: 11;
+  background: #C5D4DF00;
+  border: null;
+  hoverOverlay: #C3D3DF0D;
+  activeOverlay: #C3D3DF16;
+  animateChanges: { properties: ["background"], policy: "fast" };
+}
+style RailItemSelected extends GlassPane {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 42;
+  padding: { horizontal: 11, vertical: 8 };
+  gap: 10;
+  alignItems: "CENTER";
+  radius: 11;
+}
+style RailIcon extends Clear { width: 16; height: 16; }
+style RailLabel { pixelSize: 13; color: #8A97A1FF; }
+style RailLabelSelected { font: "strata:fonts/default-medium"; pixelSize: 13; color: #E6EDF2FF; }
+style RailCount { font: "strata:fonts/mono"; pixelSize: 10; color: #6E7C86FF; }
+style RailCountSelected { font: "strata:fonts/mono"; pixelSize: 10; color: #A9C0D0FF; }
+
+style RailFoot extends GlassPane {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: 11;
+  gap: 4;
+  radius: 13;
+}
+style RailFootTitle { font: "strata:fonts/default-medium"; pixelSize: 11; color: #C6D2DAFF; }
+style RailFootCopy { pixelSize: 10; color: #6E7C86FF; }
+
+style TuneMain extends Clear {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  gap: 11;
+}
+
+style MainHead extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 40;
+  gap: 12;
+  alignItems: "CENTER";
+}
+style MainTitle { font: "strata:fonts/default-medium"; pixelSize: 17; color: #E9EEF2FF; }
+style MainSub { pixelSize: 11; color: #78858DFF; }
+style HeadCopy extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 2; }
+
+style TuneScroll {
+  kind: "SCROLL";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  background: null;
+  border: null;
+}
+style ModuleGrid extends Clear {
+  kind: "GRID";
+  width: { weight: 1 };
+  height: "content";
+  gap: 11;
+  padding: { right: 6, bottom: 6 };
+}
+
+style ModuleCard extends GlassPane {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: { horizontal: 13, vertical: 12 };
+  gap: 9;
+  radius: 16;
+}
+style ModuleHead extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 26;
+  gap: 9;
+  alignItems: "CENTER";
+}
+style ModuleName { font: "strata:fonts/default-medium"; pixelSize: 13; color: #DDE5EBFF; }
+style ModuleTag {
+  kind: "PANEL";
+  width: "content";
+  height: 17;
+  padding: { horizontal: 6, vertical: 2 };
+  radius: 4;
+  background: #A9C2D318;
+  border: { width: 1, color: #D3E1EA26 };
+}
+style ModuleTagText { font: "strata:fonts/mono"; pixelSize: 9; color: #A9C0D0FF; }
+style ModuleRule { width: { weight: 1 }; height: 1; background: #D7E0E514; border: null; }
+
+style TuneRow extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 34;
+  gap: 10;
+  alignItems: "CENTER";
+}
+style RowCopy extends Clear {
+  kind: "COLUMN";
+  width: 132;
+  height: "content";
+  gap: 1;
+}
+style RowLabel { pixelSize: 12; color: #BCC6CDFF; }
+style RowDetail { pixelSize: 10; color: #6C7981FF; }
+style RowTrack extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 26;
+  gap: 9;
+  alignItems: "CENTER";
+}
+style RowValue {
+  font: "strata:fonts/mono";
+  pixelSize: 11;
+  color: #C9DCE8FF;
+  width: 44;
+}
+style TuneSlider {
+  width: { weight: 1 };
+  height: 22;
+  track: #DCE7EF1F;
+  fill: #9EC6E0FF;
+  thumb: #EAF3FAFF;
+  trackHeight: 3;
+  trackRadius: 2;
+  thumbSize: 12;
+  thumbRadius: 6;
+  focusRing: { width: 1, color: #AEC3D078 };
+}
+
+style CheckRow extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 32;
+  gap: 9;
+  alignItems: "CENTER";
+}
+style CheckCopy extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 1; }
+style CheckText { pixelSize: 12; color: #BCC6CDFF; }
+style CheckTextHover { pixelSize: 12; color: #EDF1F3FF; }
+style CheckMeta { pixelSize: 10; color: #6C7981FF; }
+style SwitchShell {
+  kind: "PANEL";
+  width: 32;
+  height: 18;
+  radius: 999;
+  alignItems: "START";
+  justifyContent: "CENTER";
+  padding: { horizontal: 3 };
+  background: #10161CD8;
+  border: { width: 1, color: #5B6A75FF };
+  animateChanges: { properties: ["background", "border"], policy: "fast" };
+}
+style SwitchShellHover extends SwitchShell { border: { width: 1, color: #8DA5B4FF }; }
+style SwitchShellOn extends SwitchShell {
+  justifyContent: "END";
+  background: #6E93AAFF;
+  border: { width: 1, color: #B6CDDAFF };
+}
+style SwitchShellOnHover extends SwitchShellOn { background: #7EA3B9FF; }
+style SwitchKnob { kind: "PANEL"; width: 12; height: 12; radius: 999; background: #D6E2EAFF; border: null; }
+style SwitchKnobOn extends SwitchKnob { background: #F4FAFEFF; }
+
+style SelectRow extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 38;
+  gap: 10;
+  alignItems: "CENTER";
+}
+style TuneSelectTrigger {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 30;
+  padding: { horizontal: 10, vertical: 6 };
+  gap: 8;
+  alignItems: "CENTER";
+  radius: 8;
+  background: #131A21C4;
+  border: { width: 1, color: #D6E0E622 };
+  focusRing: { width: 1, color: #AEC3D078 };
+}
+style TuneSelectPopup extends GlassPane {
+  kind: "COLUMN";
+  width: 210;
+  height: "content";
+  padding: 5;
+  gap: 2;
+  radius: 12;
+  anchorSide: "BOTTOM";
+  anchorAlign: "START";
+  anchorGap: 5;
+  anchorFlip: true;
+  anchorShift: true;
+}
+style TuneSelectItem {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 30;
+  padding: { horizontal: 9, vertical: 7 };
+  gap: 8;
+  alignItems: "CENTER";
+  radius: 6;
+  background: #BBCBD700;
+  border: null;
+  animateChanges: { properties: ["background"], policy: "fast" };
+}
+style TuneSelectItemSelected extends TuneSelectItem { background: #A8BCC91C; }
+style TuneSelectItemActive extends TuneSelectItem { background: #B7C8D322; }
+style SelectValue { font: "strata:fonts/default-medium"; pixelSize: 12; color: #DEE6EBFF; }
+style SelectMeta { font: "strata:fonts/mono"; pixelSize: 9; color: #7C8992FF; }
+style SelectedMark { kind: "PANEL"; width: 5; height: 5; radius: 3; background: #BDD1DEFF; border: null; }
+style EmptyMark extends Clear { width: 5; height: 5; }
+
+style ReadoutColumn extends Clear {
+  kind: "COLUMN";
+  width: 218;
+  height: { weight: 1 };
+  gap: 11;
+}
+style ReadoutCard extends GlassPane {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  padding: { horizontal: 12, vertical: 11 };
+  gap: 8;
+  radius: 15;
+}
+style ReadoutTitle { font: "strata:fonts/mono"; pixelSize: 10; color: #90A3B0FF; }
+style ReadoutRow extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 20;
+  gap: 8;
+  alignItems: "CENTER";
+}
+style ReadoutKey { font: "strata:fonts/mono"; pixelSize: 10; color: #75838CFF; }
+style ReadoutVal { font: "strata:fonts/mono"; pixelSize: 10; color: #CFE0EBFF; }
+style ReadoutBar { kind: "PANEL"; width: { weight: 1 }; height: 3; radius: 2; background: #DCE7EF18; border: null; }
+style ReadoutBarFill { kind: "PANEL"; width: { weight: 0.64 }; height: 3; radius: 2; background: #8FC0DCFF; border: null; }
+
+style PreviewCard extends GlassPane {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: 108;
+  padding: 12;
+  gap: 6;
+  radius: 15;
+  justifyContent: "END";
+}
+style PreviewLabel { font: "strata:fonts/mono"; pixelSize: 9; color: #8FA6B6FF; }
+style PreviewValue { font: "strata:fonts/default-medium"; pixelSize: 15; color: #E9F2F8FF; }
+
+animation TuneEnter {
+  from { opacity: 0, translateY: 12, scale: 0.987 }
+  to { opacity: 1, translateY: 0, scale: 1 }
+  duration: 190ms;
+  easing: "cubic-out";
+  fillMode: "FORWARDS";
+}
+animation PopupTransition {
+  from { opacity: 0, translateY: -4 }
+  to { opacity: 1, translateY: 0 }
+  duration: 120ms;
+  easing: "cubic-out";
+  fillMode: "FORWARDS";
+}
+
+component RailGlyph(icon: string, selected: boolean) {
+  if icon == "LENS" {
+    Draw(style: RailIcon, shapes: [
+      {
+        kind: "circle",
+        center: { x: 0.50, y: 0.50 },
+        radius: 0.36,
+        stroke: selected ? #FFFFFFFF : #9BA6AEFF,
+        strokeStyle: { width: 1.5 }
+      },
+      {
+        kind: "path",
+        commands: "M 0.28 0.66 C 0.36 0.42, 0.58 0.30, 0.74 0.34",
+        stroke: selected ? #FFFFFFFF : #9BA6AEFF,
+        strokeStyle: { width: 1.5, cap: "round" }
+      }
+    ])
+  } else if icon == "RIM" {
+    Draw(style: RailIcon, shapes: [
+      {
+        kind: "path",
+        commands: "M 0.26 0.20 H 0.74 C 0.81 0.20, 0.86 0.26, 0.86 0.33 V 0.67 C 0.86 0.74, 0.81 0.80, 0.74 0.80 H 0.26 C 0.19 0.80, 0.14 0.74, 0.14 0.67 V 0.33 C 0.14 0.26, 0.19 0.20, 0.26 0.20 Z",
+        stroke: selected ? #FFFFFFFF : #9BA6AEFF,
+        strokeStyle: { width: 1.5, join: "round" }
+      },
+      {
+        kind: "path",
+        commands: "M 0.26 0.31 H 0.74",
+        stroke: selected ? #FFFFFFFF : #9BA6AEFF,
+        strokeStyle: { width: 1.5, cap: "round" }
+      }
+    ])
+  } else if icon == "TONE" {
+    Draw(style: RailIcon, shapes: [
+      {
+        kind: "path",
+        commands: "M 0.16 0.80 L 0.50 0.18 L 0.84 0.80 Z",
+        stroke: selected ? #FFFFFFFF : #9BA6AEFF,
+        strokeStyle: { width: 1.5, join: "round" }
+      }
+    ])
+  } else if icon == "MOTION" {
+    Draw(style: RailIcon, shapes: [
+      {
+        kind: "path",
+        commands: "M 0.12 0.62 C 0.32 0.20, 0.50 0.86, 0.70 0.40 C 0.78 0.24, 0.84 0.30, 0.88 0.38",
+        stroke: selected ? #FFFFFFFF : #9BA6AEFF,
+        strokeStyle: { width: 1.5, cap: "round", join: "round" }
+      }
+    ])
+  } else if icon == "TEXT" {
+    Draw(style: RailIcon, shapes: [
+      {
+        kind: "path",
+        commands: "M 0.20 0.24 H 0.80 M 0.50 0.24 V 0.80",
+        stroke: selected ? #FFFFFFFF : #9BA6AEFF,
+        strokeStyle: { width: 1.5, cap: "round" }
+      }
+    ])
+  } else if icon == "TELEMETRY" {
+    Draw(style: RailIcon, shapes: [
+      {
+        kind: "path",
+        commands: "M 0.16 0.78 V 0.50 M 0.38 0.78 V 0.28 M 0.60 0.78 V 0.42 M 0.82 0.78 V 0.18",
+        stroke: selected ? #FFFFFFFF : #9BA6AEFF,
+        strokeStyle: { width: 1.8, cap: "round" }
+      }
+    ])
+  } else {
+    Draw(style: RailIcon, shapes: [
+      {
+        kind: "path",
+        commands: "M 0.30 0.14 H 0.70 C 0.79 0.14, 0.86 0.21, 0.86 0.30 V 0.70 C 0.86 0.79, 0.79 0.86, 0.70 0.86 H 0.30 C 0.21 0.86, 0.14 0.79, 0.14 0.70 V 0.30 C 0.14 0.21, 0.21 0.14, 0.30 0.14 Z",
+        stroke: selected ? #FFFFFFFF : #9BA6AEFF,
+        strokeStyle: { width: 1.5, join: "round" }
+      },
+      {
+        kind: "circle",
+        center: { x: 0.50, y: 0.50 },
+        radius: 0.13,
+        fill: selected ? #FFFFFFFF : #9BA6AEFF
+      }
+    ])
+  }
+}
+
+component RailButton(
+  id: string,
+  icon: string,
+  label: string,
+  count: string,
+  selected: boolean,
+  activate: action
+) {
+  Panel(
+    key: id,
+    style: selected ? RailItemSelected : RailItem,
+    behaviors: [
+      { id: "strata.focusable" },
+      { id: "strata.hoverable" },
+      { id: "strata.activate", action: activate }
+    ]
+  ) {
+    RailGlyph(icon: icon, selected: selected)
+    Text(
+      text: label,
+      style: selected ? RailLabelSelected : RailLabel,
+      layout: { width: { weight: 1 }, height: "content" }
+    )
+    Text(text: count, style: selected ? RailCountSelected : RailCount)
+  }
+}
+
+component TuneSwitchPresentation(
+  key: key,
+  label: string,
+  description: string,
+  control: checkboxState
+) {
+  Panel(key: key, style: CheckRow) {
+    Panel(style: CheckCopy) {
+      Text(text: label, style: control.hovered ? CheckTextHover : CheckText)
+      if !isEmpty(description) { Text(text: description, style: CheckMeta) }
+    }
+    Panel(
+      style: control.checked
+        ? control.hovered ? SwitchShellOnHover : SwitchShellOn
+        : control.hovered ? SwitchShellHover : SwitchShell
+    ) {
+      Panel(style: control.checked ? SwitchKnobOn : SwitchKnob)
+    }
+  }
+}
+
+component SwitchRow(id: key, label: string, detail: string, on: boolean) {
+  Checkbox(
+    key: id,
+    label: label,
+    description: detail,
+    defaultChecked: on,
+    presentationTemplate: TuneSwitchPresentation,
+    layout: { width: { weight: 1 }, height: 32 }
+  )
+}
+
+component SliderRow(
+  id: key,
+  label: string,
+  detail: string,
+  minimum: number,
+  maximum: number,
+  increment: number,
+  current: number,
+  readout: string,
+  change: action
+) {
+  Panel(style: TuneRow) {
+    Panel(style: RowCopy) {
+      Text(text: label, style: RowLabel)
+      Text(text: detail, style: RowDetail)
+    }
+    Panel(style: RowTrack) {
+      Slider(
+        key: id,
+        min: minimum,
+        max: maximum,
+        step: increment,
+        value: current,
+        onChange: change,
+        style: TuneSlider
+      )
+      Text(text: readout, style: RowValue)
+    }
+  }
+}
+
+component TuneChoiceTrigger(key: key, label: string, enabled: boolean, expanded: boolean) {
+  Panel(key: key, style: TuneSelectTrigger) {
+    Text(text: label, style: SelectValue, layout: { width: { weight: 1 }, height: "content" })
+    Text(text: expanded ? "⌃" : "⌄", style: SelectMeta)
+  }
+}
+
+component TuneChoicePopup(key: key, level: number, expanded: boolean) {
+  Panel(key: key, style: TuneSelectPopup, transition: PopupTransition)
+}
+
+component TuneChoiceItem(
+  key: key,
+  id: string,
+  label: string,
+  value: any,
+  index: number,
+  level: number,
+  enabled: boolean,
+  selected: boolean,
+  active: boolean,
+  checked: boolean,
+  separator: boolean,
+  hasChildren: boolean,
+  shortcut: string
+) {
+  Panel(
+    key: key,
+    style: active ? TuneSelectItemActive : selected ? TuneSelectItemSelected : TuneSelectItem
+  ) {
+    Panel(style: selected ? SelectedMark : EmptyMark)
+    Text(text: label, style: SelectValue, layout: { width: { weight: 1 }, height: "content" })
+  }
+}
+
+component ChoiceRow(id: key, label: string, options: selectItems, initial: string) {
+  Panel(style: SelectRow) {
+    Panel(style: RowCopy) {
+      Text(text: label, style: RowLabel)
+    }
+    Select(
+      key: id,
+      options: options,
+      defaultSelectedId: initial,
+      triggerTemplate: TuneChoiceTrigger,
+      popupTemplate: TuneChoicePopup,
+      itemTemplate: TuneChoiceItem
+    )
+  }
+}
+
+component ModuleHeader(name: string, tag: string) {
+  Panel(style: ModuleHead) {
+    Text(text: name, style: ModuleName, layout: { width: { weight: 1 }, height: "content" })
+    Panel(style: ModuleTag) { Text(text: tag, style: ModuleTagText) }
+  }
+}
+
+component SurfacePage() {
+  state blurRadius = 12;
+  state transparency = 90;
+  state contrast = 93;
+  state luminosity = 102;
+
+  Grid(columns: [{ weight: 1 }, { weight: 1 }], style: ModuleGrid) {
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Backdrop filter", tag: "BLUR")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.filter.on", label: "Filter enabled", detail: "Sample the scene behind the surface", on: true)
+      SliderRow(
+        id: "tune.filter.radius",
+        label: "Blur radius",
+        detail: "logical px",
+        minimum: 0, maximum: 32, increment: 1,
+        current: blurRadius,
+        readout: format("{0}", blurRadius),
+        change: action("state.setFromEvent", name: "blurRadius")
+      )
+      ChoiceRow(
+        id: "tune.filter.downsample",
+        label: "Downsample",
+        options: [
+          { id: "1", label: "Full resolution" },
+          { id: "2", label: "Half" },
+          { id: "4", label: "Quarter" }
+        ],
+        initial: "2"
+      )
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Body tone", tag: "BAND")
+      Panel(style: ModuleRule)
+      SliderRow(
+        id: "tune.body.transparency",
+        label: "Transparency",
+        detail: "band knee",
+        minimum: 0, maximum: 100, increment: 1,
+        current: transparency,
+        readout: format("{0}%", transparency),
+        change: action("state.setFromEvent", name: "transparency")
+      )
+      SliderRow(
+        id: "tune.body.contrast",
+        label: "Contrast",
+        detail: "local detail",
+        minimum: 40, maximum: 130, increment: 1,
+        current: contrast,
+        readout: format("{0}%", contrast),
+        change: action("state.setFromEvent", name: "contrast")
+      )
+      SliderRow(
+        id: "tune.body.luminosity",
+        label: "Luminosity",
+        detail: "output gain",
+        minimum: 60, maximum: 140, increment: 1,
+        current: luminosity,
+        readout: format("{0}%", luminosity),
+        change: action("state.setFromEvent", name: "luminosity")
+      )
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Adaptivity", tag: "AUTO")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.adapt.floor", label: "Separation lift", detail: "Hold the surface off a black backdrop", on: true)
+      SwitchRow(id: "tune.adapt.ceiling", label: "Legibility ceiling", detail: "Bound the body under bright content", on: true)
+      SwitchRow(id: "tune.adapt.local", label: "Local mean sampling", detail: "Adapt per region instead of per element", on: true)
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Chroma", tag: "VIBRANCY")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.chroma.passthrough", label: "Chroma passthrough", detail: "Carry backdrop colour through the band", on: true)
+      SwitchRow(id: "tune.chroma.peak", label: "Peak channel ceiling", detail: "Stop a single channel running away", on: true)
+      ChoiceRow(
+        id: "tune.chroma.tint",
+        label: "Tint source",
+        options: [
+          { id: "surface", label: "Surface tint" },
+          { id: "backdrop", label: "Backdrop mean" },
+          { id: "none", label: "Neutral" }
+        ],
+        initial: "surface"
+      )
+    }
+  }
+}
+
+component LensPage() {
+  state refraction = 95;
+  state thickness = 85;
+  state dispersion = 35;
+
+  Grid(columns: [{ weight: 1 }, { weight: 1 }], style: ModuleGrid) {
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Edge lens", tag: "BEVEL")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.lens.on", label: "Lensing enabled", detail: "Bend the scene through the chamfer", on: true)
+      SliderRow(
+        id: "tune.lens.refraction",
+        label: "Refraction",
+        detail: "displacement",
+        minimum: 0, maximum: 200, increment: 5,
+        current: refraction,
+        readout: format("{0}%", refraction),
+        change: action("state.setFromEvent", name: "refraction")
+      )
+      SliderRow(
+        id: "tune.lens.thickness",
+        label: "Thickness",
+        detail: "bevel width",
+        minimum: 20, maximum: 200, increment: 5,
+        current: thickness,
+        readout: format("{0}%", thickness),
+        change: action("state.setFromEvent", name: "thickness")
+      )
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Dispersion", tag: "SPECTRAL")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.disp.on", label: "Spectral split", detail: "Separate channels across the chamfer", on: true)
+      SliderRow(
+        id: "tune.disp.amount",
+        label: "Amount",
+        detail: "blend weight",
+        minimum: 0, maximum: 100, increment: 5,
+        current: dispersion,
+        readout: format("{0}%", dispersion),
+        change: action("state.setFromEvent", name: "dispersion")
+      )
+      SwitchRow(id: "tune.disp.bound", label: "Bound at hard edges", detail: "Prevent fringing into a stripe", on: true)
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Sampling", tag: "SOURCE")
+      Panel(style: ModuleRule)
+      ChoiceRow(
+        id: "tune.sample.mode",
+        label: "Outward taps",
+        options: [
+          { id: "unfiltered", label: "Unfiltered" },
+          { id: "filtered", label: "Filtered" },
+          { id: "mixed", label: "Distance mixed" }
+        ],
+        initial: "unfiltered"
+      )
+      SwitchRow(id: "tune.sample.clamp", label: "Clamp to target", detail: "Hold samples inside the framebuffer", on: true)
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Ghosting guard", tag: "SAFETY")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.ghost.interior", label: "Zero interior displacement", detail: "Never double legible content", on: true)
+      SwitchRow(id: "tune.ghost.report", label: "Report violations", detail: "Emit a diagnostic when exceeded", on: false)
+    }
+  }
+}
+
+component RimPage() {
+  state metallic = 76;
+  state edgeContrast = 100;
+  state highlight = 82;
+
+  Grid(columns: [{ weight: 1 }, { weight: 1 }], style: ModuleGrid) {
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Metal rim", tag: "CONDUCTOR")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.rim.on", label: "Rim enabled", detail: "Reflect the immediate surroundings", on: true)
+      SliderRow(
+        id: "tune.rim.metallic",
+        label: "Metallic",
+        detail: "band energy",
+        minimum: 0, maximum: 100, increment: 1,
+        current: metallic,
+        readout: format("{0}%", metallic),
+        change: action("state.setFromEvent", name: "metallic")
+      )
+      SliderRow(
+        id: "tune.rim.edge",
+        label: "Edge contrast",
+        detail: "overall gain",
+        minimum: 0, maximum: 150, increment: 1,
+        current: edgeContrast,
+        readout: format("{0}%", edgeContrast),
+        change: action("state.setFromEvent", name: "edgeContrast")
+      )
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Specular", tag: "LOBE")
+      Panel(style: ModuleRule)
+      SliderRow(
+        id: "tune.spec.highlight",
+        label: "Highlight",
+        detail: "lobe strength",
+        minimum: 0, maximum: 120, increment: 1,
+        current: highlight,
+        readout: format("{0}%", highlight),
+        change: action("state.setFromEvent", name: "highlight")
+      )
+      SwitchRow(id: "tune.spec.tinted", label: "Tinted specular", detail: "Keep hue instead of driving to white", on: true)
+      SwitchRow(id: "tune.spec.ceiling", label: "Adaptive ceiling", detail: "Scale the peak with available light", on: true)
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Chamfer", tag: "PROFILE")
+      Panel(style: ModuleRule)
+      ChoiceRow(
+        id: "tune.chamfer.profile",
+        label: "Profile",
+        options: [
+          { id: "two-lobe", label: "Two lobe" },
+          { id: "ramp", label: "Single ramp" },
+          { id: "flat", label: "Flat band" }
+        ],
+        initial: "two-lobe"
+      )
+      SwitchRow(id: "tune.chamfer.seam", label: "Contact seam", detail: "Close the band with an occluded line", on: true)
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Key light", tag: "FIXED")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.key.arc", label: "Angular distribution", detail: "Lit arc, counter lobe, dark flanks", on: true)
+      SwitchRow(id: "tune.key.ambient", label: "Flank ambient", detail: "Keep the ring closed on dark content", on: true)
+    }
+  }
+}
+
+component GlossPage() {
+  state sheen = 11;
+  state sheenWidth = 20;
+
+  Grid(columns: [{ weight: 1 }, { weight: 1 }], style: ModuleGrid) {
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Grazing sheen", tag: "FRESNEL")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.gloss.on", label: "Sheen enabled", detail: "Brighten from centre toward the outline", on: true)
+      SliderRow(
+        id: "tune.gloss.amount",
+        label: "Amount",
+        detail: "peak lift",
+        minimum: 0, maximum: 40, increment: 1,
+        current: sheen,
+        readout: format("{0}%", sheen),
+        change: action("state.setFromEvent", name: "sheen")
+      )
+      SliderRow(
+        id: "tune.gloss.width",
+        label: "Band width",
+        detail: "of min extent",
+        minimum: 5, maximum: 50, increment: 1,
+        current: sheenWidth,
+        readout: format("{0}%", sheenWidth),
+        change: action("state.setFromEvent", name: "sheenWidth")
+      )
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Geometry", tag: "SDF")
+      Panel(style: ModuleRule)
+      ChoiceRow(
+        id: "tune.gloss.source",
+        label: "Falloff source",
+        options: [
+          { id: "sdf", label: "Distance field" },
+          { id: "ellipse", label: "Axis ellipse" },
+          { id: "vertical", label: "Vertical ramp" }
+        ],
+        initial: "sdf"
+      )
+      SwitchRow(id: "tune.gloss.bounded", label: "Bounded width", detail: "Stop short elements reading as tubes", on: true)
+      SwitchRow(id: "tune.gloss.centre", label: "Centre deepening", detail: "Redistribute rather than brighten", on: true)
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Dither", tag: "BANDING")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.dither.on", label: "Ordered dither", detail: "Break gradient banding at low bit depth", on: true)
+      ChoiceRow(
+        id: "tune.dither.space",
+        label: "Grid space",
+        options: [
+          { id: "logical", label: "Logical pixels" },
+          { id: "device", label: "Device pixels" }
+        ],
+        initial: "logical"
+      )
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Volume", tag: "DEPTH")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.vol.shadow", label: "Exterior shadow", detail: "Layer a soft drop beneath the surface", on: true)
+      SwitchRow(id: "tune.vol.inner", label: "Inner occlusion", detail: "Darken where the body meets the rim", on: true)
+    }
+  }
+}
+
+component TelemetryPage() {
+  Grid(columns: [{ weight: 1 }, { weight: 1 }], style: ModuleGrid) {
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Sampling rate", tag: "LIVE")
+      Panel(style: ModuleRule)
+      ChoiceRow(
+        id: "tune.rate.refresh",
+        label: "Refresh policy",
+        options: [
+          { id: "240", label: "240 Hz cap" },
+          { id: "120", label: "120 Hz cap" },
+          { id: "unbounded", label: "Unbounded" }
+        ],
+        initial: "240"
+      )
+      SwitchRow(id: "tune.rate.reuse", label: "Reuse between refreshes", detail: "Compose from the retained sample", on: true)
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Invalidation", tag: "EPOCH")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.inv.bounds", label: "Bounds changes", detail: "Drop the sample when geometry moves", on: true)
+      SwitchRow(id: "tune.inv.params", label: "Parameter changes", detail: "Drop on any authored value edit", on: true)
+      SwitchRow(id: "tune.inv.target", label: "Target changes", detail: "Drop when the surface is resized", on: true)
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Fallback", tag: "PORTABLE")
+      Panel(style: ModuleRule)
+      ChoiceRow(
+        id: "tune.fallback.mode",
+        label: "Missing backend",
+        options: [
+          { id: "deterministic", label: "Deterministic" },
+          { id: "omit", label: "Omit stage" },
+          { id: "strict", label: "Require native" }
+        ],
+        initial: "deterministic"
+      )
+      SwitchRow(id: "tune.fallback.record", label: "Record fallbacks", detail: "List materials that lacked a source", on: true)
+    }
+
+    Panel(style: ModuleCard) {
+      ModuleHeader(name: "Capture", tag: "TRACE")
+      Panel(style: ModuleRule)
+      SwitchRow(id: "tune.capture.packets", label: "Packet capture", detail: "Retain encoded submissions per frame", on: false)
+      SwitchRow(id: "tune.capture.timings", label: "Pass timings", detail: "Measure each effect stage separately", on: true)
+    }
+  }
+}
+
+component ReadoutPane() {
+  Panel(style: ReadoutColumn) {
+    Panel(style: PreviewCard) {
+      Text(text: "ACTIVE MATERIAL", style: PreviewLabel)
+      Text(text: "tune:optic-glass", style: PreviewValue)
+    }
+    Panel(style: ReadoutCard) {
+      Text(text: "PASS BUDGET", style: ReadoutTitle)
+      Panel(style: ReadoutRow) {
+        Text(text: "blur", style: ReadoutKey, layout: { width: { weight: 1 }, height: "content" })
+        Text(text: "0.41 ms", style: ReadoutVal)
+      }
+      Panel(style: ReadoutBar) { Panel(style: ReadoutBarFill) }
+      Panel(style: ReadoutRow) {
+        Text(text: "shader", style: ReadoutKey, layout: { width: { weight: 1 }, height: "content" })
+        Text(text: "0.27 ms", style: ReadoutVal)
+      }
+      Panel(style: ReadoutBar) { Panel(style: ReadoutBarFill) }
+      Panel(style: ReadoutRow) {
+        Text(text: "composite", style: ReadoutKey, layout: { width: { weight: 1 }, height: "content" })
+        Text(text: "0.09 ms", style: ReadoutVal)
+      }
+      Panel(style: ReadoutBar) { Panel(style: ReadoutBarFill) }
+    }
+    Panel(style: ReadoutCard) {
+      Text(text: "SURFACE STATE", style: ReadoutTitle)
+      Panel(style: ReadoutRow) {
+        Text(text: "layers", style: ReadoutKey, layout: { width: { weight: 1 }, height: "content" })
+        Text(text: "2", style: ReadoutVal)
+      }
+      Panel(style: ReadoutRow) {
+        Text(text: "samples", style: ReadoutKey, layout: { width: { weight: 1 }, height: "content" })
+        Text(text: "11 / px", style: ReadoutVal)
+      }
+      Panel(style: ReadoutRow) {
+        Text(text: "epoch", style: ReadoutKey, layout: { width: { weight: 1 }, height: "content" })
+        Text(text: "stable", style: ReadoutVal)
+      }
+      Panel(style: ReadoutRow) {
+        Text(text: "backend", style: ReadoutKey, layout: { width: { weight: 1 }, height: "content" })
+        Text(text: "d3d11", style: ReadoutVal)
+      }
+    }
+  }
+}
+
+component TuningPanel() {
+  state section = "SURFACE";
+
+  Panel(style: TuneRoot, material: material("tune:color-bath")) {
+    Panel(style: TuneShell, enter: TuneEnter) {
+      Panel(style: TuneGlint)
+      Panel(style: TuneHeader) {
+        Text(text: "Aperture", style: TuneTitle)
+        Text(text: "TUNING", style: TuneScope)
+        Panel(style: Clear, layout: { width: { weight: 1 }, height: 1 })
+        Panel(style: HeaderChip) {
+          Panel(style: ChipDot)
+          Text(text: "LIVE", style: ChipText)
+        }
+        Panel(style: HeaderChip) {
+          Text(text: "18 MODULES", style: ChipText)
+        }
+        Text(text: "F4 · close", style: TuneHint)
+      }
+      Panel(style: TuneHeaderRule)
+
+      Panel(style: TuneBody) {
+        Panel(style: TuneRail) {
+          RailButton(id: "tune.nav.surface", icon: "SURFACE", label: "Surface", count: "4", selected: section == "SURFACE", activate: action("state.set", name: "section", value: "SURFACE"))
+          RailButton(id: "tune.nav.lens", icon: "LENS", label: "Lens", count: "4", selected: section == "LENS", activate: action("state.set", name: "section", value: "LENS"))
+          RailButton(id: "tune.nav.rim", icon: "RIM", label: "Rim", count: "4", selected: section == "RIM", activate: action("state.set", name: "section", value: "RIM"))
+          RailButton(id: "tune.nav.gloss", icon: "TONE", label: "Gloss", count: "4", selected: section == "GLOSS", activate: action("state.set", name: "section", value: "GLOSS"))
+          RailButton(id: "tune.nav.telemetry", icon: "TELEMETRY", label: "Telemetry", count: "4", selected: section == "TELEMETRY", activate: action("state.set", name: "section", value: "TELEMETRY"))
+          Panel(style: Clear, layout: { width: { weight: 1 }, height: { weight: 1 } })
+          Panel(style: RailFoot) {
+            Text(text: "Values are local", style: RailFootTitle)
+            Text(text: "Nothing here writes to the running renderer.", style: RailFootCopy, wrapMode: "WORD")
+          }
+        }
+
+        Panel(style: TuneMain) {
+          Panel(style: MainHead) {
+            Panel(style: HeadCopy) {
+              Text(
+                text: section == "LENS" ? "Lens" : section == "RIM" ? "Rim" : section == "GLOSS" ? "Gloss" : section == "TELEMETRY" ? "Telemetry" : "Surface",
+                style: MainTitle
+              )
+              Text(
+                text: section == "LENS" ? "Refraction confined to the chamfer" : section == "RIM" ? "Environment-reflecting metal band" : section == "GLOSS" ? "Grazing sheen and surface volume" : section == "TELEMETRY" ? "Sampling, invalidation, and capture" : "Backdrop filtering and tone band",
+                style: MainSub
+              )
+            }
+          }
+
+          Scroll(key: "tune.scroll", vertical: true, horizontal: false, style: TuneScroll) {
+            if section == "LENS" {
+              LensPage()
+            } else if section == "RIM" {
+              RimPage()
+            } else if section == "GLOSS" {
+              GlossPage()
+            } else if section == "TELEMETRY" {
+              TelemetryPage()
+            } else {
+              SurfacePage()
+            }
+          }
+        }
+
+        ReadoutPane()
+      }
+    }
+  }
+}
+
+overlay TuningPanelMenu {
+  root TuningPanel()
+}

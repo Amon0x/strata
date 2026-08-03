@@ -869,6 +869,12 @@ if(STRATA_BUILD_TOOLS)
         "src/main/resources/assets/strata/ui/control_deck.schemas.json"
         "src/main/resources/assets/strata/ui/control_deck.compiled.bin"
     )
+    strata_register_bundled_module(
+        tuning_panel
+        "src/main/resources/assets/strata/ui/tuning_panel.strata"
+        "src/main/resources/assets/strata/ui/tuning_panel.schemas.json"
+        "src/main/resources/assets/strata/ui/tuning_panel.compiled.bin"
+    )
 endif()
 
 if(WIN32 AND STRATA_BUILD_DESKTOP)
