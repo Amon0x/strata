@@ -5,17 +5,22 @@ style Clear { background: null; border: null; }
 
 style GlassSurface {
   background: #AFC6D814;
-  border: { width: 1, color: #EAF5FC48 };
+  border: { width: 1, color: #EAF5FC1C };
   effect: effect(
     "morrow:optic-glass",
     blurRadius: 14,
     downsample: 2,
-    refraction: 18,
-    tint: #C4D8E60A,
+    refraction: 1.0,
+    tint: #18233412,
     saturation: 0.96,
     highlight: 0.66,
     noise: 0.06,
-    transparency: 0.82
+    transparency: 0.82,
+    thickness: 1.05,
+    scattering: 0.72,
+    edgeContrast: 0.85,
+    contrast: 0.90,
+    luminosity: 1.0
   );
 }
 
@@ -134,12 +139,17 @@ style SearchShell extends GlassSurface {
     "morrow:optic-glass",
     blurRadius: 10,
     downsample: 2,
-    refraction: 10,
-    tint: #D1E2EC08,
+    refraction: 0.75,
+    tint: #20293810,
     saturation: 0.96,
     highlight: 0.50,
     noise: 0.04,
-    transparency: 0.88
+    transparency: 0.88,
+    thickness: 0.8,
+    scattering: 0.58,
+    edgeContrast: 0.72,
+    contrast: 0.92,
+    luminosity: 1.02
   );
 }
 style SearchEditorStyle {

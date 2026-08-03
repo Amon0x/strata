@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "application": {
+    "id": "effects.density",
+    "module": "assets/strata/ui/demo_surface.strata",
+    "schemas": "assets/strata/ui/demo_surface.schemas.json",
+    "root": "GlassDensityShowcase",
+    "packages": [
+      "strata.demo.v1"
+    ],
+    "actions": [
+      "control.alpha.action",
+      "control.beta.action",
+      "control.gamma.action",
+      "demo.behavior.activate",
+      "demo.behavior.disabled",
+      "demo.combo.query",
+      "demo.combo.select",
+      "demo.command.global",
+      "demo.command.scoped",
+      "demo.custom.pulse",
+      "demo.data.collection",
+      "demo.drop.target",
+      "demo.events.clear",
+      "demo.focus.scope",
+      "demo.form.completed",
+      "demo.host.bump",
+      "demo.host.message",
+      "demo.inspect.arm",
+      "demo.inspect.clear",
+      "demo.inspect.coalesce",
+      "demo.inspect.driver",
+      "demo.inspect.dynamic-probe",
+      "demo.inspect.pointer",
+      "demo.inspect.select",
+      "demo.nav.right",
+      "demo.reorder",
+      "demo.split.controlled",
+      "demo.state.restore",
+      "demo.state.snapshot"
+    ]
+  },
+  "surface": {
+    "id": "effects.density",
+    "role": "overlay",
+    "backend": "d3d11",
+    "width": 720,
+    "height": 480,
+    "scale": 1.0,
+    "clearColor": "#090b0fff",
+    "fonts": [
+      {
+        "id": "strata:fonts/default-medium",
+        "resource": "assets/strata/fonts/medium.ttf"
+      },
+      {
+        "id": "strata:fonts/default",
+        "resource": "assets/strata/fonts/default.ttf"
+      },
+      {
+        "id": "strata:fonts/mono",
+        "resource": "assets/strata/fonts/mono.ttf"
+      }
+    ],
+    "images": [
+      {
+        "id": "strata:ui/icons/chevron-down",
+        "resource": "assets/strata/images/ui/icons/chevron-down.svg",
+        "sampling": "linear"
+      },
+      {
+        "id": "strata:ui/icons/chevron-up",
+        "resource": "assets/strata/images/ui/icons/chevron-up.svg",
+        "sampling": "linear"
+      }
+    ]
+  },
+  "snapshots": [],
+  "steps": [
+    {
+      "advance": {
+        "milliseconds": 0,
+        "frames": 1
+      }
+    },
+    {
+      "advance": {
+        "milliseconds": 160,
+        "frames": 2
+      }
+    },
+    {
+      "capture": "density"
+    }
+  ]
+}

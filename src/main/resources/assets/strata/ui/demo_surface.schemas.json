@@ -909,6 +909,15 @@
         "shaders": {
           "hlsl": "assets/strata/shaders/materials/color-bath.hlsl"
         }
+      },
+      {
+        "id": "demo:refraction-grid",
+        "blendMode": "straight_alpha",
+        "fallback": "strata:rounded_rect",
+        "parameters": [],
+        "shaders": {
+          "hlsl": "assets/strata/shaders/materials/refraction-grid.hlsl"
+        }
       }
     ]
   },
@@ -989,6 +998,51 @@
             "nullable": false,
             "aliases": [],
             "default": null
+          },
+          {
+            "name": "thickness",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "scattering",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "edgeContrast",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "contrast",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "luminosity",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
           }
         ],
         "passes": [
@@ -1001,6 +1055,74 @@
             "kind": "SHADER",
             "shaders": {
               "hlsl": "assets/strata/shaders/effects/optic-glass.hlsl"
+            }
+          }
+        ]
+      },
+      {
+        "id": "demo:glass-vibrancy",
+        "input": "CONTENT",
+        "parameters": [
+          {
+            "name": "strength",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "onDark",
+            "effectType": "COLOR",
+            "type": { "kind": "color" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "onLight",
+            "effectType": "COLOR",
+            "type": { "kind": "color" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "threshold",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "softness",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "colorBleed",
+            "effectType": "FLOAT",
+            "type": { "kind": "number" },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "passes": [
+          {
+            "kind": "SHADER",
+            "shaders": {
+              "hlsl": "assets/strata/shaders/effects/glass-vibrancy.hlsl"
             }
           }
         ]

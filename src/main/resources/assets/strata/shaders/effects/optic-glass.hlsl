@@ -1,10 +1,16 @@
-float3 adjustSaturation(float3 color, float saturation) {
-    float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
-    return lerp(luminance.xxx, color, saturation);
-}
-
 float luminance(float3 color) {
     return dot(color, float3(0.2126, 0.7152, 0.0722));
+}
+
+float3 adjustSaturation(float3 color, float saturation) {
+    return lerp(luminance(color).xxx, color, saturation);
+}
+
+float3 softLight(float3 base, float3 blend) {
+    return saturate(
+        (1.0 - 2.0 * blend) * base * base +
+        2.0 * blend * base
+    );
 }
 
 float hash21(float2 value) {
@@ -13,7 +19,7 @@ float hash21(float2 value) {
     return frac(value.x * value.y);
 }
 
-float2 glassNormal(float2 pixel) {
+float2 shapeNormal(float2 pixel) {
     float2 gradient = float2(
         effectDistance(pixel + float2(1.0, 0.0)) -
             effectDistance(pixel - float2(1.0, 0.0)),
@@ -23,161 +29,153 @@ float2 glassNormal(float2 pixel) {
     return normalize(gradient + float2(0.0001, 0.0001));
 }
 
-float3 refractBlurredField(float2 uv, float2 offset, float dispersion) {
-    float red = sampleEffectSource(uv + offset * (1.0 + dispersion)).r;
-    float green = sampleEffectSource(uv + offset).g;
-    float blue = sampleEffectSource(uv + offset * (1.0 - dispersion)).b;
-    return float3(red, green, blue);
-}
-
-float3 sampleLowFrequencyBackdrop(float2 uv, float radius) {
-    float2 distance = radius / max(effectTargetSize, 1.0);
-    float2 diagonal = distance * 0.70710678;
-    float2 inner = distance * 0.42;
-    float3 color = 0.0;
-
-    color += sampleEffectBackdrop(uv + float2(distance.x, 0.0)).rgb * 0.10;
-    color += sampleEffectBackdrop(uv - float2(distance.x, 0.0)).rgb * 0.10;
-    color += sampleEffectBackdrop(uv + float2(0.0, distance.y)).rgb * 0.10;
-    color += sampleEffectBackdrop(uv - float2(0.0, distance.y)).rgb * 0.10;
-
-    color += sampleEffectBackdrop(uv + float2(diagonal.x, diagonal.y)).rgb * 0.08;
-    color += sampleEffectBackdrop(uv + float2(diagonal.x, -diagonal.y)).rgb * 0.08;
-    color += sampleEffectBackdrop(uv + float2(-diagonal.x, diagonal.y)).rgb * 0.08;
-    color += sampleEffectBackdrop(uv - float2(diagonal.x, diagonal.y)).rgb * 0.08;
-
-    color += sampleEffectBackdrop(uv + float2(inner.x, 0.0)).rgb * 0.07;
-    color += sampleEffectBackdrop(uv - float2(inner.x, 0.0)).rgb * 0.07;
-    color += sampleEffectBackdrop(uv + float2(0.0, inner.y)).rgb * 0.07;
-    color += sampleEffectBackdrop(uv - float2(0.0, inner.y)).rgb * 0.07;
-    return color;
-}
-
 float4 effect(EffectInput input) {
-    float distance = effectDistance(input.pixel);
-    float insideDistance = max(-distance, 0.0);
-    float2 normal = glassNormal(input.pixel);
+    float signedDistance = effectDistance(input.pixel);
+    float insideDistance = max(-signedDistance, 0.0);
+    float2 normal2d = shapeNormal(input.pixel);
     float2 texel = 1.0 / max(effectTargetSize, 1.0);
 
-    // A stable center and a curved boundary read as a lens without warping the
-    // entire field. The body uses the filtered source; the boundary later
-    // reconstructs only low frequencies and never takes a raw center sample.
-    float minimumExtent = max(min(effectBounds.z, effectBounds.w), 1.0);
-    float lensWidth = clamp(minimumExtent * 0.12, 8.0, 28.0);
-    float edgeProximity = 1.0 - smoothstep(0.0, lensWidth, insideDistance);
-    float lens = pow(saturate(edgeProximity), 1.15);
     float transparency = saturate(effectFloat(10));
-    float refraction = max(effectFloat(2), 0.0) *
-        lerp(0.62, 1.0, transparency);
-    float2 offset = -normal * refraction * lens * texel;
-    float dispersion = 0.018 * lens;
+    float thickness = max(effectFloat(11), 0.05);
+    float scattering = saturate(effectFloat(12));
+    float edgeContrast = max(effectFloat(13), 0.0);
+    float bodyContrast = max(effectFloat(14), 0.0);
+    float luminosity = max(effectFloat(15), 0.0);
 
-    float3 base = sampleEffectSource(input.uv).rgb;
-    float3 filteredRefraction = refractBlurredField(input.uv, offset, dispersion);
-    float backdropFilterRadius = clamp(refraction * 0.52, 7.0, 15.0);
-    float3 boundaryField = sampleLowFrequencyBackdrop(
-        input.uv + offset,
-        backdropFilterRadius
+    float minimumExtent = max(min(effectBounds.z, effectBounds.w), 1.0);
+    float sizeFactor = smoothstep(48.0, 260.0, minimumExtent);
+    float bendZone = clamp(
+        minimumExtent * 0.24 * thickness,
+        10.0,
+        90.0
     );
-    float3 refracted = lerp(
-        filteredRefraction,
-        boundaryField,
-        lens * 0.52
-    );
-    float3 counterSample = refractBlurredField(
-        input.uv,
-        -offset * 0.34,
-        dispersion * 0.3
-    );
-    float3 color = lerp(base, refracted, lens * 0.94);
-    color += (refracted - counterSample) * lens * 0.24;
-    color = adjustSaturation(
-        color,
-        max(effectFloat(7), 0.0) * lerp(0.76, 1.0, transparency)
-    );
-    color = saturate((color - 0.5) * 1.04 + 0.5);
+    float bendCoordinate = saturate(insideDistance / bendZone);
+    float surfaceCurve = pow(1.0 - bendCoordinate, 1.35);
+    float refractionField = pow(1.0 - bendCoordinate, 2.0);
 
-    float4 tint = effectColor(3);
-    float density = 1.0 - transparency;
-    float3 diffusedBackdrop = adjustSaturation(base, 0.45);
-    diffusedBackdrop = lerp(
-        diffusedBackdrop,
-        luminance(diffusedBackdrop).xxx,
-        0.12
-    );
-    float2 contextUv = (
+    float displacementPixels = bendZone * 0.35 *
+        max(effectFloat(2), 0.0);
+    float2 refractedOffset = -normal2d * displacementPixels *
+        refractionField * texel;
+    float chromaticFraction =
+        1.2 / max(displacementPixels, 1.0) *
+        smoothstep(0.0, 2.5, insideDistance);
+
+    float2 surfaceCenter = (
         effectBounds.xy + effectBounds.zw * 0.5
     ) / max(effectTargetSize, 1.0);
-    float3 contextualBackdrop = adjustSaturation(
-        sampleEffectSource(contextUv).rgb,
-        0.34
+    float magnification = lerp(
+        0.01,
+        0.03,
+        saturate((thickness - 0.45) / 1.35)
     );
-    contextualBackdrop = lerp(
-        contextualBackdrop,
-        luminance(contextualBackdrop).xxx,
-        0.16
+    magnification *= lerp(0.78, 1.12, sizeFactor);
+    float2 bodyUv = surfaceCenter +
+        (input.uv - surfaceCenter) * (1.0 - magnification);
+    float3 body = sampleEffectSource(bodyUv).rgb;
+    // EffectBackdrop is vertically inverted relative to EffectSource/input.uv
+    // in the render-target path. Flip only offset deltas so both samplers move
+    // through their images in the same visual direction.
+    float2 backdropDelta = refractedOffset * float2(1.0, -1.0);
+    float3 rawRefraction = float3(
+        sampleEffectBackdrop(
+            input.uv + backdropDelta * (1.0 - chromaticFraction)
+        ).r,
+        sampleEffectBackdrop(
+            input.uv + backdropDelta
+        ).g,
+        sampleEffectBackdrop(
+            input.uv + backdropDelta * (1.0 + chromaticFraction)
+        ).b
     );
-    float contextMix = lerp(0.55, 0.92, density);
-    float3 veilColor = lerp(
-        diffusedBackdrop,
-        contextualBackdrop,
-        contextMix
+    float3 color = lerp(
+        body,
+        rawRefraction,
+        refractionField * 0.96
     );
-    veilColor = lerp(veilColor, tint.rgb, saturate(tint.a));
-    color = lerp(color, veilColor, density);
+
+    float saturation = max(effectFloat(7), 0.0);
+    color = adjustSaturation(color, saturation);
+    body = adjustSaturation(body, saturation);
+
+    // The filtered scene is the transmitted layer and tint is the authored
+    // surface layer. Transparency attenuates transmission; tint alpha remains
+    // the minimum surface density at full transmission.
+    float4 tint = effectColor(3);
+    float tintAmount = saturate(tint.a);
+    float surfaceOpacity = saturate(
+        tintAmount +
+        (1.0 - transparency) * (1.0 - tintAmount) *
+            lerp(0.42, 0.58, sizeFactor)
+    );
+    float3 tintedSurface = softLight(color, tint.rgb);
+    color = lerp(color, tintedSurface, surfaceOpacity);
+    float3 tonalAnchor = lerp(
+        body,
+        softLight(body, tint.rgb),
+        surfaceOpacity
+    );
+    float effectiveContrast = bodyContrast * lerp(0.72, 1.0, transparency);
+    color = tonalAnchor + (color - tonalAnchor) * effectiveContrast;
+    color *= luminosity;
+
+    // The supplied controls share a two-pixel bright boundary followed by a
+    // one-pixel darker contact seam. Interpolation toward white reproduces the
+    // same response on colored, dark, and already-white surfaces.
+    float brightBoundary = 1.0 - smoothstep(
+        0.9,
+        2.25,
+        insideDistance
+    );
+    float contactSeam = smoothstep(1.75, 2.35, insideDistance) *
+        (1.0 - smoothstep(2.9, 3.65, insideDistance));
+    float lowerFacing = normal2d.y * 0.5 + 0.5;
+    float seamStrength = lerp(0.08, 0.22, lowerFacing);
+    float highlight = max(effectFloat(8), 0.0);
+    float3 compressedBackground = saturate(rawRefraction * 1.14);
+    float3 refractedRim = 1.0 -
+        (1.0 - color) * (1.0 - compressedBackground);
     color = lerp(
         color,
-        tint.rgb,
-        saturate(tint.a) * lerp(0.35, 1.0, 1.0 - transparency)
+        refractedRim,
+        saturate(brightBoundary * edgeContrast * 0.24)
     );
 
-    // The boundary has an ambient response on every side. A coherent virtual
-    // overhead light adds shape, while the opposing lobe stays broad and dim.
-    // Rounded corners choose their own response through the SDF normal.
-    float innerRim = 1.0 - smoothstep(0.0, 4.5, insideDistance);
-    float hairline = 1.0 - smoothstep(0.3, 1.2, abs(distance + 0.42));
-    float darkSeam = smoothstep(0.45, 1.0, insideDistance) *
-        (1.0 - smoothstep(1.25, 2.15, insideDistance));
-    float fresnel = pow(saturate(edgeProximity), 3.2) * innerRim;
-    float meniscus = smoothstep(0.3, 2.0, insideDistance) *
-        (1.0 - smoothstep(2.5, 8.0, insideDistance));
-    float2 lightDirection = normalize(float2(-0.22, -0.98));
-    float keyFacing = saturate(dot(normal, lightDirection));
-    float opposingFacing = saturate(dot(normal, -lightDirection));
-    float keyLobe = pow(keyFacing, 4.5) * innerRim;
-    float opposingLobe = pow(opposingFacing, 3.2) * innerRim;
-
-    float3 environment = sampleEffectSource(input.uv - normal * 3.0 * texel).rgb;
-    float environmentLuminance = luminance(environment);
-    float darkBackdrop = 1.0 - smoothstep(0.08, 0.5, environmentLuminance);
-    float3 neutralRim = lerp(
-        float3(0.60, 0.67, 0.72),
-        float3(0.90, 0.94, 0.96),
-        darkBackdrop
+    // The virtual light is fixed in surface space, so moving or morphing a
+    // glass element changes the reflected lobe without autonomous shimmer.
+    float2 lightVector = float2(0.24, 0.08) - surfaceCenter;
+    float3 lightDirection = normalize(float3(lightVector * 0.85, 0.78));
+    float3 surfaceNormal = normalize(float3(
+        normal2d * surfaceCurve * 1.18,
+        1.0
+    ));
+    float3 halfDirection = normalize(
+        lightDirection + float3(0.0, 0.0, 1.0)
     );
-    float3 bledRim = adjustSaturation(environment, 0.55);
-    float3 ambientRimColor = lerp(neutralRim, bledRim, 0.20);
-    float brightResponse = 1.0 - smoothstep(0.45, 0.88, environmentLuminance);
-    float darkResponse = smoothstep(0.42, 0.82, environmentLuminance);
-    float highlight = max(effectFloat(8), 0.0) *
-        lerp(0.88, 1.08, transparency);
-    float rimVisibility = 0.58 + brightResponse * 0.42;
+    float specularLobe = pow(
+        saturate(dot(surfaceNormal, halfDirection)),
+        96.0
+    ) * refractionField;
+    float2 planarLight = normalize(lightVector + float2(0.0001, 0.0001));
+    float lightFacing = pow(saturate(dot(normal2d, planarLight)), 5.0);
+    float counterFacing = pow(saturate(dot(normal2d, -planarLight)), 7.0);
+    float whiteGlint = brightBoundary * lightFacing *
+        edgeContrast * highlight * 0.34;
+    color = lerp(
+        color,
+        1.0,
+        saturate(specularLobe * highlight * 0.62 + whiteGlint)
+    );
+    color = lerp(
+        color,
+        compressedBackground,
+        saturate(
+            brightBoundary * counterFacing *
+            edgeContrast * 0.11
+        )
+    );
+    color *= 1.0 - contactSeam * edgeContrast * seamStrength;
 
-    color += hairline * highlight * rimVisibility *
-        (0.08 + darkBackdrop * 0.12) * ambientRimColor;
-    color += fresnel * highlight * rimVisibility * 0.045 * ambientRimColor;
-    color += meniscus * highlight * rimVisibility *
-        (0.025 + keyFacing * 0.095) * ambientRimColor;
-    color += keyLobe * highlight * (0.24 + darkBackdrop * 0.16) *
-        float3(1.0, 0.985, 0.955);
-    color += opposingLobe * highlight * 0.055 *
-        lerp(float3(0.48, 0.56, 0.62), ambientRimColor, 0.45);
-    color -= opposingLobe * (0.012 + (1.0 - darkBackdrop) * 0.012);
-    color -= meniscus * opposingFacing * 0.018;
-    color -= darkSeam * highlight * (0.018 + darkResponse * 0.055);
-
-    // Static grain prevents banding without turning temporal sampling into a
-    // shimmer. It is deliberately subordinate to the material lighting.
     float noise = (hash21(floor(input.logicalPixel)) - 0.5) *
         max(effectFloat(9), 0.0) * 0.01;
     color += noise;

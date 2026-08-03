@@ -12,3 +12,11 @@ overlay PushedShowcase {
 overlay GlassEffectShowcase {
   root GlassEffectFixture()
 }
+
+overlay GlassRefractionShowcase {
+  root GlassRefractionFixture()
+}
+
+overlay GlassDensityShowcase {
+  root GlassDensityFixture()
+}

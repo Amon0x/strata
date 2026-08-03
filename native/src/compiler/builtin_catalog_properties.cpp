@@ -77,6 +77,8 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "caretColor", .type = declared_type_reference("t8")},
         DeclaredProperty{.name = "clip", .type = declared_type_reference("t2")},
         DeclaredProperty{.name = "color", .type = declared_type_reference("t8")},
+        DeclaredProperty{
+            .name = "contentEffect", .type = declared_type_reference("t41"), .nullable = true},
         DeclaredProperty{.name = "columnSpan", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "detachFromParentClip", .type = declared_type_reference("t2")},
         DeclaredProperty{.name = "disabledOpacity", .type = declared_type_reference("t3")},

@@ -71,19 +71,24 @@ style GlassTriggerStyle {
   gap: 8;
   alignItems: "CENTER";
   radius: 10;
-  background: #EAE6E01C;
-  border: { width: 1, color: #FFFFFF58 };
+  background: #24272C10;
+  border: { width: 1, color: #FFFFFF20 };
   focusRing: { width: 1, color: #C9E8FF34 };
   effect: effect(
     "demo:optic-glass",
     blurRadius: 14,
     downsample: 2,
-    refraction: 18,
-    tint: #E6E1D914,
+    refraction: 1.0,
+    tint: #34373C14,
     saturation: 0.82,
     highlight: 0.82,
     noise: 0.045,
-    transparency: 0.82
+    transparency: 0.82,
+    thickness: 0.95,
+    scattering: 0.72,
+    edgeContrast: 0.95,
+    contrast: 0.88,
+    luminosity: 1.02
   );
 }
 
@@ -94,8 +99,8 @@ style GlassPopupStyle {
   padding: 6;
   gap: 3;
   radius: 14;
-  background: #E3DDD52C;
-  border: { width: 1, color: #FFFFFF5C };
+  background: #25272C14;
+  border: { width: 1, color: #FFFFFF22 };
   anchorSide: "BOTTOM";
   anchorAlign: "START";
   anchorGap: 7;
@@ -105,12 +110,17 @@ style GlassPopupStyle {
     "demo:optic-glass",
     blurRadius: 16,
     downsample: 2,
-    refraction: 22,
-    tint: #E1DAD116,
+    refraction: 1.2,
+    tint: #3432361A,
     saturation: 0.80,
     highlight: 0.84,
     noise: 0.045,
-    transparency: 0.74
+    transparency: 0.74,
+    thickness: 1.15,
+    scattering: 0.78,
+    edgeContrast: 1.0,
+    contrast: 0.86,
+    luminosity: 1.0
   );
 }
 
@@ -127,33 +137,43 @@ style GlassItemStyle extends Transparent {
 
 style GlassItemSelected extends GlassItemStyle {
   background: #F0ECE61E;
-  border: { width: 1, color: #FFFFFF44 };
+  border: { width: 1, color: #FFFFFF18 };
   effect: effect(
     "demo:optic-glass",
     blurRadius: 10,
     downsample: 2,
-    refraction: 12,
-    tint: #E8E3DC0A,
+    refraction: 0.85,
+    tint: #6E70760E,
     saturation: 0.82,
     highlight: 0.55,
     noise: 0.04,
-    transparency: 0.76
+    transparency: 0.76,
+    thickness: 0.8,
+    scattering: 0.62,
+    edgeContrast: 0.82,
+    contrast: 0.90,
+    luminosity: 1.02
   );
 }
 
 style GlassItemActive extends GlassItemStyle {
   background: #F2EEE82B;
-  border: { width: 1, color: #FFFFFF52 };
+  border: { width: 1, color: #FFFFFF20 };
   effect: effect(
     "demo:optic-glass",
     blurRadius: 12,
     downsample: 2,
-    refraction: 14,
-    tint: #EBE6DF10,
+    refraction: 0.9,
+    tint: #888A9014,
     saturation: 0.84,
     highlight: 0.64,
     noise: 0.04,
-    transparency: 0.84
+    transparency: 0.84,
+    thickness: 0.8,
+    scattering: 0.65,
+    edgeContrast: 0.90,
+    contrast: 0.90,
+    luminosity: 1.02
   );
 }
 
@@ -180,7 +200,7 @@ style GlassTooltipStyle {
   padding: { horizontal: 10, vertical: 7 };
   radius: 9;
   background: #E9E4DD26;
-  border: { width: 1, color: #FFFFFF54 };
+  border: { width: 1, color: #FFFFFF20 };
   anchorSide: "TOP";
   anchorAlign: "CENTER";
   anchorGap: 8;
@@ -188,12 +208,17 @@ style GlassTooltipStyle {
     "demo:optic-glass",
     blurRadius: 12,
     downsample: 2,
-    refraction: 18,
-    tint: #E7E1D914,
+    refraction: 1.0,
+    tint: #34383E18,
     saturation: 0.82,
     highlight: 0.78,
     noise: 0.04,
-    transparency: 0.78
+    transparency: 0.78,
+    thickness: 0.9,
+    scattering: 0.70,
+    edgeContrast: 0.95,
+    contrast: 0.88,
+    luminosity: 1.02
   );
 }
 
@@ -255,18 +280,24 @@ style EffectDemoCard {
 }
 
 style LiquidDemoCard extends EffectDemoCard {
-  background: #E9E4DC1C;
-  border: { width: 1, color: #FFFFFF58 };
+  radius: 62;
+  background: #25282D10;
+  border: { width: 1, color: #FFFFFF20 };
   effect: effect(
     "demo:optic-glass",
-    blurRadius: 16,
-    downsample: 2,
-    refraction: 26,
-    tint: #E5DFD618,
-    saturation: 0.82,
-    highlight: 0.88,
+    blurRadius: 3,
+    downsample: 1,
+    refraction: 1.35,
+    tint: #34383E08,
+    saturation: 0.96,
+    highlight: 0.96,
     noise: 0.045,
-    transparency: 0.82
+    transparency: 0.90,
+    thickness: 1.0,
+    scattering: 0.42,
+    edgeContrast: 1.0,
+    contrast: 0.94,
+    luminosity: 1.02
   );
 }
 
@@ -284,7 +315,95 @@ style SoftContentDemoCard extends EffectDemoCard {
 }
 
 style RoundedGlassDemoCard extends LiquidDemoCard {
-  radius: 34;
+  radius: 46;
+}
+
+style RefractionDiagnosticLayout extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 42;
+  gap: 28;
+  alignItems: "CENTER";
+}
+
+style RefractionDiagnosticCard extends LiquidDemoCard {
+  width: 520;
+  height: 230;
+  padding: 0;
+  radius: 56;
+}
+
+style RefractionDiagnosticPill extends LiquidDemoCard {
+  width: 520;
+  height: 92;
+  padding: 0;
+  radius: 999;
+}
+
+style DensityBackdrop extends Transparent {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: { weight: 1 };
+}
+
+style DensityCodePane {
+  kind: "COLUMN";
+  width: 360;
+  height: { weight: 1 };
+  padding: { horizontal: 18, vertical: 24 };
+  gap: 7;
+  background: #090D14FF;
+  border: null;
+}
+
+style DensityCalmPane {
+  width: { weight: 1 };
+  height: { weight: 1 };
+  background: #182841FF;
+  border: null;
+}
+
+style DensityCodeText {
+  font: "strata:fonts/mono";
+  pixelSize: 12;
+  color: #DCE7F2E8;
+  width: { weight: 1 };
+  height: "content";
+  maxLines: 1;
+  overflow: "CLIP";
+}
+
+style DensityCodeMuted extends DensityCodeText {
+  color: #7E91A6D8;
+}
+
+style DensityCodeAccent extends DensityCodeText {
+  color: #7DDAFFFF;
+}
+
+style DensityGlassPlacement extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: { horizontal: 100, vertical: 72 };
+  gap: 28;
+  alignItems: "CENTER";
+}
+
+style DensityDiagnosticCard extends LiquidDemoCard {
+  width: 520;
+  height: 230;
+  padding: 22;
+  radius: 56;
+}
+
+style DensityDiagnosticPill extends LiquidDemoCard {
+  width: 220;
+  height: 44;
+  padding: { horizontal: 18, vertical: 0 };
+  radius: 999;
+  justifyContent: "CENTER";
 }
 
 style CardStyle {
@@ -611,6 +730,62 @@ component GlassEffectFixture() {
             maxLines: 3
           )
         }
+      }
+    }
+  }
+}
+
+component GlassRefractionFixture() {
+  Panel(style: EffectFixtureRoot) {
+    Panel(
+      style: EffectWallpaper,
+      material: material("demo:refraction-grid")
+    )
+    Panel(style: RefractionDiagnosticLayout) {
+      Text(text: "PERMANENT REFRACTION GRID", style: SectionText)
+      Panel(style: RefractionDiagnosticCard)
+      Panel(style: RefractionDiagnosticPill)
+    }
+  }
+}
+
+component GlassDensityFixture() {
+  Panel(style: EffectFixtureRoot) {
+    Panel(style: DensityBackdrop) {
+      Panel(style: DensityCodePane) {
+        Text(text: "terminal — strata_desktop", style: DensityCodeAccent)
+        Text(text: "$ cmake --build --preset windows-x64", style: DensityCodeText)
+        Text(text: "[1/8] compiling ui/render.cpp", style: DensityCodeMuted)
+        Text(text: "[2/8] linking strata_core.lib", style: DensityCodeMuted)
+        Text(text: "frame 1842  gpu 3.71ms  cpu 1.26ms", style: DensityCodeText)
+        Text(text: "effect optic-glass refresh 240Hz", style: DensityCodeText)
+        Text(text: "backdrop epoch=948 geometry=stable", style: DensityCodeMuted)
+        Text(text: "if (refractionField > 0.0) {", style: DensityCodeAccent)
+        Text(text: "  sampleBackdrop(refractedUv);", style: DensityCodeText)
+        Text(text: "  composite(surface, transmission);", style: DensityCodeText)
+        Text(text: "}", style: DensityCodeAccent)
+        Text(text: "INFO popup anchored BOTTOM_START", style: DensityCodeMuted)
+        Text(text: "WARN cache miss layer=glass.menu", style: DensityCodeText)
+        Text(text: "PASS strata.headless.effects 1.42s", style: DensityCodeAccent)
+        Text(text: "$ _", style: DensityCodeText)
+      }
+      Panel(
+        style: DensityCalmPane,
+        material: material("demo:aurora", intensity: 0.28, tint: #6278A8FF)
+      )
+    }
+    Panel(style: DensityGlassPlacement) {
+      Panel(style: DensityDiagnosticCard) {
+        Text(text: "OPTIC GLASS", style: SectionText)
+        Text(
+          text: "Foreground remains crisp while background text becomes texture.",
+          style: TelemetryText,
+          wrapMode: "WORD",
+          maxLines: 2
+        )
+      }
+      Panel(style: DensityDiagnosticPill) {
+        Text(text: "44 PX GLASS CONTROL", style: SectionText)
       }
     }
   }

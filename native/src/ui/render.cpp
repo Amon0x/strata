@@ -539,16 +539,32 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         const std::optional<EffectState> local_effect =
             authored_effect.has_value() ? materials.sanitize_effect_state(*authored_effect)
                                         : std::nullopt;
+        const std::optional<EffectState> authored_content_effect =
+            effect_state(style_value("contentEffect"));
+        const std::optional<EffectState> local_content_effect =
+            authored_content_effect.has_value()
+                ? materials.sanitize_effect_state(*authored_content_effect)
+                : std::nullopt;
         const bool isolates_content =
             local_effect.has_value() && local_effect->input == EffectInput::content;
+        const bool isolates_descendants =
+            local_content_effect.has_value() &&
+            local_content_effect->input == EffectInput::content;
         std::optional<EffectState> rendered_effect = local_effect;
         if (rendered_effect.has_value()) {
             rendered_effect->opacity *= descendant_opacity;
         }
+        std::optional<EffectState> rendered_content_effect = local_content_effect;
+        if (rendered_content_effect.has_value()) {
+            rendered_content_effect->opacity *= descendant_opacity;
+        }
         const double body_descendant_opacity = isolates_content ? 1.0 : descendant_opacity;
+        const double child_descendant_opacity =
+            isolates_descendants ? 1.0 : body_descendant_opacity;
         const double presentation_inherited_opacity =
-            isolates_content ? (local_opacity > 0.0 ? 1.0 / local_opacity : 1.0)
-                             : inherited_opacity;
+            isolates_content || isolates_descendants
+                ? (local_opacity > 0.0 ? 1.0 / local_opacity : 1.0)
+                : inherited_opacity;
         std::optional<Rect> scope_clip_rect = inherited_render_clip;
         if (!record->local_clip.has_value()) {
             scope_clip_rect = intersect_clip(scope_clip_rect, record->clip);
@@ -680,6 +696,14 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 ++counters.commands_emitted;
             }
         }
+        if (isolates_descendants) {
+            output.append(ContentEffectPushRenderCommand{
+                record->bounds,
+                CornerRadii::all(radius),
+                *rendered_content_effect,
+            });
+            ++counters.commands_emitted;
+        }
         if (local_material.has_value()) {
             output.append(MaterialPushRenderCommand{*local_material});
             ++counters.commands_emitted;
@@ -756,7 +780,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         }
         for (const RetainedNode* child : ordered_children) {
             self(self, *child, render_portals, child_render_clip, effective_transform,
-                 body_descendant_opacity);
+                 child_descendant_opacity);
         }
         std::vector<std::uint64_t> ordered_child_layout_generations;
         std::vector<std::uint64_t> ordered_child_identities;
@@ -859,6 +883,10 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         const bool local_overlay_rendered = presentation.local_overlay_rendered;
         if (local_overlay_rendered)
             ++counters.overlays_rendered;
+        if (isolates_descendants) {
+            output.append(ContentEffectPopRenderCommand{});
+            ++counters.commands_emitted;
+        }
         if (isolates_content) {
             output.append(ContentEffectPopRenderCommand{});
             ++counters.commands_emitted;
