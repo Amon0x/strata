@@ -92,7 +92,11 @@ float4 effect(EffectInput input) {
     // The floor is lifted over dark content and dropped under bright content, so the element always
     // separates itself from what it sits on instead of dissolving into a black backdrop.
     // `transparency` sets the knee: an open surface keeps more of the scene's contrast.
-    float bandLow = 0.028 + lerp(0.085, 0.010, brightField);
+    // The lift is scaled by how open the surface is meant to be. Applying it flat means an author
+    // asking for a very transmissive surface still gets the same floor as a dense one, so
+    // `transparency` stops meaning anything at the dark end of the range.
+    float bandLow = 0.028 +
+        lerp(0.085, 0.010, brightField) * lerp(1.0, 0.35, transparency);
     float bandHigh = lerp(0.36, 0.30, brightField) * lerp(0.90, 1.0, sizeFactor);
     float knee = lerp(2.8, 1.05, transparency) + saturate(tint.a) * 2.5;
     float normalizer = 1.0 + knee;
