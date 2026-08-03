@@ -88,6 +88,22 @@ float4 effect(EffectInput input) {
             input.uv + backdropDelta * (1.0 + chromaticFraction)
         ).b
     );
+    float2 rimSoftness = 2.5 * texel;
+    float3 softenedRefraction = (
+        sampleEffectBackdrop(
+            input.uv + backdropDelta + float2(rimSoftness.x, 0.0)
+        ).rgb +
+        sampleEffectBackdrop(
+            input.uv + backdropDelta - float2(rimSoftness.x, 0.0)
+        ).rgb +
+        sampleEffectBackdrop(
+            input.uv + backdropDelta + float2(0.0, rimSoftness.y)
+        ).rgb +
+        sampleEffectBackdrop(
+            input.uv + backdropDelta - float2(0.0, rimSoftness.y)
+        ).rgb
+    ) * 0.25;
+    rawRefraction = lerp(rawRefraction, softenedRefraction, 1.0);
     float3 color = lerp(
         body,
         rawRefraction,

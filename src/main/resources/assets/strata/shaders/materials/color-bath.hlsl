@@ -1,9 +1,3 @@
-float hash21(float2 value) {
-    value = frac(value * float2(123.34, 456.21));
-    value += dot(value, value + 45.32);
-    return frac(value.x * value.y);
-}
-
 float2 rotatePoint(float2 value, float angle) {
     float sine = sin(angle);
     float cosine = cos(angle);
@@ -13,92 +7,106 @@ float2 rotatePoint(float2 value, float angle) {
     );
 }
 
-float paintField(float2 position, float2 center, float2 radius, float angle) {
+float colorPool(float2 position, float2 center, float2 radius, float angle) {
     float2 local = rotatePoint(position - center, angle) / max(radius, 0.0001);
-    return exp(-dot(local, local) * 2.15);
+    return exp(-dot(local, local) * 1.65);
 }
 
-float paintPool(float field, float edge) {
-    return smoothstep(edge - 0.075, edge + 0.075, field);
+float silkFold(float value, float width) {
+    float distance = abs(value);
+    float broad = exp(-distance * distance / (width * width));
+    float edge = exp(-distance * distance / (width * width * 0.075));
+    return broad * 0.56 + edge * 0.44;
 }
 
 float4 material(PixelInput input) {
     float2 size = max(materialSize(input), 1.0);
     float aspect = size.x / size.y;
-    float2 position = (input.uv - 0.5) * float2(aspect, 1.0);
+    float2 uv = input.uv;
+    float2 position = (uv - 0.5) * float2(aspect, 1.0);
+    float time = materialTime();
 
+    // Animate the coordinate field itself so even the space between color pools keeps moving.
+    float2 flow = position;
+    flow.x += sin(position.y * 2.7 + time * 0.83) * 0.18;
+    flow.y += sin(position.x * 2.2 - time * 0.69) * 0.15;
+    flow += float2(
+        sin(position.y * 6.3 - time * 0.57),
+        cos(position.x * 5.6 + time * 0.64)
+    ) * 0.038;
+
+    float cyan = colorPool(
+        flow,
+        float2(
+            -0.34 * aspect + sin(time * 0.47) * aspect * 0.22,
+            -0.17 + cos(time * 0.59) * 0.27
+        ),
+        float2(0.58, 0.40),
+        -0.28 + sin(time * 0.31) * 0.35
+    );
+    float coral = colorPool(
+        flow,
+        float2(
+            0.31 * aspect + cos(time * 0.41 + 1.3) * aspect * 0.24,
+            -0.18 + sin(time * 0.53 + 0.8) * 0.29
+        ),
+        float2(0.55, 0.37),
+        0.24 + cos(time * 0.29) * 0.38
+    );
+    float magenta = colorPool(
+        flow,
+        float2(
+            -0.30 * aspect + cos(time * 0.37 + 2.8) * aspect * 0.27,
+            0.24 + sin(time * 0.46 + 2.0) * 0.25
+        ),
+        float2(0.61, 0.41),
+        0.31 + sin(time * 0.34 + 1.0) * 0.32
+    );
+    float violet = colorPool(
+        flow,
+        float2(
+            0.30 * aspect + sin(time * 0.43 + 3.7) * aspect * 0.25,
+            0.22 + cos(time * 0.49 + 2.4) * 0.28
+        ),
+        float2(0.64, 0.43),
+        -0.34 + cos(time * 0.27 + 0.7) * 0.36
+    );
+
+    // The base current changes continuously across the whole surface, rather than leaving a
+    // static dark plate behind moving blobs.
+    float current = 0.5 + 0.5 * sin(
+        flow.x * 1.18 - flow.y * 1.53 + time * 0.76 +
+        sin(flow.y * 2.4 + time * 0.48) * 0.82
+    );
     float3 color = lerp(
-        float3(0.018, 0.025, 0.16),
-        float3(0.16, 0.025, 0.27),
-        saturate(input.uv.x * 0.62 + input.uv.y * 0.38)
+        float3(0.012, 0.018, 0.085),
+        float3(0.11, 0.025, 0.20),
+        current
     );
+    color = lerp(color, float3(0.00, 0.72, 0.91), cyan * 0.91);
+    color = lerp(color, float3(1.00, 0.14, 0.055), coral * 0.90);
+    color = lerp(color, float3(0.94, 0.018, 0.43), magenta * 0.88);
+    color = lerp(color, float3(0.39, 0.035, 0.93), violet * 0.87);
 
-    float cyan = paintPool(
-        paintField(position, float2(-0.72, -0.32), float2(0.46, 0.24), -0.24) +
-        paintField(position, float2(-0.46, -0.18), float2(0.36, 0.21), 0.42) +
-        paintField(position, float2(-0.29, -0.34), float2(0.24, 0.15), -0.12),
-        0.29
-    );
-    float orange = paintPool(
-        paintField(position, float2(0.34, -0.34), float2(0.31, 0.19), -0.32) +
-        paintField(position, float2(0.60, -0.25), float2(0.42, 0.25), 0.18) +
-        paintField(position, float2(0.78, -0.04), float2(0.25, 0.19), -0.46),
-        0.31
-    );
-    float magenta = paintPool(
-        paintField(position, float2(-0.73, 0.28), float2(0.38, 0.27), 0.25) +
-        paintField(position, float2(-0.43, 0.37), float2(0.46, 0.25), -0.28) +
-        paintField(position, float2(-0.16, 0.25), float2(0.29, 0.19), 0.38),
-        0.30
-    );
-    float violet = paintPool(
-        paintField(position, float2(0.24, 0.27), float2(0.39, 0.26), -0.35) +
-        paintField(position, float2(0.55, 0.34), float2(0.48, 0.29), 0.26) +
-        paintField(position, float2(0.81, 0.18), float2(0.27, 0.19), -0.18),
-        0.30
-    );
-    float lime = paintPool(
-        paintField(position, float2(-0.10, -0.29), float2(0.24, 0.14), 0.18) +
-        paintField(position, float2(0.08, -0.22), float2(0.23, 0.13), -0.34),
-        0.34
-    );
+    // Moving satin folds provide fine, high-contrast features for the glass to refract without
+    // turning the backdrop into a diagnostic grid.
+    float foldFieldA =
+        sin(flow.x * 2.12 + flow.y * 1.31 + time * 0.94) +
+        sin(flow.x * 4.31 - flow.y * 1.68 - time * 0.61) * 0.34;
+    float foldFieldB =
+        sin(flow.y * 3.26 - flow.x * 1.16 - time * 0.81 + 1.7) +
+        sin(flow.x * 2.66 + flow.y * 4.08 + time * 0.69) * 0.29;
+    float foldA = silkFold(foldFieldA, 0.30);
+    float foldB = silkFold(foldFieldB, 0.25);
 
-    color = lerp(color, float3(0.0, 0.76, 0.98), cyan * 0.94);
-    color = lerp(color, float3(1.0, 0.20, 0.025), orange * 0.96);
-    color = lerp(color, float3(1.0, 0.015, 0.46), magenta * 0.95);
-    color = lerp(color, float3(0.46, 0.035, 1.0), violet * 0.91);
-    color = lerp(color, float3(0.62, 1.0, 0.025), lime * 0.88);
+    color += float3(0.04, 0.83, 0.92) * foldA * (0.14 + cyan * 0.22);
+    color += float3(1.00, 0.31, 0.25) * foldB * (0.11 + coral * 0.20);
+    color += float3(1.00, 0.78, 0.62) * foldA * foldB * 0.22;
+    color *= 0.84 + current * 0.29;
 
-    float cream = paintPool(
-        paintField(position, float2(-0.09, -0.03), float2(0.12, 0.20), -0.38) +
-        paintField(position, float2(0.02, 0.06), float2(0.11, 0.18), 0.32),
-        0.34
-    );
-    float turquoiseStreak = paintPool(
-        paintField(position, float2(-0.36, 0.08), float2(0.52, 0.055), -0.48),
-        0.29
-    );
-    float pinkStreak = paintPool(
-        paintField(position, float2(0.43, 0.02), float2(0.50, 0.052), 0.42),
-        0.29
-    );
-    float opticTestStreak = paintPool(
-        paintField(position, float2(-0.49, -0.21), float2(0.43, 0.034), 0.27),
-        0.26
-    );
-    float roundedTestStreak = paintPool(
-        paintField(position, float2(0.10, 0.08), float2(0.42, 0.032), -0.36),
-        0.26
-    );
-
-    color = lerp(color, float3(1.0, 0.91, 0.70), cream * 0.88);
-    color = lerp(color, float3(0.0, 0.98, 0.79), turquoiseStreak * 0.72);
-    color = lerp(color, float3(1.0, 0.08, 0.68), pinkStreak * 0.70);
-    color = lerp(color, float3(1.0, 0.46, 0.01), opticTestStreak * 0.94);
-    color = lerp(color, float3(0.0, 0.94, 1.0), roundedTestStreak * 0.90);
-
-    float grain = hash21(floor(input.position.xy)) - 0.5;
-    color += grain * 0.01;
+    float vignette = saturate(1.0 - dot(uv - 0.5, uv - 0.5) * 0.72);
+    color *= 0.85 + vignette * 0.15;
+    color = color / (1.0 + color * 0.37) * 1.10;
 
     return float4(
         saturate(color),
