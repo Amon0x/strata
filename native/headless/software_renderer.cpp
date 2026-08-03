@@ -135,8 +135,12 @@ struct PixelRect final {
                                     const std::array<float, 4U>& radii) noexcept {
     const bool trailing = x >= 0.0F;
     const bool bottom = y >= 0.0F;
-    const float radius = std::max(0.0F, bottom ? (trailing ? radii[2U] : radii[3U])
-                                               : (trailing ? radii[1U] : radii[0U]));
+    // Clamped for the same reason as the GPU path: an oversized radius otherwise pushes the field
+    // outside the shape and the surface disappears instead of resolving to a pill.
+    const float radius =
+        std::min(std::max(0.0F, bottom ? (trailing ? radii[2U] : radii[3U])
+                                       : (trailing ? radii[1U] : radii[0U])),
+                 std::min(half_width, half_height));
     const float qx = std::abs(x) - half_width + radius;
     const float qy = std::abs(y) - half_height + radius;
     return std::hypot(std::max(qx, 0.0F), std::max(qy, 0.0F)) + std::min(std::max(qx, qy), 0.0F) -

@@ -84,6 +84,11 @@ float roundedBoxSdf(float2 p, float2 halfSize, float4 radii) {
         lerp(radii.y, radii.z, quadrant.y),
         quadrant.x
     );
+    // A radius past half the shorter extent has no geometric meaning, and left unclamped it pushes
+    // the field entirely outside the shape so nothing is drawn at all. Clamping matches the clip
+    // mask and the effect paths, so the pill idiom of an oversized radius resolves the same way
+    // whichever path draws the surface.
+    radius = min(radius, min(halfSize.x, halfSize.y));
     float2 q = abs(p) - halfSize + radius;
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
