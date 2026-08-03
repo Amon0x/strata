@@ -281,6 +281,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "tabItem", .type = declared_type_reference("t63")},
         DeclaredProperty{.name = "tabItems", .type = declared_type_reference("t64")},
         DeclaredProperty{.name = "textAlign", .type = declared_type_reference("t65")},
+        DeclaredProperty{.name = "toggleState", .type = declared_type_reference("t172")},
         DeclaredProperty{.name = "image", .type = declared_type_reference("t66")},
         DeclaredProperty{.name = "imageSource", .type = declared_type_reference("t67")},
         DeclaredProperty{.name = "widgetVariant", .type = declared_type_reference("t68")},

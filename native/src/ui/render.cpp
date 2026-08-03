@@ -525,7 +525,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             return nested;
         };
         const MotionComputedValues* computed = motion.computed_values(node.identity());
-        const MotionTransform transform = local_presentation_transform(node, motion);
+        const MotionTransform transform =
+            local_presentation_transform(node, motion, record->bounds);
         const MotionTransform effective_transform =
             concatenate_presentation_transform(inherited_transform, transform);
         const double local_opacity = local_presentation_opacity(node, &motion);

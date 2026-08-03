@@ -176,8 +176,15 @@ Point InputRouter::injection_point(const std::string_view key) const {
             route.push_back(current);
         }
         for (auto current = route.rbegin(); current != route.rend(); ++current) {
+            const LayoutRecord* current_layout = layout_->find((*current)->identity());
+            if (current_layout == nullptr) continue;
             transform = concatenate_presentation_transform(
-                transform, local_presentation_transform(**current, *motion_)
+                transform,
+                local_presentation_transform(
+                    **current,
+                    *motion_,
+                    current_layout->bounds
+                )
             );
         }
         hit = transform_presentation_bounds(hit, transform);

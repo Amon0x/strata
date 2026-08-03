@@ -402,7 +402,7 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
     if (layout == nullptr) throw std::logic_error("retained inspection node has no layout record");
     const MotionTransform effective_transform = concatenate_presentation_transform(
         inherited_transform,
-        local_presentation_transform(node, surface.motion())
+        local_presentation_transform(node, surface.motion(), layout->bounds)
     );
     std::vector<JsonValue> children;
     children.reserve(node.children().size());

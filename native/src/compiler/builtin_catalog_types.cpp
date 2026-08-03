@@ -1778,6 +1778,48 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                 .kind = DeclaredTypeKind::list,
                 .element = declared_type_reference("t170"),
                 .maximum_items = std::size_t{4U}})},
+        DeclaredNamedType{
+            .id = "t172",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "toggle presentation state",
+                .fields =
+                    {DeclaredTypeField{.name = "checked",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "enabled",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "hovered",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "pressed",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "focused",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "focusVisible",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true,
+                                       .nullable = false}},
+                .value = declared_type_reference("t7")})},
+        DeclaredNamedType{
+            .id = "t173",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::component_template,
+                .parameters =
+                    {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+                     DeclaredParameter{.name = "label", .type = declared_type_reference("t0")},
+                     DeclaredParameter{.name = "description",
+                                       .type = declared_type_reference("t0")},
+                     DeclaredParameter{.name = "control",
+                                       .type = declared_type_reference("t172")}}})},
     };
 }
 

@@ -136,8 +136,15 @@ bool InputRouter::move_focus_spatial(
             route.push_back(item);
         }
         for (auto item = route.rbegin(); item != route.rend(); ++item) {
+            const LayoutRecord* item_layout = layout_->find((*item)->identity());
+            if (item_layout == nullptr) continue;
             transform = concatenate_presentation_transform(
-                transform, local_presentation_transform(**item, *motion_)
+                transform,
+                local_presentation_transform(
+                    **item,
+                    *motion_,
+                    item_layout->bounds
+                )
             );
         }
         return transform_presentation_bounds(bounds, transform);

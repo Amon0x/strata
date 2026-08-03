@@ -16,11 +16,13 @@ class RetainedNode;
  *
  * Layout records remain in stable logical coordinates. Presentation-only motion is composed
  * separately so animation never invalidates measurement merely to keep pointer and inspection
- * geometry aligned with pixels.
+ * geometry aligned with pixels. Scale is centered on the arranged border bounds; its pivot
+ * compensation is baked into the returned translation.
  */
 [[nodiscard]] MotionTransform local_presentation_transform(
     const RetainedNode& node,
-    const MotionRuntime& motion
+    const MotionRuntime& motion,
+    const Rect& bounds
 ) noexcept;
 
 /** Effective local opacity shared by rendering and presentation-aware input hit testing. */

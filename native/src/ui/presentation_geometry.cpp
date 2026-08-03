@@ -37,7 +37,8 @@ std::optional<double> visual_number(
 
 MotionTransform local_presentation_transform(
     const RetainedNode& node,
-    const MotionRuntime& motion
+    const MotionRuntime& motion,
+    const Rect& bounds
 ) noexcept {
     const MotionComputedValues* computed = motion.computed_values(node.identity());
     const auto animated = [computed](const MotionProperty property) -> std::optional<double> {
@@ -61,15 +62,23 @@ MotionTransform local_presentation_transform(
         movement->field("y")->number() != nullptr
         ? *movement->field("y")->number()
         : 0.0;
+    const double scale_x = axis_scale(MotionProperty::scale_x, "scaleX");
+    const double scale_y = axis_scale(MotionProperty::scale_y, "scaleY");
+    const double translation_x = animated(MotionProperty::x)
+        .value_or(animated(MotionProperty::translate_x)
+                      .value_or(visual_number(node, "translateX").value_or(0.0))) + movement_x;
+    const double translation_y = animated(MotionProperty::y)
+        .value_or(animated(MotionProperty::translate_y)
+                      .value_or(visual_number(node, "translateY").value_or(0.0))) + movement_y;
+    const Point center{
+        bounds.x + bounds.width * 0.5,
+        bounds.y + bounds.height * 0.5,
+    };
     return MotionTransform{
-        animated(MotionProperty::x)
-            .value_or(animated(MotionProperty::translate_x)
-                          .value_or(visual_number(node, "translateX").value_or(0.0))) + movement_x,
-        animated(MotionProperty::y)
-            .value_or(animated(MotionProperty::translate_y)
-                          .value_or(visual_number(node, "translateY").value_or(0.0))) + movement_y,
-        axis_scale(MotionProperty::scale_x, "scaleX"),
-        axis_scale(MotionProperty::scale_y, "scaleY"),
+        translation_x + center.x * (1.0 - scale_x),
+        translation_y + center.y * (1.0 - scale_y),
+        scale_x,
+        scale_y,
     };
 }
 

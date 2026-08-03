@@ -34,7 +34,7 @@ void checkbox_defaults(WidgetLayoutDefaultsScope& scope) {
     scope.intrinsic(16.0, 16.0);
 }
 
-[[nodiscard]] bool checkbox_checked(WidgetDescriptionScope& scope) {
+[[nodiscard]] bool boolean_control_checked(WidgetDescriptionScope& scope) {
     if (const runtime::Value* value = scope.property("checked");
         value != nullptr && value->boolean() != nullptr) {
         return *value->boolean();
@@ -46,10 +46,13 @@ void checkbox_defaults(WidgetLayoutDefaultsScope& scope) {
     return scope.boolean("defaultChecked", false);
 }
 
-void checkbox_expand(WidgetDescriptionScope& scope) {
+void boolean_control_expand(
+    WidgetDescriptionScope& scope,
+    const std::string_view fallback_key
+) {
     if (scope.property("presentationTemplate") == nullptr) return;
     WidgetDescriptionExpansion& description = scope.description();
-    const std::string key = description.key.value_or("$checkbox");
+    const std::string key = description.key.value_or(std::string(fallback_key));
     const runtime::Value* interaction = scope.retained("$presentationState");
     const auto interaction_flag = [interaction](
                                       const std::string_view name
@@ -68,7 +71,7 @@ void checkbox_expand(WidgetDescriptionScope& scope) {
             {"description", runtime::Value(scope.string("description"))},
             {"control",
              widget_object({
-                 {"checked", runtime::Value(checkbox_checked(scope))},
+                 {"checked", runtime::Value(boolean_control_checked(scope))},
                  {"enabled", runtime::Value(scope.boolean("enabled", true))},
                  {"hovered", runtime::Value(interaction_flag("hovered"))},
                  {"pressed", runtime::Value(interaction_flag("pressed"))},
@@ -82,12 +85,27 @@ void checkbox_expand(WidgetDescriptionScope& scope) {
     scope.synthesized();
 }
 
+void checkbox_expand(WidgetDescriptionScope& scope) {
+    boolean_control_expand(scope, "$checkbox");
+}
+
 void toggle_defaults(WidgetLayoutDefaultsScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) {
+        scope.set("height", runtime::Value("content"));
+        scope.set("width", widget_fill());
+        scope.padding(0.0, 0.0, 0.0, 0.0);
+        scope.intrinsic(44.0, 20.0);
+        return;
+    }
     scope.set("height", runtime::Value(28.0));
     scope.set("width", runtime::Value("content"));
     scope.set("alignItems", runtime::Value("CENTER"));
     scope.padding(50.0, 4.0, 6.0, 4.0);
     scope.intrinsic(44.0, 20.0);
+}
+
+void toggle_expand(WidgetDescriptionScope& scope) {
+    boolean_control_expand(scope, "$toggle");
 }
 
 void slider_defaults(WidgetLayoutDefaultsScope& scope) {
@@ -237,7 +255,7 @@ void select_defaults(WidgetLayoutDefaultsScope& scope) {
         {"detachFromParentClip", runtime::Value(true)},
         {"height", runtime::Value("content")},
         {"kind", runtime::Value("PORTAL")},
-        {"matchAnchorWidth", runtime::Value(true)},
+        {"matchAnchorWidth", runtime::Value(false)},
         {"portalTarget", runtime::Value("root")},
         {"width", runtime::Value("content")},
         {"zIndex", runtime::Value(20'000.0)},
@@ -581,7 +599,14 @@ void register_control_widget_descriptions(WidgetRegistry& registry) {
         {},
         "presentationTemplate"
     );
-    add(registry, "Toggle", &toggle_defaults);
+    add(
+        registry,
+        "Toggle",
+        &toggle_defaults,
+        &toggle_expand,
+        {},
+        "presentationTemplate"
+    );
     add(registry, "Slider", &slider_defaults);
     add(registry, "TextBox", &text_box_defaults);
     add(registry, "TextArea", &text_area_defaults, nullptr, "text-edit");

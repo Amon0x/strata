@@ -14,6 +14,7 @@
 #include "resource/resource.hpp"
 #include "runtime/application.hpp"
 #include "ui/frame_snapshot.hpp"
+#include "ui/presentation_geometry.hpp"
 #include "ui/surface.hpp"
 #include "ui/text.hpp"
 
@@ -251,6 +252,150 @@ overlay Main { root BoundControls() }
     );
 }
 
+void test_authored_toggle_presentation(
+    const std::filesystem::path& resource_root,
+    const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
+) {
+    constexpr std::string_view source = R"(
+style AuthoredThumbOff {
+  width: 12;
+  height: 12;
+  scale: 0.5;
+  background: #FFFFFFFF;
+  border: null;
+}
+
+style AuthoredThumbOn extends AuthoredThumbOff {
+  scale: 1;
+}
+
+component AuthoredTogglePresentation(
+  key: key,
+  label: string,
+  description: string,
+  control: toggleState
+) {
+  Panel(
+    key: key,
+    layout: { kind: "ROW", width: 180, height: 28, alignItems: "CENTER" }
+  ) {
+    Text(
+      key: "authored.toggle.copy",
+      text: format(
+        "{0}:{1}:{2}",
+        label,
+        description,
+        control.checked ? "on" : "off"
+      )
+    )
+    Panel(
+      key: "authored.toggle.thumb",
+      style: control.checked ? AuthoredThumbOn : AuthoredThumbOff
+    )
+  }
+}
+
+overlay Main {
+  root Toggle(
+    key: "authored.toggle",
+    label: "Effects",
+    description: "Use post-processing",
+    defaultChecked: false,
+    presentationTemplate: AuthoredTogglePresentation
+  )
+}
+)";
+
+    strata::runtime::ApplicationContext application("authored-toggle", bundle);
+    const strata::runtime::ActivationResult activation = application.compile_and_activate(
+        strata::compiler::ModuleSource{"authored-toggle.strata", std::string(source)},
+        no_imports(),
+        0U
+    );
+    check(activation.activated(), "authored Toggle presentation did not compile and activate");
+
+    strata::ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 120;
+    environment.logical_width = 320.0;
+    environment.logical_height = 120.0;
+    environment.reduced_motion = true;
+    environment.input = strata::ui::SurfaceInputCapabilities{
+        true,
+        strata::ui::PointerPrecision::fine,
+        true,
+        false,
+        true,
+        true,
+        false,
+    };
+    strata::ui::Surface surface(
+        "authored-toggle",
+        application,
+        strata::runtime::LayerRole::overlay,
+        "Main",
+        environment,
+        strata::ui::TextEngine::load_control_font(
+            resource_root,
+            strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        )
+    );
+    static_cast<void>(surface.frame(1'000'000));
+
+    const strata::ui::RetainedNode* toggle = surface.tree().find_key("authored.toggle");
+    const strata::ui::RetainedNode* presentation =
+        surface.tree().find_key("authored.toggle.presentation");
+    const strata::ui::RetainedNode* copy =
+        surface.tree().find_key("authored.toggle.copy");
+    const strata::ui::RetainedNode* thumb =
+        surface.tree().find_key("authored.toggle.thumb");
+    const strata::ui::LayoutRecord* thumb_layout =
+        thumb != nullptr ? surface.layout().find(thumb->identity()) : nullptr;
+    check(
+        toggle != nullptr && presentation != nullptr && copy != nullptr &&
+            thumb != nullptr && thumb_layout != nullptr &&
+            string_property(copy, "text") != nullptr &&
+            *string_property(copy, "text") == "Effects:Use post-processing:off",
+        "authored Toggle template did not receive its typed label, description, and state"
+    );
+    const strata::ui::Rect presented_thumb = strata::ui::transform_presentation_bounds(
+        thumb_layout->bounds,
+        strata::ui::local_presentation_transform(
+            *thumb,
+            surface.motion(),
+            thumb_layout->bounds
+        )
+    );
+    check(
+        std::abs(presented_thumb.width - 6.0) < 0.001 &&
+            std::abs(presented_thumb.height - 6.0) < 0.001 &&
+            std::abs(
+                presented_thumb.x + presented_thumb.width * 0.5 -
+                (thumb_layout->bounds.x + thumb_layout->bounds.width * 0.5)
+            ) < 0.001 &&
+            std::abs(
+                presented_thumb.y + presented_thumb.height * 0.5 -
+                (thumb_layout->bounds.y + thumb_layout->bounds.height * 0.5)
+            ) < 0.001,
+        "presentation scale moved authored content away from its own center"
+    );
+    const strata::data::JsonValue* semantics = surface.semantics().find(toggle->identity());
+    const strata::data::JsonValue* role = semantics != nullptr ? semantics->find("role") : nullptr;
+    check(
+        role != nullptr && role->string() != nullptr && *role->string() == "switch",
+        "authored Toggle presentation lost native switch semantics"
+    );
+
+    static_cast<void>(surface.input().click("authored.toggle"));
+    static_cast<void>(surface.frame(2'000'000));
+    copy = surface.tree().find_key("authored.toggle.copy");
+    check(
+        copy != nullptr && string_property(copy, "text") != nullptr &&
+            *string_property(copy, "text") == "Effects:Use post-processing:on",
+        "authored Toggle presentation did not rematerialize after native activation"
+    );
+}
+
 void test_section_content_and_activation_contract(
     const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
@@ -422,7 +567,11 @@ component InteractiveChoiceTrigger(
 }
 
 component InteractiveChoicePopup(key: key, level: number, expanded: boolean) {
-  Panel(key: key, style: TransparentPresentation)
+  Panel(
+    key: key,
+    style: TransparentPresentation,
+    layout: { kind: "COLUMN", width: 260, height: "content" }
+  )
 }
 
 component InteractiveChoiceItem(
@@ -532,10 +681,21 @@ overlay Main { root ControlDefaults() }
     );
     const strata::ui::RetainedNode* custom_popup =
         surface.tree().find_key("defaults.custom-select.popup");
+    const strata::ui::RetainedNode* custom_popup_surface =
+        surface.tree().find_key("defaults.custom-select.popup.surface");
     const strata::ui::LayoutRecord* custom_popup_layout = custom_popup != nullptr
         ? surface.layout().find(custom_popup->identity())
         : nullptr;
-    check(custom_popup_layout != nullptr, "authored Select popup wrapper was not retained");
+    const strata::ui::LayoutRecord* custom_popup_surface_layout =
+        custom_popup_surface != nullptr
+            ? surface.layout().find(custom_popup_surface->identity())
+            : nullptr;
+    check(
+        custom_popup_layout != nullptr && custom_popup_surface_layout != nullptr &&
+            custom_popup_layout->bounds.width == 260.0 &&
+            custom_popup_surface_layout->bounds.width == 260.0,
+        "authored Select popup did not retain its template-owned width"
+    );
     const bool wrapper_drew_theme_chrome = std::ranges::any_of(
         surface.render_commands().commands(),
         [custom_popup_layout](const strata::ui::RenderCommand& command) {
@@ -878,21 +1038,29 @@ overlay Main {
         "scaled scroll clip-cache fixture did not accept a scroll offset"
     );
     static_cast<void>(scaled_surface.frame(2'000'000));
+    const strata::ui::RetainedNode* scaled_scroll =
+        scaled_surface.tree().find_key("scaled.scroll");
     const strata::ui::RetainedNode* scaled_bottom =
         scaled_surface.tree().find_key("scaled.bottom");
+    const strata::ui::LayoutRecord* scaled_scroll_layout = scaled_scroll != nullptr
+        ? scaled_surface.layout().find(scaled_scroll->identity())
+        : nullptr;
     const strata::ui::LayoutRecord* scaled_bottom_layout = scaled_bottom != nullptr
         ? scaled_surface.layout().find(scaled_bottom->identity())
         : nullptr;
     check(
-        scaled_bottom_layout != nullptr && scaled_bottom_layout->local_clip.has_value(),
+        scaled_scroll != nullptr && scaled_scroll_layout != nullptr &&
+            scaled_bottom_layout != nullptr && scaled_bottom_layout->local_clip.has_value(),
         "scaled clipped subtree lost its raw local clip"
     );
-    const strata::ui::Rect expected_scaled_clip{
-        scaled_bottom_layout->local_clip->x / 2.0,
-        scaled_bottom_layout->local_clip->y / 2.0,
-        scaled_bottom_layout->local_clip->width / 2.0,
-        scaled_bottom_layout->local_clip->height / 2.0,
-    };
+    const strata::ui::Rect expected_scaled_clip = strata::ui::inverse_presentation_bounds(
+        *scaled_bottom_layout->local_clip,
+        strata::ui::local_presentation_transform(
+            *scaled_scroll,
+            scaled_surface.motion(),
+            scaled_scroll_layout->bounds
+        )
+    );
     const bool emitted_recomposed_scaled_clip = std::ranges::any_of(
         scaled_surface.render_commands().commands(),
         [&expected_scaled_clip](const strata::ui::RenderCommand& command) {
@@ -1014,6 +1182,7 @@ int main(const int argument_count, const char* const* const arguments) {
         const auto bundle = load_bundle();
         test_semantic_binding_rejections(bundle);
         test_binding_initial_value_and_round_trip(resource_root, bundle);
+        test_authored_toggle_presentation(resource_root, bundle);
         test_section_content_and_activation_contract(resource_root, bundle);
         test_range_and_choice_control_defaults(resource_root, bundle);
         test_scrolled_clipped_subtree_render_cache(resource_root, bundle);

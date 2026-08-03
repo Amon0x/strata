@@ -275,26 +275,35 @@ style CheckText { pixelSize: 12; color: #BCC6CDFF; }
 style CheckTextHover { pixelSize: 12; color: #EDF1F3FF; }
 style CheckMeta { pixelSize: 10; color: #6C7981FF; }
 style SwitchShell {
-  kind: "PANEL";
+  kind: "ROW";
   width: 32;
   height: 18;
   radius: 999;
-  alignItems: "START";
-  justifyContent: "CENTER";
+  alignItems: "CENTER";
+  justifyContent: "START";
   padding: { horizontal: 3 };
   background: #10161CD8;
-  border: { width: 1, color: #5B6A75FF };
+  border: { width: 1.5, color: #5B6A75FF };
   animateChanges: { properties: ["background", "border"], policy: "fast" };
 }
-style SwitchShellHover extends SwitchShell { border: { width: 1, color: #8DA5B4FF }; }
+style SwitchShellHover extends SwitchShell { border: { width: 1.5, color: #8DA5B4FF }; }
 style SwitchShellOn extends SwitchShell {
-  justifyContent: "END";
   background: #6E93AAFF;
-  border: { width: 1, color: #B6CDDAFF };
+  border: { width: 1.5, color: #B6CDDAFF };
 }
 style SwitchShellOnHover extends SwitchShellOn { background: #7EA3B9FF; }
-style SwitchKnob { kind: "PANEL"; width: 12; height: 12; radius: 999; background: #D6E2EAFF; border: null; }
-style SwitchKnobOn extends SwitchKnob { background: #F4FAFEFF; }
+style SwitchKnob {
+  kind: "PANEL";
+  width: 12;
+  height: 12;
+  radius: 999;
+  translateX: 0;
+  scale: 0.72;
+  background: #91A6B3FF;
+  border: null;
+  animateChanges: { properties: ["translateX", "scale", "background"], policy: "fast" };
+}
+style SwitchKnobOn extends SwitchKnob { translateX: 14; scale: 1; background: #F4FAFEFF; }
 
 style SelectRow extends Clear {
   kind: "ROW";
@@ -303,7 +312,7 @@ style SelectRow extends Clear {
   gap: 10;
   alignItems: "CENTER";
 }
-style TuneSelectTrigger {
+style TuneSelectTrigger extends GlassPane {
   kind: "ROW";
   width: { weight: 1 };
   height: 30;
@@ -311,8 +320,6 @@ style TuneSelectTrigger {
   gap: 8;
   alignItems: "CENTER";
   radius: 8;
-  background: #131A21C4;
-  border: { width: 1, color: #D6E0E622 };
   focusRing: { width: 1, color: #AEC3D078 };
 }
 style TuneSelectPopup extends GlassPane {
@@ -514,11 +521,11 @@ component RailButton(
   }
 }
 
-component TuneSwitchPresentation(
+component TuneTogglePresentation(
   key: key,
   label: string,
   description: string,
-  control: checkboxState
+  control: toggleState
 ) {
   Panel(key: key, style: CheckRow) {
     Panel(style: CheckCopy) {
@@ -536,12 +543,12 @@ component TuneSwitchPresentation(
 }
 
 component SwitchRow(id: key, label: string, detail: string, on: boolean) {
-  Checkbox(
+  Toggle(
     key: id,
     label: label,
     description: detail,
     defaultChecked: on,
-    presentationTemplate: TuneSwitchPresentation,
+    presentationTemplate: TuneTogglePresentation,
     layout: { width: { weight: 1 }, height: 32 }
   )
 }
@@ -579,7 +586,13 @@ component SliderRow(
 
 component TuneChoiceTrigger(key: key, label: string, enabled: boolean, expanded: boolean) {
   Panel(key: key, style: TuneSelectTrigger) {
-    Text(text: label, style: SelectValue, layout: { width: { weight: 1 }, height: "content" })
+    Text(
+      text: label,
+      style: SelectValue,
+      layout: { width: { weight: 1 }, height: "content" },
+      maxLines: 1,
+      overflow: "ELLIPSIS"
+    )
     Text(text: expanded ? "⌃" : "⌄", style: SelectMeta)
   }
 }
@@ -608,7 +621,13 @@ component TuneChoiceItem(
     style: active ? TuneSelectItemActive : selected ? TuneSelectItemSelected : TuneSelectItem
   ) {
     Panel(style: selected ? SelectedMark : EmptyMark)
-    Text(text: label, style: SelectValue, layout: { width: { weight: 1 }, height: "content" })
+    Text(
+      text: label,
+      style: SelectValue,
+      layout: { width: { weight: 1 }, height: "content" },
+      maxLines: 1,
+      overflow: "ELLIPSIS"
+    )
   }
 }
 

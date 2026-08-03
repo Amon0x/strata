@@ -380,8 +380,15 @@ Point InputRouter::logical_pointer_position(
             route.push_back(current);
         }
         for (auto current = route.rbegin(); current != route.rend(); ++current) {
+            const LayoutRecord* current_layout = layout_->find((*current)->identity());
+            if (current_layout == nullptr) continue;
             transform = concatenate_presentation_transform(
-                transform, local_presentation_transform(**current, *motion_)
+                transform,
+                local_presentation_transform(
+                    **current,
+                    *motion_,
+                    current_layout->bounds
+                )
             );
         }
         position = inverse_presentation_point(position, transform);
@@ -817,7 +824,7 @@ void InputRouter::prepare_pointer_geometry() const {
         if (opacity <= 1.0e-3) return;
         const MotionTransform transform = motion_ != nullptr
             ? concatenate_presentation_transform(
-                  inherited, local_presentation_transform(node, *motion_)
+                  inherited, local_presentation_transform(node, *motion_, record->bounds)
               )
             : inherited;
         std::optional<Rect> child_clip = traversal_clip;

@@ -84,6 +84,7 @@ void checkbox_content(WidgetRenderScope& scope) {
 }
 
 void toggle_content(WidgetRenderScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) return;
     const bool checked = scope.effective_boolean(
         "checked", "$checked", "defaultChecked", false
     );

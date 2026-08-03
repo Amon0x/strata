@@ -555,8 +555,16 @@ Surface::Surface(
                 route.push_back(current);
             }
             for (auto current = route.rbegin(); current != route.rend(); ++current) {
+                const LayoutRecord* current_layout =
+                    layout_engine_.result().find((*current)->identity());
+                if (current_layout == nullptr) continue;
                 transform = concatenate_presentation_transform(
-                    transform, local_presentation_transform(**current, motion_)
+                    transform,
+                    local_presentation_transform(
+                        **current,
+                        motion_,
+                        current_layout->bounds
+                    )
                 );
             }
             caret = transform_presentation_bounds(caret, transform);
@@ -1953,8 +1961,16 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
                     route.push_back(current);
                 }
                 for (auto current = route.rbegin(); current != route.rend(); ++current) {
+                    const LayoutRecord* current_layout =
+                        laid_out.find((*current)->identity());
+                    if (current_layout == nullptr) continue;
                     transform = concatenate_presentation_transform(
-                        transform, local_presentation_transform(**current, motion_)
+                        transform,
+                        local_presentation_transform(
+                            **current,
+                            motion_,
+                            current_layout->bounds
+                        )
                     );
                 }
                 const Rect hit_bounds = transform_presentation_bounds(
