@@ -12,6 +12,12 @@ float colorPool(float2 position, float2 center, float2 radius, float angle) {
     return exp(-dot(local, local) * 1.65);
 }
 
+float hash21(float2 value) {
+    value = frac(value * float2(123.34, 456.21));
+    value += dot(value, value + 45.32);
+    return frac(value.x * value.y);
+}
+
 float silkFold(float value, float width) {
     float distance = abs(value);
     float broad = exp(-distance * distance / (width * width));
@@ -96,13 +102,37 @@ float4 material(PixelInput input) {
     float foldFieldB =
         sin(flow.y * 3.26 - flow.x * 1.16 - time * 0.81 + 1.7) +
         sin(flow.x * 2.66 + flow.y * 4.08 + time * 0.69) * 0.29;
-    float foldA = silkFold(foldFieldA, 0.30);
-    float foldB = silkFold(foldFieldB, 0.25);
+    float foldA = silkFold(foldFieldA, 0.15);
+    float foldB = silkFold(foldFieldB, 0.13);
 
     color += float3(0.04, 0.83, 0.92) * foldA * (0.14 + cyan * 0.22);
     color += float3(1.00, 0.31, 0.25) * foldB * (0.11 + coral * 0.20);
     color += float3(1.00, 0.78, 0.62) * foldA * foldB * 0.22;
     color *= 0.84 + current * 0.29;
+
+    // Fine caustic filaments. A smooth gradient gives a glass surface nothing to work with: the
+    // blur has no detail to destroy, the edge lens has no line to visibly bend, and the rim has no
+    // contrast to reflect. These ride the same flow field, so they stay part of the same material
+    // rather than reading as an overlaid texture.
+    float causticField =
+        sin(flow.x * 13.7 + flow.y * 9.1 + time * 1.24) *
+        sin(flow.y * 11.3 - flow.x * 7.6 - time * 0.97);
+    float caustic = pow(saturate(causticField * 0.5 + 0.5), 7.0);
+    float causticMask = saturate(cyan + coral + magenta + violet);
+    color += float3(0.72, 0.90, 1.00) * caustic * causticMask * 0.30;
+
+    // Drifting speculars: small, near-hard points that survive as recognisable shapes under
+    // refraction, so lens compression and rim reflection are legible against them.
+    float2 sparkFlow = flow * 3.4 + float2(time * 0.21, -time * 0.16);
+    float2 sparkCell = frac(sparkFlow) - 0.5;
+    float spark = exp(-dot(sparkCell, sparkCell) * 62.0) *
+        step(0.62, hash21(floor(sparkFlow)));
+    color += float3(1.00, 0.93, 0.86) * spark * 0.55;
+
+    // Darker lanes between the pools widen the luminance range inside any one element's footprint,
+    // which is what makes the surface's tone compression visible at all.
+    float lanes = saturate(cyan + coral + magenta + violet);
+    color *= lerp(0.62, 1.06, smoothstep(0.04, 0.55, lanes));
 
     float vignette = saturate(1.0 - dot(uv - 0.5, uv - 0.5) * 0.72);
     color *= 0.85 + vignette * 0.15;

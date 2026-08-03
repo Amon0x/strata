@@ -135,18 +135,18 @@ float4 effect(EffectInput input) {
     float keyArc = smoothstep(0.05, 0.92, facing);
     float counterArc = smoothstep(0.10, 0.98, -facing);
 
-    // Volume. A soft top-lit sheen keeps the surface reading as a slab instead of a flat scrim.
-    float2 halfExtent = max(effectBounds.zw * 0.5, 1.0);
-    float2 local = (input.pixel - (effectBounds.xy + halfExtent)) / halfExtent;
-    body *= 1.0 + (1.0 - smoothstep(-1.0, 0.30, local.y)) * 0.075 * highlight;
-    body *= 1.0 - smoothstep(0.20, 1.0, local.y) * 0.05;
+    // Gloss. Grazing reflection approaches total at the silhouette, so the surface brightens toward
+    // its outline, driven by the shape's own distance field so it stays symmetric and follows the
+    // real outline including corner radii. The band has a bounded width rather than one proportional
+    // to the element: scaling it with the size makes every surface read as half a glass cylinder,
+    // because on a short element the glow from opposite edges meets and no flat face is left.
+    float sheenWidth = clamp(minimumExtent * 0.20, 7.0, 34.0) * thickness;
+    float sheenDepth = saturate(insideDistance / sheenWidth);
+    float sheen = pow(1.0 - sheenDepth, 2.2);
+    body *= 1.0 - sheenDepth * 0.035 * highlight;
+    body += min(sheen * 0.11 * highlight, 0.13);
     body *= luminosity;
 
-    // The lensed band catches a broad highlight of its own, peaking between the rim and the flat
-    // interior. That is what makes the edge read as a curved shoulder with thickness behind it,
-    // rather than a flat panel with a stroke around it.
-    float shoulder = saturate(lens * (1.0 - lens) * 4.0);
-    body += shoulder * (0.25 + saturate(facing) * 0.75) * 0.14 * highlight;
 
     // Metal rim. The reflection is taken from outside the silhouette, partially desaturated and
     // contrast-expanded: metal keeps some of the environment's hue but compresses its value range.
