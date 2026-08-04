@@ -1240,6 +1240,16 @@
       "type": "number"
     },
     {
+      "name": "placementX",
+      "nullable": false,
+      "type": "number"
+    },
+    {
+      "name": "placementY",
+      "nullable": false,
+      "type": "number"
+    },
+    {
       "name": "radius",
       "nullable": false,
       "type": "number"
@@ -2262,6 +2272,31 @@
     },
     {
       "capabilities": [
+        "STYLE"
+      ],
+      "name": "whenStyle",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "condition",
+          "nullable": false,
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "active",
+          "nullable": false,
+          "required": true,
+          "type": "style"
+        }
+      ],
+      "returnType": "style"
+    },
+    {
+      "capabilities": [
         "COLLECTION"
       ],
       "name": "takeWhile",
@@ -2510,6 +2545,11 @@
       "name": "padding",
       "nullable": false,
       "type": "one of (number, map of any)"
+    },
+    {
+      "name": "placement",
+      "nullable": false,
+      "type": "map of any"
     },
     {
       "name": "portalTarget",
@@ -2838,6 +2878,11 @@
       "name": "pixelSize",
       "nullable": false,
       "type": "number"
+    },
+    {
+      "name": "placement",
+      "nullable": false,
+      "type": "map of any"
     },
     {
       "name": "portalTarget",
@@ -11069,18 +11114,10 @@
         {
           "aliases": [],
           "enumValues": [],
-          "name": "valueLabel",
-          "nullable": false,
-          "required": false,
-          "type": "string"
-        },
-        {
-          "aliases": [],
-          "enumValues": [],
           "name": "presentationTemplate",
           "nullable": false,
           "required": false,
-          "type": "component (key: key, valueLabel: string, control: slider presentation state)"
+          "type": "component (key: key, control: slider presentation state)"
         },
         {
           "aliases": [],

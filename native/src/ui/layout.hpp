@@ -118,6 +118,17 @@ struct LayoutSize final {
     friend bool operator==(const LayoutSize& left, const LayoutSize& right);
 };
 
+struct LayoutPlacement final {
+    std::optional<LayoutSize> x;
+    std::optional<LayoutSize> y;
+    double anchor_x = 0.0;
+    double anchor_y = 0.0;
+    double offset_x = 0.0;
+    double offset_y = 0.0;
+
+    [[nodiscard]] friend bool operator==(const LayoutPlacement&, const LayoutPlacement&) = default;
+};
+
 struct VirtualListSpec final {
     LayoutAxis axis = LayoutAxis::vertical;
     std::shared_ptr<const runtime::KeyedSequence> items;
@@ -156,6 +167,7 @@ struct LayoutStyle final {
     LayoutJustify align_content = LayoutJustify::start;
     std::optional<LayoutAlign> align_self;
     std::optional<LayoutAlign> justify_self;
+    std::optional<LayoutPlacement> placement;
     bool wrap = false;
     bool clip = false;
     int z_index = 0;
@@ -432,6 +444,14 @@ private:
         PinContext pin_context;
     };
 
+    struct PendingAnchor final {
+        MeasuredNodePtr measured;
+        Rect fallback_bounds;
+        Rect containing_bounds;
+        std::optional<Rect> inherited_clip;
+        PinContext pin_context;
+    };
+
     struct ArrangementCacheEntry final {
         std::weak_ptr<const MeasuredNode> measured;
         Rect bounds;
@@ -465,6 +485,7 @@ private:
     std::map<std::uint64_t, MeasurementCacheEntry> measurement_cache_;
     std::map<std::uint64_t, ArrangementCacheEntry> arrangement_cache_;
     std::vector<PendingPortal> pending_portals_;
+    std::vector<PendingAnchor> pending_anchors_;
     LayoutResult result_;
     const RetainedTree* last_tree_ = nullptr;
     std::uint64_t last_invalidation_generation_ = 0U;

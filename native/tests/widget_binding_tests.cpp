@@ -250,6 +250,28 @@ overlay Main {
         "authored presentation template accepted an incompatible typed parameter"
     );
 
+    const strata::runtime::ActivationResult bound_owner_parameter = compile(R"(
+component BoundOwnerPresentation(key: key, label: string, control: buttonState) {
+  Text(key: key, text: label)
+}
+overlay Main {
+  root Button(
+    key: "template.bound-owner",
+    label: "Wrong",
+    presentationTemplate: BoundOwnerPresentation(label: "Override")
+  )
+}
+)");
+    check(
+        bound_owner_parameter.status ==
+                strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(
+                bound_owner_parameter,
+                "STRATA.DSL.SEMANTIC_COMPONENT_TEMPLATE_BOUND_OWNER_PARAMETER"
+            ) != nullptr,
+        "partial component template overrode a parameter owned by its widget"
+    );
+
     const strata::runtime::ActivationResult unkeyed_template = compile(R"(
 component UnkeyedButtonPresentation(key: key) {
   Text(key: key, text: "Unkeyed")
@@ -271,8 +293,13 @@ overlay Main {
     );
 
     const strata::runtime::ActivationResult forwarded_template = compile(R"(
-component ForwardedButton(key: key, label: string, control: buttonState) {
-  Text(key: key, text: label)
+component ForwardedButton(
+  key: key,
+  label: string,
+  prefix: string,
+  control: buttonState
+) {
+  Text(key: key, text: format("{0}{1}", prefix, label))
 }
 component ButtonOwner(template: buttonTemplate) {
   Button(
@@ -282,7 +309,7 @@ component ButtonOwner(template: buttonTemplate) {
   )
 }
 overlay Main {
-  root ButtonOwner(template: ForwardedButton)
+  root ButtonOwner(template: ForwardedButton(prefix: "Forwarded: "))
 }
 )");
     check(
@@ -462,6 +489,10 @@ style AuthoredThumbOn extends AuthoredThumbOff {
   scale: 1;
 }
 
+style StateStyleBase { radius: 1; }
+style StateStyleMiddle { radius: 5; }
+style StateStyleFinal { radius: 9; }
+
 component AuthoredTogglePresentation(
   key: key,
   label: string,
@@ -494,6 +525,26 @@ component AuthoredButtonPresentation(key: key, label: string, control: buttonSta
       Text(key: "authored.button.copy", text: format("{0}:{1}", label, control.enabled ? "on" : "off"))
     }
   }
+}
+
+component ForwardedAuthoredButtonPresentation(
+  key: key,
+  label: string,
+  prefix: string,
+  control: buttonState
+) {
+  Text(
+    key: key,
+    text: format("{0}{1}", prefix, label)
+  )
+}
+
+component AuthoredButtonOwner(template: buttonTemplate) {
+  Button(
+    key: "authored.forwarded",
+    label: "Apply",
+    presentationTemplate: template
+  )
 }
 
 component AuthoredIconButtonPresentation(
@@ -538,6 +589,9 @@ component AuthoredControls() {
       label: "Apply",
       presentationTemplate: AuthoredButtonPresentation
     )
+    AuthoredButtonOwner(
+      template: ForwardedAuthoredButtonPresentation(prefix: "Bound: ")
+    )
     IconButton(
       key: "authored.icon",
       icon: "fixture:icon",
@@ -549,8 +603,7 @@ component AuthoredControls() {
       min: 0,
       max: 100,
       bind: sliderValue,
-      valueLabel: "Quarter",
-      presentationTemplate: AuthoredSliderPresentation
+      presentationTemplate: AuthoredSliderPresentation(valueLabel: "Quarter")
     )
     Progress(
       key: "authored.progress",
@@ -558,6 +611,16 @@ component AuthoredControls() {
       max: 100,
       value: 40,
       presentationTemplate: AuthoredProgressPresentation
+    )
+    Panel(
+      key: "authored.state-style",
+      style: style(
+        StateStyleBase,
+        whenStyle(false, StateStyleMiddle),
+        whenStyle(true, StateStyleMiddle),
+        whenStyle(true, StateStyleFinal)
+      ),
+      layout: { width: 20, height: 10 }
     )
     Grid(
       key: "authored.grid",
@@ -638,6 +701,14 @@ overlay Main { root AuthoredControls() }
     check(
         surface.tree().find_key("authored.button.presentation") != nullptr &&
             surface.tree().find_key("authored.button.copy") != nullptr &&
+            string_property(
+                surface.tree().find_key("authored.forwarded.presentation"),
+                "text"
+            ) != nullptr &&
+            *string_property(
+                surface.tree().find_key("authored.forwarded.presentation"),
+                "text"
+            ) == "Bound: Apply" &&
             surface.tree().find_key("authored.icon.presentation") != nullptr &&
             surface.tree().find_key("authored.icon.copy") != nullptr &&
             surface.tree().find_key("authored.slider.presentation") != nullptr &&
@@ -652,6 +723,26 @@ overlay Main { root AuthoredControls() }
                 "text"
             ) == "0.4",
         "common authored control templates did not receive typed presentation state"
+    );
+    const strata::ui::RetainedNode* state_style =
+        surface.tree().find_key("authored.state-style");
+    const auto state_style_layout_property = state_style != nullptr
+        ? state_style->description().properties.find("$layout")
+        : strata::ui::DescriptionNode::Properties::const_iterator{};
+    const strata::runtime::Value* state_style_layout =
+        state_style != nullptr &&
+            state_style_layout_property != state_style->description().properties.end()
+        ? state_style_layout_property->second.value()
+        : nullptr;
+    const strata::runtime::Value* state_style_radius =
+        state_style_layout != nullptr
+            ? state_style_layout->field("radius")
+            : nullptr;
+    check(
+        state_style_radius != nullptr &&
+            state_style_radius->number() != nullptr &&
+            *state_style_radius->number() == 9.0,
+        "conditional state-style layers did not skip false state or preserve override order"
     );
     const strata::ui::RetainedNode* grid =
         surface.tree().find_key("authored.grid");

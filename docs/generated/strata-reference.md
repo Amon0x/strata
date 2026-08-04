@@ -1171,8 +1171,7 @@ Children: `false`
 | `step` | number | false | true | — |
 | `axis` | one of (HORIZONTAL, VERTICAL) | false | false | — |
 | `enabled` | boolean | false | false | — |
-| `valueLabel` | string | false | false | — |
-| `presentationTemplate` | component (key: key, valueLabel: string, control: slider presentation state) | false | false | — |
+| `presentationTemplate` | component (key: key, control: slider presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -2391,6 +2390,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `overflow` | one of (CLIP, ELLIPSIS) |
 | `padding` | one of (number, map of any) |
 | `pixelSize` | number |
+| `placement` | map of any |
 | `portalTarget` | string |
 | `radius` | number |
 | `rowSpan` | number |
@@ -2448,6 +2448,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `minHeight` | one of (one of (number, one of (auto, content), map of any, map of any), map of any) |
 | `minWidth` | one of (one of (number, one of (auto, content), map of any, map of any), map of any) |
 | `padding` | one of (number, map of any) |
+| `placement` | map of any |
 | `portalTarget` | string |
 | `rowSpan` | number |
 | `width` | one of (one of (number, one of (auto, content), map of any, map of any), map of any) |
@@ -2490,6 +2491,8 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `paddingLeft` | number |
 | `paddingRight` | number |
 | `paddingTop` | number |
+| `placementX` | number |
+| `placementY` | number |
 | `radius` | number |
 | `scale` | number |
 | `scaleX` | number |
@@ -2547,6 +2550,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `sortBy` | collection of any | COLLECTION |
 | `startsWith` | boolean | TEXT |
 | `style` | style | STYLE |
+| `whenStyle` | style | STYLE |
 | `takeWhile` | collection of any | COLLECTION |
 | `title` | string | TEXT |
 | `trim` | string | TEXT |

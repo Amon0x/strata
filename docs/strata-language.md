@@ -86,6 +86,29 @@ that slot; `required: true` rejects omission. Unnamed caller children remain sho
 component has exactly one slot (or a slot named `content`). Filled expressions keep the caller's
 scope and stable identity; component parameters and state remain private.
 
+Component templates are values and may bind additional parameters before they are passed to a
+framework owner. The remaining signature is checked structurally against the owner's contract:
+
+```strata
+component MeterPresentation(
+  key: key,
+  suffix: string,
+  control: progressState
+) {
+  Text(key: key, text: format("{0}{1}", control.value, suffix))
+}
+
+Progress(
+  key: "upload.progress",
+  value: uploaded,
+  presentationTemplate: MeterPresentation(suffix: "%")
+)
+```
+
+The owner still supplies `key` and `control`; pre-binding an owner-supplied parameter is a compile
+error. Bound actions and other executable values retain the caller's lexical scope when the
+template is forwarded through another component.
+
 ## Styles and theme values
 
 Styles compose left to right. A derived style overrides its bases in declaration order; inline
@@ -108,8 +131,60 @@ style CardStyle extends Transparent, Spaced {
 Panel(style: style(CardStyle, padding: 8))
 ```
 
+Conditional style layers use any Boolean state rather than a fixed set of pseudo-states. Layers
+whose conditions are false contribute nothing, and later active layers win:
+
+```strata
+Panel(style: style(
+  Thumb,
+  whenStyle(hovered || focusVisible, ThumbHover),
+  whenStyle(pressed, ThumbPressed)
+))
+```
+
 The generated reference separates general style properties, layout properties/size forms, text
 properties, theme tokens, and enum values.
+
+### Layer placement and anchors
+
+Children of layered layouts (`PANEL`, `OVERLAY`, and `STACK`) can position either axis against the
+parent content box. Numeric positions are logical pixels; `{ fraction: value }` positions are a
+fraction of the available axis. `anchorX`/`anchorY` select the corresponding point on the child,
+and scalar offsets are applied last:
+
+```strata
+Panel(layout: { kind: "PANEL", width: 240, height: 40 }) {
+  Panel(layout: {
+    width: 8,
+    height: 24,
+    placement: {
+      x: { fraction: progress },
+      anchorX: 0.5,
+      offsetY: 2
+    }
+  })
+}
+```
+
+Percentage sizes use the same `{ fraction: expression }` arithmetic. Fill allocation is
+proportional to its authored weight; an explicit `{ weight: 0 }` receives zero remaining space.
+
+`anchorTarget` is also valid on an ordinary child. The child becomes out-of-flow, is measured
+against its containing content box, and is arranged after its keyed sibling target, so chained
+sibling anchors are deterministic. Ordinary keyed targets must share the same parent and must not
+be portals; use `"parent"` for the containing node.
+
+```strata
+Panel(key: "account.trigger", layout: { width: 120, height: 28 })
+Panel(layout: {
+  anchorTarget: "account.trigger",
+  anchorSide: "BOTTOM",
+  anchorAlign: "END",
+  anchorGap: 6
+})
+```
+
+Missing targets and cyclic chains produce layout diagnostics instead of order-dependent geometry.
 
 ### Anchored portals
 
@@ -484,7 +559,11 @@ channel timeline, is a compile error rather than an order-dependent override.
 A `motions` entry with `property` and a numeric or color `target` is a typed value channel; it does
 not require duplicated endpoints. `animateChanges` is the opt-in implicit path for concrete
 resolved style/layout values and retargets from the current presentation after rapid state, theme,
-or hot-reload changes. Unsupported non-concrete endpoints snap with a diagnostic.
+or hot-reload changes. Fixed, percentage, and fill-unit width/height targets interpolate without
+being flattened to pixels; `placementX`/`placementY` animate the corresponding layer-placement
+axis. Per-edge `marginLeft`/`marginTop`/`marginRight`/`marginBottom` and padding properties resolve
+from the authored edge object. Unit changes and unsupported non-concrete endpoints snap rather
+than passing through dimensionally invalid intermediate values.
 
 `animateContentSize` follows measured child geometry on content/auto axes. `disclosure` adds the
 expanded target, collapsed extent, clipping, and immediate descendant input/focus exclusion.

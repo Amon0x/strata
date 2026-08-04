@@ -26,6 +26,32 @@ namespace {
     return target.empty() ? nullptr : tree.find_key(target);
 }
 
+[[nodiscard]] const RetainedNode* ordinary_anchor_node(
+    const RetainedTree& tree,
+    const RetainedNode& anchored,
+    const std::string_view target
+) {
+    const RetainedNode* candidate = nullptr;
+    if (target == "parent") {
+        candidate = anchored.parent();
+    } else if (target == "root") {
+        candidate = anchored.parent() == tree.root() ? tree.root() : nullptr;
+    } else if (!target.empty()) {
+        candidate = tree.find_key(target);
+        if (candidate != nullptr && candidate->parent() != anchored.parent()) {
+            candidate = nullptr;
+        }
+    }
+    if (candidate == nullptr || candidate->lifecycle() != RetainedLifecycle::attached) {
+        return nullptr;
+    }
+    const LayoutStyle candidate_style = layout_style(candidate->description());
+    return candidate_style.participates &&
+        candidate_style.kind != LayoutKind::portal
+        ? candidate
+        : nullptr;
+}
+
 [[nodiscard]] Rect anchor_placement(
     const Rect anchor,
     const Rect viewport,
@@ -169,7 +195,123 @@ const LayoutResult& LayoutEngine::layout(
         next.operations
     );
     pending_portals_.clear();
+    pending_anchors_.clear();
     arrange(measured, root_bounds, std::nullopt, {}, environment, next);
+    while (!pending_anchors_.empty()) {
+        std::optional<std::size_t> ready;
+        bool missing_target = false;
+        for (std::size_t index = 0U; index < pending_anchors_.size(); ++index) {
+            const PendingAnchor& pending = pending_anchors_[index];
+            const RetainedNode* target = ordinary_anchor_node(
+                tree,
+                *pending.measured->node,
+                pending.measured->style.anchor_target
+            );
+            if (target == nullptr) {
+                ready = index;
+                missing_target = true;
+                break;
+            }
+            if (next.find(target->identity()) != nullptr) {
+                ready = index;
+                break;
+            }
+        }
+        if (!ready.has_value()) {
+            std::vector<PendingAnchor> unresolved = std::move(pending_anchors_);
+            pending_anchors_.clear();
+            for (PendingAnchor& pending : unresolved) {
+                const std::string fingerprint =
+                    pending.measured->node->description().source_path + "\n" +
+                    pending.measured->style.anchor_target;
+                if (reported_diagnostics_.insert(fingerprint).second) {
+                    diagnostics_.push_back(runtime::RuntimeDiagnostic{
+                        "STRATA.UI.LAYOUT_ANCHOR_CYCLE",
+                        "Sibling anchor '" + pending.measured->style.anchor_target +
+                            "' cannot be resolved because its anchor chain is cyclic.",
+                        pending.measured->node->description().source_path,
+                        std::string("an already arranged sibling"),
+                        runtime::DiagnosticSeverity::error,
+                        std::nullopt,
+                    });
+                }
+                arrange(
+                    pending.measured,
+                    pending.fallback_bounds,
+                    pending.inherited_clip,
+                    pending.pin_context,
+                    environment,
+                    next
+                );
+            }
+            continue;
+        }
+        PendingAnchor pending = std::move(pending_anchors_[*ready]);
+        pending_anchors_.erase(
+            pending_anchors_.begin() + static_cast<std::ptrdiff_t>(*ready)
+        );
+        const LayoutStyle& style = pending.measured->style;
+        const RetainedNode* target = ordinary_anchor_node(
+            tree,
+            *pending.measured->node,
+            style.anchor_target
+        );
+        const LayoutRecord* anchor_record = target != nullptr
+            ? next.find(target->identity())
+            : nullptr;
+        if (missing_target || anchor_record == nullptr) {
+            const std::string fingerprint =
+                pending.measured->node->description().source_path + "\n" +
+                style.anchor_target;
+            if (reported_diagnostics_.insert(fingerprint).second) {
+                diagnostics_.push_back(runtime::RuntimeDiagnostic{
+                    "STRATA.UI.LAYOUT_ANCHOR_MISSING",
+                    "Sibling anchor '" + style.anchor_target +
+                        "' is not an attached non-portal sibling.",
+                    pending.measured->node->description().source_path,
+                    std::string("an attached non-portal sibling key or parent"),
+                    runtime::DiagnosticSeverity::error,
+                    std::nullopt,
+                });
+            }
+            arrange(
+                pending.measured,
+                pending.fallback_bounds,
+                pending.inherited_clip,
+                pending.pin_context,
+                environment,
+                next
+            );
+            continue;
+        }
+        if (style.match_anchor_width &&
+            anchor_record->bounds.width != pending.measured->measured_size.width) {
+            pending.measured = measure(
+                *pending.measured->node,
+                Constraints{
+                    anchor_record->bounds.width,
+                    anchor_record->bounds.width,
+                    0.0,
+                    pending.containing_bounds.height,
+                },
+                environment,
+                next.operations
+            );
+        }
+        arrange(
+            pending.measured,
+            anchor_placement(
+                anchor_record->bounds,
+                pending.containing_bounds,
+                pending.measured->measured_size,
+                style
+            ),
+            pending.inherited_clip,
+            pending.pin_context,
+            environment,
+            next
+        );
+    }
     for (std::size_t index = 0U; index < pending_portals_.size(); ++index) {
         PendingPortal pending = pending_portals_[index];
         const LayoutStyle& style = pending.measured->style;
@@ -363,17 +505,38 @@ LayoutStyle LayoutEngine::resolved_style(const RetainedNode& node) const {
                                              ? motion_->computed_values(node.identity())
                                              : nullptr;
     if (values == nullptr) return style;
-    const auto fixed = [values](const MotionProperty property, LayoutSize& size) {
+    const auto animated_size = [values](
+                                   const MotionProperty property,
+                                   LayoutSize& size
+                               ) {
+        if (const MotionLayoutValue* value = values->layout(property); value != nullptr) {
+            const LayoutSize::Kind kind = value->unit == MotionLayoutUnit::percent
+                ? LayoutSize::Kind::percent
+                : value->unit == MotionLayoutUnit::fill
+                    ? LayoutSize::Kind::fill
+                    : LayoutSize::Kind::fixed;
+            size = LayoutSize{kind, std::max(0.0, value->value)};
+            return;
+        }
         if (const auto value = values->number(property); value.has_value()) {
             size = LayoutSize{LayoutSize::Kind::fixed, std::max(0.0, *value)};
         }
     };
-    fixed(MotionProperty::width, style.width);
-    fixed(MotionProperty::height, style.height);
+    animated_size(MotionProperty::width, style.width);
+    animated_size(MotionProperty::height, style.height);
     const auto optional_fixed = [values](
                                     const MotionProperty property,
                                     std::optional<LayoutSize>& size
                                 ) {
+        if (const MotionLayoutValue* value = values->layout(property); value != nullptr) {
+            const LayoutSize::Kind kind = value->unit == MotionLayoutUnit::percent
+                ? LayoutSize::Kind::percent
+                : value->unit == MotionLayoutUnit::fill
+                    ? LayoutSize::Kind::fill
+                    : LayoutSize::Kind::fixed;
+            size = LayoutSize{kind, std::max(0.0, value->value)};
+            return;
+        }
         if (const auto value = values->number(property); value.has_value()) {
             size = LayoutSize{LayoutSize::Kind::fixed, std::max(0.0, *value)};
         }
@@ -395,6 +558,31 @@ LayoutStyle LayoutEngine::resolved_style(const RetainedNode& node) const {
     edge(MotionProperty::padding_top, style.padding.top);
     edge(MotionProperty::padding_right, style.padding.right);
     edge(MotionProperty::padding_bottom, style.padding.bottom);
+    const auto placement = [values](
+                               const MotionProperty property,
+                               std::optional<LayoutSize>& destination
+                           ) {
+        if (const MotionLayoutValue* value = values->layout(property); value != nullptr) {
+            const LayoutSize::Kind kind = value->unit == MotionLayoutUnit::percent
+                ? LayoutSize::Kind::percent
+                : value->unit == MotionLayoutUnit::fill
+                    ? LayoutSize::Kind::fill
+                    : LayoutSize::Kind::fixed;
+            destination = LayoutSize{kind, std::max(0.0, value->value)};
+        } else if (const auto sample = values->number(property); sample.has_value()) {
+            destination = LayoutSize{
+                LayoutSize::Kind::fixed,
+                std::max(0.0, *sample),
+            };
+        }
+    };
+    if (style.placement.has_value() ||
+        values->find(MotionProperty::placement_x) != nullptr ||
+        values->find(MotionProperty::placement_y) != nullptr) {
+        if (!style.placement.has_value()) style.placement.emplace();
+        placement(MotionProperty::placement_x, style.placement->x);
+        placement(MotionProperty::placement_y, style.placement->y);
+    }
     return style;
 }
 

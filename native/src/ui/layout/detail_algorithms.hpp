@@ -345,16 +345,16 @@ inline void grow_grid_tracks(
                 continue;
             }
             growable.push_back(index);
-            total_weight += track.kind == LayoutSize::Kind::fill && track.value > 0.0
-                                ? track.value
+            total_weight += track.kind == LayoutSize::Kind::fill
+                                ? std::max(0.0, track.value)
                                 : 1.0;
         }
         if (growable.empty() || total_weight <= 0.0) break;
         double consumed = 0.0;
         for (const std::size_t index : growable) {
             const LayoutSize& track = tracks[index];
-            const double weight = track.kind == LayoutSize::Kind::fill && track.value > 0.0
-                                      ? track.value
+            const double weight = track.kind == LayoutSize::Kind::fill
+                                      ? std::max(0.0, track.value)
                                       : 1.0;
             const double share = amount * weight / total_weight;
             const double maximum = grid_track_maximum(track, available);

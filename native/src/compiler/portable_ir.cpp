@@ -1244,6 +1244,15 @@ private:
             if (call->target.qualified_name() == "material") {
                 return compile_material(expression, path, component_path, scope);
             }
+            if (components_.contains(call->target.qualified_name())) {
+                return compile_component_template(
+                    *call,
+                    expression.span,
+                    path,
+                    component_path,
+                    scope
+                );
+            }
             return compile_helper(*call, expression.span, path, component_path, scope);
         }
         if (const auto* lambda = std::get_if<LambdaExpression>(&expression.node)) {
@@ -1313,6 +1322,54 @@ private:
             {"arguments", array(std::move(arguments))},
             {"kind", JsonValue("helper")},
             {"name", JsonValue(name)},
+        });
+    }
+
+    [[nodiscard]] JsonValue compile_component_template(
+        const CallExpression& call,
+        const SourceSpan& source_span,
+        const std::string& path,
+        const std::string& component_path,
+        const Scope& scope
+    ) {
+        const std::string name = call.target.qualified_name();
+        const ComponentSchema& component = components_.at(name);
+        std::vector<JsonValue> arguments;
+        arguments.reserve(call.arguments.size());
+        std::size_t positional_index = 0U;
+        for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
+            const Argument& argument = call.arguments[index];
+            const SchemaParameter* parameter = nullptr;
+            if (argument.name.has_value()) {
+                const auto found = std::ranges::find_if(
+                    component.parameters,
+                    [&argument](const SchemaParameter& candidate) {
+                        return candidate.accepts_name(*argument.name);
+                    }
+                );
+                if (found != component.parameters.end()) parameter = &*found;
+            } else if (positional_index < component.parameters.size()) {
+                parameter = &component.parameters[positional_index++];
+            }
+            const std::string argument_name = parameter != nullptr
+                ? parameter->name
+                : argument.name.value_or("#" + std::to_string(index));
+            arguments.push_back(object({
+                {"name", JsonValue(argument_name)},
+                {"span", span(argument.span)},
+                {"value", compile_expression(
+                              *argument.value,
+                              child(path, argument_name),
+                              component_path + "." + argument_name,
+                              scope,
+                              parameter != nullptr ? parameter->type.get() : nullptr
+                          )},
+            }));
+        }
+        return expression_base(path, source_span, {
+            {"arguments", array(std::move(arguments))},
+            {"component", JsonValue(name)},
+            {"kind", JsonValue("componentTemplate")},
         });
     }
 

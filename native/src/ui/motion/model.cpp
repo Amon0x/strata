@@ -30,6 +30,8 @@ constexpr std::array property_names{
     PropertyName{MotionProperty::padding_top, "paddingTop"},
     PropertyName{MotionProperty::padding_right, "paddingRight"},
     PropertyName{MotionProperty::padding_bottom, "paddingBottom"},
+    PropertyName{MotionProperty::placement_x, "placementX"},
+    PropertyName{MotionProperty::placement_y, "placementY"},
     PropertyName{MotionProperty::background, "background"},
     PropertyName{MotionProperty::foreground, "foreground"},
     PropertyName{MotionProperty::color, "color"},
@@ -123,6 +125,13 @@ std::optional<double> MotionComputedValues::number(const MotionProperty property
     return number != nullptr ? std::optional<double>(*number) : std::nullopt;
 }
 
+const MotionLayoutValue* MotionComputedValues::layout(
+    const MotionProperty property
+) const noexcept {
+    const MotionValue* value = find(property);
+    return value != nullptr ? std::get_if<MotionLayoutValue>(value) : nullptr;
+}
+
 const runtime::ColorValue* MotionComputedValues::color(const MotionProperty property) const noexcept {
     const MotionValue* value = find(property);
     return value != nullptr ? std::get_if<runtime::ColorValue>(value) : nullptr;
@@ -160,7 +169,7 @@ std::string_view motion_property_name(const MotionProperty property) noexcept {
 }
 
 bool motion_property_affects_layout(const MotionProperty property) noexcept {
-    return property >= MotionProperty::width && property <= MotionProperty::padding_bottom;
+    return property >= MotionProperty::width && property <= MotionProperty::placement_y;
 }
 
 bool motion_property_interpolable(const MotionProperty property) noexcept {
@@ -179,6 +188,9 @@ bool motion_property_accepts(
                                 property == MotionProperty::thumb;
     if (color_property) return std::holds_alternative<runtime::ColorValue>(value);
     if (property == MotionProperty::clip) return std::holds_alternative<bool>(value);
+    if (std::holds_alternative<MotionLayoutValue>(value)) {
+        return motion_property_affects_layout(property);
+    }
     return std::holds_alternative<double>(value);
 }
 
@@ -249,6 +261,14 @@ MotionValue interpolate_motion_value(
             channel(start->green, end.green, t),
             channel(start->blue, end.blue, t),
             channel(start->alpha, end.alpha, t),
+        };
+    }
+    if (const auto* start = std::get_if<MotionLayoutValue>(&from)) {
+        const MotionLayoutValue& end = *std::get_if<MotionLayoutValue>(&to);
+        if (start->unit != end.unit) return t < 1.0 ? from : to;
+        return MotionLayoutValue{
+            start->unit,
+            start->value + (end.value - start->value) * t,
         };
     }
     return t < 1.0 ? from : to;

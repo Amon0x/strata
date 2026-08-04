@@ -24,6 +24,52 @@ namespace {
     return std::nullopt;
 }
 
+[[nodiscard]] std::optional<MotionValue> layout_motion_value(
+    const runtime::Value* value
+) noexcept {
+    if (value == nullptr) return std::nullopt;
+    if (value->number() != nullptr && std::isfinite(*value->number())) {
+        return MotionLayoutValue{MotionLayoutUnit::fixed, *value->number()};
+    }
+    if (value->object() == nullptr) return std::nullopt;
+    if (const runtime::Value* fraction = value->field("fraction");
+        fraction != nullptr && fraction->number() != nullptr &&
+        std::isfinite(*fraction->number())) {
+        return MotionLayoutValue{
+            MotionLayoutUnit::percent,
+            std::max(0.0, *fraction->number()),
+        };
+    }
+    if (const runtime::Value* weight = value->field("weight");
+        weight != nullptr && weight->number() != nullptr &&
+        std::isfinite(*weight->number())) {
+        return MotionLayoutValue{
+            MotionLayoutUnit::fill,
+            std::max(0.0, *weight->number()),
+        };
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<MotionValue> edge_motion_value(
+    const runtime::Value* edges,
+    const std::string_view side,
+    const bool horizontal
+) noexcept {
+    if (edges == nullptr) return std::nullopt;
+    if (edges->number() != nullptr && std::isfinite(*edges->number())) {
+        return std::max(0.0, *edges->number());
+    }
+    if (edges->object() == nullptr) return std::nullopt;
+    const runtime::Value* value = edges->field(side);
+    if (value == nullptr) value = edges->field(horizontal ? "horizontal" : "vertical");
+    if (value == nullptr) value = edges->field("all");
+    return value != nullptr && value->number() != nullptr &&
+        std::isfinite(*value->number())
+        ? std::optional<MotionValue>(std::max(0.0, *value->number()))
+        : std::optional<MotionValue>(0.0);
+}
+
 [[nodiscard]] const CompiledMotion* referenced_motion(
     const runtime::Value* value,
     MotionCatalog& catalog
@@ -115,6 +161,53 @@ std::optional<MotionValue> resolved_motion_value(
     const RetainedNode& node,
     const MotionProperty property
 ) noexcept {
+    if (property >= MotionProperty::width && property <= MotionProperty::max_height) {
+        return layout_motion_value(node_style(node, motion_property_name(property)));
+    }
+    const runtime::Value* edges = nullptr;
+    switch (property) {
+    case MotionProperty::margin_left:
+    case MotionProperty::margin_top:
+    case MotionProperty::margin_right:
+    case MotionProperty::margin_bottom:
+        edges = node_style(node, "margin");
+        break;
+    case MotionProperty::padding_left:
+    case MotionProperty::padding_top:
+    case MotionProperty::padding_right:
+    case MotionProperty::padding_bottom:
+        edges = node_style(node, "padding");
+        break;
+    default: break;
+    }
+    if (edges != nullptr) {
+        switch (property) {
+        case MotionProperty::margin_left:
+        case MotionProperty::padding_left:
+            return edge_motion_value(edges, "left", true);
+        case MotionProperty::margin_top:
+        case MotionProperty::padding_top:
+            return edge_motion_value(edges, "top", false);
+        case MotionProperty::margin_right:
+        case MotionProperty::padding_right:
+            return edge_motion_value(edges, "right", true);
+        case MotionProperty::margin_bottom:
+        case MotionProperty::padding_bottom:
+            return edge_motion_value(edges, "bottom", false);
+        default: break;
+        }
+    }
+    if (property == MotionProperty::placement_x ||
+        property == MotionProperty::placement_y) {
+        const runtime::Value* placement = node_style(node, "placement");
+        return layout_motion_value(
+            placement != nullptr
+                ? placement->field(
+                      property == MotionProperty::placement_x ? "x" : "y"
+                  )
+                : nullptr
+        );
+    }
     return motion_value(node_style(node, motion_property_name(property)));
 }
 

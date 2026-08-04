@@ -779,6 +779,29 @@ bool expression_value_equal(
         }
         return true;
     }
+    if (left.component_template() != nullptr || right.component_template() != nullptr) {
+        if (left.component_template() == nullptr ||
+            right.component_template() == nullptr) {
+            return false;
+        }
+        const runtime::ComponentTemplateValue& left_template =
+            **left.component_template();
+        const runtime::ComponentTemplateValue& right_template =
+            **right.component_template();
+        if (left_template.component != right_template.component ||
+            left_template.arguments.size() != right_template.arguments.size()) {
+            return false;
+        }
+        auto right_argument = right_template.arguments.begin();
+        for (const auto& [name, value] : left_template.arguments) {
+            if (name != right_argument->first ||
+                !expression_value_equal(value, right_argument->second)) {
+                return false;
+            }
+            ++right_argument;
+        }
+        return true;
+    }
     if (left.value() != nullptr || right.value() != nullptr) {
         return left.value() != nullptr && right.value() != nullptr && *left.value() == *right.value();
     }

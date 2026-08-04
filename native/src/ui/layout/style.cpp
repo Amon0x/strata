@@ -155,6 +155,21 @@ LayoutStyle layout_style(const DescriptionNode& description) {
     if (const runtime::Value* value = field(layout, "justifySelf"); value != nullptr && value->string() != nullptr) {
         style.justify_self = align(*value->string());
     }
+    if (const runtime::Value* value = field(layout, "placement");
+        value != nullptr && value->object() != nullptr) {
+        LayoutPlacement placement;
+        if (const runtime::Value* x = value->field("x"); x != nullptr) {
+            placement.x = layout_size(x);
+        }
+        if (const runtime::Value* y = value->field("y"); y != nullptr) {
+            placement.y = layout_size(y);
+        }
+        placement.anchor_x = number(value->field("anchorX"));
+        placement.anchor_y = number(value->field("anchorY"));
+        placement.offset_x = number(value->field("offsetX"));
+        placement.offset_y = number(value->field("offsetY"));
+        style.placement = std::move(placement);
+    }
     style.wrap = boolean(field(layout, "wrap"));
     style.clip = boolean(field(layout, "clip"));
     const runtime::Value* columns = field(layout, "columns");

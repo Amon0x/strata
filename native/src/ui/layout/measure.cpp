@@ -105,20 +105,27 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
     content_constraints.max_width = available_content_width;
     content_constraints.max_height = available_content_height;
     std::vector<const RetainedNode*> retained_children;
+    std::vector<const RetainedNode*> anchor_children;
     std::vector<const RetainedNode*> portal_children;
     retained_children.reserve(node.children().size());
+    anchor_children.reserve(node.children().size());
     portal_children.reserve(node.children().size());
     for (const auto& child : node.children()) {
-        if (resolved_style(*child).participates &&
+        const LayoutStyle child_style = resolved_style(*child);
+        if (child_style.participates &&
             child->lifecycle() != RetainedLifecycle::exiting) {
-            if (resolved_style(*child).kind == LayoutKind::portal) {
+            if (child_style.kind == LayoutKind::portal) {
                 portal_children.push_back(child.get());
+            } else if (!child_style.anchor_target.empty()) {
+                anchor_children.push_back(child.get());
             } else {
                 retained_children.push_back(child.get());
             }
         }
     }
-    measured.children.reserve(retained_children.size() + portal_children.size());
+    measured.children.reserve(
+        retained_children.size() + anchor_children.size() + portal_children.size()
+    );
 
     if (measured.style.kind == LayoutKind::row || measured.style.kind == LayoutKind::column) {
         const bool horizontal = measured.style.kind == LayoutKind::row;
@@ -138,8 +145,9 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
             const LayoutStyle child_style = resolved_style(*retained_children[index]);
             const LayoutSize& main_size = horizontal ? child_style.width : child_style.height;
             if (main_size.kind == LayoutSize::Kind::fill &&
-                std::isfinite(available_main) && !measured.style.wrap) {
-                total_weight += main_size.value > 0.0 ? main_size.value : 1.0;
+                std::isfinite(available_main) &&
+                (!measured.style.wrap || main_size.value == 0.0)) {
+                total_weight += std::max(0.0, main_size.value);
                 continue;
             }
             Constraints child_constraints = content_constraints;
@@ -155,7 +163,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
             if (staged[index] == nullptr) {
                 const LayoutStyle child_style = resolved_style(*retained_children[index]);
                 const LayoutSize& main_size = horizontal ? child_style.width : child_style.height;
-                const double weight = main_size.value > 0.0 ? main_size.value : 1.0;
+                const double weight = std::max(0.0, main_size.value);
                 const double allocated = total_weight > 0.0
                                              ? remaining * weight / total_weight
                                              : 0.0;
@@ -191,7 +199,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
                                                       ? measured.children[child_index]->style.width
                                                       : measured.children[child_index]->style.height;
                     if (main_size.kind == LayoutSize::Kind::fill) {
-                        line_fill_weight += main_size.value > 0.0 ? main_size.value : 1.0;
+                        line_fill_weight += std::max(0.0, main_size.value);
                     }
                 }
                 if (line_fill_weight <= 0.0) continue;
@@ -204,7 +212,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
                     const double natural_main = horizontal
                                                     ? measured.children[child_index]->measured_size.width
                                                     : measured.children[child_index]->measured_size.height;
-                    const double weight = main_size.value > 0.0 ? main_size.value : 1.0;
+                    const double weight = std::max(0.0, main_size.value);
                     const double allocated = natural_main +
                                              line_remaining * weight / line_fill_weight;
                     const LayoutStyle& child_style =
@@ -352,6 +360,14 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
         }
     }
     measured.flow_child_count = measured.children.size();
+    for (const RetainedNode* anchored : anchor_children) {
+        measured.children.push_back(measure(
+            *anchored,
+            content_constraints,
+            environment,
+            operations
+        ));
+    }
     for (const RetainedNode* portal : portal_children) {
         measured.children.push_back(measure(
             *portal,
@@ -374,6 +390,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
             return child->subtree_pins_vertical;
         });
     measured.subtree_portals = measured.style.kind == LayoutKind::portal ||
+        !measured.style.anchor_target.empty() ||
         std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
             return child->subtree_portals;
         });

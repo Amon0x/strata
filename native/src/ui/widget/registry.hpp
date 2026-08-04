@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "runtime/expression.hpp"
 #include "ui/layout.hpp"
 
 namespace strata::runtime {
@@ -68,7 +69,8 @@ using WidgetDefaultActionFactory = std::function<std::shared_ptr<const runtime::
     const RetainedNode& node,
     const runtime::RuntimeActionRegistry& actions
 )>;
-using WidgetTemplateArguments = std::map<std::string, runtime::Value, std::less<>>;
+using WidgetTemplateArguments =
+    std::map<std::string, runtime::ExpressionValue, std::less<>>;
 using WidgetTemplateInstantiator = std::function<std::shared_ptr<const DescriptionNode>(
     std::string_view component,
     std::string key,

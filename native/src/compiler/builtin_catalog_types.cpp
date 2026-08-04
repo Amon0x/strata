@@ -395,7 +395,7 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                               .label = "fill",
                               .fields = {DeclaredTypeField{.name = "weight",
                                                            .type = declared_type_reference("t3"),
-                                                           .required = false,
+                                                           .required = true,
                                                            .nullable = false}},
                               .value = declared_type_reference("t7")})},
         DeclaredNamedType{.id = "t49",
@@ -1911,8 +1911,6 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                 .kind = DeclaredTypeKind::component_template,
                 .parameters =
                     {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
-                     DeclaredParameter{.name = "valueLabel",
-                                       .type = declared_type_reference("t0")},
                      DeclaredParameter{.name = "control",
                                        .type = declared_type_reference("t177")}}})},
         DeclaredNamedType{
@@ -1953,6 +1951,55 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                     .label = "layered justification",
                     .values = {"CENTER", "END", "START"},
                 })},
+        DeclaredNamedType{
+            .id = "t182",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::union_value,
+                .label = "position",
+                .options = {
+                    declared_type_reference("t3"),
+                    declared_type_reference("t49"),
+                },
+            })},
+        DeclaredNamedType{
+            .id = "t183",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "layer placement",
+                .fields = {
+                    DeclaredTypeField{
+                        .name = "anchorX",
+                        .type = declared_type_reference("t3"),
+                        .required = false,
+                    },
+                    DeclaredTypeField{
+                        .name = "anchorY",
+                        .type = declared_type_reference("t3"),
+                        .required = false,
+                    },
+                    DeclaredTypeField{
+                        .name = "offsetX",
+                        .type = declared_type_reference("t3"),
+                        .required = false,
+                    },
+                    DeclaredTypeField{
+                        .name = "offsetY",
+                        .type = declared_type_reference("t3"),
+                        .required = false,
+                    },
+                    DeclaredTypeField{
+                        .name = "x",
+                        .type = declared_type_reference("t182"),
+                        .required = false,
+                    },
+                    DeclaredTypeField{
+                        .name = "y",
+                        .type = declared_type_reference("t182"),
+                        .required = false,
+                    },
+                },
+                .value = declared_type_reference("t7"),
+            })},
     };
 }
 

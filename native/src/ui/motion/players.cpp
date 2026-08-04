@@ -352,7 +352,15 @@ std::string motion_value_text(const MotionValue& value) {
     if (const auto* color = std::get_if<runtime::ColorValue>(&value)) {
         return "Color(value=RgbaColor(rgba=" + std::to_string(packed(*color)) + "))";
     }
-    return std::get<bool>(value) ? "BooleanValue(value=true)" : "BooleanValue(value=false)";
+    if (const bool* boolean = std::get_if<bool>(&value)) {
+        return *boolean ? "BooleanValue(value=true)" : "BooleanValue(value=false)";
+    }
+    const MotionLayoutValue& layout = std::get<MotionLayoutValue>(value);
+    const std::string_view unit = layout.unit == MotionLayoutUnit::percent
+        ? "percent"
+        : layout.unit == MotionLayoutUnit::fill ? "fill" : "fixed";
+    return "LayoutValue(unit=" + std::string(unit) +
+        ", value=" + number_text(layout.value) + ")";
 }
 
 } // namespace strata::ui::motion_detail

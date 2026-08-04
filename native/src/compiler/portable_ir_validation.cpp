@@ -381,6 +381,9 @@ private:
         } else if (kind == "action") {
             require_string(expression, "id", context);
             validate_expression_arguments(expression, context);
+        } else if (kind == "componentTemplate") {
+            require_string(expression, "component", context);
+            validate_expression_arguments(expression, context);
         } else if (kind == "lambda") {
             require_string(expression, "parameter", context);
             validate_expression(required(expression, "body"), context + "/lambda body");

@@ -110,7 +110,8 @@ constexpr double infinity = std::numeric_limits<double>::infinity();
     if (const runtime::Value* weight = value->field("weight"); weight != nullptr) {
         result.kind = LayoutSize::Kind::fill;
         result.value = number(weight, 1.0);
-        if (!std::isfinite(result.value) || result.value <= 0.0) result.value = 1.0;
+        if (!std::isfinite(result.value)) result.value = 1.0;
+        else result.value = std::max(0.0, result.value);
         return result;
     }
     if (const runtime::Value* fraction = value->field("fraction"); fraction != nullptr) {

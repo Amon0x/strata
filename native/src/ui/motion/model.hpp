@@ -27,6 +27,8 @@ enum class MotionProperty {
     padding_top,
     padding_right,
     padding_bottom,
+    placement_x,
+    placement_y,
     background,
     foreground,
     color,
@@ -89,7 +91,16 @@ struct MotionRepeat final {
     [[nodiscard]] friend bool operator==(const MotionRepeat&, const MotionRepeat&) = default;
 };
 
-using MotionValue = std::variant<double, runtime::ColorValue, bool>;
+enum class MotionLayoutUnit { fixed, percent, fill };
+
+struct MotionLayoutValue final {
+    MotionLayoutUnit unit = MotionLayoutUnit::fixed;
+    double value = 0.0;
+    [[nodiscard]] friend bool operator==(const MotionLayoutValue&, const MotionLayoutValue&) =
+        default;
+};
+
+using MotionValue = std::variant<double, runtime::ColorValue, bool, MotionLayoutValue>;
 
 struct MotionKeyframe final {
     double offset = 0.0;
@@ -137,6 +148,7 @@ struct MotionComputedValues final {
 
     [[nodiscard]] const MotionValue* find(MotionProperty property) const noexcept;
     [[nodiscard]] std::optional<double> number(MotionProperty property) const noexcept;
+    [[nodiscard]] const MotionLayoutValue* layout(MotionProperty property) const noexcept;
     [[nodiscard]] const runtime::ColorValue* color(MotionProperty property) const noexcept;
     [[nodiscard]] std::optional<bool> boolean(MotionProperty property) const noexcept;
     [[nodiscard]] bool affects_layout() const noexcept;

@@ -361,6 +361,24 @@ void add_builtin_helpers(BuiltinCatalog& catalog) {
                        .vararg_type = declared_type_reference("t7"),
                        .capabilities = {"STYLE"},
                        .allow_named_varargs = true},
+        DeclaredHelper{
+            .name = "whenStyle",
+            .implementation = "when_style",
+            .parameters = {
+                DeclaredParameter{
+                    .name = "condition",
+                    .type = declared_type_reference("t2"),
+                    .required = true,
+                },
+                DeclaredParameter{
+                    .name = "active",
+                    .type = declared_type_reference("t57"),
+                    .required = true,
+                },
+            },
+            .return_type = declared_type_reference("t57"),
+            .capabilities = {"STYLE"},
+        },
         DeclaredHelper{.name = "takeWhile",
                        .implementation = "take_while",
                        .parameters = {DeclaredParameter{.name = "source",

@@ -323,6 +323,8 @@ ExpressionValue::ExpressionValue(std::shared_ptr<const ExpressionListValue> valu
     : storage_(std::move(value)) {}
 ExpressionValue::ExpressionValue(std::shared_ptr<const ExpressionObjectValue> value)
     : storage_(std::move(value)) {}
+ExpressionValue::ExpressionValue(std::shared_ptr<const ComponentTemplateValue> value)
+    : storage_(std::move(value)) {}
 const Value* ExpressionValue::value() const noexcept {
     if (const Value* scalar = std::get_if<Value>(&storage_))
         return scalar;
@@ -330,6 +332,8 @@ const Value* ExpressionValue::value() const noexcept {
         return &(**list_value).materialized;
     if (const auto* object_value = object())
         return &(**object_value).materialized;
+    if (const auto* component_value = component_template())
+        return &(**component_value).materialized;
     return nullptr;
 }
 const Value* ExpressionValue::data_value() const noexcept {
@@ -356,6 +360,10 @@ const std::shared_ptr<const ExpressionListValue>* ExpressionValue::list() const 
 const std::shared_ptr<const ExpressionObjectValue>* ExpressionValue::object() const noexcept {
     return std::get_if<std::shared_ptr<const ExpressionObjectValue>>(&storage_);
 }
+const std::shared_ptr<const ComponentTemplateValue>*
+ExpressionValue::component_template() const noexcept {
+    return std::get_if<std::shared_ptr<const ComponentTemplateValue>>(&storage_);
+}
 
 bool ExpressionDependencyValue::cacheable() const noexcept {
     if (kind == ExpressionDependencyValueKind::unsupported)
@@ -364,6 +372,10 @@ bool ExpressionDependencyValue::cacheable() const noexcept {
         return std::ranges::all_of(elements, &ExpressionDependencyValue::cacheable);
     }
     if (kind == ExpressionDependencyValueKind::executable_object) {
+        return field_names.size() == field_values.size() &&
+               std::ranges::all_of(field_values, &ExpressionDependencyValue::cacheable);
+    }
+    if (kind == ExpressionDependencyValueKind::component_template) {
         return field_names.size() == field_values.size() &&
                std::ranges::all_of(field_values, &ExpressionDependencyValue::cacheable);
     }
@@ -395,6 +407,17 @@ ExpressionDependencyValue capture_expression_dependency(const ExpressionValue& v
         for (const auto& [name, field] : (**object).fields) {
             result.field_names.push_back(name);
             result.field_values.push_back(capture_expression_dependency(field));
+        }
+        return result;
+    }
+    if (const auto* component = value.component_template()) {
+        result.kind = ExpressionDependencyValueKind::component_template;
+        result.component = (**component).component;
+        result.field_names.reserve((**component).arguments.size());
+        result.field_values.reserve((**component).arguments.size());
+        for (const auto& [name, argument] : (**component).arguments) {
+            result.field_names.push_back(name);
+            result.field_values.push_back(capture_expression_dependency(argument));
         }
         return result;
     }
@@ -448,6 +471,25 @@ ExpressionValue restore_expression_dependency(const ExpressionDependencyValue& v
             Value(std::move(materialized)),
             std::move(executable),
         }));
+    }
+    case ExpressionDependencyValueKind::component_template: {
+        if (value.field_names.size() != value.field_values.size()) {
+            throw std::logic_error("component-template dependency arguments are inconsistent");
+        }
+        std::map<std::string, ExpressionValue, std::less<>> arguments;
+        for (std::size_t index = 0U; index < value.field_values.size(); ++index) {
+            arguments.insert_or_assign(
+                value.field_names[index],
+                restore_expression_dependency(value.field_values[index])
+            );
+        }
+        return ExpressionValue(std::make_shared<const ComponentTemplateValue>(
+            ComponentTemplateValue{
+                value.component,
+                std::move(arguments),
+                Value(value.component),
+            }
+        ));
     }
     case ExpressionDependencyValueKind::unsupported:
         throw std::logic_error("unsupported expression dependency cannot be restored");
@@ -682,6 +724,22 @@ ExpressionValue ExpressionRuntime::evaluate(const JsonValue expression,
             Value(std::move(materialized)),
             std::move(executable),
         }));
+    }
+    if (kind == "componentTemplate") {
+        std::map<std::string, ExpressionValue, std::less<>> arguments;
+        for (const JsonValue argument : array_field(expression, "arguments")) {
+            arguments.insert_or_assign(
+                std::string(string_field(argument, "name")),
+                evaluate(required(argument, "value"), scope)
+            );
+        }
+        return ExpressionValue(std::make_shared<const ComponentTemplateValue>(
+            ComponentTemplateValue{
+                std::string(string_field(expression, "component")),
+                std::move(arguments),
+                Value(std::string(string_field(expression, "component"))),
+            }
+        ));
     }
     if (kind == "lambda") {
         return ExpressionValue(std::make_shared<const LambdaValue>(LambdaValue{
@@ -1227,6 +1285,13 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const JsonValue expression,
         }
         properties.emplace_back("$bases", Value(std::move(bases)));
         return ExpressionValue(Value(std::move(properties)));
+    }
+    if (name == "whenStyle") {
+        const Value condition = argument(expression, scope, "condition", 0U);
+        if (condition.boolean() == nullptr || !*condition.boolean()) {
+            return ExpressionValue(Value{});
+        }
+        return ExpressionValue(argument(expression, scope, "active", 1U));
     }
     if (name == "effect") {
         std::vector<std::pair<std::string, Value>> arguments;

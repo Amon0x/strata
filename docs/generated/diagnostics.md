@@ -157,6 +157,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_BINDING_TARGET` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_CHILDREN_NOT_ALLOWED` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_COMPONENT_ROOT` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_COMPONENT_TEMPLATE_BOUND_OWNER_PARAMETER` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_COMPONENT_TEMPLATE_PARAMETER` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DERIVED_CYCLE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_ANIMATION_FRAME` | `native/src/compiler/semantic.cpp` |
@@ -291,6 +292,8 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.UI.COMMAND_UNKNOWN_REFERENCE` | `native/src/ui/input/framework_actions.cpp` |
 | `STRATA.UI.INPUT_QUEUE_FULL` | `native/src/surface_abi.cpp` |
 | `STRATA.UI.INPUT_QUEUE_OVERFLOW` | `native/src/ui/input/queue.cpp` |
+| `STRATA.UI.LAYOUT_ANCHOR_CYCLE` | `native/src/ui/layout/engine.cpp` |
+| `STRATA.UI.LAYOUT_ANCHOR_MISSING` | `native/src/ui/layout/engine.cpp` |
 | `STRATA.UI.LAZY_REALIZATION_NONCONVERGENT` | `native/src/ui/surface.cpp` |
 | `STRATA.UI.MATERIALIZATION_TRANSACTION_ID_DUPLICATE` | `native/src/ui/surface.cpp` |
 | `STRATA.UI.REVEAL_TARGET_MISSING` | `native/src/ui/input/router.cpp` |

@@ -25,6 +25,28 @@ using JsonObject = data::JsonObjectView;
 
 constexpr std::size_t maximum_component_cache_entries = 512U;
 
+[[nodiscard]] bool is_executable_expression(
+    const runtime::ExpressionValue& value
+) noexcept {
+    return value.collection() != nullptr || value.lambda() != nullptr ||
+        value.action() != nullptr || value.list() != nullptr ||
+        value.object() != nullptr || value.component_template() != nullptr;
+}
+
+void bind_expression(
+    runtime::ExpressionScope& scope,
+    std::string name,
+    runtime::ExpressionValue value
+) {
+    if (is_executable_expression(value)) {
+        scope.values.erase(name);
+        scope.executable_values.insert_or_assign(std::move(name), std::move(value));
+    } else if (value.value() != nullptr) {
+        scope.executable_values.erase(name);
+        scope.values.insert_or_assign(std::move(name), *value.value());
+    }
+}
+
 [[nodiscard]] JsonValue required(const JsonValue value, const std::string_view field) {
     const JsonValue child = value.find(field);
     if (!child) throw std::logic_error("validated portable IR lost field '" + std::string(field) + "'");
@@ -798,17 +820,11 @@ std::vector<std::shared_ptr<const DescriptionNode>> DescriptionBuilder::build_bl
         }
         if (kind == "derived") {
             const std::string name(string_field(statement, "name"));
-            runtime::ExpressionValue value = evaluate(
-                required(statement, "expression"),
-                scope.expressions
+            bind_expression(
+                scope.expressions,
+                name,
+                evaluate(required(statement, "expression"), scope.expressions)
             );
-            if (value.value() != nullptr) {
-                scope.expressions.executable_values.erase(name);
-                scope.expressions.values.insert_or_assign(name, *value.value());
-            } else {
-                scope.expressions.values.erase(name);
-                scope.expressions.executable_values.insert_or_assign(name, std::move(value));
-            }
             continue;
         }
         if (kind == "node") {
@@ -1323,21 +1339,13 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
             const std::string name(string_field(schema, "name"));
             const auto supplied = properties.find(name);
             if (supplied != properties.end()) {
-                if (supplied->second.value() != nullptr) {
-                    component_scope.expressions.values.insert_or_assign(name, *supplied->second.value());
-                } else {
-                    component_scope.expressions.executable_values.insert_or_assign(name, supplied->second);
-                }
+                bind_expression(component_scope.expressions, name, supplied->second);
             } else {
                 const JsonValue default_value = required(parameter, "default");
                 const runtime::ExpressionValue evaluated = default_value.is_null()
                     ? runtime::ExpressionValue(runtime::Value{})
                     : evaluate(default_value, component_scope.expressions);
-                if (evaluated.value() != nullptr) {
-                    component_scope.expressions.values.insert_or_assign(name, *evaluated.value());
-                } else {
-                    component_scope.expressions.executable_values.insert_or_assign(name, evaluated);
-                }
+                bind_expression(component_scope.expressions, name, evaluated);
             }
         }
         DescriptionNode::Properties cache_properties = properties;
@@ -1732,18 +1740,14 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_component_templ
         const std::string name(string_field(schema, "name"));
         const auto supplied = arguments.find(name);
         if (supplied != arguments.end()) {
-            component_scope.expressions.values.insert_or_assign(name, supplied->second);
+            bind_expression(component_scope.expressions, name, supplied->second);
             continue;
         }
         const JsonValue default_value = required(parameter, "default");
         const runtime::ExpressionValue evaluated = default_value.is_null()
             ? runtime::ExpressionValue(runtime::Value{})
             : evaluate(default_value, component_scope.expressions);
-        if (evaluated.value() != nullptr) {
-            component_scope.expressions.values.insert_or_assign(name, *evaluated.value());
-        } else {
-            component_scope.expressions.executable_values.insert_or_assign(name, evaluated);
-        }
+        bind_expression(component_scope.expressions, name, evaluated);
     }
     std::vector<std::shared_ptr<const DescriptionNode>> roots = build_block(
         required(component, "body"),

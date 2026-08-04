@@ -48,9 +48,9 @@ struct SiblingKey final {
 ) noexcept {
     const runtime::Value* current_value = current != nullptr ? current->value() : nullptr;
     const runtime::Value* next_value = next != nullptr ? next->value() : nullptr;
-    static constexpr std::array<std::string_view, 39U> fields{
+    static constexpr std::array<std::string_view, 40U> fields{
         "kind", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
-        "aspectRatio", "intrinsicSize", "padding", "margin", "gap", "alignItems",
+        "aspectRatio", "intrinsicSize", "padding", "margin", "gap", "placement", "alignItems",
         "justifyContent", "alignContent", "alignSelf", "justifySelf", "wrap", "clip",
         "gridColumn", "gridRow", "columnSpan", "rowSpan", "zIndex", "scrollHorizontal",
         "scrollVertical", "viewportInsets", "viewportInsetsFromInsideBorder",
@@ -113,7 +113,8 @@ struct SiblingKey final {
     }
     if (name == "layout" || name == "width" || name == "height" || name == "padding" ||
         name == "margin" || name == "gap" || name == "columns" || name == "rows" ||
-        name == "scrollOffset" || name == "scrollPin" || name == "movement") {
+        name == "scrollOffset" || name == "scrollPin" || name == "movement" ||
+        name == "placement") {
         return DirtyReason::layout;
     }
     if (name == "variant") return DirtyReason::style;

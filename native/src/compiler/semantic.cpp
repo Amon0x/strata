@@ -660,7 +660,6 @@ class Validator final {
         }
         if (*kind != "PORTAL") {
             incompatible("anchorPoint", "PORTAL");
-            incompatible("anchorTarget", "PORTAL");
             incompatible("detachFromParentClip", "PORTAL");
             incompatible("portalTarget", "PORTAL");
         }
@@ -2069,12 +2068,14 @@ class Validator final {
     }
 
     [[nodiscard]] SemanticTypePtr component_template_type(
-        const ComponentSchema& component
+        const ComponentSchema& component,
+        const std::set<std::string, std::less<>>& bound = {}
     ) const {
         auto type = std::make_shared<SemanticType>();
         type->kind = SemanticTypeKind::component_template;
         type->fields.reserve(component.parameters.size());
         for (const SchemaParameter& parameter : component.parameters) {
+            if (bound.contains(parameter.name)) continue;
             type->fields.push_back(ObjectField{
                 parameter.name,
                 parameter.type,
@@ -2085,6 +2086,95 @@ class Validator final {
         return type;
     }
 
+    [[nodiscard]] std::set<std::string, std::less<>>
+    validate_component_template_arguments(
+        const CallExpression& call,
+        const std::string& template_name,
+        const ComponentSchema& component,
+        const SemanticType* owner_contract,
+        const Scope& scope,
+        const std::string& component_path
+    ) {
+        std::set<std::string, std::less<>> bound;
+        std::size_t positional_index = 0U;
+        bool seen_named = false;
+        for (const Argument& argument : call.arguments) {
+            const SchemaParameter* parameter = nullptr;
+            if (argument.name.has_value()) {
+                seen_named = true;
+                const auto found = std::ranges::find_if(
+                    component.parameters,
+                    [&argument](const SchemaParameter& candidate) {
+                        return candidate.accepts_name(*argument.name);
+                    }
+                );
+                if (found != component.parameters.end()) parameter = &*found;
+            } else {
+                if (seen_named) {
+                    report(
+                        "STRATA.DSL.SEMANTIC_POSITIONAL_ARGUMENT_ORDER",
+                        "Positional arguments must appear before named arguments.",
+                        argument.span,
+                        component_path,
+                        "named argument"
+                    );
+                }
+                if (positional_index < component.parameters.size()) {
+                    parameter = &component.parameters[positional_index];
+                }
+                ++positional_index;
+            }
+            if (parameter == nullptr) {
+                std::vector<std::string> names;
+                names.reserve(component.parameters.size());
+                for (const SchemaParameter& candidate : component.parameters) {
+                    names.push_back(candidate.name);
+                }
+                report(
+                    argument.name.has_value()
+                        ? "STRATA.DSL.SEMANTIC_UNKNOWN_ARGUMENT"
+                        : "STRATA.DSL.SEMANTIC_TOO_MANY_ARGUMENTS",
+                    "Argument '" +
+                        argument.name.value_or("#" + std::to_string(positional_index)) +
+                        "' is not accepted by component template '" + template_name + "'.",
+                    argument.span,
+                    component_path,
+                    expected_names(std::move(names))
+                );
+                static_cast<void>(infer(*argument.value, scope, component_path));
+                continue;
+            }
+            if (!bound.insert(parameter->name).second) {
+                report(
+                    "STRATA.DSL.SEMANTIC_DUPLICATE_ARGUMENT",
+                    "Argument '" + parameter->name + "' is provided more than once.",
+                    argument.span,
+                    component_path + "." + parameter->name,
+                    "single value for '" + parameter->name + "'"
+                );
+            }
+            if (owner_contract != nullptr &&
+                owner_contract->find_field(parameter->name) != nullptr) {
+                report(
+                    "STRATA.DSL.SEMANTIC_COMPONENT_TEMPLATE_BOUND_OWNER_PARAMETER",
+                    "Component template parameter '" + parameter->name +
+                        "' is supplied by the template owner and cannot be pre-bound.",
+                    argument.span,
+                    component_path + "." + parameter->name,
+                    "bind an additional component parameter"
+                );
+            }
+            validate_expected(
+                *argument.value,
+                *parameter->type,
+                parameter->nullable,
+                component_path + "." + parameter->name,
+                scope
+            );
+        }
+        return bound;
+    }
+
     void validate_component_template(
         const Expression& expression,
         const SemanticType& expected,
@@ -2092,14 +2182,19 @@ class Validator final {
         const Scope& scope
     ) {
         const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
-        if (identifier == nullptr || scope.contains(identifier->name)) {
+        const auto* partial = std::get_if<CallExpression>(&expression.node);
+        const std::string template_name = identifier != nullptr
+            ? identifier->name
+            : partial != nullptr ? partial->target.qualified_name() : std::string{};
+        if (template_name.empty() ||
+            (identifier != nullptr && scope.contains(identifier->name))) {
             const SemanticTypePtr actual = infer(expression, scope, component_path);
             if (!type_matches(expected, *actual, false)) {
                 type_mismatch(expected, *actual, expression, component_path);
             }
             return;
         }
-        const auto component = components_.find(identifier->name);
+        const auto component = components_.find(template_name);
         if (component == components_.end()) {
             std::vector<std::string> names;
             names.reserve(components_.size());
@@ -2109,20 +2204,31 @@ class Validator final {
             }
             report(
                 "STRATA.DSL.SEMANTIC_UNKNOWN_COMPONENT_TEMPLATE",
-                "Component template '" + identifier->name + "' is not declared.",
+                "Component template '" + template_name + "' is not declared.",
                 expression.span,
                 component_path,
                 expected_names(std::move(names))
             );
             return;
         }
+        const std::set<std::string, std::less<>> bound = partial != nullptr
+            ? validate_component_template_arguments(
+                  *partial,
+                  template_name,
+                  component->second,
+                  &expected,
+                  scope,
+                  component_path
+              )
+            : std::set<std::string, std::less<>>{};
         for (const SchemaParameter& parameter : component->second.parameters) {
+            if (bound.contains(parameter.name)) continue;
             const ObjectField* provided = expected.find_field(parameter.name);
             if (provided == nullptr) {
                 if (parameter.required) {
                     report(
                         "STRATA.DSL.SEMANTIC_COMPONENT_TEMPLATE_PARAMETER",
-                        "Component template '" + identifier->name +
+                        "Component template '" + template_name +
                             "' requires parameter '" + parameter.name +
                             "', but the template owner does not provide it.",
                         expression.span,
@@ -2849,6 +2955,19 @@ class Validator final {
                                                                  : SemanticTypeKind::animation;
                 validate_expected(expression, *simple(kind), false, component_path, scope);
                 return simple(kind);
+            }
+            if (const auto component = components_.find(name);
+                component != components_.end()) {
+                const std::set<std::string, std::less<>> bound =
+                    validate_component_template_arguments(
+                        *call,
+                        name,
+                        component->second,
+                        nullptr,
+                        scope,
+                        component_path
+                    );
+                return component_template_type(component->second, bound);
             }
             const HelperSchema* helper = registry_.helper(name);
             if (helper == nullptr) {

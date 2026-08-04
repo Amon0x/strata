@@ -287,7 +287,21 @@ std::shared_ptr<const DescriptionNode> WidgetDescriptionScope::instantiate(
     std::string key,
     WidgetTemplateArguments arguments
 ) const {
-    const std::string* component = widget_description_string(property(template_property));
+    const auto found = description_.properties.find(template_property);
+    if (found == description_.properties.end()) return nullptr;
+    if (const auto* bound = found->second.component_template();
+        bound != nullptr && *bound != nullptr) {
+        WidgetTemplateArguments merged = (**bound).arguments;
+        for (auto& [name, value] : arguments) {
+            merged.insert_or_assign(name, std::move(value));
+        }
+        return instantiate_component(
+            (**bound).component,
+            std::move(key),
+            std::move(merged)
+        );
+    }
+    const std::string* component = widget_description_string(found->second.data_value());
     return component != nullptr
         ? instantiate_component(*component, std::move(key), std::move(arguments))
         : nullptr;
@@ -325,7 +339,7 @@ bool WidgetDescriptionScope::install_presentation(
     const std::string presentation_key = owner_key + ".presentation";
     arguments.insert_or_assign(
         "key",
-        runtime::Value(runtime::KeyValue{presentation_key})
+        runtime::ExpressionValue(runtime::Value(runtime::KeyValue{presentation_key}))
     );
     std::shared_ptr<const DescriptionNode> presentation = instantiate(
         template_property,

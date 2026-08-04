@@ -31,6 +31,7 @@
 #include "ui/inspection.hpp"
 #include "ui/layout.hpp"
 #include "ui/motion/catalog.hpp"
+#include "ui/motion/config.hpp"
 #include "ui/motion/players.hpp"
 #include "ui/render.hpp"
 #include "ui/render/packet.hpp"
@@ -1827,6 +1828,472 @@ void test_layered_layout_uses_independent_axes() {
         compatible_child != nullptr && compatible_child->bounds.x == 45.0 &&
             compatible_child->bounds.y == 35.0,
         "layered layout broke the legacy single-axis centering fallback"
+    );
+}
+
+void test_layer_placement_and_sibling_anchors() {
+    using namespace strata;
+    using namespace strata::ui;
+
+    const auto placed = node(
+        "Panel",
+        "placed",
+        {},
+        layout_properties(object({
+            {"height", runtime::Value(10.0)},
+            {"placement", object({
+                 {"anchorX", runtime::Value(0.5)},
+                 {"anchorY", runtime::Value(1.0)},
+                 {"offsetX", runtime::Value(2.0)},
+                 {"offsetY", runtime::Value(2.0)},
+                 {"x", object({{"fraction", runtime::Value(0.25)}})},
+                 {"y", runtime::Value(50.0)},
+             })},
+            {"width", runtime::Value(20.0)},
+        }))
+    );
+    const auto anchor = node(
+        "Panel",
+        "sibling.anchor",
+        {},
+        layout_properties(object({
+            {"height", runtime::Value(10.0)},
+            {"placement", object({
+                 {"anchorX", runtime::Value(0.5)},
+                 {"x", object({{"fraction", runtime::Value(0.75)}})},
+             })},
+            {"width", runtime::Value(20.0)},
+        }))
+    );
+    const auto anchored = node(
+        "Panel",
+        "sibling.anchored",
+        {},
+        layout_properties(object({
+            {"anchorAlign", runtime::Value("CENTER")},
+            {"anchorFlip", runtime::Value(false)},
+            {"anchorGap", runtime::Value(5.0)},
+            {"anchorShift", runtime::Value(false)},
+            {"anchorSide", runtime::Value("BOTTOM")},
+            {"anchorTarget", runtime::Value("sibling.anchor")},
+            {"height", runtime::Value(10.0)},
+            {"matchAnchorWidth", runtime::Value(true)},
+            {"width", runtime::Value(30.0)},
+        }))
+    );
+    const auto chained = node(
+        "Panel",
+        "sibling.chained",
+        {},
+        layout_properties(object({
+            {"anchorAlign", runtime::Value("CENTER")},
+            {"anchorFlip", runtime::Value(false)},
+            {"anchorGap", runtime::Value(5.0)},
+            {"anchorShift", runtime::Value(false)},
+            {"anchorSide", runtime::Value("BOTTOM")},
+            {"anchorTarget", runtime::Value("sibling.anchored")},
+            {"height", runtime::Value(10.0)},
+            {"width", runtime::Value(10.0)},
+        }))
+    );
+    const auto root = node(
+        "Panel",
+        "placement.root",
+        {chained, anchored, placed, anchor},
+        layout_properties(object({
+            {"height", runtime::Value(100.0)},
+            {"kind", runtime::Value("PANEL")},
+            {"width", runtime::Value(200.0)},
+        }))
+    );
+
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(root));
+    LayoutEngine layout;
+    const LayoutEnvironment environment{
+        0U, Rect{0.0, 0.0, 200.0, 100.0}, 1.0,
+        {}, PointSnapPolicy::nearest, RectangleSnapPolicy::outward, false,
+    };
+    const LayoutResult& result = layout.layout(tree, environment);
+    const LayoutRecord* placed_record =
+        result.find(tree.find_key("placed")->identity());
+    const LayoutRecord* anchor_record =
+        result.find(tree.find_key("sibling.anchor")->identity());
+    const LayoutRecord* anchored_record =
+        result.find(tree.find_key("sibling.anchored")->identity());
+    const LayoutRecord* chained_record =
+        result.find(tree.find_key("sibling.chained")->identity());
+    check(
+        placed_record != nullptr && placed_record->bounds.x == 42.0 &&
+            placed_record->bounds.y == 42.0,
+        "fractional layer placement did not apply its anchor and scalar offset"
+    );
+    check(
+        anchor_record != nullptr && anchored_record != nullptr &&
+            chained_record != nullptr &&
+            anchor_record->bounds.x == 140.0 &&
+            anchored_record->bounds.x == 140.0 &&
+            anchored_record->bounds.width == 20.0 &&
+            anchored_record->bounds.y == 15.0 &&
+            chained_record->bounds.x == 145.0 &&
+            chained_record->bounds.y == 30.0,
+        "ordinary layered siblings did not resolve a deferred anchor chain"
+    );
+    check(
+        layout.take_diagnostics().empty(),
+        "valid sibling anchor chain emitted layout diagnostics"
+    );
+    const auto moved_anchor = node(
+        "Panel",
+        "sibling.anchor",
+        {},
+        layout_properties(object({
+            {"height", runtime::Value(10.0)},
+            {"placement", object({
+                 {"anchorX", runtime::Value(0.5)},
+                 {"x", object({{"fraction", runtime::Value(0.5)}})},
+             })},
+            {"width", runtime::Value(20.0)},
+        }))
+    );
+    const auto moved_root = node(
+        "Panel",
+        "placement.root",
+        {chained, anchored, placed, moved_anchor},
+        layout_properties(object({
+            {"height", runtime::Value(100.0)},
+            {"kind", runtime::Value("PANEL")},
+            {"width", runtime::Value(200.0)},
+        }))
+    );
+    static_cast<void>(tree.reconcile(moved_root));
+    const LayoutResult& moved_result = layout.layout(tree, environment);
+    const LayoutRecord* moved_anchored =
+        moved_result.find(tree.find_key("sibling.anchored")->identity());
+    check(
+        moved_anchored != nullptr &&
+            moved_anchored->bounds.x == 90.0 &&
+            moved_anchored->bounds.width == 20.0,
+        "cached sibling anchor layout did not follow its moved target"
+    );
+
+    const auto invalid_root = node(
+        "Panel",
+        "anchor.invalid.root",
+        {
+            node(
+                "Panel",
+                "anchor.cycle.a",
+                {},
+                layout_properties(object({
+                    {"anchorTarget", runtime::Value("anchor.cycle.b")},
+                    {"height", runtime::Value(10.0)},
+                    {"width", runtime::Value(10.0)},
+                }))
+            ),
+            node(
+                "Panel",
+                "anchor.cycle.b",
+                {},
+                layout_properties(object({
+                    {"anchorTarget", runtime::Value("anchor.cycle.a")},
+                    {"height", runtime::Value(10.0)},
+                    {"width", runtime::Value(10.0)},
+                }))
+            ),
+            node(
+                "Panel",
+                "anchor.missing",
+                {},
+                layout_properties(object({
+                    {"anchorTarget", runtime::Value("not.present")},
+                    {"height", runtime::Value(10.0)},
+                    {"width", runtime::Value(10.0)},
+                }))
+            ),
+        },
+        layout_properties(object({
+            {"height", runtime::Value(100.0)},
+            {"kind", runtime::Value("PANEL")},
+            {"width", runtime::Value(200.0)},
+        }))
+    );
+    RetainedTree invalid_tree;
+    static_cast<void>(invalid_tree.reconcile(invalid_root));
+    LayoutEngine invalid_layout;
+    const LayoutResult& invalid_result =
+        invalid_layout.layout(invalid_tree, environment);
+    const std::vector<runtime::RuntimeDiagnostic> diagnostics =
+        invalid_layout.take_diagnostics();
+    check(
+        invalid_result.find(invalid_tree.find_key("anchor.cycle.a")->identity()) != nullptr &&
+            invalid_result.find(invalid_tree.find_key("anchor.cycle.b")->identity()) != nullptr &&
+            invalid_result.find(invalid_tree.find_key("anchor.missing")->identity()) != nullptr &&
+            std::ranges::count(
+                diagnostics,
+                std::string("STRATA.UI.LAYOUT_ANCHOR_CYCLE"),
+                &runtime::RuntimeDiagnostic::code
+            ) == 2 &&
+            std::ranges::count(
+                diagnostics,
+                std::string("STRATA.UI.LAYOUT_ANCHOR_MISSING"),
+                &runtime::RuntimeDiagnostic::code
+            ) == 1,
+        "invalid sibling anchors did not fall back with deterministic diagnostics"
+    );
+}
+
+void test_zero_fill_weight_collapses_without_stealing_space() {
+    using namespace strata;
+    using namespace strata::ui;
+
+    const auto root = node(
+        "Panel",
+        "zero-fill.root",
+        {
+            node(
+                "Panel",
+                "zero-fill.zero",
+                {},
+                layout_properties(object({
+                    {"height", runtime::Value(10.0)},
+                    {"width", object({{"weight", runtime::Value(0.0)}})},
+                }))
+            ),
+            node(
+                "Panel",
+                "zero-fill.one",
+                {},
+                layout_properties(object({
+                    {"height", runtime::Value(10.0)},
+                    {"width", object({{"weight", runtime::Value(1.0)}})},
+                }))
+            ),
+        },
+        layout_properties(object({
+            {"height", runtime::Value(10.0)},
+            {"kind", runtime::Value("ROW")},
+            {"width", runtime::Value(100.0)},
+        }))
+    );
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(root));
+    LayoutEngine layout;
+    const LayoutEnvironment environment{
+        0U, Rect{0.0, 0.0, 100.0, 10.0}, 1.0,
+        {}, PointSnapPolicy::nearest, RectangleSnapPolicy::outward, false,
+    };
+    const LayoutResult& result = layout.layout(tree, environment);
+    const LayoutRecord* zero =
+        result.find(tree.find_key("zero-fill.zero")->identity());
+    const LayoutRecord* one =
+        result.find(tree.find_key("zero-fill.one")->identity());
+    check(
+        zero != nullptr && one != nullptr &&
+            zero->bounds.width == 0.0 && one->bounds.width == 100.0,
+        "explicit zero fill weight was treated as the default positive weight"
+    );
+
+    const auto wrapped_root = node(
+        "Panel",
+        "zero-fill.wrapped",
+        {
+            node(
+                "Panel",
+                "zero-fill.wrapped.zero",
+                {},
+                layout_properties(object({
+                    {"height", runtime::Value(10.0)},
+                    {"padding", object({{"horizontal", runtime::Value(20.0)}})},
+                    {"width", object({{"weight", runtime::Value(0.0)}})},
+                }))
+            ),
+            node(
+                "Panel",
+                "zero-fill.wrapped.fixed",
+                {},
+                layout_properties(object({
+                    {"height", runtime::Value(10.0)},
+                    {"width", runtime::Value(20.0)},
+                }))
+            ),
+        },
+        layout_properties(object({
+            {"height", runtime::Value(20.0)},
+            {"kind", runtime::Value("ROW")},
+            {"width", runtime::Value(100.0)},
+            {"wrap", runtime::Value(true)},
+        }))
+    );
+    RetainedTree wrapped_tree;
+    static_cast<void>(wrapped_tree.reconcile(wrapped_root));
+    LayoutEngine wrapped_layout;
+    const LayoutResult& wrapped_result =
+        wrapped_layout.layout(wrapped_tree, environment);
+    const LayoutRecord* wrapped_zero = wrapped_result.find(
+        wrapped_tree.find_key("zero-fill.wrapped.zero")->identity()
+    );
+    check(
+        wrapped_zero != nullptr && wrapped_zero->bounds.width == 0.0,
+        "wrapped linear layout retained intrinsic width for explicit zero fill weight"
+    );
+
+    const auto grid_root = node(
+        "Panel",
+        "zero-fill.grid",
+        {
+            node("Panel", "zero-fill.grid.zero"),
+            node("Panel", "zero-fill.grid.one"),
+        },
+        layout_properties(object({
+            {"columns", runtime::Value(std::vector<runtime::Value>{
+                 object({{"weight", runtime::Value(0.0)}}),
+                 object({{"weight", runtime::Value(1.0)}}),
+             })},
+            {"height", runtime::Value(10.0)},
+            {"kind", runtime::Value("GRID")},
+            {"rows", runtime::Value(std::vector<runtime::Value>{
+                 object({{"weight", runtime::Value(1.0)}}),
+             })},
+            {"width", runtime::Value(100.0)},
+        }))
+    );
+    RetainedTree grid_tree;
+    static_cast<void>(grid_tree.reconcile(grid_root));
+    LayoutEngine grid_layout;
+    const LayoutResult& grid_result = grid_layout.layout(grid_tree, environment);
+    const LayoutRecord* grid_zero =
+        grid_result.find(grid_tree.find_key("zero-fill.grid.zero")->identity());
+    const LayoutRecord* grid_one =
+        grid_result.find(grid_tree.find_key("zero-fill.grid.one")->identity());
+    check(
+        grid_zero != nullptr && grid_one != nullptr &&
+            grid_zero->bounds.width == 0.0 && grid_one->bounds.width == 100.0,
+        "grid track resolution reassigned default weight to an explicit zero"
+    );
+}
+
+void test_layout_motion_preserves_relative_units() {
+    using namespace strata;
+    using namespace strata::ui;
+
+    const auto description = node(
+        "Panel",
+        "motion.layout",
+        {},
+        layout_properties(object({
+            {"margin", object({
+                 {"horizontal", runtime::Value(7.0)},
+                 {"top", runtime::Value(3.0)},
+             })},
+            {"placement", object({
+                 {"x", object({{"fraction", runtime::Value(0.6)}})},
+             })},
+            {"height", object({{"weight", runtime::Value(0.25)}})},
+            {"width", object({{"fraction", runtime::Value(0.25)}})},
+        }))
+    );
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(description));
+    const std::optional<MotionValue> width = motion_detail::resolved_motion_value(
+        *tree.root(),
+        MotionProperty::width
+    );
+    const std::optional<MotionValue> margin_left = motion_detail::resolved_motion_value(
+        *tree.root(),
+        MotionProperty::margin_left
+    );
+    const std::optional<MotionValue> margin_top = motion_detail::resolved_motion_value(
+        *tree.root(),
+        MotionProperty::margin_top
+    );
+    const std::optional<MotionValue> placement_x = motion_detail::resolved_motion_value(
+        *tree.root(),
+        MotionProperty::placement_x
+    );
+    const std::optional<MotionValue> height = motion_detail::resolved_motion_value(
+        *tree.root(),
+        MotionProperty::height
+    );
+    const MotionLayoutValue* width_layout = width.has_value()
+        ? std::get_if<MotionLayoutValue>(&*width)
+        : nullptr;
+    const MotionLayoutValue* placement_layout = placement_x.has_value()
+        ? std::get_if<MotionLayoutValue>(&*placement_x)
+        : nullptr;
+    const MotionLayoutValue* height_layout = height.has_value()
+        ? std::get_if<MotionLayoutValue>(&*height)
+        : nullptr;
+    check(
+        width_layout != nullptr &&
+            width_layout->unit == MotionLayoutUnit::percent &&
+            width_layout->value == 0.25 &&
+            placement_layout != nullptr &&
+            placement_layout->unit == MotionLayoutUnit::percent &&
+            placement_layout->value == 0.6 &&
+            height_layout != nullptr &&
+            height_layout->unit == MotionLayoutUnit::fill &&
+            height_layout->value == 0.25 &&
+            margin_left == std::optional<MotionValue>(MotionValue(7.0)) &&
+            margin_top == std::optional<MotionValue>(MotionValue(3.0)),
+        "resolved-property motion flattened or lost authored layout values"
+    );
+
+    motion_detail::TargetPlayer player;
+    const MotionTiming timing{
+        100, 0, "linear", {}, false, MotionFillMode::both,
+    };
+    static_cast<void>(player.advance(
+        MotionLayoutValue{MotionLayoutUnit::percent, 0.2},
+        timing,
+        0,
+        false
+    ));
+    const motion_detail::TargetSample retargeted = player.advance(
+        MotionLayoutValue{MotionLayoutUnit::percent, 0.8},
+        timing,
+        10,
+        false
+    );
+    const motion_detail::TargetSample midpoint = player.advance(
+        MotionLayoutValue{MotionLayoutUnit::percent, 0.8},
+        timing,
+        60,
+        false
+    );
+    const MotionLayoutValue* midpoint_value =
+        std::get_if<MotionLayoutValue>(&midpoint.value);
+    check(
+        retargeted.running && midpoint_value != nullptr &&
+            midpoint_value->unit == MotionLayoutUnit::percent &&
+            std::abs(midpoint_value->value - 0.5) < 0.000'001,
+        "relative layout target did not interpolate in its authored unit"
+    );
+    const MotionValue cross_unit = interpolate_motion_value(
+        MotionLayoutValue{MotionLayoutUnit::percent, 0.5},
+        MotionLayoutValue{MotionLayoutUnit::fill, 1.0},
+        0.5
+    );
+    const MotionLayoutValue* cross_unit_value =
+        std::get_if<MotionLayoutValue>(&cross_unit);
+    check(
+        cross_unit_value != nullptr &&
+            cross_unit_value->unit == MotionLayoutUnit::percent &&
+            cross_unit_value->value == 0.5,
+        "layout animation interpolated between dimensionally incompatible units"
+    );
+    const motion_detail::TargetSample reduced = player.advance(
+        MotionLayoutValue{MotionLayoutUnit::percent, 0.4},
+        timing,
+        70,
+        true
+    );
+    const MotionLayoutValue* reduced_value =
+        std::get_if<MotionLayoutValue>(&reduced.value);
+    check(
+        !reduced.running && reduced.snapped_by_reduced_motion &&
+            reduced_value != nullptr && reduced_value->value == 0.4,
+        "reduced motion did not snap a layout-property retarget"
     );
 }
 
@@ -4604,6 +5071,12 @@ animation FocusVisibleTrigger {
   duration: 100ms;
   trigger: "FOCUS_VISIBLE";
 }
+style RelativeLayoutMotion {
+  animateChanges: {
+    properties: ["width", "placementX", "placementY"];
+    policy: "standard";
+  };
+}
 overlay Motion {
   root Progress(key: "motion.progress", indeterminate: true)
 }
@@ -4615,6 +5088,36 @@ overlay InteractionMotion {
       { id: "motion.focus-visible.channel", interaction: "FOCUS_VISIBLE", animation: FocusVisibleChannel }
     ]
   )
+}
+component LayoutMotionFixture() {
+  state expanded = false;
+  Panel(layout: { kind: "PANEL", width: 200, height: 80 }) {
+    Panel(
+      key: "motion.layout.target",
+      style: RelativeLayoutMotion,
+      layout: {
+        width: { fraction: expanded ? 0.8 : 0.2 },
+        height: 10,
+        placement: {
+          x: { fraction: expanded ? 0.7 : 0.1 },
+          y: { fraction: expanded ? 0.5 : 0.1 }
+        }
+      }
+    )
+    Button(
+      key: "motion.layout.expand",
+      label: "Expand",
+      onClick: action("state.set", name: "expanded", value: true),
+      layout: {
+        width: 80,
+        height: 24,
+        placement: { y: 30 }
+      }
+    )
+  }
+}
+overlay LayoutMotion {
+  root LayoutMotionFixture()
 }
 overlay ReorderMotion {
   root Panel(
@@ -4865,6 +5368,79 @@ overlay LazyMotion {
           "pointer modality did not reverse the active focus-visible motion");
     check_near(focus_visible_sample()->progress, 0.5,
                "pointer-driven focus-visible reversal jumped away from its displayed value");
+
+    ui::Surface layout_motion(
+        "layout-motion",
+        application,
+        runtime::LayerRole::overlay,
+        "LayoutMotion",
+        environment
+    );
+    static_cast<void>(layout_motion.frame(1'500'000'000));
+    const auto layout_motion_record = [&layout_motion]() -> const ui::LayoutRecord* {
+        const ui::RetainedNode* target =
+            layout_motion.tree().find_key("motion.layout.target");
+        return target != nullptr
+            ? layout_motion.layout().find(target->identity())
+            : nullptr;
+    };
+    check(
+        layout_motion_record() != nullptr &&
+            layout_motion_record()->bounds.x == 20.0 &&
+            layout_motion_record()->bounds.y == 8.0 &&
+            layout_motion_record()->bounds.width == 40.0,
+        "relative layout-motion fixture did not start at its authored placement"
+    );
+    static_cast<void>(
+        layout_motion.input().enqueue_click("motion.layout.expand")
+    );
+    static_cast<void>(layout_motion.frame(1'510'000'000));
+    static_cast<void>(layout_motion.frame(1'610'000'000));
+    check(
+        layout_motion_record() != nullptr &&
+            layout_motion_record()->bounds.x > 20.0 &&
+            layout_motion_record()->bounds.x < 140.0 &&
+            layout_motion_record()->bounds.y > 8.0 &&
+            layout_motion_record()->bounds.y < 40.0 &&
+            layout_motion_record()->bounds.width > 40.0 &&
+            layout_motion_record()->bounds.width < 160.0,
+        "resolved percentage width and placement did not animate in layout"
+    );
+    static_cast<void>(layout_motion.frame(1'910'000'000));
+    check(
+        layout_motion_record() != nullptr &&
+            layout_motion_record()->bounds.x == 140.0 &&
+            layout_motion_record()->bounds.y == 40.0 &&
+            layout_motion_record()->bounds.width == 160.0,
+        "relative layout animation did not settle at its authored targets"
+    );
+
+    ui::SurfaceEnvironment reduced_environment = environment;
+    reduced_environment.reduced_motion = true;
+    ui::Surface reduced_layout_motion(
+        "layout-motion-reduced",
+        application,
+        runtime::LayerRole::overlay,
+        "LayoutMotion",
+        reduced_environment
+    );
+    static_cast<void>(reduced_layout_motion.frame(2'000'000'000));
+    static_cast<void>(
+        reduced_layout_motion.input().enqueue_click("motion.layout.expand")
+    );
+    static_cast<void>(reduced_layout_motion.frame(2'010'000'000));
+    const ui::RetainedNode* reduced_target =
+        reduced_layout_motion.tree().find_key("motion.layout.target");
+    const ui::LayoutRecord* reduced_record = reduced_target != nullptr
+        ? reduced_layout_motion.layout().find(reduced_target->identity())
+        : nullptr;
+    check(
+        reduced_record != nullptr &&
+            reduced_record->bounds.x == 140.0 &&
+            reduced_record->bounds.y == 40.0 &&
+            reduced_record->bounds.width == 160.0,
+        "reduced motion did not snap relative layout properties to their targets"
+    );
 
     ui::Surface reorder_motion("reorder-motion", application, runtime::LayerRole::overlay,
                                "ReorderMotion", environment);
@@ -5389,6 +5965,9 @@ int main(const int argument_count, const char* const* const arguments) {
         test_materialization_publication_identity_and_eviction();
         test_variable_virtual_extents_and_stable_anchor();
         test_layered_layout_uses_independent_axes();
+        test_layer_placement_and_sibling_anchors();
+        test_zero_fill_weight_collapses_without_stealing_space();
+        test_layout_motion_preserves_relative_units();
         test_anchored_portal_is_out_of_flow_and_flips();
         test_virtualization_cache_queries_only_observed_keys();
         test_retained_layout_cache_scale_and_invalidation();

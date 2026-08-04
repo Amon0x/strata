@@ -73,6 +73,38 @@ namespace {
     }
 }
 
+[[nodiscard]] double placement_offset(
+    const LayoutSize& position,
+    const double available
+) noexcept {
+    if (position.kind == LayoutSize::Kind::percent) {
+        return position.value * std::max(0.0, available);
+    }
+    return position.kind == LayoutSize::Kind::fixed ? position.value : 0.0;
+}
+
+[[nodiscard]] Rect apply_placement(
+    Rect bounds,
+    const Rect container,
+    const std::optional<LayoutPlacement>& authored
+) noexcept {
+    if (!authored.has_value()) return bounds;
+    const LayoutPlacement& placement = *authored;
+    if (placement.x.has_value()) {
+        bounds.x = container.x +
+            placement_offset(*placement.x, container.width) -
+            bounds.width * placement.anchor_x;
+    }
+    if (placement.y.has_value()) {
+        bounds.y = container.y +
+            placement_offset(*placement.y, container.height) -
+            bounds.height * placement.anchor_y;
+    }
+    bounds.x += placement.offset_x;
+    bounds.y += placement.offset_y;
+    return bounds;
+}
+
 void translate_record(
     LayoutRecord& record,
     const Point delta,
@@ -609,14 +641,20 @@ void LayoutEngine::arrange(
                 content_bounds.height,
                 vertical
             );
+            Rect child_bounds{
+                content_bounds.x + cross_offset(content_bounds.width, width, horizontal),
+                content_bounds.y + cross_offset(content_bounds.height, height, vertical),
+                width,
+                height,
+            };
+            child_bounds = apply_placement(
+                child_bounds,
+                content_bounds,
+                child->style.placement
+            );
             arrange(
                 child,
-                Rect{
-                    content_bounds.x + cross_offset(content_bounds.width, width, horizontal),
-                    content_bounds.y + cross_offset(content_bounds.height, height, vertical),
-                    width,
-                    height,
-                },
+                child_bounds,
                 child_clip,
                 pin_context,
                 environment,
@@ -627,8 +665,51 @@ void LayoutEngine::arrange(
     for (std::size_t index = measured.flow_child_count;
          index < measured.children.size();
          ++index) {
-        pending_portals_.push_back(PendingPortal{
-            measured.children[index],
+        const MeasuredNodePtr& child = measured.children[index];
+        if (child->style.kind == LayoutKind::portal) {
+            pending_portals_.push_back(PendingPortal{
+                child,
+                child_clip,
+                pin_context,
+            });
+            continue;
+        }
+        const LayoutAlign horizontal =
+            child->style.justify_self.value_or(style.align_items);
+        const LayoutAlign vertical = child->style.align_self.value_or(
+            style.justify_content_authored
+                ? layered_axis_alignment(style.justify_content)
+                : style.align_items
+        );
+        const double width = arranged_axis_size(
+            child->style,
+            child->measured_size,
+            true,
+            content_bounds.width,
+            horizontal
+        );
+        const double height = arranged_axis_size(
+            child->style,
+            child->measured_size,
+            false,
+            content_bounds.height,
+            vertical
+        );
+        Rect child_bounds{
+            content_bounds.x + cross_offset(content_bounds.width, width, horizontal),
+            content_bounds.y + cross_offset(content_bounds.height, height, vertical),
+            width,
+            height,
+        };
+        child_bounds = apply_placement(
+            child_bounds,
+            content_bounds,
+            child->style.placement
+        );
+        pending_anchors_.push_back(PendingAnchor{
+            child,
+            child_bounds,
+            content_bounds,
             child_clip,
             pin_context,
         });

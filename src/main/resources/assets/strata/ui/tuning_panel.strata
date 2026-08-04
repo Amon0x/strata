@@ -254,10 +254,9 @@ style MaterialSliderRoot extends Clear {
   clip: false;
 }
 style MaterialSliderTrack extends Clear {
-  kind: "ROW";
+  kind: "PANEL";
   width: { weight: 1 };
   height: 34;
-  gap: 6;
   alignItems: "CENTER";
   translateY: 6;
 }
@@ -267,7 +266,10 @@ style MaterialSliderActive {
   radius: 999;
   background: #8FCFEAFF;
   border: { width: 1, color: #E3F6FF52 };
-  animateChanges: { properties: ["background", "border"], policy: "fast" };
+  animateChanges: {
+    properties: ["width", "background", "border"];
+    policy: "fast";
+  };
 }
 style MaterialSliderActiveHot extends MaterialSliderActive {
   background: #A8DEF2FF;
@@ -283,6 +285,10 @@ style MaterialSliderInactive {
   clip: true;
   background: #C7D7E43D;
   border: { width: 1, color: #E2EDF52E };
+  animateChanges: {
+    properties: ["width", "placementX"];
+    policy: "fast";
+  };
 }
 style MaterialSliderEndDot {
   width: 4;
@@ -297,11 +303,12 @@ style MaterialSliderThumb {
   radius: 999;
   scale: 1;
   translateY: 0;
+  zIndex: 2;
   background: #EAF6FDFF;
   border: { width: 1, color: #FFFFFFA8 };
   shadows: [{ color: #07111C52, radius: 4, spread: 1, offsetY: 1 }];
   animateChanges: {
-    properties: ["scale", "translateY", "background", "border"];
+    properties: ["placementX", "scale", "translateY", "background", "border"];
     policy: "fast";
   };
 }
@@ -315,13 +322,6 @@ style MaterialSliderThumbPressed extends MaterialSliderThumbHover {
   translateY: -1;
   shadows: [{ color: #02081182, radius: 8, spread: 2, offsetY: 3 }];
 }
-style MaterialSliderLabelRail extends Clear {
-  kind: "ROW";
-  width: { weight: 1 };
-  height: 18;
-  alignItems: "CENTER";
-  zIndex: 3;
-}
 style MaterialSliderLabel {
   kind: "PANEL";
   width: "content";
@@ -333,11 +333,12 @@ style MaterialSliderLabel {
   opacity: 0;
   scale: 0.92;
   translateY: 2;
+  zIndex: 3;
   background: #111D29F5;
   border: { width: 1, color: #C9E9F866 };
   shadows: [{ color: #02081180, radius: 7, spread: 1, offsetY: 3 }];
   animateChanges: {
-    properties: ["opacity", "scale", "translateY"];
+    properties: ["placementX", "opacity", "scale", "translateY"];
     policy: "fast";
   };
 }
@@ -650,41 +651,57 @@ component TuneSliderPresentation(
   Panel(key: key, style: MaterialSliderRoot) {
     Panel(style: MaterialSliderTrack) {
       Panel(
-        style: control.hovered || control.pressed
-          ? MaterialSliderActiveHot
-          : MaterialSliderActive,
-        layout: { width: { weight: max(control.fraction, 0.001) } }
-      )
-      Panel(
-        style: control.pressed
-          ? MaterialSliderThumbPressed
-          : control.hovered || control.focusVisible
-            ? MaterialSliderThumbHover
-            : MaterialSliderThumb
+        style: style(
+          MaterialSliderActive,
+          whenStyle(control.hovered || control.pressed, MaterialSliderActiveHot)
+        ),
+        layout: {
+          width: { fraction: control.fraction },
+          placement: { x: 0 }
+        }
       )
       Panel(
         style: MaterialSliderInactive,
-        layout: { width: { weight: max(1 - control.fraction, 0.001) } }
+        layout: {
+          width: { fraction: 1 - control.fraction },
+          placement: { x: { fraction: control.fraction } }
+        }
       ) {
         Panel(style: MaterialSliderEndDot)
       }
+      Panel(
+        style: style(
+          MaterialSliderThumb,
+          whenStyle(
+            control.hovered || control.focusVisible,
+            MaterialSliderThumbHover
+          ),
+          whenStyle(control.pressed, MaterialSliderThumbPressed)
+        ),
+        layout: {
+          placement: {
+            x: { fraction: control.fraction },
+            anchorX: 0.5
+          }
+        }
+      )
     }
-    Panel(style: MaterialSliderLabelRail) {
-      Panel(
-        style: Clear,
-        layout: { width: { weight: max(control.fraction, 0.001) }, height: 1 }
-      )
-      Panel(
-        style: control.hovered || control.pressed || control.focusVisible
-          ? MaterialSliderLabelVisible
-          : MaterialSliderLabel
-      ) {
-        Text(text: valueLabel, style: MaterialSliderLabelText)
+    Panel(
+      style: style(
+        MaterialSliderLabel,
+        whenStyle(
+          control.hovered || control.pressed || control.focusVisible,
+          MaterialSliderLabelVisible
+        )
+      ),
+      layout: {
+        placement: {
+          x: { fraction: control.fraction },
+          anchorX: 0.5
+        }
       }
-      Panel(
-        style: Clear,
-        layout: { width: { weight: max(1 - control.fraction, 0.001) }, height: 1 }
-      )
+    ) {
+      Text(text: valueLabel, style: MaterialSliderLabelText)
     }
   }
 }
@@ -712,10 +729,9 @@ component SliderRow(
         max: maximum,
         step: increment,
         value: current,
-        valueLabel: readout,
         onChange: change,
         style: TuneSlider,
-        presentationTemplate: TuneSliderPresentation
+        presentationTemplate: TuneSliderPresentation(valueLabel: readout)
       )
     }
   }

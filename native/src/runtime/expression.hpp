@@ -95,6 +95,7 @@ struct ActionValue final {
 
 struct ExpressionListValue;
 struct ExpressionObjectValue;
+struct ComponentTemplateValue;
 struct LambdaValue;
 
 class ExpressionValue final {
@@ -105,16 +106,18 @@ public:
         std::shared_ptr<const LambdaValue>,
         std::shared_ptr<const ActionValue>,
         std::shared_ptr<const ExpressionListValue>,
-        std::shared_ptr<const ExpressionObjectValue>
+        std::shared_ptr<const ExpressionObjectValue>,
+        std::shared_ptr<const ComponentTemplateValue>
     >;
 
     ExpressionValue();
-    explicit ExpressionValue(Value value);
+    ExpressionValue(Value value);
     explicit ExpressionValue(std::shared_ptr<const CollectionViewValue> value);
     explicit ExpressionValue(std::shared_ptr<const LambdaValue> value);
     explicit ExpressionValue(std::shared_ptr<const ActionValue> value);
     explicit ExpressionValue(std::shared_ptr<const ExpressionListValue> value);
     explicit ExpressionValue(std::shared_ptr<const ExpressionObjectValue> value);
+    explicit ExpressionValue(std::shared_ptr<const ComponentTemplateValue> value);
 
     [[nodiscard]] const Value* value() const noexcept;
     /** Materialized data consumed by widgets, including collection-view items. */
@@ -124,6 +127,8 @@ public:
     [[nodiscard]] const std::shared_ptr<const ActionValue>* action() const noexcept;
     [[nodiscard]] const std::shared_ptr<const ExpressionListValue>* list() const noexcept;
     [[nodiscard]] const std::shared_ptr<const ExpressionObjectValue>* object() const noexcept;
+    [[nodiscard]] const std::shared_ptr<const ComponentTemplateValue>*
+    component_template() const noexcept;
 
 private:
     Storage storage_;
@@ -142,11 +147,18 @@ struct ExpressionObjectValue final {
     [[nodiscard]] const ExpressionValue* field(std::string_view name) const noexcept;
 };
 
+struct ComponentTemplateValue final {
+    std::string component;
+    std::map<std::string, ExpressionValue, std::less<>> arguments;
+    Value materialized;
+};
+
 enum class ExpressionDependencyValueKind {
     scalar,
     collection,
     executable_list,
     executable_object,
+    component_template,
     unsupported,
 };
 
@@ -175,6 +187,7 @@ struct ExpressionDependencyValue final {
     std::vector<ExpressionDependencyValue> elements;
     std::vector<std::string> field_names;
     std::vector<ExpressionDependencyValue> field_values;
+    std::string component;
 
     [[nodiscard]] bool cacheable() const noexcept;
     [[nodiscard]] friend bool operator==(
