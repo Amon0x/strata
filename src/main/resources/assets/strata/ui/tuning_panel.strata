@@ -225,7 +225,7 @@ style ModuleRule { width: { weight: 1 }; height: 1; background: #D7E0E514; borde
 style TuneRow extends Clear {
   kind: "ROW";
   width: { weight: 1 };
-  height: 34;
+  height: 38;
   gap: 10;
   alignItems: "CENTER";
 }
@@ -240,109 +240,102 @@ style RowDetail { pixelSize: 10; color: #6C7981FF; }
 style RowTrack extends Clear {
   kind: "ROW";
   width: { weight: 1 };
-  height: 26;
-  gap: 9;
+  height: 34;
   alignItems: "CENTER";
-}
-style RowValue {
-  font: "strata:fonts/mono";
-  pixelSize: 11;
-  color: #C9DCE8FF;
-  width: 44;
 }
 style TuneSlider {
   width: { weight: 1 };
-  height: 28;
+  height: 34;
 }
 style MaterialSliderRoot extends Clear {
   kind: "PANEL";
   width: { weight: 1 };
-  height: 28;
+  height: 34;
   clip: false;
 }
 style MaterialSliderTrack extends Clear {
   kind: "ROW";
   width: { weight: 1 };
-  height: 28;
+  height: 34;
   gap: 6;
   alignItems: "CENTER";
-  translateY: 4;
+  translateY: 6;
 }
 style MaterialSliderActive {
   kind: "PANEL";
-  height: 10;
+  height: 12;
   radius: 999;
-  background: #8FC3DFFF;
-  border: { width: 1, color: #D7EFFA38 };
+  background: #8FCFEAFF;
+  border: { width: 1, color: #E3F6FF52 };
   animateChanges: { properties: ["background", "border"], policy: "fast" };
 }
 style MaterialSliderActiveHot extends MaterialSliderActive {
-  background: #A8D7ECFF;
-  border: { width: 1, color: #EEFAFF52 };
+  background: #A8DEF2FF;
+  border: { width: 1, color: #F4FCFF72 };
 }
 style MaterialSliderInactive {
   kind: "PANEL";
-  height: 10;
-  padding: { right: 3 };
+  height: 12;
+  padding: { right: 4 };
   radius: 999;
   alignItems: "END";
   justifyContent: "CENTER";
   clip: true;
-  background: #D6E2EB24;
-  border: { width: 1, color: #D7E7F01A };
+  background: #C7D7E43D;
+  border: { width: 1, color: #E2EDF52E };
 }
 style MaterialSliderEndDot {
-  width: 3;
-  height: 3;
+  width: 4;
+  height: 4;
   radius: 999;
-  background: #111C26B8;
+  background: #203044D0;
   border: null;
 }
 style MaterialSliderThumb {
-  width: 3;
-  height: 22;
+  width: 4;
+  height: 28;
   radius: 999;
   scale: 1;
   translateY: 0;
   background: #EAF6FDFF;
   border: { width: 1, color: #FFFFFFA8 };
-  shadows: [{ color: #02081170, radius: 5, spread: 1, offsetY: 2 }];
+  shadows: [{ color: #07111C52, radius: 4, spread: 1, offsetY: 1 }];
   animateChanges: {
     properties: ["scale", "translateY", "background", "border"];
     policy: "fast";
   };
 }
 style MaterialSliderThumbHover extends MaterialSliderThumb {
-  scale: 1.1;
+  scale: 1.07;
   background: #F5FBFFFF;
   border: { width: 1, color: #FFFFFFFF };
 }
 style MaterialSliderThumbPressed extends MaterialSliderThumbHover {
-  scale: 1.24;
+  scale: 1.16;
   translateY: -1;
-  shadows: [{ color: #0208119A, radius: 8, spread: 2, offsetY: 3 }];
+  shadows: [{ color: #02081182, radius: 8, spread: 2, offsetY: 3 }];
 }
 style MaterialSliderLabelRail extends Clear {
   kind: "ROW";
   width: { weight: 1 };
-  height: 15;
+  height: 18;
   alignItems: "CENTER";
   zIndex: 3;
 }
 style MaterialSliderLabel {
   kind: "PANEL";
   width: "content";
-  height: 15;
-  padding: { horizontal: 5, vertical: 2 };
-  radius: 4;
+  height: 18;
+  padding: { horizontal: 7, vertical: 3 };
+  radius: 6;
   alignItems: "CENTER";
   justifyContent: "CENTER";
   opacity: 0;
-  scale: 0.94;
-  translateY: 4;
-  background: #101A23EE;
-  border: { width: 1, color: #BCD9E84A };
-  shadows: [{ color: #02081170, radius: 5, offsetY: 2 }];
+  scale: 0.92;
+  translateY: 2;
+  background: #111D29F5;
+  border: { width: 1, color: #C9E9F866 };
+  shadows: [{ color: #02081180, radius: 7, spread: 1, offsetY: 3 }];
   animateChanges: {
     properties: ["opacity", "scale", "translateY"];
     policy: "fast";
@@ -351,11 +344,11 @@ style MaterialSliderLabel {
 style MaterialSliderLabelVisible extends MaterialSliderLabel {
   opacity: 1;
   scale: 1;
-  translateY: 0;
+  translateY: -4;
 }
 style MaterialSliderLabelText {
   font: "strata:fonts/mono";
-  pixelSize: 9;
+  pixelSize: 10;
   color: #E8F5FCFF;
 }
 
@@ -724,7 +717,6 @@ component SliderRow(
         style: TuneSlider,
         presentationTemplate: TuneSliderPresentation
       )
-      Text(text: readout, style: RowValue)
     }
   }
 }
