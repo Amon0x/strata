@@ -252,15 +252,111 @@ style RowValue {
 }
 style TuneSlider {
   width: { weight: 1 };
+  height: 28;
+}
+style MaterialSliderRoot extends Clear {
+  kind: "PANEL";
+  width: { weight: 1 };
+  height: 28;
+  clip: false;
+}
+style MaterialSliderTrack extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 28;
+  gap: 6;
+  alignItems: "CENTER";
+  translateY: 4;
+}
+style MaterialSliderActive {
+  kind: "PANEL";
+  height: 10;
+  radius: 999;
+  background: #8FC3DFFF;
+  border: { width: 1, color: #D7EFFA38 };
+  animateChanges: { properties: ["background", "border"], policy: "fast" };
+}
+style MaterialSliderActiveHot extends MaterialSliderActive {
+  background: #A8D7ECFF;
+  border: { width: 1, color: #EEFAFF52 };
+}
+style MaterialSliderInactive {
+  kind: "PANEL";
+  height: 10;
+  padding: { right: 3 };
+  radius: 999;
+  alignItems: "END";
+  justifyContent: "CENTER";
+  clip: true;
+  background: #D6E2EB24;
+  border: { width: 1, color: #D7E7F01A };
+}
+style MaterialSliderEndDot {
+  width: 3;
+  height: 3;
+  radius: 999;
+  background: #111C26B8;
+  border: null;
+}
+style MaterialSliderThumb {
+  width: 3;
   height: 22;
-  track: #DCE7EF1F;
-  fill: #9EC6E0FF;
-  thumb: #EAF3FAFF;
-  trackHeight: 3;
-  trackRadius: 2;
-  thumbSize: 12;
-  thumbRadius: 6;
-  focusRing: { width: 1, color: #AEC3D078 };
+  radius: 999;
+  scale: 1;
+  translateY: 0;
+  background: #EAF6FDFF;
+  border: { width: 1, color: #FFFFFFA8 };
+  shadows: [{ color: #02081170, radius: 5, spread: 1, offsetY: 2 }];
+  animateChanges: {
+    properties: ["scale", "translateY", "background", "border"];
+    policy: "fast";
+  };
+}
+style MaterialSliderThumbHover extends MaterialSliderThumb {
+  scale: 1.1;
+  background: #F5FBFFFF;
+  border: { width: 1, color: #FFFFFFFF };
+}
+style MaterialSliderThumbPressed extends MaterialSliderThumbHover {
+  scale: 1.24;
+  translateY: -1;
+  shadows: [{ color: #0208119A, radius: 8, spread: 2, offsetY: 3 }];
+}
+style MaterialSliderLabelRail extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 15;
+  alignItems: "CENTER";
+  zIndex: 3;
+}
+style MaterialSliderLabel {
+  kind: "PANEL";
+  width: "content";
+  height: 15;
+  padding: { horizontal: 5, vertical: 2 };
+  radius: 4;
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  opacity: 0;
+  scale: 0.94;
+  translateY: 4;
+  background: #101A23EE;
+  border: { width: 1, color: #BCD9E84A };
+  shadows: [{ color: #02081170, radius: 5, offsetY: 2 }];
+  animateChanges: {
+    properties: ["opacity", "scale", "translateY"];
+    policy: "fast";
+  };
+}
+style MaterialSliderLabelVisible extends MaterialSliderLabel {
+  opacity: 1;
+  scale: 1;
+  translateY: 0;
+}
+style MaterialSliderLabelText {
+  font: "strata:fonts/mono";
+  pixelSize: 9;
+  color: #E8F5FCFF;
 }
 
 style CheckRow extends Clear {
@@ -553,6 +649,53 @@ component SwitchRow(id: key, label: string, detail: string, on: boolean) {
   )
 }
 
+component TuneSliderPresentation(
+  key: key,
+  valueLabel: string,
+  control: sliderState
+) {
+  Panel(key: key, style: MaterialSliderRoot) {
+    Panel(style: MaterialSliderTrack) {
+      Panel(
+        style: control.hovered || control.pressed
+          ? MaterialSliderActiveHot
+          : MaterialSliderActive,
+        layout: { width: { weight: max(control.fraction, 0.001) } }
+      )
+      Panel(
+        style: control.pressed
+          ? MaterialSliderThumbPressed
+          : control.hovered || control.focusVisible
+            ? MaterialSliderThumbHover
+            : MaterialSliderThumb
+      )
+      Panel(
+        style: MaterialSliderInactive,
+        layout: { width: { weight: max(1 - control.fraction, 0.001) } }
+      ) {
+        Panel(style: MaterialSliderEndDot)
+      }
+    }
+    Panel(style: MaterialSliderLabelRail) {
+      Panel(
+        style: Clear,
+        layout: { width: { weight: max(control.fraction, 0.001) }, height: 1 }
+      )
+      Panel(
+        style: control.hovered || control.pressed || control.focusVisible
+          ? MaterialSliderLabelVisible
+          : MaterialSliderLabel
+      ) {
+        Text(text: valueLabel, style: MaterialSliderLabelText)
+      }
+      Panel(
+        style: Clear,
+        layout: { width: { weight: max(1 - control.fraction, 0.001) }, height: 1 }
+      )
+    }
+  }
+}
+
 component SliderRow(
   id: key,
   label: string,
@@ -576,8 +719,10 @@ component SliderRow(
         max: maximum,
         step: increment,
         value: current,
+        valueLabel: readout,
         onChange: change,
-        style: TuneSlider
+        style: TuneSlider,
+        presentationTemplate: TuneSliderPresentation
       )
       Text(text: readout, style: RowValue)
     }

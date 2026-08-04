@@ -508,9 +508,12 @@ component AuthoredIconButtonPresentation(
   }
 }
 
-component AuthoredSliderPresentation(key: key, control: sliderState) {
+component AuthoredSliderPresentation(key: key, valueLabel: string, control: sliderState) {
   Panel(key: key, layout: { kind: "ROW", width: 180, height: 28 }) {
-    Text(key: "authored.slider.copy", text: format("{0}:{1}", control.value, control.fraction))
+    Text(
+      key: "authored.slider.copy",
+      text: format("{0}:{1}:{2}", valueLabel, control.value, control.fraction)
+    )
   }
 }
 
@@ -546,6 +549,7 @@ component AuthoredControls() {
       min: 0,
       max: 100,
       bind: sliderValue,
+      valueLabel: "Quarter",
       presentationTemplate: AuthoredSliderPresentation
     )
     Progress(
@@ -745,7 +749,7 @@ overlay Main { root AuthoredControls() }
         "text"
     );
     check(
-        slider_copy != nullptr && slider_copy->starts_with("50:0.5"),
+        slider_copy != nullptr && slider_copy->starts_with("Quarter:50:0.5"),
         "authored Slider presentation did not track native pointer state"
     );
 }

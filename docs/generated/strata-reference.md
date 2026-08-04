@@ -1171,7 +1171,8 @@ Children: `false`
 | `step` | number | false | true | — |
 | `axis` | one of (HORIZONTAL, VERTICAL) | false | false | — |
 | `enabled` | boolean | false | false | — |
-| `presentationTemplate` | component (key: key, control: slider presentation state) | false | false | — |
+| `valueLabel` | string | false | false | — |
+| `presentationTemplate` | component (key: key, valueLabel: string, control: slider presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |

@@ -149,6 +149,7 @@ void slider_expand(WidgetDescriptionScope& scope) {
     static_cast<void>(scope.install_presentation(
         "presentationTemplate",
         WidgetTemplateArguments{
+            {"valueLabel", runtime::Value(scope.string("valueLabel"))},
             {"control", scope.presentation_state(WidgetLayoutFields{
                 {"axis", runtime::Value(scope.string("axis", "HORIZONTAL"))},
                 {"fraction", runtime::Value(fraction)},

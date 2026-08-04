@@ -1911,6 +1911,8 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                 .kind = DeclaredTypeKind::component_template,
                 .parameters =
                     {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+                     DeclaredParameter{.name = "valueLabel",
+                                       .type = declared_type_reference("t0")},
                      DeclaredParameter{.name = "control",
                                        .type = declared_type_reference("t177")}}})},
         DeclaredNamedType{

@@ -11069,10 +11069,18 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "valueLabel",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "presentationTemplate",
           "nullable": false,
           "required": false,
-          "type": "component (key: key, control: slider presentation state)"
+          "type": "component (key: key, valueLabel: string, control: slider presentation state)"
         },
         {
           "aliases": [],
