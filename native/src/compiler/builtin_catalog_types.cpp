@@ -1820,6 +1820,137 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                        .type = declared_type_reference("t0")},
                      DeclaredParameter{.name = "control",
                                        .type = declared_type_reference("t172")}}})},
+        DeclaredNamedType{
+            .id = "t174",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "button presentation state",
+                .fields =
+                    {DeclaredTypeField{.name = "enabled",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "hovered",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "pressed",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "focused",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "focusVisible",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true}},
+                .value = declared_type_reference("t7")})},
+        DeclaredNamedType{
+            .id = "t175",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::component_template,
+                .parameters =
+                    {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+                     DeclaredParameter{.name = "label", .type = declared_type_reference("t0")},
+                     DeclaredParameter{.name = "control",
+                                       .type = declared_type_reference("t174")}}})},
+        DeclaredNamedType{
+            .id = "t176",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::component_template,
+                .parameters =
+                    {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+                     DeclaredParameter{.name = "label", .type = declared_type_reference("t0")},
+                     DeclaredParameter{.name = "icon", .type = declared_type_reference("t66")},
+                     DeclaredParameter{.name = "source",
+                                       .type = declared_type_reference("t67"),
+                                       .nullable = true},
+                     DeclaredParameter{.name = "control",
+                                       .type = declared_type_reference("t174")}}})},
+        DeclaredNamedType{
+            .id = "t177",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "slider presentation state",
+                .fields =
+                    {DeclaredTypeField{.name = "value",
+                                       .type = declared_type_reference("t3"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "minimum",
+                                       .type = declared_type_reference("t3"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "maximum",
+                                       .type = declared_type_reference("t3"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "step",
+                                       .type = declared_type_reference("t3"),
+                                       .required = true,
+                                       .nullable = true},
+                     DeclaredTypeField{.name = "fraction",
+                                       .type = declared_type_reference("t3"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "axis",
+                                       .type = declared_type_reference("t28"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "enabled",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "hovered",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "pressed",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "focused",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "focusVisible",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true}},
+                .value = declared_type_reference("t7")})},
+        DeclaredNamedType{
+            .id = "t178",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::component_template,
+                .parameters =
+                    {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+                     DeclaredParameter{.name = "control",
+                                       .type = declared_type_reference("t177")}}})},
+        DeclaredNamedType{
+            .id = "t179",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "progress presentation state",
+                .fields =
+                    {DeclaredTypeField{.name = "value",
+                                       .type = declared_type_reference("t3"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "minimum",
+                                       .type = declared_type_reference("t3"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "maximum",
+                                       .type = declared_type_reference("t3"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "fraction",
+                                       .type = declared_type_reference("t3"),
+                                       .required = true},
+                     DeclaredTypeField{.name = "indeterminate",
+                                       .type = declared_type_reference("t2"),
+                                       .required = true}},
+                .value = declared_type_reference("t7")})},
+        DeclaredNamedType{
+            .id = "t180",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::component_template,
+                .parameters =
+                    {DeclaredParameter{.name = "key", .type = declared_type_reference("t4")},
+                     DeclaredParameter{.name = "control",
+                                       .type = declared_type_reference("t179")}}})},
+        DeclaredNamedType{
+            .id = "t181",
+            .definition =
+                declared_type(DeclaredType{
+                    .kind = DeclaredTypeKind::enumeration,
+                    .label = "layered justification",
+                    .values = {"CENTER", "END", "START"},
+                })},
     };
 }
 

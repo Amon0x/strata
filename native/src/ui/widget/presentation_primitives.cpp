@@ -137,6 +137,7 @@ void rich_text_content(WidgetRenderScope& scope) {
 }
 
 void button_content(WidgetRenderScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) return;
     const bool context_menu = scope.string("$authoringType") == "ContextMenu";
     const bool authored_menu = scope.node().description().type == "Menu" &&
         scope.property("triggerTemplate") != nullptr;

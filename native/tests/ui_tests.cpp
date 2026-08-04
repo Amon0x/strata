@@ -1754,6 +1754,82 @@ void test_variable_virtual_extents_and_stable_anchor() {
           "virtual layout retained an all-item key snapshot instead of an observed key window");
 }
 
+void test_layered_layout_uses_independent_axes() {
+    using namespace strata;
+    using namespace strata::ui;
+
+    const auto explicitly_justified = node(
+        "Panel",
+        "layer.explicit",
+        {node(
+            "Panel",
+            "layer.explicit.child",
+            {},
+            layout_properties(object({
+                {"height", runtime::Value(10.0)},
+                {"width", runtime::Value(10.0)},
+            }))
+        )},
+        layout_properties(object({
+            {"alignItems", runtime::Value("END")},
+            {"height", runtime::Value(80.0)},
+            {"justifyContent", runtime::Value("START")},
+            {"kind", runtime::Value("PANEL")},
+            {"width", runtime::Value(100.0)},
+        }))
+    );
+    RetainedTree explicit_tree;
+    static_cast<void>(explicit_tree.reconcile(explicitly_justified));
+    LayoutEngine explicit_layout;
+    const LayoutEnvironment environment{
+        0U, Rect{0.0, 0.0, 100.0, 80.0}, 1.0,
+        {}, PointSnapPolicy::nearest, RectangleSnapPolicy::outward, false,
+    };
+    const LayoutResult& explicit_result =
+        explicit_layout.layout(explicit_tree, environment);
+    const LayoutRecord* explicit_child = explicit_result.find(
+        explicit_tree.find_key("layer.explicit.child")->identity()
+    );
+    check(
+        explicit_child != nullptr && explicit_child->bounds.x == 90.0 &&
+            explicit_child->bounds.y == 0.0,
+        "layered layout did not apply alignItems horizontally and justifyContent vertically"
+    );
+
+    const auto compatible = node(
+        "Panel",
+        "layer.compatible",
+        {node(
+            "Panel",
+            "layer.compatible.child",
+            {},
+            layout_properties(object({
+                {"height", runtime::Value(10.0)},
+                {"width", runtime::Value(10.0)},
+            }))
+        )},
+        layout_properties(object({
+            {"alignItems", runtime::Value("CENTER")},
+            {"height", runtime::Value(80.0)},
+            {"kind", runtime::Value("PANEL")},
+            {"width", runtime::Value(100.0)},
+        }))
+    );
+    RetainedTree compatible_tree;
+    static_cast<void>(compatible_tree.reconcile(compatible));
+    LayoutEngine compatible_layout;
+    const LayoutResult& compatible_result =
+        compatible_layout.layout(compatible_tree, environment);
+    const LayoutRecord* compatible_child = compatible_result.find(
+        compatible_tree.find_key("layer.compatible.child")->identity()
+    );
+    check(
+        compatible_child != nullptr && compatible_child->bounds.x == 45.0 &&
+            compatible_child->bounds.y == 35.0,
+        "layered layout broke the legacy single-axis centering fallback"
+    );
+}
+
 void test_anchored_portal_is_out_of_flow_and_flips() {
     using namespace strata;
     using namespace strata::ui;
@@ -5312,6 +5388,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_lazy_range_convergence_state_machine();
         test_materialization_publication_identity_and_eviction();
         test_variable_virtual_extents_and_stable_anchor();
+        test_layered_layout_uses_independent_axes();
         test_anchored_portal_is_out_of_flow_and_flips();
         test_virtualization_cache_queries_only_observed_keys();
         test_retained_layout_cache_scale_and_invalidation();

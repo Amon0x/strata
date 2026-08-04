@@ -86,6 +86,7 @@ Children: `false`
 | `label` | string | true | false | — |
 | `key` | key | false | false | — |
 | `enabled` | boolean | false | false | — |
+| `presentationTemplate` | component (key: key, label: string, control: button presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -126,7 +127,7 @@ Children: `false`
 | `checked` | boolean | false | true | — |
 | `defaultChecked` | boolean | false | false | — |
 | `enabled` | boolean | false | false | — |
-| `presentationTemplate` | componentTemplate | false | false | — |
+| `presentationTemplate` | component (key: key, label: string, description: string, control: checkbox presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -207,9 +208,9 @@ Children: `false`
 | `selectedId` | string | false | true | — |
 | `enabled` | boolean | false | false | — |
 | `maxVisibleRows` | number | false | false | — |
-| `triggerTemplate` | componentTemplate | false | false | — |
-| `popupTemplate` | componentTemplate | false | false | — |
-| `itemTemplate` | componentTemplate | false | false | — |
+| `triggerTemplate` | component (key: key, label: string, value: any, enabled: boolean, expanded: boolean) | false | false | — |
+| `popupTemplate` | component (key: key, level: number, expanded: boolean) | false | false | — |
+| `itemTemplate` | component (key: key, id: string, label: string, value: any, index: number, level: number, enabled: boolean, selected: boolean, active: boolean, checked: boolean, separator: boolean, hasChildren: boolean, shortcut: string) | false | false | — |
 | `onQuery` | action | false | false | — |
 | `onChange` | action | false | false | — |
 | `bindQuery` | any | false | false | — |
@@ -335,9 +336,9 @@ Children: `true`
 | `key` | key | false | false | — |
 | `menuWidth` | number | false | false | — |
 | `rowHeight` | number | false | false | — |
-| `triggerTemplate` | componentTemplate | false | false | — |
-| `popupTemplate` | componentTemplate | false | false | — |
-| `itemTemplate` | componentTemplate | false | false | — |
+| `triggerTemplate` | component (key: key, label: string, value: any, enabled: boolean, expanded: boolean) | false | false | — |
+| `popupTemplate` | component (key: key, level: number, expanded: boolean) | false | false | — |
+| `itemTemplate` | component (key: key, id: string, label: string, value: any, index: number, level: number, enabled: boolean, selected: boolean, active: boolean, checked: boolean, separator: boolean, hasChildren: boolean, shortcut: string) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -532,6 +533,7 @@ Children: `false`
 | `label` | string | false | false | — |
 | `source` | map of any | false | false | — |
 | `enabled` | boolean | false | false | — |
+| `presentationTemplate` | component (key: key, label: string, icon: image, source: image source region?, control: button presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -612,7 +614,7 @@ Children: `false`
 | `cellHeight` | number | false | false | — |
 | `gap` | number | false | false | — |
 | `overscan` | number | false | false | — |
-| `itemTemplate` | componentTemplate | false | false | — |
+| `itemTemplate` | component (key: key, label: string, selected: boolean, value: any) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -692,9 +694,9 @@ Children: `false`
 | `defaultOpen` | boolean | false | false | — |
 | `menuWidth` | number | false | false | — |
 | `rowHeight` | number | false | false | — |
-| `triggerTemplate` | componentTemplate | false | false | — |
-| `popupTemplate` | componentTemplate | false | false | — |
-| `itemTemplate` | componentTemplate | false | false | — |
+| `triggerTemplate` | component (key: key, label: string, value: any, enabled: boolean, expanded: boolean) | false | false | — |
+| `popupTemplate` | component (key: key, level: number, expanded: boolean) | false | false | — |
+| `itemTemplate` | component (key: key, id: string, label: string, value: any, index: number, level: number, enabled: boolean, selected: boolean, active: boolean, checked: boolean, separator: boolean, hasChildren: boolean, shortcut: string) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -882,6 +884,7 @@ Children: `false`
 | `min` | number | false | false | — |
 | `max` | number | false | false | — |
 | `indeterminate` | boolean | false | false | — |
+| `presentationTemplate` | component (key: key, control: progress presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -1122,9 +1125,9 @@ Children: `false`
 | `maxVisibleRows` | number | false | false | — |
 | `collapsedIcon` | image | false | false | — |
 | `expandedIcon` | image | false | false | — |
-| `triggerTemplate` | componentTemplate | false | false | — |
-| `popupTemplate` | componentTemplate | false | false | — |
-| `itemTemplate` | componentTemplate | false | false | — |
+| `triggerTemplate` | component (key: key, label: string, value: any, enabled: boolean, expanded: boolean) | false | false | — |
+| `popupTemplate` | component (key: key, level: number, expanded: boolean) | false | false | — |
+| `itemTemplate` | component (key: key, id: string, label: string, value: any, index: number, level: number, enabled: boolean, selected: boolean, active: boolean, checked: boolean, separator: boolean, hasChildren: boolean, shortcut: string) | false | false | — |
 | `enabled` | boolean | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
@@ -1168,6 +1171,7 @@ Children: `false`
 | `step` | number | false | true | — |
 | `axis` | one of (HORIZONTAL, VERTICAL) | false | false | — |
 | `enabled` | boolean | false | false | — |
+| `presentationTemplate` | component (key: key, control: slider presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -1329,12 +1333,12 @@ Children: `false`
 | `overscan` | number | false | false | — |
 | `focusMode` | one of (CELL, ROW) | false | false | — |
 | `presentation` | one of (DATA, EMPTY, LOADING, NO_MATCHES) | false | false | — |
-| `rowTemplate` | componentTemplate | false | false | — |
-| `cellTemplate` | componentTemplate | false | false | — |
+| `rowTemplate` | component (cells: object, key: key, selected: boolean) | false | false | — |
+| `cellTemplate` | component (cells: object, columnId: string, header: string, key: key, rowKey: key, selected: boolean, value: any) | false | false | — |
 | `cellTemplates` | list of map of any | false | false | — |
-| `emptyContent` | componentTemplate | false | false | — |
-| `loadingContent` | componentTemplate | false | false | — |
-| `noMatchesContent` | componentTemplate | false | false | — |
+| `emptyContent` | component template | false | false | — |
+| `loadingContent` | component template | false | false | — |
+| `noMatchesContent` | component template | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -1635,7 +1639,7 @@ Children: `false`
 | `checked` | boolean | false | true | — |
 | `defaultChecked` | boolean | false | false | — |
 | `enabled` | boolean | false | false | — |
-| `presentationTemplate` | componentTemplate | false | false | — |
+| `presentationTemplate` | component (key: key, label: string, description: string, control: toggle presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -1711,7 +1715,7 @@ Children: `true`
 | `visible` | boolean | false | true | — |
 | `showDelay` | duration | false | false | — |
 | `hideDelay` | duration | false | false | — |
-| `contentTemplate` | componentTemplate | false | false | — |
+| `contentTemplate` | component (key: key, text: string) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -1757,7 +1761,7 @@ Children: `false`
 | `showIndentGuides` | boolean | false | false | — |
 | `hoverExpandDelay` | duration | false | false | — |
 | `overscan` | number | false | false | — |
-| `rowTemplate` | componentTemplate | false | false | — |
+| `rowTemplate` | component (depth: number, expanded: boolean, key: key, label: string, loading: boolean, mayHaveChildren: boolean, selected: boolean, value: any) | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -1803,7 +1807,7 @@ Children: `true`
 | `itemCount` | number | false | false | — |
 | `itemExtent` | number | true | false | — |
 | `items` | one of (list of any, async) | false | false | — |
-| `itemTemplate` | componentTemplate | false | false | — |
+| `itemTemplate` | component (item: any, key: key, index: number) | false | false | — |
 | `loadingText` | string | false | false | — |
 | `errorText` | string | false | false | — |
 | `emptyText` | string | false | false | — |

@@ -69,6 +69,27 @@ public:
         if (kind == "list") return "list of " + label(required(type, "element"));
         if (kind == "map") return "map of " + label(required(type, "value"));
         if (kind == "collection") return "collection of " + label(required(type, "item"));
+        if (kind == "componentTemplate") {
+            const JsonValue* parameters = type.find("parameters");
+            if (parameters == nullptr || parameters->array() == nullptr ||
+                parameters->array()->empty()) {
+                return "component template";
+            }
+            std::vector<std::string> labels;
+            labels.reserve(parameters->array()->size());
+            for (const JsonValue& parameter : *parameters->array()) {
+                std::string parameter_label =
+                    string_field(parameter, "name") + ": " +
+                    component_parameter_label(required(parameter, "type"));
+                const JsonValue* nullable = parameter.find("nullable");
+                if (nullable != nullptr && nullable->boolean() != nullptr &&
+                    *nullable->boolean()) {
+                    parameter_label += "?";
+                }
+                labels.push_back(std::move(parameter_label));
+            }
+            return "component (" + join(labels) + ')';
+        }
         if (kind == "union") {
             std::vector<std::string> labels;
             for (const JsonValue& option : array_field(type, "options")) labels.push_back(label(option));
@@ -91,6 +112,20 @@ public:
     }
 
 private:
+    [[nodiscard]] std::string component_parameter_label(
+        const JsonValue& raw
+    ) const {
+        const JsonValue& type = resolve(raw);
+        const JsonValue* kind = type.find("kind");
+        const JsonValue* named = type.find("label");
+        if (kind != nullptr && kind->string() != nullptr &&
+            *kind->string() == "map" && named != nullptr &&
+            named->string() != nullptr) {
+            return *named->string();
+        }
+        return label(raw);
+    }
+
     [[nodiscard]] static std::string join(const std::vector<std::string>& values) {
         std::string result;
         for (const std::string& value : values) {

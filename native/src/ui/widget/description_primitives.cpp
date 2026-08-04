@@ -12,16 +12,36 @@ namespace strata::ui {
 namespace {
 
 void button_defaults(WidgetLayoutDefaultsScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) {
+        scope.set("height", runtime::Value("content"));
+        scope.set("width", runtime::Value("content"));
+        scope.padding(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
     scope.set("height", runtime::Value(32.0));
     scope.set("width", runtime::Value("content"));
     scope.set("alignItems", runtime::Value("CENTER"));
     scope.padding(10.0, 6.0, 10.0, 6.0);
 }
 
+void button_expand(WidgetDescriptionScope& scope) {
+    static_cast<void>(scope.install_presentation(
+        "presentationTemplate",
+        WidgetTemplateArguments{
+            {"label", runtime::Value(scope.string("label"))},
+            {"control", scope.presentation_state()},
+        }
+    ));
+}
+
 void image_defaults(WidgetLayoutDefaultsScope& scope) {
     scope.set("height", runtime::Value(64.0));
     scope.set("width", runtime::Value(64.0));
     scope.intrinsic(64.0, 64.0);
+}
+
+void grid_defaults(WidgetLayoutDefaultsScope& scope) {
+    scope.set("kind", runtime::Value("GRID"));
 }
 
 void draw_defaults(WidgetLayoutDefaultsScope& scope) {
@@ -390,24 +410,34 @@ void add(
     const WidgetLayoutDefaultsHook defaults = nullptr,
     const WidgetDescriptionHook expand = nullptr,
     std::string canonical_type = {},
-    std::string default_action = {}
+    std::string default_action = {},
+    std::string authored_presentation_property = {}
 ) {
-    registry.register_describe_phase(
-        std::move(type),
-        WidgetDescribePhase{
-            defaults,
-            expand,
-            std::move(canonical_type),
-            std::move(default_action),
-            true,
-        }
-    );
+    WidgetDescribePhase phase{
+        defaults,
+        expand,
+        std::move(canonical_type),
+        std::move(default_action),
+        true,
+    };
+    phase.authored_presentation_property =
+        std::move(authored_presentation_property);
+    registry.register_describe_phase(std::move(type), std::move(phase));
 }
 
 } // namespace
 
 void register_primitive_widget_descriptions(WidgetRegistry& registry) {
-    add(registry, "Button", &button_defaults);
+    add(
+        registry,
+        "Button",
+        &button_defaults,
+        &button_expand,
+        {},
+        {},
+        "presentationTemplate"
+    );
+    add(registry, "Grid", &grid_defaults);
     add(registry, "Image", &image_defaults);
     add(registry, "Draw", &draw_defaults);
     add(registry, "Menu", &menu_defaults, &menu_expand, {}, "Menu");

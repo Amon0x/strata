@@ -96,6 +96,199 @@ overlay Main { root InvalidTarget() }
             diagnostic(target, "STRATA.DSL.SEMANTIC_BINDING_TARGET") != nullptr,
         "binding shorthand accepted a derived value instead of declaration-owned state"
     );
+
+    const strata::runtime::ActivationResult layout = compile(R"(
+overlay Main {
+  root Panel(
+    layout: {
+      kind: "GRID",
+      width: 200,
+      height: 100,
+      justifyContent: "CENTER"
+    }
+  )
+}
+)");
+    check(
+        layout.status == strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(layout, "STRATA.DSL.SEMANTIC_LAYOUT_PROPERTY_KIND") != nullptr,
+        "kind-specific layout validation accepted a property the selected engine ignores"
+    );
+
+    const strata::runtime::ActivationResult inherited_layout = compile(R"(
+style GridAlignment { justifyContent: "CENTER"; }
+style InvalidGrid extends GridAlignment { kind: "GRID"; }
+overlay Main { root Panel(style: InvalidGrid) }
+)");
+    check(
+        inherited_layout.status == strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(
+                inherited_layout,
+                "STRATA.DSL.SEMANTIC_LAYOUT_PROPERTY_KIND"
+            ) != nullptr,
+        "kind-specific layout validation ignored composed style properties"
+    );
+
+    const strata::runtime::ActivationResult split_layout = compile(R"(
+style GridAlignment { justifyContent: "CENTER"; }
+overlay Main {
+  root Panel(style: GridAlignment, layout: { kind: "GRID" })
+}
+)");
+    check(
+        split_layout.status == strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(
+                split_layout,
+                "STRATA.DSL.SEMANTIC_LAYOUT_PROPERTY_KIND"
+            ) != nullptr,
+        "kind-specific layout validation did not combine style and layout arguments"
+    );
+
+    const strata::runtime::ActivationResult implicit_layout = compile(R"(
+overlay Main {
+  root Panel(layout: { gap: 8 })
+}
+)");
+    check(
+        implicit_layout.status == strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(
+                implicit_layout,
+                "STRATA.DSL.SEMANTIC_LAYOUT_PROPERTY_KIND"
+            ) != nullptr,
+        "kind-specific layout validation ignored Panel's implicit layout kind"
+    );
+
+    const strata::runtime::ActivationResult defaulted_layout = compile(R"(
+style GridAlignment { justifyContent: "CENTER"; }
+component DefaultedGrid() {
+  defaults: { Panel: { style: GridAlignment } }
+  Panel {
+    Slot(name: "content")
+  }
+}
+overlay Main {
+  root DefaultedGrid() {
+    Panel(layout: { kind: "GRID" })
+  }
+}
+)");
+    check(
+        defaulted_layout.status == strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(
+                defaulted_layout,
+                "STRATA.DSL.SEMANTIC_LAYOUT_PROPERTY_KIND"
+            ) != nullptr,
+        "kind-specific layout validation ignored component widget-default styles"
+    );
+
+    const strata::runtime::ActivationResult dynamic_layout = compile(R"(
+component DynamicLayer(justification: justify) {
+  Panel(layout: { kind: "PANEL", justifyContent: justification })
+}
+overlay Main {
+  root DynamicLayer(justification: "SPACE_BETWEEN")
+}
+)");
+    check(
+        dynamic_layout.status == strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(
+                dynamic_layout,
+                "STRATA.DSL.SEMANTIC_LAYOUT_PROPERTY_KIND"
+            ) != nullptr,
+        "layered layout accepted a dynamic justification type containing SPACE_* values"
+    );
+
+    const strata::runtime::ActivationResult layered_layout = compile(R"(
+component Layer(justification: layerJustify) {
+  Panel(layout: { kind: "PANEL", justifyContent: justification })
+}
+overlay Main {
+  root Layer(justification: "CENTER")
+}
+)");
+    check(
+        layered_layout.activated(),
+        "layered layout rejected a constrained dynamic justification"
+    );
+
+    const strata::runtime::ActivationResult unknown_template = compile(R"(
+overlay Main {
+  root Button(
+    key: "template.unknown",
+    label: "Unknown",
+    presentationTemplate: MissingPresentation
+  )
+}
+)");
+    check(
+        unknown_template.status == strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(
+                unknown_template,
+                "STRATA.DSL.SEMANTIC_UNKNOWN_COMPONENT_TEMPLATE"
+            ) != nullptr,
+        "unknown authored presentation template passed semantic validation"
+    );
+
+    const strata::runtime::ActivationResult wrong_template = compile(R"(
+component WrongButtonPresentation(key: key, control: progressState) {
+  Text(key: key, text: format("{0}", control.fraction))
+}
+overlay Main {
+  root Button(
+    key: "template.wrong",
+    label: "Wrong",
+    presentationTemplate: WrongButtonPresentation
+  )
+}
+)");
+    check(
+        wrong_template.status == strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(
+                wrong_template,
+                "STRATA.DSL.SEMANTIC_COMPONENT_TEMPLATE_PARAMETER"
+            ) != nullptr,
+        "authored presentation template accepted an incompatible typed parameter"
+    );
+
+    const strata::runtime::ActivationResult unkeyed_template = compile(R"(
+component UnkeyedButtonPresentation(key: key) {
+  Text(key: key, text: "Unkeyed")
+}
+overlay Main {
+  root Button(
+    label: "Unkeyed",
+    presentationTemplate: UnkeyedButtonPresentation
+  )
+}
+)");
+    check(
+        unkeyed_template.status == strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(
+                unkeyed_template,
+                "STRATA.DSL.SEMANTIC_PRESENTATION_KEY_REQUIRED"
+            ) != nullptr,
+        "unkeyed authored presentation owner passed semantic validation"
+    );
+
+    const strata::runtime::ActivationResult forwarded_template = compile(R"(
+component ForwardedButton(key: key, label: string, control: buttonState) {
+  Text(key: key, text: label)
+}
+component ButtonOwner(template: buttonTemplate) {
+  Button(
+    key: "template.forwarded",
+    label: "Forwarded",
+    presentationTemplate: template
+  )
+}
+overlay Main {
+  root ButtonOwner(template: ForwardedButton)
+}
+)");
+    check(
+        forwarded_template.activated(),
+        "typed authored presentation template could not be forwarded through a component"
+    );
 }
 
 void test_binding_initial_value_and_round_trip(
@@ -252,7 +445,7 @@ overlay Main { root BoundControls() }
     );
 }
 
-void test_authored_toggle_presentation(
+void test_authored_control_presentations(
     const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
 ) {
@@ -295,30 +488,99 @@ component AuthoredTogglePresentation(
   }
 }
 
-overlay Main {
-  root Toggle(
-    key: "authored.toggle",
-    label: "Effects",
-    description: "Use post-processing",
-    defaultChecked: false,
-    presentationTemplate: AuthoredTogglePresentation
-  )
+component AuthoredButtonPresentation(key: key, label: string, control: buttonState) {
+  Scroll(key: key, layout: { width: 120, height: 28 }) {
+    Panel(layout: { kind: "ROW", width: 120, height: 80 }) {
+      Text(key: "authored.button.copy", text: format("{0}:{1}", label, control.enabled ? "on" : "off"))
+    }
+  }
 }
+
+component AuthoredIconButtonPresentation(
+  key: key,
+  label: string,
+  icon: image,
+  source: imageSource?,
+  control: buttonState
+) {
+  Panel(key: key, layout: { kind: "PANEL", width: 32, height: 32 }) {
+    Text(key: "authored.icon.copy", text: label)
+  }
+}
+
+component AuthoredSliderPresentation(key: key, control: sliderState) {
+  Panel(key: key, layout: { kind: "ROW", width: 180, height: 28 }) {
+    Text(key: "authored.slider.copy", text: format("{0}:{1}", control.value, control.fraction))
+  }
+}
+
+component AuthoredProgressPresentation(key: key, control: progressState) {
+  Panel(key: key, layout: { kind: "ROW", width: 180, height: 16 }) {
+    Text(key: "authored.progress.copy", text: format("{0}", control.fraction))
+  }
+}
+
+component AuthoredControls() {
+  state sliderValue = 25;
+  Panel(layout: { kind: "COLUMN", width: 220, height: "content", gap: 6 }) {
+    Toggle(
+      key: "authored.toggle",
+      label: "Effects",
+      description: "Use post-processing",
+      defaultChecked: false,
+      presentationTemplate: AuthoredTogglePresentation
+    )
+    Button(
+      key: "authored.button",
+      label: "Apply",
+      presentationTemplate: AuthoredButtonPresentation
+    )
+    IconButton(
+      key: "authored.icon",
+      icon: "fixture:icon",
+      label: "More",
+      presentationTemplate: AuthoredIconButtonPresentation
+    )
+    Slider(
+      key: "authored.slider",
+      min: 0,
+      max: 100,
+      bind: sliderValue,
+      presentationTemplate: AuthoredSliderPresentation
+    )
+    Progress(
+      key: "authored.progress",
+      min: 0,
+      max: 100,
+      value: 40,
+      presentationTemplate: AuthoredProgressPresentation
+    )
+    Grid(
+      key: "authored.grid",
+      columns: [{ weight: 1 }],
+      layout: { width: 20, height: 10 }
+    ) {
+      Panel(layout: { width: 4, height: 4 })
+    }
+  }
+}
+
+overlay Main { root AuthoredControls() }
 )";
 
-    strata::runtime::ApplicationContext application("authored-toggle", bundle);
+    strata::runtime::ApplicationContext application("authored-controls", bundle);
     const strata::runtime::ActivationResult activation = application.compile_and_activate(
-        strata::compiler::ModuleSource{"authored-toggle.strata", std::string(source)},
+        strata::compiler::ModuleSource{"authored-controls.strata", std::string(source)},
         no_imports(),
         0U
     );
-    check(activation.activated(), "authored Toggle presentation did not compile and activate");
+    check(activation.activated(), "authored control presentations did not compile and activate");
 
     strata::ui::SurfaceEnvironment environment;
     environment.framebuffer_width = 320;
-    environment.framebuffer_height = 120;
+    environment.framebuffer_height = 260;
     environment.logical_width = 320.0;
-    environment.logical_height = 120.0;
+    environment.logical_height = 260.0;
     environment.reduced_motion = true;
     environment.input = strata::ui::SurfaceInputCapabilities{
         true,
@@ -330,7 +592,7 @@ overlay Main {
         false,
     };
     strata::ui::Surface surface(
-        "authored-toggle",
+        "authored-controls",
         application,
         strata::runtime::LayerRole::overlay,
         "Main",
@@ -340,7 +602,7 @@ overlay Main {
             strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
         )
     );
-    static_cast<void>(surface.frame(1'000'000));
+    const strata::ui::SurfaceFrame initial_frame = surface.frame(1'000'000);
 
     const strata::ui::RetainedNode* toggle = surface.tree().find_key("authored.toggle");
     const strata::ui::RetainedNode* presentation =
@@ -351,12 +613,94 @@ overlay Main {
         surface.tree().find_key("authored.toggle.thumb");
     const strata::ui::LayoutRecord* thumb_layout =
         thumb != nullptr ? surface.layout().find(thumb->identity()) : nullptr;
+    const strata::ui::LayoutRecord* toggle_layout =
+        toggle != nullptr ? surface.layout().find(toggle->identity()) : nullptr;
+    const strata::ui::LayoutRecord* presentation_layout =
+        presentation != nullptr ? surface.layout().find(presentation->identity()) : nullptr;
     check(
         toggle != nullptr && presentation != nullptr && copy != nullptr &&
-            thumb != nullptr && thumb_layout != nullptr &&
+            thumb != nullptr && thumb_layout != nullptr && toggle_layout != nullptr &&
+            presentation_layout != nullptr &&
             string_property(copy, "text") != nullptr &&
             *string_property(copy, "text") == "Effects:Use post-processing:off",
         "authored Toggle template did not receive its typed label, description, and state"
+    );
+    check(
+        toggle_layout->bounds.width == 180.0 && toggle_layout->bounds.height == 28.0 &&
+            presentation_layout->bounds.width == 180.0 &&
+            presentation_layout->bounds.height == 28.0,
+        "native authored-presentation owner did not derive its size from the template root"
+    );
+    check(
+        surface.tree().find_key("authored.button.presentation") != nullptr &&
+            surface.tree().find_key("authored.button.copy") != nullptr &&
+            surface.tree().find_key("authored.icon.presentation") != nullptr &&
+            surface.tree().find_key("authored.icon.copy") != nullptr &&
+            surface.tree().find_key("authored.slider.presentation") != nullptr &&
+            surface.tree().find_key("authored.slider.copy") != nullptr &&
+            surface.tree().find_key("authored.progress.presentation") != nullptr &&
+            string_property(
+                surface.tree().find_key("authored.progress.copy"),
+                "text"
+            ) != nullptr &&
+            *string_property(
+                surface.tree().find_key("authored.progress.copy"),
+                "text"
+            ) == "0.4",
+        "common authored control templates did not receive typed presentation state"
+    );
+    const strata::ui::RetainedNode* grid =
+        surface.tree().find_key("authored.grid");
+    const strata::ui::LayoutRecord* grid_layout =
+        grid != nullptr ? surface.layout().find(grid->identity()) : nullptr;
+    check(
+        grid_layout != nullptr && grid_layout->kind == strata::ui::LayoutKind::grid,
+        "Grid did not apply its implicit GRID layout kind"
+    );
+    check(
+        std::ranges::none_of(
+            initial_frame.diagnostics.records,
+            [](const strata::runtime::RuntimeDiagnosticRecord& record) {
+                return record.diagnostic.code ==
+                    "STRATA.UI.SEMANTICS_FOCUSABLE_INVISIBLE";
+            }
+        ),
+        "presentation-only descendants emitted hidden-focus semantic diagnostics"
+    );
+    const strata::ui::RetainedNode* button =
+        surface.tree().find_key("authored.button");
+    const strata::ui::RetainedNode* button_presentation =
+        surface.tree().find_key("authored.button.presentation");
+    const strata::ui::LayoutRecord* button_layout =
+        button != nullptr ? surface.layout().find(button->identity()) : nullptr;
+    const strata::ui::LayoutRecord* button_presentation_layout =
+        button_presentation != nullptr
+            ? surface.layout().find(button_presentation->identity())
+            : nullptr;
+    check(
+        button_layout != nullptr && button_presentation_layout != nullptr &&
+            button_presentation_layout->kind == strata::ui::LayoutKind::scroll &&
+            button_presentation_layout->content_size.height >
+                button_presentation_layout->content_bounds.height,
+        "authored presentation input-transparency fixture is not scrollable"
+    );
+    static_cast<void>(surface.input().enqueue_scroll(strata::ui::ScrollInputEvent{
+        strata::ui::Point{
+            button_layout->bounds.x + button_layout->bounds.width * 0.5,
+            button_layout->bounds.y + button_layout->bounds.height * 0.5,
+        },
+        0.0,
+        -1.0,
+    }));
+    static_cast<void>(surface.frame(1'500'000));
+    button_presentation = surface.tree().find_key("authored.button.presentation");
+    button_presentation_layout = button_presentation != nullptr
+        ? surface.layout().find(button_presentation->identity())
+        : nullptr;
+    check(
+        button_presentation_layout != nullptr &&
+            button_presentation_layout->scroll_offset.y == 0.0,
+        "presentation-only descendant consumed wheel input owned by the native control"
     );
     const strata::ui::Rect presented_thumb = strata::ui::transform_presentation_bounds(
         thumb_layout->bounds,
@@ -393,6 +737,16 @@ overlay Main {
         copy != nullptr && string_property(copy, "text") != nullptr &&
             *string_property(copy, "text") == "Effects:Use post-processing:on",
         "authored Toggle presentation did not rematerialize after native activation"
+    );
+    static_cast<void>(surface.input().click("authored.slider"));
+    static_cast<void>(surface.frame(3'000'000));
+    const std::string* slider_copy = string_property(
+        surface.tree().find_key("authored.slider.copy"),
+        "text"
+    );
+    check(
+        slider_copy != nullptr && slider_copy->starts_with("50:0.5"),
+        "authored Slider presentation did not track native pointer state"
     );
 }
 
@@ -1182,7 +1536,7 @@ int main(const int argument_count, const char* const* const arguments) {
         const auto bundle = load_bundle();
         test_semantic_binding_rejections(bundle);
         test_binding_initial_value_and_round_trip(resource_root, bundle);
-        test_authored_toggle_presentation(resource_root, bundle);
+        test_authored_control_presentations(resource_root, bundle);
         test_section_content_and_activation_contract(resource_root, bundle);
         test_range_and_choice_control_defaults(resource_root, bundle);
         test_scrolled_clipped_subtree_render_cache(resource_root, bundle);

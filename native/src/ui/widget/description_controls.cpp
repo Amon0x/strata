@@ -13,18 +13,37 @@ namespace strata::ui {
 namespace {
 
 void icon_button_defaults(WidgetLayoutDefaultsScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) {
+        scope.set("height", runtime::Value("content"));
+        scope.set("width", runtime::Value("content"));
+        scope.padding(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
     scope.set("height", runtime::Value(32.0));
     scope.set("width", runtime::Value(32.0));
     scope.set("alignItems", runtime::Value("CENTER"));
     scope.padding(10.0, 6.0, 10.0, 6.0);
 }
 
+void icon_button_expand(WidgetDescriptionScope& scope) {
+    const runtime::Value* icon = scope.property("icon");
+    const runtime::Value* source = scope.property("source");
+    static_cast<void>(scope.install_presentation(
+        "presentationTemplate",
+        WidgetTemplateArguments{
+            {"label", runtime::Value(scope.string("label"))},
+            {"icon", icon != nullptr ? *icon : runtime::Value{}},
+            {"source", source != nullptr ? *source : runtime::Value{}},
+            {"control", scope.presentation_state()},
+        }
+    ));
+}
+
 void checkbox_defaults(WidgetLayoutDefaultsScope& scope) {
     if (scope.property("presentationTemplate") != nullptr) {
         scope.set("height", runtime::Value("content"));
-        scope.set("width", widget_fill());
+        scope.set("width", runtime::Value("content"));
         scope.padding(0.0, 0.0, 0.0, 0.0);
-        scope.intrinsic(20.0, 20.0);
         return;
     }
     scope.set("height", runtime::Value(24.0));
@@ -46,55 +65,51 @@ void checkbox_defaults(WidgetLayoutDefaultsScope& scope) {
     return scope.boolean("defaultChecked", false);
 }
 
-void boolean_control_expand(
+[[nodiscard]] double effective_number(
     WidgetDescriptionScope& scope,
-    const std::string_view fallback_key
+    const std::string_view controlled,
+    const std::string_view retained,
+    const std::string_view initial,
+    const double fallback
 ) {
-    if (scope.property("presentationTemplate") == nullptr) return;
-    WidgetDescriptionExpansion& description = scope.description();
-    const std::string key = description.key.value_or(std::string(fallback_key));
-    const runtime::Value* interaction = scope.retained("$presentationState");
-    const auto interaction_flag = [interaction](
-                                      const std::string_view name
-                                  ) {
-        const runtime::Value* value = interaction != nullptr
-            ? interaction->field(name)
-            : nullptr;
-        return value != nullptr && value->boolean() != nullptr && *value->boolean();
-    };
-    std::shared_ptr<const DescriptionNode> presentation = scope.instantiate(
+    for (const runtime::Value* candidate : {
+             scope.property(controlled),
+             scope.retained(retained),
+             scope.property(initial),
+         }) {
+        if (candidate != nullptr && candidate->number() != nullptr &&
+            std::isfinite(*candidate->number())) {
+            return *candidate->number();
+        }
+    }
+    return fallback;
+}
+
+void boolean_control_expand(
+    WidgetDescriptionScope& scope
+) {
+    static_cast<void>(scope.install_presentation(
         "presentationTemplate",
-        key + ".presentation",
         WidgetTemplateArguments{
-            {"key", runtime::Value(runtime::KeyValue{key + ".presentation"})},
             {"label", runtime::Value(scope.string("label"))},
             {"description", runtime::Value(scope.string("description"))},
             {"control",
-             widget_object({
+             scope.presentation_state(WidgetLayoutFields{
                  {"checked", runtime::Value(boolean_control_checked(scope))},
-                 {"enabled", runtime::Value(scope.boolean("enabled", true))},
-                 {"hovered", runtime::Value(interaction_flag("hovered"))},
-                 {"pressed", runtime::Value(interaction_flag("pressed"))},
-                 {"focused", runtime::Value(interaction_flag("focused"))},
-                 {"focusVisible", runtime::Value(interaction_flag("focusVisible"))},
              })},
         }
-    );
-    if (presentation == nullptr) return;
-    description.children = {widget_native_presentation(presentation)};
-    scope.synthesized();
+    ));
 }
 
 void checkbox_expand(WidgetDescriptionScope& scope) {
-    boolean_control_expand(scope, "$checkbox");
+    boolean_control_expand(scope);
 }
 
 void toggle_defaults(WidgetLayoutDefaultsScope& scope) {
     if (scope.property("presentationTemplate") != nullptr) {
         scope.set("height", runtime::Value("content"));
-        scope.set("width", widget_fill());
+        scope.set("width", runtime::Value("content"));
         scope.padding(0.0, 0.0, 0.0, 0.0);
-        scope.intrinsic(44.0, 20.0);
         return;
     }
     scope.set("height", runtime::Value(28.0));
@@ -105,15 +120,45 @@ void toggle_defaults(WidgetLayoutDefaultsScope& scope) {
 }
 
 void toggle_expand(WidgetDescriptionScope& scope) {
-    boolean_control_expand(scope, "$toggle");
+    boolean_control_expand(scope);
 }
 
 void slider_defaults(WidgetLayoutDefaultsScope& scope) {
     const bool vertical = scope.string("axis") == "VERTICAL";
+    if (scope.property("presentationTemplate") != nullptr) {
+        scope.set("height", runtime::Value("content"));
+        scope.set("width", runtime::Value("content"));
+        scope.padding(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
     scope.set("height", runtime::Value(vertical ? 160.0 : 24.0));
     scope.set("width", runtime::Value(vertical ? 24.0 : 160.0));
     scope.padding(6.0, 6.0, 6.0, 6.0);
     scope.intrinsic(vertical ? 24.0 : 160.0, vertical ? 160.0 : 24.0);
+}
+
+void slider_expand(WidgetDescriptionScope& scope) {
+    const double minimum = scope.number("min", 0.0);
+    const double maximum = scope.number("max", 1.0);
+    const double value =
+        effective_number(scope, "value", "$value", "defaultValue", minimum);
+    const double fraction = maximum > minimum
+        ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0)
+        : 0.0;
+    const runtime::Value* step = scope.property("step");
+    static_cast<void>(scope.install_presentation(
+        "presentationTemplate",
+        WidgetTemplateArguments{
+            {"control", scope.presentation_state(WidgetLayoutFields{
+                {"axis", runtime::Value(scope.string("axis", "HORIZONTAL"))},
+                {"fraction", runtime::Value(fraction)},
+                {"maximum", runtime::Value(maximum)},
+                {"minimum", runtime::Value(minimum)},
+                {"step", step != nullptr ? *step : runtime::Value{}},
+                {"value", runtime::Value(value)},
+            })},
+        }
+    ));
 }
 
 void text_box_defaults(WidgetLayoutDefaultsScope& scope) {
@@ -138,12 +183,36 @@ void number_field_defaults(WidgetLayoutDefaultsScope& scope) {
 }
 
 void progress_defaults(WidgetLayoutDefaultsScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) {
+        scope.set("height", runtime::Value("content"));
+        scope.set("width", runtime::Value("content"));
+        scope.padding(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
     scope.set("height", runtime::Value(12.0));
     scope.set("width", runtime::Value(120.0));
     scope.intrinsic(120.0, 12.0);
 }
 
 void progress_expand(WidgetDescriptionScope& scope) {
+    const double minimum = scope.number("min", 0.0);
+    const double maximum = scope.number("max", 1.0);
+    const double value = scope.number("value", minimum);
+    const double fraction = maximum > minimum
+        ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0)
+        : 0.0;
+    static_cast<void>(scope.install_presentation(
+        "presentationTemplate",
+        WidgetTemplateArguments{
+            {"control", scope.presentation_state(WidgetLayoutFields{
+                {"fraction", runtime::Value(fraction)},
+                {"indeterminate", runtime::Value(scope.boolean("indeterminate", false))},
+                {"maximum", runtime::Value(maximum)},
+                {"minimum", runtime::Value(minimum)},
+                {"value", runtime::Value(value)},
+            })},
+        }
+    ));
     if (!scope.boolean("indeterminate", false) || scope.property("animation") != nullptr) return;
     scope.description().properties.insert_or_assign(
         "$timeline",
@@ -590,7 +659,14 @@ void add(
 } // namespace
 
 void register_control_widget_descriptions(WidgetRegistry& registry) {
-    add(registry, "IconButton", &icon_button_defaults);
+    add(
+        registry,
+        "IconButton",
+        &icon_button_defaults,
+        &icon_button_expand,
+        {},
+        "presentationTemplate"
+    );
     add(
         registry,
         "Checkbox",
@@ -607,11 +683,25 @@ void register_control_widget_descriptions(WidgetRegistry& registry) {
         {},
         "presentationTemplate"
     );
-    add(registry, "Slider", &slider_defaults);
+    add(
+        registry,
+        "Slider",
+        &slider_defaults,
+        &slider_expand,
+        {},
+        "presentationTemplate"
+    );
     add(registry, "TextBox", &text_box_defaults);
     add(registry, "TextArea", &text_area_defaults, nullptr, "text-edit");
     add(registry, "NumberField", &number_field_defaults);
-    add(registry, "Progress", &progress_defaults, &progress_expand);
+    add(
+        registry,
+        "Progress",
+        &progress_defaults,
+        &progress_expand,
+        {},
+        "presentationTemplate"
+    );
     add(registry, "Tabs", &tabs_defaults);
     add(registry, "Select", &select_defaults, &select_expand);
     add(registry, "RadioGroup", &radio_group_defaults, &radio_group_expand, "RadioGroup");

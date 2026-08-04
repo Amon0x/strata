@@ -1320,7 +1320,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
     // A press changes modality even when it lands on the already-focused control or is consumed.
     // Motion alone must not erase a keyboard user's location indicator.
     if (event.type == PointerEventType::press) set_focus_visibility(false);
-    RetainedNode* hover_target = hit_test(event.position);
+    RetainedNode* hover_target = widget_native_input_owner(hit_test(event.position));
     routed_subtarget_ = hit_subtarget(event.position, hover_target);
     if (routed_subtarget_.has_value()) {
         RetainedNode* owner = tree_->find_identity(routed_subtarget_->owner_identity);

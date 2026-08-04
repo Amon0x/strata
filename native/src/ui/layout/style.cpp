@@ -146,6 +146,7 @@ LayoutStyle layout_style(const DescriptionNode& description) {
     const Edges gap = edges(field(layout, "gap"));
     style.gap = Point{gap.horizontal() * 0.5, gap.vertical() * 0.5};
     style.align_items = align(text(field(layout, "alignItems")));
+    style.justify_content_authored = field(layout, "justifyContent") != nullptr;
     style.justify_content = justify(text(field(layout, "justifyContent")));
     style.align_content = justify(text(field(layout, "alignContent")));
     if (const runtime::Value* value = field(layout, "alignSelf"); value != nullptr && value->string() != nullptr) {

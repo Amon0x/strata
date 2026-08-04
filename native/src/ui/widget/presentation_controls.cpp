@@ -16,6 +16,7 @@ namespace strata::ui {
 namespace {
 
 void icon_button_content(WidgetRenderScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) return;
     if (scope.visual().background.has_value()) {
         scope.rounded_rect(
             scope.layout().bounds,
@@ -143,6 +144,7 @@ void toggle_content(WidgetRenderScope& scope) {
 }
 
 void slider_content(WidgetRenderScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) return;
     const double minimum = scope.number("min", 0.0);
     const double maximum = scope.number("max", 1.0);
     const double value = scope.effective_number(
@@ -333,6 +335,7 @@ void number_text_content(WidgetRenderScope& scope) {
 }
 
 void progress_content(WidgetRenderScope& scope) {
+    if (scope.property("presentationTemplate") != nullptr) return;
     scope.rounded_rect(
         scope.layout().bounds,
         scope.visual().track,

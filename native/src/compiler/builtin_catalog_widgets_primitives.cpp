@@ -12,6 +12,8 @@ void add_builtin_primitive_widgets(BuiltinCatalog& catalog) {
                     {DeclaredParameter{
                          .name = "label", .type = declared_type_reference("t0"), .required = true},
                      DeclaredParameter{.name = "enabled", .type = declared_type_reference("t2")},
+                     DeclaredParameter{.name = "presentationTemplate",
+                                       .type = declared_type_reference("t175")},
                      DeclaredParameter{.name = "onClick", .type = declared_type_reference("t36")},
                      DeclaredParameter{.name = "command",
                                        .type = declared_type_reference("t0"),
@@ -19,6 +21,7 @@ void add_builtin_primitive_widgets(BuiltinCatalog& catalog) {
                 .parameter_order = {"label",
                                     "key",
                                     "enabled",
+                                    "presentationTemplate",
                                     "layout",
                                     "variant",
                                     "style",

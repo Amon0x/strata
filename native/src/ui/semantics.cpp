@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "ui/input.hpp"
+#include "ui/widget/description.hpp"
 #include "ui/widget/semantics.hpp"
 
 namespace strata::ui {
@@ -178,6 +179,7 @@ void SemanticsEngine::materialize() const {
     if (tree_ != nullptr && tree_->root() != nullptr) {
         const auto validate = [this](auto&& self, const RetainedNode& node) -> void {
             if (!participates(node, widgets_)) return;
+            if (widget_native_presentation_root(node)) return;
             if (focusable(node, widgets_, behaviors_) && !nodes_.contains(node.identity())) {
                 const std::string fingerprint =
                     "STRATA.UI.SEMANTICS_FOCUSABLE_INVISIBLE:" +

@@ -157,6 +157,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_BINDING_TARGET` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_CHILDREN_NOT_ALLOWED` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_COMPONENT_ROOT` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_COMPONENT_TEMPLATE_PARAMETER` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DERIVED_CYCLE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_ANIMATION_FRAME` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_ARGUMENT` | `native/src/compiler/semantic.cpp` |
@@ -177,6 +178,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_DYNAMIC_STYLE_KEY` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_INVALID_PATH` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_INVALID_WIDGET_DEFAULTS` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_LAYOUT_PROPERTY_KIND` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_LOOP_BOUND_EXCEEDED` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_MISSING_ACTION_ARGUMENT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_MISSING_ARGUMENT` | `native/src/compiler/semantic.cpp` |
@@ -185,6 +187,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_PERSISTED_CONTEXT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_PERSISTENCE_KEY_STATIC` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_POSITIONAL_ARGUMENT_ORDER` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_PRESENTATION_KEY_REQUIRED` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_REPEATER_BODY` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_REPEATER_IDENTITY_EXTRACTOR` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_REPEATER_ITEM_ROOT` | `native/src/compiler/semantic.cpp` |
@@ -199,6 +202,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_UNKNOWN_ANIMATION` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_ARGUMENT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_COLLECTION` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_UNKNOWN_COMPONENT_TEMPLATE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_EFFECT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_FIELD` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_HELPER` | `native/src/compiler/semantic.cpp` |

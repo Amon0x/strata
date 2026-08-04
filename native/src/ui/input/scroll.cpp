@@ -180,7 +180,7 @@ bool InputRouter::route_scrollbar_pointer(
         ScrollbarGeometry geometry;
     };
     std::optional<Hit> hit;
-    RetainedNode* raw_target = hit_test(event.position);
+    RetainedNode* raw_target = widget_native_input_owner(hit_test(event.position));
     RetainedNode* modal = active_modal();
     for (RetainedNode* current = raw_target; current != nullptr; current = current->parent()) {
         if (modal != nullptr && !descendant_of(*current, *modal)) continue;
@@ -226,7 +226,7 @@ InputOperationResult InputRouter::scroll(const ScrollInputEvent event) {
     result.processed_events = 1U;
     if (tree_ == nullptr || layout_ == nullptr) return result;
 
-    RetainedNode* target = hit_test(event.position);
+    RetainedNode* target = widget_native_input_owner(hit_test(event.position));
     if (RetainedNode* modal = active_modal(); modal != nullptr &&
         (target == nullptr || !descendant_of(*target, *modal))) {
         target = modal;

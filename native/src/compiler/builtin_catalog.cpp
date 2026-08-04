@@ -135,6 +135,8 @@ using data::JsonValue;
         for (const DeclaredParameter& parameter : type->parameters) {
             encoded.push_back(object({
                 {"name", JsonValue(parameter.name)},
+                {"nullable", JsonValue(parameter.nullable)},
+                {"required", JsonValue(parameter.required)},
                 {"type", encode_type(parameter.type)},
             }));
         }

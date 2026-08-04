@@ -217,6 +217,8 @@ using data::JsonValue;
         for (const ObjectField& field : type.fields) {
             parameters.push_back(object({
                 {"name", JsonValue(field.name)},
+                {"nullable", JsonValue(field.nullable)},
+                {"required", JsonValue(field.required)},
                 {"type", semantic_type(*field.type)},
             }));
         }

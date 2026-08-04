@@ -70,7 +70,7 @@ InputRouter::DragTarget InputRouter::resolve_drag_target(
     const Point position
 ) const {
     if (tree_ == nullptr || layout_ == nullptr) return {};
-    RetainedNode* node = hit_test(position);
+    RetainedNode* node = widget_native_input_owner(hit_test(position));
     RetainedNode* modal = active_modal();
     while (node != nullptr) {
         const LayoutRecord* record = layout_->find(node->identity());
@@ -323,7 +323,7 @@ bool InputRouter::auto_scroll_drag(
     if (elapsed_nanos <= 0) return false;
     const double elapsed_seconds = static_cast<double>(elapsed_nanos) / 1'000'000'000.0;
 
-    for (RetainedNode* current = hit_test(session.position);
+    for (RetainedNode* current = widget_native_input_owner(hit_test(session.position));
          current != nullptr;
          current = current->parent()) {
         const LayoutRecord* record = layout_->find(current->identity());

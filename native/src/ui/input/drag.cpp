@@ -140,7 +140,7 @@ bool InputRouter::route_pointer_drag(
     if (event.type == PointerEventType::move) {
         drag.position = event.position;
         if (!drag.active) {
-            RetainedNode* hover = hit_test(event.position);
+            RetainedNode* hover = widget_native_input_owner(hit_test(event.position));
             if (RetainedNode* modal = active_modal(); modal != nullptr &&
                 (hover == nullptr || !descendant_of(*hover, *modal))) {
                 hover = modal;

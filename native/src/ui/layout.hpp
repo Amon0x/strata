@@ -152,6 +152,7 @@ struct LayoutStyle final {
     Point gap;
     LayoutAlign align_items = LayoutAlign::start;
     LayoutJustify justify_content = LayoutJustify::start;
+    bool justify_content_authored = false;
     LayoutJustify align_content = LayoutJustify::start;
     std::optional<LayoutAlign> align_self;
     std::optional<LayoutAlign> justify_self;

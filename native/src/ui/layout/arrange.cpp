@@ -63,6 +63,16 @@ namespace {
     return result;
 }
 
+[[nodiscard]] LayoutAlign layered_axis_alignment(
+    const LayoutJustify justify
+) noexcept {
+    switch (justify) {
+    case LayoutJustify::center: return LayoutAlign::center;
+    case LayoutJustify::end: return LayoutAlign::end;
+    default: return LayoutAlign::start;
+    }
+}
+
 void translate_record(
     LayoutRecord& record,
     const Point delta,
@@ -580,7 +590,11 @@ void LayoutEngine::arrange(
         });
         for (const MeasuredNodePtr& child : ordered) {
             const LayoutAlign horizontal = child->style.justify_self.value_or(style.align_items);
-            const LayoutAlign vertical = child->style.align_self.value_or(style.align_items);
+            const LayoutAlign vertical = child->style.align_self.value_or(
+                style.justify_content_authored
+                    ? layered_axis_alignment(style.justify_content)
+                    : style.align_items
+            );
             const double width = arranged_axis_size(
                 child->style,
                 child->measured_size,

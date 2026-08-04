@@ -106,6 +106,7 @@ struct ComponentSchema final {
         SourceSpan span;
     };
     std::vector<Slot> slots;
+    std::map<std::string, const Expression*, std::less<>> widget_default_styles;
 };
 
 enum class BlockContext {
@@ -343,6 +344,8 @@ class Validator final {
                     }
                 };
                 scan_slots(*component->body);
+                schema.widget_default_styles =
+                    collect_widget_default_styles(*component->body);
                 components_.emplace(component->name, std::move(schema));
             } else if (const auto* style = std::get_if<StyleDeclaration>(&declaration.node)) {
                 note_declaration("style", style->name);
@@ -374,6 +377,297 @@ class Validator final {
     }
 
   private:
+    [[nodiscard]] static std::map<std::string, const Expression*, std::less<>>
+    collect_widget_default_styles(const Block& body) {
+        std::map<std::string, const Expression*, std::less<>> result;
+        for (const StatementPtr& statement : body.statements) {
+            const auto* property = std::get_if<PropertyStatement>(&statement->node);
+            if (property == nullptr || property->property.name != "defaults") continue;
+            const auto* defaults =
+                std::get_if<MapExpression>(&property->property.value->node);
+            if (defaults == nullptr) continue;
+            for (const MapEntry& widget_entry : defaults->entries) {
+                const std::string* widget_name = static_map_key(widget_entry.key);
+                const auto* values =
+                    std::get_if<MapExpression>(&widget_entry.value->node);
+                if (widget_name == nullptr || values == nullptr) continue;
+                for (const MapEntry& value : values->entries) {
+                    const std::string* name = static_map_key(value.key);
+                    if (name != nullptr && *name == "style") {
+                        result.insert_or_assign(*widget_name, value.value.get());
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    struct LayoutPropertyRef final {
+        std::string name;
+        const Expression* value = nullptr;
+        SourceSpan span;
+    };
+    using LayoutPropertyMap =
+        std::map<std::string, LayoutPropertyRef, std::less<>>;
+
+    void merge_named_style_properties(
+        const std::string& name,
+        LayoutPropertyMap& properties,
+        std::set<std::string, std::less<>>& resolving
+    ) const {
+        const auto declaration = style_declarations_.find(name);
+        if (declaration == style_declarations_.end() ||
+            !resolving.insert(name).second) {
+            return;
+        }
+        for (const StyleBase& base : declaration->second->bases) {
+            merge_named_style_properties(base.name, properties, resolving);
+        }
+        for (const Property& property : declaration->second->properties) {
+            properties.insert_or_assign(
+                property.name,
+                LayoutPropertyRef{
+                    property.name,
+                    property.value.get(),
+                    property.span,
+                }
+            );
+        }
+        resolving.erase(name);
+    }
+
+    void merge_style_properties(
+        const Expression& expression,
+        LayoutPropertyMap& properties,
+        std::set<std::string, std::less<>>& resolving
+    ) const {
+        const Expression& value = ungrouped(expression);
+        if (const auto* identifier = std::get_if<IdentifierExpression>(&value.node)) {
+            merge_named_style_properties(identifier->name, properties, resolving);
+            return;
+        }
+        if (const auto* map = std::get_if<MapExpression>(&value.node)) {
+            for (const MapEntry& entry : map->entries) {
+                std::string name;
+                if (const auto* identifier = std::get_if<IdentifierMapKey>(&entry.key)) {
+                    name = identifier->name;
+                } else if (const auto* string = std::get_if<StringMapKey>(&entry.key)) {
+                    name = string->value;
+                }
+                if (!name.empty()) {
+                    properties.insert_or_assign(
+                        name,
+                        LayoutPropertyRef{name, entry.value.get(), entry.span}
+                    );
+                }
+            }
+            return;
+        }
+        const auto* call = std::get_if<CallExpression>(&value.node);
+        if (call == nullptr || call->target.qualified_name() != "style") return;
+        for (const Argument& argument : call->arguments) {
+            if (!argument.name.has_value()) {
+                merge_style_properties(*argument.value, properties, resolving);
+                continue;
+            }
+            properties.insert_or_assign(
+                *argument.name,
+                LayoutPropertyRef{
+                    *argument.name,
+                    argument.value.get(),
+                    argument.span,
+                }
+            );
+        }
+    }
+
+    void merge_layout_properties(
+        const Expression& expression,
+        LayoutPropertyMap& properties
+    ) const {
+        const Expression& value = ungrouped(expression);
+        const auto* map = std::get_if<MapExpression>(&value.node);
+        if (map == nullptr) return;
+        for (const MapEntry& entry : map->entries) {
+            std::string name;
+            if (const auto* identifier = std::get_if<IdentifierMapKey>(&entry.key)) {
+                name = identifier->name;
+            } else if (const auto* string = std::get_if<StringMapKey>(&entry.key)) {
+                name = string->value;
+            }
+            if (!name.empty()) {
+                properties.insert_or_assign(
+                    name,
+                    LayoutPropertyRef{name, entry.value.get(), entry.span}
+                );
+            }
+        }
+    }
+
+    void validate_widget_layout_properties(
+        const WidgetCall& call,
+        const std::vector<const SchemaParameter*>& parameters,
+        const std::string& path,
+        const Scope& scope
+    ) {
+        LayoutPropertyMap properties;
+        std::set<std::string, std::less<>> resolving;
+        const bool has_authored_style = std::ranges::any_of(
+            parameters,
+            [](const SchemaParameter* parameter) {
+                return parameter != nullptr && parameter->name == "style";
+            }
+        );
+        if (!has_authored_style) {
+            for (auto defaults = active_widget_default_styles_.rbegin();
+                 defaults != active_widget_default_styles_.rend();
+                 ++defaults) {
+                const auto style = (*defaults)->find(call.name);
+                if (style == (*defaults)->end()) continue;
+                merge_style_properties(*style->second, properties, resolving);
+                break;
+            }
+        }
+        for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
+            const SchemaParameter* parameter = parameters[index];
+            if (parameter != nullptr && parameter->name == "style") {
+                merge_style_properties(
+                    *call.arguments[index].value,
+                    properties,
+                    resolving
+                );
+            }
+        }
+        for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
+            const SchemaParameter* parameter = parameters[index];
+            if (parameter != nullptr && parameter->name == "layout") {
+                merge_layout_properties(*call.arguments[index].value, properties);
+            }
+        }
+        std::vector<LayoutPropertyRef> values;
+        values.reserve(properties.size());
+        for (const auto& [name, property] : properties) {
+            static_cast<void>(name);
+            values.push_back(property);
+        }
+        const std::string_view implicit_kind =
+            call.name == "Panel" ? std::string_view("PANEL")
+            : call.name == "Grid" ? std::string_view("GRID")
+            : call.name == "Scroll" ? std::string_view("SCROLL")
+                                    : std::string_view{};
+        validate_layout_kind_properties(values, path, &scope, implicit_kind);
+    }
+
+    void validate_layout_kind_properties(
+        const std::vector<LayoutPropertyRef>& properties,
+        const std::string& path,
+        const Scope* scope = nullptr,
+        const std::string_view implicit_kind = {}
+    ) {
+        const auto find = [&properties](const std::string_view name)
+            -> const LayoutPropertyRef* {
+            const auto found = std::ranges::find(properties, name, &LayoutPropertyRef::name);
+            return found != properties.end() ? &*found : nullptr;
+        };
+        const LayoutPropertyRef* kind_property = find("kind");
+        const std::string* kind = kind_property != nullptr && kind_property->value != nullptr
+            ? string_literal_value(*kind_property->value)
+            : nullptr;
+        const std::string implicit_kind_storage(implicit_kind);
+        if (kind == nullptr && !implicit_kind_storage.empty()) {
+            kind = &implicit_kind_storage;
+        }
+        if (kind == nullptr) return;
+        const bool linear = *kind == "ROW" || *kind == "COLUMN";
+        const bool layered = *kind == "PANEL" || *kind == "OVERLAY" ||
+                             *kind == "PORTAL" || *kind == "STACK";
+        const auto incompatible = [&](const std::string_view name,
+                                      const std::string_view expected) {
+            const LayoutPropertyRef* property = find(name);
+            if (property == nullptr) return;
+            if (property->value != nullptr &&
+                !diagnosed_layout_properties_.insert(property->value).second) {
+                return;
+            }
+            report(
+                "STRATA.DSL.SEMANTIC_LAYOUT_PROPERTY_KIND",
+                "Layout property '" + std::string(name) +
+                    "' has no effect for layout kind '" + *kind + "'.",
+                property->span,
+                path + "." + std::string(name),
+                std::string(expected)
+            );
+        };
+        if (!linear) {
+            incompatible("wrap", "ROW or COLUMN");
+            incompatible("alignContent", "ROW or COLUMN");
+        }
+        if (*kind == "GRID" || *kind == "SCROLL" || *kind == "SPACER") {
+            incompatible(
+                "alignItems",
+                "ROW, COLUMN, PANEL, OVERLAY, PORTAL, or STACK"
+            );
+            incompatible(
+                "justifyContent",
+                "ROW, COLUMN, PANEL, OVERLAY, PORTAL, or STACK"
+            );
+        }
+        if (layered) {
+            const LayoutPropertyRef* justify = find("justifyContent");
+            const std::string* value = justify != nullptr && justify->value != nullptr
+                ? string_literal_value(*justify->value)
+                : nullptr;
+            bool unsupported = value != nullptr && value->starts_with("SPACE_");
+            if (!unsupported && value == nullptr && justify != nullptr &&
+                justify->value != nullptr && scope != nullptr) {
+                const SemanticTypePtr actual = infer(
+                    *justify->value,
+                    *scope,
+                    path + ".justifyContent"
+                );
+                unsupported = actual->kind == SemanticTypeKind::enumeration &&
+                    std::ranges::any_of(
+                        actual->values,
+                        [](const std::string& candidate) {
+                            return candidate != "START" && candidate != "CENTER" &&
+                                candidate != "END";
+                        }
+                    );
+            }
+            if (unsupported) {
+                if (justify->value != nullptr &&
+                    !diagnosed_layout_properties_.insert(justify->value).second) {
+                    return;
+                }
+                report(
+                    "STRATA.DSL.SEMANTIC_LAYOUT_PROPERTY_KIND",
+                    value != nullptr
+                        ? "Layered layout kind '" + *kind +
+                            "' supports START, CENTER, or END justification, not '" +
+                            *value + "'."
+                        : "Layered layout kind '" + *kind +
+                            "' requires a justification constrained to START, CENTER, or END.",
+                    justify->span,
+                    path + ".justifyContent",
+                    value != nullptr
+                        ? "START, CENTER, or END"
+                        : "a layerJustify value"
+                );
+            }
+        }
+        if (layered || *kind == "SPACER") {
+            incompatible("gap", "ROW, COLUMN, GRID, or SCROLL");
+        }
+        if (*kind != "PORTAL") {
+            incompatible("anchorPoint", "PORTAL");
+            incompatible("anchorTarget", "PORTAL");
+            incompatible("detachFromParentClip", "PORTAL");
+            incompatible("portalTarget", "PORTAL");
+        }
+        // The remaining anchor presentation fields are also consumed from authored Select/Menu
+        // popup roots and hoisted onto their synthesized portal, so they are not kind-local.
+    }
+
     [[nodiscard]] SemanticTypePtr resolve_type(const TypeReference& reference) const {
         const std::string name = lower(reference.name);
         if (name == "list") {
@@ -788,12 +1082,20 @@ class Validator final {
                            "' must produce exactly one root node on every control-flow path.",
                        component->body->span, "component " + component->name, "single root node");
             }
+            active_widget_default_styles_.push_back(&schema.widget_default_styles);
             validate_block(*component->body, std::move(scope), "component " + component->name, {},
                            {}, maximum_eager_loop_items, BlockContext::component);
+            active_widget_default_styles_.pop_back();
         } else if (const auto* style = std::get_if<StyleDeclaration>(&declaration.node)) {
             const std::string path = "style " + style->name;
             std::set<std::string, std::less<>> seen;
+            std::vector<LayoutPropertyRef> layout_properties;
             for (const Property& property : style->properties) {
+                layout_properties.push_back(LayoutPropertyRef{
+                    property.name,
+                    property.value.get(),
+                    property.span,
+                });
                 if (!seen.insert(property.name).second) {
                     report("STRATA.DSL.SEMANTIC_DUPLICATE_PROPERTY",
                            "Style property '" + property.name + "' is declared more than once.",
@@ -810,6 +1112,7 @@ class Validator final {
                                       path + "." + property.name, scope);
                 }
             }
+            validate_layout_kind_properties(layout_properties, path, &scope);
             for (const StatementPtr& statement : style->body->statements) {
                 if (!std::holds_alternative<PropertyStatement>(statement->node) &&
                     !std::holds_alternative<ErrorStatement>(statement->node)) {
@@ -864,6 +1167,19 @@ class Validator final {
         for (const auto& [name, style] : style_declarations_) {
             static_cast<void>(style);
             visit(visit, name);
+        }
+        for (const auto& [name, style] : style_declarations_) {
+            static_cast<void>(style);
+            LayoutPropertyMap properties;
+            std::set<std::string, std::less<>> resolving;
+            merge_named_style_properties(name, properties, resolving);
+            std::vector<LayoutPropertyRef> values;
+            values.reserve(properties.size());
+            for (const auto& [property_name, property] : properties) {
+                static_cast<void>(property_name);
+                values.push_back(property);
+            }
+            validate_layout_kind_properties(values, "style " + name);
         }
     }
 
@@ -1513,6 +1829,26 @@ class Validator final {
                        argument.span, call_path, "single value for '" + parameter->name + "'");
             }
         }
+        if (widget != nullptr &&
+            consumed_parameters.contains("presentationTemplate") &&
+            !consumed_parameters.contains("key")) {
+            report(
+                "STRATA.DSL.SEMANTIC_PRESENTATION_KEY_REQUIRED",
+                "Widget '" + call.name +
+                    "' requires an explicit key when presentationTemplate is supplied.",
+                call.span,
+                call_path + ".key",
+                "key: stableKey"
+            );
+        }
+        if (widget != nullptr) {
+            validate_widget_layout_properties(
+                call,
+                resolved_parameters,
+                call_path + ".layout",
+                scope
+            );
+        }
         for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
             const Argument& argument = call.arguments[index];
             const SchemaParameter* parameter = resolved_parameters[index];
@@ -1564,10 +1900,18 @@ class Validator final {
             }
         }
         if (call.body != nullptr) {
+            if (component != components_.end()) {
+                active_widget_default_styles_.push_back(
+                    &component->second.widget_default_styles
+                );
+            }
             validate_block(*call.body, scope, call_path, retained_states, {},
                            call.name == "Repeater" ? maximum_lazy_loop_items : maximum_loop_items,
                            call.name == "Repeater" ? BlockContext::lazy_ui
                                                    : nested_context(context));
+            if (component != components_.end()) {
+                active_widget_default_styles_.pop_back();
+            }
         }
     }
 
@@ -1724,6 +2068,96 @@ class Validator final {
         }
     }
 
+    [[nodiscard]] SemanticTypePtr component_template_type(
+        const ComponentSchema& component
+    ) const {
+        auto type = std::make_shared<SemanticType>();
+        type->kind = SemanticTypeKind::component_template;
+        type->fields.reserve(component.parameters.size());
+        for (const SchemaParameter& parameter : component.parameters) {
+            type->fields.push_back(ObjectField{
+                parameter.name,
+                parameter.type,
+                parameter.required,
+                parameter.nullable,
+            });
+        }
+        return type;
+    }
+
+    void validate_component_template(
+        const Expression& expression,
+        const SemanticType& expected,
+        const std::string& component_path,
+        const Scope& scope
+    ) {
+        const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
+        if (identifier == nullptr || scope.contains(identifier->name)) {
+            const SemanticTypePtr actual = infer(expression, scope, component_path);
+            if (!type_matches(expected, *actual, false)) {
+                type_mismatch(expected, *actual, expression, component_path);
+            }
+            return;
+        }
+        const auto component = components_.find(identifier->name);
+        if (component == components_.end()) {
+            std::vector<std::string> names;
+            names.reserve(components_.size());
+            for (const auto& [name, schema] : components_) {
+                static_cast<void>(schema);
+                names.push_back(name);
+            }
+            report(
+                "STRATA.DSL.SEMANTIC_UNKNOWN_COMPONENT_TEMPLATE",
+                "Component template '" + identifier->name + "' is not declared.",
+                expression.span,
+                component_path,
+                expected_names(std::move(names))
+            );
+            return;
+        }
+        for (const SchemaParameter& parameter : component->second.parameters) {
+            const ObjectField* provided = expected.find_field(parameter.name);
+            if (provided == nullptr) {
+                if (parameter.required) {
+                    report(
+                        "STRATA.DSL.SEMANTIC_COMPONENT_TEMPLATE_PARAMETER",
+                        "Component template '" + identifier->name +
+                            "' requires parameter '" + parameter.name +
+                            "', but the template owner does not provide it.",
+                        expression.span,
+                        component_path + "." + parameter.name,
+                        "remove the parameter or give it a default value"
+                    );
+                }
+                continue;
+            }
+            if (provided->nullable && !parameter.nullable) {
+                report(
+                    "STRATA.DSL.SEMANTIC_COMPONENT_TEMPLATE_PARAMETER",
+                    "Component template parameter '" + parameter.name +
+                        "' must accept null values.",
+                    expression.span,
+                    component_path + "." + parameter.name,
+                    parameter.name + ": " + parameter.type->diagnostic_name() + "?"
+                );
+                continue;
+            }
+            if (provided->type->kind != SemanticTypeKind::any &&
+                !type_matches(*parameter.type, *provided->type, parameter.nullable)) {
+                report(
+                    "STRATA.DSL.SEMANTIC_COMPONENT_TEMPLATE_PARAMETER",
+                    "Component template parameter '" + parameter.name + "' expects " +
+                        parameter.type->diagnostic_name() + ", but the owner provides " +
+                        provided->type->diagnostic_name() + ".",
+                    expression.span,
+                    component_path + "." + parameter.name,
+                    parameter.name + ": " + provided->type->diagnostic_name()
+                );
+            }
+        }
+    }
+
     void validate_expected(const Expression& expression, const SemanticType& expected,
                            const bool nullable, const std::string& component_path,
                            const Scope& scope) {
@@ -1778,6 +2212,10 @@ class Validator final {
                 validate_action_call(*call, scope, component_path);
                 return;
             }
+        }
+        if (expected.kind == SemanticTypeKind::component_template) {
+            validate_component_template(expression, expected, component_path, scope);
+            return;
         }
         if (expected.kind == SemanticTypeKind::material) {
             if (const std::string* id = string_literal_value(expression); id != nullptr) {
@@ -1910,6 +2348,7 @@ class Validator final {
             }
             if (const auto* style = std::get_if<MapExpression>(&expression.node)) {
                 std::set<std::string, std::less<>> seen;
+                std::vector<LayoutPropertyRef> layout_properties;
                 for (const MapEntry& entry : style->entries) {
                     std::string name;
                     if (const auto* identifier = std::get_if<IdentifierMapKey>(&entry.key)) {
@@ -1928,6 +2367,11 @@ class Validator final {
                                "Style property '" + name + "' is declared more than once.",
                                entry.span, component_path + "." + name, "unique style property");
                     }
+                    layout_properties.push_back(LayoutPropertyRef{
+                        name,
+                        entry.value.get(),
+                        entry.span,
+                    });
                     const SchemaParameter* property = registry_.style_property(name);
                     if (property == nullptr) {
                         report("STRATA.DSL.SEMANTIC_UNKNOWN_PROPERTY",
@@ -1940,12 +2384,14 @@ class Validator final {
                                           component_path + "." + name, scope);
                     }
                 }
+                validate_layout_kind_properties(layout_properties, component_path, &scope);
                 return;
             }
             if (const auto* call = std::get_if<CallExpression>(&expression.node);
                 call != nullptr && call->target.qualified_name() == "style") {
                 std::set<std::string, std::less<>> seen;
                 bool seen_named = false;
+                std::vector<LayoutPropertyRef> layout_properties;
                 for (const Argument& argument : call->arguments) {
                     if (!argument.name.has_value()) {
                         if (seen_named) {
@@ -1960,6 +2406,11 @@ class Validator final {
                     }
                     seen_named = true;
                     const std::string& name = *argument.name;
+                    layout_properties.push_back(LayoutPropertyRef{
+                        name,
+                        argument.value.get(),
+                        argument.span,
+                    });
                     if (!seen.insert(name).second) {
                         report("STRATA.DSL.SEMANTIC_DUPLICATE_PROPERTY",
                                "Style property '" + name + "' is provided more than once.",
@@ -1978,6 +2429,7 @@ class Validator final {
                                           component_path + "." + name, scope);
                     }
                 }
+                validate_layout_kind_properties(layout_properties, component_path, &scope);
                 return;
             }
         }
@@ -2075,6 +2527,7 @@ class Validator final {
         }
         if (expected.kind == SemanticTypeKind::layout) {
             if (const auto* layout = std::get_if<MapExpression>(&expression.node)) {
+                std::vector<LayoutPropertyRef> layout_properties;
                 for (const MapEntry& entry : layout->entries) {
                     std::string name;
                     if (const auto* identifier = std::get_if<IdentifierMapKey>(&entry.key)) {
@@ -2082,6 +2535,11 @@ class Validator final {
                     } else if (const auto* string = std::get_if<StringMapKey>(&entry.key)) {
                         name = string->value;
                     }
+                    layout_properties.push_back(LayoutPropertyRef{
+                        name,
+                        entry.value.get(),
+                        entry.span,
+                    });
                     const SchemaParameter* property = registry_.layout_property(name);
                     if (property == nullptr) {
                         report("STRATA.DSL.SEMANTIC_UNKNOWN_LAYOUT_PROPERTY",
@@ -2094,6 +2552,7 @@ class Validator final {
                                           component_path + "." + property->name, scope);
                     }
                 }
+                validate_layout_kind_properties(layout_properties, component_path, &scope);
                 return;
             }
         }
@@ -2269,6 +2728,9 @@ class Validator final {
             const auto found = scope.find(identifier->name);
             if (found != scope.end())
                 return found->second;
+            const auto component = components_.find(identifier->name);
+            if (component != components_.end())
+                return component_template_type(component->second);
             if (std::ranges::find(styles_, identifier->name) != styles_.end())
                 return simple(SemanticTypeKind::style);
             if (std::ranges::find(animations_, identifier->name) != animations_.end()) {
@@ -2518,6 +2980,10 @@ class Validator final {
     std::vector<Diagnostic> lowering_diagnostics_;
     std::map<std::string, ValidatedAnimation, std::less<>> validated_animations_;
     std::map<std::string, std::string, std::less<>> persistence_keys_;
+    std::set<const Expression*> diagnosed_layout_properties_;
+    std::vector<
+        const std::map<std::string, const Expression*, std::less<>>*
+    > active_widget_default_styles_;
     const Expression* persisted_owner_ = nullptr;
 };
 

@@ -14,6 +14,7 @@
 #include "runtime/expression.hpp"
 #include "runtime/value.hpp"
 #include "ui/input.hpp"
+#include "ui/widget/description.hpp"
 
 namespace strata::ui::input_detail {
 
@@ -91,17 +92,11 @@ using data::JsonValue;
 }
 
 [[nodiscard]] inline bool native_presentation_root(const RetainedNode& node) noexcept {
-    const runtime::Value* marker = scalar_property(node, "$nativePresentation");
-    return marker != nullptr && marker->boolean() != nullptr && *marker->boolean();
+    return widget_native_presentation_root(node);
 }
 
 [[nodiscard]] inline bool inside_native_presentation(const RetainedNode& node) noexcept {
-    for (const RetainedNode* current = &node;
-         current != nullptr;
-         current = current->parent()) {
-        if (native_presentation_root(*current)) return true;
-    }
-    return false;
+    return widget_inside_native_presentation(node);
 }
 
 [[nodiscard]] inline JsonValue origin(const runtime::ActionOrigin& value) {

@@ -74,6 +74,15 @@ public:
         std::string key,
         WidgetTemplateArguments arguments
     ) const;
+    /** Builds the common enabled/focus/hover/press projection for authored control chrome. */
+    [[nodiscard]] runtime::Value presentation_state(
+        WidgetLayoutFields fields = {}
+    ) const;
+    /** Instantiates, marks, and installs one input/semantics-transparent authored presentation. */
+    [[nodiscard]] bool install_presentation(
+        std::string_view template_property,
+        WidgetTemplateArguments arguments
+    );
 
     void set_layout(DescriptionNode::Properties& properties, std::string name, runtime::Value value) const;
     void set_layout(std::string name, runtime::Value value);
@@ -118,6 +127,12 @@ void widget_mark_native_presentation(DescriptionNode::Properties& properties);
 [[nodiscard]] std::shared_ptr<const DescriptionNode> widget_native_presentation(
     const std::shared_ptr<const DescriptionNode>& node
 );
+[[nodiscard]] bool widget_native_presentation_root(const RetainedNode& node) noexcept;
+[[nodiscard]] bool widget_inside_native_presentation(const RetainedNode& node) noexcept;
+[[nodiscard]] const RetainedNode* widget_native_input_owner(
+    const RetainedNode* node
+) noexcept;
+[[nodiscard]] RetainedNode* widget_native_input_owner(RetainedNode* node) noexcept;
 [[nodiscard]] DescriptionNode::Properties widget_text_properties(
     std::string text,
     runtime::Value layout = runtime::Value{}

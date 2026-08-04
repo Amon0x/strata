@@ -222,6 +222,25 @@ namespace {
     return normalized;
 }
 
+[[nodiscard]] bool accepts_nullable(
+    const SemanticType& expected,
+    const SemanticType& actual,
+    const bool nullable
+) {
+    if (actual.kind == SemanticTypeKind::null_value)
+        return nullable;
+    if (actual.kind == SemanticTypeKind::union_value) {
+        return std::ranges::all_of(
+            actual.options,
+            [&expected, nullable](const SemanticTypePtr& option) {
+                return option != nullptr &&
+                    accepts_nullable(expected, *option, nullable);
+            }
+        );
+    }
+    return expected.accepts(actual);
+}
+
 } // namespace
 
 std::string SemanticType::diagnostic_name() const {
@@ -270,7 +289,19 @@ std::string SemanticType::diagnostic_name() const {
         return "pure expression (" + parameter->diagnostic_name() + ") -> " +
                returns->diagnostic_name();
     case SemanticTypeKind::component_template:
-        return "component template";
+        if (fields.empty())
+            return "component template";
+        {
+            std::string result = "component template (";
+            for (std::size_t index = 0U; index < fields.size(); ++index) {
+                if (index != 0U)
+                    result += ", ";
+                result += fields[index].name + ": " + fields[index].type->diagnostic_name();
+                if (fields[index].nullable)
+                    result += "?";
+            }
+            return result + ")";
+        }
     case SemanticTypeKind::enumeration:
         return label + " (" + join(values) + ")";
     case SemanticTypeKind::list: {
@@ -326,12 +357,57 @@ bool SemanticType::accepts(const SemanticType& actual) const {
     if (kind == SemanticTypeKind::enumeration && actual.kind == SemanticTypeKind::string_literal) {
         return std::ranges::find(values, actual.literal) != values.end();
     }
+    if (kind == SemanticTypeKind::enumeration &&
+        actual.kind == SemanticTypeKind::enumeration) {
+        return std::ranges::all_of(actual.values, [this](const std::string& value) {
+            return std::ranges::contains(values, value);
+        });
+    }
     if (kind == SemanticTypeKind::list &&
         (actual.kind == SemanticTypeKind::list || actual.kind == SemanticTypeKind::collection)) {
         return element != nullptr && actual.element != nullptr && element->accepts(*actual.element);
     }
-    if (kind == SemanticTypeKind::map && actual.kind == SemanticTypeKind::map)
+    if (kind == SemanticTypeKind::map && actual.kind == SemanticTypeKind::map) {
+        for (const ObjectField& field : fields) {
+            const ObjectField* actual_field = actual.find_field(field.name);
+            if (actual_field == nullptr) {
+                if (field.required)
+                    return false;
+                continue;
+            }
+            if (actual_field->nullable && !field.nullable)
+                return false;
+            if (field.type == nullptr || actual_field->type == nullptr ||
+                !accepts_nullable(
+                    *field.type,
+                    *actual_field->type,
+                    field.nullable
+                )) {
+                return false;
+            }
+        }
         return true;
+    }
+    if (kind == SemanticTypeKind::component_template &&
+        actual.kind == SemanticTypeKind::component_template) {
+        for (const ObjectField& actual_parameter : actual.fields) {
+            const ObjectField* provided = find_field(actual_parameter.name);
+            if (provided == nullptr) {
+                if (actual_parameter.required)
+                    return false;
+                continue;
+            }
+            if (actual_parameter.type == nullptr || provided->type == nullptr ||
+                actual_parameter.type->kind ==
+                    SemanticTypeKind::unsafe_component_parameter ||
+                (provided->nullable && !actual_parameter.nullable) ||
+                (provided->type->kind != SemanticTypeKind::any &&
+                 !actual_parameter.type->accepts(*provided->type))) {
+                return false;
+            }
+        }
+        return true;
+    }
     if (kind == SemanticTypeKind::async_value && actual.kind == SemanticTypeKind::async_value) {
         return value == nullptr || actual.value == nullptr || value->accepts(*actual.value);
     }
@@ -586,6 +662,19 @@ SemanticTypePtr SchemaRegistry::parse_type(const data::JsonValue& value) {
             });
         }
     }
+    if (const data::JsonValue* parameters = value.find("parameters");
+        parameters != nullptr) {
+        if (parameters->array() == nullptr)
+            throw std::runtime_error("schema component template parameters must be an array");
+        for (const data::JsonValue& parameter : *parameters->array()) {
+            parsed->fields.push_back(ObjectField{
+                string_field(parameter, "name"),
+                parse_type(required(parameter, "type")),
+                optional_bool(parameter, "required"),
+                optional_bool(parameter, "nullable"),
+            });
+        }
+    }
     if (const data::JsonValue* options = value.find("options"); options != nullptr) {
         if (options->array() == nullptr)
             throw std::runtime_error("schema type options must be an array");
@@ -678,6 +767,14 @@ SemanticTypePtr SchemaRegistry::parse_type(const std::shared_ptr<const DeclaredT
             parse_type(field.type),
             field.required,
             field.nullable,
+        });
+    }
+    for (const DeclaredParameter& parameter : value->parameters) {
+        parsed->fields.push_back(ObjectField{
+            parameter.name,
+            parse_type(parameter.type),
+            parameter.required,
+            parameter.nullable,
         });
     }
     parsed->options.reserve(value->options.size());

@@ -7,6 +7,7 @@
 #include "runtime/expression.hpp"
 #include "runtime/registry.hpp"
 #include "runtime/value.hpp"
+#include "ui/tree.hpp"
 
 namespace strata::ui {
 namespace {
@@ -91,6 +92,39 @@ std::shared_ptr<const DescriptionNode> widget_native_presentation(
     auto result = std::make_shared<DescriptionNode>(*node);
     widget_mark_native_presentation(result->properties);
     return result;
+}
+
+bool widget_native_presentation_root(const RetainedNode& node) noexcept {
+    const auto marker = node.description().properties.find("$nativePresentation");
+    const runtime::Value* value = marker != node.description().properties.end()
+        ? marker->second.value()
+        : nullptr;
+    return value != nullptr && value->boolean() != nullptr && *value->boolean();
+}
+
+bool widget_inside_native_presentation(const RetainedNode& node) noexcept {
+    for (const RetainedNode* current = &node;
+         current != nullptr;
+         current = current->parent()) {
+        if (widget_native_presentation_root(*current)) return true;
+    }
+    return false;
+}
+
+const RetainedNode* widget_native_input_owner(const RetainedNode* node) noexcept {
+    const RetainedNode* owner = node;
+    for (const RetainedNode* current = node;
+         current != nullptr;
+         current = current->parent()) {
+        if (widget_native_presentation_root(*current)) owner = current->parent();
+    }
+    return owner;
+}
+
+RetainedNode* widget_native_input_owner(RetainedNode* node) noexcept {
+    return const_cast<RetainedNode*>(
+        widget_native_input_owner(static_cast<const RetainedNode*>(node))
+    );
 }
 
 DescriptionNode::Properties widget_text_properties(std::string text, runtime::Value layout) {
@@ -257,6 +291,51 @@ std::shared_ptr<const DescriptionNode> WidgetDescriptionScope::instantiate(
     return component != nullptr
         ? instantiate_component(*component, std::move(key), std::move(arguments))
         : nullptr;
+}
+
+runtime::Value WidgetDescriptionScope::presentation_state(
+    WidgetLayoutFields fields
+) const {
+    const runtime::Value* interaction = retained("$presentationState");
+    const auto flag = [interaction](const std::string_view name) {
+        const runtime::Value* value = interaction != nullptr
+            ? interaction->field(name)
+            : nullptr;
+        return value != nullptr && value->boolean() != nullptr && *value->boolean();
+    };
+    fields.try_emplace("enabled", runtime::Value(boolean("enabled", true)));
+    fields.insert_or_assign("hovered", runtime::Value(flag("hovered")));
+    fields.insert_or_assign("pressed", runtime::Value(flag("pressed")));
+    fields.insert_or_assign("focused", runtime::Value(flag("focused")));
+    fields.insert_or_assign("focusVisible", runtime::Value(flag("focusVisible")));
+    return fields_value(std::move(fields));
+}
+
+bool WidgetDescriptionScope::install_presentation(
+    const std::string_view template_property,
+    WidgetTemplateArguments arguments
+) {
+    if (property(template_property) == nullptr) return false;
+    if (!description_.key.has_value()) {
+        throw std::logic_error(
+            "validated authored presentation owner must have an explicit key"
+        );
+    }
+    const std::string& owner_key = *description_.key;
+    const std::string presentation_key = owner_key + ".presentation";
+    arguments.insert_or_assign(
+        "key",
+        runtime::Value(runtime::KeyValue{presentation_key})
+    );
+    std::shared_ptr<const DescriptionNode> presentation = instantiate(
+        template_property,
+        presentation_key,
+        std::move(arguments)
+    );
+    if (presentation == nullptr) return false;
+    description_.children = {widget_native_presentation(presentation)};
+    synthesized();
+    return true;
 }
 
 std::shared_ptr<const DescriptionNode> WidgetDescriptionScope::instantiate_component(
