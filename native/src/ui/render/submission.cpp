@@ -47,7 +47,7 @@ void validate_texture_descriptors(
 
 namespace submission_detail {
 
-RenderSubmission build_cached(
+void update_cached(
     const RenderCommandBuffer& commands,
     font::GlyphAtlas& glyph_atlas,
     const TextEngine* const text_engine,
@@ -57,7 +57,8 @@ RenderSubmission build_cached(
     const double logical_width,
     const double logical_height,
     const std::span<const resource::TextureResourceDescriptor> textures,
-    PreparationCache& cache
+    PreparationCache& cache,
+    RenderSubmission& output
 ) {
     if (!std::isfinite(display_scale) || display_scale <= 0.0 || framebuffer_width < 0 ||
         framebuffer_height < 0 || !std::isfinite(logical_width) || logical_width < 0.0 ||
@@ -103,7 +104,19 @@ RenderSubmission build_cached(
         static_cast<void>(glyph_atlas.begin_frame_preparation());
         preparation.atlas = &glyph_atlas;
     }
-    RenderSubmission output;
+    output.planned_draws = 0U;
+    output.skipped_draws = 0U;
+    output.texture_batch_breaks = 0U;
+    output.clip_batch_breaks = 0U;
+    output.material_batch_breaks = 0U;
+    output.effect_batch_breaks = 0U;
+    output.planning_nanos = 0;
+    output.atlas_warmup_nanos = 0;
+    output.text_preparation_nanos = 0;
+    output.mesh_encoding_nanos = 0;
+    output.patch_from_previous = false;
+    output.vertex_patches.clear();
+    output.index_patches.clear();
     const auto planning_started = std::chrono::steady_clock::now();
     std::vector<PlannedItem> items = plan(
         commands, glyph_atlas, text_engine, context, output, cache
@@ -116,6 +129,34 @@ RenderSubmission build_cached(
     output.mesh_encoding_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - encoding_started
     ).count();
+}
+
+RenderSubmission build_cached(
+    const RenderCommandBuffer& commands,
+    font::GlyphAtlas& glyph_atlas,
+    const TextEngine* const text_engine,
+    const double display_scale,
+    const std::int64_t framebuffer_width,
+    const std::int64_t framebuffer_height,
+    const double logical_width,
+    const double logical_height,
+    const std::span<const resource::TextureResourceDescriptor> textures,
+    PreparationCache& cache
+) {
+    RenderSubmission output;
+    update_cached(
+        commands,
+        glyph_atlas,
+        text_engine,
+        display_scale,
+        framebuffer_width,
+        framebuffer_height,
+        logical_width,
+        logical_height,
+        textures,
+        cache,
+        output
+    );
     return output;
 }
 

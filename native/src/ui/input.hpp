@@ -296,7 +296,8 @@ class InputRouter final {
 public:
     using SurfaceFrameworkExecutor =
         std::function<runtime::ActionDispatchOutcome(const runtime::Action&)>;
-    using DescriptionInvalidator = std::function<void()>;
+    using DescriptionInvalidator =
+        std::function<void(const RetainedNode*, std::string_view)>;
     using FrameInvalidator = std::function<void()>;
     using HitBoundsResolver =
         std::function<Rect(const RetainedNode&, const LayoutRecord&)>;

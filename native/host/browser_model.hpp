@@ -43,6 +43,7 @@ class BrowserModel final {
                                             double viewport_height);
 
     [[nodiscard]] std::pair<double, double> resolve(const Selector& selector) const;
+    [[nodiscard]] BrowserBounds resolve_bounds(const Selector& selector) const;
     [[nodiscard]] data::JsonValue document() const;
     [[nodiscard]] const std::vector<BrowserElement>& elements() const noexcept;
 

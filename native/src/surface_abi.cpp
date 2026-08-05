@@ -1093,6 +1093,32 @@ strata_result strata_surface_frame(
              static_cast<std::uint64_t>(packet_nanos)},
         });
         surface->core.profiler().record_external_timing("packet-encode", packet_nanos);
+        if (!packet.geometry_reused) {
+            surface->core.profiler().record_external_timing(
+                "packet-submission",
+                packet.submission_nanos
+            );
+            surface->core.profiler().record_external_timing(
+                "packet-submission-plan",
+                packet.submission_planning_nanos
+            );
+            surface->core.profiler().record_external_timing(
+                "packet-submission-atlas",
+                packet.submission_atlas_warmup_nanos
+            );
+            surface->core.profiler().record_external_timing(
+                "packet-submission-text",
+                packet.submission_text_preparation_nanos
+            );
+            surface->core.profiler().record_external_timing(
+                "packet-submission-mesh",
+                packet.submission_mesh_encoding_nanos
+            );
+            surface->core.profiler().record_external_timing(
+                "packet-geometry",
+                packet.geometry_packet_nanos
+            );
+        }
         if (packet.cold_encode_profiled) {
             surface->core.profiler().record_external_timing(
                 "packet-cold-submission",

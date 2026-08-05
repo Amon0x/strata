@@ -1083,26 +1083,28 @@ typedef uint32_t strata_theme_motion_property;
 #define STRATA_THEME_MOTION_PROPERTY_PADDING_TOP UINT32_C(11)
 #define STRATA_THEME_MOTION_PROPERTY_PADDING_RIGHT UINT32_C(12)
 #define STRATA_THEME_MOTION_PROPERTY_PADDING_BOTTOM UINT32_C(13)
-#define STRATA_THEME_MOTION_PROPERTY_BACKGROUND UINT32_C(14)
-#define STRATA_THEME_MOTION_PROPERTY_FOREGROUND UINT32_C(15)
-#define STRATA_THEME_MOTION_PROPERTY_COLOR UINT32_C(16)
-#define STRATA_THEME_MOTION_PROPERTY_RADIUS UINT32_C(17)
-#define STRATA_THEME_MOTION_PROPERTY_TRACK UINT32_C(18)
-#define STRATA_THEME_MOTION_PROPERTY_FILL UINT32_C(19)
-#define STRATA_THEME_MOTION_PROPERTY_THUMB UINT32_C(20)
-#define STRATA_THEME_MOTION_PROPERTY_TRACK_RADIUS UINT32_C(21)
-#define STRATA_THEME_MOTION_PROPERTY_THUMB_RADIUS UINT32_C(22)
-#define STRATA_THEME_MOTION_PROPERTY_THUMB_SIZE UINT32_C(23)
-#define STRATA_THEME_MOTION_PROPERTY_INDICATOR_POSITION UINT32_C(24)
-#define STRATA_THEME_MOTION_PROPERTY_CLIP UINT32_C(25)
-#define STRATA_THEME_MOTION_PROPERTY_OPACITY UINT32_C(26)
-#define STRATA_THEME_MOTION_PROPERTY_X UINT32_C(27)
-#define STRATA_THEME_MOTION_PROPERTY_Y UINT32_C(28)
-#define STRATA_THEME_MOTION_PROPERTY_TRANSLATE_X UINT32_C(29)
-#define STRATA_THEME_MOTION_PROPERTY_TRANSLATE_Y UINT32_C(30)
-#define STRATA_THEME_MOTION_PROPERTY_SCALE UINT32_C(31)
-#define STRATA_THEME_MOTION_PROPERTY_SCALE_X UINT32_C(32)
-#define STRATA_THEME_MOTION_PROPERTY_SCALE_Y UINT32_C(33)
+#define STRATA_THEME_MOTION_PROPERTY_PLACEMENT_X UINT32_C(14)
+#define STRATA_THEME_MOTION_PROPERTY_PLACEMENT_Y UINT32_C(15)
+#define STRATA_THEME_MOTION_PROPERTY_BACKGROUND UINT32_C(16)
+#define STRATA_THEME_MOTION_PROPERTY_FOREGROUND UINT32_C(17)
+#define STRATA_THEME_MOTION_PROPERTY_COLOR UINT32_C(18)
+#define STRATA_THEME_MOTION_PROPERTY_RADIUS UINT32_C(19)
+#define STRATA_THEME_MOTION_PROPERTY_TRACK UINT32_C(20)
+#define STRATA_THEME_MOTION_PROPERTY_FILL UINT32_C(21)
+#define STRATA_THEME_MOTION_PROPERTY_THUMB UINT32_C(22)
+#define STRATA_THEME_MOTION_PROPERTY_TRACK_RADIUS UINT32_C(23)
+#define STRATA_THEME_MOTION_PROPERTY_THUMB_RADIUS UINT32_C(24)
+#define STRATA_THEME_MOTION_PROPERTY_THUMB_SIZE UINT32_C(25)
+#define STRATA_THEME_MOTION_PROPERTY_INDICATOR_POSITION UINT32_C(26)
+#define STRATA_THEME_MOTION_PROPERTY_CLIP UINT32_C(27)
+#define STRATA_THEME_MOTION_PROPERTY_OPACITY UINT32_C(28)
+#define STRATA_THEME_MOTION_PROPERTY_X UINT32_C(29)
+#define STRATA_THEME_MOTION_PROPERTY_Y UINT32_C(30)
+#define STRATA_THEME_MOTION_PROPERTY_TRANSLATE_X UINT32_C(31)
+#define STRATA_THEME_MOTION_PROPERTY_TRANSLATE_Y UINT32_C(32)
+#define STRATA_THEME_MOTION_PROPERTY_SCALE UINT32_C(33)
+#define STRATA_THEME_MOTION_PROPERTY_SCALE_X UINT32_C(34)
+#define STRATA_THEME_MOTION_PROPERTY_SCALE_Y UINT32_C(35)
 
 typedef uint32_t strata_theme_motion_value_kind;
 #define STRATA_THEME_MOTION_VALUE_NUMBER UINT32_C(0)
@@ -1546,7 +1548,7 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Packet v8 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * Packet v9 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
  * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
  * [u32 kind, u32 payload byte count, payload]:
  *
@@ -1571,17 +1573,19 @@ typedef struct strata_surface_frame_info {
  * with a texture-id string. Atlas create/upload then carry u32 format (0 = R8, 1 = RGBA8) and u32
  * x/y/width/height; upload adds u32 byte count and raw texels. Release has no additional fields.
  * Encoded texture creation carries u32 encoding (0 = PNG), u32 sampling, u32 width/height, a u32
- * byte count, and encoded bytes. A repeated geometry epoch has identical geometry and batch shape,
- * allowing the backend to retain its prior upload while still applying ordered resources and the
- * new frame index. When STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD is absent, batch and geometry
- * counts are zero and the decoder retains the complete geometry/batch plan previously received
- * for that epoch while still applying this packet's resources and frame index. Packets form one
- * ordered Surface/backend stream: consume every framed packet, retain geometry until its epoch
- * changes, and discard decoder state only when discarding the stream.
+ * byte count, and encoded bytes. STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES advances the epoch
+ * from the immediately preceding retained epoch. Header geometry counts describe the complete
+ * retained arrays; resource records are followed by vertex and index patch lists. Each list is
+ * u32 count followed by [u32 byte offset, u32 byte count, raw bytes], then the complete updated
+ * batch records. Vertex patches are vertex-aligned and index patches are u32-aligned. When neither
+ * geometry flag is present, batch and geometry counts are zero and the decoder retains the
+ * complete geometry/batch plan for the repeated epoch while still applying this packet's resources
+ * and frame index. Packets form one ordered Surface/backend stream: consume every framed packet
+ * and discard decoder state only when discarding the stream.
  *
  * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
  * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
- * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v8 records.
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v9 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
@@ -1591,9 +1595,11 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_6 UINT32_C(6)
 #define STRATA_RENDER_PACKET_VERSION_7 UINT32_C(7)
 #define STRATA_RENDER_PACKET_VERSION_8 UINT32_C(8)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_8
+#define STRATA_RENDER_PACKET_VERSION_9 UINT32_C(9)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_9
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
+#define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)
 #define STRATA_EFFECT_DEFAULT_REFRESH_RATE 240.0
 
 #define STRATA_RENDER_RESOURCE_ATLAS_CREATE UINT32_C(0)

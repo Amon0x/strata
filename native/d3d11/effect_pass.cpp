@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <future>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -280,6 +281,10 @@ struct EffectPassRenderer::Impl final {
         std::uint32_t downsample = 1U;
         std::uint32_t radius_parameter = UINT32_MAX;
         std::uint32_t downsample_parameter = UINT32_MAX;
+        std::string shader_source;
+    };
+    struct ShaderProgram final {
+        std::shared_future<ComPtr<ID3DBlob>> pending;
         ComPtr<ID3D11PixelShader> shader;
     };
     struct CacheKey final {
@@ -303,11 +308,19 @@ struct EffectPassRenderer::Impl final {
         LONG left = 0;
         LONG top = 0;
         double sampled_seconds = 0.0;
+        std::uint64_t geometry_epoch = 0U;
         host::EffectBatch effect;
     };
 
-    Impl(ID3D11Device* const source_device, ID3D11DeviceContext* const source_context)
-        : device(source_device), context(source_context), blur(source_device, source_context) {
+    Impl(
+        ID3D11Device* const source_device,
+        ID3D11DeviceContext* const source_context,
+        const bool asynchronous_shader_compilation
+    )
+        : device(source_device),
+          context(source_context),
+          blur(source_device, source_context),
+          asynchronous_shader_compilation(asynchronous_shader_compilation) {
         if (device == nullptr || context == nullptr) {
             throw std::invalid_argument("D3D11 effects require a device and context");
         }
@@ -374,6 +387,58 @@ struct EffectPassRenderer::Impl final {
                         "D3D11 effect composite blend creation");
     }
 
+    void complete_shader_programs() {
+        bool completed = false;
+        for (auto current = shader_programs.begin();
+             current != shader_programs.end();) {
+            const bool referenced = std::ranges::any_of(
+                programs,
+                [&current](const auto& declaration) {
+                    return std::ranges::any_of(
+                        declaration.second,
+                        [&current](const Pass& pass) {
+                            return pass.shader_source == current->first;
+                        }
+                    );
+                }
+            );
+            if (!referenced && current->second.pending.valid() &&
+                current->second.pending.wait_for(std::chrono::seconds(0)) !=
+                    std::future_status::ready) {
+                ++current;
+                continue;
+            }
+            if (!referenced) {
+                current = shader_programs.erase(current);
+                continue;
+            }
+            ShaderProgram& program = current->second;
+            if (program.shader != nullptr || !program.pending.valid() ||
+                program.pending.wait_for(std::chrono::seconds(0)) !=
+                    std::future_status::ready) {
+                ++current;
+                continue;
+            }
+            const ComPtr<ID3DBlob> bytecode = program.pending.get();
+            require_hresult(
+                device->CreatePixelShader(
+                    bytecode->GetBufferPointer(),
+                    bytecode->GetBufferSize(),
+                    nullptr,
+                    &program.shader
+                ),
+                "D3D11 authored effect shader creation"
+            );
+            program.pending = {};
+            completed = true;
+            ++current;
+        }
+        // Samples produced while an authored pass was still compiling intentionally skipped that
+        // pass. They are no longer valid once its shader becomes available, regardless of the
+        // effect's authored refresh rate.
+        if (completed) cached_samples.clear();
+    }
+
     void resize(const std::uint32_t next_width, const std::uint32_t next_height,
                 const DXGI_FORMAT next_format) {
         if (next_width == width && next_height == height && next_format == format)
@@ -388,14 +453,36 @@ struct EffectPassRenderer::Impl final {
         blur.resize(width, height, format);
     }
 
-    void begin_layer(const std::string_view layer_id, const std::uint64_t geometry_epoch) {
+    void begin_layer(
+        const std::string_view layer_id,
+        const std::uint64_t geometry_epoch,
+        const bool dirty_all,
+        const std::span<const host::GeometryDirtyRegion> dirty_regions
+    ) {
         const std::string layer(layer_id);
         const auto found = layer_epochs.find(layer);
         if (found != layer_epochs.end() && found->second == geometry_epoch)
             return;
         layer_epochs.insert_or_assign(layer, geometry_epoch);
-        std::erase_if(cached_samples,
-                      [&layer](const auto& entry) { return entry.first.layer == layer; });
+        const auto intersects = [](const host::EffectBatch& effect,
+                                   const host::GeometryDirtyRegion& dirty) {
+            const double effect_right = effect.x + effect.width;
+            const double effect_bottom = effect.y + effect.height;
+            const double dirty_right = dirty.x + dirty.width;
+            const double dirty_bottom = dirty.y + dirty.height;
+            return dirty.x <= effect_right && dirty_right >= effect.x &&
+                dirty.y <= effect_bottom && dirty_bottom >= effect.y;
+        };
+        for (auto& [key, sample] : cached_samples) {
+            if (key.layer != layer) continue;
+            const bool dirty = dirty_all || std::ranges::any_of(
+                dirty_regions,
+                [&sample, &intersects](const host::GeometryDirtyRegion& region) {
+                    return intersects(sample.effect, region);
+                }
+            );
+            if (!dirty) sample.geometry_epoch = geometry_epoch;
+        }
     }
 
     [[nodiscard]] Target target() const {
@@ -585,6 +672,7 @@ struct EffectPassRenderer::Impl final {
           ID3D11RenderTargetView* const destination, const double logical_width,
           const double logical_height, const double frame_seconds) {
         const auto started = std::chrono::steady_clock::now();
+        complete_shader_programs();
         const D3D11_RECT clip =
             effect_scissor(effect, width, height, logical_width, logical_height);
         const std::uint32_t sample_width =
@@ -609,9 +697,14 @@ struct EffectPassRenderer::Impl final {
             cached->second.height == sample_height && cached->second.left == clip.left &&
             cached->second.top == clip.top;
         const bool signature_matches = dimensions_match && cached->second.effect == effect;
+        const auto layer_epoch = layer_epochs.find(std::string(layer_id));
+        const bool geometry_matches =
+            cached != cached_samples.end() && layer_epoch != layer_epochs.end() &&
+            cached->second.geometry_epoch == layer_epoch->second;
         const double interval = rate_limited ? 1.0 / effect.refresh_rate : 0.0;
         const bool refresh_due =
-            !rate_limited || !signature_matches || frame_seconds < cached->second.sampled_seconds ||
+            !rate_limited || !signature_matches || !geometry_matches ||
+            frame_seconds < cached->second.sampled_seconds ||
             frame_seconds - cached->second.sampled_seconds + 1.0e-9 >= interval;
         if (!refresh_due) {
             draw_cached(cached->second, destination, effect, logical_width, logical_height,
@@ -654,11 +747,17 @@ struct EffectPassRenderer::Impl final {
                         blur.execute(batch, current->texture.Get(), current->target.Get(), width,
                                      height, logical_width, logical_height);
                     telemetry.passes += measured.passes;
-                } else if (pass.kind == 1U && pass.shader != nullptr) {
+                } else if (pass.kind == 1U) {
+                    const auto shader = shader_programs.find(pass.shader_source);
+                    if (shader == shader_programs.end() ||
+                        shader->second.shader == nullptr) {
+                        continue;
+                    }
                     Target* next = current == &work.ping ? &work.pong : &work.ping;
                     const float clear[4]{};
                     context->ClearRenderTargetView(next->target.Get(), clear);
-                    draw_pass(pass.shader.Get(), current->view.Get(), backdrop, next->target.Get(),
+                    draw_pass(shader->second.shader.Get(), current->view.Get(), backdrop,
+                              next->target.Get(),
                               effect, logical_width, logical_height, frame_seconds,
                               replace_blend.Get());
                     current = next;
@@ -682,6 +781,8 @@ struct EffectPassRenderer::Impl final {
             context->CopySubresourceRegion(cached->second.texture.Get(), 0U, 0U, 0U, 0U,
                                            current->texture.Get(), 0U, &source_box);
             cached->second.sampled_seconds = frame_seconds;
+            cached->second.geometry_epoch =
+                layer_epoch != layer_epochs.end() ? layer_epoch->second : 0U;
             cached->second.effect = effect;
             draw_cached(cached->second, destination, effect, logical_width, logical_height,
                         frame_seconds);
@@ -718,13 +819,22 @@ struct EffectPassRenderer::Impl final {
     std::vector<Target> content_targets;
     std::optional<Workspace> processing;
     std::map<std::string, std::vector<Pass>, std::less<>> programs;
+    std::map<std::string, ShaderProgram, std::less<>> shader_programs;
     std::map<CacheKey, CachedSample> cached_samples;
     std::map<std::string, std::uint64_t, std::less<>> layer_epochs;
+    bool asynchronous_shader_compilation = false;
 };
 
-EffectPassRenderer::EffectPassRenderer(ID3D11Device* const device,
-                                       ID3D11DeviceContext* const context)
-    : impl_(std::make_unique<Impl>(device, context)) {}
+EffectPassRenderer::EffectPassRenderer(
+    ID3D11Device* const device,
+    ID3D11DeviceContext* const context,
+    const bool asynchronous_shader_compilation
+)
+    : impl_(std::make_unique<Impl>(
+          device,
+          context,
+          asynchronous_shader_compilation
+      )) {}
 
 EffectPassRenderer::~EffectPassRenderer() = default;
 
@@ -748,9 +858,13 @@ void EffectPassRenderer::invalidate_cache() noexcept {
     impl_->layer_epochs.clear();
 }
 
-void EffectPassRenderer::begin_layer(const std::string_view layer_id,
-                                     const std::uint64_t geometry_epoch) {
-    impl_->begin_layer(layer_id, geometry_epoch);
+void EffectPassRenderer::begin_layer(
+    const std::string_view layer_id,
+    const std::uint64_t geometry_epoch,
+    const bool dirty_all,
+    const std::span<const host::GeometryDirtyRegion> dirty_regions
+) {
+    impl_->begin_layer(layer_id, geometry_epoch, dirty_all, dirty_regions);
 }
 
 void EffectPassRenderer::release_layer(const std::string_view layer_id) noexcept {
@@ -776,14 +890,34 @@ void EffectPassRenderer::declare_pass(const std::string_view effect_id, const st
     pass.radius_parameter = radius_parameter;
     pass.downsample_parameter = downsample_parameter;
     if (kind == 1U && !hlsl_source.empty()) {
-        const std::string source = std::string(effect_prelude) +
+        pass.shader_source = std::string(effect_prelude) +
             std::string(rounded_clip_hlsl) + std::string(hlsl_source) +
             std::string(effect_entry);
-        const ComPtr<ID3DBlob> bytecode = compile_shader(source, "main", "ps_5_0");
-        require_hresult(impl_->device->CreatePixelShader(bytecode->GetBufferPointer(),
-                                                         bytecode->GetBufferSize(), nullptr,
-                                                         &pass.shader),
-                        "D3D11 authored effect shader creation");
+        auto [program, inserted] =
+            impl_->shader_programs.try_emplace(pass.shader_source);
+        if (inserted) {
+            if (impl_->asynchronous_shader_compilation) {
+                const std::string source = pass.shader_source;
+                program->second.pending = std::async(
+                    std::launch::async,
+                    [source] {
+                        return compile_shader(source, "main", "ps_5_0");
+                    }
+                ).share();
+            } else {
+                const ComPtr<ID3DBlob> bytecode =
+                    compile_shader(pass.shader_source, "main", "ps_5_0");
+                require_hresult(
+                    impl_->device->CreatePixelShader(
+                        bytecode->GetBufferPointer(),
+                        bytecode->GetBufferSize(),
+                        nullptr,
+                        &program->second.shader
+                    ),
+                    "D3D11 authored effect shader creation"
+                );
+            }
+        }
     }
     std::vector<Impl::Pass>& program = impl_->programs[std::string(effect_id)];
     if (program.size() <= index)

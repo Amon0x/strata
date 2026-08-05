@@ -61,6 +61,7 @@ StateStore::StateStore(Invalidation invalidation) : invalidation_(std::move(inva
 const Value& StateStore::read(const StateAddress& address, const StateSlot& slot) {
     validate_address(address);
     validate_slot(slot);
+    initial_values_.insert_or_assign(address, slot.initial_value);
     const std::string declaration_scope = slot.declaration_scope.empty()
                                               ? address.scope
                                               : slot.declaration_scope;
@@ -83,6 +84,7 @@ const Value& StateStore::read(const StateAddress& address, const StateSlot& slot
 bool StateStore::write(const StateAddress& address, const StateSlot& slot, Value value) {
     validate_address(address);
     validate_slot(slot);
+    initial_values_.insert_or_assign(address, slot.initial_value);
     if (value.state_type_id() != slot.type_id) {
         throw std::invalid_argument("state value does not match its slot type id");
     }
@@ -120,6 +122,11 @@ bool StateStore::reset(const StateAddress& address) {
 const Value* StateStore::find(const StateAddress& address) const noexcept {
     const auto found = values_.find(address);
     return found != values_.end() ? &found->second.value : nullptr;
+}
+
+const Value* StateStore::initial(const StateAddress& address) const noexcept {
+    const auto found = initial_values_.find(address);
+    return found != initial_values_.end() ? &found->second : nullptr;
 }
 
 StateSnapshot StateStore::snapshot() const {
@@ -192,6 +199,7 @@ bool StateStore::migrate_declarations(const std::vector<StateDeclarationSchema>&
         });
         if (schema == schemas.end() ||
             (schema->second != "dsl.unknown" && schema->second != value->second.type_id)) {
+            initial_values_.erase(value->first);
             value = values_.erase(value);
             removed = true;
         } else {
@@ -219,6 +227,7 @@ bool StateStore::retain_owned_scopes(const StateScopeSet& attached_scopes) {
         iterator = owned_scopes_.erase(iterator);
         for (auto value = values_.begin(); value != values_.end();) {
             if (value->first.scope == scope) {
+                initial_values_.erase(value->first);
                 value = values_.erase(value);
                 removed = true;
             } else {
@@ -236,6 +245,7 @@ bool StateStore::retain_declaration_scopes(const StateScopeSet& attached_scopes)
         if (attached_scopes.contains(scope)) continue;
         for (auto value = values_.begin(); value != values_.end();) {
             if (value->second.declaration_scope == scope) {
+                initial_values_.erase(value->first);
                 value = values_.erase(value);
                 removed = true;
             } else {

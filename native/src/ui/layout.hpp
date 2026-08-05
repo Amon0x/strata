@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include "ui/collection/virtualization.hpp"
@@ -206,6 +207,7 @@ struct LayoutLine final {
     std::vector<std::size_t> children;
     double main_size = 0.0;
     double cross_size = 0.0;
+    [[nodiscard]] friend bool operator==(const LayoutLine&, const LayoutLine&) = default;
 };
 
 /** Shared measurement/arrangement result for a wrapping linear container. */
@@ -213,6 +215,10 @@ struct LinearLayoutResolution final {
     bool horizontal = true;
     std::vector<LayoutLine> lines;
     Size intrinsic_size;
+    [[nodiscard]] friend bool operator==(
+        const LinearLayoutResolution&,
+        const LinearLayoutResolution&
+    ) = default;
 };
 
 /** A child-to-track assignment shared by grid measurement and arrangement. */
@@ -222,6 +228,7 @@ struct GridPlacement final {
     std::size_t row = 0U;
     std::size_t column_span = 1U;
     std::size_t row_span = 1U;
+    [[nodiscard]] friend bool operator==(const GridPlacement&, const GridPlacement&) = default;
 };
 
 /** An intrinsic requirement crossing one or more tracks on a single grid axis. */
@@ -229,6 +236,10 @@ struct GridSpanContribution final {
     std::size_t start = 0U;
     std::size_t span = 1U;
     double extent = 0.0;
+    [[nodiscard]] friend bool operator==(
+        const GridSpanContribution&,
+        const GridSpanContribution&
+    ) = default;
 };
 
 /** Track definitions and their intrinsic child contributions for one grid axis. */
@@ -236,6 +247,10 @@ struct GridAxisResolution final {
     std::vector<LayoutSize> tracks;
     std::vector<double> contributions;
     std::vector<GridSpanContribution> spanning_contributions;
+    [[nodiscard]] friend bool operator==(
+        const GridAxisResolution&,
+        const GridAxisResolution&
+    ) = default;
 };
 
 /**
@@ -247,6 +262,10 @@ struct GridLayoutResolution final {
     GridAxisResolution rows;
     std::vector<GridPlacement> placements;
     Size intrinsic_size;
+    [[nodiscard]] friend bool operator==(
+        const GridLayoutResolution&,
+        const GridLayoutResolution&
+    ) = default;
 };
 
 struct VisibleRange final {
@@ -257,11 +276,11 @@ struct VisibleRange final {
 
 struct LayoutRecord final {
     std::uint64_t identity = 0U;
+    /** Pass in which this record was last written; exact cache hits retain the record in place. */
     std::uint64_t generation = 0U;
     /**
-     * Changes only when this record's arranged presentation changes. Layout result generations
-     * advance for every pass, including records copied verbatim from the arrangement cache; the
-     * retained renderer needs the narrower identity to update only genuinely changed nodes.
+     * Changes only when this record's arranged presentation changes. The retained renderer uses
+     * this narrower identity to update only genuinely changed nodes.
      */
     std::uint64_t render_generation = 0U;
     /** Changes when this record or any retained descendant changes arranged presentation. */
@@ -322,6 +341,9 @@ struct LayoutResult final {
     std::uint64_t root_identity = 0U;
     std::map<std::uint64_t, LayoutRecord> records;
     LayoutOperationCounters operations;
+    std::int64_t measure_nanos = 0;
+    std::int64_t arrange_nanos = 0;
+    std::int64_t maintenance_nanos = 0;
 
     [[nodiscard]] const LayoutRecord* find(std::uint64_t identity) const noexcept;
 };
@@ -430,6 +452,8 @@ private:
         std::uint64_t environment_generation = 0U;
         double scale = 1.0;
         MeasuredNodePtr measured;
+        /** Stable identity propagated while this subtree's parent-facing contribution is equal. */
+        MeasuredNodePtr propagated;
     };
 
     struct PinContext final {
@@ -466,6 +490,10 @@ private:
         const LayoutEnvironment& environment,
         LayoutOperationCounters& operations
     );
+    [[nodiscard]] static bool measured_model_equal(
+        const MeasuredNode& left,
+        const MeasuredNode& right
+    );
     void arrange(
         const MeasuredNodePtr& measured,
         Rect bounds,
@@ -480,12 +508,26 @@ private:
         Point fallback
     ) noexcept;
     [[nodiscard]] std::uint64_t advance_render_generation();
+    [[nodiscard]] bool arranged_in_current_pass(const RetainedNode& node) const noexcept;
 
     IntrinsicMeasure intrinsic_measure_;
     std::map<std::uint64_t, MeasurementCacheEntry> measurement_cache_;
+    std::map<std::uint64_t, MeasuredNodePtr> measurement_frontier_;
+    /** Nodes already measured against their current constraints during the active layout pass. */
+    std::unordered_set<std::uint64_t> measurement_pass_;
+    /** Current-pass structural changes which must propagate fresh node pointers to the root. */
+    std::unordered_set<std::uint64_t> structural_measurements_;
     std::map<std::uint64_t, ArrangementCacheEntry> arrangement_cache_;
     std::vector<PendingPortal> pending_portals_;
     std::vector<PendingAnchor> pending_anchors_;
+    /**
+     * Exact arrangement-cache hits retain records in place. These sets distinguish those current
+     * records from stale records which have not participated in the active pass.
+     */
+    std::unordered_set<std::uint64_t> current_arranged_records_;
+    std::unordered_set<std::uint64_t> current_arranged_subtree_roots_;
+    /** Records carrying a one-pass translation marker that must be cleared before the next pass. */
+    std::vector<std::uint64_t> translated_records_;
     LayoutResult result_;
     const RetainedTree* last_tree_ = nullptr;
     std::uint64_t last_invalidation_generation_ = 0U;

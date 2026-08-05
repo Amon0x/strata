@@ -135,6 +135,39 @@ template <typename Byte>
 } // namespace
 
 struct Host::Impl final {
+    enum HostTiming : std::size_t {
+        host_total,
+        showcase_core,
+        showcase_submit,
+        tuning_core,
+        tuning_submit,
+        tooling_total,
+        present,
+        tooling_update,
+        debug_core,
+        debug_submit,
+        performance_core,
+        performance_submit,
+        overlay_setup,
+        host_timing_count,
+    };
+
+    static constexpr std::array<std::string_view, host_timing_count> host_timing_paths{
+        "demo.desktop/host/total",
+        "demo.desktop/host/showcase-core",
+        "demo.desktop/host/showcase-submit",
+        "demo.desktop/host/tuning-core",
+        "demo.desktop/host/tuning-submit",
+        "demo.desktop/host/tooling",
+        "demo.desktop/host/present",
+        "demo.desktop/host/tooling-update",
+        "demo.desktop/host/debug-core",
+        "demo.desktop/host/debug-submit",
+        "demo.desktop/host/performance-core",
+        "demo.desktop/host/performance-submit",
+        "demo.desktop/host/overlay-setup",
+    };
+
     struct ProfileSection final {
         std::string path;
         std::uint64_t last_sample_frame_index = 0U;
@@ -199,7 +232,7 @@ struct Host::Impl final {
         std::int64_t captured_at = 0;
         ProfileSnapshot runtime;
         ProfileSnapshot surface;
-        std::array<TimingSummary, 5U> host;
+        std::array<TimingSummary, host_timing_count> host;
     };
 
     class DurableWriter final {
@@ -364,7 +397,15 @@ struct Host::Impl final {
         );
         performance_hud_enabled = options.performance_hud;
         profile_sampling_enabled = options.profile_sampling;
-        if (options.performance_hud) create_performance_hud();
+        if (options.performance_hud) {
+            const auto started = std::chrono::steady_clock::now();
+            create_performance_hud();
+            overlay_setup_timings.add(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - started
+                ).count()
+            );
+        }
         if (options.restore_window_geometry) restore_window_geometry();
         RECT restored_client{};
         if (GetClientRect(window, &restored_client)) {
@@ -1132,29 +1173,38 @@ struct Host::Impl final {
     }
 
     void capture_profile_snapshot() {
-        if (!showcase.surface.has_value()) return;
+        Session* const profiled = active_performance_session();
+        if (profiled == nullptr) return;
         ProfileCapture capture;
         capture.captured_at = frame_time;
         const strata_profiler_snapshot_sink runtime_sink{
             sizeof(strata_profiler_snapshot_sink), &capture.runtime, &Impl::profile,
         };
         strata::require_ok(
-            strata_runtime_read_profiler(showcase.runtime->native_handle(), &runtime_sink),
-            "desktop showcase runtime profiler sampling"
+            strata_runtime_read_profiler(profiled->runtime->native_handle(), &runtime_sink),
+            "desktop runtime profiler sampling"
         );
         const strata_profiler_snapshot_sink surface_sink{
             sizeof(strata_profiler_snapshot_sink), &capture.surface, &Impl::profile,
         };
         strata::require_ok(
-            strata_surface_read_profiler(showcase.surface->native_handle(), &surface_sink),
-            "desktop showcase profiler sampling"
+            strata_surface_read_profiler(profiled->surface->native_handle(), &surface_sink),
+            "desktop surface profiler sampling"
         );
         capture.host = {
             summarize(host_total_timings),
             summarize(showcase_core_timings),
             summarize(showcase_submit_timings),
+            summarize(tuning_core_timings),
+            summarize(tuning_submit_timings),
             summarize(tooling_timings),
             summarize(present_timings),
+            summarize(tooling_update_timings),
+            summarize(debug_core_timings),
+            summarize(debug_submit_timings),
+            summarize(performance_core_timings),
+            summarize(performance_submit_timings),
+            summarize(overlay_setup_timings),
         };
         profile_history.push_back(std::move(capture));
         constexpr std::size_t maximum_profile_captures = 64U;
@@ -1169,9 +1219,9 @@ struct Host::Impl final {
                                         const bool runtime
                                     ) {
             for (const ProfileSection& source : snapshot.sections) {
-                const std::string path = runtime
-                    ? "runtime:" + snapshot.scope_id + "/" + source.path
-                    : source.path;
+                const std::string path =
+                    (runtime ? "runtime:" : std::string{}) +
+                    snapshot.scope_id + "/" + source.path;
                 const auto [found, inserted] = sections.try_emplace(
                     path,
                     result.sections.size()
@@ -1206,15 +1256,15 @@ struct Host::Impl final {
     }
 
     [[nodiscard]] static std::string full_profile_path(
-        const std::string_view scope_id,
+        const std::string_view,
         const std::string_view path
     ) {
-        if (path.starts_with("runtime:")) return std::string(path);
-        return std::string(scope_id) + "/" + std::string(path);
+        return std::string(path);
     }
 
-    [[nodiscard]] std::array<TimingSummary, 5U> merged_host_timings() const {
-        std::array<TimingSummary, 5U> result{};
+    [[nodiscard]] std::array<TimingSummary, host_timing_count>
+    merged_host_timings() const {
+        std::array<TimingSummary, host_timing_count> result{};
         for (const ProfileCapture& capture : profile_history) {
             for (std::size_t index = 0U; index < result.size(); ++index) {
                 result[index].last_nanos = capture.host[index].last_nanos;
@@ -1231,7 +1281,8 @@ struct Host::Impl final {
 
     [[nodiscard]] std::string debug_json() const {
         const ProfileSnapshot profile_snapshot = merged_profile_snapshot();
-        const std::array<TimingSummary, 5U> host_timings = merged_host_timings();
+        const std::array<TimingSummary, host_timing_count> host_timings =
+            merged_host_timings();
         std::vector<ProfileSection> hot_paths = profile_snapshot.sections;
         std::ranges::stable_sort(hot_paths, [](const ProfileSection& left, const ProfileSection& right) {
             return left.p99_nanos > right.p99_nanos;
@@ -1239,7 +1290,9 @@ struct Host::Impl final {
         if (hot_paths.size() > 24U) hot_paths.resize(24U);
         std::int64_t last_frame = 0;
         for (const ProfileSection& section : profile_snapshot.sections) {
-            if (section.path == "frame") last_frame = std::max(last_frame, section.last_nanos);
+            if (section.path == profile_snapshot.scope_id + "/frame") {
+                last_frame = std::max(last_frame, section.last_nanos);
+            }
         }
         const auto metric_text = [](const double value, const std::string_view suffix = {}) {
             std::ostringstream output;
@@ -1282,11 +1335,9 @@ struct Host::Impl final {
                 .max_millis = static_cast<double>(timings.maximum_nanos) / 1'000'000.0,
             });
         };
-        append_host_path("demo.desktop/host/total", host_timings[0U]);
-        append_host_path("demo.desktop/host/showcase-core", host_timings[1U]);
-        append_host_path("demo.desktop/host/showcase-submit", host_timings[2U]);
-        append_host_path("demo.desktop/host/tooling", host_timings[3U]);
-        append_host_path("demo.desktop/host/present", host_timings[4U]);
+        for (std::size_t index = 0U; index < host_timing_paths.size(); ++index) {
+            append_host_path(host_timing_paths[index], host_timings[index]);
+        }
         for (const ProfileSection& section : hot_paths) {
             typed_hot_paths.push_back(contracts::debug_overlay::DebugHotPathsItem{
                 .path = full_profile_path(profile_snapshot.scope_id, section.path),
@@ -1324,7 +1375,8 @@ struct Host::Impl final {
 
     [[nodiscard]] std::string debug_export_text() const {
         const ProfileSnapshot profile_snapshot = merged_profile_snapshot();
-        const std::array<TimingSummary, 5U> host_timings = merged_host_timings();
+        const std::array<TimingSummary, host_timing_count> host_timings =
+            merged_host_timings();
         std::vector<ProfileSection> hot_paths = profile_snapshot.sections;
         std::ranges::stable_sort(
             hot_paths,
@@ -1341,15 +1393,8 @@ struct Host::Impl final {
                << "frame\t" << profile_snapshot.frame_index << '\n'
                << "columns\tpath\tlast_ms\trecent_p95_peak_ms\tmax_ms\n\n"
                << "HOST PATHS\n";
-        static constexpr std::array<std::string_view, 5U> host_paths{
-            "demo.desktop/host/total",
-            "demo.desktop/host/showcase-core",
-            "demo.desktop/host/showcase-submit",
-            "demo.desktop/host/tooling",
-            "demo.desktop/host/present",
-        };
-        for (std::size_t index = 0U; index < host_paths.size(); ++index) {
-            output << host_paths[index] << '\t'
+        for (std::size_t index = 0U; index < host_timing_paths.size(); ++index) {
+            output << host_timing_paths[index] << '\t'
                    << millis(host_timings[index].last_nanos) << '\t'
                    << millis(host_timings[index].p95_nanos) << '\t'
                    << millis(host_timings[index].maximum_nanos) << '\n';
@@ -1604,7 +1649,9 @@ struct Host::Impl final {
     }
 
     void toggle_hub() {
-        if (!hub_enabled && !hub.surface.has_value()) create_hub();
+        if (!hub_enabled && !hub.surface.has_value()) {
+            initialize_overlay([this] { create_hub(); });
+        }
         hub_enabled = !hub_enabled;
         if (!hub_enabled && hub.surface.has_value()) {
             static_cast<void>(strata_surface_cancel_interactions(hub.surface->native_handle()));
@@ -1676,8 +1723,21 @@ struct Host::Impl final {
         renderer.release_layer(session.id);
     }
 
+    template <typename Create>
+    void initialize_overlay(Create&& create) {
+        const auto started = std::chrono::steady_clock::now();
+        std::forward<Create>(create)();
+        overlay_setup_timings.add(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - started
+            ).count()
+        );
+    }
+
     void toggle_settings() {
-        if (!settings_enabled && !settings.surface.has_value()) create_settings();
+        if (!settings_enabled && !settings.surface.has_value()) {
+            initialize_overlay([this] { create_settings(); });
+        }
         settings_enabled = !settings_enabled;
         if (!settings_enabled && settings.surface.has_value()) {
             static_cast<void>(strata_surface_cancel_interactions(
@@ -1688,7 +1748,7 @@ struct Host::Impl final {
 
     void toggle_effect_gallery() {
         if (!effect_gallery_enabled && !effect_gallery.surface.has_value()) {
-            create_effect_gallery();
+            initialize_overlay([this] { create_effect_gallery(); });
         }
         effect_gallery_enabled = !effect_gallery_enabled;
         if (!effect_gallery_enabled && effect_gallery.surface.has_value()) {
@@ -1700,7 +1760,7 @@ struct Host::Impl final {
 
     void toggle_control_deck() {
         if (!control_deck_enabled && !control_deck.surface.has_value()) {
-            create_control_deck();
+            initialize_overlay([this] { create_control_deck(); });
         }
         control_deck_enabled = !control_deck_enabled;
         if (!control_deck_enabled && control_deck.surface.has_value()) {
@@ -1712,7 +1772,7 @@ struct Host::Impl final {
 
     void toggle_tuning_panel() {
         if (!tuning_panel_enabled && !tuning_panel.surface.has_value()) {
-            create_tuning_panel();
+            initialize_overlay([this] { create_tuning_panel(); });
         }
         tuning_panel_enabled = !tuning_panel_enabled;
         if (!tuning_panel_enabled && tuning_panel.surface.has_value()) {
@@ -1724,7 +1784,7 @@ struct Host::Impl final {
 
     void toggle_showcase() {
         if (!showcase_enabled && !showcase.surface.has_value()) {
-            create_showcase();
+            initialize_overlay([this] { create_showcase(); });
         }
         if (showcase_enabled) {
             showcase_enabled = false;
@@ -1744,7 +1804,9 @@ struct Host::Impl final {
     void cycle_debug(const bool reverse) {
         if (!debug_enabled) {
             debug_mode = reverse ? debug_modes.back() : debug_modes.front();
-            create_debug();
+            if (!debug.surface.has_value()) {
+                initialize_overlay([this] { create_debug(); });
+            }
             debug_enabled = true;
         } else {
             const auto current = std::ranges::find(debug_modes, debug_mode);
@@ -1770,7 +1832,9 @@ struct Host::Impl final {
     void toggle_performance_hud() {
         performance_hud_enabled = !performance_hud_enabled;
         if (performance_hud_enabled) {
-            create_performance_hud();
+            if (!performance_hud.surface.has_value()) {
+                initialize_overlay([this] { create_performance_hud(); });
+            }
             performance_snapshot_dirty = true;
             next_performance_snapshot = 0;
         }
@@ -1888,9 +1952,28 @@ struct Host::Impl final {
         return info.render_command_count > 0U && packet.planned_draw_count > 0U;
     }
 
+    [[nodiscard]] Session* active_performance_session() noexcept {
+        return hub_enabled ? &hub
+            : debug_enabled ? &debug
+            : settings_enabled ? &settings
+            : tuning_panel_enabled ? &tuning_panel
+            : control_deck_enabled ? &control_deck
+            : effect_gallery_enabled ? &effect_gallery
+            : showcase_enabled ? &showcase
+            : nullptr;
+    }
+
     void frame() {
         const auto host_frame_started = std::chrono::steady_clock::now();
+        Session* const performance_session = active_performance_session();
+        std::int64_t active_core_nanos = 0;
+        std::int64_t active_submit_nanos = 0;
         std::int64_t tooling_nanos = 0;
+        std::int64_t tooling_update_nanos = 0;
+        std::int64_t debug_native_nanos = 0;
+        std::int64_t debug_submit_nanos = 0;
+        std::int64_t performance_native_nanos = 0;
+        std::int64_t performance_submit_nanos = 0;
         flush_pointer_move();
         if (clear_diagnostics_pending && showcase.surface.has_value()) {
             clear_diagnostics_pending = false;
@@ -1933,13 +2016,16 @@ struct Host::Impl final {
             publish(performance_hud, "performance.desktop", performance_json());
             next_performance_snapshot = frame_time + 100'000'000;
         }
-        tooling_nanos += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        tooling_update_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - tooling_update_started
         ).count();
+        tooling_nanos += tooling_update_nanos;
         renderer.begin_frame();
         bool had_draws = false;
         std::int64_t showcase_native_nanos = 0;
         std::int64_t showcase_submit_nanos = 0;
+        std::int64_t tuning_native_nanos = 0;
+        std::int64_t tuning_submit_nanos = 0;
         DesktopFrameSample sample;
         if ((showcase_enabled || showcase_closing) && showcase.surface.has_value()) {
             const auto native_started = std::chrono::steady_clock::now();
@@ -1954,51 +2040,147 @@ struct Host::Impl final {
                     canonical_frame.find(instance_label) != std::string::npos;
             }
             had_draws = render_session(
-                showcase, info, &showcase_submit_nanos, &sample
+                showcase,
+                info,
+                &showcase_submit_nanos,
+                performance_session == &showcase ? &sample : nullptr
             ) || had_draws;
+            if (performance_session == &showcase) {
+                active_core_nanos = showcase_native_nanos;
+                active_submit_nanos = showcase_submit_nanos;
+            }
             if (!showcase_enabled &&
                 frame_time - showcase_hidden_at >= showcase_transition_nanos) {
                 showcase_closing = false;
             }
         }
         if (effect_gallery_enabled && effect_gallery.surface.has_value()) {
+            const auto native_started = std::chrono::steady_clock::now();
             const strata_surface_frame_info info =
                 effect_gallery.surface->frame(frame_time);
-            had_draws = render_session(effect_gallery, info) || had_draws;
+            const std::int64_t native_nanos =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - native_started
+                ).count();
+            std::int64_t submit_nanos = 0;
+            had_draws = render_session(
+                effect_gallery,
+                info,
+                performance_session == &effect_gallery ? &submit_nanos : nullptr,
+                performance_session == &effect_gallery ? &sample : nullptr
+            ) || had_draws;
+            if (performance_session == &effect_gallery) {
+                active_core_nanos = native_nanos;
+                active_submit_nanos = submit_nanos;
+            }
         }
         if (control_deck_enabled && control_deck.surface.has_value()) {
+            const auto native_started = std::chrono::steady_clock::now();
             const strata_surface_frame_info info =
                 control_deck.surface->frame(frame_time);
-            had_draws = render_session(control_deck, info) || had_draws;
+            const std::int64_t native_nanos =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - native_started
+                ).count();
+            std::int64_t submit_nanos = 0;
+            had_draws = render_session(
+                control_deck,
+                info,
+                performance_session == &control_deck ? &submit_nanos : nullptr,
+                performance_session == &control_deck ? &sample : nullptr
+            ) || had_draws;
+            if (performance_session == &control_deck) {
+                active_core_nanos = native_nanos;
+                active_submit_nanos = submit_nanos;
+            }
         }
         if (tuning_panel_enabled && tuning_panel.surface.has_value()) {
+            const auto native_started = std::chrono::steady_clock::now();
             const strata_surface_frame_info info =
                 tuning_panel.surface->frame(frame_time);
-            had_draws = render_session(tuning_panel, info) || had_draws;
+            tuning_native_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - native_started
+            ).count();
+            had_draws = render_session(
+                tuning_panel,
+                info,
+                &tuning_submit_nanos,
+                performance_session == &tuning_panel ? &sample : nullptr
+            ) || had_draws;
+            if (performance_session == &tuning_panel) {
+                active_core_nanos = tuning_native_nanos;
+                active_submit_nanos = tuning_submit_nanos;
+            }
         }
         if (settings_enabled && settings.surface.has_value()) {
+            const auto native_started = std::chrono::steady_clock::now();
             const strata_surface_frame_info info = settings.surface->frame(frame_time);
-            had_draws = render_session(settings, info) || had_draws;
+            const std::int64_t native_nanos =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - native_started
+                ).count();
+            std::int64_t submit_nanos = 0;
+            had_draws = render_session(
+                settings,
+                info,
+                performance_session == &settings ? &submit_nanos : nullptr,
+                performance_session == &settings ? &sample : nullptr
+            ) || had_draws;
+            if (performance_session == &settings) {
+                active_core_nanos = native_nanos;
+                active_submit_nanos = submit_nanos;
+            }
         }
         if (debug_enabled && debug.surface.has_value()) {
-            const auto tooling_started = std::chrono::steady_clock::now();
+            const auto native_started = std::chrono::steady_clock::now();
             const strata_surface_frame_info info = debug.surface->frame(frame_time);
-            had_draws = render_session(debug, info) || had_draws;
-            tooling_nanos += std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - tooling_started
+            debug_native_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - native_started
             ).count();
+            had_draws = render_session(
+                debug,
+                info,
+                &debug_submit_nanos,
+                performance_session == &debug ? &sample : nullptr
+            ) || had_draws;
+            if (performance_session == &debug) {
+                active_core_nanos = debug_native_nanos;
+                active_submit_nanos = debug_submit_nanos;
+            }
+            tooling_nanos += debug_native_nanos + debug_submit_nanos;
         }
         if (hub_enabled && hub.surface.has_value()) {
+            const auto native_started = std::chrono::steady_clock::now();
             const strata_surface_frame_info info = hub.surface->frame(frame_time);
-            had_draws = render_session(hub, info) || had_draws;
+            const std::int64_t native_nanos =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - native_started
+                ).count();
+            std::int64_t submit_nanos = 0;
+            had_draws = render_session(
+                hub,
+                info,
+                performance_session == &hub ? &submit_nanos : nullptr,
+                performance_session == &hub ? &sample : nullptr
+            ) || had_draws;
+            if (performance_session == &hub) {
+                active_core_nanos = native_nanos;
+                active_submit_nanos = submit_nanos;
+            }
         }
         if (performance_hud_enabled && performance_hud.surface.has_value()) {
-            const auto tooling_started = std::chrono::steady_clock::now();
+            const auto native_started = std::chrono::steady_clock::now();
             const strata_surface_frame_info info = performance_hud.surface->frame(frame_time);
-            had_draws = render_session(performance_hud, info) || had_draws;
-            tooling_nanos += std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - tooling_started
-            ).count();
+            performance_native_nanos =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - native_started
+                ).count();
+            had_draws = render_session(
+                performance_hud,
+                info,
+                &performance_submit_nanos
+            ) || had_draws;
+            tooling_nanos += performance_native_nanos + performance_submit_nanos;
         }
         const auto present_started = std::chrono::steady_clock::now();
         const bool presented = renderer.end_frame();
@@ -2013,8 +2195,15 @@ struct Host::Impl final {
         while (frame_history.size() > 48U) frame_history.pop_front();
         showcase_core_timings.add(showcase_native_nanos);
         showcase_submit_timings.add(showcase_submit_nanos);
+        tuning_core_timings.add(tuning_native_nanos);
+        tuning_submit_timings.add(tuning_submit_nanos);
         tooling_timings.add(tooling_nanos);
         present_timings.add(present_nanos);
+        tooling_update_timings.add(tooling_update_nanos);
+        debug_core_timings.add(debug_native_nanos);
+        debug_submit_timings.add(debug_submit_nanos);
+        performance_core_timings.add(performance_native_nanos);
+        performance_submit_timings.add(performance_submit_nanos);
         if (profile_sampling_enabled && frame_time >= next_profile_capture) {
             capture_profile_snapshot();
             next_profile_capture = frame_time + 100'000'000;
@@ -2022,7 +2211,7 @@ struct Host::Impl final {
         record_frame_sample(
             now(),
             total_nanos,
-            showcase_native_nanos
+            active_core_nanos
         );
         if (rendered_frames == 0U && !showcase_enabled && debug.surface.has_value()) {
             const std::string canonical_frame = debug.surface->frame_json();
@@ -2030,8 +2219,8 @@ struct Host::Impl final {
             first_frame_contains_instance = true;
         }
         sample.total_nanos = total_nanos;
-        sample.core_nanos = showcase_native_nanos;
-        sample.submit_nanos = showcase_submit_nanos;
+        sample.core_nanos = active_core_nanos;
+        sample.submit_nanos = active_submit_nanos;
         sample.tooling_nanos = tooling_nanos;
         sample.present_nanos = present_nanos;
         sample.had_draws = had_draws;
@@ -2061,8 +2250,16 @@ struct Host::Impl final {
     TimingWindow host_total_timings;
     TimingWindow showcase_core_timings;
     TimingWindow showcase_submit_timings;
+    TimingWindow tuning_core_timings;
+    TimingWindow tuning_submit_timings;
     TimingWindow tooling_timings;
     TimingWindow present_timings;
+    TimingWindow tooling_update_timings;
+    TimingWindow debug_core_timings;
+    TimingWindow debug_submit_timings;
+    TimingWindow performance_core_timings;
+    TimingWindow performance_submit_timings;
+    TimingWindow overlay_setup_timings;
     DesktopFrameSample last_performance_sample;
     std::optional<strata_input_event> pending_pointer_move;
     contracts::debug_overlay::StrataDebugSelectModeActionMode debug_mode =
@@ -2261,10 +2458,13 @@ DesktopHostInfo Host::performance_info() const {
 }
 
 std::string Host::performance_frame_json() {
-    if (!impl_->showcase.surface.has_value()) {
-        throw std::logic_error("desktop performance selectors require an open showcase");
+    Impl::Session* const session = impl_->active_performance_session();
+    if (session == nullptr || !session->surface.has_value()) {
+        throw std::logic_error(
+            "desktop performance selectors require an open interactive surface"
+        );
     }
-    return impl_->showcase.surface->frame_json();
+    return session->surface->frame_json();
 }
 
 bool Host::smoke_ready() const noexcept {
@@ -2284,8 +2484,16 @@ void Host::reset_profile() {
     impl_->host_total_timings.samples.clear();
     impl_->showcase_core_timings.samples.clear();
     impl_->showcase_submit_timings.samples.clear();
+    impl_->tuning_core_timings.samples.clear();
+    impl_->tuning_submit_timings.samples.clear();
     impl_->tooling_timings.samples.clear();
     impl_->present_timings.samples.clear();
+    impl_->tooling_update_timings.samples.clear();
+    impl_->debug_core_timings.samples.clear();
+    impl_->debug_submit_timings.samples.clear();
+    impl_->performance_core_timings.samples.clear();
+    impl_->performance_submit_timings.samples.clear();
+    impl_->overlay_setup_timings.samples.clear();
     impl_->next_profile_capture = 0;
 }
 

@@ -492,7 +492,32 @@ Surface::Surface(
         status_feedback_,
         notifications_,
         [this](const runtime::Action& action) { return execute_environment_action(action); },
-        [this] { invalidate_description(); },
+        [this](const RetainedNode* const node, const std::string_view name) {
+            bool inside_lazy_materialization = false;
+            for (const RetainedNode* current = node;
+                 current != nullptr;
+                 current = current->parent()) {
+                if (current->description().materialization_result != nullptr) {
+                    inside_lazy_materialization = true;
+                    break;
+                }
+            }
+            const bool native_slider_value =
+                node != nullptr && node->description().type == "Slider" &&
+                name == "$value" &&
+                !node->description().properties.contains("presentationTemplate") &&
+                !inside_lazy_materialization;
+            if (node == nullptr ||
+                descriptions_.observes_retained_value(
+                    *node,
+                    name,
+                    !native_slider_value
+                )) {
+                invalidate_description();
+            } else {
+                invalidate_frame();
+            }
+        },
         [this](const RetainedNode& node, const LayoutRecord& layout) {
             return widget_hit_bounds(*this, node, layout);
         },
@@ -1479,6 +1504,12 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
                 environment,
                 &motion_,
                 false
+            );
+            profiler_.record_external_timing("measure", result->measure_nanos);
+            profiler_.record_external_timing("arrange", result->arrange_nanos);
+            profiler_.record_external_timing(
+                "maintenance",
+                result->maintenance_nanos
             );
         }
         {

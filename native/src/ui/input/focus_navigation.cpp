@@ -258,7 +258,7 @@ bool InputRouter::dismiss_topmost(InputOperationResult& result) {
             ) || changed;
         }
     }
-    if (changed && description_invalidator_) description_invalidator_();
+    if (changed && description_invalidator_) description_invalidator_(nullptr, {});
     if (node->description().type == "CommandPalette") {
         static_cast<void>(tree_->set_retained_value(
             node->identity(), "$paletteActive", runtime::Value(0.0), DirtyReason::input

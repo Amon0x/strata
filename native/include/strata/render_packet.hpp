@@ -20,6 +20,7 @@ inline constexpr std::uint32_t resource_upload = 1U;
 inline constexpr std::uint32_t resource_release = 2U;
 inline constexpr std::uint32_t resource_encoded_image = 3U;
 inline constexpr std::uint32_t packet_flag_geometry_payload = 1U;
+inline constexpr std::uint32_t packet_flag_geometry_patches = 2U;
 inline constexpr double default_effect_refresh_rate = 240.0;
 
 inline constexpr std::uint32_t texture_format_r8 = 0U;
@@ -70,6 +71,7 @@ struct DrawBatch final {
     std::uint32_t first_index = 0U;
     std::uint32_t index_count = 0U;
     std::vector<RoundedClip> rounded_clips;
+    [[nodiscard]] friend bool operator==(const DrawBatch&, const DrawBatch&) = default;
 };
 
 struct BlurBatch final {
@@ -82,6 +84,7 @@ struct BlurBatch final {
     double radius = 0.0;
     std::uint32_t downsample = 1U;
     std::vector<RoundedClip> rounded_clips;
+    [[nodiscard]] friend bool operator==(const BlurBatch&, const BlurBatch&) = default;
 };
 
 enum class EffectBatchKind : std::uint32_t {
@@ -112,9 +115,26 @@ struct ContentEffectEndBatch final {
     std::uint32_t source_order = 0U;
     Scissor scissor;
     std::vector<RoundedClip> rounded_clips;
+    [[nodiscard]] friend bool operator==(
+        const ContentEffectEndBatch&,
+        const ContentEffectEndBatch&
+    ) = default;
 };
 
 using SubmissionBatch = std::variant<DrawBatch, BlurBatch, EffectBatch, ContentEffectEndBatch>;
+
+struct GeometryPatch final {
+    std::uint32_t offset = 0U;
+    std::vector<std::uint8_t> bytes;
+};
+
+/** Logical bounds touched by one or more retained vertex patches, including old positions. */
+struct GeometryDirtyRegion final {
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+};
 
 /** Backend-ready render plan. Geometry is retained when a packet repeats its geometry epoch. */
 struct RenderPacket final {
@@ -126,6 +146,12 @@ struct RenderPacket final {
     std::vector<std::uint8_t> vertices;
     std::vector<std::uint32_t> indices;
     std::vector<SubmissionBatch> batches;
+    /** True only when this decoded frame supplied complete geometry rather than retained patches. */
+    bool full_geometry_payload = false;
+    std::vector<GeometryPatch> vertex_patches;
+    std::vector<GeometryPatch> index_patches;
+    bool geometry_dirty_all = false;
+    std::vector<GeometryDirtyRegion> geometry_dirty_regions;
 };
 
 /**

@@ -120,10 +120,23 @@ Desktop performance scenarios are JSON documents independent of headless scenari
 }
 ```
 
-Supported steps are `frames`, `click`, `move`, `scroll`, and `key`. Pointer targets use the same
-joined semantic/inspection selector model as the headless browser: coordinates, `key`, `path`, or
-`role`/`name`. Selector resolution occurs outside the measured desktop frame because real user
-pointer targeting does not serialize frame JSON.
+Supported steps are `frames`, `click`, `move`, `drag`, `scroll`, and `key`. Pointer targets use the
+same joined semantic/inspection selector model as the headless browser: coordinates, `key`, `path`,
+or `role`/`name`. A drag resolves the selected element's bounds and alternates pointer moves between
+two fractions, providing a sustained worst-case control-update workload:
+
+```json
+{"drag": {
+  "key": "volume",
+  "fromFraction": 0.1,
+  "toFraction": 0.9,
+  "moves": 120
+}}
+```
+
+The fractions default to `0.1` and `0.9`; `moves` defaults to one. Selector resolution occurs
+outside the measured desktop frame because real user pointer targeting does not serialize frame
+JSON.
 
 Run a custom scenario directly:
 

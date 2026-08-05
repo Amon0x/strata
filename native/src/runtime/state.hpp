@@ -82,6 +82,8 @@ public:
     [[nodiscard]] bool write(const StateAddress& address, const StateSlot& slot, Value value);
     [[nodiscard]] bool reset(const StateAddress& address);
     [[nodiscard]] const Value* find(const StateAddress& address) const noexcept;
+    /** Initial value evaluated in the live lexical component instance that owns this address. */
+    [[nodiscard]] const Value* initial(const StateAddress& address) const noexcept;
     [[nodiscard]] StateSnapshot snapshot() const;
     [[nodiscard]] bool restore(const StateSnapshot& snapshot);
     /** Drops only declaration-owned values removed or made type-incompatible by activation. */
@@ -108,6 +110,7 @@ private:
     static void validate_slot(const StateSlot& slot);
 
     std::map<StateAddress, Stored> values_;
+    std::map<StateAddress, Value> initial_values_;
     StateScopeSet owned_scopes_;
     StateScopeSet declaration_scopes_;
     Invalidation invalidation_;

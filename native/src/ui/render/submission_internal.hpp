@@ -110,14 +110,30 @@ struct EncodedDrawCacheEntry final {
     std::vector<std::uint32_t> indices;
 };
 
+struct EncodedDrawPlacement final {
+    std::size_t vertex_byte_offset = 0U;
+    std::size_t index_offset = 0U;
+    std::uint32_t batch_local_vertex = 0U;
+    std::size_t vertex_byte_count = 0U;
+    std::size_t index_count = 0U;
+    std::size_t vertex_byte_capacity = 0U;
+    std::size_t index_capacity = 0U;
+    [[nodiscard]] friend bool operator==(
+        const EncodedDrawPlacement&,
+        const EncodedDrawPlacement&
+    ) = default;
+};
+
 struct PreparationCache final {
     std::vector<std::optional<PreparedTextCacheEntry>> text;
     std::vector<std::optional<EncodedDrawCacheEntry>> geometry;
+    std::vector<std::optional<EncodedDrawPlacement>> placements;
     std::optional<RenderSubmissionEnvironment> geometry_environment;
     std::vector<resource::TextureResourceDescriptor> geometry_textures;
     void clear() noexcept {
         text.clear();
         geometry.clear();
+        placements.clear();
         geometry_environment.reset();
         geometry_textures.clear();
     }
@@ -134,6 +150,20 @@ struct PreparationCache final {
     double logical_height,
     std::span<const resource::TextureResourceDescriptor> textures,
     PreparationCache& cache
+);
+
+void update_cached(
+    const RenderCommandBuffer& commands,
+    font::GlyphAtlas& glyph_atlas,
+    const TextEngine* text_engine,
+    double display_scale,
+    std::int64_t framebuffer_width,
+    std::int64_t framebuffer_height,
+    double logical_width,
+    double logical_height,
+    std::span<const resource::TextureResourceDescriptor> textures,
+    PreparationCache& cache,
+    RenderSubmission& output
 );
 
 [[nodiscard]] std::vector<PlannedItem> plan(

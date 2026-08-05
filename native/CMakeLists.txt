@@ -1012,7 +1012,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     add_test(NAME strata.resource.host.residual COMMAND strata_resource_host_residual_tests)
 
     add_executable(strata_ui_tests tests/ui_tests.cpp)
-    target_link_libraries(strata_ui_tests PRIVATE Strata::core)
+    target_link_libraries(strata_ui_tests PRIVATE Strata::core Strata::render_host)
     target_include_directories(strata_ui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     strata_target_defaults(strata_ui_tests)
     add_test(

@@ -246,111 +246,18 @@ style RowTrack extends Clear {
 style TuneSlider {
   width: { weight: 1 };
   height: 34;
-}
-style MaterialSliderRoot extends Clear {
-  kind: "PANEL";
-  width: { weight: 1 };
-  height: 34;
-  clip: false;
-}
-style MaterialSliderTrack extends Clear {
-  kind: "PANEL";
-  width: { weight: 1 };
-  height: 34;
-  alignItems: "CENTER";
-  translateY: 6;
-}
-style MaterialSliderActive {
-  kind: "PANEL";
-  height: 12;
-  radius: 999;
-  background: #8FCFEAFF;
-  border: { width: 1, color: #E3F6FF52 };
-  animateChanges: {
-    properties: ["width", "background", "border"];
-    policy: "fast";
-  };
-}
-style MaterialSliderActiveHot extends MaterialSliderActive {
-  background: #A8DEF2FF;
-  border: { width: 1, color: #F4FCFF72 };
-}
-style MaterialSliderInactive {
-  kind: "PANEL";
-  height: 12;
-  padding: { right: 4 };
-  radius: 999;
-  alignItems: "END";
-  justifyContent: "CENTER";
-  clip: true;
-  background: #C7D7E43D;
-  border: { width: 1, color: #E2EDF52E };
-  animateChanges: {
-    properties: ["width", "placementX"];
-    policy: "fast";
-  };
-}
-style MaterialSliderEndDot {
-  width: 4;
-  height: 4;
-  radius: 999;
-  background: #203044D0;
-  border: null;
-}
-style MaterialSliderThumb {
-  width: 4;
-  height: 28;
-  radius: 999;
-  scale: 1;
-  translateY: 0;
-  zIndex: 2;
-  background: #EAF6FDFF;
-  border: { width: 1, color: #FFFFFFA8 };
-  shadows: [{ color: #07111C52, radius: 4, spread: 1, offsetY: 1 }];
-  animateChanges: {
-    properties: ["placementX", "scale", "translateY", "background", "border"];
-    policy: "fast";
-  };
-}
-style MaterialSliderThumbHover extends MaterialSliderThumb {
-  scale: 1.07;
-  background: #F5FBFFFF;
-  border: { width: 1, color: #FFFFFFFF };
-}
-style MaterialSliderThumbPressed extends MaterialSliderThumbHover {
-  scale: 1.16;
-  translateY: -1;
-  shadows: [{ color: #02081182, radius: 8, spread: 2, offsetY: 3 }];
-}
-style MaterialSliderLabel {
-  kind: "PANEL";
-  width: "content";
-  height: 18;
-  padding: { horizontal: 7, vertical: 3 };
-  radius: 6;
-  alignItems: "CENTER";
-  justifyContent: "CENTER";
-  opacity: 0;
-  scale: 0.92;
-  translateY: 2;
-  zIndex: 3;
-  background: #111D29F5;
-  border: { width: 1, color: #C9E9F866 };
-  shadows: [{ color: #02081180, radius: 7, spread: 1, offsetY: 3 }];
-  animateChanges: {
-    properties: ["placementX", "opacity", "scale", "translateY"];
-    policy: "fast";
-  };
-}
-style MaterialSliderLabelVisible extends MaterialSliderLabel {
-  opacity: 1;
-  scale: 1;
-  translateY: -4;
-}
-style MaterialSliderLabelText {
+  indicatorInset: 8;
+  trackHeight: 8;
+  trackRadius: 2;
+  thumbRadius: 999;
+  track: #EDE7F52D;
+  fill: #C7A7FFFF;
+  thumb: #FAF7FFFF;
   font: "strata:fonts/mono";
-  pixelSize: 10;
-  color: #E8F5FCFF;
+  pixelSize: 9;
+  color: #FBF8FFFF;
+  hoverOverlay: null;
+  activeOverlay: null;
 }
 
 style CheckRow extends Clear {
@@ -643,69 +550,6 @@ component SwitchRow(id: key, label: string, detail: string, on: boolean) {
   )
 }
 
-component TuneSliderPresentation(
-  key: key,
-  valueLabel: string,
-  control: sliderState
-) {
-  Panel(key: key, style: MaterialSliderRoot) {
-    Panel(style: MaterialSliderTrack) {
-      Panel(
-        style: style(
-          MaterialSliderActive,
-          whenStyle(control.hovered || control.pressed, MaterialSliderActiveHot)
-        ),
-        layout: {
-          width: { fraction: control.fraction },
-          placement: { x: 0 }
-        }
-      )
-      Panel(
-        style: MaterialSliderInactive,
-        layout: {
-          width: { fraction: 1 - control.fraction },
-          placement: { x: { fraction: control.fraction } }
-        }
-      ) {
-        Panel(style: MaterialSliderEndDot)
-      }
-      Panel(
-        style: style(
-          MaterialSliderThumb,
-          whenStyle(
-            control.hovered || control.focusVisible,
-            MaterialSliderThumbHover
-          ),
-          whenStyle(control.pressed, MaterialSliderThumbPressed)
-        ),
-        layout: {
-          placement: {
-            x: { fraction: control.fraction },
-            anchorX: 0.5
-          }
-        }
-      )
-    }
-    Panel(
-      style: style(
-        MaterialSliderLabel,
-        whenStyle(
-          control.hovered || control.pressed || control.focusVisible,
-          MaterialSliderLabelVisible
-        )
-      ),
-      layout: {
-        placement: {
-          x: { fraction: control.fraction },
-          anchorX: 0.5
-        }
-      }
-    ) {
-      Text(text: valueLabel, style: MaterialSliderLabelText)
-    }
-  }
-}
-
 component SliderRow(
   id: key,
   label: string,
@@ -713,9 +557,8 @@ component SliderRow(
   minimum: number,
   maximum: number,
   increment: number,
-  current: number,
-  readout: string,
-  change: action
+  initial: number,
+  suffix: string
 ) {
   Panel(style: TuneRow) {
     Panel(style: RowCopy) {
@@ -728,10 +571,11 @@ component SliderRow(
         min: minimum,
         max: maximum,
         step: increment,
-        value: current,
-        onChange: change,
-        style: TuneSlider,
-        presentationTemplate: TuneSliderPresentation(valueLabel: readout)
+        defaultValue: initial,
+        variant: "rail",
+        showValue: true,
+        valueSuffix: suffix,
+        style: TuneSlider
       )
     }
   }
@@ -808,11 +652,6 @@ component ModuleHeader(name: string, tag: string) {
 }
 
 component SurfacePage() {
-  state blurRadius = 12;
-  state transparency = 90;
-  state contrast = 93;
-  state luminosity = 102;
-
   Grid(columns: [{ weight: 1 }, { weight: 1 }], style: ModuleGrid) {
     Panel(style: ModuleCard) {
       ModuleHeader(name: "Backdrop filter", tag: "BLUR")
@@ -823,9 +662,8 @@ component SurfacePage() {
         label: "Blur radius",
         detail: "logical px",
         minimum: 0, maximum: 32, increment: 1,
-        current: blurRadius,
-        readout: format("{0}", blurRadius),
-        change: action("state.setFromEvent", name: "blurRadius")
+        initial: 12,
+        suffix: ""
       )
       ChoiceRow(
         id: "tune.filter.downsample",
@@ -847,27 +685,24 @@ component SurfacePage() {
         label: "Transparency",
         detail: "band knee",
         minimum: 0, maximum: 100, increment: 1,
-        current: transparency,
-        readout: format("{0}%", transparency),
-        change: action("state.setFromEvent", name: "transparency")
+        initial: 90,
+        suffix: "%"
       )
       SliderRow(
         id: "tune.body.contrast",
         label: "Contrast",
         detail: "local detail",
         minimum: 40, maximum: 130, increment: 1,
-        current: contrast,
-        readout: format("{0}%", contrast),
-        change: action("state.setFromEvent", name: "contrast")
+        initial: 93,
+        suffix: "%"
       )
       SliderRow(
         id: "tune.body.luminosity",
         label: "Luminosity",
         detail: "output gain",
         minimum: 60, maximum: 140, increment: 1,
-        current: luminosity,
-        readout: format("{0}%", luminosity),
-        change: action("state.setFromEvent", name: "luminosity")
+        initial: 102,
+        suffix: "%"
       )
     }
 
@@ -899,10 +734,6 @@ component SurfacePage() {
 }
 
 component LensPage() {
-  state refraction = 95;
-  state thickness = 85;
-  state dispersion = 35;
-
   Grid(columns: [{ weight: 1 }, { weight: 1 }], style: ModuleGrid) {
     Panel(style: ModuleCard) {
       ModuleHeader(name: "Edge lens", tag: "BEVEL")
@@ -913,18 +744,16 @@ component LensPage() {
         label: "Refraction",
         detail: "displacement",
         minimum: 0, maximum: 200, increment: 5,
-        current: refraction,
-        readout: format("{0}%", refraction),
-        change: action("state.setFromEvent", name: "refraction")
+        initial: 95,
+        suffix: "%"
       )
       SliderRow(
         id: "tune.lens.thickness",
         label: "Thickness",
         detail: "bevel width",
         minimum: 20, maximum: 200, increment: 5,
-        current: thickness,
-        readout: format("{0}%", thickness),
-        change: action("state.setFromEvent", name: "thickness")
+        initial: 85,
+        suffix: "%"
       )
     }
 
@@ -937,9 +766,8 @@ component LensPage() {
         label: "Amount",
         detail: "blend weight",
         minimum: 0, maximum: 100, increment: 5,
-        current: dispersion,
-        readout: format("{0}%", dispersion),
-        change: action("state.setFromEvent", name: "dispersion")
+        initial: 35,
+        suffix: "%"
       )
       SwitchRow(id: "tune.disp.bound", label: "Bound at hard edges", detail: "Prevent fringing into a stripe", on: true)
     }
@@ -970,10 +798,6 @@ component LensPage() {
 }
 
 component RimPage() {
-  state metallic = 76;
-  state edgeContrast = 100;
-  state highlight = 82;
-
   Grid(columns: [{ weight: 1 }, { weight: 1 }], style: ModuleGrid) {
     Panel(style: ModuleCard) {
       ModuleHeader(name: "Metal rim", tag: "CONDUCTOR")
@@ -984,18 +808,16 @@ component RimPage() {
         label: "Metallic",
         detail: "band energy",
         minimum: 0, maximum: 100, increment: 1,
-        current: metallic,
-        readout: format("{0}%", metallic),
-        change: action("state.setFromEvent", name: "metallic")
+        initial: 76,
+        suffix: "%"
       )
       SliderRow(
         id: "tune.rim.edge",
         label: "Edge contrast",
         detail: "overall gain",
         minimum: 0, maximum: 150, increment: 1,
-        current: edgeContrast,
-        readout: format("{0}%", edgeContrast),
-        change: action("state.setFromEvent", name: "edgeContrast")
+        initial: 100,
+        suffix: "%"
       )
     }
 
@@ -1007,9 +829,8 @@ component RimPage() {
         label: "Highlight",
         detail: "lobe strength",
         minimum: 0, maximum: 120, increment: 1,
-        current: highlight,
-        readout: format("{0}%", highlight),
-        change: action("state.setFromEvent", name: "highlight")
+        initial: 82,
+        suffix: "%"
       )
       SwitchRow(id: "tune.spec.tinted", label: "Tinted specular", detail: "Keep hue instead of driving to white", on: true)
       SwitchRow(id: "tune.spec.ceiling", label: "Adaptive ceiling", detail: "Scale the peak with available light", on: true)
@@ -1041,9 +862,6 @@ component RimPage() {
 }
 
 component GlossPage() {
-  state sheen = 11;
-  state sheenWidth = 20;
-
   Grid(columns: [{ weight: 1 }, { weight: 1 }], style: ModuleGrid) {
     Panel(style: ModuleCard) {
       ModuleHeader(name: "Grazing sheen", tag: "FRESNEL")
@@ -1054,18 +872,16 @@ component GlossPage() {
         label: "Amount",
         detail: "peak lift",
         minimum: 0, maximum: 40, increment: 1,
-        current: sheen,
-        readout: format("{0}%", sheen),
-        change: action("state.setFromEvent", name: "sheen")
+        initial: 11,
+        suffix: "%"
       )
       SliderRow(
         id: "tune.gloss.width",
         label: "Band width",
         detail: "of min extent",
         minimum: 5, maximum: 50, increment: 1,
-        current: sheenWidth,
-        readout: format("{0}%", sheenWidth),
-        change: action("state.setFromEvent", name: "sheenWidth")
+        initial: 20,
+        suffix: "%"
       )
     }
 

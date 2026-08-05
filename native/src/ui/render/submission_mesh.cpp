@@ -576,6 +576,44 @@ void translate_vertex_positions(
     }
 }
 
+[[nodiscard]] std::size_t retained_vertex_capacity(const std::size_t required_bytes) {
+    if (required_bytes == 0U) return 0U;
+    if (required_bytes % vertex_bytes != 0U) {
+        throw std::logic_error("encoded draw vertices are not stride-aligned");
+    }
+    const std::size_t required_vertices = required_bytes / vertex_bytes;
+    std::size_t capacity = 1U;
+    while (capacity < required_vertices) {
+        if (capacity > std::numeric_limits<std::size_t>::max() / 2U) {
+            throw std::length_error("retained vertex slot exceeds size_t");
+        }
+        capacity *= 2U;
+    }
+    if (capacity > std::numeric_limits<std::size_t>::max() / vertex_bytes) {
+        throw std::length_error("retained vertex slot exceeds size_t");
+    }
+    return capacity * vertex_bytes;
+}
+
+[[nodiscard]] std::size_t retained_index_capacity(const std::size_t required_indices) {
+    if (required_indices == 0U) return 0U;
+    if (required_indices % 3U != 0U) {
+        throw std::logic_error("encoded draw indices are not triangle-aligned");
+    }
+    const std::size_t required_triangles = required_indices / 3U;
+    std::size_t capacity = 1U;
+    while (capacity < required_triangles) {
+        if (capacity > std::numeric_limits<std::size_t>::max() / 2U) {
+            throw std::length_error("retained index slot exceeds size_t");
+        }
+        capacity *= 2U;
+    }
+    if (capacity > std::numeric_limits<std::size_t>::max() / 3U) {
+        throw std::length_error("retained index slot exceeds size_t");
+    }
+    return capacity * 3U;
+}
+
 } // namespace
 
 void encode(
@@ -584,29 +622,24 @@ void encode(
     RenderSubmission& output,
     PreparationCache& cache
 ) {
+    bool topology_reused =
+        cache.geometry.size() == items.size() &&
+        cache.placements.size() == items.size();
     cache.geometry.resize(items.size());
-    std::size_t retained_vertex_bytes = 0U;
-    std::size_t retained_indices = 0U;
-    for (const std::optional<EncodedDrawCacheEntry>& entry : cache.geometry) {
-        if (!entry.has_value()) continue;
-        if (entry->vertex_bytes.size() > std::numeric_limits<std::size_t>::max() -
-                retained_vertex_bytes ||
-            entry->indices.size() > std::numeric_limits<std::size_t>::max() -
-                retained_indices) {
-            throw std::length_error("retained render submission geometry exceeds size_t");
-        }
-        retained_vertex_bytes += entry->vertex_bytes.size();
-        retained_indices += entry->indices.size();
-    }
-    output.vertex_bytes.reserve(retained_vertex_bytes);
-    output.indices.reserve(retained_indices);
+    std::vector<std::optional<EncodedDrawCacheEntry>> geometry_updates(items.size());
+    std::vector<std::optional<EncodedDrawPlacement>> next_placements(items.size());
+    std::vector<bool> changed(items.size(), false);
+    std::vector<SubmissionBatch> next_batches;
+    next_batches.reserve(output.batches.capacity());
+    std::size_t vertex_byte_count = 0U;
+    std::size_t index_count = 0U;
     std::optional<BatchKey> open_key;
     std::size_t open_batch_index = 0U;
     std::uint32_t batch_base_vertex = 0U;
     const auto close_batch = [&]() {
         if (!open_key.has_value()) return;
-        SubmissionBatch& batch = output.batches[open_batch_index];
-        const std::size_t count = output.indices.size() - batch.first_index;
+        SubmissionBatch& batch = next_batches[open_batch_index];
+        const std::size_t count = index_count - batch.first_index;
         if (count > std::numeric_limits<std::uint32_t>::max()) {
             throw std::length_error("render submission batch index count exceeds uint32");
         }
@@ -617,10 +650,13 @@ void encode(
     for (std::size_t item_index = 0U; item_index < items.size(); ++item_index) {
         const PlannedItem& item = items[item_index];
         if (const auto* effect = std::get_if<SubmissionBatch>(&item.value); effect != nullptr) {
-            cache.geometry[item_index].reset();
+            if (cache.geometry[item_index].has_value() ||
+                (topology_reused && cache.placements[item_index].has_value())) {
+                topology_reused = false;
+            }
             if (open_key.has_value()) ++output.effect_batch_breaks;
             close_batch();
-            output.batches.push_back(*effect);
+            next_batches.push_back(*effect);
             continue;
         }
         const PreparedDraw& draw = std::get<PreparedDraw>(item.value);
@@ -641,50 +677,60 @@ void encode(
                 }
             }
             close_batch();
-            const std::size_t vertex_count = output.vertex_bytes.size() / vertex_bytes;
+            const std::size_t vertex_count = vertex_byte_count / vertex_bytes;
             if (vertex_count > std::numeric_limits<std::uint32_t>::max() ||
-                output.indices.size() > std::numeric_limits<std::uint32_t>::max()) {
+                index_count > std::numeric_limits<std::uint32_t>::max()) {
                 throw std::length_error("render submission geometry exceeds uint32");
             }
             batch_base_vertex = static_cast<std::uint32_t>(vertex_count);
-            output.batches.push_back(SubmissionBatch{
+            next_batches.push_back(SubmissionBatch{
                 SubmissionBatchKind::draw,
                 next.material,
                 next.blend_mode,
                 next.texture,
                 next.scissor,
                 batch_base_vertex,
-                static_cast<std::uint32_t>(output.indices.size()),
+                static_cast<std::uint32_t>(index_count),
                 0U,
                 draw.source_order,
                 {}, 0.0, 1U,
                 {}, std::nullopt,
                 next.rounded_clips,
             });
-            open_batch_index = output.batches.size() - 1U;
+            open_batch_index = next_batches.size() - 1U;
             open_key = std::move(next);
         } else if (!open_key->texture_sampled && next.texture_sampled) {
             open_key->texture_sampled = true;
             open_key->texture = next.texture;
-            output.batches[open_batch_index].texture = next.texture;
+            next_batches[open_batch_index].texture = next.texture;
         }
         std::optional<EncodedDrawCacheEntry>& retained = cache.geometry[item_index];
-        std::optional<Point> translated;
         if (!retained.has_value() || retained->source != draw) {
+            changed[item_index] = true;
+            std::optional<Point> translated;
             if (retained.has_value()) {
                 translated = translation_from_cached_geometry(retained->source, draw, context);
             }
-            if (!translated.has_value()) {
+            if (translated.has_value()) {
+                EncodedDrawCacheEntry updated = *retained;
+                updated.source = draw;
+                translate_vertex_positions(updated.vertex_bytes, 0U, *translated);
+                geometry_updates[item_index] = std::move(updated);
+            } else {
                 RenderSubmission fragment;
                 geometry(fragment, draw, 0U, context);
-                retained = EncodedDrawCacheEntry{
+                geometry_updates[item_index] = EncodedDrawCacheEntry{
                     draw,
                     std::move(fragment.vertex_bytes),
                     std::move(fragment.indices),
                 };
             }
         }
-        const std::size_t global_vertex_count = output.vertex_bytes.size() / vertex_bytes;
+        const EncodedDrawCacheEntry& geometry =
+            geometry_updates[item_index].has_value()
+                ? *geometry_updates[item_index]
+                : *retained;
+        const std::size_t global_vertex_count = vertex_byte_count / vertex_bytes;
         if (global_vertex_count < batch_base_vertex ||
             global_vertex_count - batch_base_vertex > std::numeric_limits<std::uint32_t>::max()) {
             throw std::length_error("render submission batch-local vertex offset exceeds uint32");
@@ -692,31 +738,238 @@ void encode(
         const std::uint32_t batch_local_offset = static_cast<std::uint32_t>(
             global_vertex_count - batch_base_vertex
         );
-        const std::size_t vertex_begin = output.vertex_bytes.size();
-        output.vertex_bytes.insert(
-            output.vertex_bytes.end(),
-            retained->vertex_bytes.begin(),
-            retained->vertex_bytes.end()
-        );
-        if (translated.has_value()) {
-            translate_vertex_positions(output.vertex_bytes, vertex_begin, *translated);
+        const EncodedDrawPlacement* const previous_placement =
+            item_index < cache.placements.size() &&
+                    cache.placements[item_index].has_value()
+                ? &*cache.placements[item_index]
+                : nullptr;
+        // Text is the ordinary topology-changing retained primitive (for example "9" -> "10"
+        // while dragging a slider). Give only text a bounded geometric slot; fixed primitives
+        // retain exact public geometry counts and do not pay padding for capacity they cannot use.
+        const bool elastic_slot =
+            std::holds_alternative<PreparedTextPtr>(draw.command);
+        const std::size_t vertex_capacity =
+            previous_placement != nullptr &&
+                    geometry.vertex_bytes.size() <=
+                        previous_placement->vertex_byte_capacity
+                ? previous_placement->vertex_byte_capacity
+                : elastic_slot
+                    ? retained_vertex_capacity(geometry.vertex_bytes.size())
+                    : geometry.vertex_bytes.size();
+        const std::size_t index_capacity =
+            previous_placement != nullptr &&
+                    geometry.indices.size() <= previous_placement->index_capacity
+                ? previous_placement->index_capacity
+                : elastic_slot
+                    ? retained_index_capacity(geometry.indices.size())
+                    : geometry.indices.size();
+        const EncodedDrawPlacement placement{
+            vertex_byte_count,
+            index_count,
+            batch_local_offset,
+            geometry.vertex_bytes.size(),
+            geometry.indices.size(),
+            vertex_capacity,
+            index_capacity,
+        };
+        if (topology_reused &&
+            (previous_placement == nullptr ||
+             previous_placement->vertex_byte_offset != placement.vertex_byte_offset ||
+             previous_placement->index_offset != placement.index_offset ||
+             previous_placement->batch_local_vertex != placement.batch_local_vertex ||
+             previous_placement->vertex_byte_capacity !=
+                 placement.vertex_byte_capacity ||
+             previous_placement->index_capacity != placement.index_capacity)) {
+            topology_reused = false;
         }
-        output.indices.reserve(output.indices.size() + retained->indices.size());
-        for (const std::uint32_t index : retained->indices) {
-            if (index > std::numeric_limits<std::uint32_t>::max() - batch_local_offset) {
-                throw std::length_error("render submission cached index exceeds uint32");
-            }
-            output.indices.push_back(batch_local_offset + index);
+        next_placements[item_index] = placement;
+        if (vertex_capacity >
+                std::numeric_limits<std::size_t>::max() - vertex_byte_count ||
+            index_capacity >
+                std::numeric_limits<std::size_t>::max() - index_count) {
+            throw std::length_error("retained render submission geometry exceeds size_t");
         }
+        vertex_byte_count += vertex_capacity;
+        index_count += index_capacity;
         ++output.planned_draws;
     }
     close_batch();
-    output.batches.erase(
-        std::remove_if(output.batches.begin(), output.batches.end(), [](const SubmissionBatch& batch) {
+    next_batches.erase(
+        std::remove_if(next_batches.begin(), next_batches.end(), [](const SubmissionBatch& batch) {
             return batch.kind == SubmissionBatchKind::draw && batch.index_count == 0U;
         }),
-        output.batches.end()
+        next_batches.end()
     );
+    topology_reused = topology_reused &&
+        output.vertex_bytes.size() == vertex_byte_count &&
+        output.indices.size() == index_count;
+
+    const auto append_patch = [](
+                                  std::vector<SubmissionGeometryPatch>& patches,
+                                  const std::size_t offset,
+                                  const std::span<const std::uint8_t> bytes
+                              ) {
+        if (bytes.empty()) return;
+        if (offset > std::numeric_limits<std::uint32_t>::max() ||
+            bytes.size() > std::numeric_limits<std::uint32_t>::max()) {
+            throw std::length_error("retained geometry patch exceeds uint32");
+        }
+        if (!patches.empty() &&
+            static_cast<std::size_t>(patches.back().offset) +
+                    patches.back().bytes.size() == offset) {
+            patches.back().bytes.insert(
+                patches.back().bytes.end(),
+                bytes.begin(),
+                bytes.end()
+            );
+            return;
+        }
+        patches.push_back(SubmissionGeometryPatch{
+            static_cast<std::uint32_t>(offset),
+            std::vector<std::uint8_t>(bytes.begin(), bytes.end()),
+        });
+    };
+
+    const auto geometry_at = [&cache, &geometry_updates](
+                                 const std::size_t index
+                             ) -> const EncodedDrawCacheEntry& {
+        return geometry_updates[index].has_value()
+            ? *geometry_updates[index]
+            : *cache.geometry[index];
+    };
+    std::vector<SubmissionGeometryPatch> next_vertex_patches;
+    std::vector<SubmissionGeometryPatch> next_index_patches;
+    if (topology_reused) {
+        for (std::size_t item_index = 0U; item_index < items.size(); ++item_index) {
+            if (!changed[item_index] || !next_placements[item_index].has_value()) continue;
+            const EncodedDrawPlacement& placement = *next_placements[item_index];
+            const EncodedDrawCacheEntry& retained = geometry_at(item_index);
+            const std::uint8_t* const vertex_destination =
+                output.vertex_bytes.data() + placement.vertex_byte_offset;
+            if (placement.vertex_byte_count != 0U && std::memcmp(
+                    vertex_destination,
+                    retained.vertex_bytes.data(),
+                    placement.vertex_byte_count
+                ) != 0) {
+                append_patch(
+                    next_vertex_patches,
+                    placement.vertex_byte_offset,
+                    retained.vertex_bytes
+                );
+            }
+            std::vector<std::uint32_t> next_indices;
+            next_indices.assign(
+                placement.index_capacity,
+                placement.batch_local_vertex
+            );
+            for (std::size_t index = 0U; index < placement.index_count; ++index) {
+                const std::uint32_t local = retained.indices[index];
+                if (local > std::numeric_limits<std::uint32_t>::max() -
+                                placement.batch_local_vertex) {
+                    throw std::length_error("render submission cached index exceeds uint32");
+                }
+                const std::uint32_t next = placement.batch_local_vertex + local;
+                next_indices[index] = next;
+            }
+            if (!std::equal(
+                    next_indices.begin(),
+                    next_indices.end(),
+                    output.indices.begin() +
+                        static_cast<std::ptrdiff_t>(placement.index_offset)
+                )) {
+                const std::span<const std::uint32_t> indices(
+                    next_indices
+                );
+                const std::span<const std::byte> bytes = std::as_bytes(indices);
+                append_patch(
+                    next_index_patches,
+                    placement.index_offset * sizeof(std::uint32_t),
+                    std::span<const std::uint8_t>(
+                        reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                        bytes.size()
+                    )
+                );
+            }
+        }
+        std::size_t patch_bytes = 0U;
+        for (const SubmissionGeometryPatch& patch : next_vertex_patches) {
+            patch_bytes += patch.bytes.size() + 8U;
+        }
+        for (const SubmissionGeometryPatch& patch : next_index_patches) {
+            patch_bytes += patch.bytes.size() + 8U;
+        }
+        const std::size_t full_bytes =
+            output.vertex_bytes.size() + output.indices.size() * sizeof(std::uint32_t);
+        output.patch_from_previous = full_bytes == 0U || patch_bytes < full_bytes;
+        for (const SubmissionGeometryPatch& patch : next_vertex_patches) {
+            std::memcpy(
+                output.vertex_bytes.data() + patch.offset,
+                patch.bytes.data(),
+                patch.bytes.size()
+            );
+        }
+        std::uint8_t* const output_index_bytes =
+            reinterpret_cast<std::uint8_t*>(output.indices.data());
+        for (const SubmissionGeometryPatch& patch : next_index_patches) {
+            std::memcpy(
+                output_index_bytes + patch.offset,
+                patch.bytes.data(),
+                patch.bytes.size()
+            );
+        }
+        if (output.patch_from_previous) {
+            output.vertex_patches = std::move(next_vertex_patches);
+            output.index_patches = std::move(next_index_patches);
+        }
+    } else {
+        std::vector<std::uint8_t> next_vertices;
+        std::vector<std::uint32_t> next_indices;
+        next_vertices.reserve(vertex_byte_count);
+        next_indices.reserve(index_count);
+        for (std::size_t item_index = 0U; item_index < items.size(); ++item_index) {
+            if (!next_placements[item_index].has_value()) continue;
+            const EncodedDrawPlacement& placement = *next_placements[item_index];
+            const EncodedDrawCacheEntry& retained = geometry_at(item_index);
+            next_vertices.insert(
+                next_vertices.end(),
+                retained.vertex_bytes.begin(),
+                retained.vertex_bytes.end()
+            );
+            next_vertices.resize(
+                next_vertices.size() +
+                    placement.vertex_byte_capacity -
+                    placement.vertex_byte_count,
+                0U
+            );
+            const std::size_t index_slot_begin = next_indices.size();
+            next_indices.resize(
+                index_slot_begin + placement.index_capacity,
+                placement.batch_local_vertex
+            );
+            for (std::size_t local_index = 0U;
+                 local_index < retained.indices.size();
+                 ++local_index) {
+                const std::uint32_t index = retained.indices[local_index];
+                if (index > std::numeric_limits<std::uint32_t>::max() -
+                                placement.batch_local_vertex) {
+                    throw std::length_error("render submission cached index exceeds uint32");
+                }
+                next_indices[index_slot_begin + local_index] =
+                    placement.batch_local_vertex + index;
+            }
+        }
+        output.vertex_bytes.swap(next_vertices);
+        output.indices.swap(next_indices);
+    }
+    for (std::size_t item_index = 0U; item_index < items.size(); ++item_index) {
+        if (std::holds_alternative<SubmissionBatch>(items[item_index].value)) {
+            cache.geometry[item_index].reset();
+        } else if (geometry_updates[item_index].has_value()) {
+            cache.geometry[item_index] = std::move(geometry_updates[item_index]);
+        }
+    }
+    output.batches = std::move(next_batches);
+    cache.placements = std::move(next_placements);
 }
 
 static_assert(vertex_bytes == 88U);

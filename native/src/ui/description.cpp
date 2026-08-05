@@ -645,6 +645,43 @@ void DescriptionBuilder::set_retained_tree(const RetainedTree* const tree) {
     retained_snapshot_ = tree != nullptr ? tree->description_snapshot() : nullptr;
 }
 
+bool DescriptionBuilder::observes_retained_value(
+    const RetainedNode& node,
+    const std::string_view name,
+    const bool include_lazy_snapshots
+) const {
+    if (retained_snapshot_ == nullptr || layer_cache_.empty()) return true;
+    const auto effects_observe =
+        [this, &node, name, include_lazy_snapshots](const ComponentEffects& effects) {
+        if (include_lazy_snapshots && effects.captures_retained_snapshot) {
+            return true;
+        }
+        return std::ranges::any_of(
+            effects.retained_values,
+            [this, &node, name](const RetainedValueEffects& effect) {
+                if (!effect.values.contains(name)) return false;
+                const RetainedDescriptionSnapshot::Node* const retained =
+                    retained_widget(effect.query);
+                return retained != nullptr && retained->identity == node.identity();
+            }
+        );
+    };
+    if (std::ranges::any_of(
+            layer_cache_,
+            [&effects_observe](const auto& entry) {
+                return effects_observe(entry.second.effects);
+            }
+        )) {
+        return true;
+    }
+    return std::ranges::any_of(
+        component_cache_,
+        [&effects_observe](const auto& entry) {
+            return effects_observe(entry.second.effects);
+        }
+    );
+}
+
 void DescriptionBuilder::set_contextual_host_roots(
     std::map<std::string, runtime::Value, std::less<>> roots
 ) {
@@ -658,6 +695,7 @@ DescriptionLayersBuildResult DescriptionBuilder::build_layers(
     if (component_cache_unit_ != application_.active_unit() ||
         component_cache_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
         component_cache_.clear();
+        layer_cache_.clear();
         component_cache_epoch_ = 0U;
         component_cache_unit_ = application_.active_unit();
     }
@@ -715,6 +753,66 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_layer(
     if (!declaration) throw std::invalid_argument("requested layer declaration is not active");
     const std::string declaration_scope =
         std::string(role == runtime::LayerRole::screen ? "screen " : "overlay ") + std::string(name);
+    const std::string source_path(string_field(declaration, "path"));
+    const std::string cache_key =
+        std::string(role == runtime::LayerRole::screen ? "screen\n" : "overlay\n") +
+        std::string(name);
+    std::shared_ptr<const DescriptionNode> patched_layer_root;
+    if (auto cached = layer_cache_.find(cache_key);
+        cached != layer_cache_.end() &&
+        cached->second.role == role &&
+        cached->second.name == name &&
+        cached->second.source_path == source_path &&
+        cached->second.contextual_host_roots == contextual_host_roots_) {
+        std::map<const DescriptionNode*, std::shared_ptr<const DescriptionNode>> replacements;
+        bool valid = true;
+        for (const std::string& child_key :
+             cached->second.effects.direct_descendant_cache_keys) {
+            const auto child_before = component_cache_.find(child_key);
+            if (child_before == component_cache_.end()) {
+                valid = false;
+                break;
+            }
+            const std::shared_ptr<const DescriptionNode> previous =
+                child_before->second.root;
+            if (refresh_component_cache_entry(child_key) ==
+                ComponentRefreshResult::invalid) {
+                valid = false;
+                break;
+            }
+            const auto child_after = component_cache_.find(child_key);
+            if (child_after == component_cache_.end()) {
+                valid = false;
+                break;
+            }
+            if (child_after->second.root != previous) {
+                replacements.insert_or_assign(
+                    previous.get(),
+                    child_after->second.root
+                );
+            }
+        }
+        if (valid) {
+            const bool direct_current = component_effects_current(
+                    cached->second.effects,
+                    cached->second.host_invalidation_count,
+                    cached->second.contextual_host_roots
+                );
+            if (replacements.empty() && direct_current) {
+                cached->second.host_invalidation_count =
+                    application_.host().invalidation_count();
+                replay_component_effects(cached->second.effects);
+                return cached->second.root;
+            }
+            if (direct_current) {
+                patched_layer_root = replace_component_subtrees(
+                    cached->second.root,
+                    replacements
+                );
+            }
+        }
+    }
+
     Scope scope{
         runtime::ExpressionScope{
             .values = {},
@@ -730,18 +828,47 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_layer(
         declaration_scope,
         {},
     };
-    std::vector<std::shared_ptr<const DescriptionNode>> roots =
-        build_block(required(declaration, "body"), std::move(scope));
+    ComponentEffects effects;
+    component_effect_stack_.push_back(&effects);
+    ComponentExpressionDependencies dependencies;
+    dependencies.observe_host = [this](
+        const runtime::ExpressionHostDependency& dependency
+    ) {
+        observe_host_dependency(dependency);
+    };
+    ExpressionDependencyObserverRestore dependency_observer(
+        *expressions_,
+        &dependencies
+    );
+    dependencies.upstream = dependency_observer.previous();
+    std::vector<std::shared_ptr<const DescriptionNode>> roots;
+    try {
+        roots = build_block(required(declaration, "body"), std::move(scope));
+    } catch (...) {
+        component_effect_stack_.pop_back();
+        throw;
+    }
+    component_effect_stack_.pop_back();
     auto declaration_children = std::make_shared<const EagerDescriptionChildren>(std::move(roots));
     auto root = DescriptionNode::create(
         role == runtime::LayerRole::screen ? "$screen" : "$overlay",
         std::nullopt,
-        std::string(string_field(declaration, "path")),
+        source_path,
         declaration_scope,
         {},
         std::move(declaration_children)
     );
     ++described_nodes_;
+    if (patched_layer_root != nullptr) root = std::move(patched_layer_root);
+    layer_cache_.insert_or_assign(cache_key, LayerCacheEntry{
+        role,
+        std::string(name),
+        source_path,
+        application_.host().invalidation_count(),
+        contextual_host_roots_,
+        std::move(effects),
+        root,
+    });
     return root;
 }
 
@@ -1141,6 +1268,7 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
     }
 
     const JsonValue item_block = required(statement, "block");
+    capture_retained_snapshot();
     auto evaluation = std::make_shared<LazyRowEvaluationState>(
         application_,
         widgets_,
@@ -1369,7 +1497,18 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
             for (ComponentEffects* const component_effect : component_effect_stack_) {
                 component_effect->descendant_cache_keys.insert(cache_key);
             }
-            const auto cached = component_cache_.find(cache_key);
+            if (!component_effect_stack_.empty()) {
+                component_effect_stack_.back()->direct_descendant_cache_keys.insert(cache_key);
+            }
+            auto cached = component_cache_.find(cache_key);
+            if (cached != component_cache_.end() &&
+                cached->second.component == type &&
+                cached->second.source_path == source_path &&
+                cached->second.inputs == *inputs &&
+                cached->second.contextual_host_roots == contextual_host_roots_) {
+                static_cast<void>(refresh_component_cache_entry(cache_key));
+                cached = component_cache_.find(cache_key);
+            }
             if (cached != component_cache_.end() && component_cache_entry_current(
                     cached->second, type, source_path, *inputs
                 )) {
@@ -1383,33 +1522,12 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
         if (component_root == nullptr) {
             ComponentEffects effects;
             const std::size_t diagnostics_before = diagnostics_.size();
-            component_effect_stack_.push_back(&effects);
-            ComponentExpressionDependencies dependencies;
-            dependencies.observe_host = [this](
-                const runtime::ExpressionHostDependency& dependency
-            ) {
-                observe_host_dependency(dependency);
-            };
-            ExpressionDependencyObserverRestore dependency_observer(
-                *expressions_,
-                &dependencies
+            Scope rebuild_scope = component_scope;
+            component_root = build_component_body(
+                type,
+                std::move(component_scope),
+                effects
             );
-            dependencies.upstream = dependency_observer.previous();
-            std::vector<std::shared_ptr<const DescriptionNode>> component_roots;
-            try {
-                component_roots = build_block(
-                    required(component, "body"),
-                    std::move(component_scope)
-                );
-            } catch (...) {
-                component_effect_stack_.pop_back();
-                throw;
-            }
-            component_effect_stack_.pop_back();
-            if (component_roots.size() != 1U) {
-                throw std::logic_error("validated component body must describe exactly one root node");
-            }
-            component_root = std::move(component_roots.front());
             if (inputs.has_value() && diagnostics_.size() == diagnostics_before) {
                 component_cache_.insert_or_assign(cache_key, ComponentCacheEntry{
                     type,
@@ -1420,6 +1538,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
                     contextual_host_roots_,
                     std::move(effects),
                     component_root,
+                    std::move(rebuild_scope),
                 });
             } else {
                 component_cache_.erase(cache_key);
@@ -1522,6 +1641,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
         const std::shared_ptr<const WidgetGeneratedChildren> generated =
             std::move(expansion.generated_widget_children);
         generated_virtualization = generated->virtualization;
+        capture_retained_snapshot();
         auto evaluation = std::make_shared<WidgetRowEvaluationState>(
             application_,
             widgets_,
@@ -1846,8 +1966,8 @@ void DescriptionBuilder::observe_state_value(
     const runtime::StateAddress& address,
     const runtime::Value& value
 ) {
-    for (ComponentEffects* const component : component_effect_stack_) {
-        component->state_values.insert_or_assign(address, value);
+    if (!component_effect_stack_.empty()) {
+        component_effect_stack_.back()->state_values.insert_or_assign(address, value);
     }
 }
 
@@ -1855,8 +1975,8 @@ void DescriptionBuilder::observe_host_dependency(
     const runtime::ExpressionHostDependency& dependency
 ) {
     const std::string path = runtime::canonical_host_dependency_path(dependency.path);
-    for (ComponentEffects* const component : component_effect_stack_) {
-        component->host_values.insert_or_assign(path, dependency);
+    if (!component_effect_stack_.empty()) {
+        component_effect_stack_.back()->host_values.insert_or_assign(path, dependency);
     }
 }
 
@@ -1868,14 +1988,18 @@ void DescriptionBuilder::observe_retained_value(
     const std::optional<runtime::Value> observed = value != nullptr
                                                        ? std::optional(*value)
                                                        : std::nullopt;
-    for (ComponentEffects* const component : component_effect_stack_) {
-        auto effect = std::ranges::find(component->retained_values, query, &RetainedValueEffects::query);
-        if (effect == component->retained_values.end()) {
-            component->retained_values.push_back(RetainedValueEffects{query, {}});
-            effect = std::prev(component->retained_values.end());
-        }
-        effect->values.insert_or_assign(std::string(name), observed);
+    if (component_effect_stack_.empty()) return;
+    ComponentEffects& component = *component_effect_stack_.back();
+    auto effect = std::ranges::find(
+        component.retained_values,
+        query,
+        &RetainedValueEffects::query
+    );
+    if (effect == component.retained_values.end()) {
+        component.retained_values.push_back(RetainedValueEffects{query, {}});
+        effect = std::prev(component.retained_values.end());
     }
+    effect->values.insert_or_assign(std::string(name), observed);
 }
 
 void DescriptionBuilder::observe_retained_sequence(
@@ -1887,23 +2011,167 @@ void DescriptionBuilder::observe_retained_sequence(
         retained != nullptr ? retained->virtual_sequence.lock() : nullptr;
     const std::optional<DescriptionSequenceGeneration> generation =
         retained != nullptr ? retained->virtual_sequence_generation : std::nullopt;
-    for (ComponentEffects* const component : component_effect_stack_) {
-        auto effect = std::ranges::find(
-            component->retained_sequences,
+    ComponentEffects& component = *component_effect_stack_.back();
+    auto effect = std::ranges::find(
+        component.retained_sequences,
+        query,
+        &RetainedSequenceEffect::query
+    );
+    if (effect == component.retained_sequences.end()) {
+        component.retained_sequences.push_back(RetainedSequenceEffect{
             query,
-            &RetainedSequenceEffect::query
+            sequence,
+            generation,
+        });
+    } else {
+        effect->sequence = sequence;
+        effect->generation = generation;
+    }
+}
+
+void DescriptionBuilder::capture_retained_snapshot() {
+    for (ComponentEffects* const component : component_effect_stack_) {
+        component->captures_retained_snapshot = true;
+        component->retained_snapshot = retained_snapshot_;
+    }
+}
+
+std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_component_body(
+    const std::string_view component,
+    Scope scope,
+    ComponentEffects& effects
+) {
+    const JsonValue declaration = application_.active_unit()->component(component);
+    if (!declaration) {
+        throw std::logic_error(
+            "cached component '" + std::string(component) + "' lost its declaration"
         );
-        if (effect == component->retained_sequences.end()) {
-            component->retained_sequences.push_back(RetainedSequenceEffect{
-                query,
-                sequence,
-                generation,
-            });
-        } else {
-            effect->sequence = sequence;
-            effect->generation = generation;
+    }
+    component_effect_stack_.push_back(&effects);
+    ComponentExpressionDependencies dependencies;
+    dependencies.observe_host = [this](
+        const runtime::ExpressionHostDependency& dependency
+    ) {
+        observe_host_dependency(dependency);
+    };
+    ExpressionDependencyObserverRestore dependency_observer(
+        *expressions_,
+        &dependencies
+    );
+    dependencies.upstream = dependency_observer.previous();
+    std::vector<std::shared_ptr<const DescriptionNode>> roots;
+    try {
+        roots = build_block(required(declaration, "body"), std::move(scope));
+    } catch (...) {
+        component_effect_stack_.pop_back();
+        throw;
+    }
+    component_effect_stack_.pop_back();
+    if (roots.size() != 1U) {
+        throw std::logic_error(
+            "validated component body must describe exactly one root node"
+        );
+    }
+    return std::move(roots.front());
+}
+
+std::shared_ptr<const DescriptionNode> DescriptionBuilder::replace_component_subtrees(
+    const std::shared_ptr<const DescriptionNode>& root,
+    const std::map<
+        const DescriptionNode*,
+        std::shared_ptr<const DescriptionNode>
+    >& replacements
+) {
+    if (root == nullptr || replacements.empty()) return root;
+    if (const auto replacement = replacements.find(root.get());
+        replacement != replacements.end()) {
+        return replacement->second;
+    }
+    if (root->materialization.has_value()) return root;
+    bool changed = false;
+    std::vector<std::shared_ptr<const DescriptionNode>> children;
+    children.reserve(root->children->size());
+    for (std::size_t index = 0U; index < root->children->size(); ++index) {
+        const std::shared_ptr<const DescriptionNode> current = root->children->at(index);
+        std::shared_ptr<const DescriptionNode> next =
+            replace_component_subtrees(current, replacements);
+        changed = changed || next != current;
+        children.push_back(std::move(next));
+    }
+    if (!changed) return root;
+    auto result = std::make_shared<DescriptionNode>(*root);
+    result->children = std::make_shared<const EagerDescriptionChildren>(
+        std::move(children)
+    );
+    return result;
+}
+
+DescriptionBuilder::ComponentRefreshResult
+DescriptionBuilder::refresh_component_cache_entry(const std::string& cache_key) {
+    auto found = component_cache_.find(cache_key);
+    if (found == component_cache_.end()) return ComponentRefreshResult::invalid;
+    if (!refreshing_component_cache_keys_.insert(cache_key).second) {
+        return ComponentRefreshResult::unchanged;
+    }
+    struct RefreshGuard final {
+        std::set<std::string, std::less<>>& keys;
+        const std::string& key;
+        ~RefreshGuard() { keys.erase(key); }
+    } guard{refreshing_component_cache_keys_, cache_key};
+
+    ComponentCacheEntry& entry = found->second;
+    std::map<const DescriptionNode*, std::shared_ptr<const DescriptionNode>> replacements;
+    for (const std::string& child_key : entry.effects.direct_descendant_cache_keys) {
+        const auto child_before = component_cache_.find(child_key);
+        if (child_before == component_cache_.end()) {
+            return ComponentRefreshResult::invalid;
+        }
+        const std::shared_ptr<const DescriptionNode> previous = child_before->second.root;
+        const ComponentRefreshResult refreshed =
+            refresh_component_cache_entry(child_key);
+        const auto child_after = component_cache_.find(child_key);
+        if (refreshed == ComponentRefreshResult::invalid ||
+            child_after == component_cache_.end()) {
+            return ComponentRefreshResult::invalid;
+        }
+        if (child_after->second.root != previous) {
+            replacements.insert_or_assign(
+                previous.get(),
+                child_after->second.root
+            );
         }
     }
+
+    const bool direct_current = component_cache_entry_current(
+        entry,
+        entry.component,
+        entry.source_path,
+        entry.inputs
+    );
+    if (replacements.empty() && direct_current) {
+        return ComponentRefreshResult::unchanged;
+    }
+    const std::shared_ptr<const DescriptionNode> patched =
+        direct_current && !replacements.empty()
+            ? replace_component_subtrees(entry.root, replacements)
+            : nullptr;
+
+    const std::size_t diagnostics_before = diagnostics_.size();
+    ComponentEffects effects;
+    std::shared_ptr<const DescriptionNode> rebuilt = build_component_body(
+        entry.component,
+        entry.rebuild_scope,
+        effects
+    );
+    if (diagnostics_.size() != diagnostics_before) {
+        component_cache_.erase(cache_key);
+        return ComponentRefreshResult::invalid;
+    }
+    entry.host_invalidation_count = application_.host().invalidation_count();
+    entry.last_used_epoch = component_cache_epoch_;
+    entry.effects = std::move(effects);
+    entry.root = patched != nullptr ? patched : std::move(rebuilt);
+    return ComponentRefreshResult::changed;
 }
 
 void DescriptionBuilder::replay_component_effects(const ComponentEffects& effects) {
@@ -1921,26 +2189,6 @@ void DescriptionBuilder::replay_component_effects(const ComponentEffects& effect
             binding.declaration_scope,
             binding.address_scope
         );
-    }
-    for (const auto& [path, dependency] : effects.host_values) {
-        static_cast<void>(path);
-        observe_host_dependency(dependency);
-    }
-    for (const auto& [address, value] : effects.state_values) {
-        observe_state_value(address, value);
-    }
-    for (const RetainedValueEffects& effect : effects.retained_values) {
-        for (const auto& [name, value] : effect.values) {
-            observe_retained_value(
-                effect.query,
-                name,
-                value.has_value() ? &*value : nullptr
-            );
-        }
-    }
-    for (const RetainedSequenceEffect& effect : effects.retained_sequences) {
-        const RetainedDescriptionSnapshot::Node* const retained = retained_widget(effect.query);
-        observe_retained_sequence(effect.query, retained);
     }
 }
 
@@ -1983,8 +2231,25 @@ bool DescriptionBuilder::component_cache_entry_current(
         entry.inputs != inputs || entry.contextual_host_roots != contextual_host_roots_) {
         return false;
     }
-    if (entry.host_invalidation_count != application_.host().invalidation_count()) {
-        for (const auto& [path, dependency] : entry.effects.host_values) {
+    return component_effects_current(
+        entry.effects,
+        entry.host_invalidation_count,
+        entry.contextual_host_roots
+    );
+}
+
+bool DescriptionBuilder::component_effects_current(
+    const ComponentEffects& effects,
+    const std::uint64_t host_invalidation_count,
+    const std::map<std::string, runtime::Value, std::less<>>& contextual_host_roots
+) const {
+    if (contextual_host_roots != contextual_host_roots_) return false;
+    if (effects.captures_retained_snapshot &&
+        effects.retained_snapshot != retained_snapshot_) {
+        return false;
+    }
+    if (host_invalidation_count != application_.host().invalidation_count()) {
+        for (const auto& [path, dependency] : effects.host_values) {
             static_cast<void>(path);
             if (dependency.contextual) continue;
             const std::optional<std::pair<std::string, std::uint64_t>> origin =
@@ -1997,11 +2262,11 @@ bool DescriptionBuilder::component_cache_entry_current(
             }
         }
     }
-    for (const auto& [address, value] : entry.effects.state_values) {
+    for (const auto& [address, value] : effects.state_values) {
         const runtime::Value* const current = application_.state().find(address);
         if (current == nullptr || *current != value) return false;
     }
-    for (const RetainedValueEffects& effect : entry.effects.retained_values) {
+    for (const RetainedValueEffects& effect : effects.retained_values) {
         const RetainedDescriptionSnapshot::Node* const retained = retained_widget(effect.query);
         for (const auto& [name, expected] : effect.values) {
             const runtime::Value* const current = retained != nullptr
@@ -2014,13 +2279,13 @@ bool DescriptionBuilder::component_cache_entry_current(
             }
         }
     }
-    for (const RetainedSequenceEffect& effect : entry.effects.retained_sequences) {
+    for (const RetainedSequenceEffect& effect : effects.retained_sequences) {
         const RetainedDescriptionSnapshot::Node* const retained = retained_widget(effect.query);
         const std::shared_ptr<const runtime::IndexableSequence> sequence =
             retained != nullptr ? retained->virtual_sequence.lock() : nullptr;
         const std::optional<DescriptionSequenceGeneration> generation =
             retained != nullptr ? retained->virtual_sequence_generation : std::nullopt;
-        if (sequence != effect.sequence || generation != effect.generation) return false;
+        if (sequence != effect.sequence.lock() || generation != effect.generation) return false;
     }
     return true;
 }

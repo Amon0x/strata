@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 
 #include <d3d11.h>
@@ -25,15 +26,24 @@ struct EffectPassTelemetry final {
  */
 class EffectPassRenderer final {
   public:
-    EffectPassRenderer(ID3D11Device* device, ID3D11DeviceContext* context);
+    explicit EffectPassRenderer(
+        ID3D11Device* device,
+        ID3D11DeviceContext* context,
+        bool asynchronous_shader_compilation = false
+    );
     ~EffectPassRenderer();
     EffectPassRenderer(const EffectPassRenderer&) = delete;
     EffectPassRenderer& operator=(const EffectPassRenderer&) = delete;
 
     void resize(std::uint32_t width, std::uint32_t height, DXGI_FORMAT format);
     void invalidate_cache() noexcept;
-    /** Starts one ordered layer stream and invalidates cached samples when its geometry changes. */
-    void begin_layer(std::string_view layer_id, std::uint64_t geometry_epoch);
+    /** Advances one ordered layer stream and invalidates only samples touched by geometry patches. */
+    void begin_layer(
+        std::string_view layer_id,
+        std::uint64_t geometry_epoch,
+        bool dirty_all,
+        std::span<const host::GeometryDirtyRegion> dirty_regions
+    );
     void release_layer(std::string_view layer_id) noexcept;
     void declare_pass(std::string_view effect_id, std::uint32_t index, std::uint32_t kind,
                       double radius, std::uint32_t downsample, std::uint32_t radius_parameter,

@@ -40,7 +40,7 @@ rather than exposing implementation classes.
 
 ## Surface and packet lifetime
 
-`strata_surface_frame` updates a Surface and prepares packet v8. A bytes sink borrows the packet only
+`strata_surface_frame` updates a Surface and prepares packet v9. A bytes sink borrows the packet only
 for its callback. Resource create/upload/release operations are one-shot; settled frames use compact
 packets that reference the latest full geometry epoch. Consume every framed packet in order with one
 stateful decoder per Surface/backend stream. Reading canonical frame JSON is optional and lazily
@@ -89,7 +89,7 @@ single-configuration tree. Both enable tools, samples, tests, strict
 warnings, and installed-package acceptance. ASan uses a separate build with
 `-DSTRATA_ENABLE_ASAN=ON`; MSVC does not claim UBSan support.
 
-`strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v8
+`strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v9
 boundary as other hosts, but supplies a deterministic clock, scripted input/services, and canonical
 frame capture. On Windows it can use offscreen D3D11/WARP through the desktop host's shared
 production texture, blur, and HLSL material pipeline. Linux builds only the CPU reference backend;
@@ -117,7 +117,7 @@ authoring support linked into independently loaded package libraries; the instal
 reconstruct package paths; `Strata_DESKTOP_RUNNER` exists only when the desktop runner was installed.
 
 The installed sample project configures against only the install prefix. Its portable C and C++
-programs configure an application, activate `.strata`, create/frame a Surface, decode packet v8,
+programs configure an application, activate `.strata`, create/frame a Surface, decode packet v9,
 exercise resource reload, inspect allocator telemetry, and release every handle. The public C++
 facade is split into focused owned-value headers (`diagnostic.hpp`, `input.hpp`, `adapters.hpp`,
 `profiler.hpp`, and `config.hpp`) aggregated by `strata.hpp`; custom hosts do not need to keep

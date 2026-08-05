@@ -69,7 +69,7 @@ bool InputRouter::validate_field(RetainedNode& field, const bool mark_touched) {
             field.identity(), "strata.form.error", runtime::Value{}, DirtyReason::semantics
         );
         if ((validation_changed || error_changed) && description_invalidator_) {
-            description_invalidator_();
+            description_invalidator_(nullptr, {});
         }
         return true;
     }
@@ -130,7 +130,9 @@ bool InputRouter::validate_field(RetainedNode& field, const bool mark_touched) {
         field.identity(), "strata.form.error",
         error.has_value() ? runtime::Value(*error) : runtime::Value{}, DirtyReason::semantics
     ) || description_changed;
-    if (description_changed && description_invalidator_) description_invalidator_();
+    if (description_changed && description_invalidator_) {
+        description_invalidator_(nullptr, {});
+    }
     return !error.has_value();
 }
 

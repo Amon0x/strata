@@ -167,6 +167,32 @@ void require_object(const JsonValue& value, const std::string_view label) {
     }
     if (operation == "click") return PerformanceClickStep{selector(argument, "click")};
     if (operation == "move") return PerformanceMoveStep{selector(argument, "move")};
+    if (operation == "drag") {
+        require_object(argument, "drag");
+        PerformanceDragStep result;
+        result.target = selector(argument, "drag");
+        if (const JsonValue* field = optional(argument, "fromFraction");
+            field != nullptr) {
+            result.from_fraction = number(*field, "drag.fromFraction");
+        }
+        if (const JsonValue* field = optional(argument, "toFraction");
+            field != nullptr) {
+            result.to_fraction = number(*field, "drag.toFraction");
+        }
+        if (const JsonValue* field = optional(argument, "moves"); field != nullptr) {
+            result.moves = positive_count(*field, "drag.moves");
+        }
+        if (!std::isfinite(result.from_fraction) ||
+            !std::isfinite(result.to_fraction) ||
+            result.from_fraction < 0.0 || result.from_fraction > 1.0 ||
+            result.to_fraction < 0.0 || result.to_fraction > 1.0 ||
+            result.from_fraction == result.to_fraction) {
+            throw std::invalid_argument(
+                "drag fractions must be distinct finite values from zero through one"
+            );
+        }
+        return result;
+    }
     if (operation == "scroll") {
         require_object(argument, "scroll");
         PerformanceScrollStep result;
@@ -212,6 +238,9 @@ void require_object(const JsonValue& value, const std::string_view label) {
 }
 
 [[nodiscard]] std::uint32_t virtual_key(const std::string_view key) {
+    if (key == "f2") return VK_F2;
+    if (key == "f3") return VK_F3;
+    if (key == "f4") return VK_F4;
     if (key == "f6") return VK_F6;
     if (key == "f7") return VK_F7;
     if (key == "f8") return VK_F8;
@@ -615,6 +644,23 @@ struct PerformanceRunner::Impl final {
         }
     }
 
+    [[nodiscard]] host::BrowserBounds resolve_bounds(
+        const host::Selector& selector
+    ) {
+        const DesktopHostInfo info = host.performance_info();
+        const JsonValue frame = data::parse_json(host.performance_frame_json());
+        try {
+            return host::BrowserModel::build(
+                frame, info.logical_width, info.logical_height
+            ).resolve_bounds(selector);
+        } catch (const std::exception& error) {
+            throw std::runtime_error(
+                "performance target '" + selector_label(selector) +
+                "' did not resolve to bounds: " + error.what()
+            );
+        }
+    }
+
     void execute(
         const PerformanceStep& step,
         const bool measured,
@@ -661,6 +707,61 @@ struct PerformanceRunner::Impl final {
         run_frame(measured, phase, iteration, "click-press:" + selector_label(step.target));
         host.pointer(STRATA_INPUT_POINTER_RELEASE, 0, x * scale, y * scale);
         run_frame(measured, phase, iteration, "click-release:" + selector_label(step.target));
+    }
+
+    void execute(
+        const PerformanceDragStep& step,
+        const bool measured,
+        PhaseResult* phase,
+        const std::uint32_t iteration
+    ) {
+        const host::BrowserBounds bounds = resolve_bounds(step.target);
+        const double scale = host.scale();
+        const double y = bounds.y + bounds.height * 0.5;
+        const auto x = [&bounds](const double fraction) {
+            return bounds.x + bounds.width * fraction;
+        };
+        host.pointer(
+            STRATA_INPUT_POINTER_MOVE,
+            0,
+            x(step.from_fraction) * scale,
+            y * scale
+        );
+        run_frame(measured, phase, iteration, "drag-hover:" + selector_label(step.target));
+        host.pointer(
+            STRATA_INPUT_POINTER_PRESS,
+            0,
+            x(step.from_fraction) * scale,
+            y * scale
+        );
+        run_frame(measured, phase, iteration, "drag-press:" + selector_label(step.target));
+        for (std::uint32_t move = 0U; move < step.moves; ++move) {
+            const double fraction = move % 2U == 0U
+                ? step.to_fraction
+                : step.from_fraction;
+            host.pointer(
+                STRATA_INPUT_POINTER_MOVE,
+                0,
+                x(fraction) * scale,
+                y * scale
+            );
+            run_frame(
+                measured,
+                phase,
+                iteration,
+                "drag-move:" + selector_label(step.target)
+            );
+        }
+        const double release_fraction = (step.moves - 1U) % 2U == 0U
+            ? step.to_fraction
+            : step.from_fraction;
+        host.pointer(
+            STRATA_INPUT_POINTER_RELEASE,
+            0,
+            x(release_fraction) * scale,
+            y * scale
+        );
+        run_frame(measured, phase, iteration, "drag-release:" + selector_label(step.target));
     }
 
     void execute(

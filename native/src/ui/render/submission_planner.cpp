@@ -489,15 +489,24 @@ std::vector<PlannedItem> plan(
     if (text_engine != nullptr) glyph_atlas.adopt_display_scale(context.scale);
     cache.text.resize(commands.size());
     const std::vector<bool> visible_text = visible_text_commands(commands, context);
-    std::vector<font::GlyphAtlasWarmupRequest> warmup_requests;
-    if (text_required) {
+    const auto collect_warmup_requests =
+        [&](const std::uint64_t atlas_generation, const bool all) {
+        std::vector<font::GlyphAtlasWarmupRequest> requests;
         for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
             if (!visible_text[index]) continue;
             const auto* text = std::get_if<TextRunRenderCommand>(
                 &commands.commands()[index]
             );
             if (text == nullptr) continue;
-            warmup_requests.reserve(warmup_requests.size() + text->glyphs.size());
+            const auto& retained = cache.text[index];
+            if (!all && retained.has_value() &&
+                same_text_content(retained->source, *text) &&
+                retained->text_engine == text_engine &&
+                retained->atlas_generation == atlas_generation &&
+                retained->display_scale == context.scale) {
+                continue;
+            }
+            requests.reserve(requests.size() + text->glyphs.size());
             for (const LogicalGlyph& logical : text->glyphs) {
                 if (logical.glyph_id > std::numeric_limits<std::uint16_t>::max()) {
                     throw font::FontError(
@@ -505,7 +514,7 @@ std::vector<PlannedItem> plan(
                     );
                 }
                 const double requested_x = logical.x + logical.x_placement;
-                warmup_requests.push_back(font::GlyphAtlasWarmupRequest{
+                requests.push_back(font::GlyphAtlasWarmupRequest{
                     logical.font_id,
                     &text_engine->font(logical.font_id),
                     static_cast<std::uint16_t>(logical.glyph_id),
@@ -519,21 +528,28 @@ std::vector<PlannedItem> plan(
                 });
             }
         }
-    }
+        return requests;
+    };
     // Populate only changed text runs. Capacity reclamation is generation-wide, so a recycle
     // during warmup invalidates older prepared UVs and repeats until every retained run belongs
     // to one stable generation.
     std::uint64_t warm_generation = glyph_atlas.generation();
     if (text_required) {
+        bool warm_all = false;
         do {
             warm_generation = glyph_atlas.generation();
+            const std::vector<font::GlyphAtlasWarmupRequest> warmup_requests =
+                collect_warmup_requests(warm_generation, warm_all);
             const auto warmup_started = std::chrono::steady_clock::now();
             const bool warmed = glyph_atlas.warm(warmup_requests);
             telemetry.atlas_warmup_nanos +=
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now() - warmup_started
                 ).count();
-            if (!warmed) continue;
+            if (!warmed) {
+                warm_all = true;
+                continue;
+            }
             const auto preparation_started = std::chrono::steady_clock::now();
             for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
                 const auto* text = std::get_if<TextRunRenderCommand>(
@@ -570,7 +586,8 @@ std::vector<PlannedItem> plan(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now() - preparation_started
                 ).count();
-        } while (glyph_atlas.generation() != warm_generation);
+            warm_all = glyph_atlas.generation() != warm_generation;
+        } while (warm_all);
     }
     std::vector<PlannedItem> output;
     output.reserve(commands.size());

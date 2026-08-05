@@ -302,7 +302,7 @@ void InputRouter::synchronize_authored_presentations() {
         }
     };
     visit(visit, *tree_->root());
-    if (changed && description_invalidator_) description_invalidator_();
+    if (changed && description_invalidator_) description_invalidator_(nullptr, {});
 }
 
 bool InputRouter::hover_ready(

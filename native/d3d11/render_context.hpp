@@ -27,10 +27,14 @@ struct RenderLayerTelemetry final {
     std::uint64_t effect_nanos = 0U;
 };
 
-/** Shared D3D11 packet-v8 pipeline for swap-chain and offscreen targets. */
+/** Shared D3D11 packet-v9 pipeline for swap-chain and offscreen targets. */
 class RenderContext final {
   public:
-    RenderContext(ID3D11Device* device, ID3D11DeviceContext* context);
+    explicit RenderContext(
+        ID3D11Device* device,
+        ID3D11DeviceContext* context,
+        bool asynchronous_shader_compilation = false
+    );
     ~RenderContext();
 
     RenderContext(const RenderContext&) = delete;

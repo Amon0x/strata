@@ -142,7 +142,9 @@ public:
             status_,
             notifications_,
             {},
-            [this] { ++invalidations_; },
+            [this](const ui::RetainedNode*, const std::string_view) {
+                ++invalidations_;
+            },
             {},
             [this](
                 const ui::RetainedNode& owner,

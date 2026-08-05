@@ -110,7 +110,9 @@ void InputRouter::dismiss_transient_popups(
                 const bool changed = tree_->set_retained_value(
                     node.identity(), "$menuCategory", runtime::Value{}, DirtyReason::properties
                 );
-                if (changed && description_invalidator_) description_invalidator_();
+                if (changed && description_invalidator_) {
+                    description_invalidator_(nullptr, {});
+                }
             }
         }
         const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
@@ -149,7 +151,9 @@ void InputRouter::dismiss_transient_popups(
                         ) || changed;
                     }
                 }
-                if (changed && description_invalidator_) description_invalidator_();
+                if (changed && description_invalidator_) {
+                    description_invalidator_(nullptr, {});
+                }
                 modal_dismissed = modal_dismissed ||
                     (changed && node.description().type == "CommandPalette");
                 const std::shared_ptr<const runtime::ActionValue> action = activation_action(

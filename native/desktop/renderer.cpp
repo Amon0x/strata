@@ -63,7 +63,11 @@ struct Renderer::Impl final {
             fail_hresult("COM initialization", com_status);
         create_device();
         capture_adapter_info();
-        renderer = std::make_unique<d3d11::RenderContext>(device.Get(), context.Get());
+        renderer = std::make_unique<d3d11::RenderContext>(
+            device.Get(),
+            context.Get(),
+            true
+        );
         RECT client{};
         if (!GetClientRect(window, &client))
             throw std::runtime_error("could not read window size");

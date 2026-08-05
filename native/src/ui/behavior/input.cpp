@@ -228,7 +228,7 @@ void BehaviorInputScope::set_retained(
     if (changed &&
         (reason == DirtyReason::structure || reason == DirtyReason::properties) &&
         router_.description_invalidator_) {
-        router_.description_invalidator_();
+        router_.description_invalidator_(nullptr, {});
     }
 }
 

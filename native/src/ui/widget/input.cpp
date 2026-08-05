@@ -265,13 +265,14 @@ void WidgetInputScope::set_retained(
     const DirtyReason reason
 ) {
     if (router_.tree_ == nullptr) return;
+    const std::string retained_name = name;
     const bool changed = router_.tree_->set_retained_value(
         node_.identity(), std::move(name), std::move(value), reason
     );
     if (changed &&
         (reason == DirtyReason::structure || reason == DirtyReason::properties) &&
         router_.description_invalidator_) {
-        router_.description_invalidator_();
+        router_.description_invalidator_(&node_, retained_name);
     }
 }
 

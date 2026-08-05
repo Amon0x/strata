@@ -27,6 +27,12 @@ struct PerformanceClickStep final {
 struct PerformanceMoveStep final {
     host::Selector target;
 };
+struct PerformanceDragStep final {
+    host::Selector target;
+    double from_fraction = 0.1;
+    double to_fraction = 0.9;
+    std::uint32_t moves = 1U;
+};
 struct PerformanceScrollStep final {
     host::Selector target;
     double delta_x = 0.0;
@@ -40,6 +46,7 @@ using PerformanceStep = std::variant<
     PerformanceFramesStep,
     PerformanceClickStep,
     PerformanceMoveStep,
+    PerformanceDragStep,
     PerformanceScrollStep,
     PerformanceKeyStep
 >;

@@ -610,7 +610,15 @@ void add_builtin_types(BuiltinCatalog& catalog) {
             .definition = declared_type(DeclaredType{
                 .kind = DeclaredTypeKind::enumeration,
                 .label = "one of",
-                .values = {"compact", "danger", "default", "primary", "secondary", "subtle"}})},
+                .values = {
+                    "compact",
+                    "danger",
+                    "default",
+                    "primary",
+                    "rail",
+                    "secondary",
+                    "subtle",
+                }})},
         DeclaredNamedType{.id = "t69",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,

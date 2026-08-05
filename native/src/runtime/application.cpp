@@ -552,6 +552,9 @@ std::optional<Value> ApplicationContext::state_initial_value(
     const std::string_view runtime_scope
 ) const {
     if (resolution.declaration == nullptr) return std::nullopt;
+    if (const Value* initial = state_.initial(resolution.address); initial != nullptr) {
+        return *initial;
+    }
     ExpressionScope expression_scope;
     expression_scope.component_path = std::string(runtime_scope);
     ExpressionRuntime expressions(host_, bundle_->action_registry(), std::move(expression_scope));

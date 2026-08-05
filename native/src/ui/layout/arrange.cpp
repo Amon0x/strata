@@ -146,21 +146,7 @@ void LayoutEngine::arrange(
         cached->second.pin_context == cache_pin_context &&
         cached->second.node_arrangement_revision == measured.node->arrangement_revision() &&
         result_.records.contains(identity)) {
-        const auto copy_subtree = [this, &result](
-                                      const auto& self,
-                                      const MeasuredNodePtr& node
-                                  ) -> void {
-            const auto previous = result_.records.find(node->node->identity());
-            if (previous == result_.records.end()) {
-                throw std::logic_error("cached arrangement lost its retained layout record");
-            }
-            LayoutRecord record = previous->second;
-            record.generation = result.generation;
-            record.translated_subtree.reset();
-            result.records.insert_or_assign(record.identity, std::move(record));
-            for (const MeasuredNodePtr& child : node->children) self(self, child);
-        };
-        copy_subtree(copy_subtree, measured_ptr);
+        current_arranged_subtree_roots_.insert(identity);
         return;
     }
     const Point translation{
@@ -192,7 +178,9 @@ void LayoutEngine::arrange(
             record.generation = result.generation;
             translate_record(record, translation, environment);
             record.render_generation = advance_render_generation();
+            record.subtree_render_generation = advance_render_generation();
             record.translated_subtree = translation;
+            translated_records_.push_back(record.identity);
             std::optional<Rect> child_clip = current_inherited_clip;
             if (record.local_clip.has_value()) {
                 child_clip = intersect_optional(child_clip, *record.local_clip);
@@ -203,6 +191,7 @@ void LayoutEngine::arrange(
             }
             record.clip = child_clip;
             result.records.insert_or_assign(record.identity, std::move(record));
+            current_arranged_records_.insert(node->node->identity());
             if (auto entry = arrangement_cache_.find(node->node->identity());
                 entry != arrangement_cache_.end()) {
                 entry->second.bounds = translated_rect(entry->second.bounds, translation);
@@ -715,7 +704,9 @@ void LayoutEngine::arrange(
         });
     }
     record.render_generation = advance_render_generation();
+    record.subtree_render_generation = advance_render_generation();
     result.records.insert_or_assign(record.identity, std::move(record));
+    current_arranged_records_.insert(identity);
     arrangement_cache_.insert_or_assign(identity, ArrangementCacheEntry{
         measured_ptr, arrangement_bounds, inherited_clip, cache_pin_context,
         measured.node->arrangement_revision(),

@@ -26,6 +26,14 @@ struct HostRenderPacketTelemetry final {
     std::int64_t cold_submission_mesh_encoding_nanos = 0;
     std::int64_t cold_geometry_packet_nanos = 0;
     std::int64_t cold_resource_packet_nanos = 0;
+    std::int64_t submission_nanos = 0;
+    std::int64_t submission_planning_nanos = 0;
+    std::int64_t submission_atlas_warmup_nanos = 0;
+    std::int64_t submission_text_preparation_nanos = 0;
+    std::int64_t submission_mesh_encoding_nanos = 0;
+    std::int64_t geometry_packet_nanos = 0;
+    bool geometry_patched = false;
+    std::size_t geometry_patch_bytes = 0U;
 };
 
 class RenderCommandBuffer;
@@ -45,7 +53,7 @@ struct HostRenderResourceInvalidationPlan final {
 };
 
 /**
- * Packet v8: retained geometry epochs, compact geometry references, rate-limited effects,
+ * Packet v9: retained geometry epochs, incremental geometry patches, rate-limited effects,
  * ordered application effect programs, and rounded descendant masks. The
  * logical v3 encoder remains available only to command-stream inspection tooling.
  */
@@ -57,7 +65,7 @@ class HostRenderPacketCache final {
     HostRenderPacketCache(HostRenderPacketCache&&) = delete;
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
-    /** A null TextEngine selects the packet-v8 non-text path; text runs are then rejected. */
+    /** A null TextEngine selects the packet-v9 non-text path; text runs are then rejected. */
     [[nodiscard]] const std::vector<std::uint8_t>&
     encode(const RenderCommandBuffer& commands, std::uint64_t frame_index,
            std::span<const resource::EncodedTextureResource> texture_resources,

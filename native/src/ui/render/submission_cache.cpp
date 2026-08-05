@@ -51,7 +51,8 @@ const RenderSubmission& RenderSubmissionCache::resolve(
         return *submission_;
     }
 
-    RenderSubmission next = submission_detail::build_cached(
+    if (!submission_.has_value()) submission_.emplace();
+    submission_detail::update_cached(
         commands,
         glyph_atlas,
         text_engine,
@@ -61,7 +62,8 @@ const RenderSubmission& RenderSubmissionCache::resolve(
         environment.logical_width,
         environment.logical_height,
         textures,
-        *preparation_cache_
+        *preparation_cache_,
+        *submission_
     );
     commands_ = commands;
     environment_ = environment;
@@ -69,7 +71,6 @@ const RenderSubmission& RenderSubmissionCache::resolve(
     glyph_atlas_ = text_engine != nullptr ? &glyph_atlas : nullptr;
     glyph_atlas_generation_ = text_engine != nullptr ? glyph_atlas.generation() : 0U;
     text_engine_ = text_engine;
-    submission_ = std::move(next);
     ++misses_;
     return *submission_;
 }

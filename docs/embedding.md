@@ -110,7 +110,7 @@ installed `desktop_app.cpp` sample is a complete window loop. See
 [Win32 desktop hosting](desktop-hosting.md).
 
 Linux deliberately has no bundled GUI backend. A Vulkan, OpenGL, or other renderer links
-`Strata::render_host` and includes `<strata/render_packet.hpp>` instead of duplicating packet-v8
+`Strata::render_host` and includes `<strata/render_packet.hpp>` instead of duplicating packet-v9
 parsing:
 
 ```cpp
@@ -220,7 +220,7 @@ runtime.
 
 Adopt a complete Surface environment generation atomically: framebuffer and logical sizes, scale,
 safe insets, snapping, density, reduced-motion preference, and input capabilities. Enqueue input in
-ordered batches, call `strata_surface_frame`, then read packet v8 through a bytes sink.
+ordered batches, call `strata_surface_frame`, then read packet v9 through a bytes sink.
 
 The packet bytes are borrowed only during the sink callback. Copy them if the backend submits later;
 consume them directly if submission is synchronous. Packet-v8 full packets contain native geometry,

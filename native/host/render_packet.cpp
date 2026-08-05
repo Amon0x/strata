@@ -221,24 +221,215 @@ void validate_geometry(const RenderPacket& packet) {
     return true;
 }
 
+[[nodiscard]] std::vector<GeometryPatch> geometry_patches(
+    Reader& input,
+    const std::size_t total_bytes,
+    const std::size_t alignment,
+    const std::string_view label
+) {
+    std::vector<GeometryPatch> result;
+    const std::uint32_t count = input.count();
+    result.reserve(count);
+    std::size_t previous_end = 0U;
+    for (std::uint32_t index = 0U; index < count; ++index) {
+        GeometryPatch patch;
+        patch.offset = input.u32();
+        const std::span<const std::uint8_t> bytes = input.raw(input.count());
+        const std::size_t end = static_cast<std::size_t>(patch.offset) + bytes.size();
+        if (patch.offset % alignment != 0U || bytes.empty() ||
+            bytes.size() % alignment != 0U || patch.offset < previous_end ||
+            patch.offset > total_bytes || bytes.size() > total_bytes - patch.offset) {
+            throw std::invalid_argument(
+                "render " + std::string(label) + " patch is outside retained geometry"
+            );
+        }
+        patch.bytes.assign(bytes.begin(), bytes.end());
+        previous_end = end;
+        result.push_back(std::move(patch));
+    }
+    return result;
+}
+
+[[nodiscard]] GeometryDirtyRegion dirty_region(
+    const std::span<const std::uint8_t> previous,
+    const GeometryPatch& patch
+) {
+    double minimum_x = std::numeric_limits<double>::infinity();
+    double minimum_y = std::numeric_limits<double>::infinity();
+    double maximum_x = -std::numeric_limits<double>::infinity();
+    double maximum_y = -std::numeric_limits<double>::infinity();
+    const auto include = [&](const std::uint8_t* const bytes) {
+        float x = 0.0F;
+        float y = 0.0F;
+        std::memcpy(&x, bytes, sizeof(x));
+        std::memcpy(&y, bytes + sizeof(x), sizeof(y));
+        if (!std::isfinite(x) || !std::isfinite(y)) {
+            throw std::invalid_argument("render vertex patch contains a non-finite position");
+        }
+        minimum_x = std::min(minimum_x, static_cast<double>(x));
+        minimum_y = std::min(minimum_y, static_cast<double>(y));
+        maximum_x = std::max(maximum_x, static_cast<double>(x));
+        maximum_y = std::max(maximum_y, static_cast<double>(y));
+    };
+    for (std::size_t offset = 0U; offset < patch.bytes.size(); offset += 88U) {
+        include(previous.data() + patch.offset + offset);
+        include(patch.bytes.data() + offset);
+    }
+    return GeometryDirtyRegion{
+        minimum_x,
+        minimum_y,
+        std::max(0.0, maximum_x - minimum_x),
+        std::max(0.0, maximum_y - minimum_y),
+    };
+}
+
+[[nodiscard]] bool batches_changed(
+    const std::vector<SubmissionBatch>& previous,
+    const std::vector<SubmissionBatch>& current
+) noexcept {
+    return previous != current;
+}
+
+class PatchDecodeTransaction final {
+public:
+    PatchDecodeTransaction(
+        std::optional<RenderPacket>& retained,
+        RenderPacket& working
+    )
+        : retained_(retained),
+          working_(working),
+          frame_index_(working.frame_index),
+          geometry_epoch_(working.geometry_epoch),
+          planned_draw_count_(working.planned_draw_count),
+          skipped_draw_count_(working.skipped_draw_count),
+          resources_(std::move(working.resources)),
+          full_geometry_payload_(working.full_geometry_payload),
+          vertex_patches_(std::move(working.vertex_patches)),
+          index_patches_(std::move(working.index_patches)),
+          geometry_dirty_all_(working.geometry_dirty_all),
+          geometry_dirty_regions_(std::move(working.geometry_dirty_regions)) {}
+
+    PatchDecodeTransaction(const PatchDecodeTransaction&) = delete;
+    PatchDecodeTransaction& operator=(const PatchDecodeTransaction&) = delete;
+
+    ~PatchDecodeTransaction() {
+        if (committed_) return;
+        for (const GeometryPatch& patch : undo_vertices_) {
+            std::memcpy(
+                working_.vertices.data() + patch.offset,
+                patch.bytes.data(),
+                patch.bytes.size()
+            );
+        }
+        std::uint8_t* const index_bytes =
+            reinterpret_cast<std::uint8_t*>(working_.indices.data());
+        for (const GeometryPatch& patch : undo_indices_) {
+            std::memcpy(
+                index_bytes + patch.offset,
+                patch.bytes.data(),
+                patch.bytes.size()
+            );
+        }
+        if (batches_saved_) working_.batches = std::move(batches_);
+        working_.frame_index = frame_index_;
+        working_.geometry_epoch = geometry_epoch_;
+        working_.planned_draw_count = planned_draw_count_;
+        working_.skipped_draw_count = skipped_draw_count_;
+        working_.resources = std::move(resources_);
+        working_.full_geometry_payload = full_geometry_payload_;
+        working_.vertex_patches = std::move(vertex_patches_);
+        working_.index_patches = std::move(index_patches_);
+        working_.geometry_dirty_all = geometry_dirty_all_;
+        working_.geometry_dirty_regions = std::move(geometry_dirty_regions_);
+        retained_ = std::move(working_);
+    }
+
+    void save_batches() {
+        batches_ = std::move(working_.batches);
+        batches_saved_ = true;
+    }
+
+    void apply(
+        const std::span<const GeometryPatch> vertex_patches,
+        const std::span<const GeometryPatch> index_patches
+    ) {
+        undo_vertices_.reserve(vertex_patches.size());
+        for (const GeometryPatch& patch : vertex_patches) {
+            GeometryPatch undo{patch.offset, {}};
+            undo.bytes.assign(
+                working_.vertices.begin() + patch.offset,
+                working_.vertices.begin() + patch.offset + patch.bytes.size()
+            );
+            undo_vertices_.push_back(std::move(undo));
+            std::memcpy(
+                working_.vertices.data() + patch.offset,
+                patch.bytes.data(),
+                patch.bytes.size()
+            );
+        }
+        const std::uint8_t* const current_indices =
+            reinterpret_cast<const std::uint8_t*>(working_.indices.data());
+        undo_indices_.reserve(index_patches.size());
+        for (const GeometryPatch& patch : index_patches) {
+            GeometryPatch undo{patch.offset, {}};
+            undo.bytes.assign(
+                current_indices + patch.offset,
+                current_indices + patch.offset + patch.bytes.size()
+            );
+            undo_indices_.push_back(std::move(undo));
+            std::memcpy(
+                reinterpret_cast<std::uint8_t*>(working_.indices.data()) + patch.offset,
+                patch.bytes.data(),
+                patch.bytes.size()
+            );
+        }
+    }
+
+    void commit() noexcept { committed_ = true; }
+    [[nodiscard]] const std::vector<SubmissionBatch>& previous_batches() const noexcept {
+        return batches_;
+    }
+
+private:
+    std::optional<RenderPacket>& retained_;
+    RenderPacket& working_;
+    std::uint64_t frame_index_ = 0U;
+    std::uint64_t geometry_epoch_ = 0U;
+    std::uint32_t planned_draw_count_ = 0U;
+    std::uint32_t skipped_draw_count_ = 0U;
+    std::vector<ResourceOperation> resources_;
+    bool full_geometry_payload_ = false;
+    std::vector<GeometryPatch> vertex_patches_;
+    std::vector<GeometryPatch> index_patches_;
+    bool geometry_dirty_all_ = false;
+    std::vector<GeometryDirtyRegion> geometry_dirty_regions_;
+    std::vector<SubmissionBatch> batches_;
+    std::vector<GeometryPatch> undo_vertices_;
+    std::vector<GeometryPatch> undo_indices_;
+    bool batches_saved_ = false;
+    bool committed_ = false;
+};
+
 } // namespace
 
 const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8_t> bytes) {
     Reader input(bytes);
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
-        input.u32() != 8U) {
-        throw std::invalid_argument("render packet decoder requires protocol v8");
+        input.u32() != 9U) {
+        throw std::invalid_argument("render packet decoder requires protocol v9");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();
     const std::uint64_t frame_index = input.u64();
     const std::uint64_t geometry_epoch = input.u64();
     const std::uint32_t flags = input.u32();
-    if ((flags & ~packet_flag_geometry_payload) != 0U) {
+    if ((flags & ~(packet_flag_geometry_payload | packet_flag_geometry_patches)) != 0U ||
+        flags == (packet_flag_geometry_payload | packet_flag_geometry_patches)) {
         throw std::invalid_argument("render packet flags are outside the supported domain");
     }
     const bool has_geometry_payload = (flags & packet_flag_geometry_payload) != 0U;
+    const bool has_geometry_patches = (flags & packet_flag_geometry_patches) != 0U;
     const std::uint32_t vertex_bytes = input.count();
     const std::uint32_t index_count = input.count();
     const std::uint32_t planned_draw_count = input.count();
@@ -255,7 +446,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     }
     const bool retained_geometry =
         retained_.has_value() && retained_->geometry_epoch == geometry_epoch;
-    if (!has_geometry_payload) {
+    if (!has_geometry_payload && !has_geometry_patches) {
         if (batch_count != 0U || vertex_bytes != 0U || index_count != 0U) {
             throw std::invalid_argument(
                 "retained render packet unexpectedly carries geometry counts");
@@ -269,20 +460,69 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         retained_->planned_draw_count = planned_draw_count;
         retained_->skipped_draw_count = skipped_draw_count;
         retained_->resources = std::move(resources);
+        retained_->full_geometry_payload = false;
+        retained_->vertex_patches.clear();
+        retained_->index_patches.clear();
+        retained_->geometry_dirty_all = false;
+        retained_->geometry_dirty_regions.clear();
         return *retained_;
     }
 
-    RenderPacket result;
+    if (has_geometry_patches) {
+        if (!retained_.has_value() ||
+            retained_->geometry_epoch == std::numeric_limits<std::uint64_t>::max() ||
+            geometry_epoch != retained_->geometry_epoch + 1U ||
+            vertex_bytes != retained_->vertices.size() ||
+            index_count != retained_->indices.size()) {
+            throw std::invalid_argument(
+                "render geometry patch does not match the preceding retained epoch"
+            );
+        }
+    }
+    RenderPacket result = has_geometry_patches ? std::move(*retained_) : RenderPacket{};
+    std::optional<PatchDecodeTransaction> patch_transaction;
+    if (has_geometry_patches) {
+        patch_transaction.emplace(retained_, result);
+    }
     result.frame_index = frame_index;
     result.geometry_epoch = geometry_epoch;
     result.planned_draw_count = planned_draw_count;
     result.skipped_draw_count = skipped_draw_count;
     result.resources = std::move(resources);
-    const std::span<const std::uint8_t> vertices = input.raw(vertex_bytes);
-    result.vertices.assign(vertices.begin(), vertices.end());
-    result.indices.reserve(index_count);
-    for (std::uint32_t index = 0U; index < index_count; ++index)
-        result.indices.push_back(input.u32());
+    result.full_geometry_payload = has_geometry_payload;
+    result.geometry_dirty_all = has_geometry_payload;
+    result.geometry_dirty_regions.clear();
+    result.vertex_patches.clear();
+    result.index_patches.clear();
+    if (has_geometry_patches) {
+        result.vertex_patches = geometry_patches(
+            input,
+            result.vertices.size(),
+            88U,
+            "vertex"
+        );
+        result.index_patches = geometry_patches(
+            input,
+            result.indices.size() * sizeof(std::uint32_t),
+            sizeof(std::uint32_t),
+            "index"
+        );
+        result.geometry_dirty_regions.reserve(result.vertex_patches.size());
+        for (const GeometryPatch& patch : result.vertex_patches) {
+            result.geometry_dirty_regions.push_back(dirty_region(result.vertices, patch));
+        }
+        result.geometry_dirty_all = !result.index_patches.empty();
+        patch_transaction->apply(result.vertex_patches, result.index_patches);
+        patch_transaction->save_batches();
+    } else {
+        const std::span<const std::uint8_t> vertices = input.raw(vertex_bytes);
+        result.vertices.assign(vertices.begin(), vertices.end());
+        result.indices.clear();
+        result.indices.reserve(index_count);
+        for (std::uint32_t index = 0U; index < index_count; ++index)
+            result.indices.push_back(input.u32());
+    }
+    result.batches.clear();
     result.batches.reserve(batch_count);
     for (std::uint32_t index = 0U; index < batch_count; ++index) {
         const std::uint32_t kind = input.u32();
@@ -387,6 +627,14 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     if (effect_depth != 0U) {
         throw std::invalid_argument("render content effect stack is unbalanced");
     }
+    if (has_geometry_patches &&
+        batches_changed(
+            patch_transaction->previous_batches(),
+            result.batches
+        )) {
+        result.geometry_dirty_all = true;
+        result.geometry_dirty_regions.clear();
+    }
     validate_geometry(result);
     if (retained_geometry) {
         if (result.vertices != retained_->vertices || result.indices != retained_->indices) {
@@ -398,6 +646,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         }
     }
     retained_ = std::move(result);
+    if (patch_transaction.has_value()) patch_transaction->commit();
     return *retained_;
 }
 

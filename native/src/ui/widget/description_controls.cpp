@@ -72,15 +72,18 @@ void checkbox_defaults(WidgetLayoutDefaultsScope& scope) {
     const std::string_view initial,
     const double fallback
 ) {
-    for (const runtime::Value* candidate : {
-             scope.property(controlled),
-             scope.retained(retained),
-             scope.property(initial),
-         }) {
-        if (candidate != nullptr && candidate->number() != nullptr &&
-            std::isfinite(*candidate->number())) {
-            return *candidate->number();
-        }
+    const auto finite_number = [](const runtime::Value* value) -> const double* {
+        const double* number = value != nullptr ? value->number() : nullptr;
+        return number != nullptr && std::isfinite(*number) ? number : nullptr;
+    };
+    if (const double* value = finite_number(scope.property(controlled)); value != nullptr) {
+        return *value;
+    }
+    if (const double* value = finite_number(scope.retained(retained)); value != nullptr) {
+        return *value;
+    }
+    if (const double* value = finite_number(scope.property(initial)); value != nullptr) {
+        return *value;
     }
     return fallback;
 }
@@ -138,6 +141,7 @@ void slider_defaults(WidgetLayoutDefaultsScope& scope) {
 }
 
 void slider_expand(WidgetDescriptionScope& scope) {
+    if (scope.property("presentationTemplate") == nullptr) return;
     const double minimum = scope.number("min", 0.0);
     const double maximum = scope.number("max", 1.0);
     const double value =

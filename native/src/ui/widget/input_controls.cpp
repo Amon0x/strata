@@ -82,7 +82,14 @@ bool slider_change_at_pointer(WidgetInputScope& scope) {
         ? minimum + std::round((raw - minimum) / step) * step
         : raw;
     const double next = std::clamp(snapped, minimum, maximum);
-    scope.set_retained("$value", runtime::Value(next), DirtyReason::properties);
+    const double current = scope.effective_number(
+        "value", "$value", "defaultValue", minimum
+    );
+    const bool controlled = scope.property("value") != nullptr;
+    if (!controlled && (next != current || scope.retained("$value") == nullptr)) {
+        scope.set_retained("$value", runtime::Value(next), DirtyReason::properties);
+    }
+    if (next == current) return true;
     scope.number_changed("onChange", next);
     return true;
 }

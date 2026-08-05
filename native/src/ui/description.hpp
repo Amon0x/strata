@@ -50,6 +50,12 @@ public:
     [[nodiscard]] DescriptionBuildResult build(runtime::LayerRole role, std::string_view name);
     /** Supplies the prior retained tree to stateful widget expansion for this build. */
     void set_retained_tree(const RetainedTree* tree);
+    /** Whether changing one retained value can affect the currently cached description layers. */
+    [[nodiscard]] bool observes_retained_value(
+        const RetainedNode& node,
+        std::string_view name,
+        bool include_lazy_snapshots = true
+    ) const;
     /** Supplies request-local host roots without mutating the shared application snapshot. */
     void set_contextual_host_roots(
         std::map<std::string, runtime::Value, std::less<>> roots
@@ -108,7 +114,7 @@ private:
 
     struct RetainedSequenceEffect final {
         RetainedQuery query;
-        std::shared_ptr<const runtime::IndexableSequence> sequence;
+        std::weak_ptr<const runtime::IndexableSequence> sequence;
         std::optional<DescriptionSequenceGeneration> generation;
     };
 
@@ -117,9 +123,12 @@ private:
         std::map<runtime::StateAddress, runtime::Value> state_values;
         std::map<runtime::StateAddress, StateBindingEffect> state_bindings;
         runtime::StateScopeSet owned_state_scopes;
+        std::set<std::string, std::less<>> direct_descendant_cache_keys;
         std::set<std::string, std::less<>> descendant_cache_keys;
         std::vector<RetainedValueEffects> retained_values;
         std::vector<RetainedSequenceEffect> retained_sequences;
+        bool captures_retained_snapshot = false;
+        std::shared_ptr<const RetainedDescriptionSnapshot> retained_snapshot;
     };
 
     struct ComponentCacheEntry final {
@@ -131,6 +140,23 @@ private:
         std::map<std::string, runtime::Value, std::less<>> contextual_host_roots;
         ComponentEffects effects;
         std::shared_ptr<const DescriptionNode> root;
+        Scope rebuild_scope;
+    };
+
+    struct LayerCacheEntry final {
+        runtime::LayerRole role;
+        std::string name;
+        std::string source_path;
+        std::uint64_t host_invalidation_count = 0U;
+        std::map<std::string, runtime::Value, std::less<>> contextual_host_roots;
+        ComponentEffects effects;
+        std::shared_ptr<const DescriptionNode> root;
+    };
+
+    enum class ComponentRefreshResult {
+        unchanged,
+        changed,
+        invalid,
     };
 
     void bind_scope_state(const Scope& scope);
@@ -152,7 +178,23 @@ private:
         const RetainedQuery& query,
         const RetainedDescriptionSnapshot::Node* retained
     );
+    void capture_retained_snapshot();
     void replay_component_effects(const ComponentEffects& effects);
+    [[nodiscard]] std::shared_ptr<const DescriptionNode> build_component_body(
+        std::string_view component,
+        Scope scope,
+        ComponentEffects& effects
+    );
+    [[nodiscard]] ComponentRefreshResult refresh_component_cache_entry(
+        const std::string& cache_key
+    );
+    [[nodiscard]] static std::shared_ptr<const DescriptionNode> replace_component_subtrees(
+        const std::shared_ptr<const DescriptionNode>& root,
+        const std::map<
+            const DescriptionNode*,
+            std::shared_ptr<const DescriptionNode>
+        >& replacements
+    );
     [[nodiscard]] std::optional<ComponentInputs> component_inputs(
         const DescriptionNode::Properties& properties,
         const std::map<std::string, Scope::WidgetDefault, std::less<>>& widget_defaults
@@ -162,6 +204,11 @@ private:
         std::string_view component,
         std::string_view source_path,
         const ComponentInputs& inputs
+    ) const;
+    [[nodiscard]] bool component_effects_current(
+        const ComponentEffects& effects,
+        std::uint64_t host_invalidation_count,
+        const std::map<std::string, runtime::Value, std::less<>>& contextual_host_roots
     ) const;
     [[nodiscard]] std::shared_ptr<const DescriptionNode> build_layer(
         runtime::LayerRole role,
@@ -236,7 +283,9 @@ private:
     std::shared_ptr<const RetainedDescriptionSnapshot> retained_snapshot_;
     std::shared_ptr<const runtime::RuntimeUnit> component_cache_unit_;
     std::map<std::string, ComponentCacheEntry, std::less<>> component_cache_;
+    std::map<std::string, LayerCacheEntry, std::less<>> layer_cache_;
     std::set<std::string, std::less<>> visited_component_cache_keys_;
+    std::set<std::string, std::less<>> refreshing_component_cache_keys_;
     std::uint64_t component_cache_epoch_ = 0U;
     std::vector<ComponentEffects*> component_effect_stack_;
 };

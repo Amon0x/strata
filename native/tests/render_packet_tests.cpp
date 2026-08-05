@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 #include "font/atlas.hpp"
 #include "resource/resource.hpp"
@@ -96,8 +97,8 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
 
     host::RenderPacketDecoder decoder;
     const std::vector<std::uint8_t> encoded = encode(commands, resources);
-    check(encoded.size() > 12U && encoded[8U] == 8U,
-          "effect packet did not use render protocol v8");
+    check(encoded.size() > 12U && encoded[8U] == 9U,
+          "effect packet did not use render protocol v9");
     const host::RenderPacket packet = decoder.decode(encoded);
     check(packet.batches.size() == 4U, "effect packet changed its ordered batch count");
     const auto* backdrop = std::get_if<host::EffectBatch>(&packet.batches[0U]);
@@ -354,6 +355,113 @@ void test_repeated_epoch_rejects_batch_shape_changes(const std::filesystem::path
     check(rejected, "repeated geometry epoch accepted a changed batch shape");
 }
 
+void test_incremental_geometry_patch_round_trip(const std::filesystem::path& resources) {
+    using namespace strata;
+    const std::shared_ptr<const ui::TextEngine> text =
+        ui::TextEngine::load_control_font(
+            resources,
+            resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        );
+    font::GlyphAtlas atlas("geometry-patch-test");
+    ui::HostRenderPacketCache cache;
+    host::RenderPacketDecoder decoder;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::SolidRectRenderCommand{
+        ui::Rect{10.0, 20.0, 100.0, 50.0},
+        ui::RenderColor{30U, 80U, 140U, 255U},
+    });
+    const std::vector<std::uint8_t> first_encoded =
+        cache.encode(commands, 1U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0);
+    const host::RenderPacket first = decoder.decode(first_encoded);
+    check(first.full_geometry_payload && first.vertex_patches.empty(),
+          "initial render packet was not a complete geometry epoch");
+
+    commands.clear();
+    commands.append(ui::SolidRectRenderCommand{
+        ui::Rect{14.0, 20.0, 100.0, 50.0},
+        ui::RenderColor{30U, 80U, 140U, 255U},
+    });
+    const std::vector<std::uint8_t> patch_encoded =
+        cache.encode(commands, 2U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0);
+    check((u32(patch_encoded, 36U) & host::packet_flag_geometry_patches) != 0U &&
+              patch_encoded.size() < first_encoded.size(),
+          "small geometry change was encoded as another full packet");
+    std::vector<std::uint8_t> malformed = patch_encoded;
+    malformed.push_back(0xFFU);
+    bool rejected = false;
+    try {
+        static_cast<void>(decoder.decode(malformed));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    check(rejected, "render decoder accepted trailing data after a geometry patch");
+    const host::RenderPacket patched = decoder.decode(patch_encoded);
+    check(!patched.full_geometry_payload && !patched.vertex_patches.empty() &&
+              patched.index_patches.empty() && patched.vertices != first.vertices &&
+              patched.indices == first.indices && !patched.geometry_dirty_all &&
+              patched.geometry_dirty_regions.size() == 1U &&
+              patched.geometry_dirty_regions.front().x == 10.0 &&
+              patched.geometry_dirty_regions.front().y == 20.0 &&
+              patched.geometry_dirty_regions.front().width == 104.0 &&
+              patched.geometry_dirty_regions.front().height == 50.0,
+          "retained geometry patch did not reconstruct the changed submission");
+
+    const std::vector<std::uint8_t> reuse_encoded =
+        cache.encode(commands, 3U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0);
+    const host::RenderPacket reused = decoder.decode(reuse_encoded);
+    check(u32(reuse_encoded, 36U) == 0U && reused.vertex_patches.empty() &&
+              reused.geometry_dirty_regions.empty() && !reused.geometry_dirty_all &&
+              reused.vertices == patched.vertices && reused.geometry_epoch == patched.geometry_epoch,
+          "compact reuse did not retain the patched geometry epoch");
+}
+
+void test_effect_batch_change_invalidates_retained_samples(
+    const std::filesystem::path& resources
+) {
+    using namespace strata;
+    const std::shared_ptr<const ui::TextEngine> text =
+        ui::TextEngine::load_control_font(
+            resources,
+            resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        );
+    font::GlyphAtlas atlas("effect-batch-patch-test");
+    ui::HostRenderPacketCache cache;
+    host::RenderPacketDecoder decoder;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::SolidRectRenderCommand{
+        ui::Rect{0.0, 0.0, 100.0, 80.0},
+        ui::RenderColor{30U, 80U, 140U, 255U},
+    });
+    commands.append(ui::BackdropEffectRenderCommand{
+        ui::Rect{10.0, 12.0, 80.0, 44.0},
+        ui::CornerRadii::all(9.0),
+        effect(ui::EffectInput::backdrop),
+    });
+    static_cast<void>(decoder.decode(cache.encode(
+        commands, 1U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0
+    )));
+
+    ui::EffectState changed_effect = effect(ui::EffectInput::backdrop);
+    changed_effect.opacity = 0.5;
+    commands.clear();
+    commands.append(ui::SolidRectRenderCommand{
+        ui::Rect{0.0, 0.0, 100.0, 80.0},
+        ui::RenderColor{30U, 80U, 140U, 255U},
+    });
+    commands.append(ui::BackdropEffectRenderCommand{
+        ui::Rect{10.0, 12.0, 80.0, 44.0},
+        ui::CornerRadii::all(9.0),
+        std::move(changed_effect),
+    });
+    const host::RenderPacket& changed = decoder.decode(cache.encode(
+        commands, 2U, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0
+    ));
+    check(
+        !changed.full_geometry_payload && changed.geometry_dirty_all,
+        "an effect-batch-only patch retained stale rate-limited samples"
+    );
+}
+
 } // namespace
 
 int main(const int argument_count, const char* const* const arguments) {
@@ -368,6 +476,8 @@ int main(const int argument_count, const char* const* const arguments) {
         test_repeated_epoch_still_validates_batches(arguments[1]);
         test_content_effect_depth_is_bounded(arguments[1]);
         test_repeated_epoch_rejects_batch_shape_changes(arguments[1]);
+        test_incremental_geometry_patch_round_trip(arguments[1]);
+        test_effect_batch_change_invalidates_retained_samples(arguments[1]);
         std::cout << "strata_render_packet_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

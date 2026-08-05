@@ -197,6 +197,7 @@ void record(Writer& output, const std::uint32_t kind, const std::span<const std:
 
 constexpr std::size_t frame_index_offset = 20U;
 constexpr std::uint32_t geometry_payload_flag = 1U;
+constexpr std::uint32_t geometry_patch_flag = 2U;
 
 void write_frame_index(Bytes& packet, const std::uint64_t frame_index) {
     if (packet.size() < frame_index_offset + sizeof(frame_index)) {
@@ -212,12 +213,21 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
               const std::uint64_t geometry_epoch,
               const std::span<const resource::EncodedTextureResource> texture_resources,
               const std::span<const font::AtlasOperation> resources,
-              const bool include_geometry = true) {
+              const bool include_geometry = true,
+              const bool patch_geometry = false) {
     std::size_t reserve = 56U;
-    if (include_geometry) {
+    if (include_geometry && !patch_geometry) {
         reserve += submission.vertex_bytes.size() +
                    submission.indices.size() * sizeof(std::uint32_t) +
                    submission.batches.size() * 80U;
+    } else if (patch_geometry) {
+        for (const SubmissionGeometryPatch& patch : submission.vertex_patches) {
+            reserve += patch.bytes.size() + 8U;
+        }
+        for (const SubmissionGeometryPatch& patch : submission.index_patches) {
+            reserve += patch.bytes.size() + 8U;
+        }
+        reserve += submission.batches.size() * 80U + 8U;
     }
     for (const resource::EncodedTextureResource& texture : texture_resources) {
         reserve += texture.bytes.size() + texture.host_id.size() + 40U;
@@ -229,22 +239,30 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     constexpr std::string_view magic = "STRATARP";
     output.raw(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(magic.data()),
                                              magic.size()));
-    output.integer(std::uint32_t{8U});
+    output.integer(std::uint32_t{9U});
     if (texture_resources.size() > std::numeric_limits<std::size_t>::max() - resources.size()) {
         throw std::length_error("render resource count exceeds size_t");
     }
     output.integer(
         checked_count(texture_resources.size() + resources.size(), "render resource count"));
-    output.integer(include_geometry ? checked_count(submission.batches.size(), "render batch count")
-                                    : 0U);
+    output.integer(
+        include_geometry ? checked_count(submission.batches.size(), "render batch count") : 0U
+    );
     output.integer(frame_index);
     output.integer(geometry_epoch);
-    output.integer(include_geometry ? geometry_payload_flag : std::uint32_t{0U});
-    output.integer(include_geometry
+    output.integer(
+        patch_geometry
+            ? geometry_patch_flag
+            : include_geometry ? geometry_payload_flag : std::uint32_t{0U}
+    );
+    output.integer((include_geometry || patch_geometry)
                        ? checked_count(submission.vertex_bytes.size(), "render vertex byte count")
                        : 0U);
-    output.integer(include_geometry ? checked_count(submission.indices.size(), "render index count")
-                                    : 0U);
+    output.integer(
+        (include_geometry || patch_geometry)
+            ? checked_count(submission.indices.size(), "render index count")
+            : 0U
+    );
     output.integer(checked_count(submission.planned_draws, "render planned draw count"));
     output.integer(checked_count(submission.skipped_draws, "render skipped draw count"));
     // Releases queued by a resource reload must precede creates that may reuse the same
@@ -258,9 +276,30 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
         record(output, 3U, payload);
     }
     if (include_geometry) {
-        output.raw(submission.vertex_bytes);
-        for (const std::uint32_t index : submission.indices)
-            output.integer(index);
+        if (patch_geometry) {
+            output.integer(checked_count(
+                submission.vertex_patches.size(),
+                "render vertex patch count"
+            ));
+            for (const SubmissionGeometryPatch& patch : submission.vertex_patches) {
+                output.integer(patch.offset);
+                output.integer(checked_count(patch.bytes.size(), "render vertex patch bytes"));
+                output.raw(patch.bytes);
+            }
+            output.integer(checked_count(
+                submission.index_patches.size(),
+                "render index patch count"
+            ));
+            for (const SubmissionGeometryPatch& patch : submission.index_patches) {
+                output.integer(patch.offset);
+                output.integer(checked_count(patch.bytes.size(), "render index patch bytes"));
+                output.raw(patch.bytes);
+            }
+        } else {
+            output.raw(submission.vertex_bytes);
+            for (const std::uint32_t index : submission.indices)
+                output.integer(index);
+        }
         for (const SubmissionBatch& batch : submission.batches) {
             const Bytes payload = batch_payload(batch);
             record(output, static_cast<std::uint32_t>(batch.kind), payload);
@@ -293,6 +332,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         texture_descriptors_.swap(next_descriptors);
     }
     const std::size_t prior_hits = submission_cache_.hit_count();
+    const auto submission_started = std::chrono::steady_clock::now();
     const RenderSubmission& submission =
         submission_cache_.resolve(commands, glyph_atlas, text_engine,
                                   RenderSubmissionEnvironment{
@@ -303,6 +343,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                                       logical_height,
                                   },
                                   texture_descriptors_);
+    const auto submission_completed = std::chrono::steady_clock::now();
     const auto submission_finished = profile_cold_encode ? std::chrono::steady_clock::now()
                                                          : std::chrono::steady_clock::time_point{};
     // Submission planning has finished mutating the atlas. Keep a stable view of its pending
@@ -339,18 +380,51 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         0,
         0,
     };
+    telemetry_.submission_nanos =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            submission_completed - submission_started
+        ).count();
+    telemetry_.submission_planning_nanos = submission.planning_nanos;
+    telemetry_.submission_atlas_warmup_nanos = submission.atlas_warmup_nanos;
+    telemetry_.submission_text_preparation_nanos = submission.text_preparation_nanos;
+    telemetry_.submission_mesh_encoding_nanos = submission.mesh_encoding_nanos;
     const bool geometry_changed =
         retrying_incomplete_frame || !submission_reused || geometry_packet_.empty();
+    const bool patch_geometry =
+        geometry_changed && !retrying_incomplete_frame && !geometry_packet_.empty() &&
+        submission.patch_from_previous;
+    telemetry_.geometry_patched = patch_geometry;
+    if (patch_geometry) {
+        for (const SubmissionGeometryPatch& patch : submission.vertex_patches) {
+            telemetry_.geometry_patch_bytes += patch.bytes.size();
+        }
+        for (const SubmissionGeometryPatch& patch : submission.index_patches) {
+            telemetry_.geometry_patch_bytes += patch.bytes.size();
+        }
+    }
     std::uint64_t encoded_geometry_epoch = geometry_epoch_;
     if (geometry_changed) {
         if (geometry_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
             throw std::overflow_error("render geometry epoch exhausted");
         }
         encoded_geometry_epoch = geometry_epoch_ + 1U;
+        const auto geometry_encode_started = std::chrono::steady_clock::now();
         std::vector<std::uint8_t> next_geometry =
-            encode_packet(submission, frame_index, encoded_geometry_epoch, {}, {});
+            encode_packet(
+                submission,
+                frame_index,
+                encoded_geometry_epoch,
+                {},
+                {},
+                true,
+                patch_geometry
+            );
         static_assert(noexcept(geometry_packet_.swap(next_geometry)));
         geometry_packet_.swap(next_geometry);
+        telemetry_.geometry_packet_nanos =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - geometry_encode_started
+            ).count();
         reuse_packet_.clear();
         if (profile_cold_encode) {
             telemetry_.cold_geometry_packet_nanos =
@@ -377,7 +451,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                                                  : std::chrono::steady_clock::time_point{};
         std::vector<std::uint8_t> next_resources =
             encode_packet(submission, frame_index, encoded_geometry_epoch, texture_resources,
-                          resources, geometry_changed);
+                          resources, geometry_changed, patch_geometry);
         static_assert(noexcept(resource_packet_.swap(next_resources)));
         resource_packet_.swap(next_resources);
         current_packet_ = &resource_packet_;

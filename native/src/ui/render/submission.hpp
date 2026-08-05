@@ -69,6 +69,13 @@ struct SubmissionBatch final {
     CornerRadii effect_radii;
     std::optional<EffectState> effect;
     std::vector<SubmissionRoundedClip> rounded_clips;
+    [[nodiscard]] friend bool operator==(const SubmissionBatch&, const SubmissionBatch&) = default;
+};
+
+/** One aligned byte range replacing retained geometry from the preceding submission. */
+struct SubmissionGeometryPatch final {
+    std::uint32_t offset = 0U;
+    std::vector<std::uint8_t> bytes;
 };
 
 struct RenderSubmission final {
@@ -85,6 +92,9 @@ struct RenderSubmission final {
     std::int64_t atlas_warmup_nanos = 0;
     std::int64_t text_preparation_nanos = 0;
     std::int64_t mesh_encoding_nanos = 0;
+    bool patch_from_previous = false;
+    std::vector<SubmissionGeometryPatch> vertex_patches;
+    std::vector<SubmissionGeometryPatch> index_patches;
 };
 
 struct RenderSubmissionEnvironment final {

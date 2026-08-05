@@ -480,8 +480,11 @@ WidgetSchema::find_binding(const std::string_view shorthand) const noexcept {
 }
 
 SchemaRegistry SchemaRegistry::builtins() {
-    static const SchemaRegistry registry = from_catalog(builtin_catalog());
-    return registry;
+    static const std::shared_ptr<const SchemaRegistry> registry =
+        std::make_shared<const SchemaRegistry>(from_catalog(builtin_catalog()));
+    SchemaRegistry application;
+    application.base_ = registry;
+    return application;
 }
 
 SchemaRegistry SchemaRegistry::from_catalog(const BuiltinCatalog& catalog) {
@@ -621,11 +624,25 @@ SemanticTypePtr SchemaRegistry::parse_type(const data::JsonValue& value) {
         if (const auto cached = resolved_types_.find(id); cached != resolved_types_.end()) {
             return cached->second;
         }
+        if (base_ != nullptr) {
+            if (const auto cached = base_->resolved_types_.find(id);
+                cached != base_->resolved_types_.end()) {
+                return cached->second;
+            }
+        }
         if (const auto definition = declared_type_definitions_.find(id);
             definition != declared_type_definitions_.end()) {
             SemanticTypePtr parsed = parse_type(definition->second);
             resolved_types_.emplace(id, parsed);
             return parsed;
+        }
+        if (base_ != nullptr) {
+            if (const auto definition = base_->declared_type_definitions_.find(id);
+                definition != base_->declared_type_definitions_.end()) {
+                SemanticTypePtr parsed = parse_type(definition->second);
+                resolved_types_.emplace(id, parsed);
+                return parsed;
+            }
         }
         throw std::runtime_error("unknown schema type ref '" + id + "'");
     }
@@ -746,11 +763,26 @@ SemanticTypePtr SchemaRegistry::parse_type(const std::shared_ptr<const DeclaredT
             cached != resolved_types_.end()) {
             return cached->second;
         }
+        if (base_ != nullptr) {
+            if (const auto cached = base_->resolved_types_.find(value->reference);
+                cached != base_->resolved_types_.end()) {
+                return cached->second;
+            }
+        }
         if (const auto definition = declared_type_definitions_.find(value->reference);
             definition != declared_type_definitions_.end()) {
             SemanticTypePtr parsed = parse_type(definition->second);
             resolved_types_.emplace(value->reference, parsed);
             return parsed;
+        }
+        if (base_ != nullptr) {
+            if (const auto definition =
+                    base_->declared_type_definitions_.find(value->reference);
+                definition != base_->declared_type_definitions_.end()) {
+                SemanticTypePtr parsed = parse_type(definition->second);
+                resolved_types_.emplace(value->reference, parsed);
+                return parsed;
+            }
         }
         throw std::logic_error("unknown native catalog type ref '" + value->reference + "'");
     }
@@ -856,64 +888,86 @@ SchemaParameter SchemaRegistry::parse_parameter(const DeclaredParameter& value) 
 
 const WidgetSchema* SchemaRegistry::widget(const std::string_view name) const noexcept {
     const auto found = widgets_.find(std::string(name));
-    return found == widgets_.end() ? nullptr : &found->second;
+    return found != widgets_.end()
+        ? &found->second
+        : base_ != nullptr ? base_->widget(name) : nullptr;
 }
 
 const ActionSchema* SchemaRegistry::action(const std::string_view id) const noexcept {
     const auto found = actions_.find(std::string(id));
-    return found == actions_.end() ? nullptr : &found->second;
+    return found != actions_.end()
+        ? &found->second
+        : base_ != nullptr ? base_->action(id) : nullptr;
 }
 
 const HelperSchema* SchemaRegistry::helper(const std::string_view name) const noexcept {
     const auto found = helpers_.find(std::string(name));
-    return found == helpers_.end() ? nullptr : &found->second;
+    return found != helpers_.end()
+        ? &found->second
+        : base_ != nullptr ? base_->helper(name) : nullptr;
 }
 
 const MaterialSchema* SchemaRegistry::material(const std::string_view id) const noexcept {
     const auto found = materials_.find(std::string(id));
-    return found == materials_.end() ? nullptr : &found->second;
+    return found != materials_.end()
+        ? &found->second
+        : base_ != nullptr ? base_->material(id) : nullptr;
 }
 
 const EffectSchema* SchemaRegistry::effect(const std::string_view name) const noexcept {
     const auto found = effects_.find(std::string(name));
-    return found == effects_.end() ? nullptr : &found->second;
+    return found != effects_.end()
+        ? &found->second
+        : base_ != nullptr ? base_->effect(name) : nullptr;
 }
 
 const SemanticType*
 SchemaRegistry::component_parameter_type(const std::string_view name) const noexcept {
     const auto found = component_parameter_types_.find(normalized_semantic_name(name));
-    return found == component_parameter_types_.end() ? nullptr : found->second.get();
+    return found != component_parameter_types_.end()
+        ? found->second.get()
+        : base_ != nullptr ? base_->component_parameter_type(name) : nullptr;
 }
 
 const SchemaParameter* SchemaRegistry::layout_property(const std::string_view name) const noexcept {
     const auto found = std::ranges::find(layout_properties_, name, &SchemaParameter::name);
-    return found != layout_properties_.end() ? &*found : nullptr;
+    return found != layout_properties_.end()
+        ? &*found
+        : base_ != nullptr ? base_->layout_property(name) : nullptr;
 }
 
 const SchemaParameter* SchemaRegistry::style_property(const std::string_view name) const noexcept {
     const auto found = std::ranges::find(style_properties_, name, &SchemaParameter::name);
-    return found != style_properties_.end() ? &*found : nullptr;
+    return found != style_properties_.end()
+        ? &*found
+        : base_ != nullptr ? base_->style_property(name) : nullptr;
 }
 
 const SchemaParameter*
 SchemaRegistry::animation_property(const std::string_view name) const noexcept {
     const auto found = std::ranges::find(animation_properties_, name, &SchemaParameter::name);
-    return found != animation_properties_.end() ? &*found : nullptr;
+    return found != animation_properties_.end()
+        ? &*found
+        : base_ != nullptr ? base_->animation_property(name) : nullptr;
 }
 
 const SchemaParameter*
 SchemaRegistry::animation_timing_property(const std::string_view name) const noexcept {
     const auto found =
         std::ranges::find(animation_timing_properties_, name, &SchemaParameter::name);
-    return found != animation_timing_properties_.end() ? &*found : nullptr;
+    return found != animation_timing_properties_.end()
+        ? &*found
+        : base_ != nullptr ? base_->animation_timing_property(name) : nullptr;
 }
 
 std::vector<std::string> SchemaRegistry::layout_property_names() const {
-    std::vector<std::string> names;
-    names.reserve(layout_properties_.size());
+    std::vector<std::string> names =
+        base_ != nullptr ? base_->layout_property_names() : std::vector<std::string>{};
+    names.reserve(names.size() + layout_properties_.size());
     for (const SchemaParameter& property : layout_properties_)
         names.push_back(property.name);
     std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
     return names;
 }
 
@@ -932,55 +986,87 @@ parameter_names(const std::vector<SchemaParameter>& parameters) {
 } // namespace
 
 std::vector<std::string> SchemaRegistry::style_property_names() const {
-    return parameter_names(style_properties_);
+    std::vector<std::string> names =
+        base_ != nullptr ? base_->style_property_names() : std::vector<std::string>{};
+    std::vector<std::string> local = parameter_names(style_properties_);
+    names.insert(names.end(), local.begin(), local.end());
+    std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
+    return names;
 }
 
 std::vector<std::string> SchemaRegistry::animation_property_names() const {
-    return parameter_names(animation_properties_);
+    std::vector<std::string> names =
+        base_ != nullptr ? base_->animation_property_names() : std::vector<std::string>{};
+    std::vector<std::string> local = parameter_names(animation_properties_);
+    names.insert(names.end(), local.begin(), local.end());
+    std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
+    return names;
 }
 
 std::vector<std::string> SchemaRegistry::animation_timing_property_names() const {
-    return parameter_names(animation_timing_properties_);
+    std::vector<std::string> names =
+        base_ != nullptr
+            ? base_->animation_timing_property_names()
+            : std::vector<std::string>{};
+    std::vector<std::string> local = parameter_names(animation_timing_properties_);
+    names.insert(names.end(), local.begin(), local.end());
+    std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
+    return names;
 }
 
 bool SchemaRegistry::has_material(const std::string_view id) const noexcept {
-    return std::ranges::binary_search(material_ids_, id);
+    return std::ranges::binary_search(material_ids_, id) ||
+        (base_ != nullptr && base_->has_material(id));
 }
 
 std::vector<std::string> SchemaRegistry::widget_names() const {
-    std::vector<std::string> names;
-    names.reserve(widgets_.size());
+    std::vector<std::string> names =
+        base_ != nullptr ? base_->widget_names() : std::vector<std::string>{};
+    names.reserve(names.size() + widgets_.size());
     for (const auto& [name, schema] : widgets_) {
         static_cast<void>(schema);
         names.push_back(name);
     }
     std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
     return names;
 }
 
 std::vector<std::string> SchemaRegistry::material_ids() const {
-    return material_ids_;
+    std::vector<std::string> result =
+        base_ != nullptr ? base_->material_ids() : std::vector<std::string>{};
+    result.insert(result.end(), material_ids_.begin(), material_ids_.end());
+    std::ranges::sort(result);
+    result.erase(std::ranges::unique(result).begin(), result.end());
+    return result;
 }
 
 std::vector<std::string> SchemaRegistry::effect_names() const {
-    std::vector<std::string> names;
-    names.reserve(effects_.size());
+    std::vector<std::string> names =
+        base_ != nullptr ? base_->effect_names() : std::vector<std::string>{};
+    names.reserve(names.size() + effects_.size());
     for (const auto& [name, schema] : effects_) {
         static_cast<void>(schema);
         names.push_back(name);
     }
     std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
     return names;
 }
 
 std::vector<std::string> SchemaRegistry::action_names() const {
-    std::vector<std::string> names;
-    names.reserve(actions_.size());
+    std::vector<std::string> names =
+        base_ != nullptr ? base_->action_names() : std::vector<std::string>{};
+    names.reserve(names.size() + actions_.size());
     for (const auto& [name, schema] : actions_) {
         static_cast<void>(schema);
         names.push_back(name);
     }
     std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
     return names;
 }
 
@@ -993,7 +1079,11 @@ void SchemaRegistry::apply_scenario_declarations(const data::JsonValue& schemas)
         for (const data::JsonValue& parameter : array_field(value, "parameters")) {
             schema.parameters.push_back(parse_parameter(parameter));
         }
-        for (const SchemaParameter& framework : framework_widget_parameters_) {
+        const std::vector<SchemaParameter>& framework_parameters =
+            !framework_widget_parameters_.empty() || base_ == nullptr
+                ? framework_widget_parameters_
+                : base_->framework_widget_parameters_;
+        for (const SchemaParameter& framework : framework_parameters) {
             const bool declared = std::ranges::any_of(
                 schema.parameters, [&framework](const SchemaParameter& parameter) {
                     return parameter.name == framework.name;
@@ -1053,7 +1143,7 @@ void SchemaRegistry::apply_scenario_declarations(const data::JsonValue& schemas)
                     schema.shaders.emplace_back(backend, *source.string());
                 }
             }
-            if (materials_.find(schema.id) == materials_.end()) {
+            if (material(schema.id) == nullptr) {
                 // material_ids_ stays sorted; has_material() answers from a binary search.
                 material_ids_.insert(std::ranges::upper_bound(material_ids_, schema.id), schema.id);
             }
@@ -1176,7 +1266,8 @@ void SchemaRegistry::apply_scenario_declarations(const data::JsonValue& schemas)
             if (schema.passes.empty()) {
                 throw std::runtime_error("effect '" + schema.name + "' requires at least one pass");
             }
-            if (!effects_.emplace(schema.name, std::move(schema)).second) {
+            if (effect(schema.name) != nullptr ||
+                !effects_.emplace(schema.name, std::move(schema)).second) {
                 throw std::runtime_error("effect id is declared more than once");
             }
         }

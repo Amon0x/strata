@@ -143,6 +143,128 @@ void toggle_content(WidgetRenderScope& scope) {
     );
 }
 
+void rail_slider_content(
+    WidgetRenderScope& scope,
+    const double value,
+    const double percent
+) {
+    const Rect bounds = scope.layout().bounds;
+    const double thickness = scope.visual().track_height.value_or(8.0);
+    const double inset = scope.visual().indicator_inset.value_or(8.0);
+    const Rect track{
+        bounds.x + inset,
+        bounds.y + (bounds.height - thickness) * 0.5,
+        std::max(0.0, bounds.width - inset * 2.0),
+        thickness,
+    };
+    const double center_x = track.x + track.width * percent;
+    const double gap = scope.active() ? 5.0 : 8.0;
+    const Rect active{
+        track.x,
+        track.y,
+        std::max(0.0, center_x - gap - track.x),
+        track.height,
+    };
+    if (!active.empty()) {
+        scope.rounded_rect(
+            active,
+            scope.visual().fill,
+            std::nullopt,
+            scope.visual().track_radius.value_or(2.0)
+        );
+    }
+    const Rect inactive{
+        std::min(track.right(), center_x + gap),
+        track.y,
+        std::max(0.0, track.right() - center_x - gap),
+        track.height,
+    };
+    if (!inactive.empty()) {
+        scope.rounded_rect(
+            inactive,
+            scope.visual().track,
+            std::nullopt,
+            scope.visual().track_radius.value_or(2.0)
+        );
+        const double dot = std::min(3.0, inactive.height);
+        scope.rounded_rect(
+            Rect{
+                std::max(inactive.x, inactive.right() - dot - 4.0),
+                inactive.y + (inactive.height - dot) * 0.5,
+                dot,
+                dot,
+            },
+            RenderColor{33U, 26U, 54U, 192U},
+            std::nullopt,
+            dot * 0.5
+        );
+    }
+    const bool hot = scope.hovered() || scope.focus_visible();
+    const double thumb_scale = scope.active() ? 1.16 : hot ? 1.07 : 1.0;
+    const double thumb_width = 3.0 * thumb_scale;
+    const double thumb_height = 24.0 * thumb_scale;
+    const Rect thumb{
+        center_x - thumb_width * 0.5,
+        track.y + track.height * 0.5 - thumb_height * 0.5 -
+            (scope.active() ? 1.0 : 0.0),
+        thumb_width,
+        thumb_height,
+    };
+    scope.shadow(
+        thumb,
+        CornerRadii::all(thumb_width * 0.5),
+        RenderColor{5U, 2U, 11U, scope.active() ? 114U : 104U},
+        scope.active() ? 5.0 : 3.0,
+        scope.active() ? 1.0 : 0.0
+    );
+    scope.rounded_rect(
+        thumb,
+        scope.visual().thumb,
+        std::nullopt,
+        scope.visual().thumb_radius.value_or(999.0)
+    );
+
+    if (scope.boolean("showValue", false) &&
+        (hot || scope.active()) &&
+        scope.text_engine() != nullptr) {
+        std::string label = widget_number_text(value);
+        label += scope.string("valueSuffix");
+        const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), label);
+        const double label_width = std::max(16.0, shaped.metrics.width + 12.0);
+        const double label_height = 16.0;
+        const Rect label_bounds{
+            center_x - label_width * 0.5,
+            bounds.y - 10.0,
+            label_width,
+            label_height,
+        };
+        scope.shadow(
+            label_bounds,
+            CornerRadii::all(4.0),
+            RenderColor{4U, 2U, 8U, 114U},
+            5.0
+        );
+        scope.rounded_rect(
+            label_bounds,
+            RenderColor{16U, 12U, 27U, 239U},
+            std::nullopt,
+            4.0
+        );
+        scope.text(
+            label,
+            Point{
+                label_bounds.x,
+                label_bounds.y + (label_height - shaped.metrics.height) * 0.5,
+            },
+            scope.visual().foreground,
+            label_width,
+            WidgetTextAlignment::center
+        );
+    }
+    scope.focus(thumb);
+    scope.interaction(bounds);
+}
+
 void slider_content(WidgetRenderScope& scope) {
     if (scope.property("presentationTemplate") != nullptr) return;
     const double minimum = scope.number("min", 0.0);
@@ -154,6 +276,10 @@ void slider_content(WidgetRenderScope& scope) {
                                ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0)
                                : 0.0;
     const bool vertical = scope.string("axis") == "VERTICAL";
+    if (scope.string("variant") == "rail" && !vertical) {
+        rail_slider_content(scope, value, percent);
+        return;
+    }
     const double thickness = scope.visual().track_height.value_or(4.0);
     const double inset = scope.visual().indicator_inset.value_or(7.0);
     const Rect track = vertical

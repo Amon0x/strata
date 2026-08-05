@@ -1,6 +1,7 @@
 #include "ui/layout.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <ranges>
@@ -164,14 +165,32 @@ const LayoutResult& LayoutEngine::layout(
     if (root == nullptr) throw std::invalid_argument("layout requires a retained root");
     if (!requires_layout(tree, environment)) {
         result_.operations = {};
+        result_.measure_nanos = 0;
+        result_.arrange_nanos = 0;
+        result_.maintenance_nanos = 0;
         return result_;
     }
     if (next_generation_ == std::numeric_limits<std::uint64_t>::max()) {
         throw std::overflow_error("layout generation exhausted");
     }
-    LayoutResult next;
-    next.generation = ++next_generation_;
-    next.root_identity = root->identity();
+    for (const std::uint64_t identity : translated_records_) {
+        if (auto record = result_.records.find(identity); record != result_.records.end()) {
+            record->second.translated_subtree.reset();
+        }
+    }
+    translated_records_.clear();
+    current_arranged_records_.clear();
+    current_arranged_subtree_roots_.clear();
+    measurement_pass_.clear();
+    measurement_frontier_.clear();
+    structural_measurements_.clear();
+    result_.generation = ++next_generation_;
+    result_.root_identity = root->identity();
+    result_.operations = {};
+    result_.measure_nanos = 0;
+    result_.arrange_nanos = 0;
+    result_.maintenance_nanos = 0;
+    LayoutResult& next = result_;
     if (content_size_transitions_.active_count() != 0U) {
         std::set<std::uint64_t> transition_frontier;
         for (const std::uint64_t identity : content_size_transitions_.active_identities()) {
@@ -188,15 +207,217 @@ const LayoutResult& LayoutEngine::layout(
     Rect root_bounds = environment.apply_safe_insets
                            ? environment.viewport.deflate(environment.safe_insets)
                            : environment.viewport;
-    const MeasuredNodePtr measured = measure(
-        *root,
-        Constraints::fixed(root_bounds.width, root_bounds.height),
-        environment,
-        next.operations
-    );
+    const auto measure_started = std::chrono::steady_clock::now();
+    // Measure dirty branches bottom-up. Shared ancestors enter the queue once after all deeper
+    // siblings, avoiding both a full-root scan for one local edit and the old O(dirty * depth)
+    // behavior which repeatedly measured the same repeater parents.
+    std::map<
+        std::pair<std::size_t, std::uint64_t>,
+        const RetainedNode*,
+        std::greater<>
+    > pending_measurements;
+    std::unordered_set<std::uint64_t> scheduled_measurements;
+    const auto schedule_measurement =
+        [&pending_measurements, &scheduled_measurements](const RetainedNode* node) {
+            if (node == nullptr ||
+                !scheduled_measurements.insert(node->identity()).second) {
+                return;
+            }
+            std::size_t depth = 0U;
+            for (const RetainedNode* current = node;
+                 current != nullptr;
+                 current = current->parent()) {
+                ++depth;
+            }
+            pending_measurements.emplace(
+                std::pair(depth, node->identity()),
+                node
+            );
+        };
+    for (RetainedNode* dirty : tree.dirty_nodes()) {
+        const DirtySet& reasons = dirty->dirty();
+        if (!reasons.contains(DirtyReason::structure) &&
+            !reasons.contains(DirtyReason::layout) &&
+            !reasons.contains(DirtyReason::text) &&
+            !reasons.contains(DirtyReason::style) &&
+            !reasons.contains(DirtyReason::scale) &&
+            !reasons.contains(DirtyReason::resource) &&
+            !reasons.contains(DirtyReason::editor)) {
+            continue;
+        }
+        const RetainedNode* measurable = dirty;
+        while (measurable != root &&
+               !measurement_cache_.contains(measurable->identity())) {
+            measurable = measurable->parent();
+        }
+        schedule_measurement(measurable);
+    }
+    if (measurement_cache_.empty() ||
+        content_size_transitions_.active_count() != 0U) {
+        schedule_measurement(root);
+    }
+    MeasuredNodePtr measured;
+    while (!pending_measurements.empty()) {
+        const auto pending = pending_measurements.begin();
+        const RetainedNode* const current = pending->second;
+        pending_measurements.erase(pending);
+        const auto cached = measurement_cache_.find(current->identity());
+        const Constraints constraints = current == root
+            ? Constraints::fixed(root_bounds.width, root_bounds.height)
+            : cached != measurement_cache_.end()
+                ? cached->second.constraints
+                : Constraints{};
+        if (current != root && cached == measurement_cache_.end()) {
+            schedule_measurement(current->parent());
+            continue;
+        }
+        MeasuredNodePtr current_measured = measure(
+            *current,
+            constraints,
+            environment,
+            next.operations
+        );
+        if (current == root) measured = std::move(current_measured);
+        if (!measurement_frontier_.contains(current->identity())) {
+            schedule_measurement(current->parent());
+        }
+    }
+    if (measured == nullptr) {
+        const auto cached_root = measurement_cache_.find(root->identity());
+        if (cached_root == measurement_cache_.end() ||
+            cached_root->second.measured == nullptr) {
+            measured = measure(
+                *root,
+                Constraints::fixed(root_bounds.width, root_bounds.height),
+                environment,
+                next.operations
+            );
+        } else {
+            measured = cached_root->second.propagated != nullptr
+                ? cached_root->second.propagated
+                : cached_root->second.measured;
+        }
+    }
+    if (!measurement_frontier_.empty()) {
+        // A frontier deliberately propagates its old identity to stop parent layout work. Keep the
+        // ancestors' canonical cached model current nevertheless, so a later resize/reflow cannot
+        // resurrect stale descendants. Patch each shared ancestor once, deepest first.
+        std::map<std::uint64_t, MeasuredNodePtr> replacements = measurement_frontier_;
+        struct AffectedAncestor final {
+            RetainedNode* node = nullptr;
+            std::size_t depth = 0U;
+        };
+        std::map<std::uint64_t, AffectedAncestor> affected;
+        for (const auto& [identity, frontier] : measurement_frontier_) {
+            static_cast<void>(identity);
+            std::size_t depth = 0U;
+            for (const RetainedNode* current = frontier->node;
+                 current != nullptr;
+                 current = current->parent()) {
+                ++depth;
+            }
+            for (RetainedNode* ancestor = frontier->node->parent();
+                 ancestor != nullptr;
+                 ancestor = ancestor->parent()) {
+                --depth;
+                affected.insert_or_assign(
+                    ancestor->identity(),
+                    AffectedAncestor{ancestor, depth}
+                );
+            }
+        }
+        std::vector<AffectedAncestor> ordered;
+        ordered.reserve(affected.size());
+        for (const auto& [identity, ancestor] : affected) {
+            static_cast<void>(identity);
+            ordered.push_back(ancestor);
+        }
+        std::ranges::sort(
+            ordered,
+            std::greater{},
+            &AffectedAncestor::depth
+        );
+        for (const AffectedAncestor& ancestor : ordered) {
+            auto cached = measurement_cache_.find(ancestor.node->identity());
+            if (cached == measurement_cache_.end() ||
+                cached->second.measured == nullptr) {
+                continue;
+            }
+            MeasuredNode updated = *cached->second.measured;
+            bool changed = false;
+            for (MeasuredNodePtr& child : updated.children) {
+                const auto replacement = replacements.find(child->node->identity());
+                if (replacement == replacements.end() || child == replacement->second) {
+                    continue;
+                }
+                child = replacement->second;
+                changed = true;
+            }
+            if (!changed) continue;
+            cached->second.measured =
+                std::make_shared<const MeasuredNode>(std::move(updated));
+            replacements.insert_or_assign(
+                ancestor.node->identity(),
+                cached->second.measured
+            );
+            if (auto frontier = measurement_frontier_.find(ancestor.node->identity());
+                frontier != measurement_frontier_.end()) {
+                frontier->second = cached->second.measured;
+            }
+            cached->second.node_revision = ancestor.node->revision();
+        }
+        std::erase_if(measurement_frontier_, [this](const auto& entry) {
+            for (const RetainedNode* ancestor = entry.second->node->parent();
+                 ancestor != nullptr;
+                 ancestor = ancestor->parent()) {
+                if (measurement_frontier_.contains(ancestor->identity())) return true;
+            }
+            return false;
+        });
+    }
+    next.measure_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - measure_started
+    ).count();
+    const auto arrange_started = std::chrono::steady_clock::now();
     pending_portals_.clear();
     pending_anchors_.clear();
-    arrange(measured, root_bounds, std::nullopt, {}, environment, next);
+    const bool has_measurement_frontiers = !measurement_frontier_.empty();
+    if (const auto root_frontier = measurement_frontier_.find(root->identity());
+        root_frontier != measurement_frontier_.end()) {
+        arrange(root_frontier->second, root_bounds, std::nullopt, {}, environment, next);
+        measurement_frontier_.erase(root_frontier);
+    } else if (!has_measurement_frontiers) {
+        const auto current_root = measurement_cache_.find(root->identity());
+        arrange(
+            current_root != measurement_cache_.end() &&
+                    current_root->second.measured != nullptr
+                ? current_root->second.measured
+                : measured,
+            root_bounds,
+            std::nullopt,
+            {},
+            environment,
+            next
+        );
+    } else {
+        arrange(measured, root_bounds, std::nullopt, {}, environment, next);
+    }
+    for (const auto& [identity, frontier] : measurement_frontier_) {
+        const auto retained = arrangement_cache_.find(identity);
+        if (retained == arrangement_cache_.end()) {
+            throw std::logic_error(
+                "incremental measurement frontier lost its arrangement cache"
+            );
+        }
+        arrange(
+            frontier,
+            retained->second.bounds,
+            retained->second.inherited_clip,
+            retained->second.pin_context,
+            environment,
+            next
+        );
+    }
     while (!pending_anchors_.empty()) {
         std::optional<std::size_t> ready;
         bool missing_target = false;
@@ -212,7 +433,7 @@ const LayoutResult& LayoutEngine::layout(
                 missing_target = true;
                 break;
             }
-            if (next.find(target->identity()) != nullptr) {
+            if (arranged_in_current_pass(*target)) {
                 ready = index;
                 break;
             }
@@ -256,7 +477,8 @@ const LayoutResult& LayoutEngine::layout(
             *pending.measured->node,
             style.anchor_target
         );
-        const LayoutRecord* anchor_record = target != nullptr
+        const LayoutRecord* anchor_record = target != nullptr &&
+                arranged_in_current_pass(*target)
             ? next.find(target->identity())
             : nullptr;
         if (missing_target || anchor_record == nullptr) {
@@ -320,7 +542,8 @@ const LayoutResult& LayoutEngine::layout(
             *pending.measured->node,
             style.anchor_target
         );
-        const LayoutRecord* anchor_record = anchor_node != nullptr
+        const LayoutRecord* anchor_record = anchor_node != nullptr &&
+                arranged_in_current_pass(*anchor_node)
             ? next.find(anchor_node->identity())
             : nullptr;
         const std::optional<Rect> point_anchor = style.anchor_point.has_value()
@@ -390,29 +613,22 @@ const LayoutResult& LayoutEngine::layout(
     pending_portals_.clear();
     const auto retain_exit_layout = [&](const auto& self, const RetainedNode& node) -> void {
         if (node.lifecycle() == RetainedLifecycle::exiting) {
-            const auto retain_subtree = [&](const auto& retain, const RetainedNode& exiting) -> void {
-                if (const LayoutRecord* previous = result_.find(exiting.identity());
-                    previous != nullptr) {
-                    LayoutRecord record = *previous;
-                    record.generation = next.generation;
-                    record.translated_subtree.reset();
-                    next.records.insert_or_assign(exiting.identity(), std::move(record));
-                }
-                for (const auto& child : exiting.children()) retain(retain, *child);
-            };
-            retain_subtree(retain_subtree, node);
+            if (next.records.contains(node.identity())) {
+                current_arranged_subtree_roots_.insert(node.identity());
+            }
             return;
         }
         for (const auto& child : node.children()) self(self, *child);
     };
     retain_exit_layout(retain_exit_layout, *root);
     const auto record_unarranged = [&](const auto& self, const RetainedNode& node) -> void {
-        if (!next.records.contains(node.identity())) {
+        if (!arranged_in_current_pass(node)) {
             const LayoutStyle style = resolved_style(node);
             LayoutRecord record;
             record.identity = node.identity();
             record.generation = next.generation;
             record.render_generation = advance_render_generation();
+            record.subtree_render_generation = advance_render_generation();
             record.kind = style.kind;
             record.scroll_horizontal = style.scroll_horizontal;
             record.scroll_vertical = style.scroll_vertical;
@@ -424,37 +640,16 @@ const LayoutResult& LayoutEngine::layout(
             }
             record.portal_target = style.kind == LayoutKind::portal ? style.portal_target : std::string{};
             record.detached_from_parent_clip = style.kind == LayoutKind::portal && style.detach_from_parent_clip;
-            next.records.emplace(node.identity(), std::move(record));
+            next.records.insert_or_assign(node.identity(), std::move(record));
+            current_arranged_records_.insert(node.identity());
         }
         for (const auto& child : node.children()) self(self, *child);
     };
     record_unarranged(record_unarranged, *root);
-    const auto finalize_subtree_render_generation =
-        [this, &next](const auto& self, const RetainedNode& node) -> void {
-        for (const auto& child : node.children()) self(self, *child);
-        auto current = next.records.find(node.identity());
-        if (current == next.records.end()) return;
-        const LayoutRecord* previous = result_.find(node.identity());
-        bool unchanged = previous != nullptr &&
-            previous->render_generation == current->second.render_generation;
-        for (const auto& child : node.children()) {
-            const LayoutRecord* current_child = next.find(child->identity());
-            const LayoutRecord* previous_child = result_.find(child->identity());
-            if (current_child == nullptr || previous_child == nullptr ||
-                current_child->subtree_render_generation !=
-                    previous_child->subtree_render_generation) {
-                unchanged = false;
-                break;
-            }
-        }
-        current->second.subtree_render_generation = unchanged
-            ? previous->subtree_render_generation
-            : advance_render_generation();
-    };
-    finalize_subtree_render_generation(
-        finalize_subtree_render_generation,
-        *root
-    );
+    next.arrange_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - arrange_started
+    ).count();
+    const auto maintenance_started = std::chrono::steady_clock::now();
     for (const collection::VirtualAnchorUpdate& update :
          collection_virtualization_.take_anchor_updates()) {
         static_cast<void>(tree.set_arrangement_value(
@@ -467,6 +662,9 @@ const LayoutResult& LayoutEngine::layout(
         ));
     }
     if (consume_dirty) tree.consume_layout_dirty();
+    std::erase_if(next.records, [&tree](const auto& entry) {
+        return tree.find_identity(entry.first) == nullptr;
+    });
     std::erase_if(measurement_cache_, [&next](const auto& entry) {
         return !next.records.contains(entry.first);
     });
@@ -480,11 +678,23 @@ const LayoutResult& LayoutEngine::layout(
     }
     collection_virtualization_.retain(retained_identities);
     content_size_transitions_.retain(next.records);
-    result_ = std::move(next);
+    next.maintenance_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - maintenance_started
+    ).count();
     last_tree_ = &tree;
     last_invalidation_generation_ = tree.layout_invalidation_generation();
     last_environment_ = environment;
     return result_;
+}
+
+bool LayoutEngine::arranged_in_current_pass(const RetainedNode& node) const noexcept {
+    if (current_arranged_records_.contains(node.identity())) return true;
+    for (const RetainedNode* ancestor = &node;
+         ancestor != nullptr;
+         ancestor = ancestor->parent()) {
+        if (current_arranged_subtree_roots_.contains(ancestor->identity())) return true;
+    }
+    return false;
 }
 
 LayoutStyle LayoutEngine::resolved_style(const RetainedNode& node) const {
@@ -606,7 +816,13 @@ Point LayoutEngine::resolved_scroll_offset(
 
 void LayoutEngine::clear() {
     measurement_cache_.clear();
+    measurement_frontier_.clear();
+    measurement_pass_.clear();
+    structural_measurements_.clear();
     arrangement_cache_.clear();
+    current_arranged_records_.clear();
+    current_arranged_subtree_roots_.clear();
+    translated_records_.clear();
     collection_virtualization_.clear();
     result_ = {};
     last_tree_ = nullptr;

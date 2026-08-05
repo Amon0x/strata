@@ -329,38 +329,12 @@ void collect_semantics(const JsonValue& semantic, const GeometryIndex& geometry,
 
 } // namespace
 
-BrowserModel BrowserModel::build(const JsonValue& frame, const double viewport_width,
-                                 const double viewport_height) {
-    if (!std::isfinite(viewport_width) || !std::isfinite(viewport_height) ||
-        viewport_width <= 0.0 || viewport_height <= 0.0) {
-        throw std::invalid_argument("browser viewport must be positive and finite");
-    }
-    const BrowserBounds viewport{0.0, 0.0, viewport_width, viewport_height};
-    const JsonValue* inspection = frame.find("inspection");
-    const JsonValue* inspection_root = inspection != nullptr ? inspection->find("root") : nullptr;
-    const JsonValue* semantics = frame.find("semantics");
-    const JsonValue* semantics_root = semantics != nullptr ? semantics->find("root") : nullptr;
-    if (inspection_root == nullptr || inspection_root->object() == nullptr ||
-        semantics_root == nullptr || semantics_root->object() == nullptr) {
-        throw std::runtime_error("host frame does not contain inspectable UI roots");
-    }
-
-    GeometryIndex geometry;
-    collect_geometry(*inspection_root, viewport, viewport, geometry);
-    BrowserModel result;
-    collect_semantics(*semantics_root, geometry, result.elements_);
-    return result;
-}
-
-std::pair<double, double> BrowserModel::resolve(const Selector& selector) const {
-    if (selector.x.has_value()) {
-        if (!selector.y.has_value() || !std::isfinite(*selector.x) || !std::isfinite(*selector.y)) {
-            throw std::invalid_argument("host selector coordinates must be finite");
-        }
-        return {*selector.x, *selector.y};
-    }
+[[nodiscard]] const BrowserElement& matched_element(
+    const std::vector<BrowserElement>& elements,
+    const Selector& selector
+) {
     std::vector<const BrowserElement*> matches;
-    for (const BrowserElement& element : elements_) {
+    for (const BrowserElement& element : elements) {
         if (selector.path.has_value() && element.path != *selector.path)
             continue;
         if (selector.key.has_value() && element.key != *selector.key)
@@ -391,19 +365,67 @@ std::pair<double, double> BrowserModel::resolve(const Selector& selector) const 
             if (!detail.empty())
                 detail += ", ";
             detail +=
-                matches[index]->role + " '" + matches[index]->name + "' at " + matches[index]->path;
+                matches[index]->role + " '" + matches[index]->name + "' at " +
+                matches[index]->path;
         }
         throw std::runtime_error("host selector is ambiguous (" +
                                  std::to_string(matches.size()) + " semantic elements: " + detail +
                                  ")");
     }
-    const BrowserElement& match = *matches.front();
+    return *matches.front();
+}
+
+BrowserModel BrowserModel::build(const JsonValue& frame, const double viewport_width,
+                                 const double viewport_height) {
+    if (!std::isfinite(viewport_width) || !std::isfinite(viewport_height) ||
+        viewport_width <= 0.0 || viewport_height <= 0.0) {
+        throw std::invalid_argument("browser viewport must be positive and finite");
+    }
+    const BrowserBounds viewport{0.0, 0.0, viewport_width, viewport_height};
+    const JsonValue* inspection = frame.find("inspection");
+    const JsonValue* inspection_root = inspection != nullptr ? inspection->find("root") : nullptr;
+    const JsonValue* semantics = frame.find("semantics");
+    const JsonValue* semantics_root = semantics != nullptr ? semantics->find("root") : nullptr;
+    if (inspection_root == nullptr || inspection_root->object() == nullptr ||
+        semantics_root == nullptr || semantics_root->object() == nullptr) {
+        throw std::runtime_error("host frame does not contain inspectable UI roots");
+    }
+
+    GeometryIndex geometry;
+    collect_geometry(*inspection_root, viewport, viewport, geometry);
+    BrowserModel result;
+    collect_semantics(*semantics_root, geometry, result.elements_);
+    return result;
+}
+
+std::pair<double, double> BrowserModel::resolve(const Selector& selector) const {
+    if (selector.x.has_value()) {
+        if (!selector.y.has_value() || !std::isfinite(*selector.x) || !std::isfinite(*selector.y)) {
+            throw std::invalid_argument("host selector coordinates must be finite");
+        }
+        return {*selector.x, *selector.y};
+    }
+    const BrowserElement& match = matched_element(elements_, selector);
     if (!match.hit_bounds.has_value()) {
         throw std::runtime_error("host selector matched semantic element '" + match.name +
                                  "' without currently clickable on-screen bounds");
     }
     return {match.hit_bounds->x + match.hit_bounds->width * 0.5,
             match.hit_bounds->y + match.hit_bounds->height * 0.5};
+}
+
+BrowserBounds BrowserModel::resolve_bounds(const Selector& selector) const {
+    if (selector.x.has_value() || selector.y.has_value()) {
+        throw std::invalid_argument(
+            "coordinate selectors do not identify element bounds"
+        );
+    }
+    const BrowserElement& match = matched_element(elements_, selector);
+    if (!match.hit_bounds.has_value()) {
+        throw std::runtime_error("host selector matched semantic element '" + match.name +
+                                 "' without on-screen bounds");
+    }
+    return *match.hit_bounds;
 }
 
 JsonValue BrowserModel::document() const {

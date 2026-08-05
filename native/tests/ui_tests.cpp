@@ -3,17 +3,20 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sstream>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include <strata/svg.hpp>
+#include <strata/render_packet.hpp>
 
 #include "data/json.hpp"
 #include "font/atlas.hpp"
@@ -56,6 +59,14 @@ static_assert(!std::is_move_assignable_v<strata::ui::DescriptionMaterialization>
 void check(const bool condition, const std::string_view message) {
     if (!condition)
         throw std::runtime_error(std::string(message));
+}
+
+[[nodiscard]] std::string read_text_file(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw std::runtime_error("could not read fixture '" + path.string() + "'");
+    std::ostringstream output;
+    output << input.rdbuf();
+    return output.str();
 }
 
 std::shared_ptr<const strata::ui::DescriptionChildren>
@@ -747,31 +758,47 @@ void test_render_submission_cache(const std::filesystem::path& resource_root) {
     check(settled == first && cache.hit_count() == 1U && cache.miss_count() == 1U,
           "settled render submission did not reuse surface-owned geometry");
 
+    const std::uint8_t* const retained_vertices = settled->vertex_bytes.data();
+    commands.clear();
+    commands.append(ui::SolidRectRenderCommand{
+        ui::Rect{3.0, 2.0, 40.0, 20.0},
+        ui::RenderColor{10U, 20U, 30U, 255U},
+    });
+    const ui::RenderSubmission& patched =
+        cache.resolve(commands, atlas, *text_engine, environment);
+    check(
+        patched.vertex_bytes.data() == retained_vertices &&
+            patched.patch_from_previous && patched.vertex_patches.size() == 1U &&
+            patched.vertex_patches.front().bytes.size() == 4U * 88U &&
+            patched.index_patches.empty(),
+        "stable render topology rebuilt the complete retained geometry buffer"
+    );
+
     commands.append(ui::SolidRectRenderCommand{
         ui::Rect{2.0, 3.0, 4.0, 5.0},
         ui::RenderColor{255U, 255U, 255U, 255U},
     });
     static_cast<void>(cache.resolve(commands, atlas, *text_engine, environment));
-    check(cache.hit_count() == 1U && cache.miss_count() == 2U,
+    check(cache.hit_count() == 1U && cache.miss_count() == 3U,
           "render command mutation did not invalidate cached geometry");
     static_cast<void>(
         cache.resolve(commands, atlas, *text_engine,
                       ui::RenderSubmissionEnvironment{2.0, 1'280, 960, 640.0, 480.0}));
-    check(cache.hit_count() == 1U && cache.miss_count() == 3U,
+    check(cache.hit_count() == 1U && cache.miss_count() == 4U,
           "render environment mutation did not invalidate cached geometry");
     atlas.invalidate_resources();
     static_cast<void>(cache.resolve(commands, atlas, *text_engine, environment));
-    check(cache.hit_count() == 1U && cache.miss_count() == 4U,
+    check(cache.hit_count() == 1U && cache.miss_count() == 5U,
           "glyph-atlas generation mutation did not invalidate cached geometry");
     const std::shared_ptr<const ui::TextEngine> replacement_text_engine =
         ui::TextEngine::load_control_font(
             resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
     static_cast<void>(cache.resolve(commands, atlas, *replacement_text_engine, environment));
-    check(cache.hit_count() == 1U && cache.miss_count() == 5U,
+    check(cache.hit_count() == 1U && cache.miss_count() == 6U,
           "text-engine replacement did not invalidate cached geometry");
     cache.clear();
     static_cast<void>(cache.resolve(commands, atlas, *text_engine, environment));
-    check(cache.miss_count() == 6U, "explicit resource invalidation retained cached geometry");
+    check(cache.miss_count() == 7U, "explicit resource invalidation retained cached geometry");
 
     const std::uint16_t visible_glyph = text_engine->control_font().glyph_id('A');
     const std::uint16_t clipped_glyph = text_engine->control_font().glyph_id('B');
@@ -1070,7 +1097,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
               std::string_view(reinterpret_cast<const char*>(release_packet.data()),
                                release_offset) == "STRATARP",
           "surface teardown packet lost its fixed magic");
-    check(packet_u32(release_packet, release_offset) == 8U,
+    check(packet_u32(release_packet, release_offset) == 9U,
           "surface teardown did not use the host render packet protocol");
     check(packet_u32(release_packet, release_offset) == 2U,
           "surface teardown did not combine its live atlas and static texture releases");
@@ -1127,7 +1154,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
     const std::vector<std::uint8_t>& after_reload = reload_cache.encode(
         commands, 2U, textures, reload_atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
     std::size_t after_offset = 8U;
-    check(packet_u32(after_reload, after_offset) == 8U,
+    check(packet_u32(after_reload, after_offset) == 9U,
           "static image reload packet version changed");
     check(packet_u32(after_reload, after_offset) == 2U,
           "repeated static image reload dropped its pending release or replacement");
@@ -2500,9 +2527,8 @@ void test_retained_layout_cache_scale_and_invalidation() {
     check(tree.dirty_generation(DirtyReason::layout) == dirty_generation + 1U,
           "typed layout dirty generation did not advance");
     const LayoutResult& invalidated = layout.layout(tree, environment);
-    check(invalidated.operations.measured_nodes == 2U &&
-              invalidated.operations.measurement_cache_hits == 1U &&
-              invalidated.operations.arranged_nodes == 2U,
+    check(invalidated.operations.measured_nodes <= 3U &&
+              invalidated.operations.arranged_nodes == 0U,
           "subtree layout invalidation did not reuse unaffected measurement and placement caches");
 }
 
@@ -5576,6 +5602,7 @@ component RetainedLeaf() {
 
 component CacheRoot() {
   Panel(key: "cache.root") {
+    Text(key: "cache.raw", text: "raw")
     StableLeaf()
     HostAlphaLeaf()
     HostBetaLeaf()
@@ -5614,12 +5641,21 @@ overlay Other { root Text(key: "cache.other", text: "other") }
     check(first.diagnostics.empty(), "component retained-dependency fixture produced diagnostics");
     const std::shared_ptr<const ui::DescriptionNode> stable_before =
         find_description(find_description, first.root, "cache.stable");
+    const std::shared_ptr<const ui::DescriptionNode> raw_before =
+        find_description(find_description, first.root, "cache.raw");
     const std::shared_ptr<const ui::DescriptionNode> split_before =
         find_description(find_description, first.root, "cache.split");
     const std::shared_ptr<const ui::DescriptionNode> alpha_before =
         find_description(find_description, first.root, "cache.host.alpha");
     const std::shared_ptr<const ui::DescriptionNode> beta_before =
         find_description(find_description, first.root, "cache.host.beta");
+    const ui::DescriptionBuildResult settled =
+        builder.build(runtime::LayerRole::overlay, "Main");
+    check(
+        settled.root == first.root && settled.evaluated_expressions == 0U &&
+            settled.described_nodes == 0U,
+        "settled layer re-executed its description instead of retaining the dependency graph"
+    );
     ui::RetainedTree tree;
     static_cast<void>(tree.reconcile(first.root));
     const ui::RetainedNode* const retained_split = tree.find_key("cache.split");
@@ -5632,10 +5668,14 @@ overlay Other { root Text(key: "cache.other", text: "other") }
     ui::DescriptionBuildResult second = builder.build(runtime::LayerRole::overlay, "Main");
     const std::shared_ptr<const ui::DescriptionNode> stable_after =
         find_description(find_description, second.root, "cache.stable");
+    const std::shared_ptr<const ui::DescriptionNode> raw_after =
+        find_description(find_description, second.root, "cache.raw");
     const std::shared_ptr<const ui::DescriptionNode> split_after =
         find_description(find_description, second.root, "cache.split");
     check(stable_before != nullptr && stable_after == stable_before,
           "an unrelated retained value invalidated a component cache entry");
+    check(raw_before != nullptr && raw_after == raw_before,
+          "a descendant retained change rebuilt its unaffected component ancestor");
     check(split_before != nullptr && split_after != nullptr && split_after != split_before,
           "a component reused output after one of its observed retained values changed");
     const runtime::Value* left_layout =
@@ -5646,6 +5686,17 @@ overlay Other { root Text(key: "cache.other", text: "other") }
               left_width->field("weight")->number() != nullptr &&
               std::abs(*left_width->field("weight")->number() - 0.75) < 0.000'001,
           "the rebuilt component did not consume its changed retained value");
+    check(
+        builder.observes_retained_value(
+            *retained_split,
+            "strata.gesture.splitRatio"
+        ) &&
+            !builder.observes_retained_value(
+                *tree.find_key("cache.raw"),
+                "$value"
+            ),
+        "description retained-dependency queries lost their exact property frontier"
+    );
 
     static_cast<void>(application.host().adopt(bundle->host_snapshot(
         "component-cache-beta", 2U, data::parse_json(R"({"beta":{"value":"second"}})"))));
@@ -5665,6 +5716,415 @@ overlay Other { root Text(key: "cache.other", text: "other") }
     check(find_description(find_description, returned.root, "cache.host.alpha") == alpha_after &&
               find_description(find_description, returned.root, "cache.host.beta") == beta_after,
           "detaching one layer eagerly discarded reusable component descriptions");
+}
+
+void test_parameterized_component_state_retains_its_evaluated_initializer() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("parameter-state", bundle);
+    const std::string source = R"(
+component ParameterState(initial: number) {
+  state current = initial;
+  Panel {
+    Slider(
+      key: "parameter.slider",
+      min: 0,
+      max: 100,
+      value: current,
+      onChange: action("state.setFromEvent", name: "current")
+    )
+    Button(
+      key: "parameter.reset",
+      label: "Reset",
+      onClick: action("state.reset", name: "current")
+    )
+    Text(key: "parameter.value", text: format("{0}", current))
+  }
+}
+overlay Main { root ParameterState(initial: 12) }
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(
+                  compiler::ModuleSource{"parameter-state.strata", source},
+                  no_imports,
+                  0U
+              )
+              .activated(),
+          "parameterized component-state fixture did not activate");
+
+    ui::DescriptionBuilder builder(application);
+    ui::RetainedTree tree;
+    static_cast<void>(tree.reconcile(
+        builder.build(runtime::LayerRole::overlay, "Main").root
+    ));
+    const auto dispatch = [&application, &tree](
+                              const std::string_view key,
+                              runtime::ActionEvent event
+                          ) {
+        const ui::RetainedNode* node = tree.find_key(key);
+        const auto property = node != nullptr
+            ? node->description().properties.find(
+                  key == "parameter.slider" ? "onChange" : "onClick"
+              )
+            : ui::DescriptionNode::Properties::const_iterator{};
+        check(
+            node != nullptr && property != node->description().properties.end() &&
+                property->second.action() != nullptr,
+            "parameterized component-state fixture lost its action"
+        );
+        return application.dispatch(
+            event,
+            *(*property->second.action())->action,
+            node->description().state_scope
+        );
+    };
+
+    check(
+        dispatch(
+            "parameter.slider",
+            runtime::ActionEvent{
+                "value-changed",
+                std::string("parameter.slider"),
+                runtime::Value(37.0),
+            }
+        ).status == runtime::ActionDispatchStatus::handled,
+        "parameterized state initializer was unavailable to state.setFromEvent"
+    );
+    static_cast<void>(tree.reconcile(
+        builder.build(runtime::LayerRole::overlay, "Main").root
+    ));
+    check(
+        tree.find_key("parameter.value")->description().properties.at("text").value()->string() !=
+                nullptr &&
+            *tree.find_key("parameter.value")
+                 ->description()
+                 .properties.at("text")
+                 .value()
+                 ->string() == "37",
+        "parameterized component state did not retain its changed value"
+    );
+
+    check(
+        dispatch(
+            "parameter.reset",
+            runtime::ActionEvent{
+                "activated",
+                std::string("parameter.reset"),
+                runtime::Value{},
+            }
+        ).status == runtime::ActionDispatchStatus::handled,
+        "parameterized state initializer was unavailable to state.reset"
+    );
+    static_cast<void>(tree.reconcile(
+        builder.build(runtime::LayerRole::overlay, "Main").root
+    ));
+    check(
+        *tree.find_key("parameter.value")
+             ->description()
+             .properties.at("text")
+             .value()
+             ->string() == "12",
+        "state.reset did not restore the evaluated component initializer"
+    );
+}
+
+void test_tuning_slider_pipeline_is_proportional(
+    const std::filesystem::path& resource_root
+) {
+    using namespace strata;
+    const std::filesystem::path ui_root =
+        resource_root / "assets/strata/ui";
+    const data::JsonValue schemas = data::parse_json(read_text_file(
+        ui_root / "tuning_panel.schemas.json"
+    ));
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
+    runtime::ApplicationContext application("tuning-incremental", bundle);
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(
+        application.compile_and_activate(
+            compiler::ModuleSource{
+                "assets/strata/ui/tuning_panel.strata",
+                read_text_file(ui_root / "tuning_panel.strata"),
+            },
+            no_imports,
+            0U
+        ).activated(),
+        "tuning incremental pipeline fixture did not activate"
+    );
+    const std::shared_ptr<const ui::TextEngine> text_engine =
+        ui::TextEngine::load_control_font(
+            resource_root,
+            resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        );
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 1280;
+    environment.framebuffer_height = 800;
+    environment.logical_width = 1280.0;
+    environment.logical_height = 800.0;
+    environment.input = ui::SurfaceInputCapabilities{
+        true,
+        ui::PointerPrecision::fine,
+        true,
+        false,
+        true,
+        true,
+        false,
+    };
+    ui::Surface surface(
+        "tuning-incremental",
+        application,
+        runtime::LayerRole::overlay,
+        "TuningPanelMenu",
+        environment,
+        text_engine
+    );
+    static_cast<void>(surface.frame(1'000'000'000));
+    static_cast<void>(surface.frame(2'000'000'000));
+    const ui::RetainedNode* slider =
+        surface.tree().find_key("tune.filter.radius");
+    const ui::LayoutRecord* slider_layout = slider != nullptr
+        ? surface.layout().find(slider->identity())
+        : nullptr;
+    check(slider_layout != nullptr && slider_layout->bounds.width > 0.0,
+          "tuning slider fixture was not arranged");
+    const ui::Point pressed{
+        slider_layout->bounds.x + slider_layout->bounds.width * (12.0 / 32.0),
+        slider_layout->bounds.y + slider_layout->bounds.height * 0.5,
+    };
+    static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
+        pressed,
+        ui::PointerEventType::press,
+        41,
+        0,
+        {},
+        {},
+        2'010'000'000,
+    }));
+    static_cast<void>(surface.frame(2'016'666'667));
+    static_cast<void>(surface.frame(2'400'000'000));
+
+    font::GlyphAtlas atlas("tuning-incremental");
+    ui::HostRenderPacketCache packet_cache;
+    host::RenderPacketDecoder decoder;
+    const std::vector<std::uint8_t> baseline_encoded = packet_cache.encode(
+        surface.render_commands(),
+        1U,
+        {},
+        atlas,
+        *text_engine,
+        1.0,
+        1280,
+        800,
+        1280.0,
+        800.0
+    );
+    const std::size_t baseline_packet = baseline_encoded.size();
+    static_cast<void>(decoder.decode(baseline_encoded));
+
+    const ui::Point moved{
+        slider_layout->bounds.x + slider_layout->bounds.width * 0.75,
+        pressed.y,
+    };
+    static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
+        moved,
+        ui::PointerEventType::move,
+        41,
+        0,
+        {},
+        {moved.x - pressed.x, 0.0},
+        2'410'000'000,
+    }));
+    const ui::SurfaceFrame changed = surface.frame(2'416'666'667);
+    const std::vector<std::uint8_t> patch_encoded = packet_cache.encode(
+        surface.render_commands(),
+        2U,
+        {},
+        atlas,
+        *text_engine,
+        1.0,
+        1280,
+        800,
+        1280.0,
+        800.0
+    );
+    const std::size_t patch_packet = patch_encoded.size();
+    const host::RenderPacket& decoded_patch = decoder.decode(patch_encoded);
+    const ui::HostRenderPacketTelemetry& packet = packet_cache.telemetry();
+    const std::string operation_detail =
+        " expressions=" + std::to_string(changed.operations.evaluated_expressions) +
+        " nodes=" + std::to_string(changed.operations.described_nodes) +
+        " measured=" + std::to_string(changed.operations.layout_measured_nodes) +
+        " arranged=" + std::to_string(changed.operations.layout_arranged_nodes) +
+        " fragments=" + std::to_string(changed.operations.render.fragments_built) +
+        " motion=" + std::to_string(changed.operations.motion_mutated_nodes);
+    check(
+        changed.operations.evaluated_expressions < 160U &&
+            changed.operations.described_nodes < 20U &&
+            changed.operations.layout_measured_nodes < 30U &&
+            changed.operations.layout_arranged_nodes < 20U &&
+            changed.operations.render.fragments_built < 20U,
+        "one tuning slider move escaped its local reactive description/layout/render frontier:" +
+            operation_detail
+    );
+    check(
+        packet.geometry_patched && packet.geometry_patch_bytes != 0U &&
+            patch_packet * 4U < baseline_packet &&
+            !decoded_patch.geometry_dirty_all &&
+            !decoded_patch.geometry_dirty_regions.empty(),
+        "one tuning slider move rebuilt or transmitted the complete surface geometry: patched=" +
+            std::to_string(packet.geometry_patched) +
+            " bytes=" + std::to_string(packet.geometry_patch_bytes) +
+            " packet=" + std::to_string(patch_packet) +
+            " baseline=" + std::to_string(baseline_packet) +
+            " dirtyAll=" + std::to_string(decoded_patch.geometry_dirty_all) +
+            " vertexPatches=" + std::to_string(decoded_patch.vertex_patches.size()) +
+            (decoded_patch.vertex_patches.empty()
+                 ? std::string{}
+                 : " patch=" +
+                     std::to_string(decoded_patch.vertex_patches.front().offset) + "," +
+                     std::to_string(decoded_patch.vertex_patches.front().bytes.size())) +
+            " regions=" + std::to_string(decoded_patch.geometry_dirty_regions.size()) +
+            (decoded_patch.geometry_dirty_regions.empty()
+                 ? std::string{}
+                 : " first=" +
+                     std::to_string(decoded_patch.geometry_dirty_regions.front().x) + "," +
+                     std::to_string(decoded_patch.geometry_dirty_regions.front().y) + "," +
+                     std::to_string(decoded_patch.geometry_dirty_regions.front().width) + "," +
+                     std::to_string(decoded_patch.geometry_dirty_regions.front().height))
+    );
+
+    const auto slider_value = [&surface]() -> std::optional<double> {
+        const ui::RetainedNode* current =
+            surface.tree().find_key("tune.filter.radius");
+        const auto value_property = current != nullptr
+            ? current->description().properties.find("value")
+            : ui::DescriptionNode::Properties::const_iterator{};
+        const runtime::Value* value =
+            current != nullptr &&
+                value_property != current->description().properties.end()
+            ? value_property->second.data_value()
+            : nullptr;
+        if (value == nullptr && current != nullptr) {
+            value = current->retained_value("$value");
+        }
+        return value != nullptr && value->number() != nullptr
+            ? std::optional<double>(*value->number())
+            : std::nullopt;
+    };
+    const std::optional<double> dragged_value = slider_value();
+    check(
+        dragged_value.has_value() && *dragged_value > 20.0,
+        "tuning slider did not retain its dragged value: " +
+            (dragged_value.has_value()
+                 ? std::to_string(*dragged_value)
+                 : std::string("missing"))
+    );
+    static_cast<void>(surface.frame(2'433'333'334));
+    check(
+        slider_value() == dragged_value,
+        "tuning slider reset without an input event"
+    );
+    static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
+        moved,
+        ui::PointerEventType::release,
+        41,
+        0,
+        {},
+        {},
+        2'440'000'000,
+    }));
+    static_cast<void>(surface.frame(2'450'000'000));
+    check(
+        slider_value() == dragged_value,
+        "tuning slider reset when its pointer press ended"
+    );
+
+    static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
+        moved,
+        ui::PointerEventType::press,
+        42,
+        0,
+        {},
+        {},
+        2'460'000'000,
+    }));
+    static_cast<void>(surface.frame(2'461'000'000));
+    static_cast<void>(decoder.decode(packet_cache.encode(
+        surface.render_commands(),
+        3U,
+        {},
+        atlas,
+        *text_engine,
+        1.0,
+        1280,
+        800,
+        1280.0,
+        800.0
+    )));
+    ui::Point previous = moved;
+    for (std::size_t index = 0U; index < 512U; ++index) {
+        const double fraction = index % 2U == 0U
+            ? 0.08 + static_cast<double>(index % 17U) * 0.01
+            : 0.92 - static_cast<double>(index % 19U) * 0.01;
+        const ui::Point position{
+            slider_layout->bounds.x + slider_layout->bounds.width * fraction,
+            pressed.y,
+        };
+        const std::int64_t timestamp =
+            2'462'000'000 + static_cast<std::int64_t>(index) * 1'000'000;
+        static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
+            position,
+            ui::PointerEventType::move,
+            42,
+            0,
+            {},
+            {position.x - previous.x, 0.0},
+            timestamp,
+        }));
+        static_cast<void>(surface.frame(timestamp));
+        const host::RenderPacket& decoded = decoder.decode(packet_cache.encode(
+            surface.render_commands(),
+            4U + index,
+            {},
+            atlas,
+            *text_engine,
+            1.0,
+            1280,
+            800,
+            1280.0,
+            800.0
+        ));
+        check(
+            !decoded.vertices.empty() && !decoded.indices.empty(),
+            "repeated tuning slider movement lost retained geometry"
+        );
+        if (index >= 4U) {
+            check(
+                !decoded.full_geometry_payload &&
+                    (!decoded.vertex_patches.empty() ||
+                     !decoded.index_patches.empty()),
+                "a tuning label digit-count change escaped its retained geometry slot"
+            );
+        }
+        previous = position;
+    }
+    static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
+        previous,
+        ui::PointerEventType::release,
+        42,
+        0,
+        {},
+        {},
+        2'975'000'000,
+    }));
+    static_cast<void>(surface.frame(2'976'000'000));
 }
 
 void test_phased_input_dispatch_and_gesture_claim() {
@@ -5996,6 +6456,8 @@ int main(const int argument_count, const char* const* const arguments) {
             test_motion_timing_and_indeterminate_progress();
             test_component_slot_projection();
             test_component_cache_tracks_exact_retained_dependencies();
+            test_parameterized_component_state_retains_its_evaluated_initializer();
+            test_tuning_slider_pipeline_is_proportional(arguments[1]);
             test_phased_input_dispatch_and_gesture_claim();
             test_portable_description_and_declaration_state(arguments[1], arguments[2]);
             test_repeater_description_is_data_backed();

@@ -31,11 +31,27 @@ namespace {
 }
 
 [[nodiscard]] std::vector<std::uint8_t> read_bytes(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
     if (!input) throw std::runtime_error("could not open desktop resource: " + path.string());
-    return std::vector<std::uint8_t>(
-        std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()
-    );
+    const std::streampos end = input.tellg();
+    if (end < 0) {
+        throw std::runtime_error("could not size desktop resource: " + path.string());
+    }
+    const auto size = static_cast<std::uint64_t>(end);
+    if (size > static_cast<std::uint64_t>(std::numeric_limits<std::streamsize>::max()) ||
+        size > std::vector<std::uint8_t>{}.max_size()) {
+        throw std::length_error("desktop resource is too large: " + path.string());
+    }
+    std::vector<std::uint8_t> result(static_cast<std::size_t>(size));
+    input.seekg(0, std::ios::beg);
+    if (!result.empty()) {
+        input.read(
+            reinterpret_cast<char*>(result.data()),
+            static_cast<std::streamsize>(result.size())
+        );
+    }
+    if (!input) throw std::runtime_error("could not read desktop resource: " + path.string());
+    return result;
 }
 
 [[nodiscard]] std::string wide_to_utf8(const std::wstring_view value) {

@@ -54,6 +54,29 @@ namespace {
 
 } // namespace
 
+bool LayoutEngine::measured_model_equal(
+    const LayoutEngine::MeasuredNode& left,
+    const LayoutEngine::MeasuredNode& right
+) {
+    return left.node == right.node &&
+        left.style == right.style &&
+        left.measured_size == right.measured_size &&
+        left.content_size == right.content_size &&
+        left.content_motion_clip == right.content_motion_clip &&
+        left.content_motion_progress == right.content_motion_progress &&
+        left.content_motion_running == right.content_motion_running &&
+        left.content_motion_snapped_by_reduced_motion ==
+            right.content_motion_snapped_by_reduced_motion &&
+        left.subtree_pins_horizontal == right.subtree_pins_horizontal &&
+        left.subtree_pins_vertical == right.subtree_pins_vertical &&
+        left.subtree_portals == right.subtree_portals &&
+        left.content_motion_target_size == right.content_motion_target_size &&
+        left.children == right.children &&
+        left.flow_child_count == right.flow_child_count &&
+        left.linear == right.linear &&
+        left.grid == right.grid;
+}
+
 LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
     const RetainedNode& node,
     const Constraints& constraints,
@@ -72,9 +95,12 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
     if (cached != measurement_cache_.end() && cached->second.constraints == constraints &&
         cached->second.node_revision == node.revision() &&
         cached->second.environment_generation == environment.generation &&
-        cached->second.scale == environment.scale && !measure_dirty) {
+        cached->second.scale == environment.scale &&
+        (!measure_dirty || measurement_pass_.contains(node.identity()))) {
         ++operations.measurement_cache_hits;
-        return cached->second.measured;
+        return cached->second.propagated != nullptr
+            ? cached->second.propagated
+            : cached->second.measured;
     }
     ++operations.measured_nodes;
     MeasuredNode measured;
@@ -548,10 +574,43 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
         measured.content_size.width + frame_edges.horizontal(),
         measured.content_size.height + frame_edges.vertical(),
     });
+    const bool structurally_changed =
+        dirty.contains(DirtyReason::structure) ||
+        std::ranges::any_of(
+            measured.children,
+            [this](const MeasuredNodePtr& child) {
+                return structural_measurements_.contains(child->node->identity());
+            }
+        );
+    if (structurally_changed) structural_measurements_.insert(node.identity());
     MeasuredNodePtr result = std::make_shared<const MeasuredNode>(std::move(measured));
+    MeasuredNodePtr propagated = result;
+    const bool comparable = cached != measurement_cache_.end() &&
+        cached->second.constraints == constraints &&
+        cached->second.environment_generation == environment.generation &&
+        cached->second.scale == environment.scale &&
+        cached->second.measured != nullptr;
+    if (!structurally_changed && comparable &&
+        cached->second.measured->style == result->style &&
+        cached->second.measured->measured_size == result->measured_size) {
+        propagated = cached->second.propagated != nullptr
+            ? cached->second.propagated
+            : cached->second.measured;
+        if (measured_model_equal(*cached->second.measured, *result)) {
+            result = cached->second.measured;
+        } else {
+            measurement_frontier_.insert_or_assign(node.identity(), result);
+        }
+    }
     measurement_cache_.insert_or_assign(node.identity(), MeasurementCacheEntry{
-        constraints, node.revision(), environment.generation, environment.scale, result,
+        constraints,
+        node.revision(),
+        environment.generation,
+        environment.scale,
+        result,
+        propagated,
     });
-    return result;
+    measurement_pass_.insert(node.identity());
+    return propagated;
 }
 } // namespace strata::ui

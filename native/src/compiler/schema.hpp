@@ -208,6 +208,12 @@ public:
 private:
     [[nodiscard]] static SchemaRegistry from_catalog(const BuiltinCatalog& catalog);
 
+    /**
+     * Application registries are sparse overlays over the immutable native catalog. Keeping the
+     * catalog shared is important: constructing an application must not deep-copy every built-in
+     * widget, helper, action, and semantic type before it can decode an already-compiled module.
+     */
+    std::shared_ptr<const SchemaRegistry> base_;
     std::unordered_map<std::string, WidgetSchema> widgets_;
     std::unordered_map<std::string, ActionSchema> actions_;
     std::unordered_map<std::string, HelperSchema> helpers_;
