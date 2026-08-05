@@ -296,12 +296,54 @@ void align_text_cache(
     std::vector<std::optional<PreparedTextCacheEntry>> previous =
         std::move(cache.text);
     cache.text.resize(current_size);
+    const auto move_slot = [&](const std::size_t previous_index,
+                               const std::size_t current_index) {
+        cache.text[current_index].swap(previous[previous_index]);
+    };
     for (std::size_t index = 0U; index < prefix; ++index) {
-        cache.text[index] = std::move(previous[index]);
+        move_slot(index, index);
     }
     for (std::size_t index = 0U; index < suffix; ++index) {
-        cache.text[current_size - index - 1U] =
-            std::move(previous[previous_size - index - 1U]);
+        move_slot(
+            previous_size - index - 1U,
+            current_size - index - 1U
+        );
+    }
+    for (std::size_t index = prefix; index < current_size - suffix; ++index) {
+        const auto* text = std::get_if<TextRunRenderCommand>(
+            &commands.commands()[index]
+        );
+        if (text == nullptr || cache.text[index].has_value()) continue;
+        const auto found = std::ranges::find_if(
+            cache.detached_text,
+            [&](const PreparedTextCacheEntry& entry) {
+                return same_text_content(entry.source, *text);
+            }
+        );
+        if (found == cache.detached_text.end()) continue;
+        const std::size_t detached_index =
+            static_cast<std::size_t>(found - cache.detached_text.begin());
+        cache.text[index].emplace(std::move(*found));
+        if (detached_index + 1U != cache.detached_text.size()) {
+            cache.detached_text[detached_index] =
+                std::move(cache.detached_text.back());
+        }
+        cache.detached_text.pop_back();
+    }
+    for (std::optional<PreparedTextCacheEntry>& entry : previous) {
+        if (entry.has_value()) {
+            cache.detached_text.push_back(std::move(*entry));
+        }
+    }
+    const std::size_t detached_limit = std::max(previous_size, current_size);
+    if (cache.detached_text.size() > detached_limit) {
+        cache.detached_text.erase(
+            cache.detached_text.begin(),
+            cache.detached_text.begin() +
+                static_cast<std::ptrdiff_t>(
+                    cache.detached_text.size() - detached_limit
+                )
+        );
     }
 }
 

@@ -121,7 +121,9 @@ void ProfilerConfig::validate() const {
 }
 
 Profiler::RollingWindow::RollingWindow(const std::size_t requested_capacity)
-    : capacity(requested_capacity) {}
+    : capacity(requested_capacity) {
+    ordered_samples.reserve(capacity);
+}
 
 bool Profiler::RollingWindow::add(const std::int64_t value) {
     if (value < 0) throw std::invalid_argument("profiler timing samples must be non-negative");
@@ -130,18 +132,18 @@ bool Profiler::RollingWindow::add(const std::int64_t value) {
         const std::int64_t removed = samples.front();
         samples.pop_front();
         sum -= static_cast<std::uint64_t>(removed);
-        if (removed == maximum_value) {
-            maximum_value = samples.empty()
-                ? 0
-                : *std::ranges::max_element(samples);
-        }
+        ordered_samples.erase(std::ranges::lower_bound(ordered_samples, removed));
     }
     samples.push_back(value);
+    ordered_samples.insert(
+        std::ranges::upper_bound(ordered_samples, value),
+        value
+    );
     const std::uint64_t converted = static_cast<std::uint64_t>(value);
     sum = converted > std::numeric_limits<std::uint64_t>::max() - sum
         ? std::numeric_limits<std::uint64_t>::max()
         : sum + converted;
-    maximum_value = std::max(maximum_value, value);
+    maximum_value = ordered_samples.back();
     return evicted;
 }
 
@@ -160,16 +162,12 @@ std::int64_t Profiler::RollingWindow::percentile(const double fraction) const {
         throw std::invalid_argument("profiler percentile must be in [0, 1]");
     }
     if (samples.empty()) return 0;
-    std::vector<std::int64_t> sorted(samples.begin(), samples.end());
     const std::size_t rank = static_cast<std::size_t>(std::ceil(
-        fraction * static_cast<double>(sorted.size())
+        fraction * static_cast<double>(ordered_samples.size())
     ));
-    const std::size_t index = std::clamp(rank, std::size_t{1U}, sorted.size()) - 1U;
-    std::ranges::nth_element(
-        sorted,
-        sorted.begin() + static_cast<std::ptrdiff_t>(index)
-    );
-    return sorted[index];
+    const std::size_t index =
+        std::clamp(rank, std::size_t{1U}, ordered_samples.size()) - 1U;
+    return ordered_samples[index];
 }
 
 Profiler::Section::Section(

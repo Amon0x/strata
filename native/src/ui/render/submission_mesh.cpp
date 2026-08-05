@@ -598,10 +598,15 @@ void geometry(
         std::move(cache.placements);
     cache.geometry.resize(current_size);
     cache.placements.resize(current_size);
-    const auto move_slot = [&](const std::size_t previous, const std::size_t current) {
-        cache.geometry[current] = std::move(previous_geometry[previous]);
-        if (previous < previous_placements.size()) {
-            cache.placements[current] = std::move(previous_placements[previous]);
+    const auto move_slot = [&](const std::size_t previous_index,
+                               const std::size_t current_index) {
+        cache.geometry[current_index].swap(
+            previous_geometry[previous_index]
+        );
+        if (previous_index < previous_placements.size()) {
+            cache.placements[current_index].swap(
+                previous_placements[previous_index]
+            );
         }
     };
     for (std::size_t index = 0U; index < prefix; ++index) {
@@ -611,6 +616,46 @@ void geometry(
         move_slot(
             previous_size - index - 1U,
             current_size - index - 1U
+        );
+    }
+    for (std::size_t index = prefix; index < current_size - suffix; ++index) {
+        const auto* draw = std::get_if<PreparedDraw>(&items[index].value);
+        if (draw == nullptr || cache.geometry[index].has_value()) continue;
+        const auto found = std::ranges::find_if(
+            cache.detached_geometry,
+            [&](const EncodedDrawCacheEntry& entry) {
+                return translation_from_cached_geometry(
+                    entry.source,
+                    *draw,
+                    context
+                ).has_value();
+            }
+        );
+        if (found == cache.detached_geometry.end()) continue;
+        const std::size_t detached_index =
+            static_cast<std::size_t>(
+                found - cache.detached_geometry.begin()
+            );
+        cache.geometry[index].emplace(std::move(*found));
+        if (detached_index + 1U != cache.detached_geometry.size()) {
+            cache.detached_geometry[detached_index] =
+                std::move(cache.detached_geometry.back());
+        }
+        cache.detached_geometry.pop_back();
+    }
+    for (std::optional<EncodedDrawCacheEntry>& entry : previous_geometry) {
+        if (entry.has_value()) {
+            cache.detached_geometry.push_back(std::move(*entry));
+        }
+    }
+    const std::size_t detached_limit = std::max(previous_size, current_size);
+    if (cache.detached_geometry.size() > detached_limit) {
+        cache.detached_geometry.erase(
+            cache.detached_geometry.begin(),
+            cache.detached_geometry.begin() +
+                static_cast<std::ptrdiff_t>(
+                    cache.detached_geometry.size() - detached_limit
+                )
         );
     }
     return false;

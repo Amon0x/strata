@@ -126,7 +126,8 @@ bool InputRouter::scroll_to(
 
 bool InputRouter::route_scrollbar_pointer(
     const PointerInputEvent& event,
-    InputOperationResult& result
+    InputOperationResult& result,
+    RetainedNode* hit_target
 ) {
     const auto update_drag = [this, &result](
                                  const ScrollbarDrag& drag,
@@ -180,9 +181,8 @@ bool InputRouter::route_scrollbar_pointer(
         ScrollbarGeometry geometry;
     };
     std::optional<Hit> hit;
-    RetainedNode* raw_target = widget_native_input_owner(hit_test(event.position));
     RetainedNode* modal = active_modal();
-    for (RetainedNode* current = raw_target; current != nullptr; current = current->parent()) {
+    for (RetainedNode* current = hit_target; current != nullptr; current = current->parent()) {
         if (modal != nullptr && !descendant_of(*current, *modal)) continue;
         if (!input_enabled(*current, behaviors_)) continue;
         const LayoutRecord* layout = layout_->find(current->identity());

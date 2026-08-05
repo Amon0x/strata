@@ -126,13 +126,17 @@ struct EncodedDrawPlacement final {
 
 struct PreparationCache final {
     std::vector<std::optional<PreparedTextCacheEntry>> text;
+    std::vector<PreparedTextCacheEntry> detached_text;
     std::vector<std::optional<EncodedDrawCacheEntry>> geometry;
+    std::vector<EncodedDrawCacheEntry> detached_geometry;
     std::vector<std::optional<EncodedDrawPlacement>> placements;
     std::optional<RenderSubmissionEnvironment> geometry_environment;
     std::vector<resource::TextureResourceDescriptor> geometry_textures;
     void clear() noexcept {
         text.clear();
+        detached_text.clear();
         geometry.clear();
+        detached_geometry.clear();
         placements.clear();
         geometry_environment.reset();
         geometry_textures.clear();

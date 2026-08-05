@@ -275,6 +275,7 @@ private:
 
         std::size_t capacity;
         std::deque<std::int64_t> samples;
+        std::vector<std::int64_t> ordered_samples;
         std::uint64_t sum = 0U;
         std::int64_t maximum_value = 0;
     };

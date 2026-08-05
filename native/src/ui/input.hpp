@@ -717,7 +717,8 @@ private:
     );
     [[nodiscard]] bool route_scrollbar_pointer(
         const PointerInputEvent& event,
-        InputOperationResult& result
+        InputOperationResult& result,
+        RetainedNode* hit_target
     );
     [[nodiscard]] InputOperationResult scroll(ScrollInputEvent event);
     [[nodiscard]] std::optional<Point> scroll_limits(const RetainedNode& node) const;

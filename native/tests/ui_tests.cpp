@@ -956,11 +956,18 @@ void check_translation_reused_geometry(const strata::ui::RenderSubmission& actua
                                        const strata::ui::RenderSubmission& expected) {
     constexpr std::size_t vertex_bytes = 88U;
     check(actual.vertex_bytes.size() == expected.vertex_bytes.size() &&
-              actual.vertex_bytes.size() % vertex_bytes == 0U &&
-              actual.indices == expected.indices &&
-              actual.batches.size() == expected.batches.size(),
-          "translation reuse changed submission topology");
-    const std::size_t vertex_count = actual.vertex_bytes.size() / vertex_bytes;
+              actual.used_vertex_bytes == expected.used_vertex_bytes &&
+              actual.used_vertex_bytes % vertex_bytes == 0U &&
+              actual.used_indices == expected.used_indices &&
+              std::equal(
+                  actual.indices.begin(),
+                  actual.indices.begin() +
+                      static_cast<std::ptrdiff_t>(actual.used_indices),
+                  expected.indices.begin()
+              ) &&
+              actual.batches == expected.batches,
+          "translation reuse changed reachable submission topology");
+    const std::size_t vertex_count = actual.used_vertex_bytes / vertex_bytes;
     for (std::size_t vertex = 0U; vertex < vertex_count; ++vertex) {
         constexpr float position_tolerance = 0.000'01F;
         check(std::abs(submission_vertex_component(actual.vertex_bytes, vertex, 0U) -
@@ -1017,6 +1024,92 @@ void test_render_submission_translation_reuse(const std::filesystem::path& resou
     ui::RenderSubmissionCache fresh;
     const ui::RenderSubmission& rebuilt = fresh.resolve(moved, atlas, *text_engine, environment);
     check_translation_reused_geometry(reused, rebuilt);
+}
+
+void test_render_submission_structural_alignment(
+    const std::filesystem::path& resource_root
+) {
+    using namespace strata;
+    const std::shared_ptr<const ui::TextEngine> text_engine =
+        ui::TextEngine::load_control_font(
+            resource_root,
+            resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        );
+    const std::uint16_t glyph = text_engine->control_font().glyph_id('A');
+    check(glyph != 0U, "structural alignment fixture lost its text glyph");
+    const ui::LogicalGlyph logical{
+        "strata:fonts/default-medium", glyph, 'A', 0U, 1U, 0.0, 9.0, 7.0,
+    };
+    const auto commands = [&logical](
+                              const bool inserted,
+                              const double text_x
+                          ) {
+        ui::RenderCommandBuffer result;
+        result.append(ui::SolidRectRenderCommand{
+            ui::Rect{0.0, 0.0, 10.0, 10.0},
+            ui::RenderColor{255U, 0U, 0U, 255U},
+        });
+        if (inserted) {
+            result.append(ui::SolidRectRenderCommand{
+                ui::Rect{12.0, 0.0, 10.0, 10.0},
+                ui::RenderColor{0U, 255U, 0U, 255U},
+            });
+        }
+        result.append(ui::TextRunRenderCommand{
+            ui::Point{text_x, 20.0},
+            ui::RenderColor{240U, 241U, 242U, 255U},
+            12.0,
+            {logical},
+        });
+        result.append(ui::SolidRectRenderCommand{
+            ui::Rect{30.0, 0.0, 10.0, 10.0},
+            ui::RenderColor{0U, 0U, 255U, 255U},
+        });
+        return result;
+    };
+    const ui::RenderSubmissionEnvironment environment{
+        1.0, 640, 480, 640.0, 480.0,
+    };
+    font::GlyphAtlas retained_atlas("submission-structural-alignment-test");
+    ui::RenderSubmissionCache retained;
+    static_cast<void>(retained.resolve(
+        commands(false, 10.0),
+        retained_atlas,
+        *text_engine,
+        environment
+    ));
+
+    const ui::RenderCommandBuffer expanded = commands(true, 18.0);
+    const ui::RenderSubmission& aligned = retained.resolve(
+        expanded,
+        retained_atlas,
+        *text_engine,
+        environment
+    );
+    ui::RenderSubmissionCache fresh;
+    const ui::RenderSubmission& rebuilt = fresh.resolve(
+        expanded,
+        retained_atlas,
+        *text_engine,
+        environment
+    );
+    check_translation_reused_geometry(aligned, rebuilt);
+
+    const ui::RenderCommandBuffer collapsed = commands(false, 10.0);
+    const ui::RenderSubmission& restored = retained.resolve(
+        collapsed,
+        retained_atlas,
+        *text_engine,
+        environment
+    );
+    ui::RenderSubmissionCache fresh_collapsed;
+    const ui::RenderSubmission& rebuilt_collapsed = fresh_collapsed.resolve(
+        collapsed,
+        retained_atlas,
+        *text_engine,
+        environment
+    );
+    check_translation_reused_geometry(restored, rebuilt_collapsed);
 }
 
 void test_native_nine_patch_geometry(const std::filesystem::path& resource_root) {
@@ -6538,6 +6631,7 @@ int main(const int argument_count, const char* const* const arguments) {
             test_bundled_texture_descriptor(arguments[1]);
             test_render_submission_cache(arguments[1]);
             test_render_submission_translation_reuse(arguments[1]);
+            test_render_submission_structural_alignment(arguments[1]);
             test_native_nine_patch_geometry(arguments[1]);
             test_native_custom_mesh_geometry(arguments[1]);
             test_motion_timing_and_indeterminate_progress();

@@ -1321,6 +1321,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
     // Motion alone must not erase a keyboard user's location indicator.
     if (event.type == PointerEventType::press) set_focus_visibility(false);
     RetainedNode* hover_target = widget_native_input_owner(hit_test(event.position));
+    RetainedNode* const scrollbar_hit_target = hover_target;
     routed_subtarget_ = hit_subtarget(event.position, hover_target);
     if (routed_subtarget_.has_value()) {
         RetainedNode* owner = tree_->find_identity(routed_subtarget_->owner_identity);
@@ -1395,7 +1396,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
         hover_route(hover_target);
         dismiss_transient_popups(target, result);
         if (target == nullptr) {
-            if (!route_scrollbar_pointer(event, result)) {
+            if (!route_scrollbar_pointer(event, result, scrollbar_hit_target)) {
                 apply_pointer_focus_default(event, hover_target, nullptr, result);
             }
             return result;
@@ -1422,7 +1423,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
         static_cast<void>(tree_->mark(target->identity(), DirtyReason::input));
         InputDispatchState dispatch = route_pointer_event(target, hover_target, event, result);
         if (dispatch.consumed) return result;
-        if (route_scrollbar_pointer(event, result)) return result;
+        if (route_scrollbar_pointer(event, result, scrollbar_hit_target)) return result;
         apply_pointer_focus_default(event, hover_target, target, result);
         if (event.button == 0) {
             if (static_text_owner != nullptr) {
@@ -1472,7 +1473,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
         }
         return result;
     }
-    if (route_scrollbar_pointer(event, result)) {
+    if (route_scrollbar_pointer(event, result, scrollbar_hit_target)) {
         if (event.type == PointerEventType::release || event.type == PointerEventType::cancel) {
             finish_capture();
         }
