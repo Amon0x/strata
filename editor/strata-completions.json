@@ -2660,6 +2660,21 @@
       "type": "number"
     },
     {
+      "name": "activeThumbHeight",
+      "nullable": true,
+      "type": "number"
+    },
+    {
+      "name": "activeThumbWidth",
+      "nullable": true,
+      "type": "number"
+    },
+    {
+      "name": "activeTrackGap",
+      "nullable": true,
+      "type": "number"
+    },
+    {
       "name": "background",
       "nullable": true,
       "type": "one of (color, map of any)"
@@ -2940,6 +2955,11 @@
       "type": "color"
     },
     {
+      "name": "thumbHeight",
+      "nullable": true,
+      "type": "number"
+    },
+    {
       "name": "thumbRadius",
       "nullable": true,
       "type": "number"
@@ -2950,9 +2970,19 @@
       "type": "number"
     },
     {
+      "name": "thumbWidth",
+      "nullable": true,
+      "type": "number"
+    },
+    {
       "name": "track",
       "nullable": true,
       "type": "one of (color, map of any)"
+    },
+    {
+      "name": "trackGap",
+      "nullable": true,
+      "type": "number"
     },
     {
       "name": "trackHeight",
@@ -3087,13 +3117,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -3317,13 +3348,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -3566,13 +3598,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -3853,13 +3886,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -4137,13 +4171,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -4487,13 +4522,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -4817,13 +4853,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -5074,13 +5111,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -5352,13 +5390,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -5584,13 +5623,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -5923,13 +5963,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -6185,13 +6226,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -6412,13 +6454,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -6669,13 +6712,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -6920,13 +6964,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -7237,13 +7282,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -7509,13 +7555,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -7819,13 +7866,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -8067,13 +8115,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -8311,13 +8360,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -8609,13 +8659,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -8845,13 +8896,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -9109,13 +9161,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -9364,13 +9417,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -9647,13 +9701,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -9875,13 +9930,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -10203,13 +10259,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -10479,13 +10536,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -10819,13 +10877,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -11106,6 +11165,22 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "showValue",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "valueSuffix",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "enabled",
           "nullable": false,
           "required": false,
@@ -11134,13 +11209,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -11382,13 +11458,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -11656,13 +11733,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -11896,13 +11974,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -12335,13 +12414,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -12683,13 +12763,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -12923,13 +13004,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -13293,13 +13375,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -13692,13 +13775,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -14001,13 +14085,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -14252,13 +14337,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -14523,13 +14609,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -14779,13 +14866,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -15035,13 +15123,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -15391,13 +15480,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],
@@ -15794,13 +15884,14 @@
             "danger",
             "default",
             "primary",
+            "rail",
             "secondary",
             "subtle"
           ],
           "name": "variant",
           "nullable": false,
           "required": false,
-          "type": "one of (compact, danger, default, primary, secondary, subtle)"
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
         },
         {
           "aliases": [],

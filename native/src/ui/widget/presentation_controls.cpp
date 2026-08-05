@@ -158,64 +158,66 @@ void rail_slider_content(
         thickness,
     };
     const double center_x = track.x + track.width * percent;
-    const double gap = scope.active() ? 5.0 : 8.0;
+    const double track_gap = scope.visual().track_gap.value_or(8.0);
+    const double gap = scope.active()
+        ? scope.visual().active_track_gap.value_or(track_gap)
+        : track_gap;
     const Rect active{
         track.x,
         track.y,
         std::max(0.0, center_x - gap - track.x),
         track.height,
     };
-    if (!active.empty()) {
-        scope.rounded_rect(
-            active,
-            scope.visual().fill,
-            std::nullopt,
-            scope.visual().track_radius.value_or(2.0)
-        );
-    }
+    scope.rounded_rect(
+        active,
+        scope.visual().fill,
+        std::nullopt,
+        scope.visual().track_radius.value_or(2.0)
+    );
     const Rect inactive{
         std::min(track.right(), center_x + gap),
         track.y,
         std::max(0.0, track.right() - center_x - gap),
         track.height,
     };
-    if (!inactive.empty()) {
-        scope.rounded_rect(
-            inactive,
-            scope.visual().track,
-            std::nullopt,
-            scope.visual().track_radius.value_or(2.0)
-        );
-        const double dot = std::min(3.0, inactive.height);
-        scope.rounded_rect(
-            Rect{
-                std::max(inactive.x, inactive.right() - dot - 4.0),
-                inactive.y + (inactive.height - dot) * 0.5,
-                dot,
-                dot,
-            },
-            RenderColor{33U, 26U, 54U, 192U},
-            std::nullopt,
-            dot * 0.5
-        );
-    }
+    scope.rounded_rect(
+        inactive,
+        scope.visual().track,
+        std::nullopt,
+        scope.visual().track_radius.value_or(2.0)
+    );
+    const double dot = inactive.empty() ? 0.0 : std::min(3.0, inactive.height);
+    scope.rounded_rect(
+        Rect{
+            std::max(inactive.x, inactive.right() - dot - 4.0),
+            inactive.y + (inactive.height - dot) * 0.5,
+            dot,
+            dot,
+        },
+        RenderColor{33U, 26U, 54U, 192U},
+        std::nullopt,
+        dot * 0.5
+    );
     const bool hot = scope.hovered() || scope.focus_visible();
-    const double thumb_scale = scope.active() ? 1.16 : hot ? 1.07 : 1.0;
-    const double thumb_width = 3.0 * thumb_scale;
-    const double thumb_height = 24.0 * thumb_scale;
+    const double authored_thumb_width = scope.visual().thumb_width.value_or(3.0);
+    const double authored_thumb_height = scope.visual().thumb_height.value_or(24.0);
+    const double thumb_width = scope.active()
+        ? scope.visual().active_thumb_width.value_or(authored_thumb_width)
+        : authored_thumb_width;
+    const double thumb_height = scope.active()
+        ? scope.visual().active_thumb_height.value_or(authored_thumb_height)
+        : authored_thumb_height;
     const Rect thumb{
         center_x - thumb_width * 0.5,
-        track.y + track.height * 0.5 - thumb_height * 0.5 -
-            (scope.active() ? 1.0 : 0.0),
+        track.y + track.height * 0.5 - thumb_height * 0.5,
         thumb_width,
         thumb_height,
     };
     scope.shadow(
         thumb,
         CornerRadii::all(thumb_width * 0.5),
-        RenderColor{5U, 2U, 11U, scope.active() ? 114U : 104U},
-        scope.active() ? 5.0 : 3.0,
-        scope.active() ? 1.0 : 0.0
+        RenderColor{5U, 2U, 11U, 104U},
+        3.0
     );
     scope.rounded_rect(
         thumb,

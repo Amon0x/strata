@@ -72,6 +72,12 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{
             .name = "aspectRatio", .type = declared_type_reference("t3"), .nullable = true},
         DeclaredProperty{
+            .name = "activeThumbHeight", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "activeThumbWidth", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
+            .name = "activeTrackGap", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
             .name = "background", .type = declared_type_reference("t145"), .nullable = true},
         DeclaredProperty{
             .name = "border", .type = declared_type_reference("t38"), .nullable = true},
@@ -151,11 +157,17 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "selectionColor", .type = declared_type_reference("t8")},
         DeclaredProperty{.name = "thumb", .type = declared_type_reference("t8"), .nullable = true},
         DeclaredProperty{
+            .name = "thumbHeight", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
             .name = "thumbRadius", .type = declared_type_reference("t3"), .nullable = true},
         DeclaredProperty{
             .name = "thumbSize", .type = declared_type_reference("t3"), .nullable = true},
         DeclaredProperty{
+            .name = "thumbWidth", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{
             .name = "track", .type = declared_type_reference("t145"), .nullable = true},
+        DeclaredProperty{
+            .name = "trackGap", .type = declared_type_reference("t3"), .nullable = true},
         DeclaredProperty{
             .name = "trackHeight", .type = declared_type_reference("t3"), .nullable = true},
         DeclaredProperty{

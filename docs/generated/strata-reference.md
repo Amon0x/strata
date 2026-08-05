@@ -17,7 +17,7 @@ Children: `false`
 | `action` | action | false | true | — |
 | `dismissible` | boolean | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -51,7 +51,7 @@ Children: `false`
 | `items` | list of map of any | true | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -88,7 +88,7 @@ Children: `false`
 | `enabled` | boolean | false | false | — |
 | `presentationTemplate` | component (key: key, label: string, control: button presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -129,7 +129,7 @@ Children: `false`
 | `enabled` | boolean | false | false | — |
 | `presentationTemplate` | component (key: key, label: string, description: string, control: checkbox presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -169,7 +169,7 @@ Children: `false`
 | `enabled` | boolean | false | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -216,7 +216,7 @@ Children: `false`
 | `bindQuery` | any | false | false | — |
 | `bindSelected` | any | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -262,7 +262,7 @@ Children: `false`
 | `allowedWhileTextEditing` | boolean | false | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -300,7 +300,7 @@ Children: `false`
 | `maxVisibleRows` | number | false | false | — |
 | `rowHeight` | number | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -340,7 +340,7 @@ Children: `true`
 | `popupTemplate` | component (key: key, level: number, expanded: boolean) | false | false | — |
 | `itemTemplate` | component (key: key, id: string, label: string, value: any, index: number, level: number, enabled: boolean, selected: boolean, active: boolean, checked: boolean, separator: boolean, hasChildren: boolean, shortcut: string) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -375,7 +375,7 @@ Children: `false`
 | `shapes` | list of map of any | true | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -424,7 +424,7 @@ Children: `true`
 | `max` | number | false | true | — |
 | `rangeMessage` | string | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -462,7 +462,7 @@ Children: `true`
 | `revalidateAfterFirstValidation` | boolean | false | false | — |
 | `onSubmit` | action | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -497,7 +497,7 @@ Children: `true`
 | `rows` | list of one of (one of (number, one of (auto, content), map of any, map of any), map of any) | false | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -535,7 +535,7 @@ Children: `false`
 | `enabled` | boolean | false | false | — |
 | `presentationTemplate` | component (key: key, label: string, icon: image, source: image source region?, control: button presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -573,7 +573,7 @@ Children: `false`
 | `source` | map of any | false | false | — |
 | `tint` | color | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -616,7 +616,7 @@ Children: `false`
 | `overscan` | number | false | false | — |
 | `itemTemplate` | component (key: key, label: string, selected: boolean, value: any) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -654,7 +654,7 @@ Children: `true`
 | `key` | key | false | false | — |
 | `selectedKey` | key | false | true | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -698,7 +698,7 @@ Children: `false`
 | `popupTemplate` | component (key: key, level: number, expanded: boolean) | false | false | — |
 | `itemTemplate` | component (key: key, id: string, label: string, value: any, index: number, level: number, enabled: boolean, selected: boolean, active: boolean, checked: boolean, separator: boolean, hasChildren: boolean, shortcut: string) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -735,7 +735,7 @@ Children: `true`
 | `menuWidth` | number | false | false | — |
 | `rowHeight` | number | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -770,7 +770,7 @@ Children: `true`
 | `open` | boolean | false | false | — |
 | `dismissible` | boolean | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -812,7 +812,7 @@ Children: `false`
 | `enabled` | boolean | false | false | — |
 | `appearance` | one of (BARE, DEFAULT) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -847,7 +847,7 @@ Children: `true`
 |---|---|---:|---:|---|
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -886,7 +886,7 @@ Children: `false`
 | `indeterminate` | boolean | false | false | — |
 | `presentationTemplate` | component (key: key, control: progress presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -923,7 +923,7 @@ Children: `false`
 | `defaultSelectedId` | string | false | true | — |
 | `enabled` | boolean | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -964,7 +964,7 @@ Children: `true`
 | `contentPadding` | one of (number, map of any) | false | false | — |
 | `scrollbarGutter` | number | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -998,7 +998,7 @@ Children: `false`
 | `spans` | list of map of any | true | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1044,7 +1044,7 @@ Children: `true`
 | `contentPadding` | one of (number, map of any) | false | false | — |
 | `scrollbarGutter` | number | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1083,7 +1083,7 @@ Children: `true`
 | `contentPadding` | one of (number, map of any) | false | false | — |
 | `contentGap` | one of (number, map of any) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1130,7 +1130,7 @@ Children: `false`
 | `itemTemplate` | component (key: key, id: string, label: string, value: any, index: number, level: number, enabled: boolean, selected: boolean, active: boolean, checked: boolean, separator: boolean, hasChildren: boolean, shortcut: string) | false | false | — |
 | `enabled` | boolean | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1170,10 +1170,12 @@ Children: `false`
 | `max` | number | false | false | — |
 | `step` | number | false | true | — |
 | `axis` | one of (HORIZONTAL, VERTICAL) | false | false | — |
+| `showValue` | boolean | false | false | — |
+| `valueSuffix` | string | false | false | — |
 | `enabled` | boolean | false | false | — |
 | `presentationTemplate` | component (key: key, control: slider presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1210,7 +1212,7 @@ Children: `true`
 | `required` | boolean | false | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1249,7 +1251,7 @@ Children: `true`
 | `maxRatio` | number | false | false | — |
 | `dividerSize` | number | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1285,7 +1287,7 @@ Children: `true`
 | `key` | key | false | false | — |
 | `showCommandFeedback` | boolean | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1340,7 +1342,7 @@ Children: `false`
 | `loadingContent` | component template | false | false | — |
 | `noMatchesContent` | component template | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1386,7 +1388,7 @@ Children: `false`
 | `selectedId` | string | false | true | — |
 | `defaultSelectedId` | string | false | true | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1422,7 +1424,7 @@ Children: `false`
 | `text` | string | true | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1470,7 +1472,7 @@ Children: `false`
 | `filter` | one of (ALPHANUMERIC, ANY, DECIMAL, INTEGER, LETTERS) | false | false | — |
 | `commitFormat` | one of (LOWERCASE, NONE, TRIM, UPPERCASE) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1521,7 +1523,7 @@ Children: `false`
 | `filter` | one of (ALPHANUMERIC, ANY, DECIMAL, INTEGER, LETTERS) | false | false | — |
 | `commitFormat` | one of (LOWERCASE, NONE, TRIM, UPPERCASE) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1564,7 +1566,7 @@ Children: `true`
 | `theme` | string | true | false | — |
 | `key` | key | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1602,7 +1604,7 @@ Children: `false`
 | `minHeight` | number | false | false | — |
 | `maxMessageLines` | number | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1641,7 +1643,7 @@ Children: `false`
 | `enabled` | boolean | false | false | — |
 | `presentationTemplate` | component (key: key, label: string, description: string, control: toggle presentation state) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1679,7 +1681,7 @@ Children: `false`
 | `itemWidth` | number | false | false | — |
 | `overflowWidth` | number | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1717,7 +1719,7 @@ Children: `true`
 | `hideDelay` | duration | false | false | — |
 | `contentTemplate` | component (key: key, text: string) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1763,7 +1765,7 @@ Children: `false`
 | `overscan` | number | false | false | — |
 | `rowTemplate` | component (depth: number, expanded: boolean, key: key, label: string, loading: boolean, mayHaveChildren: boolean, selected: boolean, value: any) | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -1818,7 +1820,7 @@ Children: `true`
 | `contentPadding` | one of (number, map of any) | false | false | — |
 | `scrollbarGutter` | number | false | false | — |
 | `layout` | layout | false | false | — |
-| `variant` | one of (compact, danger, default, primary, secondary, subtle) | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
 | `visualStyle` | style | false | false | — |
 | `effect` | effect | false | false | — |
@@ -2346,6 +2348,9 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `animateContentSize` | map of any |
 | `animation` | animation |
 | `aspectRatio` | number |
+| `activeThumbHeight` | number |
+| `activeThumbWidth` | number |
+| `activeTrackGap` | number |
 | `background` | one of (color, map of any) |
 | `border` | map of any |
 | `caretColor` | color |
@@ -2402,9 +2407,12 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `shadows` | list of map of any |
 | `selectionColor` | color |
 | `thumb` | color |
+| `thumbHeight` | number |
 | `thumbRadius` | number |
 | `thumbSize` | number |
+| `thumbWidth` | number |
 | `track` | one of (color, map of any) |
+| `trackGap` | number |
 | `trackHeight` | number |
 | `trackRadius` | number |
 | `trackWidth` | number |

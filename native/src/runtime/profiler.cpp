@@ -331,7 +331,7 @@ void Profiler::increment(const ProfilerCounter counter, const std::uint64_t amou
     std::scoped_lock lock(mutex_);
     if (!enabled_) return;
     increment_saturated(counters_[index], amount);
-    if (!frame_active_) publish_completed_snapshot_locked();
+    if (!frame_active_) invalidate_completed_snapshot_locked();
 }
 
 void Profiler::record(const ProfilerCounter counter, const std::uint64_t value) {
@@ -340,7 +340,7 @@ void Profiler::record(const ProfilerCounter counter, const std::uint64_t value) 
     std::scoped_lock lock(mutex_);
     if (enabled_) {
         counters_[index] = value;
-        if (!frame_active_) publish_completed_snapshot_locked();
+        if (!frame_active_) invalidate_completed_snapshot_locked();
     }
 }
 
@@ -356,7 +356,7 @@ void Profiler::record_counters(
         }
         counters_[index] = value;
     }
-    if (!frame_active_) publish_completed_snapshot_locked();
+    if (!frame_active_) invalidate_completed_snapshot_locked();
 }
 
 void Profiler::record_host_frame(const HostFrameProfilerTelemetry& value) {
@@ -402,7 +402,7 @@ void Profiler::record_host_frame(const HostFrameProfilerTelemetry& value) {
     } else {
         increment_saturated(dropped_section_samples_);
     }
-    if (!frame_active_) publish_completed_snapshot_locked();
+    if (!frame_active_) invalidate_completed_snapshot_locked();
 }
 
 void Profiler::record_external_timing(
@@ -427,11 +427,12 @@ void Profiler::record_external_timing(
         return;
     }
     record_timing_locked(*id, duration_nanos);
-    if (!frame_active_) publish_completed_snapshot_locked();
+    if (!frame_active_) invalidate_completed_snapshot_locked();
 }
 
 ProfilerSnapshot Profiler::snapshot() const {
     std::scoped_lock lock(mutex_);
+    if (completed_snapshot_dirty_) publish_completed_snapshot_locked();
     if (has_completed_snapshot_) {
         ProfilerSnapshot result = completed_snapshot_;
         result.capture_enabled = enabled_;
@@ -474,9 +475,18 @@ ProfilerSnapshot Profiler::snapshot_locked() const {
     return result;
 }
 
-void Profiler::publish_completed_snapshot_locked() {
+void Profiler::invalidate_completed_snapshot_locked() {
+    if (has_completed_snapshot_) {
+        completed_snapshot_dirty_ = true;
+    } else {
+        publish_completed_snapshot_locked();
+    }
+}
+
+void Profiler::publish_completed_snapshot_locked() const {
     completed_snapshot_ = snapshot_locked();
     has_completed_snapshot_ = true;
+    completed_snapshot_dirty_ = false;
 }
 
 void Profiler::reset() {
@@ -498,6 +508,7 @@ void Profiler::reset() {
     dropped_spikes_ = 0U;
     completed_snapshot_ = {};
     has_completed_snapshot_ = false;
+    completed_snapshot_dirty_ = false;
 }
 
 std::int64_t Profiler::now() const noexcept {

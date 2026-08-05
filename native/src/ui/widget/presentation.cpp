@@ -165,7 +165,13 @@ namespace {
     result.track_width = optional_dimension("trackWidth");
     result.track_height = optional_dimension("trackHeight");
     result.track_radius = optional_dimension("trackRadius");
+    result.track_gap = optional_dimension("trackGap");
+    result.active_track_gap = optional_dimension("activeTrackGap");
     result.thumb_size = optional_dimension("thumbSize");
+    result.thumb_width = optional_dimension("thumbWidth");
+    result.thumb_height = optional_dimension("thumbHeight");
+    result.active_thumb_width = optional_dimension("activeThumbWidth");
+    result.active_thumb_height = optional_dimension("activeThumbHeight");
     result.thumb_radius = optional_dimension("thumbRadius");
     if (const MotionComputedValues* motion = scope.motion_values(); motion != nullptr) {
         const auto animated_color = [motion](const MotionProperty property)

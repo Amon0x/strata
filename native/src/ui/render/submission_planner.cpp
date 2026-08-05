@@ -268,6 +268,43 @@ constexpr std::size_t maximum_content_effect_depth = 4U;
         left.font_rasterization == right.font_rasterization && left.glyphs == right.glyphs;
 }
 
+void align_text_cache(
+    const RenderCommandBuffer& commands,
+    PreparationCache& cache
+) {
+    const std::size_t previous_size = cache.text.size();
+    const std::size_t current_size = commands.size();
+    const auto compatible = [&](const std::size_t previous, const std::size_t current) {
+        const auto* text = std::get_if<TextRunRenderCommand>(
+            &commands.commands()[current]
+        );
+        return text != nullptr
+            ? cache.text[previous].has_value() &&
+                same_text_content(cache.text[previous]->source, *text)
+            : !cache.text[previous].has_value();
+    };
+    const std::size_t common = std::min(previous_size, current_size);
+    std::size_t prefix = 0U;
+    while (prefix < common && compatible(prefix, prefix)) ++prefix;
+    std::size_t suffix = 0U;
+    while (suffix < common - prefix &&
+           compatible(previous_size - suffix - 1U, current_size - suffix - 1U)) {
+        ++suffix;
+    }
+    if (previous_size == current_size && prefix + suffix == current_size) return;
+
+    std::vector<std::optional<PreparedTextCacheEntry>> previous =
+        std::move(cache.text);
+    cache.text.resize(current_size);
+    for (std::size_t index = 0U; index < prefix; ++index) {
+        cache.text[index] = std::move(previous[index]);
+    }
+    for (std::size_t index = 0U; index < suffix; ++index) {
+        cache.text[current_size - index - 1U] =
+            std::move(previous[previous_size - index - 1U]);
+    }
+}
+
 [[nodiscard]] std::vector<bool> visible_text_commands(
     const RenderCommandBuffer& commands,
     const SubmissionContext& context
@@ -332,11 +369,14 @@ void append_draw(
     const Rect transformed_bounds = transform.bounds(local_bounds);
     const Rect visible = intersect(clip, transformed_bounds);
     const SubmissionScissor resolved_scissor = scissor(clip, context);
-    if (local_bounds.empty() || transformed_bounds.empty() || visible.empty() ||
+    const bool retained_empty = local_bounds.empty();
+    if ((!retained_empty &&
+         (transformed_bounds.empty() || visible.empty())) ||
         resolved_scissor.width == 0U || resolved_scissor.height == 0U) {
         ++skipped_draws;
         return;
     }
+    if (retained_empty) ++skipped_draws;
     MaterialState material = merged_material(command, material_override);
     std::optional<std::string> texture = command_texture(command, context);
     output.emplace_back(PreparedDraw{
@@ -487,7 +527,7 @@ std::vector<PlannedItem> plan(
     // Text-backed surfaces retain their atlas scale/release lifecycle even on a frame whose
     // current command buffer contains no text. Truly no-font submissions do not touch the atlas.
     if (text_engine != nullptr) glyph_atlas.adopt_display_scale(context.scale);
-    cache.text.resize(commands.size());
+    align_text_cache(commands, cache);
     const std::vector<bool> visible_text = visible_text_commands(commands, context);
     const auto collect_warmup_requests =
         [&](const std::uint64_t atlas_generation, const bool all) {

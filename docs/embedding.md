@@ -137,6 +137,12 @@ latest filtered sample between deadlines while continuing to composite every fra
 remains responsible for GPU resources, shader/material
 implementation, presentation, and the Surface release-packet barrier.
 
+Native submission keeps used geometry inside retained capacity arenas. A local draw-topology change
+that still fits those arenas is byte-diffed against the preceding epoch and remains a geometry
+patch; it does not force a complete Surface payload merely because planned-item counts changed.
+Backends should apply those ranges directly to retained buffers. Capacity growth or a patch larger
+than replacement remains an explicit full-epoch boundary.
+
 Before framing, enumerate `Runtime::material_declarations(shaderBackend)` and
 `Runtime::effect_pass_declarations(shaderBackend)`. Effect declarations are a flat table ordered by
 effect id/pass index and carry blur constants or parameter slots plus the requested backend's

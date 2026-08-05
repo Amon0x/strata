@@ -361,7 +361,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     }
     const bool submission_reused = submission_cache_.hit_count() != prior_hits;
     telemetry_ = HostRenderPacketTelemetry{
-        submission.vertex_bytes.size() / 88U,
+        submission.used_vertex_bytes / 88U,
         submission.batches.size(),
         submission.texture_batch_breaks,
         submission.clip_batch_breaks,
@@ -388,6 +388,16 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     telemetry_.submission_atlas_warmup_nanos = submission.atlas_warmup_nanos;
     telemetry_.submission_text_preparation_nanos = submission.text_preparation_nanos;
     telemetry_.submission_mesh_encoding_nanos = submission.mesh_encoding_nanos;
+    telemetry_.geometry_topology_reused = submission.geometry_topology_reused;
+    telemetry_.candidate_geometry_patch_bytes =
+        submission.candidate_geometry_patch_bytes;
+    telemetry_.previous_full_geometry_bytes =
+        submission.previous_full_geometry_bytes;
+    telemetry_.full_geometry_bytes = submission.full_geometry_bytes;
+    telemetry_.topology_change = submission.topology_change;
+    telemetry_.topology_change_item = submission.topology_change_item;
+    telemetry_.previous_item_count = submission.previous_item_count;
+    telemetry_.item_count = submission.item_count;
     const bool geometry_changed =
         retrying_incomplete_frame || !submission_reused || geometry_packet_.empty();
     const bool patch_geometry =

@@ -142,6 +142,12 @@ Panel(style: style(
 ))
 ```
 
+The native `rail` slider presentation keeps high-frequency dragging inside one retained render
+fragment while leaving its geometry authored. `trackGap` and `activeTrackGap` control the resting
+and pressed space around the thumb; `thumbWidth`/`thumbHeight` and their `activeThumbWidth`/
+`activeThumbHeight` counterparts control the two thumb states. Omitted active values inherit their
+resting value, so a press never changes track or thumb geometry unless the style requests it.
+
 The generated reference separates general style properties, layout properties/size forms, text
 properties, theme tokens, and enum values.
 

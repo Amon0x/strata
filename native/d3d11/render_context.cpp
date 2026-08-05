@@ -604,19 +604,14 @@ struct RenderContext::Impl final {
                 retained.epoch.has_value() && !packet.full_geometry_payload;
             if (incremental &&
                 (!packet.vertex_patches.empty() || !packet.index_patches.empty())) {
-                const std::size_t next =
-                    (retained.active + 1U) % GeometryBuffers::ring_size;
-                context->CopyResource(
-                    retained.vertices[next].Get(),
-                    retained.vertices[retained.active].Get()
+                patch_geometry(
+                    retained.vertices[retained.active].Get(),
+                    packet.vertex_patches
                 );
-                context->CopyResource(
-                    retained.indices[next].Get(),
-                    retained.indices[retained.active].Get()
+                patch_geometry(
+                    retained.indices[retained.active].Get(),
+                    packet.index_patches
                 );
-                patch_geometry(retained.vertices[next].Get(), packet.vertex_patches);
-                patch_geometry(retained.indices[next].Get(), packet.index_patches);
-                retained.active = next;
             } else if (!incremental) {
                 const std::size_t next = retained.epoch.has_value()
                     ? (retained.active + 1U) % GeometryBuffers::ring_size

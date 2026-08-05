@@ -34,6 +34,14 @@ struct HostRenderPacketTelemetry final {
     std::int64_t geometry_packet_nanos = 0;
     bool geometry_patched = false;
     std::size_t geometry_patch_bytes = 0U;
+    bool geometry_topology_reused = false;
+    std::size_t candidate_geometry_patch_bytes = 0U;
+    std::size_t previous_full_geometry_bytes = 0U;
+    std::size_t full_geometry_bytes = 0U;
+    SubmissionTopologyChange topology_change = SubmissionTopologyChange::none;
+    std::size_t topology_change_item = 0U;
+    std::size_t previous_item_count = 0U;
+    std::size_t item_count = 0U;
 };
 
 class RenderCommandBuffer;

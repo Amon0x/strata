@@ -551,8 +551,10 @@ void apply_motion(
 [[nodiscard]] bool mapped_number_property(const std::string_view name) noexcept {
     return name == "radius" || name == "indicatorSize" || name == "indicatorInset" ||
            name == "trackWidth" || name == "trackHeight" || name == "trackRadius" ||
-           name == "thumbSize" || name == "thumbRadius" || name == "padding" ||
-           name == "margin" || name == "gap";
+           name == "trackGap" || name == "activeTrackGap" ||
+           name == "thumbSize" || name == "thumbWidth" || name == "thumbHeight" ||
+           name == "activeThumbWidth" || name == "activeThumbHeight" ||
+           name == "thumbRadius" || name == "padding" || name == "margin" || name == "gap";
 }
 
 [[nodiscard]] std::optional<runtime::Value> resolve_token(

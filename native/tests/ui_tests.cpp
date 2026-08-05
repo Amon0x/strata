@@ -914,7 +914,7 @@ void test_shadow_submission_extends_beyond_the_source_shape() {
     font::GlyphAtlas atlas("shadow-outset-test");
     const ui::RenderSubmission submission =
         ui::build_render_submission(commands, atlas, nullptr, 1.0, 640, 480, 640.0, 480.0);
-    check(submission.vertex_bytes.size() == 4U * 88U && submission.indices.size() == 6U,
+    check(submission.used_vertex_bytes == 4U * 88U && submission.used_indices == 6U,
           "exterior shadow did not produce one expanded quad");
     float minimum_x = std::numeric_limits<float>::max();
     float minimum_y = std::numeric_limits<float>::max();
@@ -1050,7 +1050,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
     const ui::RenderSubmission& submission = cache.resolve(
         commands, atlas, *text_engine, ui::RenderSubmissionEnvironment{1.0, 640, 480, 640.0, 480.0},
         texture_descriptors);
-    check(submission.vertex_bytes.size() == 36U * 88U && submission.indices.size() == 54U &&
+    check(submission.used_vertex_bytes == 36U * 88U && submission.used_indices == 54U &&
               submission.batches.size() == 1U && submission.batches.front().index_count == 54U,
           "native nine-patch did not encode its complete 3x3 geometry");
     const std::vector<std::uint8_t> initial_geometry = submission.vertex_bytes;
@@ -1198,7 +1198,7 @@ void test_native_custom_mesh_geometry(const std::filesystem::path& resource_root
     const ui::RenderSubmission& submission =
         cache.resolve(commands, atlas, *text_engine,
                       ui::RenderSubmissionEnvironment{1.0, 640, 480, 640.0, 480.0});
-    check(submission.vertex_bytes.size() == 3U * 88U && submission.indices.size() == 3U &&
+    check(submission.used_vertex_bytes == 3U * 88U && submission.used_indices == 3U &&
               submission.batches.size() == 1U && submission.batches.front().index_count == 3U,
           "native custom mesh was not encoded from its owned vertex/index geometry");
 }
@@ -5894,6 +5894,49 @@ void test_tuning_slider_pipeline_is_proportional(
         : nullptr;
     check(slider_layout != nullptr && slider_layout->bounds.width > 0.0,
           "tuning slider fixture was not arranged");
+    struct RailGeometry final {
+        std::optional<ui::Rect> fill;
+        std::optional<ui::Rect> track;
+        std::optional<ui::Rect> thumb;
+    };
+    const auto rail_geometry = [&surface, slider_layout]() {
+        RailGeometry result;
+        for (const ui::RenderCommand& command : surface.render_commands().commands()) {
+            const auto* rectangle = std::get_if<ui::RoundedRectRenderCommand>(&command);
+            if (rectangle == nullptr) continue;
+            const ui::Point center{
+                rectangle->bounds.x + rectangle->bounds.width * 0.5,
+                rectangle->bounds.y + rectangle->bounds.height * 0.5,
+            };
+            if (center.x < slider_layout->bounds.x ||
+                center.x > slider_layout->bounds.right() ||
+                center.y < slider_layout->bounds.y ||
+                center.y > slider_layout->bounds.bottom()) {
+                continue;
+            }
+            if (rectangle->fill == ui::Paint(ui::RenderColor{199U, 167U, 255U, 255U})) {
+                result.fill = rectangle->bounds;
+            } else if (
+                rectangle->fill == ui::Paint(ui::RenderColor{237U, 231U, 245U, 45U})
+            ) {
+                result.track = rectangle->bounds;
+            } else if (
+                rectangle->fill == ui::Paint(ui::RenderColor{250U, 247U, 255U, 255U})
+            ) {
+                result.thumb = rectangle->bounds;
+            }
+        }
+        return result;
+    };
+    const RailGeometry idle_geometry = rail_geometry();
+    check(
+        idle_geometry.fill.has_value() &&
+            idle_geometry.track.has_value() &&
+            idle_geometry.thumb.has_value() &&
+            std::abs(idle_geometry.thumb->width - 3.0) < 0.001 &&
+            std::abs(idle_geometry.thumb->height - 24.0) < 0.001,
+        "authored tuning rail did not use its resting thumb dimensions"
+    );
     const ui::Point pressed{
         slider_layout->bounds.x + slider_layout->bounds.width * (12.0 / 32.0),
         slider_layout->bounds.y + slider_layout->bounds.height * 0.5,
@@ -5908,6 +5951,17 @@ void test_tuning_slider_pipeline_is_proportional(
         2'010'000'000,
     }));
     static_cast<void>(surface.frame(2'016'666'667));
+    const RailGeometry active_geometry = rail_geometry();
+    check(
+        active_geometry.fill.has_value() &&
+            active_geometry.track.has_value() &&
+            active_geometry.thumb.has_value() &&
+            std::abs(active_geometry.thumb->width - 2.0) < 0.001 &&
+            std::abs(active_geometry.thumb->height - 24.0) < 0.001 &&
+            std::abs(active_geometry.fill->right() - idle_geometry.fill->right()) < 0.001 &&
+            std::abs(active_geometry.track->x - idle_geometry.track->x) < 0.001,
+        "pressing an authored tuning rail changed its tracks instead of tightening only its thumb"
+    );
     static_cast<void>(surface.frame(2'400'000'000));
 
     font::GlyphAtlas atlas("tuning-incremental");
@@ -6109,8 +6163,41 @@ void test_tuning_slider_pipeline_is_proportional(
             check(
                 !decoded.full_geometry_payload &&
                     (!decoded.vertex_patches.empty() ||
-                     !decoded.index_patches.empty()),
-                "a tuning label digit-count change escaped its retained geometry slot"
+                     !decoded.index_patches.empty()) &&
+                    packet_cache.telemetry().geometry_topology_reused &&
+                    packet_cache.telemetry().geometry_patch_bytes < 32U * 1'024U,
+                "a tuning rail topology change escaped its retained geometry arena at move " +
+                    std::to_string(index) +
+                    " topology=" +
+                    std::to_string(packet_cache.telemetry().geometry_topology_reused) +
+                    " patch=" +
+                    std::to_string(packet_cache.telemetry().candidate_geometry_patch_bytes) +
+                    " full=" +
+                    std::to_string(packet_cache.telemetry().previous_full_geometry_bytes) +
+                    "->" +
+                    std::to_string(packet_cache.telemetry().full_geometry_bytes) +
+                    " reason=" +
+                    std::to_string(static_cast<std::uint32_t>(
+                        packet_cache.telemetry().topology_change
+                    )) +
+                    " item=" +
+                    std::to_string(packet_cache.telemetry().topology_change_item) +
+                    " items=" +
+                    std::to_string(packet_cache.telemetry().previous_item_count) +
+                    "->" +
+                    std::to_string(packet_cache.telemetry().item_count) +
+                    " commands=" +
+                    std::to_string(surface.render_commands().commands().size()) +
+                    " active=" +
+                    std::to_string(surface.input().active(slider->identity())) +
+                    " hovered=" +
+                    std::to_string(surface.input().hovered(slider->identity())) +
+                    " atlas=" +
+                    std::to_string(atlas.cached_glyph_count()) +
+                    " generation=" +
+                    std::to_string(atlas.generation()) +
+                    " recycles=" +
+                    std::to_string(atlas.generation_recycle_count())
             );
         }
         previous = position;

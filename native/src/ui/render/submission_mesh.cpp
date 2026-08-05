@@ -44,15 +44,15 @@ struct BatchKey final {
     return !(left.texture_sampled && right.texture_sampled && left.texture != right.texture);
 }
 
-void append_u32(std::vector<std::uint8_t>& output, const std::uint32_t value) {
-    output.push_back(static_cast<std::uint8_t>(value));
-    output.push_back(static_cast<std::uint8_t>(value >> 8U));
-    output.push_back(static_cast<std::uint8_t>(value >> 16U));
-    output.push_back(static_cast<std::uint8_t>(value >> 24U));
+void write_u32(std::uint8_t*& output, const std::uint32_t value) noexcept {
+    *output++ = static_cast<std::uint8_t>(value);
+    *output++ = static_cast<std::uint8_t>(value >> 8U);
+    *output++ = static_cast<std::uint8_t>(value >> 16U);
+    *output++ = static_cast<std::uint8_t>(value >> 24U);
 }
 
-void append_float(std::vector<std::uint8_t>& output, const float value) {
-    append_u32(output, std::bit_cast<std::uint32_t>(value));
+void write_float(std::uint8_t*& output, const float value) noexcept {
+    write_u32(output, std::bit_cast<std::uint32_t>(value));
 }
 
 void color_data(
@@ -195,16 +195,23 @@ void vertex(
     const std::array<float, draw_data_float_count>& data
 ) {
     const Point point = transform.apply(Point{x, y});
-    append_float(output.vertex_bytes, static_cast<float>(point.x));
-    append_float(output.vertex_bytes, static_cast<float>(point.y));
-    append_float(output.vertex_bytes, static_cast<float>(z));
-    append_float(output.vertex_bytes, static_cast<float>(u));
-    append_float(output.vertex_bytes, static_cast<float>(v));
-    output.vertex_bytes.push_back(color.red);
-    output.vertex_bytes.push_back(color.green);
-    output.vertex_bytes.push_back(color.blue);
-    output.vertex_bytes.push_back(color.alpha);
-    for (const float value : data) append_float(output.vertex_bytes, value);
+    std::array<std::uint8_t, vertex_bytes> encoded;
+    std::uint8_t* destination = encoded.data();
+    write_float(destination, static_cast<float>(point.x));
+    write_float(destination, static_cast<float>(point.y));
+    write_float(destination, static_cast<float>(z));
+    write_float(destination, static_cast<float>(u));
+    write_float(destination, static_cast<float>(v));
+    *destination++ = color.red;
+    *destination++ = color.green;
+    *destination++ = color.blue;
+    *destination++ = color.alpha;
+    for (const float value : data) write_float(destination, value);
+    output.vertex_bytes.insert(
+        output.vertex_bytes.end(),
+        encoded.begin(),
+        encoded.end()
+    );
 }
 
 void quad(
@@ -556,6 +563,59 @@ void geometry(
     return delta;
 }
 
+[[nodiscard]] bool align_geometry_cache(
+    const std::vector<PlannedItem>& items,
+    const SubmissionContext& context,
+    PreparationCache& cache
+) {
+    const std::size_t previous_size = cache.geometry.size();
+    const std::size_t current_size = items.size();
+    if (previous_size == current_size &&
+        cache.placements.size() == current_size) {
+        return true;
+    }
+    const auto compatible = [&](const std::size_t previous, const std::size_t current) {
+        const auto* draw = std::get_if<PreparedDraw>(&items[current].value);
+        if (draw == nullptr) return !cache.geometry[previous].has_value();
+        return cache.geometry[previous].has_value() &&
+            translation_from_cached_geometry(
+                cache.geometry[previous]->source,
+                *draw,
+                context
+            ).has_value();
+    };
+    const std::size_t common = std::min(previous_size, current_size);
+    std::size_t prefix = 0U;
+    while (prefix < common && compatible(prefix, prefix)) ++prefix;
+    std::size_t suffix = 0U;
+    while (suffix < common - prefix &&
+           compatible(previous_size - suffix - 1U, current_size - suffix - 1U)) {
+        ++suffix;
+    }
+    std::vector<std::optional<EncodedDrawCacheEntry>> previous_geometry =
+        std::move(cache.geometry);
+    std::vector<std::optional<EncodedDrawPlacement>> previous_placements =
+        std::move(cache.placements);
+    cache.geometry.resize(current_size);
+    cache.placements.resize(current_size);
+    const auto move_slot = [&](const std::size_t previous, const std::size_t current) {
+        cache.geometry[current] = std::move(previous_geometry[previous]);
+        if (previous < previous_placements.size()) {
+            cache.placements[current] = std::move(previous_placements[previous]);
+        }
+    };
+    for (std::size_t index = 0U; index < prefix; ++index) {
+        move_slot(index, index);
+    }
+    for (std::size_t index = 0U; index < suffix; ++index) {
+        move_slot(
+            previous_size - index - 1U,
+            current_size - index - 1U
+        );
+    }
+    return false;
+}
+
 void translate_vertex_positions(
     std::vector<std::uint8_t>& vertices,
     const std::size_t begin,
@@ -622,10 +682,22 @@ void encode(
     RenderSubmission& output,
     PreparationCache& cache
 ) {
-    bool topology_reused =
-        cache.geometry.size() == items.size() &&
-        cache.placements.size() == items.size();
-    cache.geometry.resize(items.size());
+    output.previous_item_count = cache.geometry.size();
+    output.item_count = items.size();
+    bool topology_reused = align_geometry_cache(items, context, cache);
+    const auto change_topology = [&output, &topology_reused](
+                                     const SubmissionTopologyChange reason,
+                                     const std::size_t item
+                                 ) {
+        if (output.topology_change == SubmissionTopologyChange::none) {
+            output.topology_change = reason;
+            output.topology_change_item = item;
+        }
+        topology_reused = false;
+    };
+    if (!topology_reused) {
+        change_topology(SubmissionTopologyChange::item_count, 0U);
+    }
     std::vector<std::optional<EncodedDrawCacheEntry>> geometry_updates(items.size());
     std::vector<std::optional<EncodedDrawPlacement>> next_placements(items.size());
     std::vector<bool> changed(items.size(), false);
@@ -652,7 +724,10 @@ void encode(
         if (const auto* effect = std::get_if<SubmissionBatch>(&item.value); effect != nullptr) {
             if (cache.geometry[item_index].has_value() ||
                 (topology_reused && cache.placements[item_index].has_value())) {
-                topology_reused = false;
+                change_topology(
+                    SubmissionTopologyChange::effect_placement,
+                    item_index
+                );
             }
             if (open_key.has_value()) ++output.effect_batch_breaks;
             close_batch();
@@ -772,15 +847,51 @@ void encode(
             vertex_capacity,
             index_capacity,
         };
-        if (topology_reused &&
-            (previous_placement == nullptr ||
-             previous_placement->vertex_byte_offset != placement.vertex_byte_offset ||
-             previous_placement->index_offset != placement.index_offset ||
-             previous_placement->batch_local_vertex != placement.batch_local_vertex ||
-             previous_placement->vertex_byte_capacity !=
-                 placement.vertex_byte_capacity ||
-             previous_placement->index_capacity != placement.index_capacity)) {
-            topology_reused = false;
+        if (topology_reused) {
+            if (previous_placement == nullptr) {
+                change_topology(
+                    SubmissionTopologyChange::missing_placement,
+                    item_index
+                );
+            } else if (
+                previous_placement->vertex_byte_offset !=
+                placement.vertex_byte_offset
+            ) {
+                change_topology(
+                    SubmissionTopologyChange::vertex_offset,
+                    item_index
+                );
+            } else if (
+                previous_placement->index_offset != placement.index_offset
+            ) {
+                change_topology(
+                    SubmissionTopologyChange::index_offset,
+                    item_index
+                );
+            } else if (
+                previous_placement->batch_local_vertex !=
+                placement.batch_local_vertex
+            ) {
+                change_topology(
+                    SubmissionTopologyChange::batch_local_vertex,
+                    item_index
+                );
+            } else if (
+                previous_placement->vertex_byte_capacity !=
+                placement.vertex_byte_capacity
+            ) {
+                change_topology(
+                    SubmissionTopologyChange::vertex_capacity,
+                    item_index
+                );
+            } else if (
+                previous_placement->index_capacity != placement.index_capacity
+            ) {
+                change_topology(
+                    SubmissionTopologyChange::index_capacity,
+                    item_index
+                );
+            }
         }
         next_placements[item_index] = placement;
         if (vertex_capacity >
@@ -800,9 +911,14 @@ void encode(
         }),
         next_batches.end()
     );
-    topology_reused = topology_reused &&
-        output.vertex_bytes.size() == vertex_byte_count &&
-        output.indices.size() == index_count;
+    if (topology_reused &&
+        (output.used_vertex_bytes != vertex_byte_count ||
+         output.used_indices != index_count)) {
+        change_topology(SubmissionTopologyChange::buffer_size, items.size());
+    }
+    output.geometry_topology_reused = topology_reused;
+    output.full_geometry_bytes =
+        vertex_byte_count + index_count * sizeof(std::uint32_t);
 
     const auto append_patch = [](
                                   std::vector<SubmissionGeometryPatch>& patches,
@@ -828,6 +944,45 @@ void encode(
             static_cast<std::uint32_t>(offset),
             std::vector<std::uint8_t>(bytes.begin(), bytes.end()),
         });
+    };
+    const auto changed_ranges = [&append_patch](
+                                    const std::span<const std::uint8_t> previous,
+                                    const std::span<const std::uint8_t> current,
+                                    const std::size_t stride
+                                ) {
+        std::vector<SubmissionGeometryPatch> patches;
+        if (previous.size() != current.size() ||
+            stride == 0U ||
+            current.size() % stride != 0U) {
+            return patches;
+        }
+        std::size_t begin = current.size();
+        for (std::size_t offset = 0U; offset < current.size(); offset += stride) {
+            const bool changed =
+                std::memcmp(
+                    previous.data() + offset,
+                    current.data() + offset,
+                    stride
+                ) != 0;
+            if (changed && begin == current.size()) {
+                begin = offset;
+            } else if (!changed && begin != current.size()) {
+                append_patch(
+                    patches,
+                    begin,
+                    current.subspan(begin, offset - begin)
+                );
+                begin = current.size();
+            }
+        }
+        if (begin != current.size()) {
+            append_patch(
+                patches,
+                begin,
+                current.subspan(begin)
+            );
+        }
+        return patches;
     };
 
     const auto geometry_at = [&cache, &geometry_updates](
@@ -900,6 +1055,8 @@ void encode(
         }
         const std::size_t full_bytes =
             output.vertex_bytes.size() + output.indices.size() * sizeof(std::uint32_t);
+        output.candidate_geometry_patch_bytes = patch_bytes;
+        output.full_geometry_bytes = full_bytes;
         output.patch_from_previous = full_bytes == 0U || patch_bytes < full_bytes;
         for (const SubmissionGeometryPatch& patch : next_vertex_patches) {
             std::memcpy(
@@ -958,9 +1115,95 @@ void encode(
                     placement.batch_local_vertex + index;
             }
         }
-        output.vertex_bytes.swap(next_vertices);
-        output.indices.swap(next_indices);
+        const bool arena_fits =
+            next_vertices.size() <= output.vertex_bytes.size() &&
+            next_indices.size() <= output.indices.size();
+        if (arena_fits) {
+            // Only the live prefix is reachable from the new batches. Preserve unused arena
+            // capacity in place instead of allocating, zero-filling, and comparing the whole
+            // reserved buffer on every structural transition.
+            next_vertex_patches = changed_ranges(
+                std::span<const std::uint8_t>(
+                    output.vertex_bytes.data(),
+                    next_vertices.size()
+                ),
+                next_vertices,
+                vertex_bytes
+            );
+            const std::span<const std::byte> previous_index_bytes =
+                std::as_bytes(std::span<const std::uint32_t>(
+                    output.indices.data(),
+                    next_indices.size()
+                ));
+            const std::span<const std::byte> next_index_bytes =
+                std::as_bytes(std::span<const std::uint32_t>(next_indices));
+            next_index_patches = changed_ranges(
+                std::span<const std::uint8_t>(
+                    reinterpret_cast<const std::uint8_t*>(
+                        previous_index_bytes.data()
+                    ),
+                    previous_index_bytes.size()
+                ),
+                std::span<const std::uint8_t>(
+                    reinterpret_cast<const std::uint8_t*>(
+                        next_index_bytes.data()
+                    ),
+                    next_index_bytes.size()
+                ),
+                sizeof(std::uint32_t)
+            );
+            std::size_t patch_bytes = 0U;
+            for (const SubmissionGeometryPatch& patch : next_vertex_patches) {
+                patch_bytes += patch.bytes.size() + 8U;
+            }
+            for (const SubmissionGeometryPatch& patch : next_index_patches) {
+                patch_bytes += patch.bytes.size() + 8U;
+            }
+            output.candidate_geometry_patch_bytes = patch_bytes;
+            const std::size_t full_bytes =
+                output.vertex_bytes.size() +
+                output.indices.size() * sizeof(std::uint32_t);
+            output.full_geometry_bytes = full_bytes;
+            output.patch_from_previous =
+                full_bytes == 0U || patch_bytes < full_bytes;
+            for (const SubmissionGeometryPatch& patch : next_vertex_patches) {
+                std::memcpy(
+                    output.vertex_bytes.data() + patch.offset,
+                    patch.bytes.data(),
+                    patch.bytes.size()
+                );
+            }
+            std::uint8_t* const output_index_bytes =
+                reinterpret_cast<std::uint8_t*>(output.indices.data());
+            for (const SubmissionGeometryPatch& patch : next_index_patches) {
+                std::memcpy(
+                    output_index_bytes + patch.offset,
+                    patch.bytes.data(),
+                    patch.bytes.size()
+                );
+            }
+            if (output.patch_from_previous) {
+                output.vertex_patches = std::move(next_vertex_patches);
+                output.index_patches = std::move(next_index_patches);
+            }
+        } else {
+            next_vertices.resize(
+                retained_vertex_capacity(next_vertices.size()),
+                0U
+            );
+            next_indices.resize(
+                retained_index_capacity(next_indices.size()),
+                0U
+            );
+            output.full_geometry_bytes =
+                next_vertices.size() +
+                next_indices.size() * sizeof(std::uint32_t);
+            output.vertex_bytes.swap(next_vertices);
+            output.indices.swap(next_indices);
+        }
     }
+    output.used_vertex_bytes = vertex_byte_count;
+    output.used_indices = index_count;
     for (std::size_t item_index = 0U; item_index < items.size(); ++item_index) {
         if (std::holds_alternative<SubmissionBatch>(items[item_index].value)) {
             cache.geometry[item_index].reset();

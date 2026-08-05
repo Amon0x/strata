@@ -114,6 +114,16 @@ void update_cached(
     output.atlas_warmup_nanos = 0;
     output.text_preparation_nanos = 0;
     output.mesh_encoding_nanos = 0;
+    output.geometry_topology_reused = false;
+    output.candidate_geometry_patch_bytes = 0U;
+    output.previous_full_geometry_bytes =
+        output.vertex_bytes.size() +
+        output.indices.size() * sizeof(std::uint32_t);
+    output.full_geometry_bytes = 0U;
+    output.topology_change = SubmissionTopologyChange::none;
+    output.topology_change_item = 0U;
+    output.previous_item_count = 0U;
+    output.item_count = 0U;
     output.patch_from_previous = false;
     output.vertex_patches.clear();
     output.index_patches.clear();

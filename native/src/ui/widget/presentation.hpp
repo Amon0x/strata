@@ -49,7 +49,13 @@ struct WidgetVisualStyle final {
     std::optional<double> track_width;
     std::optional<double> track_height;
     std::optional<double> track_radius;
+    std::optional<double> track_gap;
+    std::optional<double> active_track_gap;
     std::optional<double> thumb_size;
+    std::optional<double> thumb_width;
+    std::optional<double> thumb_height;
+    std::optional<double> active_thumb_width;
+    std::optional<double> active_thumb_height;
     std::optional<double> thumb_radius;
     std::optional<double> indicator_position;
 };

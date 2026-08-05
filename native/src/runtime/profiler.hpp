@@ -319,7 +319,8 @@ private:
     [[nodiscard]] std::vector<std::uint64_t> stack_locked(std::uint64_t section_id) const;
     [[nodiscard]] std::vector<ProfilerCounterSnapshot> counters_locked(bool nonzero_only) const;
     [[nodiscard]] ProfilerSnapshot snapshot_locked() const;
-    void publish_completed_snapshot_locked();
+    void invalidate_completed_snapshot_locked();
+    void publish_completed_snapshot_locked() const;
     [[nodiscard]] SectionRecord* section_locked(std::uint64_t id) noexcept;
     [[nodiscard]] const SectionRecord* section_locked(std::uint64_t id) const noexcept;
     void reset_counters_locked() noexcept;
@@ -346,8 +347,9 @@ private:
     std::uint64_t dropped_section_samples_ = 0U;
     std::uint64_t dropped_timing_samples_ = 0U;
     std::uint64_t dropped_spikes_ = 0U;
-    ProfilerSnapshot completed_snapshot_;
-    bool has_completed_snapshot_ = false;
+    mutable ProfilerSnapshot completed_snapshot_;
+    mutable bool has_completed_snapshot_ = false;
+    mutable bool completed_snapshot_dirty_ = false;
 };
 
 } // namespace strata::runtime

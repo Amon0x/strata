@@ -1,8 +1,6 @@
-// F4 Tuning Panel: a dense real-time tuning overlay. Unlike the Control Deck, which uses optic
-// glass as a restrained accent over solid chrome, every surface here is glass: the shell, the
-// category rail, each module card, the readout column, and the select popup. Modules expose the
-// optic-glass material's own parameters, so the panel is a control surface for the material it is
-// made of.
+// F4 Tuning Panel: a dense material-tuning workspace. Optic glass defines the outer lens and
+// floating popups; grounded dark chrome carries the controls and readouts so the effect remains
+// an accent rather than becoming the entire interface.
 
 style Clear { background: null; border: null; }
 
@@ -22,49 +20,49 @@ style TuneShell {
   width: { weight: 1 };
   height: { weight: 1 };
   maxWidth: 1200;
-  maxHeight: 730;
+  maxHeight: 640;
   radius: 24;
   clip: true;
   background: null;
   border: null;
   effect: effect(
     "tune:optic-glass",
-    blurRadius: 22,
+    blurRadius: 18,
     downsample: 2,
-    refraction: 1.15,
-    tint: #10161E1C,
-    saturation: 0.86,
-    highlight: 0.72,
-    noise: 0.1,
-    transparency: 0.62,
-    thickness: 1.2,
-    metallic: 0.86,
-    edgeContrast: 1.0,
+    refraction: 1.05,
+    tint: #151B2218,
+    saturation: 0.8,
+    highlight: 0.62,
+    noise: 0.08,
+    transparency: 0.68,
+    thickness: 1.05,
+    metallic: 0.8,
+    edgeContrast: 0.92,
     contrast: 0.88,
-    luminosity: 0.99
+    luminosity: 0.98
   );
 }
 
-// One glass identity shared by every inner surface, so the panel reads as a single material at two
-// depths rather than a collection of unrelated treatments.
-style GlassPane {
+// The work surfaces use the same optic glass over the dark canvas, where its lens and metal rim
+// remain visible without transmitting the full-strength colour bath.
+style WorkGlass {
   background: null;
   border: null;
   effect: effect(
     "tune:optic-glass",
-    blurRadius: 12,
+    blurRadius: 8,
     downsample: 2,
-    refraction: 0.95,
-    tint: #16202A14,
-    saturation: 0.94,
-    highlight: 0.82,
-    noise: 0.09,
-    transparency: 0.9,
-    thickness: 0.85,
-    metallic: 0.76,
-    edgeContrast: 1.0,
-    contrast: 0.93,
-    luminosity: 1.02
+    refraction: 0.55,
+    tint: #30303010,
+    saturation: 0.52,
+    highlight: 0.34,
+    noise: 0.04,
+    transparency: 0.66,
+    thickness: 0.64,
+    metallic: 0.38,
+    edgeContrast: 0.48,
+    contrast: 0.86,
+    luminosity: 0.88
   );
 }
 
@@ -94,7 +92,7 @@ style TuneTitle { font: "strata:fonts/default-medium"; pixelSize: 21; color: #EE
 style TuneScope { font: "strata:fonts/mono"; pixelSize: 11; color: #8FA6B6FF; }
 style TuneHint { font: "strata:fonts/mono"; pixelSize: 11; color: #6E7C86FF; }
 
-style HeaderChip extends GlassPane {
+style HeaderChip {
   kind: "ROW";
   width: "content";
   height: 28;
@@ -102,23 +100,28 @@ style HeaderChip extends GlassPane {
   gap: 7;
   radius: 999;
   alignItems: "CENTER";
+  background: #141A20D4;
+  border: { width: 1, color: #D5DEE52A };
 }
 style ChipText { font: "strata:fonts/mono"; pixelSize: 10; color: #C4D6E2FF; }
-style ChipDot { kind: "PANEL"; width: 6; height: 6; radius: 3; background: #6FE3A6FF; border: null; }
+style ChipDot { kind: "PANEL"; width: 6; height: 6; radius: 3; background: #8FC0DCFF; border: null; }
 
-style TuneBody extends Clear {
+style TuneBody {
   kind: "ROW";
   width: { weight: 1 };
   height: { weight: 1 };
-  padding: 14;
-  gap: 14;
+  background: #0E131866;
+  border: null;
 }
 
-style TuneRail extends Clear {
+style TuneRail {
   kind: "COLUMN";
-  width: 176;
+  width: 184;
   height: { weight: 1 };
-  gap: 6;
+  padding: { horizontal: 12, vertical: 15 };
+  gap: 7;
+  background: #090D12C7;
+  border: { width: 1, color: #D9E3EA17 };
 }
 
 style RailItem {
@@ -135,14 +138,9 @@ style RailItem {
   activeOverlay: #C3D3DF16;
   animateChanges: { properties: ["background"], policy: "fast" };
 }
-style RailItemSelected extends GlassPane {
-  kind: "ROW";
-  width: { weight: 1 };
-  height: 42;
-  padding: { horizontal: 11, vertical: 8 };
-  gap: 10;
-  alignItems: "CENTER";
-  radius: 11;
+style RailItemSelected extends RailItem {
+  background: #AFC0CC18;
+  border: { width: 1, color: #D8E2E92A };
 }
 style RailIcon extends Clear { width: 16; height: 16; }
 style RailLabel { pixelSize: 13; color: #8A97A1FF; }
@@ -150,22 +148,24 @@ style RailLabelSelected { font: "strata:fonts/default-medium"; pixelSize: 13; co
 style RailCount { font: "strata:fonts/mono"; pixelSize: 10; color: #6E7C86FF; }
 style RailCountSelected { font: "strata:fonts/mono"; pixelSize: 10; color: #A9C0D0FF; }
 
-style RailFoot extends GlassPane {
+style RailFoot extends Clear {
   kind: "COLUMN";
   width: { weight: 1 };
   height: "content";
-  padding: 11;
-  gap: 4;
-  radius: 13;
+  padding: 8;
+  gap: 5;
 }
 style RailFootTitle { font: "strata:fonts/default-medium"; pixelSize: 11; color: #C6D2DAFF; }
 style RailFootCopy { pixelSize: 10; color: #6E7C86FF; }
 
-style TuneMain extends Clear {
+style TuneMain {
   kind: "COLUMN";
   width: { weight: 1 };
   height: { weight: 1 };
+  padding: 16;
   gap: 11;
+  background: #10151A9E;
+  border: null;
 }
 
 style MainHead extends Clear {
@@ -190,17 +190,17 @@ style ModuleGrid extends Clear {
   kind: "GRID";
   width: { weight: 1 };
   height: "content";
-  gap: 11;
-  padding: { right: 6, bottom: 6 };
+  gap: 10;
+  padding: { right: 8, bottom: 8 };
 }
 
-style ModuleCard extends GlassPane {
+style ModuleCard extends WorkGlass {
   kind: "COLUMN";
   width: { weight: 1 };
   height: "content";
   padding: { horizontal: 13, vertical: 12 };
   gap: 9;
-  radius: 16;
+  radius: 12;
 }
 style ModuleHead extends Clear {
   kind: "ROW";
@@ -249,7 +249,13 @@ style TuneSlider {
   indicatorInset: 8;
   trackHeight: 8;
   trackRadius: 2;
+  trackGap: 8;
+  activeTrackGap: 8;
   thumbRadius: 999;
+  thumbWidth: 3;
+  thumbHeight: 24;
+  activeThumbWidth: 2;
+  activeThumbHeight: 24;
   track: #EDE7F52D;
   fill: #C7A7FFFF;
   thumb: #FAF7FFFF;
@@ -285,10 +291,13 @@ style SwitchShell {
 }
 style SwitchShellHover extends SwitchShell { border: { width: 1.5, color: #8DA5B4FF }; }
 style SwitchShellOn extends SwitchShell {
-  background: #6E93AAFF;
-  border: { width: 1.5, color: #B6CDDAFF };
+  background: #744EABFF;
+  border: { width: 1.5, color: #B191DEFF };
 }
-style SwitchShellOnHover extends SwitchShellOn { background: #7EA3B9FF; }
+style SwitchShellOnHover extends SwitchShellOn {
+  background: #855BC1FF;
+  border: { width: 1.5, color: #C2A7E8FF };
+}
 style SwitchKnob {
   kind: "PANEL";
   width: 12;
@@ -300,7 +309,7 @@ style SwitchKnob {
   border: null;
   animateChanges: { properties: ["translateX", "scale", "background"], policy: "fast" };
 }
-style SwitchKnobOn extends SwitchKnob { translateX: 14; scale: 1; background: #F4FAFEFF; }
+style SwitchKnobOn extends SwitchKnob { translateX: 14; scale: 1; background: #FAF7FFFF; }
 
 style SelectRow extends Clear {
   kind: "ROW";
@@ -309,7 +318,7 @@ style SelectRow extends Clear {
   gap: 10;
   alignItems: "CENTER";
 }
-style TuneSelectTrigger extends GlassPane {
+style TuneSelectTrigger {
   kind: "ROW";
   width: { weight: 1 };
   height: 30;
@@ -317,20 +326,40 @@ style TuneSelectTrigger extends GlassPane {
   gap: 8;
   alignItems: "CENTER";
   radius: 8;
+  background: #151B21D4;
+  border: { width: 1, color: #D6E0E625 };
   focusRing: { width: 1, color: #AEC3D078 };
 }
-style TuneSelectPopup extends GlassPane {
+style TuneSelectPopup {
   kind: "COLUMN";
   width: 210;
   height: "content";
   padding: 5;
   gap: 2;
   radius: 12;
+  background: null;
+  border: null;
   anchorSide: "BOTTOM";
   anchorAlign: "START";
   anchorGap: 5;
   anchorFlip: true;
   anchorShift: true;
+  effect: effect(
+    "tune:optic-glass",
+    blurRadius: 14,
+    downsample: 2,
+    refraction: 1.0,
+    tint: #53616B38,
+    saturation: 0.76,
+    highlight: 0.56,
+    noise: 0.08,
+    transparency: 0.72,
+    thickness: 1.0,
+    metallic: 0.82,
+    edgeContrast: 1.04,
+    contrast: 0.88,
+    luminosity: 1.0
+  );
 }
 style TuneSelectItem {
   kind: "ROW";
@@ -351,19 +380,24 @@ style SelectMeta { font: "strata:fonts/mono"; pixelSize: 9; color: #7C8992FF; }
 style SelectedMark { kind: "PANEL"; width: 5; height: 5; radius: 3; background: #BDD1DEFF; border: null; }
 style EmptyMark extends Clear { width: 5; height: 5; }
 
-style ReadoutColumn extends Clear {
+style ReadoutColumn {
   kind: "COLUMN";
-  width: 218;
+  width: 222;
   height: { weight: 1 };
+  padding: { horizontal: 12, vertical: 16 };
   gap: 11;
+  background: #0B1015B0;
+  border: { width: 1, color: #D9E3EA17 };
 }
-style ReadoutCard extends GlassPane {
+style ReadoutCard {
   kind: "COLUMN";
   width: { weight: 1 };
   height: "content";
   padding: { horizontal: 12, vertical: 11 };
   gap: 8;
-  radius: 15;
+  radius: 11;
+  background: #141A20C9;
+  border: { width: 1, color: #D9E2E720 };
 }
 style ReadoutTitle { font: "strata:fonts/mono"; pixelSize: 10; color: #90A3B0FF; }
 style ReadoutRow extends Clear {
@@ -378,13 +412,13 @@ style ReadoutVal { font: "strata:fonts/mono"; pixelSize: 10; color: #CFE0EBFF; }
 style ReadoutBar { kind: "PANEL"; width: { weight: 1 }; height: 3; radius: 2; background: #DCE7EF18; border: null; }
 style ReadoutBarFill { kind: "PANEL"; width: { weight: 0.64 }; height: 3; radius: 2; background: #8FC0DCFF; border: null; }
 
-style PreviewCard extends GlassPane {
+style PreviewCard extends WorkGlass {
   kind: "COLUMN";
   width: { weight: 1 };
   height: 108;
   padding: 12;
   gap: 6;
-  radius: 15;
+  radius: 11;
   justifyContent: "END";
 }
 style PreviewLabel { font: "strata:fonts/mono"; pixelSize: 9; color: #8FA6B6FF; }
@@ -1035,10 +1069,10 @@ component TuningPanel() {
         Panel(style: Clear, layout: { width: { weight: 1 }, height: 1 })
         Panel(style: HeaderChip) {
           Panel(style: ChipDot)
-          Text(text: "LIVE", style: ChipText)
+          Text(text: "LOCAL", style: ChipText)
         }
         Panel(style: HeaderChip) {
-          Text(text: "18 MODULES", style: ChipText)
+          Text(text: "20 MODULES", style: ChipText)
         }
         Text(text: "F4 · close", style: TuneHint)
       }
@@ -1053,8 +1087,8 @@ component TuningPanel() {
           RailButton(id: "tune.nav.telemetry", icon: "TELEMETRY", label: "Telemetry", count: "4", selected: section == "TELEMETRY", activate: action("state.set", name: "section", value: "TELEMETRY"))
           Panel(style: Clear, layout: { width: { weight: 1 }, height: { weight: 1 } })
           Panel(style: RailFoot) {
-            Text(text: "Values are local", style: RailFootTitle)
-            Text(text: "Nothing here writes to the running renderer.", style: RailFootCopy, wrapMode: "WORD")
+            Text(text: "Sandbox values", style: RailFootTitle)
+            Text(text: "Controls stay local to this tuning surface.", style: RailFootCopy, wrapMode: "WORD")
           }
         }
 

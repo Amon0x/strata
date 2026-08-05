@@ -78,9 +78,24 @@ struct SubmissionGeometryPatch final {
     std::vector<std::uint8_t> bytes;
 };
 
+enum class SubmissionTopologyChange : std::uint32_t {
+    none = 0U,
+    item_count = 1U,
+    effect_placement = 2U,
+    missing_placement = 3U,
+    vertex_offset = 4U,
+    index_offset = 5U,
+    batch_local_vertex = 6U,
+    vertex_capacity = 7U,
+    index_capacity = 8U,
+    buffer_size = 9U,
+};
+
 struct RenderSubmission final {
     std::vector<std::uint8_t> vertex_bytes;
     std::vector<std::uint32_t> indices;
+    std::size_t used_vertex_bytes = 0U;
+    std::size_t used_indices = 0U;
     std::vector<SubmissionBatch> batches;
     std::size_t planned_draws = 0U;
     std::size_t skipped_draws = 0U;
@@ -92,6 +107,14 @@ struct RenderSubmission final {
     std::int64_t atlas_warmup_nanos = 0;
     std::int64_t text_preparation_nanos = 0;
     std::int64_t mesh_encoding_nanos = 0;
+    bool geometry_topology_reused = false;
+    std::size_t candidate_geometry_patch_bytes = 0U;
+    std::size_t previous_full_geometry_bytes = 0U;
+    std::size_t full_geometry_bytes = 0U;
+    SubmissionTopologyChange topology_change = SubmissionTopologyChange::none;
+    std::size_t topology_change_item = 0U;
+    std::size_t previous_item_count = 0U;
+    std::size_t item_count = 0U;
     bool patch_from_previous = false;
     std::vector<SubmissionGeometryPatch> vertex_patches;
     std::vector<SubmissionGeometryPatch> index_patches;
