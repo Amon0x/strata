@@ -327,6 +327,8 @@ struct RenderOperationCounters final {
     std::size_t nodes_visited = 0U;
     std::size_t overlays_rendered = 0U;
     std::size_t portals_rendered = 0U;
+    std::size_t retained_subtrees_reused = 0U;
+    std::size_t retained_subtrees_translated = 0U;
     [[nodiscard]] friend bool operator==(const RenderOperationCounters&,
                                          const RenderOperationCounters&) = default;
 };

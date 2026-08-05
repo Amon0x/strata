@@ -1263,6 +1263,11 @@ struct PerformanceRunner::Impl final {
             if (ready_nanos == 0) ready_nanos = nanos_since(startup.started_at);
         }
 
+        // Capturing the native profiler after every measured phase keeps its serialization and
+        // selector-inspection cost outside the benchmark while preserving the retained pipeline
+        // breakdown that explains the objective frame totals.
+        write_file(output_root / "profile.txt", host.profile_report());
+
         const JsonValue initial_report = report_json(JsonValue{});
         JsonValue comparison;
         if (!baseline_report.empty() && invalid_reasons.empty()) {

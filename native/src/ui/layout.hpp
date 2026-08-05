@@ -333,6 +333,7 @@ struct LayoutRecord final {
 struct LayoutOperationCounters final {
     std::size_t measured_nodes = 0U;
     std::size_t arranged_nodes = 0U;
+    std::size_t translated_nodes = 0U;
     std::size_t measurement_cache_hits = 0U;
 };
 
@@ -410,7 +411,8 @@ public:
         RetainedTree& tree,
         const LayoutEnvironment& environment,
         const MotionRuntime* motion = nullptr,
-        bool consume_dirty = true
+        bool consume_dirty = true,
+        std::uint64_t frame_index = 0U
     );
     [[nodiscard]] const LayoutResult& result() const noexcept;
     [[nodiscard]] std::size_t active_transition_count() const noexcept;
@@ -526,8 +528,9 @@ private:
      */
     std::unordered_set<std::uint64_t> current_arranged_records_;
     std::unordered_set<std::uint64_t> current_arranged_subtree_roots_;
-    /** Records carrying a one-pass translation marker that must be cleared before the next pass. */
+    /** Records carrying a translation accumulated across one Surface frame's convergence passes. */
     std::vector<std::uint64_t> translated_records_;
+    std::uint64_t translation_frame_index_ = 0U;
     LayoutResult result_;
     const RetainedTree* last_tree_ = nullptr;
     std::uint64_t last_invalidation_generation_ = 0U;

@@ -101,6 +101,9 @@ enum class ProfilerCounter : std::size_t {
     text_font_resolution_nanos,
     text_opentype_nanos,
     text_line_assembly_nanos,
+    render_retained_subtrees_reused,
+    render_retained_subtrees_translated,
+    layout_translated_nodes,
     count,
 };
 

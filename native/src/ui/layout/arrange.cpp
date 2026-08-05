@@ -175,11 +175,17 @@ void LayoutEngine::arrange(
                 throw std::logic_error("cached arrangement lost its retained layout record");
             }
             LayoutRecord record = previous->second;
+            const Point accumulated_translation =
+                record.translated_subtree.value_or(Point{});
             record.generation = result.generation;
             translate_record(record, translation, environment);
             record.render_generation = advance_render_generation();
             record.subtree_render_generation = advance_render_generation();
-            record.translated_subtree = translation;
+            record.translated_subtree = Point{
+                accumulated_translation.x + translation.x,
+                accumulated_translation.y + translation.y,
+            };
+            ++result.operations.translated_nodes;
             translated_records_.push_back(record.identity);
             std::optional<Rect> child_clip = current_inherited_clip;
             if (record.local_clip.has_value()) {

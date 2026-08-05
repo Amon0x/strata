@@ -335,6 +335,7 @@ void add_layout_operations(
 ) {
     target.layout_measured_nodes += source.measured_nodes;
     target.layout_arranged_nodes += source.arranged_nodes;
+    target.layout_translated_nodes += source.translated_nodes;
     target.layout_measurement_cache_hits += source.measurement_cache_hits;
 }
 
@@ -1503,7 +1504,8 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
                 tree_,
                 environment,
                 &motion_,
-                false
+                false,
+                frame.frame_index
             );
             profiler_.record_external_timing("measure", result->measure_nanos);
             profiler_.record_external_timing("arrange", result->arrange_nanos);
@@ -2100,6 +2102,8 @@ void Surface::record_profiler_counters(const SurfaceFrame& frame) {
         {runtime::ProfilerCounter::layout_nanos, value.layout_nanos},
         {runtime::ProfilerCounter::layout_measured_nodes, value.layout_measured_nodes},
         {runtime::ProfilerCounter::layout_arranged_nodes, value.layout_arranged_nodes},
+        {runtime::ProfilerCounter::layout_translated_nodes,
+         value.layout_translated_nodes},
         {runtime::ProfilerCounter::layout_reused_nodes, value.layout_measurement_cache_hits},
         {runtime::ProfilerCounter::resource_reloads, value.resource_reloads},
         {runtime::ProfilerCounter::reload_duration_nanos, value.reload_duration_nanos},
@@ -2121,6 +2125,10 @@ void Surface::record_profiler_counters(const SurfaceFrame& frame) {
         {runtime::ProfilerCounter::render_nodes_visited, value.render.nodes_visited},
         {runtime::ProfilerCounter::render_overlays, value.render.overlays_rendered},
         {runtime::ProfilerCounter::render_portals, value.render.portals_rendered},
+        {runtime::ProfilerCounter::render_retained_subtrees_reused,
+         value.render.retained_subtrees_reused},
+        {runtime::ProfilerCounter::render_retained_subtrees_translated,
+         value.render.retained_subtrees_translated},
         {runtime::ProfilerCounter::diagnostics, frame.diagnostics.records.size()},
     });
 }

@@ -78,6 +78,7 @@ struct SurfaceOperationCounters final {
     std::size_t evaluated_expressions = 0U;
     std::size_t layout_measured_nodes = 0U;
     std::size_t layout_arranged_nodes = 0U;
+    std::size_t layout_translated_nodes = 0U;
     std::size_t layout_measurement_cache_hits = 0U;
     std::size_t injected_events = 0U;
     std::size_t input_events_processed = 0U;

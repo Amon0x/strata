@@ -420,6 +420,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 found->second.visited = true;
                 counters.fragments_reused += retained.subtree_node_count;
                 counters.overlays_rendered += retained.subtree_overlay_count;
+                ++counters.retained_subtrees_reused;
                 append_retained_subtree(retained);
                 return;
             }
@@ -459,6 +460,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 found->second.visited = true;
                 counters.fragments_reused += retained.subtree_node_count;
                 counters.overlays_rendered += retained.subtree_overlay_count;
+                ++counters.retained_subtrees_translated;
                 append_retained_subtree(retained);
                 return;
             }

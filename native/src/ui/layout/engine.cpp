@@ -157,12 +157,23 @@ const LayoutResult& LayoutEngine::layout(
     RetainedTree& tree,
     const LayoutEnvironment& environment,
     const MotionRuntime* const motion,
-    const bool consume_dirty
+    const bool consume_dirty,
+    const std::uint64_t frame_index
 ) {
     environment.validate();
     motion_ = motion;
     const RetainedNode* root = tree.root();
     if (root == nullptr) throw std::invalid_argument("layout requires a retained root");
+    if (frame_index == 0U || translation_frame_index_ != frame_index) {
+        for (const std::uint64_t identity : translated_records_) {
+            if (auto record = result_.records.find(identity);
+                record != result_.records.end()) {
+                record->second.translated_subtree.reset();
+            }
+        }
+        translated_records_.clear();
+        translation_frame_index_ = frame_index;
+    }
     if (!requires_layout(tree, environment)) {
         result_.operations = {};
         result_.measure_nanos = 0;
@@ -173,12 +184,6 @@ const LayoutResult& LayoutEngine::layout(
     if (next_generation_ == std::numeric_limits<std::uint64_t>::max()) {
         throw std::overflow_error("layout generation exhausted");
     }
-    for (const std::uint64_t identity : translated_records_) {
-        if (auto record = result_.records.find(identity); record != result_.records.end()) {
-            record->second.translated_subtree.reset();
-        }
-    }
-    translated_records_.clear();
     current_arranged_records_.clear();
     current_arranged_subtree_roots_.clear();
     measurement_pass_.clear();
@@ -823,6 +828,7 @@ void LayoutEngine::clear() {
     current_arranged_records_.clear();
     current_arranged_subtree_roots_.clear();
     translated_records_.clear();
+    translation_frame_index_ = 0U;
     collection_virtualization_.clear();
     result_ = {};
     last_tree_ = nullptr;

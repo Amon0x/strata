@@ -92,6 +92,9 @@ constexpr std::array<std::string_view, static_cast<std::size_t>(ProfilerCounter:
         "text.font_resolution_nanos",
         "text.opentype_nanos",
         "text.line_assembly_nanos",
+        "render.retained_subtrees_reused",
+        "render.retained_subtrees_translated",
+        "layout.translated_nodes",
     };
 
 [[nodiscard]] std::int64_t steady_now_nanos() noexcept {

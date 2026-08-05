@@ -2664,7 +2664,7 @@ void test_retained_layout_cache_translates_unchanged_subtrees() {
         {},    PointSnapPolicy::nearest,    RectangleSnapPolicy::outward,
         false,
     };
-    const LayoutResult& initial = layout.layout(tree, environment);
+    const LayoutResult& initial = layout.layout(tree, environment, nullptr, true, 1U);
     check(initial.operations.arranged_nodes == 4U, "initial translation fixture skipped layout");
     const std::uint64_t trailing_identity = tree.find_key("translation.trailing")->identity();
     const std::uint64_t inner_identity = tree.find_key("translation.inner")->identity();
@@ -2672,7 +2672,7 @@ void test_retained_layout_cache_translates_unchanged_subtrees() {
     const LayoutRecord initial_inner = *initial.find(inner_identity);
 
     static_cast<void>(tree.reconcile(description(13.25)));
-    const LayoutResult& shifted = layout.layout(tree, environment);
+    const LayoutResult& shifted = layout.layout(tree, environment, nullptr, true, 2U);
     const LayoutRecord* shifted_trailing = shifted.find(trailing_identity);
     const LayoutRecord* shifted_inner = shifted.find(inner_identity);
     check(shifted.operations.arranged_nodes == 2U && shifted_trailing != nullptr &&
@@ -2690,14 +2690,29 @@ void test_retained_layout_cache_translates_unchanged_subtrees() {
     check_near(shifted_trailing->snapped_bounds.y * environment.scale,
                std::round(shifted_trailing->snapped_bounds.y * environment.scale),
                "translated arrangement cache did not resnap moved geometry");
+    check(shifted_trailing->translated_subtree.has_value() &&
+              shifted_trailing->translated_subtree == Point{0.0, 3.25},
+          "translated arrangement cache did not publish its subtree translation");
+
+    const LayoutResult& converged = layout.layout(tree, environment, nullptr, true, 2U);
+    check(converged.find(trailing_identity)->translated_subtree == Point{0.0, 3.25},
+          "a repeated layout pass in one frame discarded its retained translation");
 
     const double shifted_y = shifted_trailing->bounds.y;
     static_cast<void>(tree.reconcile(description(14.5)));
-    const LayoutResult& shifted_again = layout.layout(tree, environment);
+    const LayoutResult& shifted_again =
+        layout.layout(tree, environment, nullptr, true, 2U);
     check(shifted_again.operations.arranged_nodes == 2U,
           "translated arrangement cache did not advance its retained placement");
     check_near(shifted_again.find(trailing_identity)->bounds.y, shifted_y + 1.25,
                "successive translated arrangement reuse accumulated the wrong offset");
+    check(shifted_again.find(trailing_identity)->translated_subtree == Point{0.0, 4.5},
+          "multiple layout passes did not accumulate their subtree translations");
+
+    const LayoutResult& next_frame =
+        layout.layout(tree, environment, nullptr, true, 3U);
+    check(!next_frame.find(trailing_identity)->translated_subtree.has_value(),
+          "a subtree translation leaked into the next frame");
 }
 
 void test_explicit_container_size_constrains_descendants() {
