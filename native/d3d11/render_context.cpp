@@ -227,8 +227,6 @@ struct RenderContext::Impl final {
     }
 
     void release_target() {
-        context->ClearState();
-        context->Flush();
         target.Reset();
         target_texture.Reset();
         width = 0U;
@@ -566,7 +564,8 @@ struct RenderContext::Impl final {
             textures->apply(operation);
     }
 
-    void begin_frame(const std::array<float, 4U> clear_color, const double frame_seconds) {
+    void begin_frame(const std::optional<std::array<float, 4U>>& clear_color,
+                     const double frame_seconds) {
         if (target == nullptr)
             throw std::logic_error("D3D11 render target is not configured");
         complete_material_programs();
@@ -586,7 +585,8 @@ struct RenderContext::Impl final {
         };
         std::memcpy(mapped.pData, frame_values.data(), sizeof(frame_values));
         context->Unmap(viewport_buffer.Get(), 0U);
-        context->ClearRenderTargetView(target.Get(), clear_color.data());
+        if (clear_color.has_value())
+            context->ClearRenderTargetView(target.Get(), clear_color->data());
         current_frame_seconds = frame_seconds;
     }
 
@@ -800,7 +800,7 @@ void RenderContext::consume_resources(const host::RenderPacket& packet) {
     impl_->consume_resources(packet);
 }
 
-void RenderContext::begin_frame(const std::array<float, 4U> clear_color,
+void RenderContext::begin_frame(const std::optional<std::array<float, 4U>> clear_color,
                                 const double frame_seconds) {
     impl_->begin_frame(clear_color, frame_seconds);
 }

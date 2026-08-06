@@ -103,3 +103,32 @@ if(WIN32 AND TARGET Strata::desktop)
         )
     endif()
 endif()
+
+if(WIN32 AND TARGET Strata::d3d11)
+    add_executable(strata_installed_adapter_c adapter_c_smoke.c)
+    target_link_libraries(
+        strata_installed_adapter_c
+        PRIVATE Strata::c Strata::d3d11 Strata::win32
+    )
+    set_target_properties(
+        strata_installed_adapter_c
+        PROPERTIES C_STANDARD 17 C_STANDARD_REQUIRED YES LINKER_LANGUAGE CXX
+    )
+    add_custom_command(
+        TARGET strata_installed_adapter_c
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:Strata::c>
+            $<TARGET_FILE_DIR:strata_installed_adapter_c>
+        VERBATIM
+    )
+    add_test(NAME strata_installed_adapter_c COMMAND strata_installed_adapter_c)
+
+    add_executable(strata_installed_d3d11_target d3d11_target_smoke.cpp)
+    target_link_libraries(
+        strata_installed_d3d11_target
+        PRIVATE Strata::d3d11 Strata::host Strata::win32
+    )
+    set_target_properties(strata_installed_d3d11_target PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME strata_installed_d3d11_target COMMAND strata_installed_d3d11_target)
+endif()

@@ -1110,7 +1110,7 @@ component PageViewport(selectedPage: string) {
   }
 }
 
-component ShowcaseHeader(selectedPage: string) {
+component ShowcaseHeader(selectedPage: Binding<string>) {
   Panel(
     style: Header,
     material: material("demo:aurora", intensity: 0.85, tint: #7C6BFFFF)

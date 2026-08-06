@@ -178,6 +178,7 @@ template <typename... T>
 struct DebugSummaryMetricsItem final {
     std::string label{};
     std::string value{};
+    [[nodiscard]] friend bool operator==(const DebugSummaryMetricsItem&, const DebugSummaryMetricsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DebugSummaryMetricsItem& value) {
@@ -198,6 +199,7 @@ struct DebugSummaryMetricsItem final {
 struct DebugCountersItem final {
     std::string label{};
     std::string value{};
+    [[nodiscard]] friend bool operator==(const DebugCountersItem&, const DebugCountersItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DebugCountersItem& value) {
@@ -221,6 +223,7 @@ struct DebugHotPathsItem final {
     double p95_millis{};
     double p99_millis{};
     double max_millis{};
+    [[nodiscard]] friend bool operator==(const DebugHotPathsItem&, const DebugHotPathsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DebugHotPathsItem& value) {
@@ -249,6 +252,7 @@ struct DebugSpikesItem final {
     std::string stack{};
     double duration_millis{};
     double threshold_millis{};
+    [[nodiscard]] friend bool operator==(const DebugSpikesItem&, const DebugSpikesItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DebugSpikesItem& value) {
@@ -280,6 +284,7 @@ struct DebugDiagnosticsItem final {
     std::string source{};
     std::string component_path{};
     std::string expected{};
+    [[nodiscard]] friend bool operator==(const DebugDiagnosticsItem&, const DebugDiagnosticsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DebugDiagnosticsItem& value) {
@@ -322,6 +327,7 @@ struct DebugMotionsItem final {
     std::string target_value{};
     std::string properties{};
     std::string status{};
+    [[nodiscard]] friend bool operator==(const DebugMotionsItem&, const DebugMotionsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DebugMotionsItem& value) {
@@ -367,6 +373,7 @@ struct DebugSemanticsItem final {
     std::string state_summary{};
     std::string actions{};
     bool selected{};
+    [[nodiscard]] friend bool operator==(const DebugSemanticsItem&, const DebugSemanticsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DebugSemanticsItem& value) {
@@ -415,6 +422,7 @@ struct DebugCollectionsItem final {
     double rebuilds{};
     std::string active_anchor{};
     std::string pending_navigation{};
+    [[nodiscard]] friend bool operator==(const DebugCollectionsItem&, const DebugCollectionsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DebugCollectionsItem& value) {
@@ -455,6 +463,7 @@ struct DebugCollectionsItem final {
 struct DebugReloadMetricsItem final {
     std::string label{};
     std::string value{};
+    [[nodiscard]] friend bool operator==(const DebugReloadMetricsItem&, const DebugReloadMetricsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DebugReloadMetricsItem& value) {
@@ -495,6 +504,7 @@ struct Debug final {
     std::vector<DebugSemanticsItem> semantics{};
     std::vector<DebugCollectionsItem> collections{};
     std::vector<DebugReloadMetricsItem> reload_metrics{};
+    [[nodiscard]] friend bool operator==(const Debug&, const Debug&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const Debug& value) {
@@ -679,6 +689,381 @@ enum class StrataDebugSelectModeActionMode {
 [[nodiscard]] inline strata::host::Value encode_debug_reload_metrics(const std::vector<DebugReloadMetricsItem>& value) {
     return strata::host::Value::object({{"debug", strata::host::Value::object({{"reloadMetrics", to_value(value)}})}});
 }
+
+class DebugModel final {
+public:
+    DebugModel() = default;
+    DebugModel(const DebugModel&) = delete;
+    DebugModel& operator=(const DebugModel&) = delete;
+    DebugModel(DebugModel&&) = delete;
+    DebugModel& operator=(DebugModel&&) = delete;
+
+    [[nodiscard]] bool set(Debug value) {
+        bool changed = false;
+        changed = set_mode(std::move(value.mode)) || changed;
+        changed = set_frame(std::move(value.frame)) || changed;
+        changed = set_errors(std::move(value.errors)) || changed;
+        changed = set_warnings(std::move(value.warnings)) || changed;
+        changed = set_infos(std::move(value.infos)) || changed;
+        changed = set_diagnostic_count(std::move(value.diagnostic_count)) || changed;
+        changed = set_dropped_diagnostics(std::move(value.dropped_diagnostics)) || changed;
+        changed = set_hot_path_count(std::move(value.hot_path_count)) || changed;
+        changed = set_spike_count(std::move(value.spike_count)) || changed;
+        changed = set_motion_count(std::move(value.motion_count)) || changed;
+        changed = set_running_motion_count(std::move(value.running_motion_count)) || changed;
+        changed = set_semantic_count(std::move(value.semantic_count)) || changed;
+        changed = set_collection_count(std::move(value.collection_count)) || changed;
+        changed = set_summary_metrics(std::move(value.summary_metrics)) || changed;
+        changed = set_counters(std::move(value.counters)) || changed;
+        changed = set_hot_paths(std::move(value.hot_paths)) || changed;
+        changed = set_spikes(std::move(value.spikes)) || changed;
+        changed = set_diagnostics(std::move(value.diagnostics)) || changed;
+        changed = set_motions(std::move(value.motions)) || changed;
+        changed = set_semantics(std::move(value.semantics)) || changed;
+        changed = set_collections(std::move(value.collections)) || changed;
+        changed = set_reload_metrics(std::move(value.reload_metrics)) || changed;
+        return changed;
+    }
+
+    [[nodiscard]] bool set_mode(std::string value) {
+        return mode_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& mode() const noexcept {
+        return mode_.get();
+    }
+    [[nodiscard]] bool set_frame(double value) {
+        return frame_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& frame() const noexcept {
+        return frame_.get();
+    }
+    [[nodiscard]] bool set_errors(double value) {
+        return errors_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& errors() const noexcept {
+        return errors_.get();
+    }
+    [[nodiscard]] bool set_warnings(double value) {
+        return warnings_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& warnings() const noexcept {
+        return warnings_.get();
+    }
+    [[nodiscard]] bool set_infos(double value) {
+        return infos_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& infos() const noexcept {
+        return infos_.get();
+    }
+    [[nodiscard]] bool set_diagnostic_count(double value) {
+        return diagnostic_count_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& diagnostic_count() const noexcept {
+        return diagnostic_count_.get();
+    }
+    [[nodiscard]] bool set_dropped_diagnostics(double value) {
+        return dropped_diagnostics_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& dropped_diagnostics() const noexcept {
+        return dropped_diagnostics_.get();
+    }
+    [[nodiscard]] bool set_hot_path_count(double value) {
+        return hot_path_count_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& hot_path_count() const noexcept {
+        return hot_path_count_.get();
+    }
+    [[nodiscard]] bool set_spike_count(double value) {
+        return spike_count_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& spike_count() const noexcept {
+        return spike_count_.get();
+    }
+    [[nodiscard]] bool set_motion_count(double value) {
+        return motion_count_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& motion_count() const noexcept {
+        return motion_count_.get();
+    }
+    [[nodiscard]] bool set_running_motion_count(double value) {
+        return running_motion_count_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& running_motion_count() const noexcept {
+        return running_motion_count_.get();
+    }
+    [[nodiscard]] bool set_semantic_count(double value) {
+        return semantic_count_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& semantic_count() const noexcept {
+        return semantic_count_.get();
+    }
+    [[nodiscard]] bool set_collection_count(double value) {
+        return collection_count_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& collection_count() const noexcept {
+        return collection_count_.get();
+    }
+    [[nodiscard]] bool set_summary_metrics(std::vector<DebugSummaryMetricsItem> value) {
+        return summary_metrics_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DebugSummaryMetricsItem>& summary_metrics() const noexcept {
+        return summary_metrics_.get();
+    }
+    [[nodiscard]] bool set_counters(std::vector<DebugCountersItem> value) {
+        return counters_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DebugCountersItem>& counters() const noexcept {
+        return counters_.get();
+    }
+    [[nodiscard]] bool set_hot_paths(std::vector<DebugHotPathsItem> value) {
+        return hot_paths_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DebugHotPathsItem>& hot_paths() const noexcept {
+        return hot_paths_.get();
+    }
+    [[nodiscard]] bool set_spikes(std::vector<DebugSpikesItem> value) {
+        return spikes_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DebugSpikesItem>& spikes() const noexcept {
+        return spikes_.get();
+    }
+    [[nodiscard]] bool set_diagnostics(std::vector<DebugDiagnosticsItem> value) {
+        return diagnostics_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DebugDiagnosticsItem>& diagnostics() const noexcept {
+        return diagnostics_.get();
+    }
+    [[nodiscard]] bool set_motions(std::vector<DebugMotionsItem> value) {
+        return motions_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DebugMotionsItem>& motions() const noexcept {
+        return motions_.get();
+    }
+    [[nodiscard]] bool set_semantics(std::vector<DebugSemanticsItem> value) {
+        return semantics_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DebugSemanticsItem>& semantics() const noexcept {
+        return semantics_.get();
+    }
+    [[nodiscard]] bool set_collections(std::vector<DebugCollectionsItem> value) {
+        return collections_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DebugCollectionsItem>& collections() const noexcept {
+        return collections_.get();
+    }
+    [[nodiscard]] bool set_reload_metrics(std::vector<DebugReloadMetricsItem> value) {
+        return reload_metrics_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DebugReloadMetricsItem>& reload_metrics() const noexcept {
+        return reload_metrics_.get();
+    }
+
+    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+        if (id.empty()) {
+            throw std::invalid_argument("DebugModel binding id must not be empty");
+        }
+        bindings.snapshot(
+            std::string(id) + ".mode",
+            mode_,
+            [](const auto& model) {
+                return encode_debug_mode(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".frame",
+            frame_,
+            [](const auto& model) {
+                return encode_debug_frame(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".errors",
+            errors_,
+            [](const auto& model) {
+                return encode_debug_errors(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".warnings",
+            warnings_,
+            [](const auto& model) {
+                return encode_debug_warnings(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".infos",
+            infos_,
+            [](const auto& model) {
+                return encode_debug_infos(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".diagnostic_count",
+            diagnostic_count_,
+            [](const auto& model) {
+                return encode_debug_diagnostic_count(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".dropped_diagnostics",
+            dropped_diagnostics_,
+            [](const auto& model) {
+                return encode_debug_dropped_diagnostics(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".hot_path_count",
+            hot_path_count_,
+            [](const auto& model) {
+                return encode_debug_hot_path_count(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".spike_count",
+            spike_count_,
+            [](const auto& model) {
+                return encode_debug_spike_count(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".motion_count",
+            motion_count_,
+            [](const auto& model) {
+                return encode_debug_motion_count(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".running_motion_count",
+            running_motion_count_,
+            [](const auto& model) {
+                return encode_debug_running_motion_count(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".semantic_count",
+            semantic_count_,
+            [](const auto& model) {
+                return encode_debug_semantic_count(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".collection_count",
+            collection_count_,
+            [](const auto& model) {
+                return encode_debug_collection_count(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".summary_metrics",
+            summary_metrics_,
+            [](const auto& model) {
+                return encode_debug_summary_metrics(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".counters",
+            counters_,
+            [](const auto& model) {
+                return encode_debug_counters(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".hot_paths",
+            hot_paths_,
+            [](const auto& model) {
+                return encode_debug_hot_paths(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".spikes",
+            spikes_,
+            [](const auto& model) {
+                return encode_debug_spikes(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".diagnostics",
+            diagnostics_,
+            [](const auto& model) {
+                return encode_debug_diagnostics(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".motions",
+            motions_,
+            [](const auto& model) {
+                return encode_debug_motions(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".semantics",
+            semantics_,
+            [](const auto& model) {
+                return encode_debug_semantics(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".collections",
+            collections_,
+            [](const auto& model) {
+                return encode_debug_collections(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".reload_metrics",
+            reload_metrics_,
+            [](const auto& model) {
+                return encode_debug_reload_metrics(model.get());
+            }
+        );
+    }
+
+private:
+    strata::host::Observable<std::string> mode_{};
+    strata::host::Observable<double> frame_{};
+    strata::host::Observable<double> errors_{};
+    strata::host::Observable<double> warnings_{};
+    strata::host::Observable<double> infos_{};
+    strata::host::Observable<double> diagnostic_count_{};
+    strata::host::Observable<double> dropped_diagnostics_{};
+    strata::host::Observable<double> hot_path_count_{};
+    strata::host::Observable<double> spike_count_{};
+    strata::host::Observable<double> motion_count_{};
+    strata::host::Observable<double> running_motion_count_{};
+    strata::host::Observable<double> semantic_count_{};
+    strata::host::Observable<double> collection_count_{};
+    strata::host::Observable<std::vector<DebugSummaryMetricsItem>> summary_metrics_{};
+    strata::host::Observable<std::vector<DebugCountersItem>> counters_{};
+    strata::host::Observable<std::vector<DebugHotPathsItem>> hot_paths_{};
+    strata::host::Observable<std::vector<DebugSpikesItem>> spikes_{};
+    strata::host::Observable<std::vector<DebugDiagnosticsItem>> diagnostics_{};
+    strata::host::Observable<std::vector<DebugMotionsItem>> motions_{};
+    strata::host::Observable<std::vector<DebugSemanticsItem>> semantics_{};
+    strata::host::Observable<std::vector<DebugCollectionsItem>> collections_{};
+    strata::host::Observable<std::vector<DebugReloadMetricsItem>> reload_metrics_{};
+};
 
 struct StrataDebugClearDiagnosticsAction final {
     static inline constexpr std::string_view id = "strata.debug.clear-diagnostics";

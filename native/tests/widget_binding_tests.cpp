@@ -97,6 +97,18 @@ overlay Main { root InvalidTarget() }
         "binding shorthand accepted a derived value instead of declaration-owned state"
     );
 
+    const strata::runtime::ActivationResult component_target = compile(R"(
+component BoundEditor(value: Binding<string>) {
+  TextBox(key: "binding.component-target", bind: value)
+}
+overlay Main { root BoundEditor(value: "not retained state") }
+)");
+    check(
+        component_target.status == strata::runtime::ActivationStatus::rejected_compile &&
+            diagnostic(component_target, "STRATA.DSL.SEMANTIC_BINDING_TARGET") != nullptr,
+        "Binding<T> component parameter accepted a temporary value"
+    );
+
     const strata::runtime::ActivationResult layout = compile(R"(
 overlay Main {
   root Panel(
@@ -323,7 +335,7 @@ void test_binding_initial_value_and_round_trip(
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
 ) {
     constexpr std::string_view source = R"(
-component BoundToggle(enabled: boolean) {
+component BoundToggle(enabled: Binding<boolean>) {
   Toggle(
     key: "binding.toggle",
     label: "Enabled",
@@ -332,14 +344,22 @@ component BoundToggle(enabled: boolean) {
   )
 }
 
+component BoundEditor(value: Binding<string>) {
+  TextBox(
+    key: "binding.editor", bind: value,
+    undoLabel: "Edit value", undoCoalesce: "binding.value.edit"
+  )
+}
+
+component ForwardedEditor(value: Binding<string>) {
+  BoundEditor(value: value)
+}
+
 component BoundControls() {
   state value = "Seed value";
   state enabled = true;
   Panel(key: "binding.root", layout: { kind: "COLUMN" }) {
-    TextBox(
-      key: "binding.editor", bind: value,
-      undoLabel: "Edit value", undoCoalesce: "binding.value.edit"
-    )
+    ForwardedEditor(value: value)
     BoundToggle(enabled: enabled)
     Text(key: "binding.value", text: value)
     Text(key: "binding.enabled", text: format("Enabled {0}", enabled))
@@ -1292,6 +1312,162 @@ overlay Main { root ControlDefaults() }
     );
 }
 
+void test_parent_local_retained_queries(
+    const std::filesystem::path& resource_root,
+    const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
+) {
+    constexpr std::string_view source = R"(
+style LocalToggleOff {
+  opacity: 0.25;
+  background: #00000000;
+  border: null;
+}
+
+style LocalToggleOn extends LocalToggleOff {
+  opacity: 1;
+}
+
+component LocalTogglePresentation(
+  key: key,
+  label: string,
+  description: string,
+  control: toggleState
+) {
+  Panel(
+    key: key,
+    style: control.checked ? LocalToggleOn : LocalToggleOff,
+    layout: { kind: "ROW", width: 120, height: 28 }
+  ) {
+    Text(key: "local.copy", text: control.checked ? "on" : "off")
+  }
+}
+
+component LocalToggle() {
+  Toggle(
+    key: "local.control",
+    label: "Local",
+    presentationTemplate: LocalTogglePresentation
+  )
+}
+
+overlay Main {
+  root Panel(layout: { kind: "ROW", width: 300, height: 80, gap: 20 }) {
+    Panel(key: "local.left", layout: { width: 120, height: 40 }) {
+      LocalToggle()
+    }
+    Panel(key: "local.right", layout: { width: 120, height: 40 }) {
+      LocalToggle()
+    }
+  }
+}
+)";
+
+    strata::runtime::ApplicationContext application("parent-local-retained", bundle);
+    const strata::runtime::ActivationResult activation = application.compile_and_activate(
+        strata::compiler::ModuleSource{"parent-local-retained.strata", std::string(source)},
+        no_imports(),
+        0U
+    );
+    check(activation.activated(), "parent-local retained fixture did not activate");
+
+    strata::ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 360;
+    environment.framebuffer_height = 120;
+    environment.logical_width = 360.0;
+    environment.logical_height = 120.0;
+    environment.reduced_motion = true;
+    environment.input = strata::ui::SurfaceInputCapabilities{
+        true,
+        strata::ui::PointerPrecision::fine,
+        true,
+        false,
+        true,
+        true,
+        false,
+    };
+    strata::ui::Surface surface(
+        "parent-local-retained",
+        application,
+        strata::runtime::LayerRole::overlay,
+        "Main",
+        environment,
+        strata::ui::TextEngine::load_control_font(
+            resource_root,
+            strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        )
+    );
+    static_cast<void>(surface.frame(1'000'000));
+
+    const auto descendant = [](
+        const strata::ui::RetainedNode* root,
+        const std::string_view key
+    ) {
+        const auto find = [&](const auto& self, const strata::ui::RetainedNode* node)
+            -> const strata::ui::RetainedNode* {
+            if (node == nullptr) return nullptr;
+            if (node->description().key == key) return node;
+            for (const std::unique_ptr<strata::ui::RetainedNode>& child : node->children()) {
+                if (const strata::ui::RetainedNode* result = self(self, child.get());
+                    result != nullptr) {
+                    return result;
+                }
+            }
+            return nullptr;
+        };
+        return find(find, root);
+    };
+    const strata::ui::RetainedNode* left = surface.tree().find_key("local.left");
+    const strata::ui::RetainedNode* right = surface.tree().find_key("local.right");
+    const strata::ui::RetainedNode* right_control = descendant(right, "local.control");
+    const strata::ui::LayoutRecord* right_layout = right_control != nullptr
+        ? surface.layout().find(right_control->identity())
+        : nullptr;
+    check(
+        left != nullptr && right != nullptr && right_layout != nullptr &&
+            surface.tree().find_key("local.control") == nullptr &&
+            surface.tree().find_keys("local.control") != nullptr &&
+            surface.tree().find_keys("local.control")->size() == 2U,
+        "parent-local controls were not retained as distinct ambiguous global keys"
+    );
+    bool ambiguous_rejected = false;
+    try {
+        static_cast<void>(surface.input().click("local.control"));
+    } catch (const std::invalid_argument&) {
+        ambiguous_rejected = true;
+    }
+    check(
+        ambiguous_rejected,
+        "ambiguous global key unexpectedly targeted a parent-local control"
+    );
+
+    const strata::ui::Point center{
+        right_layout->bounds.x + right_layout->bounds.width * 0.5,
+        right_layout->bounds.y + right_layout->bounds.height * 0.5,
+    };
+    for (const strata::ui::PointerEventType type : {
+             strata::ui::PointerEventType::move,
+             strata::ui::PointerEventType::press,
+             strata::ui::PointerEventType::release,
+         }) {
+        static_cast<void>(surface.input().enqueue_pointer(
+            strata::ui::PointerInputEvent{center, type, 0, 0}
+        ));
+    }
+    const strata::ui::SurfaceFrame changed = surface.frame(2'000'000);
+    left = surface.tree().find_key("local.left");
+    right = surface.tree().find_key("local.right");
+    const strata::ui::RetainedNode* left_copy = descendant(left, "local.copy");
+    const strata::ui::RetainedNode* right_copy = descendant(right, "local.copy");
+    check(
+        changed.operations.rebuilds == 1U &&
+            string_property(left_copy, "text") != nullptr &&
+            *string_property(left_copy, "text") == "off" &&
+            string_property(right_copy, "text") != nullptr &&
+            *string_property(right_copy, "text") == "on",
+        "retained invalidation did not resolve a duplicate key through its parent-local scope"
+    );
+}
+
 void test_scrolled_clipped_subtree_render_cache(
     const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
@@ -1634,6 +1810,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_authored_control_presentations(resource_root, bundle);
         test_section_content_and_activation_contract(resource_root, bundle);
         test_range_and_choice_control_defaults(resource_root, bundle);
+        test_parent_local_retained_queries(resource_root, bundle);
         test_scrolled_clipped_subtree_render_cache(resource_root, bundle);
         test_typed_host_keys_and_derived_collection_metadata();
         std::cout << "strata_widget_binding_tests: OK\n";

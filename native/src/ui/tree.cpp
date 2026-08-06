@@ -209,7 +209,37 @@ const RetainedDescriptionSnapshot::Node* RetainedDescriptionSnapshot::find_key(
     const std::string_view key
 ) const noexcept {
     const auto found = key_index_.find(key);
-    return found != key_index_.end() ? found->second : nullptr;
+    return found != key_index_.end() && found->second.size() == 1U
+        ? found->second.front()
+        : nullptr;
+}
+
+const RetainedDescriptionSnapshot::Node* RetainedDescriptionSnapshot::find_key(
+    const std::string_view key,
+    const std::string_view source_path,
+    const std::string_view state_scope,
+    const std::string_view type
+) const noexcept {
+    const auto found = key_index_.find(key);
+    if (found == key_index_.end()) return nullptr;
+    const auto compatible_type = [type](const Node* candidate) {
+        return candidate->type == type ||
+            (type == "Repeater" && candidate->type == "VirtualList");
+    };
+    const auto unique_match = [&found](const auto& predicate) {
+        const Node* result = nullptr;
+        for (const Node* candidate : found->second) {
+            if (!predicate(candidate)) continue;
+            if (result != nullptr) return static_cast<const Node*>(nullptr);
+            result = candidate;
+        }
+        return result;
+    };
+    return unique_match([compatible_type, source_path, state_scope](const Node* value) {
+        return compatible_type(value) &&
+            value->source_path == source_path &&
+            value->state_scope == state_scope;
+    });
 }
 
 const std::vector<const RetainedDescriptionSnapshot::Node*>*
@@ -412,7 +442,7 @@ std::shared_ptr<const RetainedDescriptionSnapshot> RetainedTree::description_sna
         const RetainedDescriptionSnapshot::Node* const indexed = node.get();
         snapshot->nodes_.push_back(std::move(node));
         if (indexed->key.has_value()) {
-            snapshot->key_index_.try_emplace(*indexed->key, indexed);
+            snapshot->key_index_[*indexed->key].push_back(indexed);
         }
         snapshot->source_index_[indexed->source_path].push_back(indexed);
         for (const std::unique_ptr<RetainedNode>& child : retained.children_) {
@@ -426,7 +456,15 @@ std::shared_ptr<const RetainedDescriptionSnapshot> RetainedTree::description_sna
 
 RetainedNode* RetainedTree::find_key(const std::string_view key) const noexcept {
     const auto found = key_index_.find(key);
-    return found != key_index_.end() ? found->second : nullptr;
+    return found != key_index_.end() && found->second.size() == 1U
+        ? found->second.front()
+        : nullptr;
+}
+
+const std::vector<RetainedNode*>*
+RetainedTree::find_keys(const std::string_view key) const noexcept {
+    const auto found = key_index_.find(key);
+    return found != key_index_.end() ? &found->second : nullptr;
 }
 
 RetainedNode* RetainedTree::find_identity(const std::uint64_t identity) const noexcept {
@@ -703,9 +741,7 @@ void RetainedTree::rebuild_indexes() {
 void RetainedTree::index(RetainedNode& node) {
     identity_index_.emplace(node.identity_, &node);
     if (node.description_->key.has_value()) {
-        if (!key_index_.emplace(*node.description_->key, &node).second) {
-            throw std::invalid_argument("retained tree contains duplicate key '" + *node.description_->key + "'");
-        }
+        key_index_[*node.description_->key].push_back(&node);
     }
     if (!node.description_->source_path.empty()) source_index_[node.description_->source_path].push_back(&node);
     type_index_[node.description_->type].push_back(&node);
@@ -749,6 +785,8 @@ bool expression_value_equal(
     const runtime::ExpressionValue& left,
     const runtime::ExpressionValue& right
 ) {
+    if (left.lexical_state_binding() != right.lexical_state_binding())
+        return false;
     if (left.list() != nullptr || right.list() != nullptr) {
         if (left.list() == nullptr || right.list() == nullptr ||
             (**left.list()).values.size() != (**right.list()).values.size()) {

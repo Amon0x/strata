@@ -1243,6 +1243,7 @@ bool Surface::rebuild_tree(
     if (tree_.root() != nullptr) {
         static_cast<void>(realize_virtual_children(layout_engine_.result()));
     }
+    descriptions_.set_retained_tree(&tree_);
     retain_scroll_animations();
     frame.operations.rebuilds = 1U;
     frame.operations.described_nodes += description.described_nodes;

@@ -76,6 +76,7 @@ ValueSchemaPtr runtime_schema(const compiler::SemanticType& type) {
     case SemanticTypeKind::unknown:
     case SemanticTypeKind::any:
     case SemanticTypeKind::unsafe_component_parameter:
+    case SemanticTypeKind::state_binding:
     case SemanticTypeKind::style:
     case SemanticTypeKind::layout:
     case SemanticTypeKind::animation:

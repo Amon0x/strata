@@ -251,6 +251,9 @@ std::string SemanticType::diagnostic_name() const {
         return "any value";
     case SemanticTypeKind::unsafe_component_parameter:
         return "explicit component parameter schema";
+    case SemanticTypeKind::state_binding:
+        return "binding to " +
+            (value != nullptr ? value->diagnostic_name() : std::string("state"));
     case SemanticTypeKind::null_value:
         return "null";
     case SemanticTypeKind::string:
@@ -343,6 +346,14 @@ bool SemanticType::accepts(const SemanticType& actual) const {
         return std::ranges::any_of(
             options, [&actual](const SemanticTypePtr& option) { return option->accepts(actual); });
     }
+    if (kind == SemanticTypeKind::state_binding) {
+        const SemanticType* actual_value =
+            actual.kind == SemanticTypeKind::state_binding ? actual.value.get() : &actual;
+        return value != nullptr && actual_value != nullptr && value->accepts(*actual_value);
+    }
+    if (actual.kind == SemanticTypeKind::state_binding) {
+        return actual.value != nullptr && accepts(*actual.value);
+    }
     if (kind == SemanticTypeKind::string && actual.kind == SemanticTypeKind::string_literal)
         return true;
     if (kind == SemanticTypeKind::path && (actual.kind == SemanticTypeKind::string ||
@@ -365,7 +376,13 @@ bool SemanticType::accepts(const SemanticType& actual) const {
     }
     if (kind == SemanticTypeKind::list &&
         (actual.kind == SemanticTypeKind::list || actual.kind == SemanticTypeKind::collection)) {
-        return element != nullptr && actual.element != nullptr && element->accepts(*actual.element);
+        if (maximum_items.has_value() &&
+            (!actual.maximum_items.has_value() ||
+             *actual.maximum_items > *maximum_items)) {
+            return false;
+        }
+        return element != nullptr && actual.element != nullptr &&
+            element->accepts(*actual.element);
     }
     if (kind == SemanticTypeKind::map && actual.kind == SemanticTypeKind::map) {
         for (const ObjectField& field : fields) {
@@ -621,8 +638,29 @@ SemanticTypePtr SchemaRegistry::parse_type(const data::JsonValue& value) {
         if (reference->string() == nullptr)
             throw std::runtime_error("schema type ref must be a string");
         const std::string& id = *reference->string();
-        if (const auto cached = resolved_types_.find(id); cached != resolved_types_.end()) {
+        const std::string normalized = normalized_semantic_name(id);
+        if (const auto cached = resolved_types_.find(normalized);
+            cached != resolved_types_.end()) {
             return cached->second;
+        }
+        if (const auto definition = application_type_definitions_.find(normalized);
+            definition != application_type_definitions_.end()) {
+            if (std::ranges::contains(resolving_types_, normalized)) {
+                throw std::runtime_error(
+                    "application type reference cycle contains '" + id + "'");
+            }
+            resolving_types_.push_back(normalized);
+            try {
+                const SemanticTypePtr definition_type = parse_type(definition->second);
+                auto parsed = std::make_shared<SemanticType>(*definition_type);
+                parsed->schema_name = application_type_names_.at(normalized);
+                resolving_types_.pop_back();
+                resolved_types_.emplace(normalized, parsed);
+                return parsed;
+            } catch (...) {
+                resolving_types_.pop_back();
+                throw;
+            }
         }
         if (base_ != nullptr) {
             if (const auto cached = base_->resolved_types_.find(id);
@@ -929,6 +967,15 @@ SchemaRegistry::component_parameter_type(const std::string_view name) const noex
         : base_ != nullptr ? base_->component_parameter_type(name) : nullptr;
 }
 
+const SemanticType*
+SchemaRegistry::application_type(const std::string_view name) const noexcept {
+    const std::string normalized = normalized_semantic_name(name);
+    if (!application_type_definitions_.contains(normalized))
+        return nullptr;
+    const auto found = resolved_types_.find(normalized);
+    return found != resolved_types_.end() ? found->second.get() : nullptr;
+}
+
 const SchemaParameter* SchemaRegistry::layout_property(const std::string_view name) const noexcept {
     const auto found = std::ranges::find(layout_properties_, name, &SchemaParameter::name);
     return found != layout_properties_.end()
@@ -1071,6 +1118,28 @@ std::vector<std::string> SchemaRegistry::action_names() const {
 }
 
 void SchemaRegistry::apply_scenario_declarations(const data::JsonValue& schemas) {
+    if (const data::JsonValue* types = schemas.find("types"); types != nullptr) {
+        for (const data::JsonValue& value : array_field(*types, "definitions")) {
+            const std::string& id = string_field(value, "id");
+            const std::string normalized = normalized_semantic_name(id);
+            if (normalized.empty() ||
+                component_parameter_type(normalized) != nullptr ||
+                application_type_definitions_.contains(normalized) ||
+                !application_type_definitions_
+                     .emplace(normalized, required(value, "type"))
+                     .second) {
+                throw std::runtime_error(
+                    "application type '" + id + "' is declared more than once");
+            }
+            application_type_names_.emplace(normalized, id);
+        }
+        for (const auto& [id, definition] : application_type_definitions_) {
+            static_cast<void>(definition);
+            static_cast<void>(parse_type(data::JsonValue(data::JsonValue::Object{
+                {"ref", data::JsonValue(application_type_names_.at(id))},
+            })));
+        }
+    }
     const data::JsonValue& widgets = required(schemas, "widgets");
     for (const data::JsonValue& value : array_field(widgets, "definitions")) {
         WidgetSchema schema;

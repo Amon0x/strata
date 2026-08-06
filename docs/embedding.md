@@ -126,6 +126,19 @@ for (const strata::host::SubmissionBatch& batch : plan.batches) {
 }
 ```
 
+On Windows, an application that already owns a D3D11 device and render target can link
+`Strata::d3d11` instead of implementing packet submission. Its `Presenter` owns Surface framing,
+packet ordering, declaration synchronization, backend layer resources, and terminal packet
+delivery while preserving existing target contents and host context state. It never owns the
+window, device, swap chain, target, or presentation. A lower-level packet-only `Renderer` remains
+available for language bindings and remote/recorded streams. See
+[Rendering into a host-owned D3D11 target](d3d11-hosting.md).
+
+An existing Win32 message loop can independently link `Strata::win32` and pass messages for the
+currently active Surface to `InputAdapter`. The application keeps shortcut handling and Surface
+selection; the adapter owns pointer/key/text/IME translation and capture cancellation. See
+[Win32 input adapter](win32-input.md).
+
 The decoder is stateful because settled packets can retain an earlier geometry epoch while updating
 the frame index and resource operations. Consume every framed packet in order with one decoder per
 Surface/backend stream. Compact packets are deltas and cannot initialize a fresh decoder; call
@@ -151,6 +164,43 @@ against the bounded sixteen-float parameter block. The C equivalents are
 `strata_runtime_read_material_declarations` and
 `strata_runtime_read_effect_pass_declarations`.
 
+## Source-tree static embedding
+
+The installed SDK keeps `Strata::c` shared so every language and extension package crosses one
+stable ABI instance. A plug-in, injected module, firmware-style executable, or other consumer that
+must ship as one native binary can instead include Strata's source tree and link the build-tree-only
+static targets:
+
+```cmake
+set(STRATA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(STRATA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(STRATA_BUILD_AUTHORING ON CACHE BOOL "" FORCE)
+set(STRATA_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(STRATA_BUILD_DESKTOP OFF CACHE BOOL "" FORCE)
+add_subdirectory(path/to/strata/native strata EXCLUDE_FROM_ALL)
+
+target_link_libraries(my_module PRIVATE Strata::host_static)
+```
+
+Pure C consumers use `Strata::c_static`. The public ABI and facade are identical to `Strata::c` and
+`Strata::host`; only linkage changes. Do not link a shared and static Strata runtime into the same
+process ownership graph, and do not pass runtime handles to extension libraries backed by another
+runtime instance.
+
+`STRATA_BUILD_AUTHORING` builds only `strata_authoring` for source-tree custom commands without
+enabling the compiler, headless runner, SVG tool, or other command-line hosts. Set it to `OFF` when
+the embedding project consumes a checked generated contract or does not use application schemas.
+
+Custom Windows module loaders that do not register the image's static TLS for every calling thread
+must configure `STRATA_ENABLE_THREAD_SAFE_STATICS=OFF` before `add_subdirectory`. This removes
+MSVC's function-local-static TLS bookkeeping. The embedding host must then serialize first access
+to each runtime path, normally by constructing and activating Strata before publishing the Surface
+to render or input threads. Ordinary OS-loaded modules should keep the default enabled.
+
+The static targets are deliberately not installed. Their private FreeType and core object graph is
+resolved by the source-tree CMake build, while the relocatable installed package remains centered
+on the shared, language-neutral ABI.
+
 ## Typed C++ host models
 
 C hosts use the JSON ABI directly. Ordinary C++ application code should generate its contract from
@@ -173,8 +223,7 @@ host.snapshot(
     [&] { return contract::encode_app_items(items); }
 );
 
-host.on(contract::AppSaveAction::id, [&](const strata::host::ActionEvent& event) {
-    const contract::AppSaveAction action = contract::AppSaveAction::decode(event);
+host.on<contract::AppSaveAction>([&](const contract::AppSaveAction& action) {
     save(action.path);
     return strata::host::ActionResult::handled;
 });
@@ -186,9 +235,23 @@ host.synchronize();
 Model code never assembles or parses JSON, and schema drift becomes a C++ compile failure.
 `Bindings::synchronize()` republishes only changed revisions and rethrows any application exception
 that had to be contained at the C callback boundary. For small standalone values,
-`strata::host::Observable<T>` owns the revision automatically. The dynamic `Value` API remains the
-intentional escape hatch for scenario runners and remote protocols whose schema is selected only at
-runtime.
+`strata::host::Observable<T>` owns the revision automatically. Generated model structures are
+equality comparable, so an observable can reject an unchanged replacement without encoding it.
+
+Every object host root also gets a generated model/binder. It owns one observable per field and
+registers the per-field encoders with independent snapshot ids:
+
+```cpp
+contract::AppModel app;
+app.bind(host, "my.application");
+static_cast<void>(app.set(load_application_model()));
+```
+
+The runtime composes those immutable field fragments by host path. `set` compares and moves each
+field independently, so updating status does not encode or publish items and unchanged revisions do
+not cross the ABI. Individual generated field getters expose the current immutable model without
+reconstructing the root. The dynamic `Value` API remains the intentional escape hatch for scenario
+runners and remote protocols whose schema is selected only at runtime.
 
 ## Low-level host data, actions, and services
 

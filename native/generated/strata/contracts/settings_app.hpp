@@ -180,6 +180,7 @@ struct SettingsProfileTreeItem final {
     std::string label{};
     bool may_have_children{};
     bool children_loaded{};
+    [[nodiscard]] friend bool operator==(const SettingsProfileTreeItem&, const SettingsProfileTreeItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const SettingsProfileTreeItem& value) {
@@ -204,6 +205,7 @@ struct SettingsProfileTreeItem final {
 struct Settings final {
     std::string saved_message{};
     std::vector<SettingsProfileTreeItem> profile_tree{};
+    [[nodiscard]] friend bool operator==(const Settings&, const Settings&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const Settings& value) {
@@ -232,6 +234,61 @@ struct Settings final {
 [[nodiscard]] inline strata::host::Value encode_settings_profile_tree(const std::vector<SettingsProfileTreeItem>& value) {
     return strata::host::Value::object({{"settings", strata::host::Value::object({{"profileTree", to_value(value)}})}});
 }
+
+class SettingsModel final {
+public:
+    SettingsModel() = default;
+    SettingsModel(const SettingsModel&) = delete;
+    SettingsModel& operator=(const SettingsModel&) = delete;
+    SettingsModel(SettingsModel&&) = delete;
+    SettingsModel& operator=(SettingsModel&&) = delete;
+
+    [[nodiscard]] bool set(Settings value) {
+        bool changed = false;
+        changed = set_saved_message(std::move(value.saved_message)) || changed;
+        changed = set_profile_tree(std::move(value.profile_tree)) || changed;
+        return changed;
+    }
+
+    [[nodiscard]] bool set_saved_message(std::string value) {
+        return saved_message_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& saved_message() const noexcept {
+        return saved_message_.get();
+    }
+    [[nodiscard]] bool set_profile_tree(std::vector<SettingsProfileTreeItem> value) {
+        return profile_tree_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<SettingsProfileTreeItem>& profile_tree() const noexcept {
+        return profile_tree_.get();
+    }
+
+    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+        if (id.empty()) {
+            throw std::invalid_argument("SettingsModel binding id must not be empty");
+        }
+        bindings.snapshot(
+            std::string(id) + ".saved_message",
+            saved_message_,
+            [](const auto& model) {
+                return encode_settings_saved_message(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".profile_tree",
+            profile_tree_,
+            [](const auto& model) {
+                return encode_settings_profile_tree(model.get());
+            }
+        );
+    }
+
+private:
+    strata::host::Observable<std::string> saved_message_{};
+    strata::host::Observable<std::vector<SettingsProfileTreeItem>> profile_tree_{};
+};
 
 struct SettingsSaveAction final {
     static inline constexpr std::string_view id = "settings.save";

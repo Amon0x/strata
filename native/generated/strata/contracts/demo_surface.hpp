@@ -178,6 +178,7 @@ template <typename... T>
 struct AsyncResultsValueItem final {
     std::string key{};
     std::string label{};
+    [[nodiscard]] friend bool operator==(const AsyncResultsValueItem&, const AsyncResultsValueItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const AsyncResultsValueItem& value) {
@@ -201,6 +202,7 @@ struct AsyncTreeChildrenValueItem final {
     std::optional<std::string> parent_key{};
     bool may_have_children{};
     bool children_loaded{};
+    [[nodiscard]] friend bool operator==(const AsyncTreeChildrenValueItem&, const AsyncTreeChildrenValueItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const AsyncTreeChildrenValueItem& value) {
@@ -233,6 +235,7 @@ struct DataTreeItemsItem final {
     std::optional<std::string> parent_key{};
     bool may_have_children{};
     bool children_loaded{};
+    [[nodiscard]] friend bool operator==(const DataTreeItemsItem&, const DataTreeItemsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DataTreeItemsItem& value) {
@@ -263,6 +266,7 @@ struct DataTableRowsItemCells final {
     std::string name{};
     std::string status{};
     double progress{};
+    [[nodiscard]] friend bool operator==(const DataTableRowsItemCells&, const DataTableRowsItemCells&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DataTableRowsItemCells& value) {
@@ -285,6 +289,7 @@ struct DataTableRowsItemCells final {
 struct DataTableRowsItem final {
     std::string key{};
     DataTableRowsItemCells cells{};
+    [[nodiscard]] friend bool operator==(const DataTableRowsItem&, const DataTableRowsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DataTableRowsItem& value) {
@@ -306,6 +311,7 @@ struct DataGridEntriesItem final {
     std::string kind{};
     std::string key{};
     std::string label{};
+    [[nodiscard]] friend bool operator==(const DataGridEntriesItem&, const DataGridEntriesItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DataGridEntriesItem& value) {
@@ -329,6 +335,7 @@ struct Data final {
     std::vector<DataTreeItemsItem> tree_items{};
     std::vector<DataTableRowsItem> table_rows{};
     std::vector<DataGridEntriesItem> grid_entries{};
+    [[nodiscard]] friend bool operator==(const Data&, const Data&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const Data& value) {
@@ -352,6 +359,7 @@ struct DemoEventsItem final {
     std::string key{};
     double sequence{};
     std::string description{};
+    [[nodiscard]] friend bool operator==(const DemoEventsItem&, const DemoEventsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DemoEventsItem& value) {
@@ -375,6 +383,7 @@ struct DemoReorderItemsItem final {
     std::string id{};
     std::string key{};
     std::string label{};
+    [[nodiscard]] friend bool operator==(const DemoReorderItemsItem&, const DemoReorderItemsItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const DemoReorderItemsItem& value) {
@@ -423,6 +432,7 @@ struct Demo final {
     double reused_nodes{};
     double arranged_nodes{};
     bool surface_visible{};
+    [[nodiscard]] friend bool operator==(const Demo&, const Demo&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const Demo& value) {
@@ -543,6 +553,77 @@ struct AsyncTreeChildren final {
     return strata::host::Value::object({{"data", strata::host::Value::object({{"gridEntries", to_value(value)}})}});
 }
 
+class DataModel final {
+public:
+    DataModel() = default;
+    DataModel(const DataModel&) = delete;
+    DataModel& operator=(const DataModel&) = delete;
+    DataModel(DataModel&&) = delete;
+    DataModel& operator=(DataModel&&) = delete;
+
+    [[nodiscard]] bool set(Data value) {
+        bool changed = false;
+        changed = set_tree_items(std::move(value.tree_items)) || changed;
+        changed = set_table_rows(std::move(value.table_rows)) || changed;
+        changed = set_grid_entries(std::move(value.grid_entries)) || changed;
+        return changed;
+    }
+
+    [[nodiscard]] bool set_tree_items(std::vector<DataTreeItemsItem> value) {
+        return tree_items_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DataTreeItemsItem>& tree_items() const noexcept {
+        return tree_items_.get();
+    }
+    [[nodiscard]] bool set_table_rows(std::vector<DataTableRowsItem> value) {
+        return table_rows_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DataTableRowsItem>& table_rows() const noexcept {
+        return table_rows_.get();
+    }
+    [[nodiscard]] bool set_grid_entries(std::vector<DataGridEntriesItem> value) {
+        return grid_entries_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DataGridEntriesItem>& grid_entries() const noexcept {
+        return grid_entries_.get();
+    }
+
+    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+        if (id.empty()) {
+            throw std::invalid_argument("DataModel binding id must not be empty");
+        }
+        bindings.snapshot(
+            std::string(id) + ".tree_items",
+            tree_items_,
+            [](const auto& model) {
+                return encode_data_tree_items(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".table_rows",
+            table_rows_,
+            [](const auto& model) {
+                return encode_data_table_rows(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".grid_entries",
+            grid_entries_,
+            [](const auto& model) {
+                return encode_data_grid_entries(model.get());
+            }
+        );
+    }
+
+private:
+    strata::host::Observable<std::vector<DataTreeItemsItem>> tree_items_{};
+    strata::host::Observable<std::vector<DataTableRowsItem>> table_rows_{};
+    strata::host::Observable<std::vector<DataGridEntriesItem>> grid_entries_{};
+};
+
 [[nodiscard]] inline strata::host::Value encode_demo(const Demo& value) {
     return strata::host::Value::object({{"demo", to_value(value)}});
 }
@@ -658,6 +739,477 @@ struct AsyncTreeChildren final {
 [[nodiscard]] inline strata::host::Value encode_demo_surface_visible(const bool& value) {
     return strata::host::Value::object({{"demo", strata::host::Value::object({{"surfaceVisible", to_value(value)}})}});
 }
+
+class DemoModel final {
+public:
+    DemoModel() = default;
+    DemoModel(const DemoModel&) = delete;
+    DemoModel& operator=(const DemoModel&) = delete;
+    DemoModel(DemoModel&&) = delete;
+    DemoModel& operator=(DemoModel&&) = delete;
+
+    [[nodiscard]] bool set(Demo value) {
+        bool changed = false;
+        changed = set_event_total(std::move(value.event_total)) || changed;
+        changed = set_retained_event_count(std::move(value.retained_event_count)) || changed;
+        changed = set_events(std::move(value.events)) || changed;
+        changed = set_coalescing_result(std::move(value.coalescing_result)) || changed;
+        changed = set_deterministic_result(std::move(value.deterministic_result)) || changed;
+        changed = set_focus_contained(std::move(value.focus_contained)) || changed;
+        changed = set_inspector_pick_armed(std::move(value.inspector_pick_armed)) || changed;
+        changed = set_reorder_items(std::move(value.reorder_items)) || changed;
+        changed = set_controlled_split_ratio(std::move(value.controlled_split_ratio)) || changed;
+        changed = set_host_value(std::move(value.host_value)) || changed;
+        changed = set_host_message(std::move(value.host_message)) || changed;
+        changed = set_data_activity(std::move(value.data_activity)) || changed;
+        changed = set_form_valid(std::move(value.form_valid)) || changed;
+        changed = set_form_dirty(std::move(value.form_dirty)) || changed;
+        changed = set_form_touched(std::move(value.form_touched)) || changed;
+        changed = set_combo_query(std::move(value.combo_query)) || changed;
+        changed = set_combo_selection(std::move(value.combo_selection)) || changed;
+        changed = set_inspector_node_count(std::move(value.inspector_node_count)) || changed;
+        changed = set_inspector_selected_key(std::move(value.inspector_selected_key)) || changed;
+        changed = set_inspector_selected_type(std::move(value.inspector_selected_type)) || changed;
+        changed = set_inspector_bounds(std::move(value.inspector_bounds)) || changed;
+        changed = set_inspector_actions(std::move(value.inspector_actions)) || changed;
+        changed = set_inspector_handler_owners(std::move(value.inspector_handler_owners)) || changed;
+        changed = set_inspector_motion(std::move(value.inspector_motion)) || changed;
+        changed = set_measured_nodes(std::move(value.measured_nodes)) || changed;
+        changed = set_reused_nodes(std::move(value.reused_nodes)) || changed;
+        changed = set_arranged_nodes(std::move(value.arranged_nodes)) || changed;
+        changed = set_surface_visible(std::move(value.surface_visible)) || changed;
+        return changed;
+    }
+
+    [[nodiscard]] bool set_event_total(double value) {
+        return event_total_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& event_total() const noexcept {
+        return event_total_.get();
+    }
+    [[nodiscard]] bool set_retained_event_count(double value) {
+        return retained_event_count_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& retained_event_count() const noexcept {
+        return retained_event_count_.get();
+    }
+    [[nodiscard]] bool set_events(std::vector<DemoEventsItem> value) {
+        return events_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DemoEventsItem>& events() const noexcept {
+        return events_.get();
+    }
+    [[nodiscard]] bool set_coalescing_result(std::string value) {
+        return coalescing_result_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& coalescing_result() const noexcept {
+        return coalescing_result_.get();
+    }
+    [[nodiscard]] bool set_deterministic_result(std::string value) {
+        return deterministic_result_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& deterministic_result() const noexcept {
+        return deterministic_result_.get();
+    }
+    [[nodiscard]] bool set_focus_contained(bool value) {
+        return focus_contained_.set(std::move(value));
+    }
+
+    [[nodiscard]] const bool& focus_contained() const noexcept {
+        return focus_contained_.get();
+    }
+    [[nodiscard]] bool set_inspector_pick_armed(bool value) {
+        return inspector_pick_armed_.set(std::move(value));
+    }
+
+    [[nodiscard]] const bool& inspector_pick_armed() const noexcept {
+        return inspector_pick_armed_.get();
+    }
+    [[nodiscard]] bool set_reorder_items(std::vector<DemoReorderItemsItem> value) {
+        return reorder_items_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<DemoReorderItemsItem>& reorder_items() const noexcept {
+        return reorder_items_.get();
+    }
+    [[nodiscard]] bool set_controlled_split_ratio(double value) {
+        return controlled_split_ratio_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& controlled_split_ratio() const noexcept {
+        return controlled_split_ratio_.get();
+    }
+    [[nodiscard]] bool set_host_value(std::string value) {
+        return host_value_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& host_value() const noexcept {
+        return host_value_.get();
+    }
+    [[nodiscard]] bool set_host_message(std::string value) {
+        return host_message_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& host_message() const noexcept {
+        return host_message_.get();
+    }
+    [[nodiscard]] bool set_data_activity(std::string value) {
+        return data_activity_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& data_activity() const noexcept {
+        return data_activity_.get();
+    }
+    [[nodiscard]] bool set_form_valid(bool value) {
+        return form_valid_.set(std::move(value));
+    }
+
+    [[nodiscard]] const bool& form_valid() const noexcept {
+        return form_valid_.get();
+    }
+    [[nodiscard]] bool set_form_dirty(bool value) {
+        return form_dirty_.set(std::move(value));
+    }
+
+    [[nodiscard]] const bool& form_dirty() const noexcept {
+        return form_dirty_.get();
+    }
+    [[nodiscard]] bool set_form_touched(bool value) {
+        return form_touched_.set(std::move(value));
+    }
+
+    [[nodiscard]] const bool& form_touched() const noexcept {
+        return form_touched_.get();
+    }
+    [[nodiscard]] bool set_combo_query(std::string value) {
+        return combo_query_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& combo_query() const noexcept {
+        return combo_query_.get();
+    }
+    [[nodiscard]] bool set_combo_selection(std::optional<std::string> value) {
+        return combo_selection_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::optional<std::string>& combo_selection() const noexcept {
+        return combo_selection_.get();
+    }
+    [[nodiscard]] bool set_inspector_node_count(double value) {
+        return inspector_node_count_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& inspector_node_count() const noexcept {
+        return inspector_node_count_.get();
+    }
+    [[nodiscard]] bool set_inspector_selected_key(std::string value) {
+        return inspector_selected_key_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& inspector_selected_key() const noexcept {
+        return inspector_selected_key_.get();
+    }
+    [[nodiscard]] bool set_inspector_selected_type(std::string value) {
+        return inspector_selected_type_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& inspector_selected_type() const noexcept {
+        return inspector_selected_type_.get();
+    }
+    [[nodiscard]] bool set_inspector_bounds(std::string value) {
+        return inspector_bounds_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& inspector_bounds() const noexcept {
+        return inspector_bounds_.get();
+    }
+    [[nodiscard]] bool set_inspector_actions(std::string value) {
+        return inspector_actions_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& inspector_actions() const noexcept {
+        return inspector_actions_.get();
+    }
+    [[nodiscard]] bool set_inspector_handler_owners(std::string value) {
+        return inspector_handler_owners_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& inspector_handler_owners() const noexcept {
+        return inspector_handler_owners_.get();
+    }
+    [[nodiscard]] bool set_inspector_motion(std::string value) {
+        return inspector_motion_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& inspector_motion() const noexcept {
+        return inspector_motion_.get();
+    }
+    [[nodiscard]] bool set_measured_nodes(double value) {
+        return measured_nodes_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& measured_nodes() const noexcept {
+        return measured_nodes_.get();
+    }
+    [[nodiscard]] bool set_reused_nodes(double value) {
+        return reused_nodes_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& reused_nodes() const noexcept {
+        return reused_nodes_.get();
+    }
+    [[nodiscard]] bool set_arranged_nodes(double value) {
+        return arranged_nodes_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& arranged_nodes() const noexcept {
+        return arranged_nodes_.get();
+    }
+    [[nodiscard]] bool set_surface_visible(bool value) {
+        return surface_visible_.set(std::move(value));
+    }
+
+    [[nodiscard]] const bool& surface_visible() const noexcept {
+        return surface_visible_.get();
+    }
+
+    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+        if (id.empty()) {
+            throw std::invalid_argument("DemoModel binding id must not be empty");
+        }
+        bindings.snapshot(
+            std::string(id) + ".event_total",
+            event_total_,
+            [](const auto& model) {
+                return encode_demo_event_total(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".retained_event_count",
+            retained_event_count_,
+            [](const auto& model) {
+                return encode_demo_retained_event_count(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".events",
+            events_,
+            [](const auto& model) {
+                return encode_demo_events(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".coalescing_result",
+            coalescing_result_,
+            [](const auto& model) {
+                return encode_demo_coalescing_result(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".deterministic_result",
+            deterministic_result_,
+            [](const auto& model) {
+                return encode_demo_deterministic_result(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".focus_contained",
+            focus_contained_,
+            [](const auto& model) {
+                return encode_demo_focus_contained(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".inspector_pick_armed",
+            inspector_pick_armed_,
+            [](const auto& model) {
+                return encode_demo_inspector_pick_armed(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".reorder_items",
+            reorder_items_,
+            [](const auto& model) {
+                return encode_demo_reorder_items(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".controlled_split_ratio",
+            controlled_split_ratio_,
+            [](const auto& model) {
+                return encode_demo_controlled_split_ratio(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".host_value",
+            host_value_,
+            [](const auto& model) {
+                return encode_demo_host_value(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".host_message",
+            host_message_,
+            [](const auto& model) {
+                return encode_demo_host_message(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".data_activity",
+            data_activity_,
+            [](const auto& model) {
+                return encode_demo_data_activity(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".form_valid",
+            form_valid_,
+            [](const auto& model) {
+                return encode_demo_form_valid(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".form_dirty",
+            form_dirty_,
+            [](const auto& model) {
+                return encode_demo_form_dirty(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".form_touched",
+            form_touched_,
+            [](const auto& model) {
+                return encode_demo_form_touched(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".combo_query",
+            combo_query_,
+            [](const auto& model) {
+                return encode_demo_combo_query(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".combo_selection",
+            combo_selection_,
+            [](const auto& model) {
+                return encode_demo_combo_selection(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".inspector_node_count",
+            inspector_node_count_,
+            [](const auto& model) {
+                return encode_demo_inspector_node_count(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".inspector_selected_key",
+            inspector_selected_key_,
+            [](const auto& model) {
+                return encode_demo_inspector_selected_key(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".inspector_selected_type",
+            inspector_selected_type_,
+            [](const auto& model) {
+                return encode_demo_inspector_selected_type(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".inspector_bounds",
+            inspector_bounds_,
+            [](const auto& model) {
+                return encode_demo_inspector_bounds(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".inspector_actions",
+            inspector_actions_,
+            [](const auto& model) {
+                return encode_demo_inspector_actions(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".inspector_handler_owners",
+            inspector_handler_owners_,
+            [](const auto& model) {
+                return encode_demo_inspector_handler_owners(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".inspector_motion",
+            inspector_motion_,
+            [](const auto& model) {
+                return encode_demo_inspector_motion(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".measured_nodes",
+            measured_nodes_,
+            [](const auto& model) {
+                return encode_demo_measured_nodes(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".reused_nodes",
+            reused_nodes_,
+            [](const auto& model) {
+                return encode_demo_reused_nodes(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".arranged_nodes",
+            arranged_nodes_,
+            [](const auto& model) {
+                return encode_demo_arranged_nodes(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".surface_visible",
+            surface_visible_,
+            [](const auto& model) {
+                return encode_demo_surface_visible(model.get());
+            }
+        );
+    }
+
+private:
+    strata::host::Observable<double> event_total_{};
+    strata::host::Observable<double> retained_event_count_{};
+    strata::host::Observable<std::vector<DemoEventsItem>> events_{};
+    strata::host::Observable<std::string> coalescing_result_{};
+    strata::host::Observable<std::string> deterministic_result_{};
+    strata::host::Observable<bool> focus_contained_{};
+    strata::host::Observable<bool> inspector_pick_armed_{};
+    strata::host::Observable<std::vector<DemoReorderItemsItem>> reorder_items_{};
+    strata::host::Observable<double> controlled_split_ratio_{};
+    strata::host::Observable<std::string> host_value_{};
+    strata::host::Observable<std::string> host_message_{};
+    strata::host::Observable<std::string> data_activity_{};
+    strata::host::Observable<bool> form_valid_{};
+    strata::host::Observable<bool> form_dirty_{};
+    strata::host::Observable<bool> form_touched_{};
+    strata::host::Observable<std::string> combo_query_{};
+    strata::host::Observable<std::optional<std::string>> combo_selection_{};
+    strata::host::Observable<double> inspector_node_count_{};
+    strata::host::Observable<std::string> inspector_selected_key_{};
+    strata::host::Observable<std::string> inspector_selected_type_{};
+    strata::host::Observable<std::string> inspector_bounds_{};
+    strata::host::Observable<std::string> inspector_actions_{};
+    strata::host::Observable<std::string> inspector_handler_owners_{};
+    strata::host::Observable<std::string> inspector_motion_{};
+    strata::host::Observable<double> measured_nodes_{};
+    strata::host::Observable<double> reused_nodes_{};
+    strata::host::Observable<double> arranged_nodes_{};
+    strata::host::Observable<bool> surface_visible_{};
+};
 
 struct ControlAlphaAction final {
     static inline constexpr std::string_view id = "control.alpha.action";

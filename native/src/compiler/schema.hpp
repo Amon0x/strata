@@ -21,6 +21,7 @@ enum class SemanticTypeKind {
     unknown,
     any,
     unsafe_component_parameter,
+    state_binding,
     null_value,
     string,
     string_literal,
@@ -62,6 +63,7 @@ struct ObjectField final {
 
 struct SemanticType final {
     SemanticTypeKind kind = SemanticTypeKind::unknown;
+    std::string schema_name;
     std::string label;
     std::string literal;
     std::vector<std::string> values;
@@ -188,6 +190,7 @@ public:
     [[nodiscard]] const MaterialSchema* material(std::string_view id) const noexcept;
     [[nodiscard]] const EffectSchema* effect(std::string_view name) const noexcept;
     [[nodiscard]] const SemanticType* component_parameter_type(std::string_view name) const noexcept;
+    [[nodiscard]] const SemanticType* application_type(std::string_view name) const noexcept;
     [[nodiscard]] const SchemaParameter* layout_property(std::string_view name) const noexcept;
     [[nodiscard]] const SchemaParameter* style_property(std::string_view name) const noexcept;
     [[nodiscard]] const SchemaParameter* animation_property(std::string_view name) const noexcept;
@@ -229,7 +232,10 @@ private:
     std::vector<std::string> material_ids_;
     std::unordered_map<std::string, std::shared_ptr<const DeclaredType>>
         declared_type_definitions_;
+    std::unordered_map<std::string, data::JsonValue> application_type_definitions_;
+    std::unordered_map<std::string, std::string> application_type_names_;
     std::unordered_map<std::string, SemanticTypePtr> resolved_types_;
+    std::vector<std::string> resolving_types_;
 
     [[nodiscard]] SemanticTypePtr parse_type(const data::JsonValue& value);
     [[nodiscard]] SemanticTypePtr parse_type(

@@ -181,6 +181,7 @@ struct PerformanceSamplesItem final {
     double native_height{};
     bool severe{};
     bool slow{};
+    [[nodiscard]] friend bool operator==(const PerformanceSamplesItem&, const PerformanceSamplesItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const PerformanceSamplesItem& value) {
@@ -209,6 +210,7 @@ struct Performance final {
     std::string total_millis{};
     std::string native_millis{};
     std::vector<PerformanceSamplesItem> samples{};
+    [[nodiscard]] friend bool operator==(const Performance&, const Performance&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const Performance& value) {
@@ -249,6 +251,93 @@ struct Performance final {
 [[nodiscard]] inline strata::host::Value encode_performance_samples(const std::vector<PerformanceSamplesItem>& value) {
     return strata::host::Value::object({{"performance", strata::host::Value::object({{"samples", to_value(value)}})}});
 }
+
+class PerformanceModel final {
+public:
+    PerformanceModel() = default;
+    PerformanceModel(const PerformanceModel&) = delete;
+    PerformanceModel& operator=(const PerformanceModel&) = delete;
+    PerformanceModel(PerformanceModel&&) = delete;
+    PerformanceModel& operator=(PerformanceModel&&) = delete;
+
+    [[nodiscard]] bool set(Performance value) {
+        bool changed = false;
+        changed = set_fps(std::move(value.fps)) || changed;
+        changed = set_total_millis(std::move(value.total_millis)) || changed;
+        changed = set_native_millis(std::move(value.native_millis)) || changed;
+        changed = set_samples(std::move(value.samples)) || changed;
+        return changed;
+    }
+
+    [[nodiscard]] bool set_fps(std::string value) {
+        return fps_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& fps() const noexcept {
+        return fps_.get();
+    }
+    [[nodiscard]] bool set_total_millis(std::string value) {
+        return total_millis_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& total_millis() const noexcept {
+        return total_millis_.get();
+    }
+    [[nodiscard]] bool set_native_millis(std::string value) {
+        return native_millis_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& native_millis() const noexcept {
+        return native_millis_.get();
+    }
+    [[nodiscard]] bool set_samples(std::vector<PerformanceSamplesItem> value) {
+        return samples_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<PerformanceSamplesItem>& samples() const noexcept {
+        return samples_.get();
+    }
+
+    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+        if (id.empty()) {
+            throw std::invalid_argument("PerformanceModel binding id must not be empty");
+        }
+        bindings.snapshot(
+            std::string(id) + ".fps",
+            fps_,
+            [](const auto& model) {
+                return encode_performance_fps(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".total_millis",
+            total_millis_,
+            [](const auto& model) {
+                return encode_performance_total_millis(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".native_millis",
+            native_millis_,
+            [](const auto& model) {
+                return encode_performance_native_millis(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".samples",
+            samples_,
+            [](const auto& model) {
+                return encode_performance_samples(model.get());
+            }
+        );
+    }
+
+private:
+    strata::host::Observable<std::string> fps_{};
+    strata::host::Observable<std::string> total_millis_{};
+    strata::host::Observable<std::string> native_millis_{};
+    strata::host::Observable<std::vector<PerformanceSamplesItem>> samples_{};
+};
 
 inline constexpr std::array<std::string_view, 0U> action_ids{
 };

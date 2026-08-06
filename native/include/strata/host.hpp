@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -204,6 +205,43 @@ class Bindings final {
     Bindings& operator=(Bindings&&) noexcept;
 
     void on(std::string_view action_id, Handler handler);
+
+    template <typename Action, typename Handler>
+        requires requires(const ActionEvent& event) {
+            { Action::id } -> std::convertible_to<std::string_view>;
+            { Action::decode(event) };
+        } && (
+            std::is_invocable_r_v<
+                ActionResult,
+                Handler&,
+                decltype(Action::decode(std::declval<const ActionEvent&>()))
+            > ||
+            std::is_invocable_r_v<
+                ActionResult,
+                Handler&,
+                decltype(Action::decode(std::declval<const ActionEvent&>())),
+                const ActionEvent&
+            >
+        )
+    void on(Handler&& handler) {
+        on(
+            std::string_view(Action::id),
+            [handler = std::forward<Handler>(handler)](const ActionEvent& event) mutable {
+                auto action = Action::decode(event);
+                if constexpr (std::is_invocable_r_v<
+                                  ActionResult,
+                                  Handler&,
+                                  decltype(action),
+                                  const ActionEvent&
+                              >) {
+                    return std::invoke(handler, std::move(action), event);
+                } else {
+                    return std::invoke(handler, std::move(action));
+                }
+            }
+        );
+    }
+
     void snapshot(std::string snapshot_id, RevisionSource revision, SnapshotSource source);
 
     template <typename Model, typename Snapshot>

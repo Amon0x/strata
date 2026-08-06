@@ -178,6 +178,7 @@ template <typename... T>
 struct HubFrameHistoryItem final {
     double x{};
     double y{};
+    [[nodiscard]] friend bool operator==(const HubFrameHistoryItem&, const HubFrameHistoryItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const HubFrameHistoryItem& value) {
@@ -198,6 +199,7 @@ struct HubFrameHistoryItem final {
 struct HubFrameAreaItem final {
     double x{};
     double y{};
+    [[nodiscard]] friend bool operator==(const HubFrameAreaItem&, const HubFrameAreaItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const HubFrameAreaItem& value) {
@@ -221,6 +223,7 @@ struct HubSurfacesItem final {
     std::string detail{};
     std::string shortcut{};
     bool active{};
+    [[nodiscard]] friend bool operator==(const HubSurfacesItem&, const HubSurfacesItem&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const HubSurfacesItem& value) {
@@ -252,6 +255,7 @@ struct Hub final {
     std::string frame_scale{};
     std::string status{};
     std::vector<HubSurfacesItem> surfaces{};
+    [[nodiscard]] friend bool operator==(const Hub&, const Hub&) = default;
 };
 
 [[nodiscard]] inline strata::host::Value to_value(const Hub& value) {
@@ -310,6 +314,141 @@ struct Hub final {
 [[nodiscard]] inline strata::host::Value encode_hub_surfaces(const std::vector<HubSurfacesItem>& value) {
     return strata::host::Value::object({{"hub", strata::host::Value::object({{"surfaces", to_value(value)}})}});
 }
+
+class HubModel final {
+public:
+    HubModel() = default;
+    HubModel(const HubModel&) = delete;
+    HubModel& operator=(const HubModel&) = delete;
+    HubModel(HubModel&&) = delete;
+    HubModel& operator=(HubModel&&) = delete;
+
+    [[nodiscard]] bool set(Hub value) {
+        bool changed = false;
+        changed = set_frame_summary(std::move(value.frame_summary)) || changed;
+        changed = set_frame_millis(std::move(value.frame_millis)) || changed;
+        changed = set_frame_history(std::move(value.frame_history)) || changed;
+        changed = set_frame_area(std::move(value.frame_area)) || changed;
+        changed = set_frame_scale(std::move(value.frame_scale)) || changed;
+        changed = set_status(std::move(value.status)) || changed;
+        changed = set_surfaces(std::move(value.surfaces)) || changed;
+        return changed;
+    }
+
+    [[nodiscard]] bool set_frame_summary(std::string value) {
+        return frame_summary_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& frame_summary() const noexcept {
+        return frame_summary_.get();
+    }
+    [[nodiscard]] bool set_frame_millis(double value) {
+        return frame_millis_.set(std::move(value));
+    }
+
+    [[nodiscard]] const double& frame_millis() const noexcept {
+        return frame_millis_.get();
+    }
+    [[nodiscard]] bool set_frame_history(std::vector<HubFrameHistoryItem> value) {
+        return frame_history_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<HubFrameHistoryItem>& frame_history() const noexcept {
+        return frame_history_.get();
+    }
+    [[nodiscard]] bool set_frame_area(std::vector<HubFrameAreaItem> value) {
+        return frame_area_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<HubFrameAreaItem>& frame_area() const noexcept {
+        return frame_area_.get();
+    }
+    [[nodiscard]] bool set_frame_scale(std::string value) {
+        return frame_scale_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& frame_scale() const noexcept {
+        return frame_scale_.get();
+    }
+    [[nodiscard]] bool set_status(std::string value) {
+        return status_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::string& status() const noexcept {
+        return status_.get();
+    }
+    [[nodiscard]] bool set_surfaces(std::vector<HubSurfacesItem> value) {
+        return surfaces_.set(std::move(value));
+    }
+
+    [[nodiscard]] const std::vector<HubSurfacesItem>& surfaces() const noexcept {
+        return surfaces_.get();
+    }
+
+    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+        if (id.empty()) {
+            throw std::invalid_argument("HubModel binding id must not be empty");
+        }
+        bindings.snapshot(
+            std::string(id) + ".frame_summary",
+            frame_summary_,
+            [](const auto& model) {
+                return encode_hub_frame_summary(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".frame_millis",
+            frame_millis_,
+            [](const auto& model) {
+                return encode_hub_frame_millis(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".frame_history",
+            frame_history_,
+            [](const auto& model) {
+                return encode_hub_frame_history(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".frame_area",
+            frame_area_,
+            [](const auto& model) {
+                return encode_hub_frame_area(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".frame_scale",
+            frame_scale_,
+            [](const auto& model) {
+                return encode_hub_frame_scale(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".status",
+            status_,
+            [](const auto& model) {
+                return encode_hub_status(model.get());
+            }
+        );
+        bindings.snapshot(
+            std::string(id) + ".surfaces",
+            surfaces_,
+            [](const auto& model) {
+                return encode_hub_surfaces(model.get());
+            }
+        );
+    }
+
+private:
+    strata::host::Observable<std::string> frame_summary_{};
+    strata::host::Observable<double> frame_millis_{};
+    strata::host::Observable<std::vector<HubFrameHistoryItem>> frame_history_{};
+    strata::host::Observable<std::vector<HubFrameAreaItem>> frame_area_{};
+    strata::host::Observable<std::string> frame_scale_{};
+    strata::host::Observable<std::string> status_{};
+    strata::host::Observable<std::vector<HubSurfacesItem>> surfaces_{};
+};
 
 struct HubLaunchAction final {
     static inline constexpr std::string_view id = "hub.launch";

@@ -350,17 +350,16 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
     }
     existing->children_.clear();
 
-    std::set<SiblingKey> next_keys;
+    std::set<std::string, std::less<>> next_keys;
     for (std::size_t index = range.start; index < range.end_exclusive; ++index) {
         std::shared_ptr<const DescriptionNode> child_description = description->children->at(index);
         ++stats.materialized;
         std::optional<std::uint64_t> matched_identity;
         if (child_description->key.has_value()) {
             const SiblingKey key{child_description->type, *child_description->key};
-            if (!next_keys.insert(key).second) {
+            if (!next_keys.insert(*child_description->key).second) {
                 throw std::invalid_argument(
-                    "description siblings contain duplicate key '" + *child_description->key +
-                    "' for type '" + child_description->type + "'"
+                    "description siblings contain duplicate key '" + *child_description->key + "'"
                 );
             }
             if (const auto found = keyed.find(key); found != keyed.end()) {
@@ -482,15 +481,13 @@ ReconcileStats RetainedTree::realize_children(
             );
         }
     }
-    std::set<SiblingKey> desired_keys;
+    std::set<std::string, std::less<>> desired_keys;
     for (const RealizedDescriptionChild& child : children) {
         if (!child.description->key.has_value()) continue;
-        const SiblingKey key{child.description->type, *child.description->key};
-        if (!desired_keys.insert(key).second) {
+        if (!desired_keys.insert(*child.description->key).second) {
             throw std::invalid_argument(
                 "virtual collection contains duplicate key '" +
-                *child.description->key + "' for type '" +
-                child.description->type + "'"
+                *child.description->key + "'"
             );
         }
     }

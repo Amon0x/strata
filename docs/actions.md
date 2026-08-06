@@ -52,14 +52,13 @@ strata_authoring --write-cpp-contract \
   application.schemas.json my::contracts generated/application_contract.hpp
 ```
 
-The header contains owned model structures, encoders for complete and per-field host snapshots,
-action IDs, typed action payload decoders, enums, and an application action variant. It uses
-`strata::host::Value` only at the ABI boundary:
+The header contains owned model structures, per-root model/binders with field revisions, encoders
+for complete and per-field host snapshots, action IDs, typed action payload decoders, enums, and an
+application action variant. It uses `strata::host::Value` only at the ABI boundary:
 
 ```cpp
-host.on(my::contracts::ProjectRenameAction::id,
-        [&](const strata::host::ActionEvent& event) {
-    const auto action = my::contracts::ProjectRenameAction::decode(event);
+host.on<my::contracts::ProjectRenameAction>(
+        [&](const auto& action, const strata::host::ActionEvent& event) {
     project.rename(action.id, event.value.require_string("name"));
     project_revision.changed();
     return strata::host::ActionResult::handled;
@@ -69,7 +68,9 @@ host.on(my::contracts::ProjectRenameAction::id,
 Changing an action field or host model shape now makes generated C++ consumers fail at compile time
 instead of leaving duplicated field names in application code. `ActionEvent` still owns the concrete
 widget event because its shape depends on the event kind rather than the application action payload.
-Shared lifecycle projections such as `DragEvent` decode that framework event once.
+Handlers that do not need it may accept only the generated action. `Bindings::on<Action>` owns the
+action id and payload decoding in both forms. Shared lifecycle projections such as `DragEvent`
+decode the framework event once.
 
 C hosts register handlers per runtime through `strata_runtime_register_action_handler`. A
 registration has an explicit release handle and owner label. Its callback receives borrowed

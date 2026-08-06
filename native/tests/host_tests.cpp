@@ -25,6 +25,25 @@ std::int64_t clock(void* const user_data) noexcept {
     return *static_cast<std::int64_t*>(user_data);
 }
 
+struct HostTestAction final {
+    static constexpr std::string_view id = "host.test";
+    std::string kind;
+    std::optional<std::string> source_key;
+    std::string name;
+    std::optional<std::int64_t> count;
+
+    [[nodiscard]] static HostTestAction decode(
+        const strata::host::ActionEvent& event
+    ) {
+        return {
+            event.kind,
+            event.source_key,
+            std::string(event.value.require_string("name")),
+            event.value.optional_integer("count"),
+        };
+    }
+};
+
 void generated_contracts_round_trip() {
     namespace settings = strata::contracts::settings_app;
     const settings::Settings source{
@@ -161,10 +180,10 @@ void action_bindings_decode_at_the_boundary() {
     };
     runtime.configure_application(application);
 
-    std::optional<strata::host::ActionEvent> captured;
+    std::optional<HostTestAction> captured;
     strata::host::Bindings bindings(runtime, "strata.host-tests");
-    bindings.on("host.test", [&captured](const strata::host::ActionEvent& event) {
-        captured = event;
+    bindings.on<HostTestAction>([&captured](HostTestAction action) {
+        captured = std::move(action);
         return strata::host::ActionResult::handled;
     });
     strata::Runtime active_runtime = std::move(runtime);
@@ -178,10 +197,10 @@ void action_bindings_decode_at_the_boundary() {
         .dynamic = false,
     });
     check(info.status == strata::ActionDispatchStatus::handled && captured.has_value() &&
-              captured->id == "host.test" && captured->kind == "host-test-event" &&
+              captured->kind == "host-test-event" &&
               captured->source_key == std::optional<std::string>("host.source") &&
-              captured->value.require_string("name") == "alpha" &&
-              captured->value.optional_integer("count") == std::optional<std::int64_t>(3),
+              captured->name == "alpha" &&
+              captured->count == std::optional<std::int64_t>(3),
           "typed action binding leaked or mistranslated the ABI JSON call");
 }
 
@@ -372,6 +391,51 @@ void snapshot_bindings_publish_only_changed_revisions() {
     active_runtime.close();
 }
 
+void generated_root_models_publish_changed_fields_only() {
+    std::int64_t now = 1;
+    strata_runtime_config config{};
+    config.struct_size = sizeof(config);
+    config.abi_version = STRATA_ABI_VERSION_CURRENT;
+    config.required_capabilities = STRATA_CAPABILITY_CORE_LIFECYCLE |
+                                   STRATA_CAPABILITY_CALLER_CLOCK |
+                                   STRATA_CAPABILITY_HOST_SNAPSHOTS;
+    config.clock = strata_clock{sizeof(strata_clock), &now, &clock};
+    strata::Runtime runtime(config);
+    strata::Runtime active_runtime = std::move(runtime);
+
+    namespace settings = strata::contracts::settings_app;
+    settings::SettingsModel model;
+    strata::host::Bindings bindings(active_runtime, "strata.host-tests.generated");
+    model.bind(bindings, "host-tests.settings");
+    static_cast<void>(model.set(settings::Settings{}));
+    bindings.synchronize();
+    const std::uint64_t initial_generation =
+        active_runtime.host_snapshot_info().generation;
+
+    check(
+        model.set_saved_message("changed"),
+        "generated root model ignored a changed field"
+    );
+    bindings.synchronize();
+    const std::uint64_t changed_generation =
+        active_runtime.host_snapshot_info().generation;
+    check(
+        changed_generation == initial_generation + 1U,
+        "generated root model published more than the changed field"
+    );
+
+    check(
+        !model.set_saved_message("changed"),
+        "generated root model accepted an unchanged field"
+    );
+    bindings.synchronize();
+    check(
+        active_runtime.host_snapshot_info().generation == changed_generation,
+        "generated root model republished an unchanged field"
+    );
+    active_runtime.close();
+}
+
 } // namespace
 
 int main() {
@@ -382,6 +446,7 @@ int main() {
         list_reorder_uses_stable_neighbors();
         action_bindings_decode_at_the_boundary();
         snapshot_bindings_publish_only_changed_revisions();
+        generated_root_models_publish_changed_fields_only();
         public_runtime_facade_owns_host_boundaries();
         std::cout << "strata_host_tests: typed values, models, and complete host facade OK\n";
         return 0;

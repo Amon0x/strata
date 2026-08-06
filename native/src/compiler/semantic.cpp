@@ -95,6 +95,15 @@ constexpr std::size_t maximum_lazy_loop_items = 100'000U;
     }
     if (expected.kind == SemanticTypeKind::unsafe_component_parameter)
         return false;
+    if (expected.kind == SemanticTypeKind::state_binding) {
+        const SemanticType* actual_value =
+            actual.kind == SemanticTypeKind::state_binding ? actual.value.get() : &actual;
+        return expected.value != nullptr && actual_value != nullptr &&
+            type_matches(*expected.value, *actual_value, nullable);
+    }
+    if (actual.kind == SemanticTypeKind::state_binding) {
+        return actual.value != nullptr && type_matches(expected, *actual.value, nullable);
+    }
     return expected.accepts(actual);
 }
 
@@ -669,6 +678,14 @@ class Validator final {
 
     [[nodiscard]] SemanticTypePtr resolve_type(const TypeReference& reference) const {
         const std::string name = lower(reference.name);
+        if (name == "binding") {
+            auto type = std::make_shared<SemanticType>();
+            type->kind = SemanticTypeKind::state_binding;
+            type->value = reference.arguments.size() == 1U
+                              ? resolve_type(reference.arguments.front())
+                              : simple(SemanticTypeKind::unsafe_component_parameter);
+            return type;
+        }
         if (name == "list") {
             auto type = std::make_shared<SemanticType>();
             type->kind = SemanticTypeKind::list;
@@ -690,6 +707,10 @@ class Validator final {
             return type;
         }
         if (const SemanticType* declared = registry_.component_parameter_type(name);
+            declared != nullptr) {
+            return std::make_shared<SemanticType>(*declared);
+        }
+        if (const SemanticType* declared = registry_.application_type(name);
             declared != nullptr) {
             return std::make_shared<SemanticType>(*declared);
         }
@@ -1068,9 +1089,24 @@ class Validator final {
                 const Parameter& authored = component->parameters[index];
                 const SchemaParameter& parameter = schema.parameters[index];
                 if (authored.default_value != nullptr) {
-                    validate_expected(*authored.default_value, *parameter.type, parameter.nullable,
-                                      "component " + component->name + "(" + parameter.name + ")",
-                                      scope);
+                    if (parameter.type->kind == SemanticTypeKind::state_binding) {
+                        report(
+                            "STRATA.DSL.SEMANTIC_BINDING_TARGET",
+                            "Binding component parameter '" + parameter.name +
+                                "' cannot declare a default value.",
+                            authored.default_value->span,
+                            "component " + component->name + "(" + parameter.name + ")",
+                            "required Binding<T> parameter"
+                        );
+                    } else {
+                        validate_expected(
+                            *authored.default_value,
+                            *parameter.type,
+                            parameter.nullable,
+                            "component " + component->name + "(" + parameter.name + ")",
+                            scope
+                        );
+                    }
                 }
                 scope.insert_or_assign(parameter.name, parameter.type);
             }
@@ -1869,12 +1905,18 @@ class Validator final {
                            "binding shorthand or explicit controlled value/callback, not both");
                 }
                 const auto* identifier = std::get_if<IdentifierExpression>(&argument.value->node);
-                if (identifier == nullptr || !retained_states.contains(identifier->name)) {
+                const auto scoped =
+                    identifier != nullptr ? scope.find(identifier->name) : scope.end();
+                const bool forwarded_binding =
+                    scoped != scope.end() && scoped->second != nullptr &&
+                    scoped->second->kind == SemanticTypeKind::state_binding;
+                if (identifier == nullptr ||
+                    (!retained_states.contains(identifier->name) && !forwarded_binding)) {
                     report("STRATA.DSL.SEMANTIC_BINDING_TARGET",
                            "Binding '" + binding->shorthand_parameter +
-                               "' must name local retained state directly.",
+                               "' must name retained state or a Binding<T> component parameter.",
                            argument.value->span, call_path + "." + binding->shorthand_parameter,
-                           binding->shorthand_parameter + ": localStateName");
+                           binding->shorthand_parameter + ": retainedState");
                 }
                 const SchemaParameter* controlled =
                     widget->find_parameter(binding->value_parameter);
@@ -1884,6 +1926,36 @@ class Validator final {
                 }
                 consumed_parameters.insert(binding->value_parameter);
                 consumed_parameters.insert(binding->event_parameter);
+                continue;
+            }
+            if (parameter->type->kind == SemanticTypeKind::state_binding) {
+                const auto* identifier =
+                    std::get_if<IdentifierExpression>(&argument.value->node);
+                const auto scoped =
+                    identifier != nullptr ? scope.find(identifier->name) : scope.end();
+                const bool forwarded_binding =
+                    scoped != scope.end() && scoped->second != nullptr &&
+                    scoped->second->kind == SemanticTypeKind::state_binding;
+                if (identifier == nullptr ||
+                    (!retained_states.contains(identifier->name) && !forwarded_binding)) {
+                    report(
+                        "STRATA.DSL.SEMANTIC_BINDING_TARGET",
+                        "Binding component parameter '" + parameter->name +
+                            "' must receive retained state directly.",
+                        argument.value->span,
+                        call_path + "." + parameter->name,
+                        parameter->name + ": retainedState"
+                    );
+                }
+                if (parameter->type->value != nullptr) {
+                    validate_expected(
+                        *argument.value,
+                        *parameter->type->value,
+                        parameter->nullable,
+                        call_path + "." + parameter->name,
+                        scope
+                    );
+                }
                 continue;
             }
             validate_expected(*argument.value, *parameter->type, parameter->nullable,

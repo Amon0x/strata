@@ -65,8 +65,16 @@ Installed targets are:
 | `Strata::c` | Stable shared C ABI. |
 | `Strata::host` | C++ ownership and structured host-data/action bindings. |
 | `Strata::desktop` | Complete reusable Win32/D3D11 application host. |
+| `Strata::d3d11` | D3D11 Surface presenter and packet renderer for host-owned devices, contexts, and targets. |
+| `Strata::win32` | Input translation for a host-owned Win32 window procedure. |
 | `Strata::extensions` | Authoring support linked into independently loaded extension libraries. |
 | `Strata::render_host` | Public stateful packet-v9 decoder used by custom render backends. |
+
+Applications that already own a graphics loop should use `Strata::d3d11` instead of
+`Strata::desktop`; it neither creates nor presents a swap chain. See
+[Rendering into a host-owned D3D11 target](d3d11-hosting.md).
+Applications that already own a Win32 message loop can independently use `Strata::win32`; see
+[Win32 input adapter](win32-input.md).
 
 The package also defines:
 

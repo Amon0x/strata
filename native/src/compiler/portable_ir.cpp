@@ -170,6 +170,9 @@ using data::JsonValue;
         {"name", JsonValue(parameter.name)},
         {"nullable", JsonValue(parameter.nullable)},
         {"required", JsonValue(parameter.required)},
+        {"stateBinding", JsonValue(
+            parameter.type->kind == SemanticTypeKind::state_binding
+        )},
         {"type", semantic_type(*parameter.type)},
     });
 }
@@ -189,6 +192,10 @@ using data::JsonValue;
     case SemanticTypeKind::unknown: return type_base("unknown");
     case SemanticTypeKind::any: return type_base("any");
     case SemanticTypeKind::unsafe_component_parameter: return type_base("unsafeComponentParameter");
+    case SemanticTypeKind::state_binding:
+        return type.value != nullptr
+            ? semantic_type(*type.value)
+            : type_base("unsafeComponentParameter");
     case SemanticTypeKind::null_value: return type_base("null");
     case SemanticTypeKind::string: return type_base("string");
     case SemanticTypeKind::string_literal:
@@ -453,6 +460,14 @@ private:
         std::ranges::transform(normalized, normalized.begin(), [](const unsigned char character) {
             return static_cast<char>(std::tolower(character));
         });
+        if (normalized == "binding") {
+            auto type = std::make_shared<SemanticType>();
+            type->kind = SemanticTypeKind::state_binding;
+            type->value = reference.arguments.size() == 1U
+                              ? resolve_type(reference.arguments.front())
+                              : type_of(SemanticTypeKind::unknown);
+            return type;
+        }
         if (normalized == "list") {
             auto type = std::make_shared<SemanticType>();
             type->kind = SemanticTypeKind::list;
@@ -473,6 +488,9 @@ private:
             return type;
         }
         if (const SemanticType* type = registry_.component_parameter_type(normalized); type != nullptr) {
+            return std::make_shared<SemanticType>(*type);
+        }
+        if (const SemanticType* type = registry_.application_type(normalized); type != nullptr) {
             return std::make_shared<SemanticType>(*type);
         }
         return type_of(SemanticTypeKind::unknown);
@@ -509,7 +527,14 @@ private:
         for (std::size_t index = 0U; index < component.parameters.size(); ++index) {
             const Parameter& parameter = component.parameters[index];
             const SchemaParameter& parameter_schema = schema.parameters[index];
-            scope.insert_or_assign(parameter.name, Binding{BindingKind::parameter, parameter_schema.type});
+            scope.insert_or_assign(
+                parameter.name,
+                Binding{
+                    BindingKind::parameter,
+                    parameter_schema.type,
+                    parameter_schema.type->kind == SemanticTypeKind::state_binding,
+                }
+            );
             parameters.push_back(object({
                 {"default", parameter.default_value != nullptr
                                 ? compile_expression(
@@ -1103,6 +1128,10 @@ private:
                 {"binding", JsonValue(binding_name(binding.kind))},
                 {"kind", JsonValue("variable")},
                 {"name", JsonValue(identifier->name)},
+                {"stateBinding", JsonValue(
+                    expected != nullptr &&
+                    expected->kind == SemanticTypeKind::state_binding
+                )},
                 {"type", JsonValue(binding.type->diagnostic_name())},
             });
         }

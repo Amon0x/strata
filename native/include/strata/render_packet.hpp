@@ -9,6 +9,12 @@
 #include <variant>
 #include <vector>
 
+#include <strata/strata.h>
+
+namespace strata {
+class Surface;
+}
+
 namespace strata::host {
 
 /** Maximum balanced CONTENT-effect nesting accepted by the packet and bundled renderers. */
@@ -166,6 +172,41 @@ class RenderPacketDecoder final {
 
   private:
     std::optional<RenderPacket> retained_;
+};
+
+struct SurfacePacketFrame final {
+    strata_surface_frame_info surface{};
+    const RenderPacket* packet = nullptr;
+    std::size_t packet_bytes = 0U;
+};
+
+/**
+ * Backend-neutral ordered packet stream for one live Surface. Backend presenters use this rather
+ * than duplicating frame/read/decode and terminal release ordering.
+ */
+class SurfacePacketStream final {
+  public:
+    explicit SurfacePacketStream(Surface& surface);
+    explicit SurfacePacketStream(strata_surface* surface);
+
+    SurfacePacketStream(const SurfacePacketStream&) = delete;
+    SurfacePacketStream& operator=(const SurfacePacketStream&) = delete;
+    SurfacePacketStream(SurfacePacketStream&&) = delete;
+    SurfacePacketStream& operator=(SurfacePacketStream&&) = delete;
+    ~SurfacePacketStream();
+
+    [[nodiscard]] SurfacePacketFrame frame(std::int64_t time_nanoseconds);
+    [[nodiscard]] const RenderPacket& prepare_release();
+    void acknowledge_release();
+    [[nodiscard]] bool matches(const Surface& surface) const noexcept;
+    [[nodiscard]] bool matches(const strata_surface* surface) const noexcept;
+    [[nodiscard]] strata_surface* native_surface() const noexcept;
+    void reset() noexcept;
+
+  private:
+    strata_surface* surface_ = nullptr;
+    RenderPacketDecoder decoder_;
+    std::vector<std::uint8_t> bytes_;
 };
 
 } // namespace strata::host

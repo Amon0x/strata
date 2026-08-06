@@ -112,6 +112,7 @@ public:
 
     ExpressionValue();
     ExpressionValue(Value value);
+    ExpressionValue(Value value, LexicalStateBinding state_binding);
     explicit ExpressionValue(std::shared_ptr<const CollectionViewValue> value);
     explicit ExpressionValue(std::shared_ptr<const LambdaValue> value);
     explicit ExpressionValue(std::shared_ptr<const ActionValue> value);
@@ -129,9 +130,12 @@ public:
     [[nodiscard]] const std::shared_ptr<const ExpressionObjectValue>* object() const noexcept;
     [[nodiscard]] const std::shared_ptr<const ComponentTemplateValue>*
     component_template() const noexcept;
+    [[nodiscard]] const std::optional<LexicalStateBinding>&
+    lexical_state_binding() const noexcept;
 
 private:
     Storage storage_;
+    std::optional<LexicalStateBinding> lexical_state_binding_;
 };
 
 /** Executable composites retain nested actions/lambdas and expose an immutable scalar projection. */

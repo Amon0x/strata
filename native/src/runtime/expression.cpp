@@ -313,6 +313,9 @@ std::optional<DiagnosticRange> portable_expression_range(const JsonValue express
 
 ExpressionValue::ExpressionValue() : storage_(Value{}) {}
 ExpressionValue::ExpressionValue(Value value) : storage_(std::move(value)) {}
+ExpressionValue::ExpressionValue(Value value, LexicalStateBinding state_binding)
+    : storage_(std::move(value)),
+      lexical_state_binding_(std::move(state_binding)) {}
 ExpressionValue::ExpressionValue(std::shared_ptr<const CollectionViewValue> value)
     : storage_(std::move(value)) {}
 ExpressionValue::ExpressionValue(std::shared_ptr<const LambdaValue> value)
@@ -363,6 +366,10 @@ const std::shared_ptr<const ExpressionObjectValue>* ExpressionValue::object() co
 const std::shared_ptr<const ComponentTemplateValue>*
 ExpressionValue::component_template() const noexcept {
     return std::get_if<std::shared_ptr<const ComponentTemplateValue>>(&storage_);
+}
+const std::optional<LexicalStateBinding>&
+ExpressionValue::lexical_state_binding() const noexcept {
+    return lexical_state_binding_;
 }
 
 bool ExpressionDependencyValue::cacheable() const noexcept {
@@ -681,7 +688,17 @@ ExpressionValue ExpressionRuntime::evaluate(const JsonValue expression,
         }
         const auto local = scope.values.find(name);
         if (local != scope.values.end()) {
-            const ExpressionValue value(local->second);
+            const JsonValue state_binding_value = expression.find("stateBinding");
+            const std::optional<bool> preserve_state_binding =
+                state_binding_value ? state_binding_value.boolean() : std::optional<bool>{};
+            const auto state_binding =
+                preserve_state_binding.value_or(false)
+                    ? scope.state_bindings.find(name)
+                    : scope.state_bindings.end();
+            const ExpressionValue value =
+                state_binding != scope.state_bindings.end()
+                    ? ExpressionValue(local->second, state_binding->second)
+                    : ExpressionValue(local->second);
             if (dependency_observer_ != nullptr) {
                 dependency_observer_->lexical(name, capture_expression_dependency(value));
             }

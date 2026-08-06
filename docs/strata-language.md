@@ -86,6 +86,60 @@ that slot; `required: true` rejects omission. Unnamed caller children remain sho
 component has exactly one slot (or a slot named `content`). Filled expressions keep the caller's
 scope and stable identity; component parameters and state remain private.
 
+Application schemas may declare reusable semantic types for component parameters and host roots:
+
+```json
+"types": {
+  "definitions": [
+    {
+      "id": "ProjectRow",
+      "type": {
+        "kind": "object",
+        "label": "project row",
+        "allowUnknownFields": false,
+        "fields": [
+          { "name": "key", "type": { "kind": "key" }, "required": true, "nullable": false },
+          { "name": "name", "type": { "kind": "string" }, "required": true, "nullable": false }
+        ]
+      }
+    },
+    {
+      "id": "ProjectRows",
+      "type": {
+        "kind": "list",
+        "minimumItems": 0,
+        "maximumItems": 5000,
+        "elementNullable": false,
+        "element": { "ref": "ProjectRow" }
+      }
+    }
+  ]
+}
+```
+
+`component ProjectList(rows: ProjectRows)` preserves both the record fields and the declared
+collection bound through the component boundary. Type references are available to every module in
+that application and may also be reused from host/action schemas with `{ "ref": "ProjectRow" }`.
+Duplicate and cyclic application types reject schema composition.
+
+Use `Binding<T>` when a reusable component must edit caller-owned retained state:
+
+```strata
+component SearchField(query: Binding<string>) {
+  TextBox(key: "search.editor", bind: query, hint: "Search")
+}
+
+component SearchPage() {
+  state query = "";
+  SearchField(query: query)
+}
+```
+
+A `Binding<T>` argument must be retained state or another compatible `Binding<T>` parameter.
+Temporary values, derived values, host fields, and defaults are rejected. The binding retains its
+original state address through nested component forwarding, so editor undo and declarative state
+actions still mutate the caller's state.
+
 Component templates are values and may bind additional parameters before they are passed to a
 framework owner. The remaining signature is checked structurally against the owner's contract:
 
@@ -592,8 +646,12 @@ current presentation value because their stable channel identity already defines
 ## Keys
 
 Keys identify retained nodes across rebuilds. Use keys for dynamic/reordered children, focus
-targets, forms, layers, and controlled state. Static leaves normally do not need keys. Duplicate
-explicit sibling keys are invalid.
+targets, forms, layers, and controlled state. Static leaves normally do not need keys. Keys are
+required to be unique among siblings, which is the reconciliation boundary. The same model key may
+appear under independent parents or component instances without manual string prefixes. A
+surface-global lookup is intentionally unresolved when more than one active node has that key;
+cross-tree focus, anchor, form, drag, and host automation targets therefore still need an
+unambiguous application-level key. Duplicate explicit sibling keys remain invalid.
 
 ## Validation from the command line
 

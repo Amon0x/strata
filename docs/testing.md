@@ -49,8 +49,12 @@ integration that owns pointer capture/leave, Unicode, DPI, and IMM32 routing.
 
 The installed-package test stages a real CMake installation, configures a separate consumer against
 only that prefix, then builds and runs the portable C/C++ applications. Windows additionally builds
-and runs the hidden one-frame `Strata::desktop` application. The release-dependency test rejects
-repository-path leaks and undeclared runtime dependencies.
+and runs the hidden one-frame `Strata::desktop` application plus the public `Strata::d3d11`
+host-target sample under WARP. The latter verifies preserve/clear target load actions, context-state
+restoration, exception cleanup, live-Surface presentation/terminal delivery, Win32 message
+translation, the opaque C adapter handles, and the installed static adapter targets. A separate C17
+consumer verifies that the adapter headers and exported symbols do not require C++. The
+release-dependency test rejects repository-path leaks and undeclared runtime dependencies.
 
 ## Generated and bundled artifacts
 

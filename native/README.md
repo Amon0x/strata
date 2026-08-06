@@ -110,11 +110,14 @@ cmake --install build/cmake/linux-x64
 
 The default prefixes are `build/install/windows-x64` and `build/install/linux-x64`. Every package
 exports `Strata::c`, `Strata::host`, `Strata::extensions`, and `Strata::render_host`, plus public
-headers, a generated JSON catalog projection, runtime assets, tools, and samples. `Strata::extensions` is static
-authoring support linked into independently loaded package libraries; the installed
-`strata_configure_extension` CMake helper assigns their discovery-safe names. Windows also exports
-`Strata::desktop`. `Strata_RESOURCES` names the installed `share` directory so consumers do not
-reconstruct package paths; `Strata_DESKTOP_RUNNER` exists only when the desktop runner was installed.
+headers, a generated JSON catalog projection, runtime assets, tools, and samples.
+`Strata::extensions` is static authoring support linked into independently loaded package
+libraries; the installed `strata_configure_extension` CMake helper assigns their discovery-safe
+names. Windows also exports `Strata::d3d11`, `Strata::win32`, and `Strata::desktop`.
+`Strata::d3d11` includes both low-level packet submission and a Surface presenter;
+`Strata::win32` translates messages for hosts that retain window-loop ownership.
+`Strata_RESOURCES` names the installed `share` directory so consumers do not reconstruct package paths;
+`Strata_DESKTOP_RUNNER` exists only when the desktop runner was installed.
 
 The installed sample project configures against only the install prefix. Its portable C and C++
 programs configure an application, activate `.strata`, create/frame a Surface, decode packet v9,
@@ -125,6 +128,12 @@ borrowed C strings or callback bridge records alive. `Strata_AUTHORING` names th
 schema-to-C++ generator; the installed consumer gate generates and compiles a typed host contract
 without repository paths. `Strata_VSCODE_EXTENSION` names the installed schema-aware VSIX when tools
 were built. On Windows the gate also builds a hidden one-frame program linked through
-`Strata::desktop`. See
+`Strata::desktop` and a WARP program linked through `Strata::d3d11` and `Strata::win32` that
+presents a live Surface into a host-owned target. A C17 adapter smoke also compiles the opaque
+D3D11/Win32 handles without C++ headers. See
 [`docs/embedding.md`](../docs/embedding.md) for portable package and custom-renderer consumption, and
 [`docs/desktop-hosting.md`](../docs/desktop-hosting.md) for Win32 deployment.
+
+Source-tree consumers that require a single native artifact may link `Strata::c_static` or
+`Strata::host_static`. Those targets preserve the same ABI and facade but remain build-tree-only so
+the installed package does not expose an incomplete private static dependency graph.

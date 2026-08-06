@@ -23,8 +23,10 @@
 - `native/src/font` — OpenType reading, shaping/fallback, rasterization, and glyph atlas ownership.
 - `native/src/resource` — encoded image and resource handling.
 - `native/host` — reusable packet decoding, extension selection, and safe module-path resolution.
-- `native/d3d11` — target-independent packet-v4 pipeline, textures, blur, and HLSL materials shared
-  by windowed and offscreen hosts.
+- `native/d3d11` — target-independent packet-v9 pipeline, textures, blur, HLSL materials, low-level
+  packet submission, and the optional host-owned-target Surface presenter with C/C++ handles.
+- `native/win32` — optional Win32 message-to-Surface input translation with C/C++ handles for
+  embedding hosts.
 - `native/desktop` — Win32 input/services, swap-chain ownership, and multi-window executable.
 - `native/headless` — persistent semantic browser/control sessions, deterministic replay, offscreen
   D3D11/WARP capture, optional CPU reference rendering, and PNG output.
@@ -40,6 +42,7 @@ owning subsystem rather than adding application-specific branches to the ABI or 
 ```text
 .strata/resources -> strata_core -> strata_c
                                   -> desktop host -> D3D11
+                                  -> embedding host -> host-owned D3D11 target
                                   -> headless host -> D3D11/WARP or reference renderer
 ```
 

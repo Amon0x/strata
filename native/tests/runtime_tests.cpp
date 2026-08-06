@@ -1230,6 +1230,84 @@ void test_target10_compile_diagnostics() {
           "schema-invalid persisted list elements entered application state");
 }
 
+void test_application_types_are_component_parameter_types() {
+    using namespace strata;
+    compiler::SchemaRegistry schema = compiler::SchemaRegistry::builtins();
+    schema.apply_scenario_declarations(data::parse_json(R"({
+      "types":{"definitions":[
+        {"id":"DiagnosticRow","type":{"kind":"object","label":"diagnostic row",
+          "allowUnknownFields":false,"fields":[
+            {"name":"key","type":{"kind":"key"},"required":true,"nullable":false},
+            {"name":"label","type":{"kind":"string"},"required":true,"nullable":false}
+          ]}},
+        {"id":"DiagnosticRows","type":{"kind":"list","minimumItems":0,"maximumItems":32,
+          "elementNullable":false,"element":{"ref":"DiagnosticRow"}}}
+      ]},
+      "widgets":{"registry":"test","required":[],"definitions":[]},
+      "actions":{"registry":"test","required":[],"definitions":[]},
+      "host":[{"path":"rows","nullable":false,"type":{"ref":"DiagnosticRows"}}]
+    })"));
+    const auto validate = [&schema](const std::string_view source) {
+        const compiler::ParseResult parsed =
+            compiler::parse_source(
+                "application-types.strata",
+                std::string(source)
+            );
+        check(parsed.diagnostics.empty(), "application type fixture did not parse");
+        return compiler::validate_semantics(parsed.file, schema);
+    };
+    const compiler::SemanticResult valid = validate(R"(
+component RowList(rows: DiagnosticRows) {
+  Panel {
+    for row in rows {
+      Text(key: row.key, text: row.label)
+    }
+  }
+}
+overlay Main { root RowList(rows: rows) }
+)");
+    check(
+        valid.diagnostics.empty(),
+        "schema-defined record/list types were not accepted by component parameters"
+    );
+    const compiler::SemanticResult invalid = validate(R"(
+component RowList(rows: DiagnosticRows) {
+  Panel {
+    for row in rows {
+      Text(key: row.key, text: row.label)
+    }
+  }
+}
+overlay Main { root RowList(rows: ["not a row"]) }
+)");
+    check(
+        std::ranges::any_of(
+            invalid.diagnostics,
+            [](const compiler::Diagnostic& value) {
+                return value.code == "STRATA.DSL.SEMANTIC_TYPE_MISMATCH";
+            }
+        ),
+        "schema-defined component parameter accepted an incompatible list"
+    );
+
+    bool cycle_rejected = false;
+    try {
+        compiler::SchemaRegistry cyclic = compiler::SchemaRegistry::builtins();
+        cyclic.apply_scenario_declarations(data::parse_json(R"({
+          "types":{"definitions":[
+            {"id":"First","type":{"kind":"list","maximumItems":4,"element":{"ref":"Second"}}},
+            {"id":"Second","type":{"kind":"list","maximumItems":4,"element":{"ref":"First"}}}
+          ]},
+          "widgets":{"registry":"test","required":[],"definitions":[]},
+          "actions":{"registry":"test","required":[],"definitions":[]},
+          "host":[]
+        })"));
+    } catch (const std::runtime_error&) {
+        cycle_rejected = true;
+    }
+    check(cycle_rejected, "cyclic application schema types were accepted");
+}
+
 void test_authored_effect_schema_and_semantics() {
     using namespace strata;
     compiler::SchemaRegistry schema = compiler::SchemaRegistry::builtins();
@@ -1644,6 +1722,9 @@ int main(const int argument_count, const char* const* const arguments) {
         run("built-in catalog", [&] { test_builtin_catalog_projects_runtime_action_contracts(); });
         run("animation validation", [&] { test_animation_validation_is_total(); });
         run("Target 10 compile diagnostics", [&] { test_target10_compile_diagnostics(); });
+        run("application component types", [&] {
+            test_application_types_are_component_parameter_types();
+        });
         run("authored effect schema", [&] { test_authored_effect_schema_and_semantics(); });
         run("application isolation", [&] { test_application_bundle_and_runtime_isolation(); });
         run("portable expression runtime", [&] { test_portable_ir_expression_runtime(); });

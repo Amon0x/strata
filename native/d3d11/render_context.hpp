@@ -3,7 +3,10 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
+
+#include <strata/d3d11.hpp>
 
 struct ID3D11Device;
 struct ID3D11DeviceContext;
@@ -15,17 +18,6 @@ struct RenderPacket;
 }
 
 namespace strata::d3d11 {
-
-struct RenderLayerTelemetry final {
-    std::uint64_t blur_passes = 0U;
-    std::uint32_t blur_target_width = 0U;
-    std::uint32_t blur_target_height = 0U;
-    std::uint64_t blur_nanos = 0U;
-    std::uint64_t effect_passes = 0U;
-    std::uint32_t effect_target_width = 0U;
-    std::uint32_t effect_target_height = 0U;
-    std::uint64_t effect_nanos = 0U;
-};
 
 /** Shared D3D11 packet-v9 pipeline for swap-chain and offscreen targets. */
 class RenderContext final {
@@ -50,7 +42,7 @@ class RenderContext final {
                              std::uint32_t radius_parameter, std::uint32_t downsample_parameter,
                              std::string_view hlsl_source);
     void consume_resources(const host::RenderPacket& packet);
-    void begin_frame(std::array<float, 4U> clear_color, double frame_seconds);
+    void begin_frame(std::optional<std::array<float, 4U>> clear_color, double frame_seconds);
     [[nodiscard]] RenderLayerTelemetry render_layer(std::string_view id,
                                                     const host::RenderPacket& packet);
     void release_layer(std::string_view id) noexcept;

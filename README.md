@@ -18,7 +18,9 @@ ABI.
 The native framework supports two platform profiles:
 
 - **Windows x64:** the portable framework plus `strata_desktop`, the production Win32/D3D11 host.
-  The headless host can use D3D11/WARP for production-renderer fidelity.
+  The headless host can use D3D11/WARP for production-renderer fidelity, and `Strata::d3d11`
+  presents Surfaces into targets owned by an existing graphics application. `Strata::win32`
+  optionally translates an existing window's messages into portable Surface input.
 - **Linux x64:** the platform-neutral framework, C/C++ host APIs, extensions, compiler/authoring
   tools, public packet-v9 decoder, and CPU reference headless host. Strata does not ship a Linux GUI
   backend; consumers can implement Vulkan/OpenGL submission on top of `Strata::render_host`.
@@ -91,9 +93,12 @@ exports these portable targets:
 | `Strata::render_host` | Stateful public packet-v9 decoder for custom render backends. |
 | `Strata::svg` | Dependency-free static SVG parser and deterministic CPU rasterizer. |
 
-Windows additionally exports `Strata::desktop`. See [Embedding](docs/embedding.md) for custom
-renderer integration and [Win32 desktop hosting](docs/desktop-hosting.md) for DLL/resource
-deployment and the installed desktop consumer.
+Windows additionally exports `Strata::d3d11`, `Strata::win32`, and `Strata::desktop`. See
+[Embedding](docs/embedding.md) for custom renderer integration,
+[host-owned D3D11 targets](docs/d3d11-hosting.md) for existing graphics loops,
+[Win32 input adaptation](docs/win32-input.md) for existing window procedures, and
+[Win32 desktop hosting](docs/desktop-hosting.md) for DLL/resource deployment and the installed
+desktop consumer.
 
 ## Native desktop
 
@@ -151,6 +156,8 @@ compiler.
 
 - [PNG and SVG images](docs/svg.md)
 - [C/C++ embedding and custom renderer guide](docs/embedding.md)
+- [Rendering into a host-owned D3D11 target](docs/d3d11-hosting.md)
+- [Forwarding an existing Win32 message loop](docs/win32-input.md)
 - [Win32 desktop hosting and SDK consumption](docs/desktop-hosting.md)
 - [Native ABI and build notes](native/README.md)
 - [Headless application testing](docs/headless-testing.md)

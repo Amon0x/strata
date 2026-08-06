@@ -234,6 +234,7 @@ struct RootDefinition final {
     SemanticTypePtr semantic;
     bool wrapper = false;
     std::string wrapper_name;
+    std::string model_name;
 };
 
 struct ActionParameter final {
@@ -345,6 +346,8 @@ private:
         case SemanticTypeKind::key: return {"std::string", false};
         case SemanticTypeKind::unknown:
         case SemanticTypeKind::any: return {"strata::host::Value", false};
+        case SemanticTypeKind::state_binding:
+            throw std::runtime_error("state bindings cannot cross a host contract");
         case SemanticTypeKind::enumeration:
         case SemanticTypeKind::host_object: return discover_named(type, hint);
         case SemanticTypeKind::map:
@@ -404,7 +407,9 @@ private:
         if (const auto found = named_types_.find(type.get()); found != named_types_.end()) {
             return {found->second, false};
         }
-        const std::string name = unique_name(hint);
+        const std::string name = unique_name(
+            type->schema_name.empty() ? hint : std::string_view(type->schema_name)
+        );
         named_types_.emplace(type.get(), name);
         if (type->kind == SemanticTypeKind::enumeration) {
             definitions_.push_back(Definition{
@@ -465,6 +470,7 @@ private:
                 semantic,
                 !named_object,
                 {},
+                named_object ? unique_name(root_name + "Model") : std::string{},
             };
             if (root.wrapper) root.wrapper_name = unique_name(root_name);
             roots_.push_back(std::move(root));
@@ -901,6 +907,9 @@ template <typename... T>
         for (const FieldDefinition& field : definition.fields) {
             output << "    " << field.type.cpp << ' ' << field.member_name << "{};\n";
         }
+        output << "    [[nodiscard]] friend bool operator==(const "
+               << definition.name << "&, const " << definition.name
+               << "&) = default;\n";
         output << "};\n\n[[nodiscard]] inline strata::host::Value to_value(const "
                << definition.name << "& value) {\n"
                << "    strata::host::Value::Object fields;\n";
@@ -977,6 +986,62 @@ template <typename... T>
                        << cpp_quote(root.path) << ", strata::host::Value::object({{"
                        << cpp_quote(field.wire_name) << ", to_value(value)}})}});\n}\n\n";
             }
+            output << "class " << root.model_name << " final {\n"
+                   << "public:\n"
+                   << "    " << root.model_name << "() = default;\n"
+                   << "    " << root.model_name << "(const " << root.model_name
+                   << "&) = delete;\n"
+                   << "    " << root.model_name << "& operator=(const "
+                   << root.model_name << "&) = delete;\n"
+                   << "    " << root.model_name << "(" << root.model_name
+                   << "&&) = delete;\n"
+                   << "    " << root.model_name << "& operator=("
+                   << root.model_name << "&&) = delete;\n\n"
+                   << "    [[nodiscard]] bool set(" << type << " value) {\n"
+                   << "        bool changed = false;\n";
+            for (const FieldDefinition& field : definition->fields) {
+                output << "        changed = set_" << field.member_name
+                       << "(std::move(value." << field.member_name
+                       << ")) || changed;\n";
+            }
+            output << "        return changed;\n"
+                   << "    }\n\n";
+            for (const FieldDefinition& field : definition->fields) {
+                output << "    [[nodiscard]] bool set_" << field.member_name << "("
+                       << field.type.cpp << " value) {\n"
+                       << "        return " << field.member_name
+                       << "_.set(std::move(value));\n"
+                       << "    }\n"
+                       << "\n";
+                output << "    [[nodiscard]] const " << field.type.cpp << "& "
+                       << field.member_name << "() const noexcept {\n"
+                       << "        return " << field.member_name << "_.get();\n"
+                       << "    }\n";
+            }
+            output << "\n    void bind(strata::host::Bindings& bindings, "
+                      "const std::string_view id) const {\n"
+                   << "        if (id.empty()) {\n"
+                   << "            throw std::invalid_argument("
+                   << cpp_quote(root.model_name + " binding id must not be empty")
+                   << ");\n"
+                   << "        }\n";
+            for (const FieldDefinition& field : definition->fields) {
+                output << "        bindings.snapshot(\n"
+                       << "            std::string(id) + "
+                       << cpp_quote("." + field.member_name) << ",\n"
+                       << "            " << field.member_name << "_,\n"
+                       << "            [](const auto& model) {\n"
+                       << "                return encode_" << root.function_name << '_'
+                       << field.member_name << "(model.get());\n"
+                       << "            }\n"
+                       << "        );\n";
+            }
+            output << "    }\n\nprivate:\n";
+            for (const FieldDefinition& field : definition->fields) {
+                output << "    strata::host::Observable<" << field.type.cpp << "> "
+                       << field.member_name << "_{};\n";
+            }
+            output << "};\n\n";
         }
     }
 

@@ -1500,6 +1500,59 @@ void test_keyed_reconciliation_and_detach_cleanup() {
     check(detached == 1U, "detached cleanup ran more than once");
 }
 
+void test_keys_are_local_to_their_retained_parent() {
+    using namespace strata::ui;
+    RetainedTree tree;
+    const auto description = node(
+        "Panel",
+        "root",
+        {
+            node("Panel", "left", {node("Text", "ready")}),
+            node("Panel", "right", {node("Text", "ready")}),
+        }
+    );
+    const ReconcileStats initial = tree.reconcile(description);
+    const RetainedNode* left = tree.find_key("left");
+    const RetainedNode* right = tree.find_key("right");
+    const std::vector<RetainedNode*>* ready = tree.find_keys("ready");
+    check(
+        initial.created == 5U && left != nullptr && right != nullptr &&
+            ready != nullptr && ready->size() == 2U &&
+            tree.find_key("ready") == nullptr,
+        "keys in independent retained parents were rejected or resolved ambiguously"
+    );
+    const std::uint64_t left_ready = left->children().front()->identity();
+    const std::uint64_t right_ready = right->children().front()->identity();
+    const ReconcileStats repeated = tree.reconcile(description);
+    left = tree.find_key("left");
+    right = tree.find_key("right");
+    check(
+        repeated.created == 0U && repeated.reused == 5U &&
+            left->children().front()->identity() == left_ready &&
+            right->children().front()->identity() == right_ready,
+        "parent-local duplicate keys lost retained identity on rebuild"
+    );
+
+    bool sibling_duplicate_rejected = false;
+    try {
+        RetainedTree invalid;
+        static_cast<void>(invalid.reconcile(node(
+            "Panel",
+            "root",
+            {
+                node("Text", "duplicate"),
+                node("Panel", "duplicate"),
+            }
+        )));
+    } catch (const std::invalid_argument&) {
+        sibling_duplicate_rejected = true;
+    }
+    check(
+        sibling_duplicate_rejected,
+        "duplicate sibling keys were accepted when widget types differed"
+    );
+}
+
 void test_exit_retention_and_prune_ownership() {
     using namespace strata::ui;
     const auto owns_scope = [](const std::shared_ptr<const DescriptionNode>& source,
@@ -6613,6 +6666,7 @@ int main(const int argument_count, const char* const* const arguments) {
         }
         test_collection_models();
         test_keyed_reconciliation_and_detach_cleanup();
+        test_keys_are_local_to_their_retained_parent();
         test_exit_retention_and_prune_ownership();
         test_lazy_materialization_and_noop_reconcile();
         test_retained_virtual_realization_window();

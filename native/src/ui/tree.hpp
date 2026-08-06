@@ -219,6 +219,12 @@ public:
     };
 
     [[nodiscard]] const Node* find_key(std::string_view key) const noexcept;
+    [[nodiscard]] const Node* find_key(
+        std::string_view key,
+        std::string_view source_path,
+        std::string_view state_scope,
+        std::string_view type
+    ) const noexcept;
     [[nodiscard]] const std::vector<const Node*>* find_source(
         std::string_view source_path
     ) const noexcept;
@@ -226,7 +232,7 @@ public:
 private:
     friend class RetainedTree;
     std::vector<std::unique_ptr<Node>> nodes_;
-    std::map<std::string, const Node*, std::less<>> key_index_;
+    std::map<std::string, std::vector<const Node*>, std::less<>> key_index_;
     std::map<std::string, std::vector<const Node*>, std::less<>> source_index_;
 };
 
@@ -385,6 +391,9 @@ public:
     [[nodiscard]] std::size_t prune_exiting(const ExitCompletion& exit_completion);
     [[nodiscard]] RetainedNode* root() const noexcept;
     [[nodiscard]] RetainedNode* find_key(std::string_view key) const noexcept;
+    [[nodiscard]] const std::vector<RetainedNode*>* find_keys(
+        std::string_view key
+    ) const noexcept;
     [[nodiscard]] RetainedNode* find_identity(std::uint64_t identity) const noexcept;
     [[nodiscard]] const std::vector<RetainedNode*>* find_source(std::string_view source_path) const noexcept;
     [[nodiscard]] const std::vector<RetainedNode*>* find_type(std::string_view type) const noexcept;
@@ -466,7 +475,7 @@ private:
     std::uint64_t generation_ = 0U;
     std::uint64_t layout_invalidation_generation_ = 0U;
     std::array<std::uint64_t, 11U> dirty_generations_{};
-    std::map<std::string, RetainedNode*, std::less<>> key_index_;
+    std::map<std::string, std::vector<RetainedNode*>, std::less<>> key_index_;
     std::map<std::uint64_t, RetainedNode*> identity_index_;
     std::map<std::string, std::vector<RetainedNode*>, std::less<>> source_index_;
     std::map<std::string, std::vector<RetainedNode*>, std::less<>> type_index_;

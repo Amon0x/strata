@@ -13,6 +13,7 @@ include(FetchContent)
 
 option(STRATA_BUILD_TESTS "Build native unit and ABI tests" ON)
 option(STRATA_BUILD_TOOLS "Build native command-line tools" ON)
+option(STRATA_BUILD_AUTHORING "Build only the schema authoring tool for source embeddings" OFF)
 option(STRATA_BUILD_SAMPLES "Build C and C++ embedding smoke applications" ON)
 option(STRATA_BUILD_DESKTOP "Build the native Win32 fidelity host" ON)
 option(STRATA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
@@ -20,6 +21,11 @@ option(STRATA_ENABLE_ASAN "Enable AddressSanitizer where supported" OFF)
 option(STRATA_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer where supported" OFF)
 option(STRATA_ENABLE_STATIC_ANALYSIS "Enable compiler static analysis" OFF)
 option(STRATA_ENABLE_TRACY "Enable local Tracy instrumentation" OFF)
+option(
+    STRATA_ENABLE_THREAD_SAFE_STATICS
+    "Use compiler-managed thread-safe initialization for function-local statics"
+    ON
+)
 
 set(STRATA_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 set(STRATA_RESOURCE_ROOT "${STRATA_REPOSITORY_ROOT}/src/main/resources")
@@ -90,6 +96,9 @@ function(strata_target_defaults target)
                 $<$<BOOL:${STRATA_WARNINGS_AS_ERRORS}>:/WX>
                 $<$<BOOL:${STRATA_ENABLE_STATIC_ANALYSIS}>:/analyze>
         )
+        if(NOT STRATA_ENABLE_THREAD_SAFE_STATICS)
+            target_compile_options(${target} PRIVATE /Zc:threadSafeInit-)
+        endif()
         if(STRATA_ENABLE_ASAN)
             target_compile_options(${target} PRIVATE /fsanitize=address)
             # With the Visual Studio generator MSVC's compiler embeds the ASAN linker
@@ -181,6 +190,7 @@ add_library(
     strata_render_host
     STATIC
         host/render_packet.cpp
+        host/surface_stream.cpp
 )
 add_library(Strata::render_host ALIAS strata_render_host)
 target_include_directories(
@@ -401,7 +411,8 @@ if(STRATA_ENABLE_TRACY)
 endif()
 strata_target_defaults(strata_core)
 
-add_library(strata_c SHARED
+set(
+    strata_c_sources
     src/abi.cpp
     src/abi_extension.cpp
     src/abi_application.cpp
@@ -414,6 +425,7 @@ add_library(strata_c SHARED
     src/surface_inspector_abi.cpp
     src/surface_theme_abi.cpp
 )
+add_library(strata_c SHARED ${strata_c_sources})
 add_library(Strata::c ALIAS strata_c)
 target_link_libraries(strata_c PRIVATE Strata::core)
 target_include_directories(
@@ -442,14 +454,14 @@ strata_target_defaults(strata_c)
 
 # Pleasant typed C++ host bindings over the stable C ABI. This is static by design: STL model
 # types never become part of strata_c's compiler-independent DLL boundary.
-add_library(
-    strata_host_cpp
-    STATIC
-        src/host.cpp
-        src/core/utf8.cpp
-        src/data/json.cpp
-        src/data/json_view.cpp
+set(
+    strata_host_cpp_sources
+    src/host.cpp
+    src/core/utf8.cpp
+    src/data/json.cpp
+    src/data/json_view.cpp
 )
+add_library(strata_host_cpp STATIC ${strata_host_cpp_sources})
 add_library(Strata::host ALIAS strata_host_cpp)
 target_link_libraries(strata_host_cpp PUBLIC Strata::c)
 target_include_directories(
@@ -467,6 +479,33 @@ set_target_properties(
 )
 target_compile_features(strata_host_cpp PUBLIC cxx_std_23)
 strata_target_defaults(strata_host_cpp)
+
+# Source-tree consumers that must produce one self-contained module can link the same stable C ABI
+# and C++ facade statically. These targets intentionally remain build-tree-only because the
+# installed shared ABI is the portable SDK boundary and a relocatable static package would also
+# need to package Strata's private FreeType object graph.
+add_library(strata_c_static STATIC ${strata_c_sources})
+add_library(Strata::c_static ALIAS strata_c_static)
+target_link_libraries(strata_c_static PRIVATE Strata::core)
+target_include_directories(
+    strata_c_static
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+set_target_properties(strata_c_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+strata_target_defaults(strata_c_static)
+
+add_library(strata_host_cpp_static STATIC ${strata_host_cpp_sources})
+add_library(Strata::host_static ALIAS strata_host_cpp_static)
+target_link_libraries(strata_host_cpp_static PUBLIC Strata::c_static)
+target_include_directories(
+    strata_host_cpp_static
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+set_target_properties(strata_host_cpp_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_features(strata_host_cpp_static PUBLIC cxx_std_23)
+strata_target_defaults(strata_host_cpp_static)
 
 # Generated application contracts are repository-internal consumers of the public host API. The
 # installed generator emits equivalent headers for external application schemas.
@@ -516,15 +555,19 @@ elseif(UNIX)
 endif()
 strata_target_defaults(strata_demo_extension)
 
-if(WIN32 AND (STRATA_BUILD_DESKTOP OR STRATA_BUILD_TOOLS))
+if(WIN32)
     add_library(
         strata_d3d11
         STATIC
             d3d11/blur_pass.cpp
             d3d11/effect_pass.cpp
+            d3d11/presenter.cpp
+            d3d11/presenter_abi.cpp
             d3d11/render_context.cpp
+            d3d11/renderer.cpp
             d3d11/texture_store.cpp
     )
+    add_library(Strata::d3d11 ALIAS strata_d3d11)
     target_link_libraries(
         strata_d3d11
         PRIVATE
@@ -536,9 +579,38 @@ if(WIN32 AND (STRATA_BUILD_DESKTOP OR STRATA_BUILD_TOOLS))
             windowscodecs
     )
     target_include_directories(
-        strata_d3d11 PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        strata_d3d11
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
     )
+    set_target_properties(
+        strata_d3d11
+        PROPERTIES
+            EXPORT_NAME d3d11
+            POSITION_INDEPENDENT_CODE ON
+    )
+    target_compile_features(strata_d3d11 PUBLIC cxx_std_23)
     strata_target_defaults(strata_d3d11)
+
+    add_library(strata_win32 STATIC win32/input.cpp win32/input_abi.cpp)
+    add_library(Strata::win32 ALIAS strata_win32)
+    target_link_libraries(strata_win32 PUBLIC imm32 user32)
+    target_include_directories(
+        strata_win32
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+    )
+    set_target_properties(
+        strata_win32
+        PROPERTIES
+            EXPORT_NAME win32
+            POSITION_INDEPENDENT_CODE ON
+    )
+    target_compile_features(strata_win32 PUBLIC cxx_std_23)
+    strata_target_defaults(strata_win32)
 endif()
 
 if(WIN32 AND STRATA_BUILD_DESKTOP)
@@ -553,16 +625,13 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             desktop/renderer.cpp
             host/extensions.cpp
             host/module_path.cpp
-            d3d11/blur_pass.cpp
-            d3d11/effect_pass.cpp
-            d3d11/render_context.cpp
-            d3d11/texture_store.cpp
     )
     add_library(Strata::desktop ALIAS strata_desktop_host)
     target_link_libraries(
         strata_desktop_host
         PUBLIC Strata::host
         PRIVATE
+            Strata::d3d11
             Strata::render_host
             d3d11
             d3dcompiler
@@ -587,25 +656,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
     strata_target_defaults(strata_desktop_host)
 endif()
 
-if(STRATA_BUILD_TOOLS)
-    add_executable(strata_svg_render tools/svg_render.cpp)
-    target_link_libraries(strata_svg_render PRIVATE Strata::svg)
-    strata_target_defaults(strata_svg_render)
-
-    add_executable(
-        strata_compile
-        tools/compiler_main.cpp
-        tools/compiler_check.cpp
-        tools/compiler_check.hpp
-    )
-    target_link_libraries(strata_compile PRIVATE Strata::core strata_host_support)
-    add_dependencies(strata_compile strata_demo_extension)
-    target_include_directories(
-        strata_compile
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/tools
-    )
-    strata_target_defaults(strata_compile)
-
+if(STRATA_BUILD_TOOLS OR STRATA_BUILD_AUTHORING)
     add_executable(
         strata_authoring
         tools/authoring_main.cpp
@@ -626,6 +677,26 @@ if(STRATA_BUILD_TOOLS)
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/tools
     )
     strata_target_defaults(strata_authoring)
+endif()
+
+if(STRATA_BUILD_TOOLS)
+    add_executable(strata_svg_render tools/svg_render.cpp)
+    target_link_libraries(strata_svg_render PRIVATE Strata::svg)
+    strata_target_defaults(strata_svg_render)
+
+    add_executable(
+        strata_compile
+        tools/compiler_main.cpp
+        tools/compiler_check.cpp
+        tools/compiler_check.hpp
+    )
+    target_link_libraries(strata_compile PRIVATE Strata::core strata_host_support)
+    add_dependencies(strata_compile strata_demo_extension)
+    target_include_directories(
+        strata_compile
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/tools
+    )
+    strata_target_defaults(strata_compile)
 
     set(strata_headless_platform_sources headless/unsupported_image_codec.cpp)
     if(WIN32)
@@ -681,10 +752,33 @@ if(STRATA_BUILD_SAMPLES)
     )
     strata_target_defaults(strata_cpp_smoke)
 
+    add_executable(strata_cpp_static_smoke samples/cpp_smoke.cpp)
+    target_link_libraries(
+        strata_cpp_static_smoke
+        PRIVATE Strata::host_static Strata::render_host Strata::svg
+    )
+    strata_target_defaults(strata_cpp_static_smoke)
+
     if(WIN32 AND STRATA_BUILD_DESKTOP)
         add_executable(strata_desktop_sample samples/desktop_app.cpp)
         target_link_libraries(strata_desktop_sample PRIVATE Strata::desktop)
         strata_target_defaults(strata_desktop_sample)
+    endif()
+    if(WIN32)
+        add_executable(strata_adapter_c_smoke samples/adapter_c_smoke.c)
+        target_link_libraries(
+            strata_adapter_c_smoke
+            PRIVATE Strata::c Strata::d3d11 Strata::win32
+        )
+        set_target_properties(strata_adapter_c_smoke PROPERTIES LINKER_LANGUAGE CXX)
+        strata_target_defaults(strata_adapter_c_smoke)
+
+        add_executable(strata_d3d11_target_smoke samples/d3d11_target_smoke.cpp)
+        target_link_libraries(
+            strata_d3d11_target_smoke
+            PRIVATE Strata::d3d11 Strata::host Strata::win32
+        )
+        strata_target_defaults(strata_d3d11_target_smoke)
     endif()
 endif()
 
@@ -1162,12 +1256,20 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             NAME strata.embed.cpp
             COMMAND strata_cpp_smoke
         )
+        add_test(
+            NAME strata.embed.cpp_static
+            COMMAND strata_cpp_static_smoke
+        )
         if(WIN32 AND STRATA_BUILD_DESKTOP)
             add_test(
                 NAME strata.embed.desktop
                 COMMAND strata_desktop_sample --smoke
                     ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
             )
+        endif()
+        if(WIN32)
+            add_test(NAME strata.embed.adapter_c COMMAND strata_adapter_c_smoke)
+            add_test(NAME strata.embed.d3d11_target COMMAND strata_d3d11_target_smoke)
         endif()
     endif()
     if(STRATA_BUILD_TOOLS)
@@ -1272,6 +1374,13 @@ install(
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
+if(WIN32)
+    install(
+        TARGETS strata_d3d11 strata_win32
+        EXPORT StrataTargets
+        ARCHIVE DESTINATION lib
+    )
+endif()
 install(
     TARGETS strata_demo_extension
     RUNTIME DESTINATION bin
@@ -1326,6 +1435,8 @@ install(
         samples/installed/extension_loader_smoke.cpp
         samples/desktop_app.cpp
         samples/desktop_app.json
+        samples/adapter_c_smoke.c
+        samples/d3d11_target_smoke.cpp
     DESTINATION share/strata/samples
 )
 install(

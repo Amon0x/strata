@@ -36,8 +36,16 @@ constexpr std::size_t maximum_component_cache_entries = 512U;
 void bind_expression(
     runtime::ExpressionScope& scope,
     std::string name,
-    runtime::ExpressionValue value
+    runtime::ExpressionValue value,
+    const bool state_binding = false
 ) {
+    scope.state_bindings.erase(name);
+    if (state_binding && value.lexical_state_binding().has_value()) {
+        scope.state_bindings.insert_or_assign(
+            name,
+            *value.lexical_state_binding()
+        );
+    }
     if (is_executable_expression(value)) {
         scope.values.erase(name);
         scope.executable_values.insert_or_assign(std::move(name), std::move(value));
@@ -1104,7 +1112,14 @@ const RetainedDescriptionSnapshot::Node* DescriptionBuilder::retained_widget(
     const RetainedQuery& query
 ) const noexcept {
     if (retained_snapshot_ == nullptr) return nullptr;
-    if (query.key.has_value()) return retained_snapshot_->find_key(*query.key);
+    if (query.key.has_value()) {
+        return retained_snapshot_->find_key(
+            *query.key,
+            query.source_path,
+            query.state_scope,
+            query.type
+        );
+    }
     const std::vector<const RetainedDescriptionSnapshot::Node*>* candidates =
         retained_snapshot_->find_source(query.source_path);
     if (candidates == nullptr) return nullptr;
@@ -1467,7 +1482,19 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
             const std::string name(string_field(schema, "name"));
             const auto supplied = properties.find(name);
             if (supplied != properties.end()) {
-                bind_expression(component_scope.expressions, name, supplied->second);
+                const std::optional<bool> state_binding =
+                    required(schema, "stateBinding").boolean();
+                if (!state_binding.has_value()) {
+                    throw std::logic_error(
+                        "validated component parameter binding flag changed type"
+                    );
+                }
+                bind_expression(
+                    component_scope.expressions,
+                    name,
+                    supplied->second,
+                    *state_binding
+                );
             } else {
                 const JsonValue default_value = required(parameter, "default");
                 const runtime::ExpressionValue evaluated = default_value.is_null()
@@ -1860,7 +1887,19 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_component_templ
         const std::string name(string_field(schema, "name"));
         const auto supplied = arguments.find(name);
         if (supplied != arguments.end()) {
-            bind_expression(component_scope.expressions, name, supplied->second);
+            const std::optional<bool> state_binding =
+                required(schema, "stateBinding").boolean();
+            if (!state_binding.has_value()) {
+                throw std::logic_error(
+                    "validated component template parameter binding flag changed type"
+                );
+            }
+            bind_expression(
+                component_scope.expressions,
+                name,
+                supplied->second,
+                *state_binding
+            );
             continue;
         }
         const JsonValue default_value = required(parameter, "default");
