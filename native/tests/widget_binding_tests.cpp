@@ -1487,6 +1487,12 @@ style CachedMenuItem {
   background: #223344FF;
 }
 
+style CachedContextArea {
+  width: 300;
+  height: 40;
+  background: #445566FF;
+}
+
 component CachedTrigger(key: key, label: string, enabled: boolean, expanded: boolean) {
   Panel(key: key, style: CachedMenuTrigger)
 }
@@ -1528,12 +1534,33 @@ component CachedMenu(key: key) {
   )
 }
 
+component ForwardedContextMenu(key: key, select: action) {
+  ContextMenu(
+    key: key,
+    items: [
+      { id: "bind", label: "Set context keybind" },
+      { id: "remove", label: "Remove context binding" }
+    ],
+    popupTemplate: CachedPopup,
+    itemTemplate: CachedItem,
+    onSelect: select
+  ) {
+    Panel(style: CachedContextArea) {
+      Text(text: "Right-click for context actions")
+    }
+  }
+}
+
 component CachedMenuList() {
   Panel(style: CachedMenuRoot) {
     Text(text: "Menus")
     for entry in [{ key: "cached.loop.menu" }] {
       CachedMenu(key: entry.key)
     }
+    ForwardedContextMenu(
+      key: "uncached.context.menu",
+      select: action("notification.raise", message: "context selected")
+    )
   }
 }
 
@@ -1589,6 +1616,42 @@ overlay Main { root CachedMenuList() }
             surface.tree().find_key("cached.loop.menu.popup.surface.0") != nullptr &&
             surface.tree().find_key("cached.loop.menu.item.0") != nullptr,
         "component cache dropped a retained Menu refresh through an annotated loop root"
+    );
+
+    static_cast<void>(surface.input().key("escape"));
+    static_cast<void>(surface.frame(3'000'000));
+    const strata::ui::RetainedNode* context =
+        surface.tree().find_key("uncached.context.menu");
+    const strata::ui::LayoutRecord* context_layout = context != nullptr
+        ? surface.layout().find(context->identity())
+        : nullptr;
+    check(
+        context != nullptr && context_layout != nullptr,
+        "forwarded authored ContextMenu was not retained or laid out"
+    );
+    const strata::ui::Point context_point{
+        context_layout->bounds.x + context_layout->bounds.width * 0.5,
+        context_layout->bounds.y + context_layout->bounds.height * 0.5,
+    };
+    static_cast<void>(surface.input().enqueue_pointer(strata::ui::PointerInputEvent{
+        context_point,
+        strata::ui::PointerEventType::press,
+        7,
+        1,
+    }));
+    static_cast<void>(surface.input().enqueue_pointer(strata::ui::PointerInputEvent{
+        context_point,
+        strata::ui::PointerEventType::release,
+        7,
+        1,
+    }));
+    static_cast<void>(surface.frame(4'000'000));
+    context = surface.tree().find_key("uncached.context.menu");
+    check(
+        context != nullptr && context->children().size() == 2U &&
+            surface.tree().find_key("uncached.context.menu.popup.surface.0") != nullptr &&
+            surface.tree().find_key("uncached.context.menu.item.0") != nullptr,
+        "uncached component boundary dropped an authored ContextMenu retained refresh"
     );
 }
 

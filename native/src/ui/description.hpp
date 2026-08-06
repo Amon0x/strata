@@ -180,6 +180,7 @@ private:
     );
     void capture_retained_snapshot();
     void replay_component_effects(const ComponentEffects& effects);
+    void absorb_uncached_component_effects(const ComponentEffects& effects);
     [[nodiscard]] std::shared_ptr<const DescriptionNode> build_component_body(
         std::string_view component,
         Scope scope,

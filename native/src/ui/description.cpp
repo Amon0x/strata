@@ -1340,7 +1340,17 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
             key = lifecycle->describe.implicit_key_prefix + source_path;
         }
     }
-    const RetainedQuery retained_query{key, source_path, scope.runtime_state_scope, type};
+    const WidgetLifecycle* const widget = widgets_.find(type);
+    const std::string retained_type =
+        widget != nullptr && !widget->describe.canonical_type.empty()
+            ? widget->describe.canonical_type
+            : type;
+    const RetainedQuery retained_query{
+        key,
+        source_path,
+        scope.runtime_state_scope,
+        retained_type,
+    };
     const RetainedDescriptionSnapshot::Node* retained = retained_widget(retained_query);
     RetainedDescriptionSnapshot::Node durable_retained;
     if (retained == nullptr) {
@@ -1568,6 +1578,14 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
                     std::move(rebuild_scope),
                 });
             } else {
+                if (inputs.has_value()) {
+                    for (ComponentEffects* const component_effect :
+                         component_effect_stack_) {
+                        component_effect->direct_descendant_cache_keys.erase(cache_key);
+                        component_effect->descendant_cache_keys.erase(cache_key);
+                    }
+                }
+                absorb_uncached_component_effects(effects);
                 component_cache_.erase(cache_key);
             }
         }
@@ -2240,6 +2258,60 @@ void DescriptionBuilder::replay_component_effects(const ComponentEffects& effect
             binding.declaration_scope,
             binding.address_scope
         );
+    }
+}
+
+void DescriptionBuilder::absorb_uncached_component_effects(
+    const ComponentEffects& effects
+) {
+    if (component_effect_stack_.empty()) return;
+    ComponentEffects& parent = *component_effect_stack_.back();
+    parent.host_values.insert(effects.host_values.begin(), effects.host_values.end());
+    parent.state_values.insert(effects.state_values.begin(), effects.state_values.end());
+    parent.state_bindings.insert(
+        effects.state_bindings.begin(),
+        effects.state_bindings.end()
+    );
+    parent.owned_state_scopes.insert(
+        effects.owned_state_scopes.begin(),
+        effects.owned_state_scopes.end()
+    );
+    parent.direct_descendant_cache_keys.insert(
+        effects.direct_descendant_cache_keys.begin(),
+        effects.direct_descendant_cache_keys.end()
+    );
+    parent.descendant_cache_keys.insert(
+        effects.descendant_cache_keys.begin(),
+        effects.descendant_cache_keys.end()
+    );
+    for (const RetainedValueEffects& source : effects.retained_values) {
+        auto destination = std::ranges::find(
+            parent.retained_values,
+            source.query,
+            &RetainedValueEffects::query
+        );
+        if (destination == parent.retained_values.end()) {
+            parent.retained_values.push_back(source);
+            continue;
+        }
+        destination->values.insert(source.values.begin(), source.values.end());
+    }
+    for (const RetainedSequenceEffect& source : effects.retained_sequences) {
+        auto destination = std::ranges::find(
+            parent.retained_sequences,
+            source.query,
+            &RetainedSequenceEffect::query
+        );
+        if (destination == parent.retained_sequences.end()) {
+            parent.retained_sequences.push_back(source);
+            continue;
+        }
+        destination->sequence = source.sequence;
+        destination->generation = source.generation;
+    }
+    if (effects.captures_retained_snapshot) {
+        parent.captures_retained_snapshot = true;
+        parent.retained_snapshot = effects.retained_snapshot;
     }
 }
 
