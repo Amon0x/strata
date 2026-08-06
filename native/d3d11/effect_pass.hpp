@@ -44,6 +44,19 @@ class EffectPassRenderer final {
         bool dirty_all,
         std::span<const host::GeometryDirtyRegion> dirty_regions
     );
+    /** Returns whether any SURFACE effect must refresh rather than reuse its retained sample. */
+    [[nodiscard]] bool surface_backdrop_required(
+        std::string_view layer_id,
+        std::span<const host::SubmissionBatch> batches,
+        double logical_width,
+        double logical_height,
+        double frame_seconds
+    );
+    /**
+     * Starts one Surface layer and captures its incoming framebuffer only when preflight found a
+     * SURFACE effect whose retained sample is due for refresh.
+     */
+    void begin_surface(ID3D11Texture2D* target_texture, bool capture_backdrop);
     void release_layer(std::string_view layer_id) noexcept;
     void declare_pass(std::string_view effect_id, std::uint32_t index, std::uint32_t kind,
                       double radius, std::uint32_t downsample, std::uint32_t radius_parameter,

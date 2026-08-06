@@ -416,8 +416,8 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     Reader input(bytes);
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
-        input.u32() != 9U) {
-        throw std::invalid_argument("render packet decoder requires protocol v9");
+        input.u32() != STRATA_RENDER_PACKET_VERSION_CURRENT) {
+        throw std::invalid_argument("render packet decoder requires protocol v10");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();
@@ -579,6 +579,11 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             effect.effect = batch.text();
             effect.opacity = batch.number();
             effect.refresh_rate = batch.number();
+            const std::uint32_t backdrop_source = batch.u32();
+            if (backdrop_source > static_cast<std::uint32_t>(EffectBackdropSource::surface)) {
+                throw std::invalid_argument("render effect backdrop source is unknown");
+            }
+            effect.backdrop_source = static_cast<EffectBackdropSource>(backdrop_source);
             effect.parameter_count = batch.u32();
             if (effect.effect.empty() || effect.parameter_count > effect.parameters.size() ||
                 !std::isfinite(effect.x) || !std::isfinite(effect.y) ||
@@ -590,6 +595,12 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
                     effect.radii,
                     [](const double value) { return !std::isfinite(value) || value < 0.0; })) {
                 throw std::invalid_argument("render effect batch is outside the portable domain");
+            }
+            if (effect.kind != EffectBatchKind::backdrop &&
+                effect.backdrop_source != EffectBackdropSource::current) {
+                throw std::invalid_argument(
+                    "content effects cannot select a backdrop source"
+                );
             }
             for (std::uint32_t parameter = 0U; parameter < effect.parameter_count; ++parameter) {
                 effect.parameters[parameter] = batch.number();

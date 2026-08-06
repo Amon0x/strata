@@ -120,12 +120,18 @@ enum class EffectInput : std::uint32_t {
     shape = 2U,
 };
 
+enum class EffectBackdropSource : std::uint32_t {
+    current = 0U,
+    surface = 1U,
+};
+
 /** Default visual sampling ceiling for live effects; zero explicitly means unbounded. */
 inline constexpr double default_effect_refresh_rate = 240.0;
 
 struct EffectState final {
     std::string id;
     EffectInput input = EffectInput::backdrop;
+    EffectBackdropSource backdrop_source = EffectBackdropSource::current;
     double opacity = 1.0;
     double refresh_rate = default_effect_refresh_rate;
     bool refresh_rate_valid = true;

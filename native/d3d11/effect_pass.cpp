@@ -448,9 +448,33 @@ struct EffectPassRenderer::Impl final {
         format = next_format;
         content_targets.clear();
         processing.reset();
+        surface_backdrop.reset();
+        surface_backdrop_available = false;
         cached_samples.clear();
         layer_epochs.clear();
         blur.resize(width, height, format);
+    }
+
+    void begin_surface(
+        ID3D11Texture2D* const target_texture,
+        const bool capture_backdrop
+    ) {
+        surface_backdrop_available = false;
+        if (!capture_backdrop)
+            return;
+        if (target_texture == nullptr) {
+            throw std::invalid_argument(
+                "D3D11 surface backdrop capture requires a target texture"
+            );
+        }
+        if (!surface_backdrop.has_value()) {
+            surface_backdrop.emplace(target());
+        }
+        context->OMSetRenderTargets(0U, nullptr, nullptr);
+        ID3D11ShaderResourceView* cleared[]{nullptr, nullptr};
+        context->PSSetShaderResources(0U, 2U, cleared);
+        context->CopyResource(surface_backdrop->texture.Get(), target_texture);
+        surface_backdrop_available = true;
     }
 
     void begin_layer(
@@ -483,6 +507,52 @@ struct EffectPassRenderer::Impl final {
             );
             if (!dirty) sample.geometry_epoch = geometry_epoch;
         }
+    }
+
+    [[nodiscard]] bool surface_backdrop_required(
+        const std::string_view layer_id,
+        const std::span<const host::SubmissionBatch> batches,
+        const double logical_width,
+        const double logical_height,
+        const double frame_seconds
+    ) {
+        complete_shader_programs();
+        const auto layer_epoch = layer_epochs.find(std::string(layer_id));
+        for (const host::SubmissionBatch& batch : batches) {
+            const auto* effect = std::get_if<host::EffectBatch>(&batch);
+            if (effect == nullptr ||
+                effect->kind != host::EffectBatchKind::backdrop ||
+                effect->backdrop_source != host::EffectBackdropSource::surface) {
+                continue;
+            }
+            const D3D11_RECT clip =
+                effect_scissor(*effect, width, height, logical_width, logical_height);
+            const std::uint32_t sample_width =
+                static_cast<std::uint32_t>(std::max<LONG>(0, clip.right - clip.left));
+            const std::uint32_t sample_height =
+                static_cast<std::uint32_t>(std::max<LONG>(0, clip.bottom - clip.top));
+            if (sample_width == 0U || sample_height == 0U)
+                continue;
+            if (effect->refresh_rate <= 0.0)
+                return true;
+            const CacheKey key{std::string(layer_id), effect->source_order, false};
+            const auto cached = cached_samples.find(key);
+            if (cached == cached_samples.end() ||
+                cached->second.width != sample_width ||
+                cached->second.height != sample_height ||
+                cached->second.left != clip.left ||
+                cached->second.top != clip.top ||
+                cached->second.effect != *effect ||
+                layer_epoch == layer_epochs.end() ||
+                cached->second.geometry_epoch != layer_epoch->second ||
+                frame_seconds < cached->second.sampled_seconds) {
+                return true;
+            }
+            const double interval = 1.0 / effect->refresh_rate;
+            if (frame_seconds - cached->second.sampled_seconds + 1.0e-9 >= interval)
+                return true;
+        }
+        return false;
     }
 
     [[nodiscard]] Target target() const {
@@ -666,9 +736,11 @@ struct EffectPassRenderer::Impl final {
     }
 
     [[nodiscard]] EffectPassTelemetry
-    apply(const std::string_view layer_id, const bool content, const std::size_t depth,
-          const host::EffectBatch& effect, ID3D11Texture2D* const source_texture,
-          ID3D11RenderTargetView* const source_target, ID3D11Texture2D* const backdrop_texture,
+    apply(const std::string_view layer_id, const bool content, const bool surface_source,
+          const std::size_t depth, const host::EffectBatch& effect,
+          ID3D11Texture2D* const source_texture,
+          ID3D11RenderTargetView* const source_target,
+          ID3D11Texture2D* const backdrop_texture,
           ID3D11RenderTargetView* const destination, const double logical_width,
           const double logical_height, const double frame_seconds) {
         const auto started = std::chrono::steady_clock::now();
@@ -718,16 +790,31 @@ struct EffectPassRenderer::Impl final {
                 height,
             };
         }
+        ID3D11Texture2D* resolved_source = source_texture;
+        ID3D11Texture2D* resolved_backdrop = backdrop_texture;
+        ID3D11ShaderResourceView* direct_backdrop = nullptr;
+        if (surface_source) {
+            if (!surface_backdrop_available || !surface_backdrop.has_value()) {
+                throw std::logic_error(
+                    "D3D11 SURFACE backdrop refresh has no captured Surface input"
+                );
+            }
+            resolved_source = surface_backdrop->texture.Get();
+            resolved_backdrop = resolved_source;
+            direct_backdrop = surface_backdrop->view.Get();
+        }
         Workspace& work = processing_workspace(depth);
         context->OMSetRenderTargets(0U, nullptr, nullptr);
         ID3D11ShaderResourceView* cleared[]{nullptr, nullptr};
         context->PSSetShaderResources(0U, 2U, cleared);
         Target* current = &work.capture;
-        if (source_texture != current->texture.Get()) {
-            context->CopyResource(current->texture.Get(), source_texture);
+        if (resolved_source != current->texture.Get()) {
+            context->CopyResource(current->texture.Get(), resolved_source);
         }
-        context->CopyResource(work.backdrop.texture.Get(), backdrop_texture);
-        ID3D11ShaderResourceView* const backdrop = work.backdrop.view.Get();
+        if (direct_backdrop == nullptr) {
+            context->CopyResource(work.backdrop.texture.Get(), resolved_backdrop);
+            direct_backdrop = work.backdrop.view.Get();
+        }
         EffectPassTelemetry telemetry;
         const auto program = programs.find(effect.effect);
         if (program != programs.end()) {
@@ -756,7 +843,7 @@ struct EffectPassRenderer::Impl final {
                     Target* next = current == &work.ping ? &work.pong : &work.ping;
                     const float clear[4]{};
                     context->ClearRenderTargetView(next->target.Get(), clear);
-                    draw_pass(shader->second.shader.Get(), current->view.Get(), backdrop,
+                    draw_pass(shader->second.shader.Get(), current->view.Get(), direct_backdrop,
                               next->target.Get(),
                               effect, logical_width, logical_height, frame_seconds,
                               replace_blend.Get());
@@ -787,7 +874,7 @@ struct EffectPassRenderer::Impl final {
             draw_cached(cached->second, destination, effect, logical_width, logical_height,
                         frame_seconds);
         } else {
-            draw_pass(composite.Get(), current->view.Get(), backdrop, destination, effect,
+            draw_pass(composite.Get(), current->view.Get(), direct_backdrop, destination, effect,
                       logical_width, logical_height, frame_seconds, composite_blend.Get());
         }
         ++telemetry.passes;
@@ -818,10 +905,12 @@ struct EffectPassRenderer::Impl final {
     std::unique_ptr<RoundedClipBuffer> rounded_clips;
     std::vector<Target> content_targets;
     std::optional<Workspace> processing;
+    std::optional<Target> surface_backdrop;
     std::map<std::string, std::vector<Pass>, std::less<>> programs;
     std::map<std::string, ShaderProgram, std::less<>> shader_programs;
     std::map<CacheKey, CachedSample> cached_samples;
     std::map<std::string, std::uint64_t, std::less<>> layer_epochs;
+    bool surface_backdrop_available = false;
     bool asynchronous_shader_compilation = false;
 };
 
@@ -865,6 +954,29 @@ void EffectPassRenderer::begin_layer(
     const std::span<const host::GeometryDirtyRegion> dirty_regions
 ) {
     impl_->begin_layer(layer_id, geometry_epoch, dirty_all, dirty_regions);
+}
+
+bool EffectPassRenderer::surface_backdrop_required(
+    const std::string_view layer_id,
+    const std::span<const host::SubmissionBatch> batches,
+    const double logical_width,
+    const double logical_height,
+    const double frame_seconds
+) {
+    return impl_->surface_backdrop_required(
+        layer_id,
+        batches,
+        logical_width,
+        logical_height,
+        frame_seconds
+    );
+}
+
+void EffectPassRenderer::begin_surface(
+    ID3D11Texture2D* const target_texture,
+    const bool capture_backdrop
+) {
+    impl_->begin_surface(target_texture, capture_backdrop);
 }
 
 void EffectPassRenderer::release_layer(const std::string_view layer_id) noexcept {
@@ -941,8 +1053,20 @@ EffectPassTelemetry EffectPassRenderer::apply_backdrop(
     const std::string_view layer_id, const std::size_t depth, const host::EffectBatch& effect,
     ID3D11Texture2D* const target_texture, ID3D11RenderTargetView* const target,
     const double logical_width, const double logical_height, const double frame_seconds) {
-    return impl_->apply(layer_id, false, depth, effect, target_texture, target, target_texture,
-                        target, logical_width, logical_height, frame_seconds);
+    return impl_->apply(
+        layer_id,
+        false,
+        effect.backdrop_source == host::EffectBackdropSource::surface,
+        depth,
+        effect,
+        target_texture,
+        target,
+        target_texture,
+        target,
+        logical_width,
+        logical_height,
+        frame_seconds
+    );
 }
 
 EffectPassTelemetry EffectPassRenderer::finish_content(
@@ -950,9 +1074,20 @@ EffectPassTelemetry EffectPassRenderer::finish_content(
     ID3D11Texture2D* const backdrop_texture, ID3D11RenderTargetView* const destination,
     const double logical_width, const double logical_height, const double frame_seconds) {
     Impl::Target& content = impl_->content_target(depth);
-    return impl_->apply(layer_id, true, depth, effect, content.texture.Get(), content.target.Get(),
-                        backdrop_texture, destination, logical_width, logical_height,
-                        frame_seconds);
+    return impl_->apply(
+        layer_id,
+        true,
+        false,
+        depth,
+        effect,
+        content.texture.Get(),
+        content.target.Get(),
+        backdrop_texture,
+        destination,
+        logical_width,
+        logical_height,
+        frame_seconds
+    );
 }
 
 } // namespace strata::d3d11

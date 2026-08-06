@@ -178,7 +178,10 @@ using data::JsonValue;
     const std::string_view input = value.input == EffectInput::content ? "CONTENT"
                                    : value.input == EffectInput::shape ? "SHAPE"
                                                                        : "BACKDROP";
+    const std::string_view backdrop_source =
+        value.backdrop_source == EffectBackdropSource::surface ? "SURFACE" : "CURRENT";
     return object({
+        {"backdropSource", JsonValue(std::string(backdrop_source))},
         {"id", JsonValue(value.id)},
         {"input", JsonValue(std::string(input))},
         {"opacity", JsonValue(value.opacity)},

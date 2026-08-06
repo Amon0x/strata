@@ -25,6 +25,9 @@ strata::ui::EffectState effect(const strata::ui::EffectInput input) {
     strata::ui::EffectState result;
     result.id = "test:effect";
     result.input = input;
+    if (input == strata::ui::EffectInput::backdrop) {
+        result.backdrop_source = strata::ui::EffectBackdropSource::surface;
+    }
     result.opacity = 0.75;
     result.refresh_rate = 120.0;
     result.parameters.push_back(
@@ -97,13 +100,15 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
 
     host::RenderPacketDecoder decoder;
     const std::vector<std::uint8_t> encoded = encode(commands, resources);
-    check(encoded.size() > 12U && encoded[8U] == 9U,
-          "effect packet did not use render protocol v9");
+    check(encoded.size() > 12U &&
+              encoded[8U] == static_cast<std::uint8_t>(STRATA_RENDER_PACKET_VERSION_CURRENT),
+          "effect packet did not use render protocol v10");
     const host::RenderPacket packet = decoder.decode(encoded);
     check(packet.batches.size() == 4U, "effect packet changed its ordered batch count");
     const auto* backdrop = std::get_if<host::EffectBatch>(&packet.batches[0U]);
     const auto* content = std::get_if<host::EffectBatch>(&packet.batches[1U]);
     check(backdrop != nullptr && backdrop->kind == host::EffectBatchKind::backdrop &&
+              backdrop->backdrop_source == host::EffectBackdropSource::surface &&
               backdrop->effect == "test:effect" && backdrop->parameter_count == 1U &&
               backdrop->parameters[0U] == 12.0 && backdrop->refresh_rate == 120.0,
           "backdrop effect batch lost its typed program state");
@@ -236,6 +241,74 @@ void test_invalid_effect_refresh_rate_is_rejected(const std::filesystem::path& r
         rejected = true;
     }
     check(rejected, "packet decoder accepted a negative effect refresh rate");
+}
+
+void test_invalid_effect_backdrop_source_is_rejected(const std::filesystem::path& resources) {
+    using namespace strata;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::BackdropEffectRenderCommand{
+        ui::Rect{0.0, 0.0, 20.0, 20.0},
+        {},
+        effect(ui::EffectInput::backdrop),
+    });
+    std::vector<std::uint8_t> encoded = encode(commands, resources);
+    const std::vector<std::size_t> offsets = batch_kind_offsets(encoded);
+    check(offsets.size() == 1U, "backdrop-source fixture changed its batch shape");
+    const std::size_t effect_record = offsets.front() + 2U * sizeof(std::uint32_t);
+    const std::size_t effect_id_length_offset =
+        effect_record + 2U * sizeof(std::uint32_t) +
+        4U * sizeof(std::uint32_t) + 8U * sizeof(double);
+    const std::size_t opacity_offset =
+        effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
+    const std::uint32_t invalid_backdrop_source = 2U;
+    std::memcpy(
+        encoded.data() + opacity_offset + 2U * sizeof(double),
+        &invalid_backdrop_source,
+        sizeof(invalid_backdrop_source)
+    );
+    bool rejected = false;
+    try {
+        host::RenderPacketDecoder decoder;
+        static_cast<void>(decoder.decode(encoded));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    check(rejected, "packet decoder accepted an unknown effect backdrop source");
+}
+
+void test_content_effect_backdrop_source_is_rejected(const std::filesystem::path& resources) {
+    using namespace strata;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::ContentEffectPushRenderCommand{
+        ui::Rect{0.0, 0.0, 20.0, 20.0},
+        {},
+        effect(ui::EffectInput::content),
+    });
+    commands.append(ui::ContentEffectPopRenderCommand{});
+    std::vector<std::uint8_t> encoded = encode(commands, resources);
+    const std::vector<std::size_t> offsets = batch_kind_offsets(encoded);
+    check(offsets.size() == 2U, "content-source fixture changed its batch shape");
+    const std::size_t effect_record = offsets.front() + 2U * sizeof(std::uint32_t);
+    const std::size_t effect_id_length_offset =
+        effect_record + 2U * sizeof(std::uint32_t) +
+        4U * sizeof(std::uint32_t) + 8U * sizeof(double);
+    const std::size_t opacity_offset =
+        effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
+    const std::uint32_t surface_backdrop_source =
+        static_cast<std::uint32_t>(host::EffectBackdropSource::surface);
+    std::memcpy(
+        encoded.data() + opacity_offset + 2U * sizeof(double),
+        &surface_backdrop_source,
+        sizeof(surface_backdrop_source)
+    );
+    bool rejected = false;
+    try {
+        host::RenderPacketDecoder decoder;
+        static_cast<void>(decoder.decode(encoded));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    check(rejected, "packet decoder accepted SURFACE sampling on a content effect");
 }
 
 void test_unbalanced_content_effect_is_rejected(const std::filesystem::path& resources) {
@@ -472,6 +545,8 @@ int main(const int argument_count, const char* const* const arguments) {
         test_rounded_clip_batches_round_trip(arguments[1]);
         test_large_scale_rounded_clip_round_trip(arguments[1]);
         test_invalid_effect_refresh_rate_is_rejected(arguments[1]);
+        test_invalid_effect_backdrop_source_is_rejected(arguments[1]);
+        test_content_effect_backdrop_source_is_rejected(arguments[1]);
         test_unbalanced_content_effect_is_rejected(arguments[1]);
         test_repeated_epoch_still_validates_batches(arguments[1]);
         test_content_effect_depth_is_bounded(arguments[1]);

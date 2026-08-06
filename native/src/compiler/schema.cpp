@@ -1233,9 +1233,10 @@ void SchemaRegistry::apply_scenario_declarations(const data::JsonValue& schemas)
             std::size_t slots = 0U;
             for (const data::JsonValue& parameter : array_field(value, "parameters")) {
                 SchemaParameter declared = parse_parameter(parameter);
-                if (declared.name == "refreshRate") {
+                if (declared.name == "refreshRate" || declared.name == "backdropSource") {
                     throw std::runtime_error("effect '" + schema.name +
-                                             "' uses reserved parameter name 'refreshRate'");
+                                             "' uses reserved parameter name '" +
+                                             declared.name + "'");
                 }
                 if (const data::JsonValue* material_type = parameter.find("effectType");
                     material_type != nullptr && material_type->string() != nullptr) {

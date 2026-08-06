@@ -217,7 +217,10 @@ planning remain in the runtime.
 Render effects are also application declarations, not native widgets. A typed ordered effect
 program can filter the already-rendered backdrop or isolate and filter a component subtree. D3D11
 executes blur and authored HLSL passes; the software host runs the declared blur subset and applies
-the same bounds, rounded mask, opacity, and content composition deterministically. See
+the same bounds, rounded mask, opacity, and content composition deterministically.
+`backdropSource: "SURFACE"` lets nested `BACKDROP` effects sample the framebuffer from before the
+current Surface began, so parent fills do not become an accidental glass input and nested surfaces
+do not require inverse alpha calculations. See
 [the language guide](strata-language.md#authored-render-effects).
 
 ## 3. Native extensions

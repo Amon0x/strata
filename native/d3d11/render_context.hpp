@@ -19,7 +19,7 @@ struct RenderPacket;
 
 namespace strata::d3d11 {
 
-/** Shared D3D11 packet-v9 pipeline for swap-chain and offscreen targets. */
+/** Shared D3D11 packet-v10 pipeline for swap-chain and offscreen targets. */
 class RenderContext final {
   public:
     explicit RenderContext(

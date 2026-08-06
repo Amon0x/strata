@@ -98,8 +98,14 @@ enum class EffectBatchKind : std::uint32_t {
     content_begin = 3U,
 };
 
+enum class EffectBackdropSource : std::uint32_t {
+    current = 0U,
+    surface = 1U,
+};
+
 struct EffectBatch final {
     EffectBatchKind kind = EffectBatchKind::backdrop;
+    EffectBackdropSource backdrop_source = EffectBackdropSource::current;
     std::uint32_t source_order = 0U;
     Scissor scissor;
     double x = 0.0;

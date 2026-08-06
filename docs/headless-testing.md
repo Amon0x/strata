@@ -3,7 +3,7 @@
 `strata_headless` is a deterministic host for complete `.strata` applications. It is not a second
 UI runtime and it contains no widget-specific test hooks. The tool uses the public C ABI to compile
 and activate an application, create a normal `Surface`, enqueue ordinary input, frame it against a
-caller-owned clock, and consume render packet v9.
+caller-owned clock, and consume render packet v10.
 
 Each capture contains both views needed by automated testing:
 

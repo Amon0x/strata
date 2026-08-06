@@ -1,6 +1,6 @@
 # Rendering into a host-owned D3D11 target
 
-`Strata::d3d11` submits decoded packet-v9 layers into a D3D11 device, immediate context, texture,
+`Strata::d3d11` submits decoded packet-v10 layers into a D3D11 device, immediate context, texture,
 and render-target view owned by an embedding application. It does not create a window or swap
 chain, clear existing content by default, resize host resources, or present. This makes it suitable
 for engines, editors, overlays, plug-ins, and applications that already own their graphics loop.
@@ -9,7 +9,7 @@ The target is intentionally separate from the UI runtime:
 
 ```text
 any Strata language binding
-  -> stable Surface packet-v9 bytes
+  -> stable Surface packet-v10 bytes
   -> backend-specific presenter or Strata::render_host decoder
   -> host-owned graphics target
 ```

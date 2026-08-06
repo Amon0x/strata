@@ -66,6 +66,11 @@ namespace {
     }
     EffectState result;
     result.id = *id_value->string();
+    if (const runtime::Value* backdrop_source = value->field("backdropSource");
+        backdrop_source != nullptr && backdrop_source->string() != nullptr &&
+        *backdrop_source->string() == "SURFACE") {
+        result.backdrop_source = EffectBackdropSource::surface;
+    }
     if (const runtime::Value* opacity = value->field("opacity");
         opacity != nullptr && opacity->number() != nullptr) {
         result.opacity = std::clamp(*opacity->number(), 0.0, 1.0);

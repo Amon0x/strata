@@ -1312,12 +1312,17 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const JsonValue expression,
     }
     if (name == "effect") {
         std::vector<std::pair<std::string, Value>> arguments;
+        std::optional<Value> backdrop_source;
         std::optional<Value> refresh_rate;
         for (const JsonValue entry : array_field(expression, "arguments")) {
             const JsonValue argument_name = required(entry, "name");
             const std::optional<std::string_view> encoded_name = argument_name.string();
             if (!encoded_name.has_value() || *encoded_name == "name")
                 continue;
+            if (*encoded_name == "backdropSource") {
+                backdrop_source = require_value(evaluate(required(entry, "value"), scope), entry);
+                continue;
+            }
             if (*encoded_name == "refreshRate") {
                 refresh_rate = require_value(evaluate(required(entry, "value"), scope), entry);
                 continue;
@@ -1329,6 +1334,9 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const JsonValue expression,
             {"arguments", Value(std::move(arguments))},
             {"name", argument(expression, scope, "name", 0U)},
         };
+        if (backdrop_source.has_value()) {
+            fields.emplace_back("backdropSource", std::move(*backdrop_source));
+        }
         if (refresh_rate.has_value()) {
             fields.emplace_back("refreshRate", std::move(*refresh_rate));
         }

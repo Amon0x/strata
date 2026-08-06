@@ -1315,20 +1315,28 @@ void test_authored_effect_schema_and_semantics() {
       "widgets":{"registry":"test","required":[],"definitions":[]},
       "actions":{"registry":"test","required":[],"definitions":[]},
       "host":[],
-      "effects":{"definitions":[{
-        "id":"test:glass",
-        "input":"BACKDROP",
-        "parameters":[
-          {"name":"radius","effectType":"FLOAT","type":{"kind":"number"},
-           "required":true,"nullable":false,"aliases":[],"default":null},
-          {"name":"tint","effectType":"COLOR","type":{"kind":"color"},
-           "required":true,"nullable":false,"aliases":[],"default":null}
-        ],
-        "passes":[
-          {"kind":"BLUR","radiusParameter":"radius","downsample":2},
-          {"kind":"SHADER","shaders":{"hlsl":"test/glass.hlsl"}}
-        ]
-      }]}
+      "effects":{"definitions":[
+        {
+          "id":"test:glass",
+          "input":"BACKDROP",
+          "parameters":[
+            {"name":"radius","effectType":"FLOAT","type":{"kind":"number"},
+             "required":true,"nullable":false,"aliases":[],"default":null},
+            {"name":"tint","effectType":"COLOR","type":{"kind":"color"},
+             "required":true,"nullable":false,"aliases":[],"default":null}
+          ],
+          "passes":[
+            {"kind":"BLUR","radiusParameter":"radius","downsample":2},
+            {"kind":"SHADER","shaders":{"hlsl":"test/glass.hlsl"}}
+          ]
+        },
+        {
+          "id":"test:soft-content",
+          "input":"CONTENT",
+          "parameters":[],
+          "passes":[{"kind":"BLUR","radius":0.0,"downsample":1}]
+        }
+      ]}
     })"));
     const compiler::EffectSchema* declared = schema.effect("test:glass");
     check(declared != nullptr && declared->input == "BACKDROP" &&
@@ -1345,10 +1353,42 @@ void test_authored_effect_schema_and_semantics() {
     };
     const compiler::SemanticResult valid = validate(R"(
       overlay Main {
-        root Panel(effect: effect("test:glass", refreshRate: 120, radius: 12, tint: #7DB8FF44))
+        root Panel(effect: effect(
+          "test:glass",
+          backdropSource: "SURFACE",
+          refreshRate: 120,
+          radius: 12,
+          tint: #7DB8FF44
+        ))
       }
     )");
     check(valid.diagnostics.empty(), "valid authored effect call produced diagnostics");
+    const compiler::SemanticResult invalid_backdrop_source = validate(R"(
+      overlay Main {
+        root Panel(effect: effect(
+          "test:glass", backdropSource: "PARENT", radius: 12, tint: #7DB8FF44
+        ))
+      }
+    )");
+    check(std::ranges::any_of(invalid_backdrop_source.diagnostics,
+                              [](const compiler::Diagnostic& value) {
+                                  return value.code == "STRATA.DSL.SEMANTIC_TYPE_MISMATCH" &&
+                                         value.component_path.has_value() &&
+                                         value.component_path->ends_with(".backdropSource");
+                              }),
+          "unknown authored effect backdrop source bypassed semantic validation");
+    const compiler::SemanticResult content_backdrop_source = validate(R"(
+      overlay Main {
+        root Panel(effect: effect("test:soft-content", backdropSource: "SURFACE"))
+      }
+    )");
+    check(std::ranges::any_of(content_backdrop_source.diagnostics,
+                              [](const compiler::Diagnostic& value) {
+                                  return value.code == "STRATA.DSL.SEMANTIC_TYPE_MISMATCH" &&
+                                         value.component_path.has_value() &&
+                                         value.component_path->ends_with(".backdropSource");
+                              }),
+          "CONTENT effect accepted a backdrop source");
     const compiler::SemanticResult unbounded = validate(R"(
       overlay Main {
         root Panel(effect: effect(

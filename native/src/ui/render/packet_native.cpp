@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include <strata/strata.h>
+
 #include "font/atlas.hpp"
 #include "resource/image.hpp"
 #include "ui/render/submission.hpp"
@@ -171,6 +173,7 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
         output.text(batch.effect->id);
         output.number(batch.effect->opacity);
         output.number(batch.effect->refresh_rate);
+        output.integer(static_cast<std::uint32_t>(batch.effect->backdrop_source));
         output.integer(batch.effect->packed_parameter_count);
         for (std::uint32_t index = 0U; index < batch.effect->packed_parameter_count; ++index) {
             output.number(batch.effect->packed_parameters[index]);
@@ -239,7 +242,7 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     constexpr std::string_view magic = "STRATARP";
     output.raw(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(magic.data()),
                                              magic.size()));
-    output.integer(std::uint32_t{9U});
+    output.integer(STRATA_RENDER_PACKET_VERSION_CURRENT);
     if (texture_resources.size() > std::numeric_limits<std::size_t>::max() - resources.size()) {
         throw std::length_error("render resource count exceeds size_t");
     }

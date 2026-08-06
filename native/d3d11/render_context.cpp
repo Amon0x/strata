@@ -636,6 +636,14 @@ struct RenderContext::Impl final {
             packet.geometry_dirty_all,
             packet.geometry_dirty_regions
         );
+        const bool capture_surface_backdrop = effects->surface_backdrop_required(
+            id,
+            packet.batches,
+            logical_width,
+            logical_height,
+            current_frame_seconds
+        );
+        effects->begin_surface(target_texture.Get(), capture_surface_backdrop);
         bind_draw_pipeline(retained, target.Get());
         struct ContentLayer final {
             EffectBatch effect;

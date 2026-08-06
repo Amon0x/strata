@@ -448,6 +448,26 @@ Apply the program through the ordinary widget/style effect field:
 Panel(effect: effect("demo:optic-glass", blurRadius: 18, tint: #7DB8FF35))
 ```
 
+`BACKDROP` effects sample pixels already rendered behind the widget by default. A nested glass
+surface can instead sample the framebuffer as it existed immediately before this Surface started
+rendering:
+
+```strata
+Panel(effect: effect(
+  "demo:optic-glass",
+  backdropSource: "SURFACE",
+  blurRadius: 18,
+  tint: #7DB8FF35
+))
+```
+
+`backdropSource` is `"CURRENT"` by default. `"SURFACE"` is useful for independently authored
+nested glass: its filtered output composites into the current widget position, but its samples are
+not polluted by parent fills or earlier effects from the same Surface. In an overlay host, the
+incoming Surface framebuffer is the game, window, or lower UI layer already present in the target.
+Only `BACKDROP` effects accept this argument; `CONTENT` effects always filter their isolated
+subtree.
+
 Live effects default to a maximum refresh rate of 240 Hz. The renderer continues composing every
 application frame while reusing the latest filtered sample between refreshes; animation time is
 absolute, so a sampled shader does not run in slow motion. `refreshRate` is a generic effect
@@ -472,8 +492,9 @@ composition, and clips work to the intersection of the effect bounds and inherit
 The D3D11 desktop and headless hosts execute the full pass program. The reference software backend
 executes declared blur passes, ignores authored shader stages, and then applies the same rounded
 mask, opacity, and backdrop/content composition. This approximation is intentionally deterministic
-rather than a claim of shader fidelity. Packet v9 carries ordered backdrop/content batches, active
-rounded-clip geometry, effect refresh-rate policy, and a bounded sixteen-float parameter block.
+rather than a claim of shader fidelity. Packet v10 carries ordered backdrop/content batches,
+current/surface backdrop selection, active rounded-clip geometry, effect refresh-rate policy, and a
+bounded sixteen-float parameter block.
 The public decoder rejects malformed clip/effect state, caps nested `CONTENT` effects at four
 levels, and caps rounded clip stacks at sixteen.
 

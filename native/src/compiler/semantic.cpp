@@ -2652,6 +2652,26 @@ class Validator final {
                                    "' is supplied more than once.",
                                argument.span, component_path, "unique effect parameter");
                     }
+                    if (*argument.name == "backdropSource") {
+                        const std::string* literal = string_literal_value(*argument.value);
+                        if (literal == nullptr ||
+                            (*literal != "CURRENT" && *literal != "SURFACE")) {
+                            report(
+                                "STRATA.DSL.SEMANTIC_TYPE_MISMATCH",
+                                "Effect backdropSource must be \"CURRENT\" or \"SURFACE\".",
+                                argument.span, component_path + ".backdropSource",
+                                "CURRENT, SURFACE"
+                            );
+                        } else if (effect != nullptr && effect->input != "BACKDROP") {
+                            report(
+                                "STRATA.DSL.SEMANTIC_TYPE_MISMATCH",
+                                "Effect backdropSource is available only to BACKDROP effects.",
+                                argument.span, component_path + ".backdropSource",
+                                "BACKDROP effect"
+                            );
+                        }
+                        continue;
+                    }
                     if (*argument.name == "refreshRate") {
                         const SemanticTypePtr actual =
                             infer(*argument.value, scope, component_path + ".refreshRate");
@@ -2675,6 +2695,9 @@ class Validator final {
                     if (parameter == nullptr) {
                         std::vector<std::string> names;
                         if (effect != nullptr) {
+                            if (effect->input == "BACKDROP") {
+                                names.push_back("backdropSource");
+                            }
                             names.push_back("refreshRate");
                             for (const SchemaParameter& candidate : effect->parameters) {
                                 names.push_back(candidate.name);

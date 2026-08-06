@@ -700,6 +700,7 @@ void test_render_packet_batches_every_portable_command() {
     EffectState effect{
         "fixture.effect",
         EffectInput::backdrop,
+        EffectBackdropSource::current,
         0.8,
         default_effect_refresh_rate,
         true,
@@ -1190,7 +1191,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
               std::string_view(reinterpret_cast<const char*>(release_packet.data()),
                                release_offset) == "STRATARP",
           "surface teardown packet lost its fixed magic");
-    check(packet_u32(release_packet, release_offset) == 9U,
+    check(packet_u32(release_packet, release_offset) == STRATA_RENDER_PACKET_VERSION_CURRENT,
           "surface teardown did not use the host render packet protocol");
     check(packet_u32(release_packet, release_offset) == 2U,
           "surface teardown did not combine its live atlas and static texture releases");
@@ -1247,7 +1248,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
     const std::vector<std::uint8_t>& after_reload = reload_cache.encode(
         commands, 2U, textures, reload_atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
     std::size_t after_offset = 8U;
-    check(packet_u32(after_reload, after_offset) == 9U,
+    check(packet_u32(after_reload, after_offset) == STRATA_RENDER_PACKET_VERSION_CURRENT,
           "static image reload packet version changed");
     check(packet_u32(after_reload, after_offset) == 2U,
           "repeated static image reload dropped its pending release or replacement");

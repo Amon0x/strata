@@ -980,6 +980,17 @@ void SoftwareRenderer::render(const host::RenderPacket& packet,
         std::copy(clear_.begin(), clear_.end(),
                   pixels_.begin() + static_cast<std::ptrdiff_t>(pixel));
     }
+    const bool capture_surface_backdrop = std::ranges::any_of(
+        packet.batches,
+        [](const host::SubmissionBatch& batch) {
+            const auto* effect = std::get_if<host::EffectBatch>(&batch);
+            return effect != nullptr &&
+                effect->kind == host::EffectBatchKind::backdrop &&
+                effect->backdrop_source == host::EffectBackdropSource::surface;
+        }
+    );
+    const std::vector<std::uint8_t> surface_backdrop =
+        capture_surface_backdrop ? pixels_ : std::vector<std::uint8_t>{};
     std::vector<ContentEffect> content_effects;
     for (const host::SubmissionBatch& batch : packet.batches) {
         if (const auto* draw_batch = std::get_if<host::DrawBatch>(&batch); draw_batch != nullptr) {
@@ -992,6 +1003,15 @@ void SoftwareRenderer::render(const host::RenderPacket& packet,
                    backdrop_effect->kind == host::EffectBatchKind::backdrop) {
             if (effect_refresh_due(*backdrop_effect, false, time_nanoseconds)) {
                 std::vector<std::uint8_t> backdrop = pixels_;
+                if (backdrop_effect->backdrop_source ==
+                    host::EffectBackdropSource::surface) {
+                    if (surface_backdrop.empty()) {
+                        throw std::logic_error(
+                            "software SURFACE backdrop effect has no captured Surface input"
+                        );
+                    }
+                    pixels_ = surface_backdrop;
+                }
                 apply_effect(*backdrop_effect);
                 if (backdrop_effect->refresh_rate > 0.0) {
                     capture_effect(*backdrop_effect, false, time_nanoseconds);

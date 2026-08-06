@@ -288,6 +288,9 @@ std::optional<EffectState> MaterialRegistry::sanitize_effect_state(const EffectS
     result.input = schema->input == "CONTENT" ? EffectInput::content
                    : schema->input == "SHAPE" ? EffectInput::shape
                                               : EffectInput::backdrop;
+    if (result.input != EffectInput::backdrop) {
+        result.backdrop_source = EffectBackdropSource::current;
+    }
     std::vector<MaterialParameter> parameters;
     parameters.reserve(result.parameters.size());
     std::set<std::string, std::less<>> seen;

@@ -61,8 +61,9 @@ struct HostRenderResourceInvalidationPlan final {
 };
 
 /**
- * Packet v9: retained geometry epochs, incremental geometry patches, rate-limited effects,
- * ordered application effect programs, and rounded descendant masks. The
+ * Packet v10: retained geometry epochs, incremental geometry patches, rate-limited effects,
+ * explicit current/surface backdrop sources, ordered application effect programs, and rounded
+ * descendant masks. The
  * logical v3 encoder remains available only to command-stream inspection tooling.
  */
 class HostRenderPacketCache final {
@@ -73,7 +74,7 @@ class HostRenderPacketCache final {
     HostRenderPacketCache(HostRenderPacketCache&&) = delete;
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
-    /** A null TextEngine selects the packet-v9 non-text path; text runs are then rejected. */
+    /** A null TextEngine selects the packet-v10 non-text path; text runs are then rejected. */
     [[nodiscard]] const std::vector<std::uint8_t>&
     encode(const RenderCommandBuffer& commands, std::uint64_t frame_index,
            std::span<const resource::EncodedTextureResource> texture_resources,
