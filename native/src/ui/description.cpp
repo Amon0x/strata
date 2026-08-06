@@ -2122,26 +2122,38 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::replace_component_sub
     >& replacements
 ) {
     if (root == nullptr || replacements.empty()) return root;
-    if (const auto replacement = replacements.find(root.get());
-        replacement != replacements.end()) {
-        return replacement->second;
-    }
-    if (root->materialization.has_value()) return root;
-    bool changed = false;
-    std::vector<std::shared_ptr<const DescriptionNode>> children;
-    children.reserve(root->children->size());
-    for (std::size_t index = 0U; index < root->children->size(); ++index) {
-        const std::shared_ptr<const DescriptionNode> current = root->children->at(index);
-        std::shared_ptr<const DescriptionNode> next =
-            replace_component_subtrees(current, replacements);
-        changed = changed || next != current;
-        children.push_back(std::move(next));
-    }
-    if (!changed) return root;
-    auto result = std::make_shared<DescriptionNode>(*root);
-    result->children = std::make_shared<const EagerDescriptionChildren>(
-        std::move(children)
-    );
+    std::set<const DescriptionNode*> applied;
+    const auto replace = [&replacements, &applied](
+                             const auto& self,
+                             const std::shared_ptr<const DescriptionNode>& current
+                         ) -> std::shared_ptr<const DescriptionNode> {
+        if (const auto replacement = replacements.find(current.get());
+            replacement != replacements.end()) {
+            applied.insert(replacement->first);
+            return replacement->second;
+        }
+        if (current->materialization.has_value()) return current;
+        bool changed = false;
+        std::vector<std::shared_ptr<const DescriptionNode>> children;
+        children.reserve(current->children->size());
+        for (std::size_t index = 0U; index < current->children->size(); ++index) {
+            const std::shared_ptr<const DescriptionNode> child =
+                current->children->at(index);
+            std::shared_ptr<const DescriptionNode> next = self(self, child);
+            changed = changed || next != child;
+            children.push_back(std::move(next));
+        }
+        if (!changed) return current;
+        auto result = std::make_shared<DescriptionNode>(*current);
+        result->children = std::make_shared<const EagerDescriptionChildren>(
+            std::move(children)
+        );
+        return result;
+    };
+    std::shared_ptr<const DescriptionNode> result = replace(replace, root);
+    // A loop or slot projection may have cloned a component root to annotate it. In that case a
+    // partial pointer rewrite would leave stale descendants, so the caller must use its rebuild.
+    if (applied.size() != replacements.size()) return nullptr;
     return result;
 }
 

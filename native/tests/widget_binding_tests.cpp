@@ -1453,6 +1453,145 @@ overlay Main { root PopupOnlyMenu() }
     check(popup_rendered, "popup-only Menu did not render its authored popup surface");
 }
 
+void test_cached_component_refresh_through_loop_root(
+    const std::filesystem::path& resource_root,
+    const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
+) {
+    constexpr std::string_view source = R"(
+style CachedMenuRoot {
+  kind: "COLUMN";
+  width: 360;
+  height: "content";
+  padding: 20;
+  alignItems: "START";
+}
+
+style CachedMenuTrigger {
+  width: 28;
+  height: 26;
+  background: #778899FF;
+}
+
+style CachedMenuPopup {
+  kind: "COLUMN";
+  width: 220;
+  height: "content";
+  padding: 5;
+  background: #334455FF;
+}
+
+style CachedMenuItem {
+  width: { weight: 1 };
+  height: 32;
+  padding: 6;
+  background: #223344FF;
+}
+
+component CachedTrigger(key: key, label: string, enabled: boolean, expanded: boolean) {
+  Panel(key: key, style: CachedMenuTrigger)
+}
+
+component CachedPopup(key: key, level: number, expanded: boolean) {
+  Panel(key: key, style: CachedMenuPopup)
+}
+
+component CachedItem(
+  key: key,
+  id: string,
+  label: string,
+  index: number,
+  level: number,
+  enabled: boolean,
+  selected: boolean,
+  active: boolean,
+  checked: boolean,
+  separator: boolean,
+  hasChildren: boolean,
+  shortcut: string
+) {
+  Panel(key: key, style: CachedMenuItem) {
+    Text(text: label)
+  }
+}
+
+component CachedMenu(key: key) {
+  Menu(
+    key: key,
+    label: "More",
+    items: [
+      { id: "bind", label: "Set feature keybind" },
+      { id: "remove", label: "Remove feature" }
+    ],
+    triggerTemplate: CachedTrigger,
+    popupTemplate: CachedPopup,
+    itemTemplate: CachedItem
+  )
+}
+
+component CachedMenuList() {
+  Panel(style: CachedMenuRoot) {
+    Text(text: "Menus")
+    for entry in [{ key: "cached.loop.menu" }] {
+      CachedMenu(key: entry.key)
+    }
+  }
+}
+
+overlay Main { root CachedMenuList() }
+)";
+
+    strata::runtime::ApplicationContext application("cached-loop-menu", bundle);
+    const strata::runtime::ActivationResult activation = application.compile_and_activate(
+        strata::compiler::ModuleSource{"cached-loop-menu.strata", std::string(source)},
+        no_imports(),
+        0U
+    );
+    check(activation.activated(), "cached loop-root Menu fixture did not activate");
+
+    strata::ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 480;
+    environment.framebuffer_height = 300;
+    environment.logical_width = 480.0;
+    environment.logical_height = 300.0;
+    environment.reduced_motion = true;
+    environment.input = strata::ui::SurfaceInputCapabilities{
+        true,
+        strata::ui::PointerPrecision::fine,
+        true,
+        false,
+        true,
+        true,
+        false,
+    };
+    strata::ui::Surface surface(
+        "cached-loop-menu",
+        application,
+        strata::runtime::LayerRole::overlay,
+        "Main",
+        environment,
+        strata::ui::TextEngine::load_control_font(
+            resource_root,
+            strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        )
+    );
+    static_cast<void>(surface.frame(1'000'000));
+    check(
+        surface.tree().find_key("cached.loop.menu.popup.surface.0") == nullptr,
+        "closed cached loop-root Menu unexpectedly materialized its popup"
+    );
+
+    static_cast<void>(surface.input().click("cached.loop.menu"));
+    static_cast<void>(surface.frame(2'000'000));
+    const strata::ui::RetainedNode* menu =
+        surface.tree().find_key("cached.loop.menu");
+    check(
+        menu != nullptr && menu->children().size() == 2U &&
+            surface.tree().find_key("cached.loop.menu.popup.surface.0") != nullptr &&
+            surface.tree().find_key("cached.loop.menu.item.0") != nullptr,
+        "component cache dropped a retained Menu refresh through an annotated loop root"
+    );
+}
+
 void test_parent_local_retained_queries(
     const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
@@ -1952,6 +2091,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_section_content_and_activation_contract(resource_root, bundle);
         test_range_and_choice_control_defaults(resource_root, bundle);
         test_independent_menu_popup_template(resource_root, bundle);
+        test_cached_component_refresh_through_loop_root(resource_root, bundle);
         test_parent_local_retained_queries(resource_root, bundle);
         test_scrolled_clipped_subtree_render_cache(resource_root, bundle);
         test_typed_host_keys_and_derived_collection_metadata();
