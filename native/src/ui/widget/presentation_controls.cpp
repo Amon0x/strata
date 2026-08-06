@@ -617,10 +617,9 @@ void select_content(WidgetRenderScope& scope) {
 }
 
 void select_overlay(WidgetRenderScope& scope) {
-    if (scope.property("popupTemplate") != nullptr &&
-        scope.property("itemTemplate") != nullptr) {
-        return;
-    }
+    const bool authored_popup = scope.property("popupTemplate") != nullptr;
+    const bool authored_items = scope.property("itemTemplate") != nullptr;
+    if (authored_popup && authored_items) return;
     const std::vector<WidgetSubtarget> targets = scope.input().subtargets(scope.node().identity());
     std::vector<WidgetSubtarget> rows;
     for (const WidgetSubtarget& target : targets) {
@@ -635,11 +634,14 @@ void select_overlay(WidgetRenderScope& scope) {
         const double bottom = std::max(popup.bottom(), row.bounds.bottom());
         popup = Rect{left, top, right - left, bottom - top};
     }
-    scope.rounded_rect(
-        popup,
-        scope.visual().background.value_or(RenderColor{34U, 38U, 46U, 245U}),
-        scope.visual().border
-    );
+    if (!authored_popup) {
+        scope.rounded_rect(
+            popup,
+            scope.visual().background.value_or(RenderColor{34U, 38U, 46U, 245U}),
+            scope.visual().border
+        );
+    }
+    if (authored_items) return;
     for (const WidgetSubtarget& row : rows) {
         scope.interaction(row.bounds, row.id);
         if (scope.text_engine() == nullptr || row.label.empty()) continue;

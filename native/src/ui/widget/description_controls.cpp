@@ -314,6 +314,52 @@ void select_defaults(WidgetLayoutDefaultsScope& scope) {
     return result;
 }
 
+[[nodiscard]] std::shared_ptr<const DescriptionNode> native_choice_row_footprint(
+    WidgetDescriptionScope& scope,
+    std::string key
+) {
+    DescriptionNode::Properties properties = widget_transparent_properties();
+    properties.emplace(
+        "$inputTransparent",
+        runtime::ExpressionValue(runtime::Value(true))
+    );
+    properties.emplace(
+        "$semanticTransparent",
+        runtime::ExpressionValue(runtime::Value(true))
+    );
+    properties.emplace(
+        "$layout",
+        runtime::ExpressionValue(widget_object({
+            {"height", runtime::Value(28.0)},
+            {"intrinsicSize", widget_object({
+                {"height", runtime::Value(28.0)},
+                {"width", runtime::Value(180.0)},
+            })},
+            {"kind", runtime::Value("PANEL")},
+            {"width", widget_fill()},
+        }))
+    );
+    return scope.node("Panel", std::move(key), std::move(properties));
+}
+
+[[nodiscard]] std::shared_ptr<const DescriptionNode> native_choice_popup(
+    WidgetDescriptionScope& scope,
+    std::string key
+) {
+    DescriptionNode::Properties properties = widget_transparent_properties();
+    properties.emplace(
+        "$layout",
+        runtime::ExpressionValue(widget_object({
+            {"alignItems", runtime::Value("STRETCH")},
+            {"height", runtime::Value("content")},
+            {"kind", runtime::Value("COLUMN")},
+            {"matchAnchorWidth", runtime::Value(true)},
+            {"width", runtime::Value(180.0)},
+        }))
+    );
+    return scope.node("Panel", std::move(key), std::move(properties));
+}
+
 [[nodiscard]] runtime::Value select_portal_layout(
     const DescriptionNode& popup,
     const std::string& anchor
@@ -365,7 +411,7 @@ void select_expand(WidgetDescriptionScope& scope) {
         widget_description_string(scope.property("popupTemplate"));
     const std::string* item_component =
         widget_description_string(scope.property("itemTemplate"));
-    const bool authored_popup = popup_component != nullptr && item_component != nullptr;
+    const bool authored_popup = popup_component != nullptr || item_component != nullptr;
     if (trigger_component == nullptr && !authored_popup) {
         return;
     }
@@ -424,36 +470,43 @@ void select_expand(WidgetDescriptionScope& scope) {
             (option_enabled == nullptr || option_enabled->boolean() == nullptr ||
              *option_enabled->boolean());
         const std::string row_key = choice_option_key(key, *id);
-        std::shared_ptr<const DescriptionNode> row = scope.instantiate_component(
-            *item_component,
-            row_key,
-            WidgetTemplateArguments{
-                {"key", runtime::Value(runtime::KeyValue{row_key})},
-                {"id", runtime::Value(*id)},
-                {"label", runtime::Value(label != nullptr ? *label : *id)},
-                {"value", runtime::Value(*id)},
-                {"index", runtime::Value(static_cast<double>(index))},
-                {"level", runtime::Value(0.0)},
-                {"enabled", runtime::Value(row_enabled)},
-                {"selected", runtime::Value(selected == index)},
-                {"active", runtime::Value(active == index)},
-                {"checked", runtime::Value(false)},
-                {"separator", runtime::Value(false)},
-                {"hasChildren", runtime::Value(false)},
-                {"shortcut", runtime::Value("")},
-            }
-        );
+        std::shared_ptr<const DescriptionNode> row = item_component != nullptr
+            ? scope.instantiate_component(
+                  *item_component,
+                  row_key,
+                  WidgetTemplateArguments{
+                      {"key", runtime::Value(runtime::KeyValue{row_key})},
+                      {"id", runtime::Value(*id)},
+                      {"label", runtime::Value(label != nullptr ? *label : *id)},
+                      {"value", runtime::Value(*id)},
+                      {"index", runtime::Value(static_cast<double>(index))},
+                      {"level", runtime::Value(0.0)},
+                      {"enabled", runtime::Value(row_enabled)},
+                      {"selected", runtime::Value(selected == index)},
+                      {"active", runtime::Value(active == index)},
+                      {"checked", runtime::Value(false)},
+                      {"separator", runtime::Value(false)},
+                      {"hasChildren", runtime::Value(false)},
+                      {"shortcut", runtime::Value("")},
+                  }
+              )
+            : native_choice_row_footprint(scope, row_key);
+        if (item_component == nullptr) scope.synthesized();
         if (row != nullptr) rows.push_back(std::move(row));
     }
-    std::shared_ptr<const DescriptionNode> popup = scope.instantiate_component(
-        *popup_component,
-        key + ".popup.surface",
-        WidgetTemplateArguments{
-            {"key", runtime::Value(runtime::KeyValue{key + ".popup.surface"})},
-            {"level", runtime::Value(0.0)},
-            {"expanded", runtime::Value(true)},
-        }
-    );
+    const std::string popup_key = key + ".popup.surface";
+    std::shared_ptr<const DescriptionNode> popup = popup_component != nullptr
+        ? scope.instantiate_component(
+              *popup_component,
+              popup_key,
+              WidgetTemplateArguments{
+                  {"key", runtime::Value(runtime::KeyValue{popup_key})},
+                  {"level", runtime::Value(0.0)},
+                  {"expanded", runtime::Value(true)},
+              }
+          )
+        : native_choice_popup(scope, popup_key);
+    if (popup_component == nullptr) scope.synthesized();
     if (popup == nullptr) return;
     popup = append_popup_children(popup, std::move(rows));
     DescriptionNode::Properties portal_properties = widget_transparent_properties();

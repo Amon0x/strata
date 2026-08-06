@@ -116,6 +116,54 @@ void menu_defaults(WidgetLayoutDefaultsScope& scope) {
     return result;
 }
 
+[[nodiscard]] std::shared_ptr<const DescriptionNode> native_menu_row_footprint(
+    WidgetDescriptionScope& scope,
+    std::string key,
+    const double width,
+    const double height
+) {
+    DescriptionNode::Properties properties = widget_transparent_properties();
+    properties.emplace(
+        "$inputTransparent",
+        runtime::ExpressionValue(runtime::Value(true))
+    );
+    properties.emplace(
+        "$semanticTransparent",
+        runtime::ExpressionValue(runtime::Value(true))
+    );
+    properties.emplace(
+        "$layout",
+        runtime::ExpressionValue(widget_object({
+            {"height", runtime::Value(height)},
+            {"intrinsicSize", widget_object({
+                {"height", runtime::Value(height)},
+                {"width", runtime::Value(width)},
+            })},
+            {"kind", runtime::Value("PANEL")},
+            {"width", widget_fill()},
+        }))
+    );
+    return scope.node("Panel", std::move(key), std::move(properties));
+}
+
+[[nodiscard]] std::shared_ptr<const DescriptionNode> native_menu_popup(
+    WidgetDescriptionScope& scope,
+    std::string key,
+    const double width
+) {
+    DescriptionNode::Properties properties = widget_transparent_properties();
+    properties.emplace(
+        "$layout",
+        runtime::ExpressionValue(widget_object({
+            {"alignItems", runtime::Value("STRETCH")},
+            {"height", runtime::Value("content")},
+            {"kind", runtime::Value("COLUMN")},
+            {"width", runtime::Value(width)},
+        }))
+    );
+    return scope.node("Panel", std::move(key), std::move(properties));
+}
+
 [[nodiscard]] runtime::Value popup_portal_layout(
     const DescriptionNode& popup,
     const std::string& anchor,
@@ -171,7 +219,7 @@ void menu_expand(WidgetDescriptionScope& scope) {
         widget_description_string(scope.property("popupTemplate"));
     const std::string* item_component =
         widget_description_string(scope.property("itemTemplate"));
-    const bool authored_popup = popup_component != nullptr && item_component != nullptr;
+    const bool authored_popup = popup_component != nullptr || item_component != nullptr;
     if ((context && !authored_popup) ||
         (!context && trigger_component == nullptr && !authored_popup)) {
         return;
@@ -202,6 +250,8 @@ void menu_expand(WidgetDescriptionScope& scope) {
     if (!expanded || !authored_popup) return;
 
     const std::vector<MenuItemModel> items = parse_menu_items(scope.property("items"), nullptr);
+    const double menu_width = std::max(80.0, scope.number("menuWidth", 180.0));
+    const double row_height = std::max(18.0, scope.number("rowHeight", 26.0));
     const std::vector<std::size_t> active_path = retained_menu_path(scope);
     const std::vector<MenuItemModel>* level_items = &items;
     std::vector<std::size_t> parent_path;
@@ -225,38 +275,46 @@ void menu_expand(WidgetDescriptionScope& scope) {
             const std::string row_key = menu_row_key(key, path);
             const bool active = active_path.size() >= path.size() &&
                 std::equal(path.begin(), path.end(), active_path.begin());
-            std::shared_ptr<const DescriptionNode> row = scope.instantiate_component(
-                *item_component,
-                row_key,
-                WidgetTemplateArguments{
-                    {"key", runtime::Value(runtime::KeyValue{row_key})},
-                    {"id", runtime::Value(item.id)},
-                    {"label", runtime::Value(item.label)},
-                    {"value", runtime::Value(item.id)},
-                    {"index", runtime::Value(static_cast<double>(index))},
-                    {"level", runtime::Value(static_cast<double>(level))},
-                    {"enabled", runtime::Value(item.enabled)},
-                    {"selected", runtime::Value(active)},
-                    {"active", runtime::Value(active)},
-                    {"checked", runtime::Value(item.has_checked && item.checked)},
-                    {"separator", runtime::Value(item.separator)},
-                    {"hasChildren", runtime::Value(!item.children.empty())},
-                    {"shortcut", runtime::Value(item.shortcut)},
-                }
-            );
+            std::shared_ptr<const DescriptionNode> row = item_component != nullptr
+                ? scope.instantiate_component(
+                      *item_component,
+                      row_key,
+                      WidgetTemplateArguments{
+                          {"key", runtime::Value(runtime::KeyValue{row_key})},
+                          {"id", runtime::Value(item.id)},
+                          {"label", runtime::Value(item.label)},
+                          {"value", runtime::Value(item.id)},
+                          {"index", runtime::Value(static_cast<double>(index))},
+                          {"level", runtime::Value(static_cast<double>(level))},
+                          {"enabled", runtime::Value(item.enabled)},
+                          {"selected", runtime::Value(active)},
+                          {"active", runtime::Value(active)},
+                          {"checked", runtime::Value(item.has_checked && item.checked)},
+                          {"separator", runtime::Value(item.separator)},
+                          {"hasChildren", runtime::Value(!item.children.empty())},
+                          {"shortcut", runtime::Value(item.shortcut)},
+                      }
+                  )
+                : native_menu_row_footprint(
+                      scope, row_key, menu_width, row_height
+                  );
+            if (item_component == nullptr) scope.synthesized();
             if (row != nullptr) rows.push_back(std::move(row));
         }
-        std::shared_ptr<const DescriptionNode> popup = scope.instantiate_component(
-            *popup_component,
-            key + ".popup.surface." + std::to_string(level),
-            WidgetTemplateArguments{
-                {"key", runtime::Value(runtime::KeyValue{
-                    key + ".popup.surface." + std::to_string(level)
-                })},
-                {"level", runtime::Value(static_cast<double>(level))},
-                {"expanded", runtime::Value(true)},
-            }
-        );
+        const std::string popup_key =
+            key + ".popup.surface." + std::to_string(level);
+        std::shared_ptr<const DescriptionNode> popup = popup_component != nullptr
+            ? scope.instantiate_component(
+                  *popup_component,
+                  popup_key,
+                  WidgetTemplateArguments{
+                      {"key", runtime::Value(runtime::KeyValue{popup_key})},
+                      {"level", runtime::Value(static_cast<double>(level))},
+                      {"expanded", runtime::Value(true)},
+                  }
+              )
+            : native_menu_popup(scope, popup_key, menu_width);
+        if (popup_component == nullptr) scope.synthesized();
         if (popup == nullptr) break;
         popup = append_children(popup, std::move(rows));
         DescriptionNode::Properties portal_properties = widget_transparent_properties();

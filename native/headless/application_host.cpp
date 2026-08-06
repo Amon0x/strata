@@ -46,6 +46,39 @@ namespace {
                                      std::istreambuf_iterator<char>());
 }
 
+[[nodiscard]] std::string initialization_failure(
+    const std::string_view reason,
+    const std::vector<CapturedDiagnostic>& diagnostics
+) {
+    std::string result(reason);
+    if (diagnostics.empty()) return result;
+    result += "\nCaptured diagnostics:";
+    for (const CapturedDiagnostic& diagnostic : diagnostics) {
+        result += "\n  ";
+        result += diagnostic.code.empty()
+            ? "diagnostic " + std::to_string(diagnostic.id)
+            : diagnostic.code;
+        if (!diagnostic.source.empty()) {
+            result += " [";
+            result += diagnostic.source;
+            result += ']';
+        }
+        if (!diagnostic.component_path.empty()) {
+            result += " at ";
+            result += diagnostic.component_path;
+        }
+        if (!diagnostic.message.empty()) {
+            result += ": ";
+            result += diagnostic.message;
+        }
+        if (!diagnostic.expected.empty()) {
+            result += " Expected: ";
+            result += diagnostic.expected;
+        }
+    }
+    return result;
+}
+
 } // namespace
 
 struct ApplicationHost::Impl final {
@@ -57,9 +90,11 @@ struct ApplicationHost::Impl final {
           renderer(create_capture_renderer(scenario.render_backend)) {
         try {
             initialize();
+        } catch (const std::exception& error) {
+            if (surface.has_value()) surface->abandon();
+            throw std::runtime_error(initialization_failure(error.what(), diagnostics));
         } catch (...) {
-            if (surface.has_value())
-                surface->abandon();
+            if (surface.has_value()) surface->abandon();
             throw;
         }
     }

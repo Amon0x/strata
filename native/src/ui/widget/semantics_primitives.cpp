@@ -126,8 +126,9 @@ void list(WidgetSemanticsScope& scope) {
     }
     const bool branch_expanded = menu_open && !item.children.empty() &&
         menu_path_prefix(path, active_path);
+    const bool available = menu_open && menu_path_prefix(parent_path, active_path);
     std::vector<std::string> actions;
-    if (item.enabled && !item.separator) {
+    if (available && item.enabled && !item.separator) {
         actions.push_back(item.children.empty()
             ? "activate"
             : branch_expanded ? "collapse" : "expand");

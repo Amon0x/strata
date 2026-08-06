@@ -157,6 +157,39 @@ namespace {
     };
 }
 
+[[nodiscard]] const RetainedNode* descendant_key(
+    const RetainedNode& node,
+    const std::string_view key
+) noexcept {
+    if (node.description().key.has_value() && *node.description().key == key) return &node;
+    for (const auto& child : node.children()) {
+        if (const RetainedNode* found = descendant_key(*child, key); found != nullptr) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] std::optional<Rect> authored_panel_bounds(
+    const RetainedNode& node,
+    const LayoutResult& layout,
+    const std::string_view menu_key,
+    const std::size_t level
+) noexcept {
+    if (property(node, "popupTemplate") == nullptr &&
+        property(node, "itemTemplate") == nullptr) {
+        return std::nullopt;
+    }
+    const RetainedNode* surface = descendant_key(
+        node,
+        std::string(menu_key) + ".popup.surface." + std::to_string(level)
+    );
+    const LayoutRecord* record = surface != nullptr
+        ? layout.find(surface->identity())
+        : nullptr;
+    return record != nullptr ? std::optional(record->content_bounds) : std::nullopt;
+}
+
 } // namespace
 
 std::vector<MenuRowModel> MenuProjection::rows() const {
@@ -233,6 +266,7 @@ MenuProjection project_menu(
     result.context = context_menu(node);
     if (result.items.empty()) return result;
 
+    const std::string menu_key = node.description().key.value_or("$menu");
     const Rect viewport = viewport_bounds(layout, record->bounds);
     Rect panel = place_root(
         menu_anchor(node, *record, result.context),
@@ -244,6 +278,11 @@ MenuProjection project_menu(
     const std::vector<MenuItemModel>* level = &result.items;
     std::vector<std::size_t> parent_path;
     for (std::size_t depth = 0U; !level->empty(); ++depth) {
+        if (const std::optional<Rect> authored = authored_panel_bounds(
+                node, layout, menu_key, depth
+            ); authored.has_value() && !authored->empty()) {
+            panel = *authored;
+        }
         result.panels.push_back(MenuPanelModel{depth, parent_path, panel});
         if (depth >= result.active_path.size()) break;
         const std::size_t selected = result.active_path[depth];

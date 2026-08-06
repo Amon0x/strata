@@ -119,10 +119,12 @@ with more room and shift keeps the result inside the root viewport. `anchorPoint
 replaces the target rectangle for pointer-positioned overlays.
 
 `Menu` and `Select` accept typed `triggerTemplate`, `popupTemplate`, and `itemTemplate` components.
-The trigger can be replaced independently; supply `popupTemplate` and `itemTemplate` together.
-The popup component is the authored surface/container; Strata injects
-the materialized item components as its children and places it through an anchored portal. The
-typed item context includes stable key/id/value/index, label, enabled, selected/active/checked
+Each layer is independent. A popup-only template replaces the surface while retaining native rows;
+an item-only template replaces the rows inside the native popup surface; supplying both authors the
+complete popup presentation. The popup component is the authored surface/container; Strata injects
+either the materialized item components or native row-layout footprints as its children and places
+it through an anchored portal. The typed item context includes stable key/id/value/index, label,
+enabled, selected/active/checked
 state, separator status, nesting level, shortcut, and child disclosure. Template instances are
 visual presentation owned by the parent control: nested focusable or clickable widgets do not
 create competing interaction targets. `ComboBox` forwards the same templates to its choice popup.

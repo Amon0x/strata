@@ -204,6 +204,65 @@ void action_bindings_decode_at_the_boundary() {
           "typed action binding leaked or mistranslated the ABI JSON call");
 }
 
+void raw_runtime_config_retains_activation_diagnostics() {
+    std::int64_t now = 1;
+    strata_runtime_config config{};
+    config.struct_size = sizeof(config);
+    config.abi_version = STRATA_ABI_VERSION_CURRENT;
+    config.required_capabilities =
+        STRATA_CAPABILITY_CORE_LIFECYCLE |
+        STRATA_CAPABILITY_CALLER_CLOCK |
+        STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
+        STRATA_CAPABILITY_COMPILER_ACTIVATION |
+        STRATA_CAPABILITY_ACTION_DISPATCH;
+    config.clock = strata_clock{sizeof(strata_clock), &now, &clock};
+    strata::Runtime runtime(config);
+    runtime.configure_application(strata::ApplicationOptions{
+        .id = "host-tests.activation-diagnostics",
+        .schemas_json = R"({
+          "widgets":{"registry":"host-tests.diagnostics.v1","required":[],"definitions":[]},
+          "actions":{
+            "registry":"host-tests.diagnostics.v1",
+            "required":["host.required"],
+            "definitions":[{
+              "id":"host.required",
+              "dispatchPolicy":"required",
+              "summary":"required host action",
+              "payloadContract":"no payload",
+              "arguments":[]
+            }]
+          },
+          "host":[]
+        })",
+    });
+
+    bool enriched = false;
+    try {
+        static_cast<void>(runtime.activate(strata::SourceActivation{
+            .generation = 1U,
+            .entry_source_id = "host-tests/activation-diagnostics.strata",
+            .entry_text = R"(
+              overlay Main {
+                root Button(
+                  key: "diagnostic.button",
+                  label: "Save",
+                  onClick: action("host.required")
+                )
+              }
+            )",
+        }));
+    } catch (const strata::AbiError& error) {
+        enriched = error.diagnostic().has_value() &&
+            error.diagnostic()->code == "STRATA.DSL.ACTION_HANDLER_MISSING" &&
+            std::string_view(error.what()).find("host.required") != std::string_view::npos;
+    }
+    check(
+        enriched,
+        "raw-config Runtime activation lost its diagnostic code and message"
+    );
+    runtime.close();
+}
+
 void public_runtime_facade_owns_host_boundaries() {
     std::int64_t now = 100;
     std::vector<strata::Diagnostic> observed_diagnostics;
@@ -445,6 +504,7 @@ int main() {
         drag_events_are_typed_once();
         list_reorder_uses_stable_neighbors();
         action_bindings_decode_at_the_boundary();
+        raw_runtime_config_retains_activation_diagnostics();
         snapshot_bindings_publish_only_changed_revisions();
         generated_root_models_publish_changed_fields_only();
         public_runtime_facade_owns_host_boundaries();

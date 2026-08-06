@@ -1,6 +1,7 @@
 @PACKAGE_INIT@
 
 include("${CMAKE_CURRENT_LIST_DIR}/StrataTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/StrataModule.cmake")
 
 set(Strata_REGISTRY "${PACKAGE_PREFIX_DIR}/share/strata/registry-v1.json")
 if(NOT EXISTS "${Strata_REGISTRY}")

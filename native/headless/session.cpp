@@ -205,10 +205,10 @@ struct Session::Impl final {
         enqueue(pointer_event(STRATA_INPUT_POINTER_MOVE, x, y));
         frame();
         advance_clock(1'000'000);
-        enqueue(pointer_event(STRATA_INPUT_POINTER_PRESS, x, y));
+        enqueue(pointer_event(STRATA_INPUT_POINTER_PRESS, x, y, step.button));
         frame();
         advance_clock(1'000'000);
-        enqueue(pointer_event(STRATA_INPUT_POINTER_RELEASE, x, y));
+        enqueue(pointer_event(STRATA_INPUT_POINTER_RELEASE, x, y, step.button));
         frame();
     }
 

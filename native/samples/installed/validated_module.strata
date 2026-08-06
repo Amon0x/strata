@@ -1,0 +1,3 @@
+overlay InstalledValidation {
+  root Panel(key: "installed.validation")
+}

@@ -33,6 +33,12 @@ target_link_libraries(
     strata_installed_cpp PRIVATE Strata::host Strata::render_host Strata::svg
 )
 set_target_properties(strata_installed_cpp PROPERTIES CXX_EXTENSIONS OFF)
+if(Strata_COMPILER)
+    strata_validate_module(
+        TARGET strata_installed_cpp
+        SOURCE "${CMAKE_CURRENT_LIST_DIR}/validated_module.strata"
+    )
+endif()
 
 if(Strata_AUTHORING)
     set(contract_header "${CMAKE_CURRENT_BINARY_DIR}/generated/installed_contract.hpp")

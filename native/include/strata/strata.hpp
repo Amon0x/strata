@@ -436,8 +436,13 @@ inline void capture_profiler(
 }
 
 struct RuntimeCallbacks final {
-    explicit RuntimeCallbacks(RuntimeOptions options) : options(std::move(options)) {}
+    explicit RuntimeCallbacks(
+        RuntimeOptions options,
+        const strata_diagnostic_sink forwarded_diagnostic = {}
+    ) : options(std::move(options)),
+        forwarded_diagnostic(forwarded_diagnostic) {}
     RuntimeOptions options;
+    strata_diagnostic_sink forwarded_diagnostic{};
     mutable std::mutex diagnostic_mutex;
     std::vector<Diagnostic> diagnostics;
 };
@@ -457,6 +462,17 @@ inline void runtime_diagnostic(
 ) noexcept {
     auto& callbacks = *static_cast<RuntimeCallbacks*>(user_data);
     if (diagnostic == nullptr) return;
+    if (callbacks.forwarded_diagnostic.emit != nullptr &&
+        callbacks.forwarded_diagnostic.struct_size >= sizeof(strata_diagnostic_sink)) {
+        try {
+            callbacks.forwarded_diagnostic.emit(
+                callbacks.forwarded_diagnostic.user_data,
+                diagnostic
+            );
+        } catch (...) {
+            // A foreign diagnostic observer cannot unwind through the C ABI.
+        }
+    }
     try {
         const Diagnostic owned = copy_diagnostic(*diagnostic);
         {
@@ -1051,10 +1067,45 @@ public:
     }
 
     explicit Runtime(const strata_runtime_config& config) {
+        if (config.diagnostics.struct_size != 0U &&
+            config.diagnostics.struct_size < sizeof(strata_diagnostic_sink)) {
+            strata_runtime* value = nullptr;
+            const strata_result created = strata_runtime_create(&config, &value);
+            if (created.status != STRATA_STATUS_OK) {
+                throw AbiError(created, "runtime creation");
+            }
+            try {
+                control_ = std::make_shared<detail::RuntimeControl>(value);
+            } catch (...) {
+                static_cast<void>(strata_runtime_release(value));
+                throw;
+            }
+            return;
+        }
+        auto callbacks = std::make_shared<detail::RuntimeCallbacks>(
+            RuntimeOptions{},
+            config.diagnostics
+        );
+        strata_runtime_config bridged = config;
+        bridged.diagnostics = strata_diagnostic_sink{
+            sizeof(strata_diagnostic_sink),
+            callbacks.get(),
+            &detail::runtime_diagnostic,
+        };
         strata_runtime* value = nullptr;
-        require_ok(strata_runtime_create(&config, &value), "runtime creation");
+        const strata_result created = strata_runtime_create(&bridged, &value);
+        if (created.status != STRATA_STATUS_OK) {
+            throw AbiError(
+                created,
+                "runtime creation",
+                detail::find_diagnostic(callbacks.get(), created.diagnostic_id)
+            );
+        }
         try {
-            control_ = std::make_shared<detail::RuntimeControl>(value);
+            control_ = std::make_shared<detail::RuntimeControl>(
+                value,
+                std::move(callbacks)
+            );
         } catch (...) {
             static_cast<void>(strata_runtime_release(value));
             throw;

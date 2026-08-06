@@ -157,7 +157,11 @@ rejected. `surface.images` accepts encoded PNGs and the bounded static SVG subse
 resolver used by the native hosts.
 
 `application.actions` installs a generic recording handler for each declared host action. Framework
-state actions still execute in the core. `extensionPaths` are absolute or relative to the scenario
+state actions still execute in the core. Activation validates the complete candidate module, before
+a Surface root is selected, so this list must cover every required or forwarded host action
+referenced by any screen, overlay, or component in that module—not only the scenario's `root`.
+Activation failures print every captured diagnostic code/message (including all missing action
+handlers) before the process exits. `extensionPaths` are absolute or relative to the scenario
 document. Selected package shared libraries export both their schemas and runtime bundles, so
 compiler and Surface capabilities cannot drift; the headless host keeps them loaded through Surface
 release.
@@ -170,7 +174,7 @@ Supported steps are:
 | --- | --- |
 | `advance` | Advances the deterministic clock by `milliseconds`, distributed over `frames`, framing each sample. |
 | `capture` | Writes the current PNG and canonical frame JSON; creates the first frame if necessary. |
-| `click` | Resolves a target, then frames pointer move, press, and release through the normal input router. |
+| `click` | Resolves a target, then frames pointer move, press, and release through the normal input router. An optional `button` selects `primary`/`left`, `secondary`/`right`, or `middle`. |
 | `move` | Moves the fine pointer to a target. |
 | `scroll` | Sends `deltaX`/`deltaY` at a target. |
 | `key` | Frames a key press and release. Modifiers are `shift`, `control`, `alt`, and `super`. |
@@ -198,6 +202,16 @@ semantic element; an ambiguous selector fails with candidate details instead of 
 an arbitrary match. The click point is the center of its visible, clip-correct `hitBounds`. For a
 virtual semantic element those bounds come from the same presenter-owned subtarget geometry used by
 ordinary hit testing.
+
+Secondary-click a context-menu owner with the same selector syntax:
+
+```json
+{"click": {"key": "settings.row", "button": "right"}}
+```
+
+Collapsed menu descendants remain in the logical semantic tree, but have no current subtarget
+geometry or actions; interactive inspection therefore reports them as `visible: false` and
+`actionable: false`, and selector clicks reject them until their popup level is open.
 
 ## Render backends and fidelity boundary
 

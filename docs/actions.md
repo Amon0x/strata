@@ -42,6 +42,12 @@ The native compiler resolves that id against the composed built-in catalog/appli
 optional fields, validates types, and retains the source range and component path. Unknown ids,
 misspellings, or incompatible payloads reject activation and leave the last-good unit active.
 
+Required and forwarded handler availability is also an activation contract over the complete
+candidate module. Validation happens before any Surface chooses a screen or overlay root, because
+the activated unit may later serve multiple roots and Surfaces. Hosts must therefore register those
+handlers for references in inactive roots too; optional/broadcast observation actions remain
+optional according to their declared dispatch policy.
+
 ## Generate and own C++ handlers
 
 The language-neutral application schema is also the source of truth for C++ host code. Generate a

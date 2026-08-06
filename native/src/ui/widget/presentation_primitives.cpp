@@ -209,35 +209,45 @@ void draw_content(WidgetRenderScope& scope) {
 }
 
 void menu_overlay(WidgetRenderScope& scope) {
-    if (scope.property("popupTemplate") != nullptr &&
-        scope.property("itemTemplate") != nullptr) {
-        return;
-    }
     if (!scope.effective_boolean("open", "$expanded", "defaultOpen", false)) return;
+    const bool authored_popup = scope.property("popupTemplate") != nullptr;
+    const bool authored_items = scope.property("itemTemplate") != nullptr;
+    if (authored_popup && authored_items) return;
     const MenuProjection projection = project_menu(
         scope.node(), scope.layout_result(), &scope.command_index()
     );
     const Paint background = scope.visual().background.value_or(
         RenderColor{34U, 38U, 46U, 245U}
     );
-    for (const MenuPanelModel& panel : projection.panels) {
-        scope.shadow(
-            panel.bounds,
-            CornerRadii::all(scope.visual().radius),
-            RenderColor{0U, 0U, 0U, 105U},
-            8.0,
-            1.0
-        );
-        scope.rounded_rect(panel.bounds, background, scope.visual().border);
+    if (!authored_popup) {
+        for (const MenuPanelModel& panel : projection.panels) {
+            scope.shadow(
+                panel.bounds,
+                CornerRadii::all(scope.visual().radius),
+                RenderColor{0U, 0U, 0U, 105U},
+                8.0,
+                1.0
+            );
+            scope.rounded_rect(panel.bounds, background, scope.visual().border);
+        }
     }
+    if (authored_items) return;
+    const std::vector<WidgetSubtarget> targets =
+        scope.input().subtargets(scope.node().identity());
     for (const MenuRowModel& row : projection.rows()) {
         if (row.item == nullptr) continue;
         const MenuItemModel& item = *row.item;
         const std::string identity = menu_row_identity(row.path);
+        const auto target = std::ranges::find(
+            targets,
+            std::string_view(identity),
+            &WidgetSubtarget::id
+        );
+        const Rect bounds = target != targets.end() ? target->bounds : row.bounds;
         if (item.separator) {
             scope.solid_rect(
-                Rect{row.bounds.x + 8.0, row.bounds.y + row.bounds.height * 0.5,
-                     std::max(0.0, row.bounds.width - 16.0), 1.0},
+                Rect{bounds.x + 8.0, bounds.y + bounds.height * 0.5,
+                     std::max(0.0, bounds.width - 16.0), 1.0},
                 RenderColor{92U, 102U, 118U, 150U}
             );
             continue;
@@ -246,21 +256,21 @@ void menu_overlay(WidgetRenderScope& scope) {
             std::equal(row.path.begin(), row.path.end(), projection.active_path.begin());
         if (selected) {
             scope.rounded_rect(
-                Rect{row.bounds.x + 3.0, row.bounds.y + 2.0,
-                     std::max(0.0, row.bounds.width - 6.0),
-                     std::max(0.0, row.bounds.height - 4.0)},
+                Rect{bounds.x + 3.0, bounds.y + 2.0,
+                     std::max(0.0, bounds.width - 6.0),
+                     std::max(0.0, bounds.height - 4.0)},
                 RenderColor{91U, 141U, 239U, 62U}
             );
         }
-        scope.interaction(row.bounds, identity);
+        scope.interaction(bounds, identity);
         const RenderColor foreground = item.enabled
             ? scope.visual().foreground
             : RenderColor{160U, 168U, 178U, 135U};
         if (item.has_checked && item.checked) {
             scope.shape(
                 Rect{
-                    row.bounds.x + 8.0,
-                    row.bounds.y + (row.bounds.height - 12.0) * 0.5,
+                    bounds.x + 8.0,
+                    bounds.y + (bounds.height - 12.0) * 0.5,
                     12.0,
                     12.0,
                 },
@@ -270,8 +280,8 @@ void menu_overlay(WidgetRenderScope& scope) {
         if (item.shortcut.empty() && !item.children.empty()) {
             scope.shape(
                 Rect{
-                    row.bounds.right() - 18.0,
-                    row.bounds.y + (row.bounds.height - 10.0) * 0.5,
+                    bounds.right() - 18.0,
+                    bounds.y + (bounds.height - 10.0) * 0.5,
                     10.0,
                     10.0,
                 },
@@ -282,17 +292,17 @@ void menu_overlay(WidgetRenderScope& scope) {
         const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), item.label);
         scope.text(
             item.label,
-            Point{row.bounds.x + 28.0,
-                  row.bounds.y + (row.bounds.height - shaped.metrics.height) * 0.5},
+            Point{bounds.x + 28.0,
+                  bounds.y + (bounds.height - shaped.metrics.height) * 0.5},
             foreground,
-            std::max(0.0, row.bounds.width - 60.0)
+            std::max(0.0, bounds.width - 60.0)
         );
         if (!item.shortcut.empty()) {
             scope.text(
                 item.shortcut,
-                Point{row.bounds.x + 8.0, row.bounds.y + 5.0},
+                Point{bounds.x + 8.0, bounds.y + 5.0},
                 foreground,
-                std::max(0.0, row.bounds.width - 24.0),
+                std::max(0.0, bounds.width - 24.0),
                 WidgetTextAlignment::end
             );
         }

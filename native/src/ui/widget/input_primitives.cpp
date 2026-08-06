@@ -96,7 +96,7 @@ bool list_select(WidgetInputScope& scope) {
 
 void set_menu_path(WidgetInputScope& scope, const std::vector<std::size_t>& path) {
     const bool authored_presentation =
-        scope.property("popupTemplate") != nullptr &&
+        scope.property("popupTemplate") != nullptr ||
         scope.property("itemTemplate") != nullptr;
     scope.set_retained(
         "$menuPath",

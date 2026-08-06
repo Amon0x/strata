@@ -15,8 +15,8 @@ namespace {
 
 [[nodiscard]] DirtyReason choice_cursor_reason(const WidgetInputScope& scope) noexcept {
     return scope.node().description().type == "Select" &&
-            scope.property("popupTemplate") != nullptr &&
-            scope.property("itemTemplate") != nullptr
+            (scope.property("popupTemplate") != nullptr ||
+             scope.property("itemTemplate") != nullptr)
         ? DirtyReason::properties
         : DirtyReason::input;
 }

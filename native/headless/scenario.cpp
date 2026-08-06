@@ -184,6 +184,21 @@ void require_relative_resource(const std::filesystem::path& path, const std::str
     return result;
 }
 
+[[nodiscard]] std::int32_t pointer_button(
+    const JsonValue* const value,
+    const std::string_view label
+) {
+    if (value == nullptr) return 0;
+    const std::string name = text(*value, label);
+    if (name == "primary" || name == "left") return 0;
+    if (name == "secondary" || name == "right") return 1;
+    if (name == "middle") return 2;
+    throw std::invalid_argument(
+        std::string(label) +
+        " must be 'primary'/'left', 'secondary'/'right', or 'middle'"
+    );
+}
+
 [[nodiscard]] SnapshotConfig snapshot(const JsonValue& value, const std::string_view label) {
     static_cast<void>(as_object(value, label));
     SnapshotConfig result;
@@ -234,8 +249,15 @@ void require_relative_resource(const std::filesystem::path& path, const std::str
         }
         return CaptureStep{name};
     }
-    if (operation == "click")
-        return ClickStep{selector(argument, "click")};
+    if (operation == "click") {
+        const Selector target = selector(argument, "click");
+        return ClickStep{
+            target,
+            argument.object() != nullptr
+                ? pointer_button(optional(argument, "button"), "click.button")
+                : 0,
+        };
+    }
     if (operation == "move")
         return MoveStep{selector(argument, "move")};
     if (operation == "scroll") {

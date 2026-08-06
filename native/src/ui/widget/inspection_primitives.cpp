@@ -38,17 +38,17 @@ void section(WidgetInspectionScope& scope) {
 }
 
 void menu(WidgetInspectionScope& scope) {
-    if (!scope.effective_boolean("open", "$expanded", "defaultOpen", false)) return;
-    const runtime::Value* items = scope.property("items");
-    if (items == nullptr || items->list() == nullptr) return;
-    const Rect& bounds = scope.layout().bounds;
-    scope.hit_bounds(Rect{
-        bounds.x,
-        bounds.y,
-        std::max(bounds.width, scope.number("menuWidth", 180.0)),
-        bounds.height + 2.0 +
-            scope.number("rowHeight", 26.0) * static_cast<double>(items->list()->values.size()),
-    });
+    // The retained Menu semantic represents its control. Popup rows have independently projected
+    // subtargets, so folding their detached extent into the owner made key-based automation click
+    // somewhere other than a custom trigger and obscured its measured hit geometry.
+    const std::vector<WidgetSubtarget> targets =
+        scope.surface().input().subtargets(scope.node().identity());
+    const auto control = std::ranges::find(
+        targets,
+        std::string_view("$control"),
+        &WidgetSubtarget::id
+    );
+    if (control != targets.end()) scope.hit_bounds(control->bounds);
 }
 
 void add(

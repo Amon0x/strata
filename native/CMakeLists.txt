@@ -10,6 +10,7 @@ project(
 include(CMakePackageConfigHelpers)
 include(CTest)
 include(FetchContent)
+include(cmake/StrataModule.cmake)
 
 option(STRATA_BUILD_TESTS "Build native unit and ABI tests" ON)
 option(STRATA_BUILD_TOOLS "Build native command-line tools" ON)
@@ -1040,6 +1041,18 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     )
 
     add_executable(
+        strata_browser_model_tests
+        tests/browser_model_tests.cpp
+        headless/scenario.cpp
+    )
+    target_link_libraries(strata_browser_model_tests PRIVATE strata_host_support)
+    strata_target_defaults(strata_browser_model_tests)
+    add_test(
+        NAME strata.host.browser_model
+        COMMAND strata_browser_model_tests
+    )
+
+    add_executable(
         strata_showcase_model_tests
         tests/showcase_model_tests.cpp
         desktop/showcase.cpp
@@ -1431,6 +1444,7 @@ install(
         samples/cpp_smoke.cpp
         samples/installed/contract.schemas.json
         samples/installed/contract_smoke.cpp
+        samples/installed/validated_module.strata
         samples/installed/external_extension.cpp
         samples/installed/extension_loader_smoke.cpp
         samples/desktop_app.cpp
@@ -1459,6 +1473,7 @@ install(
     FILES
         ${CMAKE_CURRENT_BINARY_DIR}/StrataConfig.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/StrataConfigVersion.cmake
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/StrataModule.cmake
     DESTINATION lib/cmake/Strata
 )
 

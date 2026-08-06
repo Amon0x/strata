@@ -89,6 +89,7 @@ struct Subtarget final {
     BrowserBounds bounds;
     std::string command_id;
     std::string id;
+    std::string kind;
     std::string label;
     std::vector<std::size_t> path;
     std::optional<std::uint64_t> notification_id;
@@ -151,6 +152,7 @@ void collect_geometry(const JsonValue& node, const BrowserBounds& viewport,
                     *clipped,
                     text(value.find("commandId")),
                     text(value.find("id")),
+                    text(value.find("kind")),
                     text(value.find("label")),
                     index_path(value.find("path")),
                     std::nullopt,
@@ -241,6 +243,10 @@ void collect_geometry(const JsonValue& node, const BrowserBounds& viewport,
 
     std::vector<const Subtarget*> candidates;
     for (const Subtarget& target : owner.subtargets) {
+        // The owner's control geometry belongs to the retained semantic node, never one of its
+        // virtual descendants. Index zero is common to both, so filtering by index alone is not
+        // sufficient for a collapsed Select/Menu.
+        if (target.kind == "control") continue;
         if (!command.empty() && target.command_id != command)
             continue;
         if (notification.has_value() &&
@@ -252,7 +258,13 @@ void collect_geometry(const JsonValue& node, const BrowserBounds& viewport,
             (*virtual_index < 0 || target.index != static_cast<std::size_t>(*virtual_index))) {
             continue;
         }
-        if (!target.path.empty() && !path.empty() && target.path != path)
+        // Menu rows use their structural path as the discriminator, while choices/tabs use an
+        // explicit virtual index and legitimately have an empty subtarget path. Do not let an
+        // empty-path owner control satisfy a path-only menu row, but preserve indexed projections.
+        const bool path_discriminated =
+            !path.empty() && !virtual_index.has_value() &&
+            command.empty() && !notification.has_value();
+        if ((path_discriminated || !target.path.empty()) && target.path != path)
             continue;
         candidates.push_back(&target);
     }

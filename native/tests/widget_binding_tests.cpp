@@ -17,6 +17,7 @@
 #include "ui/presentation_geometry.hpp"
 #include "ui/surface.hpp"
 #include "ui/text.hpp"
+#include "ui/widget/inspection.hpp"
 
 namespace {
 
@@ -1312,6 +1313,146 @@ overlay Main { root ControlDefaults() }
     );
 }
 
+void test_independent_menu_popup_template(
+    const std::filesystem::path& resource_root,
+    const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
+) {
+    constexpr std::string_view source = R"(
+style PopupOnlySurface {
+  kind: "COLUMN";
+  width: 220;
+  height: "content";
+  padding: 5;
+  radius: 8;
+  background: #334455FF;
+}
+
+style DotsTrigger {
+  width: 28;
+  height: 26;
+  background: #778899FF;
+}
+
+component PopupOnly(key: key, level: number, expanded: boolean) {
+  Panel(key: key, style: PopupOnlySurface)
+}
+
+component Dots(key: key, label: string, enabled: boolean, expanded: boolean) {
+  Panel(key: key, style: DotsTrigger)
+}
+
+component PopupOnlyMenu() {
+  Panel(layout: { kind: "COLUMN", width: 360, height: "content", alignItems: "START" }) {
+    Menu(
+      key: "popup-only.menu",
+      label: "More",
+      defaultOpen: true,
+      items: [
+        { id: "bind", label: "Set feature keybind" },
+        { id: "remove", label: "Remove feature" }
+      ],
+      triggerTemplate: Dots,
+      popupTemplate: PopupOnly
+    )
+  }
+}
+
+overlay Main { root PopupOnlyMenu() }
+)";
+
+    strata::runtime::ApplicationContext application("popup-only-menu", bundle);
+    const strata::runtime::ActivationResult activation = application.compile_and_activate(
+        strata::compiler::ModuleSource{"popup-only-menu.strata", std::string(source)},
+        no_imports(),
+        0U
+    );
+    check(activation.activated(), "popup-only Menu fixture did not activate");
+
+    strata::ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 480;
+    environment.framebuffer_height = 300;
+    environment.logical_width = 480.0;
+    environment.logical_height = 300.0;
+    environment.reduced_motion = true;
+    environment.input = strata::ui::SurfaceInputCapabilities{
+        true,
+        strata::ui::PointerPrecision::fine,
+        true,
+        false,
+        true,
+        true,
+        false,
+    };
+    strata::ui::Surface surface(
+        "popup-only-menu",
+        application,
+        strata::runtime::LayerRole::overlay,
+        "Main",
+        environment,
+        strata::ui::TextEngine::load_control_font(
+            resource_root,
+            strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        )
+    );
+    static_cast<void>(surface.frame(1'000'000));
+
+    const strata::ui::RetainedNode* menu = surface.tree().find_key("popup-only.menu");
+    const strata::ui::RetainedNode* trigger =
+        surface.tree().find_key("popup-only.menu.trigger");
+    const strata::ui::RetainedNode* popup =
+        surface.tree().find_key("popup-only.menu.popup.surface.0");
+    const strata::ui::RetainedNode* first_row =
+        surface.tree().find_key("popup-only.menu.item.0");
+    const strata::ui::LayoutRecord* menu_layout =
+        menu != nullptr ? surface.layout().find(menu->identity()) : nullptr;
+    const strata::ui::LayoutRecord* trigger_layout =
+        trigger != nullptr ? surface.layout().find(trigger->identity()) : nullptr;
+    const strata::ui::LayoutRecord* popup_layout =
+        popup != nullptr ? surface.layout().find(popup->identity()) : nullptr;
+    const strata::ui::LayoutRecord* first_row_layout =
+        first_row != nullptr ? surface.layout().find(first_row->identity()) : nullptr;
+    check(
+        menu != nullptr && menu_layout != nullptr && trigger_layout != nullptr &&
+            popup_layout != nullptr && first_row_layout != nullptr,
+        "popup-only Menu did not materialize its trigger, surface, and native row footprints"
+    );
+    check(
+        popup_layout->bounds.width == 220.0 &&
+            popup_layout->bounds.height >= 62.0,
+        "popup-only Menu did not measure its custom surface around native rows"
+    );
+
+    const std::vector<strata::ui::WidgetSubtarget> targets =
+        surface.input().subtargets(menu->identity());
+    const auto control = std::ranges::find(
+        targets, std::string_view("$control"), &strata::ui::WidgetSubtarget::id
+    );
+    const auto first = std::ranges::find(
+        targets, std::string_view("$menu/0"), &strata::ui::WidgetSubtarget::id
+    );
+    check(
+        control != targets.end() && first != targets.end() &&
+            control->bounds == trigger_layout->bounds &&
+            first->bounds == first_row_layout->bounds &&
+            first->bounds != control->bounds,
+        "popup-only Menu did not preserve exact trigger and row hit geometry"
+    );
+    check(
+        strata::ui::widget_hit_bounds(surface, *menu, *menu_layout) ==
+            trigger_layout->bounds,
+        "Menu owner hit geometry did not follow its custom trigger"
+    );
+    const bool popup_rendered = std::ranges::any_of(
+        surface.render_commands().commands(),
+        [popup_layout](const strata::ui::RenderCommand& command) {
+            const auto* rounded =
+                std::get_if<strata::ui::RoundedRectRenderCommand>(&command);
+            return rounded != nullptr && rounded->bounds == popup_layout->bounds;
+        }
+    );
+    check(popup_rendered, "popup-only Menu did not render its authored popup surface");
+}
+
 void test_parent_local_retained_queries(
     const std::filesystem::path& resource_root,
     const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
@@ -1810,6 +1951,7 @@ int main(const int argument_count, const char* const* const arguments) {
         test_authored_control_presentations(resource_root, bundle);
         test_section_content_and_activation_contract(resource_root, bundle);
         test_range_and_choice_control_defaults(resource_root, bundle);
+        test_independent_menu_popup_template(resource_root, bundle);
         test_parent_local_retained_queries(resource_root, bundle);
         test_scrolled_clipped_subtree_render_cache(resource_root, bundle);
         test_typed_host_keys_and_derived_collection_metadata();

@@ -40,6 +40,7 @@ struct CaptureStep final {
 };
 struct ClickStep final {
     Selector target;
+    std::int32_t button = 0;
 };
 struct MoveStep final {
     Selector target;

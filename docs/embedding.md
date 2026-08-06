@@ -238,6 +238,25 @@ that had to be contained at the C callback boundary. For small standalone values
 `strata::host::Observable<T>` owns the revision automatically. Generated model structures are
 equality comparable, so an observable can reject an unchanged replacement without encoding it.
 
+Generating the host contract does not validate `.strata` source. Installed packages that include
+`strata_compile`, and source embeddings with `STRATA_BUILD_TOOLS=ON`, expose a build-integrated
+validation helper; attach it to the embedding target so a malformed module fails the build before
+it can be embedded:
+
+```cmake
+strata_validate_module(
+    TARGET my_application
+    SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ui/menu.strata"
+    SCHEMAS "${CMAKE_CURRENT_SOURCE_DIR}/ui/application.schemas.json"
+    # EXTENSION_PATHS may list directories containing selected extension packages.
+)
+```
+
+The helper creates a module-root/schema-dependent validation stamp and makes `TARGET` depend on it.
+Because Strata imports are confined to the entry module's directory, every `.strata` file in that
+root is tracked without duplicating the compiler's import parser; incremental builds rerun
+`strata_compile --check-module` only when a possible module input changes.
+
 Every object host root also gets a generated model/binder. It owns one observable per field and
 registers the per-field encoders with independent snapshot ids:
 

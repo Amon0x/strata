@@ -351,7 +351,10 @@ std::vector<WidgetSubtarget> widget_subtargets(
         source = property(node, "options");
         if (!effective_boolean(node, "expanded", "$expanded", "defaultExpanded", false) ||
             source == nullptr || source->list() == nullptr) return result;
-        if (property(node, "itemTemplate") != nullptr) {
+        const bool authored_popup =
+            property(node, "popupTemplate") != nullptr ||
+            property(node, "itemTemplate") != nullptr;
+        if (authored_popup) {
             const RetainedNode* popup_node = descendant_key(
                 node,
                 select_key + ".popup"
@@ -429,7 +432,10 @@ std::vector<WidgetSubtarget> widget_subtargets(
         });
         if (!effective_boolean(node, "open", "$expanded", "defaultOpen", false)) return result;
         const MenuProjection projection = project_menu(node, layout, commands);
-        if (property(node, "popupTemplate") != nullptr) {
+        const bool authored_popup =
+            property(node, "popupTemplate") != nullptr ||
+            property(node, "itemTemplate") != nullptr;
+        if (authored_popup) {
             for (std::size_t level = 0U; level < projection.panels.size(); ++level) {
                 const RetainedNode* popup_node = descendant_key(
                     node,
@@ -465,13 +471,12 @@ std::vector<WidgetSubtarget> widget_subtargets(
         for (const MenuRowModel& row : projection.rows()) {
             if (row.item == nullptr) continue;
             const MenuItemModel& item = *row.item;
-            const bool authored_item = property(node, "itemTemplate") != nullptr;
-            const RetainedNode* row_node = authored_item
+            const RetainedNode* row_node = authored_popup
                 ? descendant_key(node, menu_row_key(menu_key, row.path))
                 : nullptr;
             const LayoutRecord* row_layout =
                 row_node != nullptr ? layout.find(row_node->identity()) : nullptr;
-            if (authored_item && row_layout == nullptr) continue;
+            if (authored_popup && row_layout == nullptr) continue;
             const Rect item_bounds = row_layout != nullptr
                 ? row_layout->bounds
                 : row.bounds;
