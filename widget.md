@@ -217,6 +217,11 @@ Committed values schedule one accessibility projection.
   non-participating widgets.
 - `DeckInertialScrubber` proves the frame contract with pointer-derived release velocity, bounded
   friction and edge response, one settled commit, keyboard access, and no idle callback.
+- `CanvasTransform`, fixed-capacity `MeshBatch`, and reserved visible subtarget projection support
+  public-only pan/zoom canvases without per-object render commands or full-set hit geometry.
+- `DeckCurveEditor` proves the canvas contract over 8,192 stable global point identities with
+  viewport-level detail, batched curve/marker geometry, point editing, lasso selection, anchored
+  wheel zoom, right-drag pan, cancellation, keyboard adjustment, and bounded semantic projection.
 
 ## Acceptance evidence
 
@@ -231,6 +236,9 @@ Committed values schedule one accessibility projection.
 - `strata.headless.control_deck_gradient` exercises multi-stop editing and stable semantic children.
 - `strata.headless.control_deck_motion` drives a sampled pointer drag through inertia and settlement,
   records the final action, and verifies subsequent idle frames perform no layout or render traversal.
+- `strata.headless.control_deck_canvas` edits one virtual curve point, selects through a 60-sample
+  lasso over the 8,192-object set, zooms and pans the viewport, preserves the selected point's
+  accessible identity, emits committed canvas state, and verifies idle render/layout quiescence.
 
 ## Extension roadmap
 
@@ -281,6 +289,17 @@ idle frame request.
 Add pan/zoom transforms, selection and lasso routing, batched geometry, viewport-aware projection,
 large virtual interactive-object sets, and stable accessible identities. Prove the contract with a
 curve editor before generalizing it to timelines, waveforms, node graphs, or vector tooling.
+
+Implemented. The installed SDK now provides `CanvasTransform` for anchored world/surface projection,
+pan, zoom, and visible-world derivation; `MeshBatch` for all-or-nothing fixed-capacity geometry
+assembly; and `Subtargets::reserve` for bounded visible interaction projection. These are generic
+public-header and stable-C-ABI capabilities, not curve-editor branches in core.
+
+The proof is `DeckCurveEditor` in the Control Deck Canvas workspace. Its world contains 8,192 stable
+point ids while the current viewport projects only a bounded level of detail. One curve mesh and one
+marker batch replace per-object render commands. Point capture, lasso selection, anchored wheel zoom,
+right-button pan, keyboard editing, cancellation, committed actions, and semantic children all retain
+global point identity across viewport changes.
 
 ### Deferred platform work
 

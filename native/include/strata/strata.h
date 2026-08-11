@@ -2073,6 +2073,8 @@ strata_widget_subtargets_property_value(const strata_widget_subtargets_context* 
 STRATA_API strata_result
 strata_widget_subtargets_retained_bytes(const strata_widget_subtargets_context* context,
                                         strata_string_view name, void* buffer, size_t size);
+STRATA_API strata_result strata_widget_subtargets_reserve(strata_widget_subtargets_context* context,
+                                                          size_t capacity);
 STRATA_API strata_result strata_widget_subtargets_add(strata_widget_subtargets_context* context,
                                                       const strata_widget_subtarget* subtarget);
 STRATA_API strata_rect strata_widget_input_bounds(const strata_widget_input_context* context);

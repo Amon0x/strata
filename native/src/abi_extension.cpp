@@ -881,6 +881,18 @@ strata_widget_subtargets_retained_bytes(const strata_widget_subtargets_context* 
     return strata::core::result(STRATA_STATUS_OK);
 }
 
+strata_result strata_widget_subtargets_reserve(strata_widget_subtargets_context* const context,
+                                               const size_t capacity) {
+    if (context == nullptr || context->targets == nullptr)
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    try {
+        context->targets->reserve(capacity);
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (...) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+}
+
 strata_result strata_widget_subtargets_add(strata_widget_subtargets_context* const context,
                                            const strata_widget_subtarget* const subtarget) {
     if (context == nullptr || context->node == nullptr || context->layout == nullptr ||

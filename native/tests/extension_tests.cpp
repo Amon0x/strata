@@ -4,6 +4,7 @@
 #include "host/extensions.hpp"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -124,6 +125,7 @@ struct HarnessCounters final {
     std::uint64_t frame_callbacks = 0U;
     std::uint64_t frame_presentations = 0U;
     std::uint64_t frame_requests = 0U;
+    bool subtarget_reserve_accepted = false;
     bool declared_write_accepted = false;
     bool undeclared_write_rejected = false;
     bool text_write_accepted = false;
@@ -297,6 +299,7 @@ void drag_semantics(Semantics& semantics) {
 
 void drag_subtargets(Subtargets& subtargets) {
     ++counters.compound_subtarget_projections;
+    counters.subtarget_reserve_accepted = subtargets.reserve(2U);
     const CompoundState compound = subtargets.get(compound_state);
     const ValueView points = subtargets.get(compound_points);
     counters.structured_property_visible = points.kind() == ValueView::Kind::list &&
@@ -518,6 +521,56 @@ bool harness_pointer(BehaviorInput& input, const Pointer& pointer) {
     return created;
 }
 
+void test_canvas_sdk() {
+    const auto near = [](const double left, const double right) {
+        return std::abs(left - right) < 1.0e-9;
+    };
+    CanvasTransform transform{
+        Rect{100.0, 50.0, 800.0, 400.0},
+        Point{10.0, -1.0},
+        Point{20.0, 100.0},
+    };
+    const Point projected = transform.project(Point{12.0, 0.5});
+    check(near(projected.x, 140.0) && near(projected.y, 200.0),
+          "canvas projection did not map world coordinates into its viewport");
+    const Point unprojected = transform.unproject(projected);
+    const Rect visible = transform.visible_world();
+    check(near(unprojected.x, 12.0) && near(unprojected.y, 0.5) && near(visible.x, 10.0) &&
+              near(visible.y, -1.0) && near(visible.width, 40.0) && near(visible.height, 4.0),
+          "canvas projection did not round-trip or expose its visible world rectangle");
+    transform.pan(Point{20.0, -50.0});
+    check(near(transform.origin.x, 9.0) && near(transform.origin.y, -0.5),
+          "canvas pan did not convert surface deltas into world motion");
+    const Point anchor{500.0, 250.0};
+    const Point anchored_world = transform.unproject(anchor);
+    transform.zoom(anchor, Point{2.0, 0.5}, Point{1.0, 1.0}, Point{1000.0, 1000.0});
+    const Point anchored_after = transform.project(anchored_world);
+    check(near(anchored_after.x, anchor.x) && near(anchored_after.y, anchor.y) &&
+              near(transform.scale.x, 40.0) && near(transform.scale.y, 50.0),
+          "canvas zoom did not preserve its surface anchor");
+
+    constexpr Color white = rgba(255U, 255U, 255U);
+    const std::array<MeshVertex, 4U> quad{
+        MeshVertex{0.0, 0.0, 0.0, 0.0, 0.0, white},
+        MeshVertex{1.0, 0.0, 0.0, 1.0, 0.0, white},
+        MeshVertex{1.0, 1.0, 0.0, 1.0, 1.0, white},
+        MeshVertex{0.0, 1.0, 0.0, 0.0, 1.0, white},
+    };
+    constexpr std::array<std::uint32_t, 6U> quad_indices{0U, 1U, 2U, 0U, 2U, 3U};
+    MeshBatch<8U, 12U> batch;
+    check(batch.append(quad, quad_indices) && batch.append(quad, quad_indices) &&
+              batch.vertex_count() == 8U && batch.index_count() == 12U &&
+              batch.geometry().indices[6U] == 4U,
+          "fixed-capacity mesh batching did not append and rebase geometry");
+    const std::size_t vertices_before_rejection = batch.vertex_count();
+    const std::size_t indices_before_rejection = batch.index_count();
+    constexpr std::array<std::uint32_t, 1U> invalid_index{4U};
+    check(!batch.append(std::span<const MeshVertex>(quad.data(), 1U), invalid_index) &&
+              batch.vertex_count() == vertices_before_rejection &&
+              batch.index_count() == indices_before_rejection,
+          "mesh batching partially mutated after rejecting invalid geometry");
+}
+
 void test_definition_diagnostics() {
     check(rejection([] { static_cast<void>(widget("")); }).find("must not be empty") !=
               std::string::npos,
@@ -593,16 +646,18 @@ void test_external_package_and_schema_projection() {
           "duplicate schema package declarations were accepted");
 
     strata::host::SelectedExtensions control = strata::host::select_extensions(declared);
-    check(control.widgets.size() == 3U && control.widget_inputs.size() == 3U &&
+    check(control.widgets.size() == 4U && control.widget_inputs.size() == 4U &&
               control.behaviors.empty(),
           "the Control Deck package did not project widget pointer input separately");
     const std::string control_schema = control.packages.front().schema_json();
     check(control_schema.find(R"("name":"DeckColorPicker")") != std::string::npos &&
               control_schema.find(R"("name":"DeckGradientEditor")") != std::string::npos &&
               control_schema.find(R"("name":"DeckInertialScrubber")") != std::string::npos &&
+              control_schema.find(R"("name":"DeckCurveEditor")") != std::string::npos &&
               control_schema.find(R"("id":"control-deck.color.commit")") != std::string::npos &&
               control_schema.find(R"("id":"control-deck.gradient.commit")") != std::string::npos &&
-              control_schema.find(R"("id":"control-deck.motion.commit")") != std::string::npos,
+              control_schema.find(R"("id":"control-deck.motion.commit")") != std::string::npos &&
+              control_schema.find(R"("id":"control-deck.canvas.commit")") != std::string::npos,
           "the Control Deck package schema is missing a public widget or value contract");
 }
 
@@ -843,11 +898,12 @@ screen Main {
               counters.last_local_x > 160.0,
           "widget pointer capture did not retain release outside its bounds");
     check(counters.compound_subtarget_routed && counters.structured_state_round_tripped &&
-              counters.structured_property_visible,
-          "compound subtarget/state/property: routed=" +
+              counters.structured_property_visible && counters.subtarget_reserve_accepted,
+          "compound subtarget/state/property/reserve: routed=" +
               std::to_string(counters.compound_subtarget_routed) +
               " state=" + std::to_string(counters.structured_state_round_tripped) +
-              " property=" + std::to_string(counters.structured_property_visible));
+              " property=" + std::to_string(counters.structured_property_visible) +
+              " reserve=" + std::to_string(counters.subtarget_reserve_accepted));
     strata_input_event hover_drag = focus_drag[0];
     hover_drag.kind = STRATA_INPUT_POINTER_MOVE;
     hover_drag.x = 8.0;
@@ -1136,6 +1192,7 @@ screen Main {
 
 int main(const int argument_count, const char* const* const arguments) {
     try {
+        test_canvas_sdk();
         test_definition_diagnostics();
         test_external_package_and_schema_projection();
         if (argument_count == 2)

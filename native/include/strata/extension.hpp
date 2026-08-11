@@ -14,6 +14,9 @@
  * as plain function pointers so no per-callback state is captured.
  */
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -32,6 +35,10 @@
 namespace strata::extension {
 
 using Rect = strata_rect;
+struct Point final {
+    double x = 0.0;
+    double y = 0.0;
+};
 using Color = strata_color;
 using Border = strata_border;
 
@@ -67,6 +74,123 @@ using MeshVertex = strata_mesh_vertex;
 struct Mesh final {
     std::span<const MeshVertex> vertices;
     std::span<const std::uint32_t> indices;
+};
+
+/**
+ * Fixed-capacity custom geometry accumulator. Appended indices are rebased, and a failed append
+ * leaves the batch unchanged. The batch owns no heap storage and its geometry view remains valid
+ * until the next mutation.
+ */
+template <std::size_t VertexCapacity, std::size_t IndexCapacity> class MeshBatch final {
+  public:
+    static_assert(VertexCapacity <= UINT32_MAX);
+
+    [[nodiscard]] bool append(const std::span<const MeshVertex> vertices,
+                              const std::span<const std::uint32_t> indices) noexcept {
+        if (vertices.size() > VertexCapacity - vertex_count_ ||
+            indices.size() > IndexCapacity - index_count_) {
+            return false;
+        }
+        for (const std::uint32_t index : indices) {
+            if (index >= vertices.size())
+                return false;
+        }
+        const auto base = static_cast<std::uint32_t>(vertex_count_);
+        for (const MeshVertex& vertex : vertices)
+            vertices_[vertex_count_++] = vertex;
+        for (const std::uint32_t index : indices)
+            indices_[index_count_++] = base + index;
+        return true;
+    }
+
+    void clear() noexcept {
+        vertex_count_ = 0U;
+        index_count_ = 0U;
+    }
+    [[nodiscard]] std::size_t vertex_count() const noexcept {
+        return vertex_count_;
+    }
+    [[nodiscard]] std::size_t index_count() const noexcept {
+        return index_count_;
+    }
+    [[nodiscard]] Mesh geometry() const noexcept {
+        return Mesh{
+            std::span<const MeshVertex>(vertices_.data(), vertex_count_),
+            std::span<const std::uint32_t>(indices_.data(), index_count_),
+        };
+    }
+
+  private:
+    std::array<MeshVertex, VertexCapacity> vertices_{};
+    std::array<std::uint32_t, IndexCapacity> indices_{};
+    std::size_t vertex_count_ = 0U;
+    std::size_t index_count_ = 0U;
+};
+
+/**
+ * Affine world-to-surface projection for canvas-like extension widgets. Scale is expressed in
+ * surface pixels per world unit; origin is the world point at the viewport's leading/top edge.
+ */
+struct CanvasTransform final {
+    Rect viewport{};
+    Point origin{};
+    Point scale{1.0, 1.0};
+
+    [[nodiscard]] Point project(const Point world) const noexcept {
+        return Point{
+            viewport.x + (world.x - origin.x) * valid_scale(scale.x),
+            viewport.y + (world.y - origin.y) * valid_scale(scale.y),
+        };
+    }
+    [[nodiscard]] Point unproject(const Point surface) const noexcept {
+        return Point{
+            origin.x + (surface.x - viewport.x) / valid_scale(scale.x),
+            origin.y + (surface.y - viewport.y) / valid_scale(scale.y),
+        };
+    }
+    [[nodiscard]] Rect project(const Rect world) const noexcept {
+        const Point projected = project(Point{world.x, world.y});
+        return Rect{
+            projected.x,
+            projected.y,
+            world.width * valid_scale(scale.x),
+            world.height * valid_scale(scale.y),
+        };
+    }
+    [[nodiscard]] Rect visible_world() const noexcept {
+        const Point start = unproject(Point{viewport.x, viewport.y});
+        return Rect{
+            start.x,
+            start.y,
+            viewport.width / valid_scale(scale.x),
+            viewport.height / valid_scale(scale.y),
+        };
+    }
+    void pan(const Point surface_delta) noexcept {
+        origin.x -= surface_delta.x / valid_scale(scale.x);
+        origin.y -= surface_delta.y / valid_scale(scale.y);
+    }
+    void zoom(const Point surface_anchor, const Point factor,
+              const Point minimum_scale = Point{1.0e-4, 1.0e-4},
+              const Point maximum_scale = Point{1.0e4, 1.0e4}) noexcept {
+        const Point world_anchor = unproject(surface_anchor);
+        const double factor_x = valid_factor(factor.x);
+        const double factor_y = valid_factor(factor.y);
+        scale.x = std::clamp(valid_scale(scale.x) * factor_x, valid_scale(minimum_scale.x),
+                             valid_scale(maximum_scale.x));
+        scale.y = std::clamp(valid_scale(scale.y) * factor_y, valid_scale(minimum_scale.y),
+                             valid_scale(maximum_scale.y));
+        origin.x = world_anchor.x - (surface_anchor.x - viewport.x) / scale.x;
+        origin.y = world_anchor.y - (surface_anchor.y - viewport.y) / scale.y;
+    }
+
+  private:
+    [[nodiscard]] static double valid_scale(const double value) noexcept {
+        return std::isfinite(value) && value > 1.0e-9 ? value : 1.0;
+    }
+    [[nodiscard]] static double valid_factor(const double value) noexcept {
+        return std::isfinite(value) && value > 0.0 ? value : 1.0;
+    }
 };
 
 /** Typed material parameter; build them with the number/boolean/text/color helpers below. */
@@ -368,6 +492,9 @@ class Subtargets final {
         return ValueView(strata_widget_subtargets_property_value(
                              context_, strata_string_view{field.name.data(), field.name.size()}))
             .color();
+    }
+    bool reserve(const std::size_t capacity) noexcept {
+        return strata_widget_subtargets_reserve(context_, capacity).status == STRATA_STATUS_OK;
     }
     bool add(const Subtarget& target) noexcept {
         const strata_widget_subtarget descriptor{

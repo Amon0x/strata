@@ -505,6 +505,18 @@ component CategoryIcon(icon: string, selected: boolean) {
         fill: selected ? #58D6B4FF : #5F9A7DFF
       }
     ])
+  } else if icon == "CANVAS" {
+    Draw(style: CategoryIconDraw, shapes: [
+      {
+        kind: "path",
+        commands: "M 0.08 0.70 C 0.22 0.18, 0.35 0.82, 0.50 0.42 C 0.65 0.10, 0.76 0.72, 0.92 0.28",
+        stroke: selected ? #FFFFFFFF : #A6A9B0FF,
+        strokeStyle: { width: 1.5, cap: "round", join: "round" }
+      },
+      { kind: "circle", center: { x: 0.22, y: 0.48 }, radius: 0.08, fill: selected ? #58D6B4FF : #5F9A7DFF },
+      { kind: "circle", center: { x: 0.50, y: 0.42 }, radius: 0.08, fill: selected ? #58D6B4FF : #5F9A7DFF },
+      { kind: "circle", center: { x: 0.78, y: 0.49 }, radius: 0.08, fill: selected ? #58D6B4FF : #5F9A7DFF }
+    ])
   } else if icon == "INPUT" {
     Draw(style: CategoryIconDraw, shapes: [
       {
@@ -1012,6 +1024,24 @@ component MotionPage() {
   }
 }
 
+component CanvasPage() {
+  Panel(style: SettingsStack) {
+    SectionTitle(label: "SERIOUS CANVAS")
+    DeckCurveEditor(
+      key: "deck.canvas.editor",
+      layout: { width: { weight: 1 }, height: 360 }
+    )
+    Panel(style: StatusCard) {
+      Panel(style: StatusDot)
+      Panel(style: ChoiceCopy) {
+        Text(text: "Viewport-aware virtual interaction", style: StatusTitle)
+        Text(text: "8,192 stable point identities · batched curve and marker geometry", style: StatusMeta)
+      }
+      Text(text: "VIRTUAL", style: DeckScope)
+    }
+  }
+}
+
 component AdvancedPage() {
   Panel(style: SettingsStack) {
     SectionTitle(label: "DIAGNOSTICS")
@@ -1059,6 +1089,7 @@ component ControlDeck() {
           CategoryButton(id: "deck.color", icon: "COLOR", label: "Color", selected: category == "COLOR", activate: action("state.set", name: "category", value: "COLOR"))
           CategoryButton(id: "deck.gradient", icon: "GRADIENT", label: "Gradient", selected: category == "GRADIENT", activate: action("state.set", name: "category", value: "GRADIENT"))
           CategoryButton(id: "deck.motion", icon: "MOTION", label: "Motion", selected: category == "MOTION", activate: action("state.set", name: "category", value: "MOTION"))
+          CategoryButton(id: "deck.canvas", icon: "CANVAS", label: "Canvas", selected: category == "CANVAS", activate: action("state.set", name: "category", value: "CANVAS"))
           CategoryButton(id: "deck.input", icon: "INPUT", label: "Input", selected: category == "INPUT", activate: action("state.set", name: "category", value: "INPUT"))
           CategoryButton(id: "deck.audio", icon: "AUDIO", label: "Audio", selected: category == "AUDIO", activate: action("state.set", name: "category", value: "AUDIO"))
           CategoryButton(id: "deck.profiles", icon: "PROFILES", label: "Profiles", selected: category == "PROFILES", activate: action("state.set", name: "category", value: "PROFILES"))
@@ -1074,10 +1105,10 @@ component ControlDeck() {
           Panel(style: ContentHeader) {
             Panel(style: ChoiceCopy) {
               Text(
-                text: category == "GENERAL" ? "General" : category == "DISPLAY" ? "Display" : category == "COLOR" ? "Color" : category == "GRADIENT" ? "Gradient" : category == "MOTION" ? "Motion" : category == "INPUT" ? "Input" : category == "AUDIO" ? "Audio" : category == "PROFILES" ? "Profiles" : "Advanced",
+                text: category == "GENERAL" ? "General" : category == "DISPLAY" ? "Display" : category == "COLOR" ? "Color" : category == "GRADIENT" ? "Gradient" : category == "MOTION" ? "Motion" : category == "CANVAS" ? "Canvas" : category == "INPUT" ? "Input" : category == "AUDIO" ? "Audio" : category == "PROFILES" ? "Profiles" : "Advanced",
                 style: ContentTitle
               )
-              Text(text: category == "MOTION" ? "Bounded native inertia and frame policy" : category == "GRADIENT" ? "Compound native gradient authoring" : category == "COLOR" ? "Frame-bound native color authoring" : "Workspace configuration and behavior", style: ContentSubtitle)
+              Text(text: category == "CANVAS" ? "Pan, zoom, lasso, and virtual curve editing" : category == "MOTION" ? "Bounded native inertia and frame policy" : category == "GRADIENT" ? "Compound native gradient authoring" : category == "COLOR" ? "Frame-bound native color authoring" : "Workspace configuration and behavior", style: ContentSubtitle)
             }
             if category == "GENERAL" {
               Panel(style: SegmentRail) {
@@ -1094,6 +1125,8 @@ component ControlDeck() {
               GradientPage()
             } else if category == "MOTION" {
               MotionPage()
+            } else if category == "CANVAS" {
+              CanvasPage()
             } else if category == "DISPLAY" {
               DisplayPage()
             } else if category == "INPUT" {

@@ -237,6 +237,38 @@ void advance(Input& input, const Frame& frame) {
 }
 ```
 
+## Canvas transforms and virtual geometry
+
+`CanvasTransform` maps world coordinates into a widget-owned surface viewport. Its `project`,
+`unproject`, and `visible_world` operations use pixels-per-world-unit scale. `pan` converts a surface
+delta back into world motion, while `zoom` preserves the world point under its surface anchor and
+clamps each axis to caller-supplied limits. The helper owns no state outside the value itself, so an
+extension can retain the minimal center/zoom model and reconstruct the projection from current
+bounds on every paint or hit-projection pass.
+
+`MeshBatch<VertexCapacity, IndexCapacity>` accumulates custom geometry without heap storage.
+`append` validates capacity and every source index before changing the batch, rebases accepted
+indices, and exposes borrowed spans through `geometry()`. Submit one batch with `Present::mesh`
+instead of producing one render command per curve segment, marker, waveform sample, or graph edge.
+
+For large virtual object sets, derive the visible world range first, select a bounded level of detail,
+and project only those objects as subtargets. Call `Subtargets::reserve` with that bounded count.
+Use the object's global stable id as `Subtarget::index` and the matching `SemanticChild::index`;
+never substitute its current visible-array offset. Paint-only pan, lasso, and point movement may keep
+the prior hit projection during capture, then request one `Invalidation::input` and semantic refresh
+when the gesture commits.
+
+```cpp
+CanvasTransform view{plot, world_origin, pixels_per_world_unit};
+const Rect visible = view.visible_world();
+
+MeshBatch<1024, 1536> geometry;
+for (const Object& object : visible_objects(visible)) {
+    append_marker(geometry, view.project(object.position));
+}
+present.mesh(plot, "curve.points", geometry.geometry());
+```
+
 Build against the installed SDK. The helper creates the shared library, links the authoring layer,
 sets C++23 and symbol visibility, assigns the portable discovery name, records it for same-build
 module validation, and optionally installs it to the platform discovery directory:
