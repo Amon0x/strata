@@ -19,20 +19,18 @@ namespace {
         if (current == std::numeric_limits<std::uint64_t>::max()) {
             throw std::overflow_error("description materialization transaction id exhausted");
         }
-        if (next.compare_exchange_weak(
-                current,
-                current + 1U,
-                std::memory_order_relaxed,
-                std::memory_order_relaxed
-            )) {
+        if (next.compare_exchange_weak(current, current + 1U, std::memory_order_relaxed,
+                                       std::memory_order_relaxed)) {
             return current;
         }
     }
 }
 
-void validate_text(const std::string_view value, const std::string_view label, const bool allow_empty = false) {
+void validate_text(const std::string_view value, const std::string_view label,
+                   const bool allow_empty = false) {
     if ((!allow_empty && value.empty()) || !core::valid_utf8(value)) {
-        throw std::invalid_argument(std::string(label) + " must be valid UTF-8" + (allow_empty ? "" : " and non-empty"));
+        throw std::invalid_argument(std::string(label) + " must be valid UTF-8" +
+                                    (allow_empty ? "" : " and non-empty"));
     }
 }
 
@@ -47,42 +45,54 @@ void validate_text(const std::string_view value, const std::string_view label, c
     return reason != DirtyReason::semantics;
 }
 
-[[nodiscard]] bool action_value_equal(
-    const std::shared_ptr<const runtime::ActionValue>& left,
-    const std::shared_ptr<const runtime::ActionValue>& right
-) {
-    if (left == right) return true;
+[[nodiscard]] bool action_value_equal(const std::shared_ptr<const runtime::ActionValue>& left,
+                                      const std::shared_ptr<const runtime::ActionValue>& right) {
+    if (left == right)
+        return true;
     if (left == nullptr || right == nullptr || left->composition != right->composition ||
         left->children.size() != right->children.size()) {
         return false;
     }
-    if ((left->action == nullptr) != (right->action == nullptr)) return false;
-    if (left->action != nullptr &&
-        (left->action->id() != right->action->id() ||
-         left->action->payload != right->action->payload ||
-         left->action->dynamic != right->action->dynamic)) {
+    if ((left->action == nullptr) != (right->action == nullptr))
+        return false;
+    if (left->action != nullptr && (left->action->id() != right->action->id() ||
+                                    left->action->payload != right->action->payload ||
+                                    left->action->dynamic != right->action->dynamic)) {
         return false;
     }
     for (std::size_t index = 0U; index < left->children.size(); ++index) {
-        if (!action_value_equal(left->children[index], right->children[index])) return false;
+        if (!action_value_equal(left->children[index], right->children[index]))
+            return false;
     }
     return true;
 }
 
 [[nodiscard]] std::size_t reason_index(const DirtyReason reason) noexcept {
     switch (reason) {
-    case DirtyReason::structure: return 0U;
-    case DirtyReason::properties: return 1U;
-    case DirtyReason::layout: return 2U;
-    case DirtyReason::text: return 3U;
-    case DirtyReason::style: return 4U;
-    case DirtyReason::semantics: return 5U;
-    case DirtyReason::input: return 6U;
-    case DirtyReason::scale: return 7U;
-    case DirtyReason::animation: return 8U;
-    case DirtyReason::resource: return 9U;
-    case DirtyReason::editor: return 10U;
-    case DirtyReason::paint: return 11U;
+    case DirtyReason::structure:
+        return 0U;
+    case DirtyReason::properties:
+        return 1U;
+    case DirtyReason::layout:
+        return 2U;
+    case DirtyReason::text:
+        return 3U;
+    case DirtyReason::style:
+        return 4U;
+    case DirtyReason::semantics:
+        return 5U;
+    case DirtyReason::input:
+        return 6U;
+    case DirtyReason::scale:
+        return 7U;
+    case DirtyReason::animation:
+        return 8U;
+    case DirtyReason::resource:
+        return 9U;
+    case DirtyReason::editor:
+        return 10U;
+    case DirtyReason::paint:
+        return 11U;
     }
     return 0U;
 }
@@ -92,75 +102,77 @@ void validate_text(const std::string_view value, const std::string_view label, c
 DescriptionMaterialization::DescriptionMaterialization(
     runtime::StateScopeSet source_owned_state_scopes,
     std::vector<runtime::RuntimeDiagnostic> source_diagnostics,
-    const std::size_t source_evaluated_expressions,
-    const std::size_t source_described_nodes
-) : owned_state_scopes(std::move(source_owned_state_scopes)),
-    diagnostics(std::move(source_diagnostics)),
-    evaluated_expressions(source_evaluated_expressions),
-    described_nodes(source_described_nodes),
-    transaction_id_(next_materialization_transaction_id()) {}
+    const std::size_t source_evaluated_expressions, const std::size_t source_described_nodes)
+    : owned_state_scopes(std::move(source_owned_state_scopes)),
+      diagnostics(std::move(source_diagnostics)),
+      evaluated_expressions(source_evaluated_expressions), described_nodes(source_described_nodes),
+      transaction_id_(next_materialization_transaction_id()) {}
 
-DescriptionMaterialization::DescriptionMaterialization(
-    DescriptionMaterialization&& source
-) noexcept : owned_state_scopes(std::move(source.owned_state_scopes)),
-    diagnostics(std::move(source.diagnostics)),
-    evaluated_expressions(std::exchange(source.evaluated_expressions, 0U)),
-    described_nodes(std::exchange(source.described_nodes, 0U)),
-    transaction_id_(std::exchange(source.transaction_id_, 0U)) {}
+DescriptionMaterialization::DescriptionMaterialization(DescriptionMaterialization&& source) noexcept
+    : owned_state_scopes(std::move(source.owned_state_scopes)),
+      diagnostics(std::move(source.diagnostics)),
+      evaluated_expressions(std::exchange(source.evaluated_expressions, 0U)),
+      described_nodes(std::exchange(source.described_nodes, 0U)),
+      transaction_id_(std::exchange(source.transaction_id_, 0U)) {}
 
 std::uint64_t DescriptionMaterialization::transaction_id() const noexcept {
     return transaction_id_;
 }
 
 EagerDescriptionChildren::EagerDescriptionChildren(
-    std::vector<std::shared_ptr<const DescriptionNode>> children
-) : children_(std::move(children)) {
+    std::vector<std::shared_ptr<const DescriptionNode>> children)
+    : children_(std::move(children)) {
     if (std::ranges::any_of(children_, [](const auto& child) { return child == nullptr; })) {
         throw std::invalid_argument("eager description children must not contain null nodes");
     }
 }
 
-std::size_t EagerDescriptionChildren::size() const noexcept { return children_.size(); }
+std::size_t EagerDescriptionChildren::size() const noexcept {
+    return children_.size();
+}
 
 std::shared_ptr<const DescriptionNode> EagerDescriptionChildren::at(const std::size_t index) const {
-    if (index >= children_.size()) throw std::out_of_range("description child index is outside the eager snapshot");
+    if (index >= children_.size())
+        throw std::out_of_range("description child index is outside the eager snapshot");
     return children_[index];
 }
 
-GeneratedDescriptionChildren::GeneratedDescriptionChildren(
-    const std::size_t size,
-    Factory factory
-) : size_(size), factory_(std::move(factory)) {
-    if (!factory_) throw std::invalid_argument("generated description children require a factory");
+GeneratedDescriptionChildren::GeneratedDescriptionChildren(const std::size_t size, Factory factory)
+    : size_(size), factory_(std::move(factory)) {
+    if (!factory_)
+        throw std::invalid_argument("generated description children require a factory");
 }
 
-std::size_t GeneratedDescriptionChildren::size() const noexcept { return size_; }
+std::size_t GeneratedDescriptionChildren::size() const noexcept {
+    return size_;
+}
 
-std::shared_ptr<const DescriptionNode> GeneratedDescriptionChildren::at(const std::size_t index) const {
-    if (index >= size_) throw std::out_of_range("description child index is outside the generated snapshot");
+std::shared_ptr<const DescriptionNode>
+GeneratedDescriptionChildren::at(const std::size_t index) const {
+    if (index >= size_)
+        throw std::out_of_range("description child index is outside the generated snapshot");
     std::scoped_lock lock(mutex_);
     std::erase_if(children_, [](const auto& entry) { return entry.second.expired(); });
     if (const auto found = children_.find(index); found != children_.end()) {
-        if (std::shared_ptr<const DescriptionNode> child = found->second.lock()) return child;
+        if (std::shared_ptr<const DescriptionNode> child = found->second.lock())
+            return child;
         children_.erase(found);
     }
     std::shared_ptr<const DescriptionNode> child = factory_(index);
-    if (child == nullptr) throw std::logic_error("generated description child factory returned null");
+    if (child == nullptr)
+        throw std::logic_error("generated description child factory returned null");
     children_.emplace(index, child);
     return child;
 }
 
-std::shared_ptr<const DescriptionNode> DescriptionNode::create(
-    std::string type,
-    std::optional<std::string> key,
-    std::string source_path,
-    std::string state_scope,
-    Properties properties,
-    std::shared_ptr<const DescriptionChildren> children,
-    std::vector<DescriptionBehavior> behaviors
-) {
+std::shared_ptr<const DescriptionNode>
+DescriptionNode::create(std::string type, std::optional<std::string> key, std::string source_path,
+                        std::string state_scope, Properties properties,
+                        std::shared_ptr<const DescriptionChildren> children,
+                        std::vector<DescriptionBehavior> behaviors) {
     validate_text(type, "description type");
-    if (key.has_value()) validate_text(*key, "description key");
+    if (key.has_value())
+        validate_text(*key, "description key");
     validate_text(source_path, "description source path", true);
     validate_text(state_scope, "description state scope", true);
     for (const auto& [name, value] : properties) {
@@ -176,8 +188,7 @@ std::shared_ptr<const DescriptionNode> DescriptionNode::create(
     }
     if (children == nullptr) {
         children = std::make_shared<const EagerDescriptionChildren>(
-            std::vector<std::shared_ptr<const DescriptionNode>>{}
-        );
+            std::vector<std::shared_ptr<const DescriptionNode>>{});
     }
     return std::make_shared<const DescriptionNode>(DescriptionNode{
         std::move(type),
@@ -199,47 +210,42 @@ std::shared_ptr<const DescriptionNode> DescriptionNode::create(
     });
 }
 
-const runtime::Value* RetainedDescriptionSnapshot::Node::retained_value(
-    const std::string_view name
-) const noexcept {
+const runtime::Value*
+RetainedDescriptionSnapshot::Node::retained_value(const std::string_view name) const noexcept {
     const auto found = retained_values.find(name);
     return found != retained_values.end() ? &found->second : nullptr;
 }
 
-const RetainedDescriptionSnapshot::Node* RetainedDescriptionSnapshot::find_key(
-    const std::string_view key
-) const noexcept {
+const RetainedDescriptionSnapshot::Node*
+RetainedDescriptionSnapshot::find_key(const std::string_view key) const noexcept {
     const auto found = key_index_.find(key);
-    return found != key_index_.end() && found->second.size() == 1U
-        ? found->second.front()
-        : nullptr;
+    return found != key_index_.end() && found->second.size() == 1U ? found->second.front()
+                                                                   : nullptr;
 }
 
 const RetainedDescriptionSnapshot::Node* RetainedDescriptionSnapshot::find_key(
-    const std::string_view key,
-    const std::string_view source_path,
-    const std::string_view state_scope,
-    const std::string_view type
-) const noexcept {
+    const std::string_view key, const std::string_view source_path,
+    const std::string_view state_scope, const std::string_view type) const noexcept {
     const auto found = key_index_.find(key);
-    if (found == key_index_.end()) return nullptr;
+    if (found == key_index_.end())
+        return nullptr;
     const auto compatible_type = [type](const Node* candidate) {
-        return candidate->type == type ||
-            (type == "Repeater" && candidate->type == "VirtualList");
+        return candidate->type == type || (type == "Repeater" && candidate->type == "VirtualList");
     };
     const auto unique_match = [&found](const auto& predicate) {
         const Node* result = nullptr;
         for (const Node* candidate : found->second) {
-            if (!predicate(candidate)) continue;
-            if (result != nullptr) return static_cast<const Node*>(nullptr);
+            if (!predicate(candidate))
+                continue;
+            if (result != nullptr)
+                return static_cast<const Node*>(nullptr);
             result = candidate;
         }
         return result;
     };
     return unique_match([compatible_type, source_path, state_scope](const Node* value) {
-        return compatible_type(value) &&
-            value->source_path == source_path &&
-            value->state_scope == state_scope;
+        return compatible_type(value) && value->source_path == source_path &&
+               value->state_scope == state_scope;
     });
 }
 
@@ -249,26 +255,31 @@ RetainedDescriptionSnapshot::find_source(const std::string_view source_path) con
     return found != source_index_.end() ? &found->second : nullptr;
 }
 
-void DirtySet::add(const DirtyReason reason) noexcept { bits_ |= static_cast<std::uint32_t>(reason); }
-void DirtySet::remove(const DirtyReason reason) noexcept { bits_ &= ~static_cast<std::uint32_t>(reason); }
-void DirtySet::clear() noexcept { bits_ = 0U; }
+void DirtySet::add(const DirtyReason reason) noexcept {
+    bits_ |= static_cast<std::uint32_t>(reason);
+}
+void DirtySet::remove(const DirtyReason reason) noexcept {
+    bits_ &= ~static_cast<std::uint32_t>(reason);
+}
+void DirtySet::clear() noexcept {
+    bits_ = 0U;
+}
 bool DirtySet::contains(const DirtyReason reason) const noexcept {
     return (bits_ & static_cast<std::uint32_t>(reason)) != 0U;
 }
-bool DirtySet::empty() const noexcept { return bits_ == 0U; }
-std::uint32_t DirtySet::bits() const noexcept { return bits_; }
+bool DirtySet::empty() const noexcept {
+    return bits_ == 0U;
+}
+std::uint32_t DirtySet::bits() const noexcept {
+    return bits_;
+}
 
-RetainedNode::RetainedNode(
-    const std::uint64_t identity,
-    std::shared_ptr<const DescriptionNode> description,
-    RetainedNode* const parent,
-    const std::size_t source_index,
-    std::string structural_path
-) : identity_(identity),
-    description_(std::move(description)),
-    parent_(parent),
-    source_index_(source_index),
-    structural_path_(std::move(structural_path)) {
+RetainedNode::RetainedNode(const std::uint64_t identity,
+                           std::shared_ptr<const DescriptionNode> description,
+                           RetainedNode* const parent, const std::size_t source_index,
+                           std::string structural_path)
+    : identity_(identity), description_(std::move(description)), parent_(parent),
+      source_index_(source_index), structural_path_(std::move(structural_path)) {
     mark_dirty(DirtyReason::structure);
     mark_dirty(DirtyReason::properties);
     mark_dirty(DirtyReason::layout);
@@ -287,28 +298,41 @@ void RetainedNode::mark_dirty(const DirtyReason reason) {
         }
         ++render_generation_;
         for (RetainedNode* ancestor = this; ancestor != nullptr; ancestor = ancestor->parent_) {
-            if (ancestor->subtree_render_generation_ ==
-                std::numeric_limits<std::uint64_t>::max()) {
-                throw std::overflow_error(
-                    "retained subtree render generation exhausted"
-                );
+            if (ancestor->subtree_render_generation_ == std::numeric_limits<std::uint64_t>::max()) {
+                throw std::overflow_error("retained subtree render generation exhausted");
             }
             ++ancestor->subtree_render_generation_;
         }
     }
 }
 
-std::uint64_t RetainedNode::identity() const noexcept { return identity_; }
-const DescriptionNode& RetainedNode::description() const noexcept { return *description_; }
-RetainedNode* RetainedNode::parent() const noexcept { return parent_; }
-const std::vector<std::unique_ptr<RetainedNode>>& RetainedNode::children() const noexcept { return children_; }
-std::string_view RetainedNode::structural_path() const noexcept { return structural_path_; }
-std::size_t RetainedNode::source_index() const noexcept { return source_index_; }
-std::uint64_t RetainedNode::revision() const noexcept { return revision_; }
+std::uint64_t RetainedNode::identity() const noexcept {
+    return identity_;
+}
+const DescriptionNode& RetainedNode::description() const noexcept {
+    return *description_;
+}
+RetainedNode* RetainedNode::parent() const noexcept {
+    return parent_;
+}
+const std::vector<std::unique_ptr<RetainedNode>>& RetainedNode::children() const noexcept {
+    return children_;
+}
+std::string_view RetainedNode::structural_path() const noexcept {
+    return structural_path_;
+}
+std::size_t RetainedNode::source_index() const noexcept {
+    return source_index_;
+}
+std::uint64_t RetainedNode::revision() const noexcept {
+    return revision_;
+}
 std::uint64_t RetainedNode::arrangement_revision() const noexcept {
     return arrangement_revision_;
 }
-std::uint64_t RetainedNode::render_generation() const noexcept { return render_generation_; }
+std::uint64_t RetainedNode::render_generation() const noexcept {
+    return render_generation_;
+}
 std::uint64_t RetainedNode::subtree_render_generation() const noexcept {
     return subtree_render_generation_;
 }
@@ -318,19 +342,22 @@ std::uint64_t RetainedNode::presentation_generation() const noexcept {
 std::uint64_t RetainedNode::subtree_presentation_generation() const noexcept {
     return subtree_presentation_generation_;
 }
-RetainedLifecycle RetainedNode::lifecycle() const noexcept { return lifecycle_; }
-const DirtySet& RetainedNode::dirty() const noexcept { return dirty_; }
+RetainedLifecycle RetainedNode::lifecycle() const noexcept {
+    return lifecycle_;
+}
+const DirtySet& RetainedNode::dirty() const noexcept {
+    return dirty_;
+}
 std::optional<MaterializationRange> RetainedNode::realized_range() const noexcept {
     return realized_range_;
 }
 
-std::shared_ptr<const DescriptionNode> RetainedNode::realized_child_description(
-    const std::size_t source_index,
-    const std::shared_ptr<const DescriptionChildren>& provider,
-    const std::shared_ptr<const Theme>& projected_theme,
-    const std::optional<std::string>& projected_theme_scope,
-    const std::uint64_t theme_generation
-) const noexcept {
+std::shared_ptr<const DescriptionNode>
+RetainedNode::realized_child_description(const std::size_t source_index,
+                                         const std::shared_ptr<const DescriptionChildren>& provider,
+                                         const std::shared_ptr<const Theme>& projected_theme,
+                                         const std::optional<std::string>& projected_theme_scope,
+                                         const std::uint64_t theme_generation) const noexcept {
     if (provider == nullptr || realization_provider_ != provider ||
         realization_theme_ != projected_theme ||
         realization_theme_scope_ != projected_theme_scope ||
@@ -347,15 +374,12 @@ std::shared_ptr<const DescriptionNode> RetainedNode::realized_child_description(
     return found != realization_cache_.end() ? found->second : nullptr;
 }
 
-bool RetainedNode::realization_current(
-    const std::shared_ptr<const DescriptionChildren>& provider,
-    const std::shared_ptr<const Theme>& projected_theme,
-    const std::optional<std::string>& projected_theme_scope,
-    const std::uint64_t theme_generation,
-    const MaterializationRange range
-) const noexcept {
-    return realization_provider_ == provider &&
-           realization_theme_ == projected_theme &&
+bool RetainedNode::realization_current(const std::shared_ptr<const DescriptionChildren>& provider,
+                                       const std::shared_ptr<const Theme>& projected_theme,
+                                       const std::optional<std::string>& projected_theme_scope,
+                                       const std::uint64_t theme_generation,
+                                       const MaterializationRange range) const noexcept {
+    return realization_provider_ == provider && realization_theme_ == projected_theme &&
            realization_theme_scope_ == projected_theme_scope &&
            realization_theme_generation_ == theme_generation &&
            realized_range_ == std::optional<MaterializationRange>(range);
@@ -367,11 +391,10 @@ const runtime::StateScopeSet& RetainedNode::warm_realization_state_scopes() cons
 
 DirtyGenerationSnapshot RetainedNode::dirty_generations() const noexcept {
     return DirtyGenerationSnapshot{
-        dirty_generations_[0U], dirty_generations_[1U], dirty_generations_[2U],
-        dirty_generations_[3U], dirty_generations_[4U], dirty_generations_[5U],
-        dirty_generations_[6U], dirty_generations_[7U], dirty_generations_[8U],
-        dirty_generations_[9U], dirty_generations_[10U], dirty_generations_[11U]
-    };
+        dirty_generations_[0U], dirty_generations_[1U],  dirty_generations_[2U],
+        dirty_generations_[3U], dirty_generations_[4U],  dirty_generations_[5U],
+        dirty_generations_[6U], dirty_generations_[7U],  dirty_generations_[8U],
+        dirty_generations_[9U], dirty_generations_[10U], dirty_generations_[11U]};
 }
 
 const runtime::Value* RetainedNode::retained_value(const std::string_view name) const noexcept {
@@ -382,13 +405,36 @@ const runtime::Value* RetainedNode::retained_value(const std::string_view name) 
 bool RetainedNode::set_retained_value(std::string name, runtime::Value value) {
     validate_text(name, "retained value name");
     const auto found = retained_values_.find(name);
-    if (found != retained_values_.end() && found->second == value) return false;
+    if (found != retained_values_.end() && found->second == value)
+        return false;
     retained_values_.insert_or_assign(std::move(name), std::move(value));
     return true;
 }
 
+std::span<const std::byte>
+RetainedNode::retained_bytes(const std::string_view name) const noexcept {
+    const auto found = retained_bytes_.find(name);
+    return found != retained_bytes_.end() ? std::span<const std::byte>(found->second)
+                                          : std::span<const std::byte>{};
+}
+
+bool RetainedNode::set_retained_bytes(std::string name, const std::span<const std::byte> value) {
+    validate_text(name, "retained byte field name");
+    const auto found = retained_bytes_.find(name);
+    if (found != retained_bytes_.end()) {
+        if (found->second.size() == value.size() && std::ranges::equal(found->second, value)) {
+            return false;
+        }
+        found->second.assign(value.begin(), value.end());
+        return true;
+    }
+    retained_bytes_.emplace(std::move(name), std::vector<std::byte>(value.begin(), value.end()));
+    return true;
+}
+
 void RetainedNode::add_cleanup(Cleanup cleanup) {
-    if (!cleanup) throw std::invalid_argument("retained cleanup callback must not be empty");
+    if (!cleanup)
+        throw std::invalid_argument("retained cleanup callback must not be empty");
     cleanups_.push_back(std::move(cleanup));
 }
 
@@ -408,22 +454,24 @@ bool ReconcileStats::changed() const noexcept {
 }
 
 RetainedTree::RetainedTree(const std::uint64_t identity_seed) : next_identity_(identity_seed) {}
-RetainedTree::~RetainedTree() { clear(); }
+RetainedTree::~RetainedTree() {
+    clear();
+}
 
-void RetainedTree::configure_persistence(
-    PersistenceFields fields,
-    PersistenceReader reader,
-    PersistenceWriter writer
-) {
+void RetainedTree::configure_persistence(PersistenceFields fields, PersistenceReader reader,
+                                         PersistenceWriter writer) {
     persistence_fields_ = std::move(fields);
     persistence_reader_ = std::move(reader);
     persistence_writer_ = std::move(writer);
 }
 
-RetainedNode* RetainedTree::root() const noexcept { return root_.get(); }
+RetainedNode* RetainedTree::root() const noexcept {
+    return root_.get();
+}
 
 std::shared_ptr<const RetainedDescriptionSnapshot> RetainedTree::description_snapshot() const {
-    if (description_snapshot_ != nullptr) return description_snapshot_;
+    if (description_snapshot_ != nullptr)
+        return description_snapshot_;
     auto snapshot = std::make_shared<RetainedDescriptionSnapshot>();
     if (root_ == nullptr) {
         description_snapshot_ = snapshot;
@@ -438,8 +486,7 @@ std::shared_ptr<const RetainedDescriptionSnapshot> RetainedTree::description_sna
         node->state_scope = retained.description_->state_scope;
         node->retained_values = retained.retained_values_;
         node->virtual_sequence = retained.description_->virtual_sequence;
-        node->virtual_sequence_generation =
-            retained.description_->virtual_sequence_generation;
+        node->virtual_sequence_generation = retained.description_->virtual_sequence_generation;
         const RetainedDescriptionSnapshot::Node* const indexed = node.get();
         snapshot->nodes_.push_back(std::move(node));
         if (indexed->key.has_value()) {
@@ -457,9 +504,8 @@ std::shared_ptr<const RetainedDescriptionSnapshot> RetainedTree::description_sna
 
 RetainedNode* RetainedTree::find_key(const std::string_view key) const noexcept {
     const auto found = key_index_.find(key);
-    return found != key_index_.end() && found->second.size() == 1U
-        ? found->second.front()
-        : nullptr;
+    return found != key_index_.end() && found->second.size() == 1U ? found->second.front()
+                                                                   : nullptr;
 }
 
 const std::vector<RetainedNode*>*
@@ -473,27 +519,34 @@ RetainedNode* RetainedTree::find_identity(const std::uint64_t identity) const no
     return found != identity_index_.end() ? found->second : nullptr;
 }
 
-const std::vector<RetainedNode*>* RetainedTree::find_source(const std::string_view source_path) const noexcept {
+const std::vector<RetainedNode*>*
+RetainedTree::find_source(const std::string_view source_path) const noexcept {
     const auto found = source_index_.find(source_path);
     return found != source_index_.end() ? &found->second : nullptr;
 }
 
-const std::vector<RetainedNode*>* RetainedTree::find_type(const std::string_view type) const noexcept {
+const std::vector<RetainedNode*>*
+RetainedTree::find_type(const std::string_view type) const noexcept {
     const auto found = type_index_.find(type);
     return found != type_index_.end() ? &found->second : nullptr;
 }
 
-const std::vector<RetainedNode*>* RetainedTree::find_state_scope(const std::string_view scope) const noexcept {
+const std::vector<RetainedNode*>*
+RetainedTree::find_state_scope(const std::string_view scope) const noexcept {
     const auto found = state_scope_index_.find(scope);
     return found != state_scope_index_.end() ? &found->second : nullptr;
 }
 
-const std::vector<RetainedNode*>& RetainedTree::semantic_nodes() const noexcept { return semantic_index_; }
+const std::vector<RetainedNode*>& RetainedTree::semantic_nodes() const noexcept {
+    return semantic_index_;
+}
 const std::vector<RetainedNode*>& RetainedTree::virtual_nodes() const noexcept {
     return virtual_index_;
 }
 
-std::uint64_t RetainedTree::generation() const noexcept { return generation_; }
+std::uint64_t RetainedTree::generation() const noexcept {
+    return generation_;
+}
 std::uint64_t RetainedTree::layout_invalidation_generation() const noexcept {
     return layout_invalidation_generation_;
 }
@@ -504,21 +557,15 @@ std::uint64_t RetainedTree::dirty_generation(const DirtyReason reason) const noe
 
 DirtyGenerationSnapshot RetainedTree::dirty_generations() const noexcept {
     return DirtyGenerationSnapshot{
-        dirty_generations_[0U],
-        dirty_generations_[1U],
-        dirty_generations_[2U],
-        dirty_generations_[3U],
-        dirty_generations_[4U],
-        dirty_generations_[5U],
-        dirty_generations_[6U],
-        dirty_generations_[7U],
-        dirty_generations_[8U],
-        dirty_generations_[9U],
-        dirty_generations_[10U],
-        dirty_generations_[11U],
+        dirty_generations_[0U], dirty_generations_[1U],  dirty_generations_[2U],
+        dirty_generations_[3U], dirty_generations_[4U],  dirty_generations_[5U],
+        dirty_generations_[6U], dirty_generations_[7U],  dirty_generations_[8U],
+        dirty_generations_[9U], dirty_generations_[10U], dirty_generations_[11U],
     };
 }
-std::size_t RetainedTree::dirty_count() const noexcept { return dirty_index_.size(); }
+std::size_t RetainedTree::dirty_count() const noexcept {
+    return dirty_index_.size();
+}
 
 std::vector<RetainedNode*> RetainedTree::dirty_nodes() const {
     std::vector<RetainedNode*> result;
@@ -533,9 +580,11 @@ std::vector<RetainedNode*> RetainedTree::dirty_nodes() const {
 
 runtime::StateScopeSet attached_description_state_scopes(const RetainedTree& tree) {
     runtime::StateScopeSet result;
-    if (tree.root() == nullptr) return result;
+    if (tree.root() == nullptr)
+        return result;
     const auto collect = [&result](const auto& self, const RetainedNode& node) -> void {
-        if (node.lifecycle() != RetainedLifecycle::attached) return;
+        if (node.lifecycle() != RetainedLifecycle::attached)
+            return;
         if (node.description().materialization_result != nullptr) {
             const auto& scopes = node.description().materialization_result->owned_state_scopes;
             result.insert(scopes.begin(), scopes.end());
@@ -552,7 +601,8 @@ runtime::StateScopeSet attached_description_state_scopes(const RetainedTree& tre
 
 bool RetainedTree::mark(const std::uint64_t identity, const DirtyReason reason) {
     RetainedNode* node = find_identity(identity);
-    if (node == nullptr) return false;
+    if (node == nullptr)
+        return false;
     const bool was_dirty = node->dirty_.contains(reason);
     node->mark_dirty(reason);
     dirty_index_.insert(identity);
@@ -569,27 +619,32 @@ bool RetainedTree::mark(const std::uint64_t identity, const DirtyReason reason) 
     return !was_dirty;
 }
 
-bool RetainedTree::set_retained_value(
-    const std::uint64_t identity,
-    std::string name,
-    runtime::Value value,
-    const DirtyReason reason
-) {
+bool RetainedTree::set_retained_value(const std::uint64_t identity, std::string name,
+                                      runtime::Value value, const DirtyReason reason) {
     RetainedNode* node = find_identity(identity);
-    if (node == nullptr || !node->set_retained_value(name, value)) return false;
+    if (node == nullptr || !node->set_retained_value(name, value))
+        return false;
     persist_retained_value(*node, name, value);
     invalidate_description_snapshot();
     static_cast<void>(mark(identity, reason));
     return true;
 }
 
-bool RetainedTree::set_presentation_value(
-    const std::uint64_t identity,
-    std::string name,
-    runtime::Value value
-) {
+bool RetainedTree::set_retained_bytes(const std::uint64_t identity, std::string name,
+                                      const std::span<const std::byte> value,
+                                      const DirtyReason reason) {
     RetainedNode* node = find_identity(identity);
-    if (node == nullptr || !node->set_retained_value(name, value)) return false;
+    if (node == nullptr || !node->set_retained_bytes(std::move(name), value))
+        return false;
+    static_cast<void>(mark(identity, reason));
+    return true;
+}
+
+bool RetainedTree::set_presentation_value(const std::uint64_t identity, std::string name,
+                                          runtime::Value value) {
+    RetainedNode* node = find_identity(identity);
+    if (node == nullptr || !node->set_retained_value(name, value))
+        return false;
     if (node->presentation_generation_ == std::numeric_limits<std::uint64_t>::max()) {
         throw std::overflow_error("retained node presentation generation exhausted");
     }
@@ -597,9 +652,7 @@ bool RetainedTree::set_presentation_value(
     for (RetainedNode* current = node; current != nullptr; current = current->parent_) {
         if (current->subtree_presentation_generation_ ==
             std::numeric_limits<std::uint64_t>::max()) {
-            throw std::overflow_error(
-                "retained subtree presentation generation exhausted"
-            );
+            throw std::overflow_error("retained subtree presentation generation exhausted");
         }
         ++current->subtree_presentation_generation_;
     }
@@ -609,11 +662,8 @@ bool RetainedTree::set_presentation_value(
     return true;
 }
 
-bool RetainedTree::set_paint_value(
-    const std::uint64_t identity,
-    std::string name,
-    runtime::Value value
-) {
+bool RetainedTree::set_paint_value(const std::uint64_t identity, std::string name,
+                                   runtime::Value value) {
     RetainedNode* node = find_identity(identity);
     if (node == nullptr || !node->set_retained_value(std::move(name), std::move(value))) {
         return false;
@@ -623,11 +673,8 @@ bool RetainedTree::set_paint_value(
     return true;
 }
 
-bool RetainedTree::set_input_value(
-    const std::uint64_t identity,
-    std::string name,
-    runtime::Value value
-) {
+bool RetainedTree::set_input_value(const std::uint64_t identity, std::string name,
+                                   runtime::Value value) {
     RetainedNode* node = find_identity(identity);
     if (node == nullptr || !node->set_retained_value(std::move(name), std::move(value))) {
         return false;
@@ -636,11 +683,14 @@ bool RetainedTree::set_input_value(
     return true;
 }
 
-bool RetainedTree::set_arrangement_value(
-    const std::uint64_t identity,
-    std::string name,
-    runtime::Value value
-) {
+bool RetainedTree::set_input_bytes(const std::uint64_t identity, std::string name,
+                                   const std::span<const std::byte> value) {
+    RetainedNode* node = find_identity(identity);
+    return node != nullptr && node->set_retained_bytes(std::move(name), value);
+}
+
+bool RetainedTree::set_arrangement_value(const std::uint64_t identity, std::string name,
+                                         runtime::Value value) {
     RetainedNode* node = find_identity(identity);
     if (node == nullptr || !node->set_retained_value(name, value)) {
         return false;
@@ -659,48 +709,49 @@ bool RetainedTree::set_arrangement_value(
     return true;
 }
 
-bool RetainedTree::field_persisted(
-    const std::string_view type,
-    const std::string_view name
-) const {
-    if (!persistence_fields_) return false;
+bool RetainedTree::field_persisted(const std::string_view type, const std::string_view name) const {
+    if (!persistence_fields_)
+        return false;
     const std::vector<std::string> fields = persistence_fields_(type);
     return std::ranges::find(fields, name) != fields.end();
 }
 
 void RetainedTree::hydrate_persistence(RetainedNode& node) {
-    if (!persistence_fields_ || !persistence_reader_) return;
+    if (!persistence_fields_ || !persistence_reader_)
+        return;
     const auto key_property = node.description_->properties.find("persistenceKey");
     const runtime::Value* key_value = key_property != node.description_->properties.end()
-        ? key_property->second.value() : nullptr;
+                                          ? key_property->second.value()
+                                          : nullptr;
     const std::string* key = key_value != nullptr ? key_value->string() : nullptr;
-    if (key == nullptr || key->empty()) return;
+    if (key == nullptr || key->empty())
+        return;
     for (const std::string& field : persistence_fields_(node.description_->type)) {
-        if (std::optional<runtime::Value> restored = persistence_reader_(
-                node.description_->type, *key, field
-            );
+        if (std::optional<runtime::Value> restored =
+                persistence_reader_(node.description_->type, *key, field);
             restored.has_value()) {
             node.retained_values_.insert_or_assign(field, std::move(*restored));
         }
     }
 }
 
-void RetainedTree::persist_retained_value(
-    const RetainedNode& node,
-    const std::string_view name,
-    const runtime::Value& value
-) {
-    if (!persistence_writer_ || !field_persisted(node.description_->type, name)) return;
+void RetainedTree::persist_retained_value(const RetainedNode& node, const std::string_view name,
+                                          const runtime::Value& value) {
+    if (!persistence_writer_ || !field_persisted(node.description_->type, name))
+        return;
     const auto key_property = node.description_->properties.find("persistenceKey");
     const runtime::Value* key_value = key_property != node.description_->properties.end()
-        ? key_property->second.value() : nullptr;
+                                          ? key_property->second.value()
+                                          : nullptr;
     const std::string* key = key_value != nullptr ? key_value->string() : nullptr;
-    if (key != nullptr && !key->empty()) persistence_writer_(*key, name, value);
+    if (key != nullptr && !key->empty())
+        persistence_writer_(*key, name, value);
 }
 
 void RetainedTree::clear_dirty() {
     for (const std::uint64_t identity : dirty_index_) {
-        if (RetainedNode* node = find_identity(identity); node != nullptr) node->dirty_.clear();
+        if (RetainedNode* node = find_identity(identity); node != nullptr)
+            node->dirty_.clear();
     }
     dirty_index_.clear();
 }
@@ -713,16 +764,19 @@ void RetainedTree::consume_layout_dirty() {
     std::vector<std::uint64_t> clean;
     for (const std::uint64_t identity : dirty_index_) {
         RetainedNode* node = find_identity(identity);
-        if (node == nullptr) continue;
+        if (node == nullptr)
+            continue;
         node->dirty_.remove(DirtyReason::structure);
         node->dirty_.remove(DirtyReason::layout);
         node->dirty_.remove(DirtyReason::text);
         node->dirty_.remove(DirtyReason::style);
         node->dirty_.remove(DirtyReason::scale);
         node->dirty_.remove(DirtyReason::editor);
-        if (node->dirty_.empty()) clean.push_back(identity);
+        if (node->dirty_.empty())
+            clean.push_back(identity);
     }
-    for (const std::uint64_t identity : clean) dirty_index_.erase(identity);
+    for (const std::uint64_t identity : clean)
+        dirty_index_.erase(identity);
 }
 
 void RetainedTree::clear() {
@@ -738,10 +792,13 @@ void RetainedTree::clear() {
     dirty_index_.clear();
 }
 
-void RetainedTree::detach(std::unique_ptr<RetainedNode> node, ReconcileStats* const stats) noexcept {
-    if (node == nullptr) return;
+void RetainedTree::detach(std::unique_ptr<RetainedNode> node,
+                          ReconcileStats* const stats) noexcept {
+    if (node == nullptr)
+        return;
     node->lifecycle_ = RetainedLifecycle::detached;
-    for (auto& child : node->children_) detach(std::move(child), stats);
+    for (auto& child : node->children_)
+        detach(std::move(child), stats);
     node->children_.clear();
     for (auto& cleanup : node->cleanups_) {
         try {
@@ -750,7 +807,8 @@ void RetainedTree::detach(std::unique_ptr<RetainedNode> node, ReconcileStats* co
             /* Cleanup is a teardown boundary and cannot prevent the remainder from detaching. */
         }
     }
-    if (stats != nullptr) ++stats->detached;
+    if (stats != nullptr)
+        ++stats->detached;
 }
 
 void RetainedTree::rebuild_indexes() {
@@ -762,7 +820,8 @@ void RetainedTree::rebuild_indexes() {
     semantic_index_.clear();
     virtual_index_.clear();
     dirty_index_.clear();
-    if (root_ != nullptr) index(*root_);
+    if (root_ != nullptr)
+        index(*root_);
 }
 
 void RetainedTree::index(RetainedNode& node) {
@@ -770,9 +829,11 @@ void RetainedTree::index(RetainedNode& node) {
     if (node.description_->key.has_value()) {
         key_index_[*node.description_->key].push_back(&node);
     }
-    if (!node.description_->source_path.empty()) source_index_[node.description_->source_path].push_back(&node);
+    if (!node.description_->source_path.empty())
+        source_index_[node.description_->source_path].push_back(&node);
     type_index_[node.description_->type].push_back(&node);
-    if (!node.description_->state_scope.empty()) state_scope_index_[node.description_->state_scope].push_back(&node);
+    if (!node.description_->state_scope.empty())
+        state_scope_index_[node.description_->state_scope].push_back(&node);
     const auto semantics = node.description_->properties.find("semantics");
     if (semantics != node.description_->properties.end() && semantics->second.value() != nullptr &&
         semantics->second.value()->kind() != runtime::ValueKind::null_value) {
@@ -782,8 +843,10 @@ void RetainedTree::index(RetainedNode& node) {
         node.description_->materialization.has_value()) {
         virtual_index_.push_back(&node);
     }
-    if (!node.dirty_.empty()) dirty_index_.insert(node.identity_);
-    for (auto& child : node.children_) index(*child);
+    if (!node.dirty_.empty())
+        dirty_index_.insert(node.identity_);
+    for (auto& child : node.children_)
+        index(*child);
 }
 
 std::uint64_t RetainedTree::next_identity() {
@@ -808,10 +871,8 @@ void RetainedTree::bump_dirty_generation(const DirtyReason reason) {
     ++generation;
 }
 
-bool expression_value_equal(
-    const runtime::ExpressionValue& left,
-    const runtime::ExpressionValue& right
-) {
+bool expression_value_equal(const runtime::ExpressionValue& left,
+                            const runtime::ExpressionValue& right) {
     if (left.lexical_state_binding() != right.lexical_state_binding())
         return false;
     if (left.list() != nullptr || right.list() != nullptr) {
@@ -820,10 +881,8 @@ bool expression_value_equal(
             return false;
         }
         for (std::size_t index = 0U; index < (**left.list()).values.size(); ++index) {
-            if (!expression_value_equal(
-                    (**left.list()).values[index],
-                    (**right.list()).values[index]
-                )) {
+            if (!expression_value_equal((**left.list()).values[index],
+                                        (**right.list()).values[index])) {
                 return false;
             }
         }
@@ -845,14 +904,11 @@ bool expression_value_equal(
         return true;
     }
     if (left.component_template() != nullptr || right.component_template() != nullptr) {
-        if (left.component_template() == nullptr ||
-            right.component_template() == nullptr) {
+        if (left.component_template() == nullptr || right.component_template() == nullptr) {
             return false;
         }
-        const runtime::ComponentTemplateValue& left_template =
-            **left.component_template();
-        const runtime::ComponentTemplateValue& right_template =
-            **right.component_template();
+        const runtime::ComponentTemplateValue& left_template = **left.component_template();
+        const runtime::ComponentTemplateValue& right_template = **right.component_template();
         if (left_template.component != right_template.component ||
             left_template.arguments.size() != right_template.arguments.size()) {
             return false;
@@ -868,7 +924,8 @@ bool expression_value_equal(
         return true;
     }
     if (left.value() != nullptr || right.value() != nullptr) {
-        return left.value() != nullptr && right.value() != nullptr && *left.value() == *right.value();
+        return left.value() != nullptr && right.value() != nullptr &&
+               *left.value() == *right.value();
     }
     if (left.collection() != nullptr || right.collection() != nullptr) {
         return left.collection() != nullptr && right.collection() != nullptr &&
@@ -880,20 +937,19 @@ bool expression_value_equal(
                action_value_equal(*left.action(), *right.action());
     }
     if (left.lambda() != nullptr || right.lambda() != nullptr) {
-        if (left.lambda() == nullptr || right.lambda() == nullptr) return false;
+        if (left.lambda() == nullptr || right.lambda() == nullptr)
+            return false;
         const runtime::LambdaValue& left_lambda = **left.lambda();
         const runtime::LambdaValue& right_lambda = **right.lambda();
         if (left_lambda.parameter != right_lambda.parameter ||
             left_lambda.body != right_lambda.body ||
             left_lambda.captured != right_lambda.captured ||
             left_lambda.captured_host_roots != right_lambda.captured_host_roots ||
-            left_lambda.captured_host_dependencies !=
-                right_lambda.captured_host_dependencies ||
+            left_lambda.captured_host_dependencies != right_lambda.captured_host_dependencies ||
             left_lambda.captured_lexical_dependencies !=
                 right_lambda.captured_lexical_dependencies ||
             left_lambda.component_path != right_lambda.component_path ||
-            left_lambda.captured_executable.size() !=
-                right_lambda.captured_executable.size()) {
+            left_lambda.captured_executable.size() != right_lambda.captured_executable.size()) {
             return false;
         }
         auto right_capture = right_lambda.captured_executable.begin();

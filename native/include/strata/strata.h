@@ -116,10 +116,8 @@ typedef struct strata_diagnostics_snapshot {
     size_t record_count;
 } strata_diagnostics_snapshot;
 
-typedef void (*strata_diagnostics_snapshot_fn)(
-    void* user_data,
-    const strata_diagnostics_snapshot* snapshot
-);
+typedef void (*strata_diagnostics_snapshot_fn)(void* user_data,
+                                               const strata_diagnostics_snapshot* snapshot);
 
 typedef struct strata_diagnostics_snapshot_sink {
     size_t struct_size;
@@ -228,10 +226,8 @@ typedef struct strata_profiler_snapshot {
     size_t spike_count;
 } strata_profiler_snapshot;
 
-typedef void (*strata_profiler_snapshot_fn)(
-    void* user_data,
-    const strata_profiler_snapshot* snapshot
-);
+typedef void (*strata_profiler_snapshot_fn)(void* user_data,
+                                            const strata_profiler_snapshot* snapshot);
 
 typedef struct strata_profiler_snapshot_sink {
     size_t struct_size;
@@ -240,12 +236,8 @@ typedef struct strata_profiler_snapshot_sink {
 } strata_profiler_snapshot_sink;
 
 typedef void* (*strata_allocate_fn)(void* user_data, size_t size, size_t alignment);
-typedef void (*strata_deallocate_fn)(
-    void* user_data,
-    void* allocation,
-    size_t size,
-    size_t alignment
-);
+typedef void (*strata_deallocate_fn)(void* user_data, void* allocation, size_t size,
+                                     size_t alignment);
 
 typedef struct strata_allocator {
     size_t struct_size;
@@ -262,10 +254,7 @@ typedef struct strata_clock {
     strata_clock_now_fn now_nanoseconds;
 } strata_clock;
 
-typedef void (*strata_diagnostic_fn)(
-    void* user_data,
-    const strata_diagnostic* diagnostic
-);
+typedef void (*strata_diagnostic_fn)(void* user_data, const strata_diagnostic* diagnostic);
 
 typedef struct strata_diagnostic_sink {
     size_t struct_size;
@@ -375,7 +364,8 @@ typedef struct strata_value_json_sink {
     strata_value_json_fn emit;
 } strata_value_json_sink;
 
-/* Application configuration is copied during the call. Empty schemas_json selects built-ins only. */
+/* Application configuration is copied during the call. Empty schemas_json selects built-ins only.
+ */
 typedef struct strata_application_config {
     size_t struct_size;
     strata_string_view id;
@@ -396,12 +386,10 @@ typedef struct strata_module_source {
 } strata_module_source;
 
 /* Returned module views are borrowed only for the callback and are copied before it returns. */
-typedef strata_status (*strata_module_load_fn)(
-    void* user_data,
-    strata_string_view importer_source_id,
-    strata_string_view import_path,
-    strata_module_source* out_source
-);
+typedef strata_status (*strata_module_load_fn)(void* user_data,
+                                               strata_string_view importer_source_id,
+                                               strata_string_view import_path,
+                                               strata_module_source* out_source);
 
 typedef struct strata_activation_config {
     size_t struct_size;
@@ -454,10 +442,8 @@ typedef struct strata_action_call {
     strata_string_view event_value_json;
 } strata_action_call;
 
-typedef strata_action_handler_result (*strata_action_handler_fn)(
-    void* user_data,
-    const strata_action_call* call
-);
+typedef strata_action_handler_result (*strata_action_handler_fn)(void* user_data,
+                                                                 const strata_action_call* call);
 
 typedef struct strata_action_handler_config {
     size_t struct_size;
@@ -514,11 +500,8 @@ typedef struct strata_string_sink {
 } strata_string_sink;
 
 /* Returned resource bytes are borrowed from the host and copied before load returns. */
-typedef strata_status (*strata_resource_load_fn)(
-    void* user_data,
-    strata_string_view resource_id,
-    strata_bytes_view* out_bytes
-);
+typedef strata_status (*strata_resource_load_fn)(void* user_data, strata_string_view resource_id,
+                                                 strata_bytes_view* out_bytes);
 
 typedef struct strata_resource_adapter {
     size_t struct_size;
@@ -528,16 +511,10 @@ typedef struct strata_resource_adapter {
 } strata_resource_adapter;
 
 /* Missing durable data returns STRATA_STATUS_NOT_FOUND. Loaded bytes are copied before return. */
-typedef strata_status (*strata_durable_load_fn)(
-    void* user_data,
-    strata_string_view application_id,
-    strata_bytes_view* out_bytes
-);
-typedef strata_status (*strata_durable_write_fn)(
-    void* user_data,
-    strata_string_view application_id,
-    strata_bytes_view bytes
-);
+typedef strata_status (*strata_durable_load_fn)(void* user_data, strata_string_view application_id,
+                                                strata_bytes_view* out_bytes);
+typedef strata_status (*strata_durable_write_fn)(void* user_data, strata_string_view application_id,
+                                                 strata_bytes_view bytes);
 typedef struct strata_durable_store_adapter {
     size_t struct_size;
     void* user_data;
@@ -551,13 +528,9 @@ typedef struct strata_durable_store_adapter {
  * cancel callback begins, the request is stale and later completions are deterministically dropped.
  * The host must quiesce its callbacks before releasing the runtime handle.
  */
-typedef strata_status (*strata_async_begin_fn)(
-    void* user_data,
-    uint64_t request_id,
-    strata_string_view binding,
-    strata_string_view owner,
-    strata_string_view payload_json
-);
+typedef strata_status (*strata_async_begin_fn)(void* user_data, uint64_t request_id,
+                                               strata_string_view binding, strata_string_view owner,
+                                               strata_string_view payload_json);
 typedef void (*strata_async_cancel_fn)(void* user_data, uint64_t request_id);
 typedef struct strata_async_host_adapter {
     size_t struct_size;
@@ -604,11 +577,8 @@ typedef struct strata_ime_adapter {
 } strata_ime_adapter;
 
 /* Effect payload JSON is canonical UTF-8 and borrowed only for the callback. */
-typedef strata_status (*strata_effect_emit_fn)(
-    void* user_data,
-    strata_string_view effect_id,
-    strata_string_view payload_json
-);
+typedef strata_status (*strata_effect_emit_fn)(void* user_data, strata_string_view effect_id,
+                                               strata_string_view payload_json);
 
 typedef struct strata_effect_adapter {
     size_t struct_size;
@@ -744,6 +714,8 @@ typedef struct strata_widget_render_context strata_widget_render_context;
 typedef struct strata_widget_inspection_context strata_widget_inspection_context;
 typedef struct strata_widget_semantics_context strata_widget_semantics_context;
 typedef struct strata_behavior_input_context strata_behavior_input_context;
+typedef struct strata_widget_value strata_widget_value;
+typedef struct strata_widget_subtargets_context strata_widget_subtargets_context;
 
 typedef struct strata_color {
     uint8_t red;
@@ -752,10 +724,28 @@ typedef struct strata_color {
     uint8_t alpha;
 } strata_color;
 
+typedef uint32_t strata_widget_value_kind;
+#define STRATA_WIDGET_VALUE_NULL UINT32_C(0)
+#define STRATA_WIDGET_VALUE_BOOLEAN UINT32_C(1)
+#define STRATA_WIDGET_VALUE_NUMBER UINT32_C(2)
+#define STRATA_WIDGET_VALUE_DURATION UINT32_C(3)
+#define STRATA_WIDGET_VALUE_TEXT UINT32_C(4)
+#define STRATA_WIDGET_VALUE_COLOR UINT32_C(5)
+#define STRATA_WIDGET_VALUE_IMAGE UINT32_C(6)
+#define STRATA_WIDGET_VALUE_KEY UINT32_C(7)
+#define STRATA_WIDGET_VALUE_THEME_TOKEN UINT32_C(8)
+#define STRATA_WIDGET_VALUE_LIST UINT32_C(9)
+#define STRATA_WIDGET_VALUE_OBJECT UINT32_C(10)
+
 typedef struct strata_border {
     double width;
     strata_color color;
 } strata_border;
+
+typedef uint32_t strata_widget_text_alignment;
+#define STRATA_WIDGET_TEXT_ALIGN_START UINT32_C(0)
+#define STRATA_WIDGET_TEXT_ALIGN_CENTER UINT32_C(1)
+#define STRATA_WIDGET_TEXT_ALIGN_END UINT32_C(2)
 
 #define STRATA_THEME_MODEL_VERSION_1 UINT32_C(1)
 #define STRATA_THEME_MODEL_VERSION_2 UINT32_C(2)
@@ -1270,21 +1260,12 @@ typedef uint32_t strata_extension_input_result;
 #define STRATA_EXTENSION_INPUT_CONSUMED UINT32_C(1)
 
 typedef strata_extension_input_result (*strata_widget_activate_fn)(
-    void* user_data,
-    strata_widget_input_context* context
-);
-typedef void (*strata_widget_present_fn)(
-    void* user_data,
-    strata_widget_render_context* context
-);
-typedef strata_rect (*strata_widget_hit_bounds_fn)(
-    void* user_data,
-    strata_widget_inspection_context* context
-);
-typedef void (*strata_widget_semantics_fn)(
-    void* user_data,
-    strata_widget_semantics_context* context
-);
+    void* user_data, strata_widget_input_context* context);
+typedef void (*strata_widget_present_fn)(void* user_data, strata_widget_render_context* context);
+typedef strata_rect (*strata_widget_hit_bounds_fn)(void* user_data,
+                                                   strata_widget_inspection_context* context);
+typedef void (*strata_widget_semantics_fn)(void* user_data,
+                                           strata_widget_semantics_context* context);
 
 typedef struct strata_corner_radii {
     double top_left;
@@ -1359,17 +1340,16 @@ typedef struct strata_material_state {
 
 typedef struct strata_widget_key_event {
     size_t struct_size;
-    /* Canonical lowercased key name shared with built-in widgets, for example "enter" or "right". */
+    /* Canonical lowercased key name shared with built-in widgets, for example "enter" or "right".
+     */
     strata_string_view key;
     uint32_t modifiers;
     uint32_t reserved;
 } strata_widget_key_event;
 
-typedef strata_extension_input_result (*strata_widget_key_fn)(
-    void* user_data,
-    strata_widget_input_context* context,
-    const strata_widget_key_event* event
-);
+typedef strata_extension_input_result (*strata_widget_key_fn)(void* user_data,
+                                                              strata_widget_input_context* context,
+                                                              const strata_widget_key_event* event);
 
 /** Work invalidated when an extension writes one declared retained field. */
 typedef uint32_t strata_widget_invalidation;
@@ -1393,6 +1373,43 @@ typedef struct strata_widget_retained_field {
     strata_widget_invalidation invalidation;
     uint32_t reserved;
 } strata_widget_retained_field;
+
+/** One widget-owned hit region; later entries win equal-z overlap. */
+typedef struct strata_widget_subtarget {
+    size_t struct_size;
+    strata_string_view id;
+    strata_rect bounds;
+    int32_t z_index;
+    uint32_t enabled;
+    /* Stable logical collection index, or SIZE_MAX when the target is not indexed. */
+    size_t index;
+    /* CONTROL belongs to the owner; ITEM maps an indexed virtual semantic child. */
+    uint32_t kind;
+    uint32_t reserved;
+} strata_widget_subtarget;
+
+typedef void (*strata_widget_subtargets_fn)(void* user_data,
+                                            strata_widget_subtargets_context* context);
+#define STRATA_WIDGET_SUBTARGET_CONTROL UINT32_C(0)
+#define STRATA_WIDGET_SUBTARGET_ITEM UINT32_C(1)
+
+#define STRATA_WIDGET_SEMANTIC_CHILD_SELECTED (UINT32_C(1) << 0)
+#define STRATA_WIDGET_SEMANTIC_CHILD_DISABLED (UINT32_C(1) << 1)
+#define STRATA_WIDGET_SEMANTIC_CHILD_VALUE_RANGE (UINT32_C(1) << 2)
+
+/** One independently addressable semantic child of a compound widget. */
+typedef struct strata_widget_semantic_child {
+    size_t struct_size;
+    size_t index;
+    strata_string_view role;
+    strata_string_view name;
+    strata_string_view value_text;
+    double current;
+    double minimum;
+    double maximum;
+    uint32_t flags;
+    uint32_t reserved;
+} strata_widget_semantic_child;
 
 #define STRATA_WIDGET_EXTENSION_FOCUSABLE (UINT64_C(1) << 0)
 #define STRATA_WIDGET_EXTENSION_DETACHED_OVERLAY (UINT64_C(1) << 1)
@@ -1424,7 +1441,10 @@ typedef struct strata_widget_extension {
     strata_string_view semantics_role;
     const strata_widget_retained_field* retained_fields;
     size_t retained_field_count;
+    /* Optional suffix; absent from version-1 descriptors. */
+    strata_widget_subtargets_fn subtargets;
 } strata_widget_extension;
+#define STRATA_WIDGET_EXTENSION_VERSION_1_SIZE offsetof(strata_widget_extension, subtargets)
 
 typedef uint32_t strata_extension_event_phase;
 #define STRATA_EXTENSION_EVENT_CAPTURE UINT32_C(0)
@@ -1450,10 +1470,8 @@ typedef struct strata_behavior_pointer_event {
 } strata_behavior_pointer_event;
 
 typedef strata_extension_input_result (*strata_behavior_pointer_fn)(
-    void* user_data,
-    strata_behavior_input_context* context,
-    const strata_behavior_pointer_event* event
-);
+    void* user_data, strata_behavior_input_context* context,
+    const strata_behavior_pointer_event* event);
 
 #define STRATA_BEHAVIOR_EXTENSION_FOCUSABLE (UINT64_C(1) << 0)
 #define STRATA_BEHAVIOR_EXTENSION_ACCEPTS_POINTER (UINT64_C(1) << 1)
@@ -1483,13 +1501,14 @@ typedef struct strata_widget_pointer_event {
     int64_t timestamp_nanoseconds;
     uint32_t target;
     uint32_t reserved;
+    /* Optional suffix. Empty/SIZE_MAX means the routed region is the widget itself. */
+    strata_string_view subtarget_id;
+    size_t subtarget_index;
 } strata_widget_pointer_event;
 
 typedef strata_extension_input_result (*strata_widget_pointer_fn)(
-    void* user_data,
-    strata_widget_input_context* context,
-    const strata_widget_pointer_event* event
-);
+    void* user_data, strata_widget_input_context* context,
+    const strata_widget_pointer_event* event);
 /** Widget-local wheel/trackpad event delivered through capture, target, and bubble phases. */
 typedef struct strata_widget_scroll_event {
     size_t struct_size;
@@ -1506,11 +1525,7 @@ typedef struct strata_widget_scroll_event {
 } strata_widget_scroll_event;
 
 typedef strata_extension_input_result (*strata_widget_scroll_fn)(
-    void* user_data,
-    strata_widget_input_context* context,
-    const strata_widget_scroll_event* event
-);
-
+    void* user_data, strata_widget_input_context* context, const strata_widget_scroll_event* event);
 
 /**
  * Optional input phases for one widget descriptor. This table is separate so extending widget
@@ -1530,7 +1545,6 @@ typedef struct strata_widget_scroll_extension {
     strata_widget_scroll_fn scroll;
 } strata_widget_scroll_extension;
 
-
 typedef struct strata_surface_extension_bundle {
     size_t struct_size;
     const strata_widget_extension* widgets;
@@ -1543,9 +1557,9 @@ typedef struct strata_surface_extension_bundle {
     size_t widget_scroll_count;
 } strata_surface_extension_bundle;
 
-#define STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE \
+#define STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE                                             \
     offsetof(strata_surface_extension_bundle, widget_inputs)
-#define STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE \
+#define STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE                                             \
     offsetof(strata_surface_extension_bundle, widget_scrolls)
 
 typedef struct strata_surface_config {
@@ -1751,77 +1765,47 @@ STRATA_API uint32_t strata_abi_version(void);
 STRATA_API strata_capabilities strata_capability_bits(void);
 STRATA_API strata_result strata_get_api_info(uint32_t requested_abi, strata_api_info* out_info);
 
-STRATA_API strata_result strata_runtime_create(
-    const strata_runtime_config* config,
-    strata_runtime** out_runtime
-);
+STRATA_API strata_result strata_runtime_create(const strata_runtime_config* config,
+                                               strata_runtime** out_runtime);
 /* Refuses to destroy a runtime that still owns any Surface, leaving every handle recoverable. */
 STRATA_API strata_result strata_runtime_release(strata_runtime* runtime);
-STRATA_API strata_result strata_runtime_get_memory_info(
-    const strata_runtime* runtime,
-    strata_runtime_memory_info* out_info
-);
-STRATA_API strata_result strata_runtime_next_identity(
-    strata_runtime* runtime,
-    uint64_t* out_identity
-);
-STRATA_API strata_result strata_runtime_create_snapshot(
-    strata_runtime* runtime,
-    strata_snapshot** out_snapshot
-);
+STRATA_API strata_result strata_runtime_get_memory_info(const strata_runtime* runtime,
+                                                        strata_runtime_memory_info* out_info);
+STRATA_API strata_result strata_runtime_next_identity(strata_runtime* runtime,
+                                                      uint64_t* out_identity);
+STRATA_API strata_result strata_runtime_create_snapshot(strata_runtime* runtime,
+                                                        strata_snapshot** out_snapshot);
 STRATA_API strata_result strata_runtime_publish_host_snapshot(
-    strata_runtime* runtime,
-    const strata_host_snapshot_config* snapshot
-);
-STRATA_API strata_result strata_runtime_get_host_snapshot_info(
-    const strata_runtime* runtime,
-    strata_host_snapshot_info* out_info
-);
+    strata_runtime* runtime, const strata_host_snapshot_config* snapshot);
+STRATA_API strata_result strata_runtime_get_host_snapshot_info(const strata_runtime* runtime,
+                                                               strata_host_snapshot_info* out_info);
 /* Reads the retained generation for one snapshot producer id. */
-STRATA_API strata_result strata_runtime_get_host_snapshot_generation(
-    const strata_runtime* runtime,
-    strata_string_view id,
-    uint64_t* out_generation
-);
+STRATA_API strata_result strata_runtime_get_host_snapshot_generation(const strata_runtime* runtime,
+                                                                     strata_string_view id,
+                                                                     uint64_t* out_generation);
 /* Reads the canonical bounded runtime diagnostic history without materializing frame JSON. */
 STRATA_API strata_result strata_runtime_read_diagnostics(
-    const strata_runtime* runtime,
-    const strata_diagnostics_snapshot_sink* sink
-);
+    const strata_runtime* runtime, const strata_diagnostics_snapshot_sink* sink);
 /* Clears retained diagnostics, pending publication, and every owned Surface diagnostic queue. */
 STRATA_API strata_result strata_runtime_clear_diagnostics(strata_runtime* runtime);
 /* Typed canonical profiler history; this never materializes inspection/frame JSON. */
-STRATA_API strata_result strata_runtime_read_profiler(
-    const strata_runtime* runtime,
-    const strata_profiler_snapshot_sink* sink
-);
-STRATA_API strata_result strata_runtime_set_profiler_capture(
-    strata_runtime* runtime,
-    uint32_t enabled
-);
-STRATA_API strata_result strata_runtime_read_host_value_json(
-    strata_runtime* runtime,
-    strata_string_view path,
-    const strata_value_json_sink* sink
-);
+STRATA_API strata_result strata_runtime_read_profiler(const strata_runtime* runtime,
+                                                      const strata_profiler_snapshot_sink* sink);
+STRATA_API strata_result strata_runtime_set_profiler_capture(strata_runtime* runtime,
+                                                             uint32_t enabled);
+STRATA_API strata_result strata_runtime_read_host_value_json(strata_runtime* runtime,
+                                                             strata_string_view path,
+                                                             const strata_value_json_sink* sink);
 STRATA_API strata_result strata_runtime_configure_application(
-    strata_runtime* runtime,
-    const strata_application_config* config
-);
-STRATA_API strata_result strata_runtime_compile_and_activate(
-    strata_runtime* runtime,
-    const strata_activation_config* config,
-    strata_activation_info* out_info
-);
+    strata_runtime* runtime, const strata_application_config* config);
+STRATA_API strata_result strata_runtime_compile_and_activate(strata_runtime* runtime,
+                                                             const strata_activation_config* config,
+                                                             strata_activation_info* out_info);
 STRATA_API strata_result strata_runtime_activate_compiled_module(
-    strata_runtime* runtime,
-    const strata_compiled_activation_config* config,
-    strata_activation_info* out_info
-);
-STRATA_API strata_result strata_runtime_read_active_unit_json(
-    strata_runtime* runtime,
-    const strata_value_json_sink* sink
-);
+    strata_runtime* runtime, const strata_compiled_activation_config* config,
+    strata_activation_info* out_info);
+STRATA_API strata_result strata_runtime_read_active_unit_json(strata_runtime* runtime,
+                                                              const strata_value_json_sink* sink);
 /*
  * One application-declared material as a host sees it. Parameter packing is already resolved into
  * the vertex draw data, so a host needs only the shading source it implements and the policy for
@@ -1844,12 +1828,8 @@ typedef struct strata_material_declaration {
  * backend adds a source key rather than a second contract.
  */
 STRATA_API strata_result strata_runtime_read_material_declarations(
-    strata_runtime* runtime,
-    strata_string_view backend,
-    strata_material_declaration* out_declarations,
-    size_t capacity,
-    size_t* out_count
-);
+    strata_runtime* runtime, strata_string_view backend,
+    strata_material_declaration* out_declarations, size_t capacity, size_t* out_count);
 
 #define STRATA_EFFECT_INPUT_BACKDROP UINT32_C(0)
 #define STRATA_EFFECT_INPUT_CONTENT UINT32_C(1)
@@ -1875,625 +1855,394 @@ typedef struct strata_effect_pass_declaration {
 
 /** Enumerates every pass of every effect for one backend as a flat ordered table. */
 STRATA_API strata_result strata_runtime_read_effect_pass_declarations(
-    strata_runtime* runtime,
-    strata_string_view backend,
-    strata_effect_pass_declaration* out_declarations,
-    size_t capacity,
-    size_t* out_count
-);
+    strata_runtime* runtime, strata_string_view backend,
+    strata_effect_pass_declaration* out_declarations, size_t capacity, size_t* out_count);
 /* Resolves one compiled path without exporting or reparsing the whole active unit/source map. */
 STRATA_API strata_result strata_runtime_read_source_map_entry_json(
-    strata_runtime* runtime,
-    strata_string_view compiled_path,
-    const strata_value_json_sink* sink
-);
+    strata_runtime* runtime, strata_string_view compiled_path, const strata_value_json_sink* sink);
 /* Returns the ordered active-unit entries whose authored range contains this source position. */
 STRATA_API strata_result strata_runtime_read_source_map_entries_at_json(
-    strata_runtime* runtime,
-    strata_string_view source_id,
-    uint32_t line,
-    uint32_t column,
-    const strata_value_json_sink* sink
-);
+    strata_runtime* runtime, strata_string_view source_id, uint32_t line, uint32_t column,
+    const strata_value_json_sink* sink);
 STRATA_API strata_result strata_runtime_register_action_handler(
-    strata_runtime* runtime,
-    const strata_action_handler_config* config,
-    strata_action_registration** out_registration
-);
+    strata_runtime* runtime, const strata_action_handler_config* config,
+    strata_action_registration** out_registration);
 STRATA_API void strata_action_registration_release(strata_action_registration* registration);
 STRATA_API strata_result strata_runtime_dispatch_action_json(
-    strata_runtime* runtime,
-    const strata_action_dispatch_config* config,
-    strata_action_dispatch_info* out_info
-);
+    strata_runtime* runtime, const strata_action_dispatch_config* config,
+    strata_action_dispatch_info* out_info);
 /* Installs a non-null adapter whose nonzero generation is strictly newer than the active one. */
 STRATA_API strata_result strata_runtime_set_resource_adapter(
-    strata_runtime* runtime,
-    const strata_resource_adapter* adapter
-);
-STRATA_API strata_result strata_runtime_read_resource(
-    strata_runtime* runtime,
-    strata_string_view resource_id,
-    const strata_bytes_sink* sink
-);
+    strata_runtime* runtime, const strata_resource_adapter* adapter);
+STRATA_API strata_result strata_runtime_read_resource(strata_runtime* runtime,
+                                                      strata_string_view resource_id,
+                                                      const strata_bytes_sink* sink);
 STRATA_API strata_result strata_runtime_set_durable_store_adapter(
-    strata_runtime* runtime,
-    const strata_durable_store_adapter* adapter
-);
+    strata_runtime* runtime, const strata_durable_store_adapter* adapter);
 STRATA_API strata_result strata_runtime_read_durable_shell_value_json(
-    strata_runtime* runtime,
-    strata_string_view key,
-    const strata_value_json_sink* sink
-);
+    strata_runtime* runtime, strata_string_view key, const strata_value_json_sink* sink);
 STRATA_API strata_result strata_runtime_write_durable_shell_value_json(
-    strata_runtime* runtime,
-    strata_string_view key,
-    strata_string_view value_json
-);
+    strata_runtime* runtime, strata_string_view key, strata_string_view value_json);
 STRATA_API strata_result strata_runtime_flush_durable_state(strata_runtime* runtime);
 STRATA_API strata_result strata_runtime_set_async_host_adapter(
-    strata_runtime* runtime,
-    const strata_async_host_adapter* adapter
-);
-STRATA_API strata_result strata_runtime_async_progress(
-    strata_runtime* runtime,
-    uint64_t request_id,
-    const strata_async_progress* progress
-);
-STRATA_API strata_result strata_runtime_async_succeed_json(
-    strata_runtime* runtime,
-    uint64_t request_id,
-    strata_string_view value_json
-);
-STRATA_API strata_result strata_runtime_async_fail(
-    strata_runtime* runtime,
-    uint64_t request_id,
-    strata_string_view message,
-    strata_string_view code
-);
+    strata_runtime* runtime, const strata_async_host_adapter* adapter);
+STRATA_API strata_result strata_runtime_async_progress(strata_runtime* runtime, uint64_t request_id,
+                                                       const strata_async_progress* progress);
+STRATA_API strata_result strata_runtime_async_succeed_json(strata_runtime* runtime,
+                                                           uint64_t request_id,
+                                                           strata_string_view value_json);
+STRATA_API strata_result strata_runtime_async_fail(strata_runtime* runtime, uint64_t request_id,
+                                                   strata_string_view message,
+                                                   strata_string_view code);
 STRATA_API strata_result strata_runtime_set_clipboard_adapter(
-    strata_runtime* runtime,
-    const strata_clipboard_adapter* adapter
-);
-STRATA_API strata_result strata_runtime_clipboard_read(
-    strata_runtime* runtime,
-    const strata_string_sink* text_sink
-);
-STRATA_API strata_result strata_runtime_clipboard_write(
-    strata_runtime* runtime,
-    strata_string_view text
-);
-STRATA_API strata_result strata_runtime_set_ime_adapter(
-    strata_runtime* runtime,
-    const strata_ime_adapter* adapter
-);
+    strata_runtime* runtime, const strata_clipboard_adapter* adapter);
+STRATA_API strata_result strata_runtime_clipboard_read(strata_runtime* runtime,
+                                                       const strata_string_sink* text_sink);
+STRATA_API strata_result strata_runtime_clipboard_write(strata_runtime* runtime,
+                                                        strata_string_view text);
+STRATA_API strata_result strata_runtime_set_ime_adapter(strata_runtime* runtime,
+                                                        const strata_ime_adapter* adapter);
 STRATA_API strata_result strata_runtime_ime_set_active(strata_runtime* runtime, uint32_t active);
-STRATA_API strata_result strata_runtime_ime_set_cursor_rect(
-    strata_runtime* runtime,
-    strata_rect logical_rect
-);
-STRATA_API strata_result strata_runtime_set_effect_adapter(
-    strata_runtime* runtime,
-    const strata_effect_adapter* adapter
-);
-STRATA_API strata_result strata_runtime_emit_effect_json(
-    strata_runtime* runtime,
-    strata_string_view effect_id,
-    strata_string_view payload_json
-);
-STRATA_API strata_result strata_runtime_create_surface(
-    strata_runtime* runtime,
-    const strata_surface_config* config,
-    strata_surface** out_surface
-);
+STRATA_API strata_result strata_runtime_ime_set_cursor_rect(strata_runtime* runtime,
+                                                            strata_rect logical_rect);
+STRATA_API strata_result strata_runtime_set_effect_adapter(strata_runtime* runtime,
+                                                           const strata_effect_adapter* adapter);
+STRATA_API strata_result strata_runtime_emit_effect_json(strata_runtime* runtime,
+                                                         strata_string_view effect_id,
+                                                         strata_string_view payload_json);
+STRATA_API strata_result strata_runtime_create_surface(strata_runtime* runtime,
+                                                       const strata_surface_config* config,
+                                                       strata_surface** out_surface);
 /** Produces a complete validated policy configuration for the selected policy kind. */
-STRATA_API strata_result strata_scale_policy_defaults(
-    strata_scale_policy_kind kind,
-    strata_scale_policy_config* out_policy
-);
+STRATA_API strata_result strata_scale_policy_defaults(strata_scale_policy_kind kind,
+                                                      strata_scale_policy_config* out_policy);
 /** Resolves one portable, uniform logical/framebuffer mapping without host-side policy code. */
-STRATA_API strata_result strata_resolve_scale_context(
-    const strata_scale_policy_config* policy,
-    int64_t framebuffer_width,
-    int64_t framebuffer_height,
-    strata_scale_context* out_context
-);
+STRATA_API strata_result strata_resolve_scale_context(const strata_scale_policy_config* policy,
+                                                      int64_t framebuffer_width,
+                                                      int64_t framebuffer_height,
+                                                      strata_scale_context* out_context);
 /** Fills the frozen default theme token set. */
 STRATA_API strata_result strata_theme_tokens_defaults(strata_theme_tokens* out_tokens);
-STRATA_API strata_result strata_theme_visual_style_defaults(
-    strata_theme_visual_style* out_style
-);
-STRATA_API strata_result strata_theme_text_visual_style_defaults(
-    strata_theme_text_visual_style* out_style
-);
-STRATA_API strata_result strata_theme_text_layout_style_defaults(
-    strata_theme_text_layout_style* out_style
-);
-STRATA_API strata_result strata_theme_layout_style_defaults(
-    strata_theme_layout_style* out_style
-);
-STRATA_API strata_result strata_theme_animation_set_defaults(
-    strata_theme_animation_set* out_set
-);
+STRATA_API strata_result strata_theme_visual_style_defaults(strata_theme_visual_style* out_style);
+STRATA_API strata_result
+strata_theme_text_visual_style_defaults(strata_theme_text_visual_style* out_style);
+STRATA_API strata_result
+strata_theme_text_layout_style_defaults(strata_theme_text_layout_style* out_style);
+STRATA_API strata_result strata_theme_layout_style_defaults(strata_theme_layout_style* out_style);
+STRATA_API strata_result strata_theme_animation_set_defaults(strata_theme_animation_set* out_set);
 /** Registers/replaces a named immutable theme. */
-STRATA_API strata_result strata_surface_register_theme(
-    strata_surface* surface,
-    const strata_theme* theme,
-    uint32_t* out_changed
-);
+STRATA_API strata_result strata_surface_register_theme(strata_surface* surface,
+                                                       const strata_theme* theme,
+                                                       uint32_t* out_changed);
 /** Registers and selects the supplied root theme. */
-STRATA_API strata_result strata_surface_set_theme(
-    strata_surface* surface,
-    const strata_theme* theme,
-    uint32_t* out_changed
-);
+STRATA_API strata_result strata_surface_set_theme(strata_surface* surface,
+                                                  const strata_theme* theme, uint32_t* out_changed);
 /** Refuses the active root and reports an unknown name as an unchanged successful operation. */
-STRATA_API strata_result strata_surface_unregister_theme(
-    strata_surface* surface,
-    strata_string_view name,
-    uint32_t* out_removed
-);
+STRATA_API strata_result strata_surface_unregister_theme(strata_surface* surface,
+                                                         strata_string_view name,
+                                                         uint32_t* out_removed);
 /** Installs a typed local ThemeScope at the keyed node; descendants inherit it. */
-STRATA_API strata_result strata_surface_set_scoped_theme(
-    strata_surface* surface,
-    strata_string_view node_key,
-    const strata_theme* theme,
-    uint32_t* out_changed
-);
-STRATA_API strata_result strata_surface_clear_scoped_theme(
-    strata_surface* surface,
-    strata_string_view node_key,
-    uint32_t* out_removed
-);
+STRATA_API strata_result strata_surface_set_scoped_theme(strata_surface* surface,
+                                                         strata_string_view node_key,
+                                                         const strata_theme* theme,
+                                                         uint32_t* out_changed);
+STRATA_API strata_result strata_surface_clear_scoped_theme(strata_surface* surface,
+                                                           strata_string_view node_key,
+                                                           uint32_t* out_removed);
 STRATA_API strata_result strata_surface_animate_scroll_to(
-    strata_surface* surface,
-    const strata_scroll_animation_request* request,
-    uint32_t* out_started
-);
+    strata_surface* surface, const strata_scroll_animation_request* request, uint32_t* out_started);
 /* Reloads the original font/image bindings transactionally; failure retains prior resources. */
 STRATA_API strata_result strata_surface_reload_resources(strata_surface* surface);
 STRATA_API strata_result strata_runtime_create_application_state_snapshot(
-    strata_runtime* runtime,
-    strata_application_state_snapshot** out_snapshot
-);
+    strata_runtime* runtime, strata_application_state_snapshot** out_snapshot);
 STRATA_API strata_result strata_runtime_restore_application_state(
-    strata_runtime* runtime,
-    const strata_application_state_snapshot* snapshot,
-    uint32_t* out_changed
-);
-STRATA_API void strata_application_state_snapshot_release(
-    strata_application_state_snapshot* snapshot
-);
+    strata_runtime* runtime, const strata_application_state_snapshot* snapshot,
+    uint32_t* out_changed);
+STRATA_API void
+strata_application_state_snapshot_release(strata_application_state_snapshot* snapshot);
 /*
  * Terminal ordered teardown. Prepare and synchronously consume the resource-only packet while its
  * GPU owner is alive, acknowledge that consumption, then release. Preparation alone is never a
  * delivery acknowledgement. Repeated preparation returns the same retained terminal packet;
  * ordinary Surface mutation/framing is rejected after the first successful preparation.
  */
-STRATA_API strata_result strata_surface_prepare_release_packet(
-    strata_surface* surface,
-    const strata_bytes_sink* sink
-);
+STRATA_API strata_result strata_surface_prepare_release_packet(strata_surface* surface,
+                                                               const strata_bytes_sink* sink);
 STRATA_API strata_result strata_surface_acknowledge_release_packet(strata_surface* surface);
 /* Refuses out-of-order release and leaves the Surface handle recoverable for retry. */
 STRATA_API strata_result strata_surface_release(strata_surface* surface);
 /* Explicit last resort when packet delivery is impossible; host GPU resources may remain live. */
 STRATA_API strata_result strata_surface_abandon(strata_surface* surface);
 STRATA_API strata_result strata_surface_adopt_environment(
-    strata_surface* surface,
-    const strata_surface_environment* environment,
-    uint32_t* out_adopted
-);
-STRATA_API strata_result strata_surface_enqueue_input(
-    strata_surface* surface,
-    const strata_input_event* events,
-    size_t event_count,
-    strata_surface_input_batch_info* out_info
-);
+    strata_surface* surface, const strata_surface_environment* environment, uint32_t* out_adopted);
+STRATA_API strata_result strata_surface_enqueue_input(strata_surface* surface,
+                                                      const strata_input_event* events,
+                                                      size_t event_count,
+                                                      strata_surface_input_batch_info* out_info);
 STRATA_API strata_result strata_surface_cancel_interactions(strata_surface* surface);
 STRATA_API strata_result strata_surface_dispatch_action_json(
-    strata_surface* surface,
-    const strata_action_dispatch_config* config,
-    strata_action_dispatch_info* out_info
-);
+    strata_surface* surface, const strata_action_dispatch_config* config,
+    strata_action_dispatch_info* out_info);
 /* Empty key clears the active focus containment scope. */
-STRATA_API strata_result strata_surface_set_focus_containment(
-    strata_surface* surface,
-    strata_string_view key,
-    uint32_t* out_contained
-);
-STRATA_API strata_result strata_surface_frame(
-    strata_surface* surface,
-    int64_t frame_time_nanoseconds,
-    strata_surface_frame_info* out_info
-);
+STRATA_API strata_result strata_surface_set_focus_containment(strata_surface* surface,
+                                                              strata_string_view key,
+                                                              uint32_t* out_contained);
+STRATA_API strata_result strata_surface_frame(strata_surface* surface,
+                                              int64_t frame_time_nanoseconds,
+                                              strata_surface_frame_info* out_info);
 /* The canonical frame JSON is borrowed only for the duration of emit. */
-STRATA_API strata_result strata_surface_read_frame_json(
-    const strata_surface* surface,
-    const strata_value_json_sink* sink
-);
+STRATA_API strata_result strata_surface_read_frame_json(const strata_surface* surface,
+                                                        const strata_value_json_sink* sink);
 /* Surface aliases operate on the owning runtime's canonical shared diagnostic history. */
 STRATA_API strata_result strata_surface_read_diagnostics(
-    const strata_surface* surface,
-    const strata_diagnostics_snapshot_sink* sink
-);
+    const strata_surface* surface, const strata_diagnostics_snapshot_sink* sink);
 STRATA_API strata_result strata_surface_clear_diagnostics(strata_surface* surface);
-STRATA_API strata_result strata_surface_read_profiler(
-    const strata_surface* surface,
-    const strata_profiler_snapshot_sink* sink
-);
-STRATA_API strata_result strata_surface_set_profiler_capture(
-    strata_surface* surface,
-    uint32_t enabled
-);
+STRATA_API strata_result strata_surface_read_profiler(const strata_surface* surface,
+                                                      const strata_profiler_snapshot_sink* sink);
+STRATA_API strata_result strata_surface_set_profiler_capture(strata_surface* surface,
+                                                             uint32_t enabled);
 /* Called after submission to attach one complete genuine host boundary to the latest frame. */
 STRATA_API strata_result strata_surface_record_host_frame(
-    strata_surface* surface,
-    const strata_profiler_host_frame* telemetry
-);
+    strata_surface* surface, const strata_profiler_host_frame* telemetry);
 /* Drains bounded ordered lifecycle events and paired action outcomes since the prior drain. */
-STRATA_API strata_result strata_surface_drain_events_json(
-    strata_surface* surface,
-    const strata_value_json_sink* sink
-);
+STRATA_API strata_result strata_surface_drain_events_json(strata_surface* surface,
+                                                          const strata_value_json_sink* sink);
 /* The complete packet is borrowed only for the duration of emit. */
-STRATA_API strata_result strata_surface_read_render_packet(
-    const strata_surface* surface,
-    const strata_bytes_sink* sink
-);
-STRATA_API strata_result strata_surface_inspector_select(
-    strata_surface* surface,
-    strata_string_view key,
-    uint32_t* out_selected
-);
-STRATA_API strata_result strata_surface_inspector_pick(
-    strata_surface* surface,
-    double x,
-    double y,
-    uint32_t* out_selected
-);
+STRATA_API strata_result strata_surface_read_render_packet(const strata_surface* surface,
+                                                           const strata_bytes_sink* sink);
+STRATA_API strata_result strata_surface_inspector_select(strata_surface* surface,
+                                                         strata_string_view key,
+                                                         uint32_t* out_selected);
+STRATA_API strata_result strata_surface_inspector_pick(strata_surface* surface, double x, double y,
+                                                       uint32_t* out_selected);
 STRATA_API strata_result strata_surface_inspector_clear(strata_surface* surface);
 STRATA_API strata_result strata_surface_read_inspector_selection_json(
-    const strata_surface* surface,
-    const strata_value_json_sink* sink
-);
+    const strata_surface* surface, const strata_value_json_sink* sink);
 
-/* Extension callback capabilities. Context pointers are valid only for their callback invocation. */
-STRATA_API strata_rect strata_widget_input_bounds(
-    const strata_widget_input_context* context
-);
-STRATA_API double strata_widget_input_scale(
-    const strata_widget_input_context* context
-);
+/* Extension callback capabilities. Context pointers are valid only for their callback invocation.
+ */
+/* Borrowed immutable values remain valid only for the callback that returned them. */
+STRATA_API strata_widget_value_kind strata_widget_value_get_kind(const strata_widget_value* value);
+STRATA_API uint32_t strata_widget_value_get_boolean(const strata_widget_value* value,
+                                                    uint32_t fallback);
+STRATA_API double strata_widget_value_get_number(const strata_widget_value* value, double fallback);
+STRATA_API uint32_t strata_widget_value_get_color(const strata_widget_value* value,
+                                                  strata_color* out_color);
+STRATA_API strata_string_view strata_widget_value_get_text(const strata_widget_value* value);
+STRATA_API size_t strata_widget_value_list_size(const strata_widget_value* value);
+STRATA_API const strata_widget_value* strata_widget_value_list_at(const strata_widget_value* value,
+                                                                  size_t index);
+STRATA_API const strata_widget_value*
+strata_widget_value_object_field(const strata_widget_value* value, strata_string_view name);
+STRATA_API const strata_widget_value*
+strata_widget_input_property_value(const strata_widget_input_context* context,
+                                   strata_string_view name);
+STRATA_API const strata_widget_value*
+strata_widget_render_property_value(const strata_widget_render_context* context,
+                                    strata_string_view name);
+STRATA_API const strata_widget_value*
+strata_widget_render_style_value(const strata_widget_render_context* context,
+                                 strata_string_view name);
+STRATA_API const strata_widget_value*
+strata_widget_semantics_property_value(const strata_widget_semantics_context* context,
+                                       strata_string_view name);
+STRATA_API strata_rect
+strata_widget_subtargets_bounds(const strata_widget_subtargets_context* context);
+STRATA_API const strata_widget_value*
+strata_widget_subtargets_property_value(const strata_widget_subtargets_context* context,
+                                        strata_string_view name);
+STRATA_API strata_result
+strata_widget_subtargets_retained_bytes(const strata_widget_subtargets_context* context,
+                                        strata_string_view name, void* buffer, size_t size);
+STRATA_API strata_result strata_widget_subtargets_add(strata_widget_subtargets_context* context,
+                                                      const strata_widget_subtarget* subtarget);
+STRATA_API strata_rect strata_widget_input_bounds(const strata_widget_input_context* context);
+STRATA_API double strata_widget_input_scale(const strata_widget_input_context* context);
 /* The framework retains press capture through release/cancel; claiming wins gesture arbitration. */
-STRATA_API uint32_t strata_widget_input_claim_gesture(
-    strata_widget_input_context* context
-);
-STRATA_API uint32_t strata_widget_input_cancel_gesture(
-    strata_widget_input_context* context
-);
-STRATA_API strata_result strata_widget_input_invalidate(
-    strata_widget_input_context* context,
-    strata_widget_invalidation invalidation
-);
-STRATA_API double strata_widget_input_retained_number(
-    const strata_widget_input_context* context,
-    strata_string_view name,
-    double fallback
-);
-STRATA_API uint32_t strata_widget_input_retained_boolean(
-    const strata_widget_input_context* context,
-    strata_string_view name,
-    uint32_t fallback
-);
+STRATA_API uint32_t strata_widget_input_claim_gesture(strata_widget_input_context* context);
+STRATA_API uint32_t strata_widget_input_cancel_gesture(strata_widget_input_context* context);
+STRATA_API strata_result strata_widget_input_invalidate(strata_widget_input_context* context,
+                                                        strata_widget_invalidation invalidation);
+STRATA_API double strata_widget_input_retained_number(const strata_widget_input_context* context,
+                                                      strata_string_view name, double fallback);
+STRATA_API uint32_t strata_widget_input_retained_boolean(const strata_widget_input_context* context,
+                                                         strata_string_view name,
+                                                         uint32_t fallback);
 STRATA_API strata_result strata_widget_input_set_retained_number(
-    strata_widget_input_context* context,
-    strata_string_view name,
-    double value
-);
+    strata_widget_input_context* context, strata_string_view name, double value);
 STRATA_API strata_result strata_widget_input_set_retained_boolean(
-    strata_widget_input_context* context,
-    strata_string_view name,
-    uint32_t value
-);
+    strata_widget_input_context* context, strata_string_view name, uint32_t value);
 /*
  * Text reads copy into caller storage; out_length always receives the byte length the field needs.
  * A field larger than capacity fails with STRATA_STATUS_INVALID_ARGUMENT and leaves the buffer
  * untouched, an absent field with STRATA_STATUS_NOT_FOUND.
  */
 STRATA_API strata_result strata_widget_input_retained_text(
-    const strata_widget_input_context* context,
-    strata_string_view name,
-    char* buffer,
-    size_t capacity,
-    size_t* out_length
-);
-STRATA_API strata_result strata_widget_input_set_retained_text(
-    strata_widget_input_context* context,
-    strata_string_view name,
-    strata_string_view value
-);
+    const strata_widget_input_context* context, strata_string_view name, char* buffer,
+    size_t capacity, size_t* out_length);
+STRATA_API strata_result strata_widget_input_set_retained_text(strata_widget_input_context* context,
+                                                               strata_string_view name,
+                                                               strata_string_view value);
+/*
+ * Fixed-size extension state is copied exactly. The first successful write reserves node-local
+ * storage; equal-size updates reuse it and perform no runtime-routed allocation.
+ */
+STRATA_API strata_result strata_widget_input_retained_bytes(
+    const strata_widget_input_context* context, strata_string_view name, void* buffer, size_t size);
+STRATA_API strata_result strata_widget_input_set_retained_bytes(
+    strata_widget_input_context* context, strata_string_view name, const void* value, size_t size);
 /** Reports whether the authored property exists, independent of its typed fallback. */
-STRATA_API uint32_t strata_widget_input_has_property(
-    const strata_widget_input_context* context,
-    strata_string_view name
-);
-STRATA_API double strata_widget_input_property_number(
-    const strata_widget_input_context* context,
-    strata_string_view name,
-    double fallback
-);
-STRATA_API uint32_t strata_widget_input_property_boolean(
-    const strata_widget_input_context* context,
-    strata_string_view name,
-    uint32_t fallback
-);
+STRATA_API uint32_t strata_widget_input_has_property(const strata_widget_input_context* context,
+                                                     strata_string_view name);
+STRATA_API double strata_widget_input_property_number(const strata_widget_input_context* context,
+                                                      strata_string_view name, double fallback);
+STRATA_API uint32_t strata_widget_input_property_boolean(const strata_widget_input_context* context,
+                                                         strata_string_view name,
+                                                         uint32_t fallback);
 STRATA_API strata_result strata_widget_input_property_text(
-    const strata_widget_input_context* context,
-    strata_string_view name,
-    char* buffer,
-    size_t capacity,
-    size_t* out_length
-);
-STRATA_API strata_result strata_widget_input_emit_action_json(
-    strata_widget_input_context* context,
-    strata_string_view action_id,
-    strata_string_view payload_json,
-    strata_string_view event_kind,
-    strata_string_view event_value_json
-);
-STRATA_API strata_result strata_widget_input_emit_event_json(
-    strata_widget_input_context* context,
-    strata_string_view event_kind,
-    strata_string_view event_value_json
-);
-STRATA_API strata_result strata_widget_input_emit_number_event(
-    strata_widget_input_context* context,
-    strata_string_view event_kind,
-    double value
-);
+    const strata_widget_input_context* context, strata_string_view name, char* buffer,
+    size_t capacity, size_t* out_length);
+STRATA_API strata_result strata_widget_input_emit_action_json(strata_widget_input_context* context,
+                                                              strata_string_view action_id,
+                                                              strata_string_view payload_json,
+                                                              strata_string_view event_kind,
+                                                              strata_string_view event_value_json);
+STRATA_API strata_result strata_widget_input_emit_event_json(strata_widget_input_context* context,
+                                                             strata_string_view event_kind,
+                                                             strata_string_view event_value_json);
+STRATA_API strata_result strata_widget_input_emit_number_event(strata_widget_input_context* context,
+                                                               strata_string_view event_kind,
+                                                               double value);
 STRATA_API strata_result strata_widget_input_emit_boolean_event(
-    strata_widget_input_context* context,
-    strata_string_view event_kind,
-    uint32_t value
-);
-STRATA_API strata_result strata_widget_input_emit_text_event(
-    strata_widget_input_context* context,
-    strata_string_view event_kind,
-    strata_string_view value
-);
+    strata_widget_input_context* context, strata_string_view event_kind, uint32_t value);
+STRATA_API strata_result strata_widget_input_emit_text_event(strata_widget_input_context* context,
+                                                             strata_string_view event_kind,
+                                                             strata_string_view value);
 STRATA_API strata_result strata_behavior_input_emit_action_json(
-    strata_behavior_input_context* context,
-    strata_string_view action_id,
-    strata_string_view payload_json,
-    strata_string_view event_kind,
-    strata_string_view event_value_json
-);
-STRATA_API strata_rect strata_widget_render_bounds(
-    const strata_widget_render_context* context
-);
-STRATA_API strata_rect strata_widget_render_root_bounds(
-    const strata_widget_render_context* context
-);
-STRATA_API double strata_widget_render_scale(
-    const strata_widget_render_context* context
-);
-STRATA_API uint32_t strata_widget_render_focused(
-    const strata_widget_render_context* context
-);
-STRATA_API uint32_t strata_widget_render_focus_visible(
-    const strata_widget_render_context* context
-);
-STRATA_API uint32_t strata_widget_render_hovered(
-    const strata_widget_render_context* context
-);
-STRATA_API double strata_widget_render_retained_number(
-    const strata_widget_render_context* context,
-    strata_string_view name,
-    double fallback
-);
+    strata_behavior_input_context* context, strata_string_view action_id,
+    strata_string_view payload_json, strata_string_view event_kind,
+    strata_string_view event_value_json);
+STRATA_API strata_rect strata_widget_render_bounds(const strata_widget_render_context* context);
+STRATA_API strata_rect
+strata_widget_render_root_bounds(const strata_widget_render_context* context);
+STRATA_API double strata_widget_render_scale(const strata_widget_render_context* context);
+STRATA_API uint32_t strata_widget_render_focused(const strata_widget_render_context* context);
+STRATA_API uint32_t strata_widget_render_focus_visible(const strata_widget_render_context* context);
+STRATA_API uint32_t strata_widget_render_hovered(const strata_widget_render_context* context);
+STRATA_API double strata_widget_render_retained_number(const strata_widget_render_context* context,
+                                                       strata_string_view name, double fallback);
 STRATA_API uint32_t strata_widget_render_retained_boolean(
-    const strata_widget_render_context* context,
-    strata_string_view name,
-    uint32_t fallback
-);
-STRATA_API double strata_widget_render_motion_progress(
-    const strata_widget_render_context* context,
-    strata_string_view id,
-    double fallback
-);
-STRATA_API void strata_widget_render_rounded_rect(
-    strata_widget_render_context* context,
-    strata_rect bounds,
-    double radius,
-    strata_color fill,
-    const strata_border* border
-);
-STRATA_API void strata_widget_render_solid_rect(
-    strata_widget_render_context* context,
-    strata_rect bounds,
-    strata_color color
-);
-STRATA_API void strata_widget_render_border(
-    strata_widget_render_context* context,
-    strata_rect bounds,
-    double radius,
-    strata_border border
-);
-STRATA_API void strata_widget_render_text(
-    strata_widget_render_context* context,
-    strata_string_view text,
-    double x,
-    double y,
-    strata_color color
-);
-STRATA_API void strata_widget_render_image(
-    strata_widget_render_context* context,
-    strata_rect bounds,
-    strata_string_view image,
-    strata_color tint,
-    strata_texture_region source
-);
-STRATA_API void strata_widget_render_nine_patch(
-    strata_widget_render_context* context,
-    strata_rect bounds,
-    strata_string_view texture,
-    strata_edges source_insets,
-    strata_edges destination_insets,
-    strata_texture_region source,
-    strata_color tint
-);
+    const strata_widget_render_context* context, strata_string_view name, uint32_t fallback);
+STRATA_API double strata_widget_render_motion_progress(const strata_widget_render_context* context,
+                                                       strata_string_view id, double fallback);
+STRATA_API void strata_widget_render_rounded_rect(strata_widget_render_context* context,
+                                                  strata_rect bounds, double radius,
+                                                  strata_color fill, const strata_border* border);
+STRATA_API void strata_widget_render_solid_rect(strata_widget_render_context* context,
+                                                strata_rect bounds, strata_color color);
+STRATA_API void strata_widget_render_border(strata_widget_render_context* context,
+                                            strata_rect bounds, double radius,
+                                            strata_border border);
+STRATA_API void strata_widget_render_text(strata_widget_render_context* context,
+                                          strata_string_view text, double x, double y,
+                                          strata_color color);
+STRATA_API void strata_widget_render_aligned_text(strata_widget_render_context* context,
+                                                  strata_string_view text, strata_rect bounds,
+                                                  strata_widget_text_alignment horizontal,
+                                                  strata_widget_text_alignment vertical,
+                                                  strata_color color);
+STRATA_API void strata_widget_render_image(strata_widget_render_context* context,
+                                           strata_rect bounds, strata_string_view image,
+                                           strata_color tint, strata_texture_region source);
+STRATA_API void strata_widget_render_nine_patch(strata_widget_render_context* context,
+                                                strata_rect bounds, strata_string_view texture,
+                                                strata_edges source_insets,
+                                                strata_edges destination_insets,
+                                                strata_texture_region source, strata_color tint);
 /*
  * Indexed triangles only: index_count must be a non-zero multiple of three and every index must
  * address a declared vertex. A draw that fails validation is dropped whole rather than failing the
  * frame, so one malformed mesh never blanks a Surface.
  */
-STRATA_API void strata_widget_render_custom_mesh(
-    strata_widget_render_context* context,
-    strata_rect bounds,
-    strata_string_view mesh,
-    const strata_mesh_geometry* geometry,
-    strata_string_view texture,
-    const strata_material_state* material
-);
-STRATA_API void strata_widget_render_blur(
-    strata_widget_render_context* context,
-    strata_rect bounds,
-    double radius,
-    uint32_t downsample
-);
-STRATA_API void strata_widget_render_shadow(
-    strata_widget_render_context* context,
-    strata_rect bounds,
-    strata_corner_radii radii,
-    strata_color color,
-    double radius,
-    double spread
-);
+STRATA_API void strata_widget_render_custom_mesh(strata_widget_render_context* context,
+                                                 strata_rect bounds, strata_string_view mesh,
+                                                 const strata_mesh_geometry* geometry,
+                                                 strata_string_view texture,
+                                                 const strata_material_state* material);
+STRATA_API void strata_widget_render_blur(strata_widget_render_context* context, strata_rect bounds,
+                                          double radius, uint32_t downsample);
+STRATA_API void strata_widget_render_shadow(strata_widget_render_context* context,
+                                            strata_rect bounds, strata_corner_radii radii,
+                                            strata_color color, double radius, double spread);
 /* Every push must be matched by one pop inside the same presentation callback. */
-STRATA_API void strata_widget_render_push_clip(
-    strata_widget_render_context* context,
-    strata_rect bounds
-);
+STRATA_API void strata_widget_render_push_clip(strata_widget_render_context* context,
+                                               strata_rect bounds);
 STRATA_API void strata_widget_render_pop_clip(strata_widget_render_context* context);
 /** Measures one unwrapped line through the same shaping cache the paint path uses. */
-STRATA_API strata_result strata_widget_render_text_metrics(
-    const strata_widget_render_context* context,
-    strata_string_view text,
-    double* out_width,
-    double* out_height
-);
-STRATA_API uint32_t strata_widget_render_enabled(
-    const strata_widget_render_context* context
-);
-STRATA_API uint32_t strata_widget_render_active(
-    const strata_widget_render_context* context
-);
+STRATA_API strata_result
+strata_widget_render_text_metrics(const strata_widget_render_context* context,
+                                  strata_string_view text, double* out_width, double* out_height);
+STRATA_API uint32_t strata_widget_render_enabled(const strata_widget_render_context* context);
+STRATA_API uint32_t strata_widget_render_active(const strata_widget_render_context* context);
 STRATA_API strata_result strata_widget_render_retained_text(
-    const strata_widget_render_context* context,
-    strata_string_view name,
-    char* buffer,
-    size_t capacity,
-    size_t* out_length
-);
-STRATA_API uint32_t strata_widget_render_has_property(
-    const strata_widget_render_context* context,
-    strata_string_view name
-);
-STRATA_API double strata_widget_render_property_number(
-    const strata_widget_render_context* context,
-    strata_string_view name,
-    double fallback
-);
+    const strata_widget_render_context* context, strata_string_view name, char* buffer,
+    size_t capacity, size_t* out_length);
+STRATA_API strata_result
+strata_widget_render_retained_bytes(const strata_widget_render_context* context,
+                                    strata_string_view name, void* buffer, size_t size);
+STRATA_API uint32_t strata_widget_render_has_property(const strata_widget_render_context* context,
+                                                      strata_string_view name);
+STRATA_API double strata_widget_render_property_number(const strata_widget_render_context* context,
+                                                       strata_string_view name, double fallback);
 STRATA_API uint32_t strata_widget_render_property_boolean(
-    const strata_widget_render_context* context,
-    strata_string_view name,
-    uint32_t fallback
-);
+    const strata_widget_render_context* context, strata_string_view name, uint32_t fallback);
 STRATA_API strata_result strata_widget_render_property_text(
-    const strata_widget_render_context* context,
-    strata_string_view name,
-    char* buffer,
-    size_t capacity,
-    size_t* out_length
-);
-STRATA_API strata_rect strata_widget_inspection_layout_bounds(
-    const strata_widget_inspection_context* context
-);
+    const strata_widget_render_context* context, strata_string_view name, char* buffer,
+    size_t capacity, size_t* out_length);
+STRATA_API strata_rect
+strata_widget_inspection_layout_bounds(const strata_widget_inspection_context* context);
 
-STRATA_API strata_result strata_widget_semantics_set_name(
-    strata_widget_semantics_context* context,
-    strata_string_view value
-);
+STRATA_API strata_result strata_widget_semantics_set_name(strata_widget_semantics_context* context,
+                                                          strata_string_view value);
 STRATA_API strata_result strata_widget_semantics_set_value_text(
-    strata_widget_semantics_context* context,
-    strata_string_view value
-);
-STRATA_API void strata_widget_semantics_set_value_range(
-    strata_widget_semantics_context* context,
-    double current,
-    double minimum,
-    double maximum
-);
+    strata_widget_semantics_context* context, strata_string_view value);
+STRATA_API void strata_widget_semantics_set_value_range(strata_widget_semantics_context* context,
+                                                        double current, double minimum,
+                                                        double maximum);
 STRATA_API strata_result strata_widget_semantics_add_action(
-    strata_widget_semantics_context* context,
-    strata_string_view action
-);
-STRATA_API void strata_widget_semantics_set_checked(
-    strata_widget_semantics_context* context,
-    uint32_t value
-);
-STRATA_API void strata_widget_semantics_set_expanded(
-    strata_widget_semantics_context* context,
-    uint32_t value
-);
-STRATA_API void strata_widget_semantics_set_selected(
-    strata_widget_semantics_context* context,
-    uint32_t value
-);
-STRATA_API double strata_widget_semantics_retained_number(
-    const strata_widget_semantics_context* context,
-    strata_string_view name,
-    double fallback
-);
+    strata_widget_semantics_context* context, strata_string_view action);
+STRATA_API strata_result strata_widget_semantics_add_child(
+    strata_widget_semantics_context* context, const strata_widget_semantic_child* child);
+STRATA_API void strata_widget_semantics_set_checked(strata_widget_semantics_context* context,
+                                                    uint32_t value);
+STRATA_API void strata_widget_semantics_set_expanded(strata_widget_semantics_context* context,
+                                                     uint32_t value);
+STRATA_API void strata_widget_semantics_set_selected(strata_widget_semantics_context* context,
+                                                     uint32_t value);
+STRATA_API double
+strata_widget_semantics_retained_number(const strata_widget_semantics_context* context,
+                                        strata_string_view name, double fallback);
 STRATA_API uint32_t strata_widget_semantics_retained_boolean(
-    const strata_widget_semantics_context* context,
-    strata_string_view name,
-    uint32_t fallback
-);
+    const strata_widget_semantics_context* context, strata_string_view name, uint32_t fallback);
 STRATA_API uint32_t strata_widget_semantics_has_property(
-    const strata_widget_semantics_context* context,
-    strata_string_view name
-);
-STRATA_API double strata_widget_semantics_property_number(
-    const strata_widget_semantics_context* context,
-    strata_string_view name,
-    double fallback
-);
+    const strata_widget_semantics_context* context, strata_string_view name);
+STRATA_API double
+strata_widget_semantics_property_number(const strata_widget_semantics_context* context,
+                                        strata_string_view name, double fallback);
 STRATA_API uint32_t strata_widget_semantics_property_boolean(
-    const strata_widget_semantics_context* context,
-    strata_string_view name,
-    uint32_t fallback
-);
+    const strata_widget_semantics_context* context, strata_string_view name, uint32_t fallback);
 
 STRATA_API strata_result strata_widget_semantics_retained_text(
-    const strata_widget_semantics_context* context,
-    strata_string_view name,
-    char* buffer,
-    size_t capacity,
-    size_t* out_length
-);
+    const strata_widget_semantics_context* context, strata_string_view name, char* buffer,
+    size_t capacity, size_t* out_length);
 STRATA_API strata_result strata_widget_semantics_property_text(
-    const strata_widget_semantics_context* context,
-    strata_string_view name,
-    char* buffer,
-    size_t capacity,
-    size_t* out_length
-);
-STRATA_API strata_result strata_snapshot_get_info(
-    const strata_snapshot* snapshot,
-    strata_snapshot_info* out_info
-);
+    const strata_widget_semantics_context* context, strata_string_view name, char* buffer,
+    size_t capacity, size_t* out_length);
+STRATA_API strata_result
+strata_widget_semantics_retained_bytes(const strata_widget_semantics_context* context,
+                                       strata_string_view name, void* buffer, size_t size);
+STRATA_API strata_result strata_snapshot_get_info(const strata_snapshot* snapshot,
+                                                  strata_snapshot_info* out_info);
 STRATA_API void strata_snapshot_release(strata_snapshot* snapshot);
 
 #ifdef __cplusplus

@@ -137,6 +137,66 @@ to support controlled and retained fallback modes without stringly typed propert
 name and default are never restated at call sites, and undeclared writes fail rather than
 materializing hidden state.
 
+## Compound controls
+
+Use fixed-capacity `structured<T>` retained state for a bounded collection that moves frequently:
+
+```cpp
+struct StopState {
+    std::uint32_t count = 0;
+    std::array<Stop, 8> stops{};
+};
+
+constexpr auto stops = retained<structured<StopState>>(
+    "gradient.stops", StopState{}, Invalidation::paint
+);
+constexpr auto controlled_stops = parameter<any>("stops");
+constexpr auto outline = parameter<color>("outline");
+```
+
+`T` must be trivially copyable and standard-layout. The first write allocates node-local byte
+storage; equal-size updates reuse it. `ValueView` reads `any` values as borrowed lists/objects and
+typed boolean, number, text, or color leaves without JSON serialization. This lets an authored list
+act as the controlled value while `structured<T>` supplies the per-instance retained fallback and
+active drag draft.
+
+Project independently hittable regions with `.subtargets(...)`. Bounds are widget-local; ids and
+indices must remain stable when collection order changes. Higher `z_index` wins overlap, then later
+declaration order. Mark a region `semantic: true` when its index corresponds to a
+`Semantics::child(...)` virtual child:
+
+```cpp
+void project_stops(Subtargets& projection) {
+    const StopState state = projection.get(stops);
+    for (const Stop& stop : active_stops(state)) {
+        projection.add(Subtarget{
+            stop_id(stop.id),
+            stop.id,
+            handle_bounds(stop.position),
+            stop.id == state.selected ? 20 : 10,
+            true,
+            true,
+        });
+    }
+}
+```
+
+`Pointer::subtarget_id` and `subtarget_index` identify the pressed region and stay routed through
+capture. Ordinary paint-only movement deliberately does not rebuild subtarget geometry; capture
+continues to the owner while the handle moves. On release, `invalidate(Invalidation::input)`
+requests one fresh hit projection and `invalidate(Invalidation::semantics)` refreshes the virtual
+children.
+
+`Present::get(parameter<color>)` provides typed authored colors, `Present::get(parameter<any>)`
+provides a `ValueView`, and `Present::style(name)` reads a computed/direct style value through the
+same facade. Material draws continue to use typed `material_number`, `material_boolean`,
+`material_text`, and `material_color` parameters.
+
+The coordinate overload of `Present::text` takes the shaped line's top-left origin; it is not a
+baseline or a control-alignment API. Labels inside buttons, rows, and other bounded controls should
+use the rectangle overload with horizontal and vertical `TextAlignment`. That path aligns from the
+actual shaped line metrics, so font, scale, and rasterization changes do not require guessed offsets.
+
 Build against the installed SDK. The helper creates the shared library, links the authoring layer,
 sets C++23 and symbol visibility, assigns the portable discovery name, records it for same-build
 module validation, and optionally installs it to the platform discovery directory:
@@ -197,11 +257,11 @@ these capabilities:
 | --- | --- |
 | describe | typed parameter handles with defaults/presence, child policy, intrinsic size, padding, clip, framework disclosure motion |
 | input | activation, continuous pointer and scroll lifecycles with phased routing, capture arbitration, local coordinates, scale, key press, focusability, typed live/commit events, popup retained field |
-| retained | typed per-instance number, boolean, and text fields with declared input-only, paint-only, or broader invalidation and fallback |
-| semantics | typed retained/parameter reads plus role and derive hook for name, text value, numeric range, actions, checked, expanded, and selected state |
-| inspection | hit-bounds narrowing; local coordinates let one widget own multiple internal hit regions |
-| present | content, overlay, detached overlay, motion/status participation, property presence, bounds, scale, and state |
-| render | solid and rounded rects, borders, text, images, atlas regions, nine-patch, custom mesh/material state, blur, shadow, scoped clip, and text measurement |
+| retained | typed per-instance number, boolean, text, and fixed-capacity structured fields with declared input-only, paint-only, or broader invalidation and fallback |
+| semantics | typed retained/parameter reads plus role and derive hook for owner state and independently addressable virtual children |
+| inspection | hit-bounds narrowing and stable widget-owned subtargets with overlap precedence, logical indices, and semantic mapping |
+| present | content, overlay, detached overlay, motion/status participation, typed colors, borrowed structured values, computed/direct styles, bounds, scale, and state |
+| render | solid and rounded rects, borders, text, images, atlas regions, nine-patch, custom mesh with typed material state, blur, shadow, scoped clip, and text measurement |
 | behaviors | ambient pointer events across capture/target/bubble and emitted actions |
 
 Not public, by decision rather than omission: custom layout measurement and arrangement, custom
@@ -235,27 +295,32 @@ only, so a package projects its behavior ids and their option objects are not ty
   cannot outlive its pop.
 - Hooks are plain function pointers over a package-owned hook table passed as `user_data`.
   Descriptors, defaults, and retained-field lookup tables are materialized once when the bundle is
-  taken. Number/boolean pointer and paint paths require no JSON parsing; explicit text/JSON events
-  may allocate according to their payload.
+  taken. Scalar paths and equal-size structured pointer/paint updates require no JSON parsing or
+  repeated node-local allocation; explicit text/JSON events may allocate according to their
+  payload.
 
 ## Testing
 
 `native/tests/extension_tests.cpp` (`ctest --preset <platform> -R strata.extension`) builds a
 package covering every supported phase. It checks registration, schema/compiler parity, retained
 identity, pointer capture outside bounds, cancellation, local coordinates, scroll routing,
-controlled-property presence, display scale, typed live/commit events, keyboard input, numeric
-semantics, hit bounds, detached overlays, behavior dispatch, and action contracts against a
-headless Surface.
+controlled-property presence, borrowed structured/color access, compound subtarget overlap and
+semantic children, display scale, typed live/commit events, keyboard input, numeric semantics, hit
+bounds, detached overlays, behavior dispatch, and action contracts against a headless Surface.
 
-The drag regression establishes capture, then enqueues 120 moves before one frame. It verifies that
-the queue coalesces the burst, the frame performs one content-presentation rebuild, leaves semantic
-generation and pointer-hit geometry unchanged, and does not advance runtime ABI allocator counts.
+The drag regression establishes capture, then enqueues 120 moves before one frame. Its compound
+handle moves through allocation-conscious structured state. The test verifies queue coalescing, one
+content-presentation rebuild, stable semantic generation and subtarget/hit geometry, and unchanged
+runtime ABI allocator counts.
 Release runs separately and schedules the single committed semantic projection. A scroll write
 through `Invalidation::input` also proves that session bookkeeping causes neither presentation nor
 semantic work. These assertions defend the lifecycle contract instead of benchmarking
 machine-dependent wall-clock timing.
 
 The shipped packages are the references: `strata_demo_extension` covers activation, children,
-disclosure, motion, overlays, and behaviors; `strata_control_deck_extension` implements a
-multi-region continuous color control through public headers only. Installed-package tests
-independently build and query another extension against the installed SDK.
+disclosure, motion, overlays, and behaviors; `strata_control_deck_extension` implements both a
+multi-region continuous color control and a production gradient editor through public headers only.
+The gradient workspace covers stable overlapping stop handles, add/remove/reorder, retained and
+controlled values, palette selection, keyboard editing, semantic children, typed style colors, a
+material-backed glint, and one commit on release. Installed-package tests independently build and
+query another extension against the installed SDK.

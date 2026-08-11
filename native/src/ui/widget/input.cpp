@@ -20,55 +20,65 @@ using data::JsonValue;
 } // namespace
 
 WidgetInputScope::WidgetInputScope(
-    InputRouter& router,
-    RetainedNode& node,
-    InputOperationResult& result,
-    const std::string_view key,
-    const KeyModifiers modifiers,
-    const PointerInputEvent* const pointer,
-    RetainedNode* const pointer_target,
-    const std::size_t click_count,
-    std::optional<WidgetSubtarget> subtarget,
-    const std::string_view input_text,
-    InputDispatchContext* const dispatch
-) noexcept : router_(router),
-    node_(node),
-    result_(result),
-    key_(key),
-    modifiers_(modifiers),
-    pointer_(pointer),
-    pointer_target_(pointer_target),
-    click_count_(click_count),
-    subtarget_(std::move(subtarget)),
-    input_text_(input_text),
-    dispatch_(dispatch) {}
+    InputRouter& router, RetainedNode& node, InputOperationResult& result,
+    const std::string_view key, const KeyModifiers modifiers,
+    const PointerInputEvent* const pointer, RetainedNode* const pointer_target,
+    const std::size_t click_count, std::optional<WidgetSubtarget> subtarget,
+    const std::string_view input_text, InputDispatchContext* const dispatch) noexcept
+    : router_(router), node_(node), result_(result), key_(key), modifiers_(modifiers),
+      pointer_(pointer), pointer_target_(pointer_target), click_count_(click_count),
+      subtarget_(std::move(subtarget)), input_text_(input_text), dispatch_(dispatch) {}
 
-RetainedNode& WidgetInputScope::node() noexcept { return node_; }
-const RetainedNode& WidgetInputScope::node() const noexcept { return node_; }
-std::string_view WidgetInputScope::key() const noexcept { return key_; }
-std::string_view WidgetInputScope::input_text() const noexcept { return input_text_; }
-const KeyModifiers& WidgetInputScope::modifiers() const noexcept { return modifiers_; }
-const PointerInputEvent* WidgetInputScope::pointer() const noexcept { return pointer_; }
+RetainedNode& WidgetInputScope::node() noexcept {
+    return node_;
+}
+const RetainedNode& WidgetInputScope::node() const noexcept {
+    return node_;
+}
+std::string_view WidgetInputScope::key() const noexcept {
+    return key_;
+}
+std::string_view WidgetInputScope::input_text() const noexcept {
+    return input_text_;
+}
+const KeyModifiers& WidgetInputScope::modifiers() const noexcept {
+    return modifiers_;
+}
+const PointerInputEvent* WidgetInputScope::pointer() const noexcept {
+    return pointer_;
+}
 const ScrollInputEvent* WidgetInputScope::scroll() const noexcept {
     return dispatch_ != nullptr ? dispatch_->scroll() : nullptr;
 }
-RetainedNode* WidgetInputScope::pointer_target() const noexcept { return pointer_target_; }
-std::size_t WidgetInputScope::click_count() const noexcept { return click_count_; }
+RetainedNode* WidgetInputScope::pointer_target() const noexcept {
+    return pointer_target_;
+}
+std::size_t WidgetInputScope::click_count() const noexcept {
+    return click_count_;
+}
 const WidgetSubtarget* WidgetInputScope::subtarget() const noexcept {
     return subtarget_.has_value() ? &*subtarget_ : nullptr;
 }
-InputDispatchContext* WidgetInputScope::dispatch() const noexcept { return dispatch_; }
+InputDispatchContext* WidgetInputScope::dispatch() const noexcept {
+    return dispatch_;
+}
 InputEventPhase WidgetInputScope::phase() const noexcept {
     return dispatch_ != nullptr ? dispatch_->phase() : InputEventPhase::target;
 }
 InputEventKind WidgetInputScope::kind() const noexcept {
-    if (dispatch_ != nullptr) return dispatch_->kind();
-    if (pointer_ == nullptr) return key_.empty() ? InputEventKind::advance : InputEventKind::key;
+    if (dispatch_ != nullptr)
+        return dispatch_->kind();
+    if (pointer_ == nullptr)
+        return key_.empty() ? InputEventKind::advance : InputEventKind::key;
     switch (pointer_->type) {
-    case PointerEventType::move: return InputEventKind::pointer_move;
-    case PointerEventType::press: return InputEventKind::pointer_press;
-    case PointerEventType::release: return InputEventKind::pointer_release;
-    case PointerEventType::cancel: return InputEventKind::pointer_cancel;
+    case PointerEventType::move:
+        return InputEventKind::pointer_move;
+    case PointerEventType::press:
+        return InputEventKind::pointer_press;
+    case PointerEventType::release:
+        return InputEventKind::pointer_release;
+    case PointerEventType::cancel:
+        return InputEventKind::pointer_cancel;
     }
     return InputEventKind::pointer_cancel;
 }
@@ -76,18 +86,19 @@ bool WidgetInputScope::press_moved_beyond_slop() const noexcept {
     return dispatch_ != nullptr && dispatch_->press_moved_beyond_slop();
 }
 GestureClaimState WidgetInputScope::gesture_claim_state() const noexcept {
-    return dispatch_ != nullptr
-        ? dispatch_->gesture_claim_state()
-        : GestureClaimState::unclaimed;
+    return dispatch_ != nullptr ? dispatch_->gesture_claim_state() : GestureClaimState::unclaimed;
 }
 void WidgetInputScope::consume() noexcept {
-    if (dispatch_ != nullptr) dispatch_->consume();
+    if (dispatch_ != nullptr)
+        dispatch_->consume();
 }
 void WidgetInputScope::stop_propagation() noexcept {
-    if (dispatch_ != nullptr) dispatch_->stop_propagation();
+    if (dispatch_ != nullptr)
+        dispatch_->stop_propagation();
 }
 bool WidgetInputScope::claim_gesture() noexcept {
-    if (dispatch_ == nullptr || !dispatch_->claim_gesture() || pointer_ == nullptr) return false;
+    if (dispatch_ == nullptr || !dispatch_->claim_gesture() || pointer_ == nullptr)
+        return false;
     const auto pressed = router_.pressed_pointer_targets_.find(pointer_->pointer_id);
     if (pressed != router_.pressed_pointer_targets_.end()) {
         pressed->second.widget_lifecycle_claim = true;
@@ -100,19 +111,17 @@ bool WidgetInputScope::cancel_gesture() noexcept {
 std::vector<WidgetSubtarget> WidgetInputScope::subtargets() const {
     return router_.subtargets(node_.identity());
 }
-std::optional<std::size_t> WidgetInputScope::text_offset(
-    const std::string_view text
-) const {
-    return pointer_ != nullptr
-        ? router_.resolve_text_offset(node_, text, pointer_->position)
-        : std::nullopt;
+std::optional<std::size_t> WidgetInputScope::text_offset(const std::string_view text) const {
+    return pointer_ != nullptr ? router_.resolve_text_offset(node_, text, pointer_->position)
+                               : std::nullopt;
 }
 std::int64_t WidgetInputScope::frame_time_nanos() const noexcept {
     return router_.frame_time_nanos_;
 }
 
 std::optional<WidgetDragInteraction> WidgetInputScope::active_drag() const {
-    if (router_.tree_ == nullptr) return std::nullopt;
+    if (router_.tree_ == nullptr)
+        return std::nullopt;
     for (const auto& [pointer_id, session] : router_.drag_sessions_) {
         static_cast<void>(pointer_id);
         if (!session.active || !session.target_identity.has_value() ||
@@ -120,7 +129,8 @@ std::optional<WidgetDragInteraction> WidgetInputScope::active_drag() const {
             continue;
         }
         const RetainedNode* target = router_.tree_->find_identity(*session.target_identity);
-        if (target == nullptr || !InputRouter::descendant_of(*target, node_)) continue;
+        if (target == nullptr || !InputRouter::descendant_of(*target, node_))
+            continue;
         const RetainedNode* source = router_.tree_->find_identity(session.source_identity);
         return WidgetDragInteraction{
             source != nullptr ? source->description().key : std::nullopt,
@@ -169,27 +179,27 @@ const runtime::Value* WidgetInputScope::retained(const std::string_view name) co
     return node_.retained_value(name);
 }
 
-bool WidgetInputScope::effective_boolean(
-    const std::string_view controlled,
-    const std::string_view retained_name,
-    const std::string_view initial,
-    const bool fallback
-) const noexcept {
+bool WidgetInputScope::effective_boolean(const std::string_view controlled,
+                                         const std::string_view retained_name,
+                                         const std::string_view initial,
+                                         const bool fallback) const noexcept {
     const runtime::Value* value = property(controlled);
-    if (value == nullptr || value->boolean() == nullptr) value = retained(retained_name);
-    if (value == nullptr || value->boolean() == nullptr) value = property(initial);
+    if (value == nullptr || value->boolean() == nullptr)
+        value = retained(retained_name);
+    if (value == nullptr || value->boolean() == nullptr)
+        value = property(initial);
     return value != nullptr && value->boolean() != nullptr ? *value->boolean() : fallback;
 }
 
-double WidgetInputScope::effective_number(
-    const std::string_view controlled,
-    const std::string_view retained_name,
-    const std::string_view initial,
-    const double fallback
-) const noexcept {
+double WidgetInputScope::effective_number(const std::string_view controlled,
+                                          const std::string_view retained_name,
+                                          const std::string_view initial,
+                                          const double fallback) const noexcept {
     const runtime::Value* value = property(controlled);
-    if (value == nullptr || value->number() == nullptr) value = retained(retained_name);
-    if (value == nullptr || value->number() == nullptr) value = property(initial);
+    if (value == nullptr || value->number() == nullptr)
+        value = retained(retained_name);
+    if (value == nullptr || value->number() == nullptr)
+        value = property(initial);
     return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
                ? *value->number()
                : fallback;
@@ -202,31 +212,27 @@ double WidgetInputScope::number(const std::string_view name, const double fallba
                : fallback;
 }
 
-std::int64_t WidgetInputScope::duration_nanos(
-    const std::string_view name,
-    const std::int64_t fallback
-) const noexcept {
+std::int64_t WidgetInputScope::duration_nanos(const std::string_view name,
+                                              const std::int64_t fallback) const noexcept {
     const runtime::Value* value = property(name);
-    return value != nullptr && value->duration() != nullptr
-        ? value->duration()->nanoseconds
-        : fallback;
+    return value != nullptr && value->duration() != nullptr ? value->duration()->nanoseconds
+                                                            : fallback;
 }
 
 std::string WidgetInputScope::string(const std::string_view name, std::string fallback) const {
     const runtime::Value* value = property(name);
-    if (value != nullptr && value->string() != nullptr) return *value->string();
-    if (value != nullptr && value->key() != nullptr) return value->key()->value;
+    if (value != nullptr && value->string() != nullptr)
+        return *value->string();
+    if (value != nullptr && value->key() != nullptr)
+        return value->key()->value;
     return fallback;
 }
 
-bool WidgetInputScope::reveal_vertical(
-    const double item_start,
-    const double item_end,
-    const double sticky_leading_inset
-) {
+bool WidgetInputScope::reveal_vertical(const double item_start, const double item_end,
+                                       const double sticky_leading_inset) {
     const LayoutRecord* record = layout();
-    if (record == nullptr || !record->viewport.has_value() ||
-        !std::isfinite(item_start) || !std::isfinite(item_end) || item_end < item_start) {
+    if (record == nullptr || !record->viewport.has_value() || !std::isfinite(item_start) ||
+        !std::isfinite(item_end) || item_end < item_start) {
         return false;
     }
     const Rect& viewport = *record->viewport;
@@ -243,12 +249,11 @@ bool WidgetInputScope::reveal_vertical(
 
 bool WidgetInputScope::scroll_by(const double delta_x, const double delta_y) {
     const LayoutRecord* record = layout();
-    if (record == nullptr || !std::isfinite(delta_x) || !std::isfinite(delta_y)) return false;
+    if (record == nullptr || !std::isfinite(delta_x) || !std::isfinite(delta_y))
+        return false;
     return router_.set_scroll_offset(
-        node_,
-        Point{record->scroll_offset.x + delta_x, record->scroll_offset.y + delta_y},
-        result_
-    );
+        node_, Point{record->scroll_offset.x + delta_x, record->scroll_offset.y + delta_y},
+        result_);
 }
 
 const std::string* WidgetInputScope::editor_text() const noexcept {
@@ -263,57 +268,73 @@ bool WidgetInputScope::clear_editor_text() {
     return router_.clear_editor_text(node_, result_);
 }
 
-void WidgetInputScope::synchronize_editor_text(
-    const std::string_view value,
-    const bool move_caret_to_end
-) {
+void WidgetInputScope::synchronize_editor_text(const std::string_view value,
+                                               const bool move_caret_to_end) {
     router_.synchronize_editor_text(node_, value, move_caret_to_end);
 }
 
-void WidgetInputScope::set_retained(
-    std::string name,
-    runtime::Value value,
-    const DirtyReason reason
-) {
-    if (router_.tree_ == nullptr) return;
+void WidgetInputScope::set_retained(std::string name, runtime::Value value,
+                                    const DirtyReason reason) {
+    if (router_.tree_ == nullptr)
+        return;
     const std::string retained_name = name;
-    const bool changed = router_.tree_->set_retained_value(
-        node_.identity(), std::move(name), std::move(value), reason
-    );
-    if (changed &&
-        (reason == DirtyReason::structure || reason == DirtyReason::properties) &&
+    const bool changed = router_.tree_->set_retained_value(node_.identity(), std::move(name),
+                                                           std::move(value), reason);
+    if (changed && (reason == DirtyReason::structure || reason == DirtyReason::properties) &&
         router_.description_invalidator_) {
         router_.description_invalidator_(&node_, retained_name);
     }
 }
 
+std::span<const std::byte>
+WidgetInputScope::retained_bytes(const std::string_view name) const noexcept {
+    return node_.retained_bytes(name);
+}
+
+void WidgetInputScope::set_retained_bytes(std::string name, const std::span<const std::byte> value,
+                                          const DirtyReason reason) {
+    if (router_.tree_ == nullptr)
+        return;
+    static_cast<void>(
+        router_.tree_->set_retained_bytes(node_.identity(), std::move(name), value, reason));
+}
+
+void WidgetInputScope::set_input_bytes(std::string name, const std::span<const std::byte> value) {
+    if (router_.tree_ == nullptr)
+        return;
+    static_cast<void>(router_.tree_->set_input_bytes(node_.identity(), std::move(name), value));
+}
+
 void WidgetInputScope::set_presentation(std::string name, runtime::Value value) {
-    if (router_.tree_ == nullptr) return;
-    const bool changed = router_.tree_->set_presentation_value(
-        node_.identity(), std::move(name), std::move(value)
-    );
-    if (changed && router_.frame_invalidator_) router_.frame_invalidator_();
+    if (router_.tree_ == nullptr)
+        return;
+    const bool changed =
+        router_.tree_->set_presentation_value(node_.identity(), std::move(name), std::move(value));
+    if (changed && router_.frame_invalidator_)
+        router_.frame_invalidator_();
 }
 void WidgetInputScope::set_paint(std::string name, runtime::Value value) {
-    if (router_.tree_ == nullptr) return;
-    const bool changed = router_.tree_->set_paint_value(
-        node_.identity(), std::move(name), std::move(value)
-    );
-    if (changed && router_.frame_invalidator_) router_.frame_invalidator_();
+    if (router_.tree_ == nullptr)
+        return;
+    const bool changed =
+        router_.tree_->set_paint_value(node_.identity(), std::move(name), std::move(value));
+    if (changed && router_.frame_invalidator_)
+        router_.frame_invalidator_();
 }
 
-
 void WidgetInputScope::set_input(std::string name, runtime::Value value) {
-    if (router_.tree_ == nullptr) return;
-    static_cast<void>(router_.tree_->set_input_value(
-        node_.identity(), std::move(name), std::move(value)
-    ));
+    if (router_.tree_ == nullptr)
+        return;
+    static_cast<void>(
+        router_.tree_->set_input_value(node_.identity(), std::move(name), std::move(value)));
 }
 
 void WidgetInputScope::invalidate(const DirtyReason reason) {
-    if (router_.tree_ == nullptr) return;
+    if (router_.tree_ == nullptr)
+        return;
     static_cast<void>(router_.tree_->mark(node_.identity(), reason));
-    if (router_.frame_invalidator_) router_.frame_invalidator_();
+    if (router_.frame_invalidator_)
+        router_.frame_invalidator_();
 }
 
 void WidgetInputScope::set_event_count(const std::size_t count) noexcept {
@@ -321,9 +342,8 @@ void WidgetInputScope::set_event_count(const std::size_t count) noexcept {
     result_.processed_events = count;
 }
 
-std::shared_ptr<const runtime::ActionValue> WidgetInputScope::action(
-    const std::string_view property_name
-) const {
+std::shared_ptr<const runtime::ActionValue>
+WidgetInputScope::action(const std::string_view property_name) const {
     return router_.activation_action(node_, property_name);
 }
 
@@ -334,11 +354,8 @@ void WidgetInputScope::activated(const std::string_view action_property) {
         if (binding.has_value()) {
             RetainedNode* modal = router_.active_modal();
             static_cast<void>(router_.invoke_command(
-                binding->id,
-                node_,
-                modal != nullptr && router_.descendant_of(node_, *modal),
-                result_
-            ));
+                binding->id, node_, modal != nullptr && router_.descendant_of(node_, *modal),
+                result_));
             return;
         }
     }
@@ -351,10 +368,7 @@ void WidgetInputScope::activated(const std::string_view action_property) {
     router_.emit(std::move(event), binding, node_, runtime::Value{}, result_);
 }
 
-void WidgetInputScope::boolean_changed(
-    const std::string_view action_property,
-    const bool value
-) {
+void WidgetInputScope::boolean_changed(const std::string_view action_property, const bool value) {
     const std::shared_ptr<const runtime::ActionValue> binding = action(action_property);
     JsonValue event = object({
         {"action", binding != nullptr ? router_.canonical_action(*binding, node_) : JsonValue{}},
@@ -365,10 +379,7 @@ void WidgetInputScope::boolean_changed(
     router_.emit(std::move(event), binding, node_, runtime::Value(value), result_);
 }
 
-void WidgetInputScope::number_changed(
-    const std::string_view action_property,
-    const double value
-) {
+void WidgetInputScope::number_changed(const std::string_view action_property, const double value) {
     const std::shared_ptr<const runtime::ActionValue> binding = action(action_property);
     JsonValue event = object({
         {"action", binding != nullptr ? router_.canonical_action(*binding, node_) : JsonValue{}},
@@ -379,11 +390,9 @@ void WidgetInputScope::number_changed(
     router_.emit(std::move(event), binding, node_, runtime::Value(value), result_);
 }
 
-void WidgetInputScope::value_changed(
-    const std::string_view action_property,
-    const std::string_view event_kind,
-    runtime::Value event_value
-) {
+void WidgetInputScope::value_changed(const std::string_view action_property,
+                                     const std::string_view event_kind,
+                                     runtime::Value event_value) {
     const std::shared_ptr<const runtime::ActionValue> binding = action(action_property);
     JsonValue event = object({
         {"action", binding != nullptr ? router_.canonical_action(*binding, node_) : JsonValue{}},
@@ -394,11 +403,9 @@ void WidgetInputScope::value_changed(
     router_.emit(std::move(event), binding, node_, std::move(event_value), result_);
 }
 
-void WidgetInputScope::dispatch_action(
-    std::shared_ptr<const runtime::ActionValue> binding,
-    const std::string_view event_kind,
-    runtime::Value event_value
-) {
+void WidgetInputScope::dispatch_action(std::shared_ptr<const runtime::ActionValue> binding,
+                                       const std::string_view event_kind,
+                                       runtime::Value event_value) {
     JsonValue event = object({
         {"action", binding != nullptr ? router_.canonical_action(*binding, node_) : JsonValue{}},
         {"source", router_.source(node_)},
@@ -408,19 +415,13 @@ void WidgetInputScope::dispatch_action(
     router_.emit(std::move(event), binding, node_, std::move(event_value), result_);
 }
 
-bool WidgetInputScope::emit_action(
-    const std::string_view action_id,
-    runtime::Value payload,
-    const std::string_view event_kind,
-    runtime::Value event_value
-) {
+bool WidgetInputScope::emit_action(const std::string_view action_id, runtime::Value payload,
+                                   const std::string_view event_kind, runtime::Value event_value) {
     const std::shared_ptr<const runtime::ActionContract> contract =
         router_.application_.bundle()->action_registry().contract(action_id);
-    if (contract == nullptr) return false;
-    const auto action_value = std::make_shared<const runtime::Action>(
-        contract,
-        std::move(payload)
-    );
+    if (contract == nullptr)
+        return false;
+    const auto action_value = std::make_shared<const runtime::Action>(contract, std::move(payload));
     JsonValue event = object({
         {"action", router_.canonical_action(*action_value, node_)},
         {"source", router_.source(node_)},
@@ -432,21 +433,15 @@ bool WidgetInputScope::emit_action(
 }
 
 bool WidgetInputScope::invoke_command(const std::string_view id) {
-    if (router_.commands_ == nullptr || router_.commands_->find(id) == nullptr) return false;
+    if (router_.commands_ == nullptr || router_.commands_->find(id) == nullptr)
+        return false;
     RetainedNode* modal = router_.active_modal();
     const InputRouter::CommandInvocation invocation = router_.invoke_command(
-        id,
-        node_,
-        modal != nullptr && InputRouter::descendant_of(node_, *modal),
-        result_
-    );
+        id, node_, modal != nullptr && InputRouter::descendant_of(node_, *modal), result_);
     return invocation.executed;
 }
 
-void WidgetInputScope::emit_event(
-    const std::string_view event_kind,
-    runtime::Value event_value
-) {
+void WidgetInputScope::emit_event(const std::string_view event_kind, runtime::Value event_value) {
     JsonValue event = object({
         {"action", JsonValue{}},
         {"source", router_.source(node_)},

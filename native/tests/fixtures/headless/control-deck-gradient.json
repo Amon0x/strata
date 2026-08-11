@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "application": {
+    "id": "control-deck.gradient.headless",
+    "module": "assets/strata/ui/control_deck.strata",
+    "schemas": "assets/strata/ui/control_deck.schemas.json",
+    "root": "ControlDeckMenu",
+    "actions": ["control-deck.gradient.commit"]
+  },
+  "surface": {
+    "id": "control-deck.gradient.headless",
+    "role": "overlay",
+    "backend": "d3d11",
+    "width": 1280,
+    "height": 800,
+    "scale": 1,
+    "clearColor": "#090b0fff",
+    "fonts": [
+      {"id": "strata:fonts/default-medium", "resource": "assets/strata/fonts/medium.ttf"},
+      {"id": "strata:fonts/default", "resource": "assets/strata/fonts/default.ttf"},
+      {"id": "strata:fonts/mono", "resource": "assets/strata/fonts/mono.ttf"}
+    ]
+  },
+  "snapshots": [],
+  "steps": [
+    {"advance": {"milliseconds": 220, "frames": 2}},
+    {"click": {"key": "deck.gradient"}},
+    {"advance": {"milliseconds": 180, "frames": 2}},
+    {"capture": "gradient"},
+    {"click": {"role": "slider", "name": "Gradient stop 2"}},
+    {"key": {"name": "right", "modifiers": ["shift"]}},
+    {"key": {"name": "down"}},
+    {"key": {"name": "pageup"}},
+    {"key": {"name": "insert"}},
+    {"capture": "adjusted"}
+  ]
+}

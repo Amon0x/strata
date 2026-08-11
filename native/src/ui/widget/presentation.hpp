@@ -62,21 +62,13 @@ struct WidgetVisualStyle final {
 
 /** Typed, per-node presentation capability passed only to a widget lifecycle hook. */
 class WidgetRenderScope final {
-public:
-    WidgetRenderScope(
-        const RetainedNode& node,
-        const LayoutRecord& layout,
-        const LayoutResult& layout_result,
-        const InputRouter& input,
-        const CommandIndex& commands,
-        const TextEngine* text,
-        const resource::SvgImageRegistry* svg_images,
-        const MotionRuntime* motion,
-        double inherited_opacity,
-        WidgetVisualProfile visual_profile,
-        std::vector<RenderCommand>& output,
-        bool apply_presentation_opacity = true
-    );
+  public:
+    WidgetRenderScope(const RetainedNode& node, const LayoutRecord& layout,
+                      const LayoutResult& layout_result, const InputRouter& input,
+                      const CommandIndex& commands, const TextEngine* text,
+                      const resource::SvgImageRegistry* svg_images, const MotionRuntime* motion,
+                      double inherited_opacity, WidgetVisualProfile visual_profile,
+                      std::vector<RenderCommand>& output, bool apply_presentation_opacity = true);
 
     [[nodiscard]] const RetainedNode& node() const noexcept;
     [[nodiscard]] const LayoutRecord& layout() const noexcept;
@@ -102,78 +94,46 @@ public:
     [[nodiscard]] bool boolean(std::string_view name, bool fallback) const noexcept;
     [[nodiscard]] std::string string(std::string_view name, std::string fallback = {}) const;
     [[nodiscard]] const runtime::ValueList* list(std::string_view name) const noexcept;
-    [[nodiscard]] double effective_number(
-        std::string_view controlled,
-        std::string_view retained,
-        std::string_view initial,
-        double fallback
-    ) const noexcept;
-    [[nodiscard]] bool effective_boolean(
-        std::string_view controlled,
-        std::string_view retained,
-        std::string_view initial,
-        bool fallback
-    ) const noexcept;
+    [[nodiscard]] double effective_number(std::string_view controlled, std::string_view retained,
+                                          std::string_view initial, double fallback) const noexcept;
+    [[nodiscard]] bool effective_boolean(std::string_view controlled, std::string_view retained,
+                                         std::string_view initial, bool fallback) const noexcept;
     [[nodiscard]] std::optional<std::string_view> node_text() const noexcept;
 
-    void rounded_rect(
-        Rect bounds,
-        Paint fill,
-        std::optional<RenderBorder> border = std::nullopt,
-        std::optional<double> radius = std::nullopt
-    );
+    void rounded_rect(Rect bounds, Paint fill, std::optional<RenderBorder> border = std::nullopt,
+                      std::optional<double> radius = std::nullopt);
     void border(Rect bounds, RenderBorder border, std::optional<double> radius = std::nullopt);
     void solid_rect(Rect bounds, Paint fill);
-    void image(
-        Rect bounds,
-        std::string image,
-        RenderColor tint = RenderColor{255U, 255U, 255U, 255U},
-        TextureRegion source = TextureRegion{}
-    );
-    void nine_patch(
-        Rect bounds,
-        std::string texture,
-        Edges source_insets,
-        Edges destination_insets,
-        TextureRegion source = TextureRegion{},
-        RenderColor tint = RenderColor{255U, 255U, 255U, 255U}
-    );
+    void image(Rect bounds, std::string image,
+               RenderColor tint = RenderColor{255U, 255U, 255U, 255U},
+               TextureRegion source = TextureRegion{});
+    void nine_patch(Rect bounds, std::string texture, Edges source_insets, Edges destination_insets,
+                    TextureRegion source = TextureRegion{},
+                    RenderColor tint = RenderColor{255U, 255U, 255U, 255U});
     /** Draws one authored vector shape inside `bounds`, in that rectangle's normalized space. */
     void shape(Rect bounds, PathShape shape);
-    void custom_mesh(
-        Rect bounds,
-        std::string mesh,
-        MeshGeometry geometry,
-        std::optional<std::string> texture = std::nullopt,
-        std::optional<MaterialState> material = std::nullopt
-    );
+    void custom_mesh(Rect bounds, std::string mesh, MeshGeometry geometry,
+                     std::optional<std::string> texture = std::nullopt,
+                     std::optional<MaterialState> material = std::nullopt);
     void blur_region(Rect bounds, double radius, std::size_t downsample = 1U);
-    void shadow(
-        Rect bounds,
-        CornerRadii radii,
-        RenderColor color,
-        double radius,
-        double spread = 0.0
-    );
+    void shadow(Rect bounds, CornerRadii radii, RenderColor color, double radius,
+                double spread = 0.0);
     void push_clip(Rect bounds, CornerRadii radii = {});
     void pop_clip();
     void push_transform(double scale, Point translation);
     void pop_transform();
     void append(RenderCommand command, double opacity = 1.0);
-    void text(
-        std::string_view value,
-        Point origin,
-        RenderColor color,
-        double alignment_width = 0.0,
-        WidgetTextAlignment alignment = WidgetTextAlignment::start
-    );
+    void text(std::string_view value, Point origin, RenderColor color, double alignment_width = 0.0,
+              WidgetTextAlignment horizontal_alignment = WidgetTextAlignment::start,
+              double alignment_height = 0.0,
+              WidgetTextAlignment vertical_alignment = WidgetTextAlignment::start);
     void node_text(Point origin, RenderColor color);
     void rich_text(Point origin, RenderColor fallback);
     void focus(Rect bounds);
     /** Shared hover/pressed projection for retained widgets and presenter-owned subtargets. */
     void interaction(Rect bounds, std::string_view subtarget = {});
 
-private:
+  private:
     const RetainedNode& node_;
     const LayoutRecord& layout_;
     const LayoutResult& layout_result_;
@@ -190,69 +150,38 @@ private:
 };
 
 [[nodiscard]] std::vector<RenderCommand> build_widget_fragment(
-    const WidgetRegistry& registry,
-    const RetainedNode& node,
-    const LayoutRecord& layout,
-    const LayoutResult& layout_result,
-    const InputRouter& input,
-    const CommandIndex& commands,
-    const TextEngine* text,
-    const resource::SvgImageRegistry* svg_images,
-    const MotionRuntime* motion,
-    double inherited_opacity,
-    bool apply_presentation_opacity = true
-);
+    const WidgetRegistry& registry, const RetainedNode& node, const LayoutRecord& layout,
+    const LayoutResult& layout_result, const InputRouter& input, const CommandIndex& commands,
+    const TextEngine* text, const resource::SvgImageRegistry* svg_images,
+    const MotionRuntime* motion, double inherited_opacity, bool apply_presentation_opacity = true);
 
-[[nodiscard]] std::vector<RenderCommand> build_widget_overlay(
-    const WidgetRegistry& registry,
-    const RetainedNode& node,
-    const LayoutRecord& layout,
-    const LayoutResult& layout_result,
-    const InputRouter& input,
-    const CommandIndex& commands,
-    const TextEngine* text,
-    const resource::SvgImageRegistry* svg_images,
-    const MotionRuntime* motion,
-    double inherited_opacity
-);
+[[nodiscard]] std::vector<RenderCommand>
+build_widget_overlay(const WidgetRegistry& registry, const RetainedNode& node,
+                     const LayoutRecord& layout, const LayoutResult& layout_result,
+                     const InputRouter& input, const CommandIndex& commands, const TextEngine* text,
+                     const resource::SvgImageRegistry* svg_images, const MotionRuntime* motion,
+                     double inherited_opacity);
 
-void append_widget_foreground(
-    const WidgetRegistry& registry,
-    const RetainedNode& node,
-    const LayoutRecord& layout,
-    const LayoutResult& layout_result,
-    const InputRouter& input,
-    const CommandIndex& commands,
-    const TextEngine* text,
-    const resource::SvgImageRegistry* svg_images,
-    const MotionRuntime* motion,
-    double inherited_opacity,
-    std::vector<RenderCommand>& output
-);
+void append_widget_foreground(const WidgetRegistry& registry, const RetainedNode& node,
+                              const LayoutRecord& layout, const LayoutResult& layout_result,
+                              const InputRouter& input, const CommandIndex& commands,
+                              const TextEngine* text, const resource::SvgImageRegistry* svg_images,
+                              const MotionRuntime* motion, double inherited_opacity,
+                              std::vector<RenderCommand>& output);
 
-[[nodiscard]] std::optional<Rect> widget_descendant_clip(
-    const WidgetRegistry& registry,
-    const RetainedNode& node,
-    const LayoutRecord& layout,
-    const LayoutResult& layout_result,
-    const InputRouter& input,
-    const CommandIndex& commands,
-    const TextEngine* text,
-    const resource::SvgImageRegistry* svg_images,
-    const MotionRuntime* motion,
-    double inherited_opacity
-);
+[[nodiscard]] std::optional<Rect>
+widget_descendant_clip(const WidgetRegistry& registry, const RetainedNode& node,
+                       const LayoutRecord& layout, const LayoutResult& layout_result,
+                       const InputRouter& input, const CommandIndex& commands,
+                       const TextEngine* text, const resource::SvgImageRegistry* svg_images,
+                       const MotionRuntime* motion, double inherited_opacity);
 
 [[nodiscard]] const std::string* widget_string_value(const runtime::Value* value) noexcept;
 [[nodiscard]] const std::string* widget_image_value(const runtime::Value* value) noexcept;
-[[nodiscard]] TextureRegion widget_texture_region(
-    const runtime::Value* value,
-    TextureRegion fallback = TextureRegion{}
-) noexcept;
-[[nodiscard]] RenderColor widget_color(
-    const runtime::Value* value,
-    RenderColor fallback
-) noexcept;
+[[nodiscard]] TextureRegion
+widget_texture_region(const runtime::Value* value,
+                      TextureRegion fallback = TextureRegion{}) noexcept;
+[[nodiscard]] RenderColor widget_color(const runtime::Value* value, RenderColor fallback) noexcept;
 [[nodiscard]] RenderColor widget_opacity(RenderColor color, double multiplier) noexcept;
 [[nodiscard]] std::string widget_number_text(double value);
 

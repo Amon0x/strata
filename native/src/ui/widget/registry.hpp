@@ -11,11 +11,12 @@
 
 #include "runtime/expression.hpp"
 #include "ui/layout.hpp"
+#include "ui/widget/subtarget.hpp"
 
 namespace strata::runtime {
 class IndexableSequence;
 class RuntimeActionRegistry;
-}
+} // namespace strata::runtime
 
 namespace strata::ui {
 
@@ -27,9 +28,7 @@ class WidgetDescriptionScope;
 class WidgetLayoutDefaultsScope;
 
 using WidgetGeneratedChildHook = std::function<std::shared_ptr<const DescriptionNode>(
-    WidgetDescriptionScope& scope,
-    std::size_t index
-)>;
+    WidgetDescriptionScope& scope, std::size_t index)>;
 
 struct WidgetGeneratedVirtualization final {
     std::shared_ptr<const runtime::IndexableSequence> sequence{};
@@ -63,23 +62,17 @@ using WidgetInspectionHook = std::function<void(WidgetInspectionScope& scope)>;
 using WidgetSemanticsHook = std::function<void(WidgetSemanticsScope& scope)>;
 using WidgetDescriptionHook = std::function<void(WidgetDescriptionScope& scope)>;
 using WidgetParticipationHook = bool (*)(const RetainedNode& node) noexcept;
+using WidgetSubtargetsHook = std::function<std::vector<WidgetSubtarget>(
+    const RetainedNode& node, const LayoutRecord& layout)>;
 using WidgetLayoutDefaultsHook = std::function<void(WidgetLayoutDefaultsScope& scope)>;
 /** Resolves a default action from the attached retained node, including its final key. */
 using WidgetDefaultActionFactory = std::function<std::shared_ptr<const runtime::ActionValue>(
-    const RetainedNode& node,
-    const runtime::RuntimeActionRegistry& actions
-)>;
-using WidgetTemplateArguments =
-    std::map<std::string, runtime::ExpressionValue, std::less<>>;
+    const RetainedNode& node, const runtime::RuntimeActionRegistry& actions)>;
+using WidgetTemplateArguments = std::map<std::string, runtime::ExpressionValue, std::less<>>;
 using WidgetTemplateInstantiator = std::function<std::shared_ptr<const DescriptionNode>(
-    std::string_view component,
-    std::string key,
-    WidgetTemplateArguments arguments
-)>;
-using WidgetRetainedDependencyObserver = std::function<void(
-    std::string_view name,
-    const runtime::Value* value
-)>;
+    std::string_view component, std::string key, WidgetTemplateArguments arguments)>;
+using WidgetRetainedDependencyObserver =
+    std::function<void(std::string_view name, const runtime::Value* value)>;
 
 enum class WidgetTextEditMode { none, single_line, multi_line, numeric, static_text };
 enum class WidgetPointerFocusPolicy { automatic, preserve };
@@ -88,7 +81,8 @@ struct WidgetDescribePhase final {
     WidgetLayoutDefaultsHook layout_defaults = nullptr;
     WidgetDescriptionHook expand = nullptr;
     std::string canonical_type;
-    /** Static no-payload fallback; use default_action_factory when retained identity is required. */
+    /** Static no-payload fallback; use default_action_factory when retained identity is required.
+     */
     std::string default_action;
     bool layout_participates = true;
     std::string implicit_key_prefix{};
@@ -127,7 +121,8 @@ struct WidgetInputPhase final {
     std::string popup_initial;
     std::string popup_dismiss_action_property;
     WidgetTextEditMode text_edit_mode = WidgetTextEditMode::none;
-    /** Scalar editors publish their draft through onChange; composite editors publish separately. */
+    /** Scalar editors publish their draft through onChange; composite editors publish separately.
+     */
     bool editor_emits_change = true;
 };
 
@@ -141,6 +136,7 @@ struct WidgetSemanticsPhase final {
 
 struct WidgetInspectionPhase final {
     WidgetInspectionHook derive = nullptr;
+    WidgetSubtargetsHook subtargets = nullptr;
 };
 
 struct WidgetCommandPhase final {
@@ -155,10 +151,8 @@ struct WidgetCommandPhase final {
     std::string activation_reference_property;
 };
 
-using WidgetPersistenceValidator = bool (*)(
-    std::string_view field,
-    const runtime::Value& value
-) noexcept;
+using WidgetPersistenceValidator = bool (*)(std::string_view field,
+                                            const runtime::Value& value) noexcept;
 
 struct WidgetPersistencePhase final {
     /** Only these named retained values may cross a process restart. */
@@ -201,7 +195,7 @@ struct WidgetLifecycle final {
  * never widget names; widget modules own their description, input, semantics, and presentation.
  */
 class WidgetRegistry final {
-public:
+  public:
     WidgetRegistry();
 
     [[nodiscard]] const WidgetLifecycle* find(std::string_view type) const noexcept;
@@ -216,20 +210,16 @@ public:
     void register_present_phase(std::string type, WidgetPresentPhase phase);
     [[nodiscard]] std::vector<std::string> text_editable_types() const;
 
-    void apply_layout_defaults(
-        std::string_view type,
-        DescriptionNode::Properties& properties
-    ) const;
-    [[nodiscard]] WidgetDescriptionExpansion expand_description(
-        WidgetDescriptionExpansion description,
-        std::string_view state_scope,
-        const runtime::RuntimeActionRegistry& actions,
-        const RetainedDescriptionSnapshot::Node* retained = nullptr,
-        WidgetTemplateInstantiator instantiate_template = {},
-        WidgetRetainedDependencyObserver observe_retained = {}
-    ) const;
+    void apply_layout_defaults(std::string_view type,
+                               DescriptionNode::Properties& properties) const;
+    [[nodiscard]] WidgetDescriptionExpansion
+    expand_description(WidgetDescriptionExpansion description, std::string_view state_scope,
+                       const runtime::RuntimeActionRegistry& actions,
+                       const RetainedDescriptionSnapshot::Node* retained = nullptr,
+                       WidgetTemplateInstantiator instantiate_template = {},
+                       WidgetRetainedDependencyObserver observe_retained = {}) const;
 
-private:
+  private:
     [[nodiscard]] WidgetLifecycle& lifecycle(std::string type);
     std::map<std::string, WidgetLifecycle, std::less<>> lifecycles_;
 };

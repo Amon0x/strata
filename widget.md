@@ -221,3 +221,50 @@ Committed values schedule one accessibility projection.
   semantic projection.
 - The Control Deck headless scenario exercises plane, hue, alpha, and keyboard changes and records
   committed color events in canonical frame output.
+
+## Extension roadmap
+
+The next work stays proof-driven: each generic capability lands with one demanding public-only
+package, conformance evidence, and a desktop workspace suitable for manual interaction and FPS
+evaluation. Milestones are delivered sequentially so later APIs are justified by a real consumer.
+
+### Milestone A — compound controls and typed visuals
+
+The public SDK gains stable widget-owned subtargets with bounds, overlap precedence, pointer identity,
+keyboard selection, inspection identity, and independently projected semantic children. Structured
+per-instance state must support bounded collections without JSON reconstruction or heap allocation on
+ordinary movement. Typed color, structured value, computed style, and material parameter access must
+remain available through public headers and the stable C ABI.
+
+The proof is a production-quality native gradient editor in a dedicated Control Deck workspace:
+
+- add, select, remove, reorder, and drag color stops;
+- preserve capture and selection when handles overlap or cross;
+- provide fine/coarse keyboard movement and deletion;
+- support an optional authored controlled value and an allocation-conscious retained fallback;
+- render a theme-aware, material-capable gradient preview;
+- emit local live feedback during movement and one committed action on release or keyboard completion;
+- expose each stop to inspection and accessibility under one stable compound-widget identity; and
+- keep movement to one content-fragment rebuild with no reconciliation, layout, text, semantic,
+  pointer-hit geometry, or runtime-routed allocation churn.
+
+### Milestone B — bounded animation
+
+Add explicit request/cancel-frame capability with frame time, delta, reduced-motion policy, automatic
+suspension when hidden or detached, and distinct paint versus layout costs. Prove it with a control
+whose behavior genuinely requires inertia or spring motion; never introduce a permanently pumping
+idle widget.
+
+### Milestone C — serious canvas controls
+
+Add pan/zoom transforms, selection and lasso routing, batched geometry, viewport-aware projection,
+large virtual interactive-object sets, and stable accessible identities. Prove the contract with a
+curve editor before generalizing it to timelines, waveforms, node graphs, or vector tooling.
+
+### Deferred platform work
+
+- Custom layout measurement and arrangement remain deferred until a proof cannot use ordinary Strata
+  composition.
+- Native text editing remains a separate IME, selection, clipboard, and undo project.
+- Command-surface integration remains deferred until an editor requires menus, shortcuts, palettes,
+  and toolbar state.

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -20,20 +22,14 @@ struct WidgetDragInteraction final {
 
 /** Widget-local capabilities layered over the shared phased input dispatch context. */
 class WidgetInputScope final {
-public:
-    WidgetInputScope(
-        InputRouter& router,
-        RetainedNode& node,
-        InputOperationResult& result,
-        std::string_view key,
-        KeyModifiers modifiers,
-        const PointerInputEvent* pointer = nullptr,
-        RetainedNode* pointer_target = nullptr,
-        std::size_t click_count = 0U,
-        std::optional<WidgetSubtarget> subtarget = std::nullopt,
-        std::string_view input_text = {},
-        InputDispatchContext* dispatch = nullptr
-    ) noexcept;
+  public:
+    WidgetInputScope(InputRouter& router, RetainedNode& node, InputOperationResult& result,
+                     std::string_view key, KeyModifiers modifiers,
+                     const PointerInputEvent* pointer = nullptr,
+                     RetainedNode* pointer_target = nullptr, std::size_t click_count = 0U,
+                     std::optional<WidgetSubtarget> subtarget = std::nullopt,
+                     std::string_view input_text = {},
+                     InputDispatchContext* dispatch = nullptr) noexcept;
 
     [[nodiscard]] RetainedNode& node() noexcept;
     [[nodiscard]] const RetainedNode& node() const noexcept;
@@ -68,30 +64,20 @@ public:
     void synchronize_modal_focus();
     [[nodiscard]] const runtime::Value* property(std::string_view name) const noexcept;
     [[nodiscard]] const runtime::Value* retained(std::string_view name) const noexcept;
-    [[nodiscard]] bool effective_boolean(
-        std::string_view controlled,
-        std::string_view retained_name,
-        std::string_view initial,
-        bool fallback
-    ) const noexcept;
-    [[nodiscard]] double effective_number(
-        std::string_view controlled,
-        std::string_view retained_name,
-        std::string_view initial,
-        double fallback
-    ) const noexcept;
+    [[nodiscard]] std::span<const std::byte> retained_bytes(std::string_view name) const noexcept;
+    [[nodiscard]] bool effective_boolean(std::string_view controlled,
+                                         std::string_view retained_name, std::string_view initial,
+                                         bool fallback) const noexcept;
+    [[nodiscard]] double effective_number(std::string_view controlled,
+                                          std::string_view retained_name, std::string_view initial,
+                                          double fallback) const noexcept;
     [[nodiscard]] double number(std::string_view name, double fallback) const noexcept;
-    [[nodiscard]] std::int64_t duration_nanos(
-        std::string_view name,
-        std::int64_t fallback
-    ) const noexcept;
+    [[nodiscard]] std::int64_t duration_nanos(std::string_view name,
+                                              std::int64_t fallback) const noexcept;
     [[nodiscard]] std::string string(std::string_view name, std::string fallback = {}) const;
     /** Reveals a vertical item range inside this widget's scroll viewport. */
-    [[nodiscard]] bool reveal_vertical(
-        double item_start,
-        double item_end,
-        double sticky_leading_inset = 0.0
-    );
+    [[nodiscard]] bool reveal_vertical(double item_start, double item_end,
+                                       double sticky_leading_inset = 0.0);
     [[nodiscard]] bool scroll_by(double delta_x, double delta_y);
     [[nodiscard]] const std::string* editor_text() const noexcept;
     /** Inserts through the surface-owned editor, preserving filtering, undo, and dirty tracking. */
@@ -102,38 +88,31 @@ public:
     void synchronize_editor_text(std::string_view value, bool move_caret_to_end = false);
 
     void set_retained(std::string name, runtime::Value value, DirtyReason reason);
+    void set_retained_bytes(std::string name, std::span<const std::byte> value, DirtyReason reason);
     void set_presentation(std::string name, runtime::Value value);
     void set_paint(std::string name, runtime::Value value);
     void set_input(std::string name, runtime::Value value);
+    void set_input_bytes(std::string name, std::span<const std::byte> value);
     void invalidate(DirtyReason reason);
     void set_event_count(std::size_t count) noexcept;
     void activated(std::string_view action_property);
     void boolean_changed(std::string_view action_property, bool value);
     void number_changed(std::string_view action_property, double value);
-    void value_changed(
-        std::string_view action_property,
-        std::string_view event_kind,
-        runtime::Value event_value
-    );
-    void dispatch_action(
-        std::shared_ptr<const runtime::ActionValue> action,
-        std::string_view event_kind,
-        runtime::Value event_value = runtime::Value{}
-    );
+    void value_changed(std::string_view action_property, std::string_view event_kind,
+                       runtime::Value event_value);
+    void dispatch_action(std::shared_ptr<const runtime::ActionValue> action,
+                         std::string_view event_kind,
+                         runtime::Value event_value = runtime::Value{});
     /** Emits an extension-owned action through the same registry/dispatcher as authored actions. */
-    [[nodiscard]] bool emit_action(
-        std::string_view action_id,
-        runtime::Value payload,
-        std::string_view event_kind,
-        runtime::Value event_value = runtime::Value{}
-    );
+    [[nodiscard]] bool emit_action(std::string_view action_id, runtime::Value payload,
+                                   std::string_view event_kind,
+                                   runtime::Value event_value = runtime::Value{});
     [[nodiscard]] bool invoke_command(std::string_view id);
     void emit_event(std::string_view event_kind, runtime::Value event_value = runtime::Value{});
 
-private:
-    [[nodiscard]] std::shared_ptr<const runtime::ActionValue> action(
-        std::string_view property_name
-    ) const;
+  private:
+    [[nodiscard]] std::shared_ptr<const runtime::ActionValue>
+    action(std::string_view property_name) const;
 
     InputRouter& router_;
     RetainedNode& node_;

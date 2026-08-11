@@ -468,6 +468,18 @@ component CategoryIcon(icon: string, selected: boolean) {
         fill: selected ? #669CFFFF : #627DAAFF
       }
     ])
+  } else if icon == "GRADIENT" {
+    Draw(style: CategoryIconDraw, shapes: [
+      {
+        kind: "path",
+        commands: "M 0.10 0.50 H 0.90",
+        stroke: selected ? #FFFFFFFF : #A6A9B0FF,
+        strokeStyle: { width: 2, cap: "round" }
+      },
+      { kind: "circle", center: { x: 0.22, y: 0.50 }, radius: 0.12, fill: selected ? #5797FFFF : #627DAAFF },
+      { kind: "circle", center: { x: 0.50, y: 0.50 }, radius: 0.12, fill: selected ? #58D6B4FF : #5F9A7DFF },
+      { kind: "circle", center: { x: 0.78, y: 0.50 }, radius: 0.12, fill: selected ? #E55183FF : #A65767FF }
+    ])
   } else if icon == "INPUT" {
     Draw(style: CategoryIconDraw, shapes: [
       {
@@ -935,6 +947,28 @@ component ColorPage() {
   }
 }
 
+component GradientPage() {
+  Panel(style: SettingsStack) {
+    SectionTitle(label: "COMPOUND COLOR CONTROL")
+    DeckGradientEditor(
+      key: "deck.gradient.editor",
+      panelColor: #0F141BF2,
+      trackColor: #080B10FF,
+      outlineColor: #6C7D8980,
+      textColor: #E6ECF0FF,
+      layout: { width: { weight: 1 }, height: 210 }
+    )
+    Panel(style: StatusCard) {
+      Panel(style: StatusDot)
+      Panel(style: ChoiceCopy) {
+        Text(text: "Public extension SDK", style: StatusTitle)
+        Text(text: "Stable stop subtargets · overlap-safe capture · one commit on release", style: StatusMeta)
+      }
+      Text(text: "COMPOUND", style: DeckScope)
+    }
+  }
+}
+
 component AdvancedPage() {
   Panel(style: SettingsStack) {
     SectionTitle(label: "DIAGNOSTICS")
@@ -980,6 +1014,7 @@ component ControlDeck() {
           CategoryButton(id: "deck.general", icon: "GENERAL", label: "General", selected: category == "GENERAL", activate: action("state.set", name: "category", value: "GENERAL"))
           CategoryButton(id: "deck.display", icon: "DISPLAY", label: "Display", selected: category == "DISPLAY", activate: action("state.set", name: "category", value: "DISPLAY"))
           CategoryButton(id: "deck.color", icon: "COLOR", label: "Color", selected: category == "COLOR", activate: action("state.set", name: "category", value: "COLOR"))
+          CategoryButton(id: "deck.gradient", icon: "GRADIENT", label: "Gradient", selected: category == "GRADIENT", activate: action("state.set", name: "category", value: "GRADIENT"))
           CategoryButton(id: "deck.input", icon: "INPUT", label: "Input", selected: category == "INPUT", activate: action("state.set", name: "category", value: "INPUT"))
           CategoryButton(id: "deck.audio", icon: "AUDIO", label: "Audio", selected: category == "AUDIO", activate: action("state.set", name: "category", value: "AUDIO"))
           CategoryButton(id: "deck.profiles", icon: "PROFILES", label: "Profiles", selected: category == "PROFILES", activate: action("state.set", name: "category", value: "PROFILES"))
@@ -995,10 +1030,10 @@ component ControlDeck() {
           Panel(style: ContentHeader) {
             Panel(style: ChoiceCopy) {
               Text(
-                text: category == "GENERAL" ? "General" : category == "DISPLAY" ? "Display" : category == "COLOR" ? "Color" : category == "INPUT" ? "Input" : category == "AUDIO" ? "Audio" : category == "PROFILES" ? "Profiles" : "Advanced",
+                text: category == "GENERAL" ? "General" : category == "DISPLAY" ? "Display" : category == "COLOR" ? "Color" : category == "GRADIENT" ? "Gradient" : category == "INPUT" ? "Input" : category == "AUDIO" ? "Audio" : category == "PROFILES" ? "Profiles" : "Advanced",
                 style: ContentTitle
               )
-              Text(text: category == "COLOR" ? "Frame-bound native color authoring" : "Workspace configuration and behavior", style: ContentSubtitle)
+              Text(text: category == "GRADIENT" ? "Compound native gradient authoring" : category == "COLOR" ? "Frame-bound native color authoring" : "Workspace configuration and behavior", style: ContentSubtitle)
             }
             if category == "GENERAL" {
               Panel(style: SegmentRail) {
@@ -1011,6 +1046,8 @@ component ControlDeck() {
           Scroll(key: "deck.settings.scroll", vertical: true, horizontal: false, style: DeckScroll) {
             if category == "COLOR" {
               ColorPage()
+            } else if category == "GRADIENT" {
+              GradientPage()
             } else if category == "DISPLAY" {
               DisplayPage()
             } else if category == "INPUT" {

@@ -16,16 +16,17 @@
 #include "ui/widget/presentation.hpp"
 #include "ui/widget/registry.hpp"
 #include "ui/widget/semantics.hpp"
+#include "ui/widget/subtarget.hpp"
 
 namespace strata::abi_detail {
 
 /** Declared retained surface of one widget extension, resolved once at surface creation. */
 class ExtensionRetainedFields final {
-public:
+  public:
     void declare(std::string name, strata_widget_invalidation invalidation);
     [[nodiscard]] const strata_widget_invalidation* find(std::string_view name) const noexcept;
 
-private:
+  private:
     std::vector<std::pair<std::string, strata_widget_invalidation>> fields_;
 };
 
@@ -51,6 +52,13 @@ struct strata_widget_semantics_context final {
     std::vector<std::string>* actions = nullptr;
 };
 
+struct strata_widget_subtargets_context final {
+    const strata::ui::RetainedNode* node = nullptr;
+    const strata::ui::LayoutRecord* layout = nullptr;
+    const strata::abi_detail::ExtensionRetainedFields* fields = nullptr;
+    std::vector<strata::ui::WidgetSubtarget>* targets = nullptr;
+};
+
 struct strata_behavior_input_context final {
     strata::ui::BehaviorInputScope* scope = nullptr;
 };
@@ -62,8 +70,7 @@ struct ExtensionRegistries final {
     ui::BehaviorRegistry behaviors;
 };
 
-[[nodiscard]] ExtensionRegistries extension_registries(
-    const strata_surface_extension_bundle* bundle
-);
+[[nodiscard]] ExtensionRegistries
+extension_registries(const strata_surface_extension_bundle* bundle);
 
 } // namespace strata::abi_detail
