@@ -181,7 +181,7 @@ void snapshots_never_publish_an_open_frame() {
 
 } // namespace
 
-int main() {
+int strata_test_profiler() {
     try {
         nested_rolling_statistics_are_canonical();
         adaptive_spikes_freeze_stack_baseline_and_counters();

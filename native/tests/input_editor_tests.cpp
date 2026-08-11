@@ -100,7 +100,7 @@ void test_pointer_selection_primitives() {
 
 } // namespace
 
-int main() {
+int strata_test_input_editor() {
     try {
         test_grapheme_navigation_and_deletion();
         test_word_selection_undo_and_redo();

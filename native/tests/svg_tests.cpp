@@ -394,7 +394,7 @@ void test_truncated_and_arbitrary_inputs(const std::filesystem::path& fixtures) 
 
 } // namespace
 
-int main(const int argument_count, const char* const* const arguments) {
+int strata_test_svg(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count != 2) {
             throw std::runtime_error("usage: strata_svg_tests FIXTURE_DIRECTORY");

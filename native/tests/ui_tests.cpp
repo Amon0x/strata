@@ -6658,7 +6658,7 @@ overlay PhasedInput {
 
 } // namespace
 
-int main(const int argument_count, const char* const* const arguments) {
+int strata_test_ui(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--collections") {
             test_native_collection_interaction_and_templates(arguments[2]);

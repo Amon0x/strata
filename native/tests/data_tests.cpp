@@ -120,7 +120,7 @@ void test_resource_identity() {
 
 } // namespace
 
-int main() {
+int strata_test_data() {
     try {
         test_exact_numbers_and_canonical_json();
         test_strict_json_failures_and_limits();

@@ -537,7 +537,7 @@ void test_effect_batch_change_invalidates_retained_samples(
 
 } // namespace
 
-int main(const int argument_count, const char* const* const arguments) {
+int strata_test_render_packet(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count < 2)
             throw std::invalid_argument("resource root is required");

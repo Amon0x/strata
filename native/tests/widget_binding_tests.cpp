@@ -2143,7 +2143,7 @@ overlay Main { root TypedProjection() }
 
 } // namespace
 
-int main(const int argument_count, const char* const* const arguments) {
+int strata_test_widget_binding(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count != 2) throw std::invalid_argument("expected resource root");
         const std::filesystem::path resource_root(arguments[1]);

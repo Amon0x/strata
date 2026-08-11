@@ -450,7 +450,7 @@ void test_portable_ir_rejects_duplicate_fields_in_narrow_and_wide_objects() {
 
 } // namespace
 
-int main() {
+int strata_test_compiler() {
     try {
         test_utf8_source_positions_use_kotlin_compatible_utf16_offsets();
         test_lexer_contract();

@@ -497,7 +497,7 @@ void generated_root_models_publish_changed_fields_only() {
 
 } // namespace
 
-int main() {
+int strata_test_host() {
     try {
         generated_contracts_round_trip();
         structured_values_round_trip();

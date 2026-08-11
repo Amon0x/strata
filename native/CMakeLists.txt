@@ -7,6 +7,14 @@ project(
     LANGUAGES C CXX
 )
 
+if(MSVC AND CMAKE_GENERATOR MATCHES "^Visual Studio")
+    list(
+        APPEND CMAKE_VS_GLOBALS
+        "UseMultiToolTask=true"
+        "EnforceProcessCountAcrossBuilds=true"
+    )
+endif()
+
 include(CMakePackageConfigHelpers)
 include(CTest)
 include(FetchContent)
@@ -21,6 +29,7 @@ option(STRATA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(STRATA_ENABLE_ASAN "Enable AddressSanitizer where supported" OFF)
 option(STRATA_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer where supported" OFF)
 option(STRATA_ENABLE_STATIC_ANALYSIS "Enable compiler static analysis" OFF)
+option(STRATA_ENABLE_PCH "Precompile stable standard-library headers for large targets" ON)
 option(STRATA_ENABLE_TRACY "Enable local Tracy instrumentation" OFF)
 option(
     STRATA_ENABLE_THREAD_SAFE_STATICS
@@ -86,10 +95,9 @@ function(strata_target_defaults target)
             PRIVATE
                 /W4
                 /utf-8
-                # The core intentionally has many ownership-sized translation units; let one
-                # MSBuild project use all host threads instead of relying only on project-level
-                # `cmake --build --parallel` scheduling.
-                $<$<COMPILE_LANGUAGE:C,CXX>:/MP16>
+                # Let cl parallelize translation units. Visual Studio's Multi-Tool Task scheduler
+                # above coordinates compiler processes across concurrent MSBuild projects.
+                $<$<COMPILE_LANGUAGE:C,CXX>:/MP>
                 $<$<COMPILE_LANGUAGE:C,CXX>:/FS>
                 $<$<COMPILE_LANGUAGE:CXX>:/permissive->
                 $<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>
@@ -147,6 +155,7 @@ function(strata_target_defaults target)
         endif()
     endif()
 endfunction()
+
 
 add_library(
     strata_internal_data
@@ -411,6 +420,26 @@ if(STRATA_ENABLE_TRACY)
     target_compile_definitions(strata_core PRIVATE STRATA_ENABLE_TRACY)
 endif()
 strata_target_defaults(strata_core)
+if(STRATA_ENABLE_PCH)
+    target_precompile_headers(
+        strata_core
+        PRIVATE
+            <algorithm>
+            <array>
+            <cmath>
+            <cstddef>
+            <cstdint>
+            <limits>
+            <memory>
+            <optional>
+            <ranges>
+            <stdexcept>
+            <string>
+            <string_view>
+            <utility>
+            <vector>
+    )
+endif()
 
 set(
     strata_c_sources
@@ -1032,115 +1061,79 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         endif()
     endif()
 
-    add_executable(strata_host_tests tests/host_tests.cpp)
-    target_link_libraries(strata_host_tests PRIVATE Strata::host strata_application_contracts)
-    strata_target_defaults(strata_host_tests)
-    add_test(
-        NAME strata.host
-        COMMAND strata_host_tests
-    )
-
     add_executable(
-        strata_browser_model_tests
+        strata_host_tests
+        tests/host_test_runner.cpp
+        tests/host_tests.cpp
         tests/browser_model_tests.cpp
-        headless/scenario.cpp
-    )
-    target_link_libraries(strata_browser_model_tests PRIVATE strata_host_support)
-    strata_target_defaults(strata_browser_model_tests)
-    add_test(
-        NAME strata.host.browser_model
-        COMMAND strata_browser_model_tests
-    )
-
-    add_executable(
-        strata_showcase_model_tests
         tests/showcase_model_tests.cpp
+        headless/scenario.cpp
         desktop/showcase.cpp
     )
     target_link_libraries(
-        strata_showcase_model_tests PRIVATE Strata::host strata_application_contracts
+        strata_host_tests
+        PRIVATE Strata::host strata_application_contracts strata_host_support
     )
-    target_include_directories(strata_showcase_model_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop)
-    strata_target_defaults(strata_showcase_model_tests)
-    add_test(NAME strata.showcase.model COMMAND strata_showcase_model_tests)
+    target_include_directories(strata_host_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop)
+    strata_target_defaults(strata_host_tests)
+    add_test(NAME strata.host COMMAND strata_host_tests host)
+    add_test(NAME strata.host.browser_model COMMAND strata_host_tests browser_model)
+    add_test(NAME strata.showcase.model COMMAND strata_host_tests showcase_model)
 
-    add_executable(strata_svg_tests tests/svg_tests.cpp)
-    target_link_libraries(strata_svg_tests PRIVATE Strata::svg)
-    strata_target_defaults(strata_svg_tests)
-    add_test(
-        NAME strata.svg
-        COMMAND strata_svg_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/svg
+    add_executable(
+        strata_core_tests
+        tests/core_test_runner.cpp
+        tests/svg_tests.cpp
+        tests/core_tests.cpp
+        tests/data_tests.cpp
+        tests/compiler_tests.cpp
+        tests/runtime_tests.cpp
+        tests/profiler_tests.cpp
+        tests/resource_host_residual_tests.cpp
+        tests/ui_tests.cpp
+        tests/render_packet_tests.cpp
+        tests/text_font_residual_tests.cpp
+        tests/theme_tests.cpp
+        tests/input_editor_tests.cpp
+        tests/chip_input_tests.cpp
+        tests/shell_lifecycle_tests.cpp
+        tests/interaction_residual_tests.cpp
+        tests/widget_binding_tests.cpp
+        tests/form_validation_tests.cpp
+        tests/command_binding_tests.cpp
     )
-
-    add_executable(strata_core_tests tests/core_tests.cpp)
-    target_link_libraries(strata_core_tests PRIVATE Strata::core)
+    target_link_libraries(
+        strata_core_tests
+        PRIVATE Strata::core Strata::render_host Strata::svg
+    )
     target_include_directories(strata_core_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     strata_target_defaults(strata_core_tests)
-    add_test(NAME strata.core COMMAND strata_core_tests)
-
-    add_executable(strata_scale_tests tests/scale_tests.cpp)
-    target_link_libraries(strata_scale_tests PRIVATE Strata::c Strata::core)
-    target_include_directories(strata_scale_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_scale_tests)
-    add_test(NAME strata.scale COMMAND strata_scale_tests)
-
-    add_executable(strata_data_tests tests/data_tests.cpp)
-    target_link_libraries(strata_data_tests PRIVATE Strata::core)
-    target_include_directories(strata_data_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_data_tests)
-    add_test(NAME strata.data COMMAND strata_data_tests)
-
-    add_executable(strata_compiler_tests tests/compiler_tests.cpp)
-    target_link_libraries(strata_compiler_tests PRIVATE Strata::core)
-    target_include_directories(strata_compiler_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_compiler_tests)
-    add_test(NAME strata.compiler COMMAND strata_compiler_tests)
-
-    add_executable(strata_runtime_tests tests/runtime_tests.cpp)
-    target_link_libraries(strata_runtime_tests PRIVATE Strata::core)
-    target_include_directories(strata_runtime_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_runtime_tests)
+    add_test(
+        NAME strata.svg
+        COMMAND strata_core_tests svg ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/svg
+    )
+    add_test(NAME strata.core COMMAND strata_core_tests core)
+    add_test(NAME strata.data COMMAND strata_core_tests data)
+    add_test(NAME strata.compiler COMMAND strata_core_tests compiler)
     add_test(
         NAME strata.runtime
-        COMMAND strata_runtime_tests
+        COMMAND strata_core_tests runtime
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dynamic-session
     )
-
-    add_executable(strata_profiler_tests tests/profiler_tests.cpp)
-    target_link_libraries(strata_profiler_tests PRIVATE Strata::core)
-    target_include_directories(strata_profiler_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_profiler_tests)
-    add_test(NAME strata.profiler COMMAND strata_profiler_tests)
-
-    add_executable(strata_resource_host_residual_tests tests/resource_host_residual_tests.cpp)
-    target_link_libraries(strata_resource_host_residual_tests PRIVATE Strata::core)
-    target_include_directories(strata_resource_host_residual_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_resource_host_residual_tests)
-    add_test(NAME strata.resource.host.residual COMMAND strata_resource_host_residual_tests)
-
-    add_executable(strata_ui_tests tests/ui_tests.cpp)
-    target_link_libraries(strata_ui_tests PRIVATE Strata::core Strata::render_host)
-    target_include_directories(strata_ui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_ui_tests)
+    add_test(NAME strata.profiler COMMAND strata_core_tests profiler)
+    add_test(
+        NAME strata.resource.host.residual
+        COMMAND strata_core_tests resource_host_residual
+    )
     add_test(
         NAME strata.ui
-        COMMAND strata_ui_tests
+        COMMAND strata_core_tests ui
             ${STRATA_RESOURCE_ROOT}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dynamic-session
     )
-
-    add_executable(strata_render_packet_tests tests/render_packet_tests.cpp)
-    target_link_libraries(
-        strata_render_packet_tests
-        PRIVATE Strata::core Strata::render_host
-    )
-    target_include_directories(
-        strata_render_packet_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
-    strata_target_defaults(strata_render_packet_tests)
     add_test(
         NAME strata.render_packet
-        COMMAND strata_render_packet_tests ${STRATA_RESOURCE_ROOT}
+        COMMAND strata_core_tests render_packet ${STRATA_RESOURCE_ROOT}
     )
 
     if(TARGET strata_headless_host)
@@ -1154,91 +1147,35 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         add_test(NAME strata.effect_refresh COMMAND strata_effect_refresh_tests)
     endif()
 
-    add_executable(strata_text_font_residual_tests tests/text_font_residual_tests.cpp)
-    target_link_libraries(strata_text_font_residual_tests PRIVATE Strata::core)
-    target_include_directories(
-        strata_text_font_residual_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
-    strata_target_defaults(strata_text_font_residual_tests)
     add_test(
         NAME strata.ui.text_font_residuals
-        COMMAND strata_text_font_residual_tests
-            ${STRATA_RESOURCE_ROOT}
+        COMMAND strata_core_tests text_font_residual ${STRATA_RESOURCE_ROOT}
     )
-
-    add_executable(strata_theme_tests tests/theme_tests.cpp)
-    target_link_libraries(strata_theme_tests PRIVATE Strata::core)
-    target_include_directories(strata_theme_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_theme_tests)
-    add_test(
-        NAME strata.ui.theme
-        COMMAND strata_theme_tests
-    )
-
-    add_executable(strata_input_editor_tests tests/input_editor_tests.cpp)
-    target_link_libraries(strata_input_editor_tests PRIVATE Strata::core)
-    target_include_directories(strata_input_editor_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_input_editor_tests)
-    add_test(NAME strata.input.editor COMMAND strata_input_editor_tests)
-
-    add_executable(strata_chip_input_tests tests/chip_input_tests.cpp)
-    target_link_libraries(strata_chip_input_tests PRIVATE Strata::core)
-    target_include_directories(strata_chip_input_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_chip_input_tests)
+    add_test(NAME strata.ui.theme COMMAND strata_core_tests theme)
+    add_test(NAME strata.input.editor COMMAND strata_core_tests input_editor)
     add_test(
         NAME strata.widget.chip_input
-        COMMAND strata_chip_input_tests
-            ${STRATA_RESOURCE_ROOT}
+        COMMAND strata_core_tests chip_input ${STRATA_RESOURCE_ROOT}
     )
-
-    add_executable(strata_shell_lifecycle_tests tests/shell_lifecycle_tests.cpp)
-    target_link_libraries(strata_shell_lifecycle_tests PRIVATE Strata::core)
-    target_include_directories(strata_shell_lifecycle_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_shell_lifecycle_tests)
     add_test(
         NAME strata.widget.shell_lifecycle
-        COMMAND strata_shell_lifecycle_tests
-            ${STRATA_RESOURCE_ROOT}
+        COMMAND strata_core_tests shell_lifecycle ${STRATA_RESOURCE_ROOT}
     )
-
-    add_executable(strata_interaction_residual_tests tests/interaction_residual_tests.cpp)
-    target_link_libraries(strata_interaction_residual_tests PRIVATE Strata::core)
-    target_include_directories(strata_interaction_residual_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_interaction_residual_tests)
     add_test(
         NAME strata.ui.interaction_residuals
-        COMMAND strata_interaction_residual_tests
-            ${STRATA_RESOURCE_ROOT}
+        COMMAND strata_core_tests interaction_residual ${STRATA_RESOURCE_ROOT}
     )
-
-    add_executable(strata_widget_binding_tests tests/widget_binding_tests.cpp)
-    target_link_libraries(strata_widget_binding_tests PRIVATE Strata::core)
-    target_include_directories(strata_widget_binding_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_widget_binding_tests)
     add_test(
         NAME strata.widget.binding
-        COMMAND strata_widget_binding_tests
-            ${STRATA_RESOURCE_ROOT}
+        COMMAND strata_core_tests widget_binding ${STRATA_RESOURCE_ROOT}
     )
-
-    add_executable(strata_form_validation_tests tests/form_validation_tests.cpp)
-    target_link_libraries(strata_form_validation_tests PRIVATE Strata::core)
-    target_include_directories(strata_form_validation_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_form_validation_tests)
     add_test(
         NAME strata.form.validation
-        COMMAND strata_form_validation_tests
-            ${STRATA_RESOURCE_ROOT}
+        COMMAND strata_core_tests form_validation ${STRATA_RESOURCE_ROOT}
     )
-
-    add_executable(strata_command_binding_tests tests/command_binding_tests.cpp)
-    target_link_libraries(strata_command_binding_tests PRIVATE Strata::core)
-    target_include_directories(strata_command_binding_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    strata_target_defaults(strata_command_binding_tests)
     add_test(
         NAME strata.command.binding
-        COMMAND strata_command_binding_tests
-            ${STRATA_RESOURCE_ROOT}
+        COMMAND strata_core_tests command_binding ${STRATA_RESOURCE_ROOT}
     )
 
     add_executable(strata_extension_tests tests/extension_tests.cpp)
@@ -1251,12 +1188,19 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             ${STRATA_RESOURCE_ROOT}
     )
 
-    add_executable(strata_abi_tests tests/abi_tests.cpp)
-    target_link_libraries(strata_abi_tests PRIVATE Strata::c)
+    add_executable(
+        strata_abi_tests
+        tests/abi_test_runner.cpp
+        tests/abi_tests.cpp
+        tests/scale_tests.cpp
+    )
+    target_link_libraries(strata_abi_tests PRIVATE Strata::c Strata::core)
+    target_include_directories(strata_abi_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     strata_target_defaults(strata_abi_tests)
+    add_test(NAME strata.scale COMMAND strata_abi_tests scale)
     add_test(
         NAME strata.abi
-        COMMAND strata_abi_tests
+        COMMAND strata_abi_tests abi
             ${STRATA_RESOURCE_ROOT}
     )
 

@@ -197,7 +197,7 @@ void click_steps_accept_secondary_buttons() {
 
 } // namespace
 
-int main() {
+int strata_test_browser_model() {
     try {
         virtual_menu_rows_require_exact_geometry();
         indexed_virtual_controls_keep_index_geometry();

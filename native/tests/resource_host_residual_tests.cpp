@@ -38,7 +38,7 @@ void material_warning_suppression_rearms_after_clear() {
 
 } // namespace
 
-int main() {
+int strata_test_resource_host_residual() {
     try {
         material_warning_suppression_rearms_after_clear();
         std::cout << "resource/host residual tests passed\n";

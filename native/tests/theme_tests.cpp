@@ -1046,7 +1046,7 @@ overlay Main {
 
 } // namespace
 
-int main() {
+int strata_test_theme() {
     try {
         test_defaults_and_validation();
         test_scopes_styles_tokens_and_lazy_ranges();

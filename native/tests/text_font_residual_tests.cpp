@@ -1589,7 +1589,7 @@ void test_logical_glyph_json_default_absence() {
 
 } // namespace
 
-int main(const int argument_count, const char* const* arguments) {
+int strata_test_text_font_residual(const int argument_count, const char* const* arguments) {
     try {
         if (argument_count != 2) throw std::runtime_error("expected resource root");
         const std::filesystem::path resources(arguments[1]);

@@ -113,7 +113,7 @@ void surface_visibility_preserves_the_model() {
 
 } // namespace
 
-int main() {
+int strata_test_showcase_model() {
     try {
         cards_reorder_through_typed_action();
         tree_reparents_without_json_plumbing();

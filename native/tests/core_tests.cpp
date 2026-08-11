@@ -133,7 +133,7 @@ void test_foreign_diagnostic_exception_is_contained() {
 
 } // namespace
 
-int main() {
+int strata_test_core() {
     try {
         test_utf8();
         test_arena_uses_host_allocator();

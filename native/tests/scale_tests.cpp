@@ -107,7 +107,7 @@ void test_c_abi_policy_boundary() {
 
 } // namespace
 
-int main() {
+int strata_test_scale() {
     try {
         test_portable_policies();
         test_c_abi_policy_boundary();

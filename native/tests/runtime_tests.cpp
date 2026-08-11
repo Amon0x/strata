@@ -1740,7 +1740,7 @@ void test_layer_stack_and_declarative_registry() {
 
 } // namespace
 
-int main(const int argument_count, const char* const* const arguments) {
+int strata_test_runtime(const int argument_count, const char* const* const arguments) {
     try {
         const auto run = [](const std::string_view name, auto&& operation) {
             try {

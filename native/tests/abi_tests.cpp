@@ -1705,7 +1705,7 @@ void test_invalid_contracts() {
 
 } // namespace
 
-int main(const int argument_count, const char* const* const arguments) {
+int strata_test_abi(const int argument_count, const char* const* const arguments) {
     try {
         test_negotiation();
         test_lifecycle_identity_snapshot_and_clock();
