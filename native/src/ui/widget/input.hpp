@@ -94,6 +94,8 @@ class WidgetInputScope final {
     void set_input(std::string name, runtime::Value value);
     void set_input_bytes(std::string name, std::span<const std::byte> value);
     void invalidate(DirtyReason reason);
+    [[nodiscard]] bool request_frame(WidgetFrameCost cost = WidgetFrameCost::paint);
+    void cancel_frame() noexcept;
     void set_event_count(std::size_t count) noexcept;
     void activated(std::string_view action_property);
     void boolean_changed(std::string_view action_property, bool value);

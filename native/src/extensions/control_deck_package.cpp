@@ -19,6 +19,31 @@ constexpr auto picker_value = retained<number>("picker.value", 0.92, Invalidatio
 constexpr auto picker_alpha = retained<number>("picker.alpha", 0.82, Invalidation::paint);
 constexpr auto picker_active = retained<number>("picker.active", 0.0, Invalidation::input);
 
+constexpr std::size_t inertia_trail_capacity = 48U;
+constexpr std::int64_t inertia_trail_lifetime_nanos = 420'000'000;
+constexpr std::int64_t inertia_trail_sample_interval_nanos = 12'000'000;
+constexpr double inertia_trail_sample_distance = 0.018;
+
+struct InertiaTrailSample final {
+    double position = 0.0;
+    std::int64_t time_nanos = 0;
+};
+
+struct InertiaState final {
+    double position = 0.38;
+    double velocity = 0.0;
+    double last_pointer_x = 0.0;
+    std::int64_t last_pointer_nanos = 0;
+    std::array<InertiaTrailSample, inertia_trail_capacity> trail{};
+    std::int64_t trail_time_nanos = 0;
+    std::uint32_t trail_begin = 0U;
+    std::uint32_t trail_count = 0U;
+    bool dragging = false;
+};
+
+constexpr auto inertia_state =
+    retained<structured<InertiaState>>("motion.inertia", InertiaState{}, Invalidation::input);
+
 constexpr Color chrome = rgba(17U, 22U, 28U);
 constexpr Color inset = rgba(9U, 12U, 16U);
 constexpr Color line = rgba(108U, 125U, 137U, 120U);
@@ -907,6 +932,347 @@ void gradient_present(Present& present) {
         present.border(bounds, 10.0, stroke(2.0, focus));
 }
 
+struct InertiaGeometry final {
+    Rect track{};
+    Rect value{};
+};
+
+[[nodiscard]] InertiaGeometry inertia_geometry(const Rect bounds) noexcept {
+    constexpr double margin = 24.0;
+    return InertiaGeometry{
+        Rect{bounds.x + margin, bounds.y + 78.0, std::max(1.0, bounds.width - margin * 2.0), 12.0},
+        Rect{bounds.x + bounds.width - 154.0, bounds.y + 14.0, 130.0, 28.0},
+    };
+}
+
+[[nodiscard]] std::size_t inertia_trail_index(const InertiaState& state,
+                                              const std::size_t offset) noexcept {
+    return (static_cast<std::size_t>(state.trail_begin) + offset) % inertia_trail_capacity;
+}
+
+void clear_inertia_trail(InertiaState& state) noexcept {
+    state.trail_begin = 0U;
+    state.trail_count = 0U;
+    state.trail_time_nanos = 0;
+}
+
+void append_inertia_trail(InertiaState& state, const double position,
+                          const std::int64_t time_nanos) noexcept {
+    const std::int64_t sampled_at = std::max(time_nanos, state.trail_time_nanos);
+    state.trail_time_nanos = sampled_at;
+    if (state.trail_count > 1U) {
+        const InertiaTrailSample& anchor = state.trail[inertia_trail_index(
+            state, static_cast<std::size_t>(state.trail_count - 2U))];
+        InertiaTrailSample& newest = state.trail[inertia_trail_index(
+            state, static_cast<std::size_t>(state.trail_count - 1U))];
+        const bool close_in_time =
+            sampled_at - anchor.time_nanos < inertia_trail_sample_interval_nanos;
+        const bool close_in_space =
+            std::abs(unit(position) - anchor.position) < inertia_trail_sample_distance;
+        if (close_in_time && close_in_space) {
+            newest = InertiaTrailSample{unit(position), sampled_at};
+            return;
+        }
+    }
+    std::size_t destination = 0U;
+    if (state.trail_count < inertia_trail_capacity) {
+        destination = inertia_trail_index(state, static_cast<std::size_t>(state.trail_count));
+        ++state.trail_count;
+    } else {
+        destination = inertia_trail_index(state, 0U);
+        state.trail_begin =
+            static_cast<std::uint32_t>((state.trail_begin + 1U) % inertia_trail_capacity);
+    }
+    state.trail[destination] = InertiaTrailSample{unit(position), sampled_at};
+}
+
+void prune_inertia_trail(InertiaState& state, const std::int64_t time_nanos) noexcept {
+    state.trail_time_nanos = std::max(time_nanos, state.trail_time_nanos);
+    while (state.trail_count > 0U) {
+        const InertiaTrailSample& oldest = state.trail[inertia_trail_index(state, 0U)];
+        if (state.trail_time_nanos - oldest.time_nanos < inertia_trail_lifetime_nanos)
+            break;
+        state.trail_begin =
+            static_cast<std::uint32_t>((state.trail_begin + 1U) % inertia_trail_capacity);
+        --state.trail_count;
+    }
+    if (state.trail_count == 0U)
+        state.trail_begin = 0U;
+}
+
+void update_inertia_pointer(InertiaState& state, const InertiaGeometry& geometry,
+                            const Pointer& pointer) noexcept {
+    const double next = unit((pointer.x - geometry.track.x) / geometry.track.width);
+    const double displacement = next - state.position;
+    if (std::abs(displacement) > 0.0001 && state.last_pointer_nanos > 0 &&
+        pointer.timestamp_nanoseconds > state.last_pointer_nanos) {
+        const auto elapsed = pointer.timestamp_nanoseconds - state.last_pointer_nanos;
+        if (elapsed <= 250'000'000) {
+            const double seconds = static_cast<double>(elapsed) / 1'000'000'000.0;
+            const double instant = displacement / seconds;
+            state.velocity = std::clamp(state.velocity * 0.25 + instant * 0.75, -4.0, 4.0);
+        }
+    }
+    state.position = next;
+    append_inertia_trail(state, state.position, pointer.timestamp_nanoseconds);
+    state.last_pointer_x = pointer.x;
+    state.last_pointer_nanos = pointer.timestamp_nanoseconds;
+}
+
+void emit_inertia_commit(Input& input, const double position) {
+    std::array<char, 64U> payload{};
+    const std::string_view json = formatted(payload, R"({{"value":{:.6g}}})", unit(position));
+    static_cast<void>(input.invalidate(Invalidation::semantics));
+    static_cast<void>(input.emit("control-deck.motion.commit", json, "motion-committed", json));
+}
+
+bool inertia_pointer(Input& input, const Pointer& pointer) {
+    if (pointer.button != 0)
+        return false;
+    InertiaState state = input.get(inertia_state);
+    const InertiaGeometry geometry = inertia_geometry(input.bounds());
+    if (pointer.kind == Pointer::Kind::press) {
+        if (!contains(geometry.track, pointer.x, pointer.y))
+            return false;
+        input.cancel_frame();
+        clear_inertia_trail(state);
+        state.dragging = true;
+        state.velocity = 0.0;
+        state.last_pointer_nanos = pointer.timestamp_nanoseconds;
+        state.last_pointer_x = pointer.x;
+        state.position = unit((pointer.x - geometry.track.x) / geometry.track.width);
+        append_inertia_trail(state, state.position, pointer.timestamp_nanoseconds);
+        static_cast<void>(input.set(inertia_state, state));
+        static_cast<void>(input.invalidate(Invalidation::paint));
+        static_cast<void>(input.claim_gesture());
+        static_cast<void>(input.request_frame(FrameCost::paint));
+        return true;
+    }
+    if (!state.dragging)
+        return false;
+    if (pointer.kind == Pointer::Kind::move) {
+        update_inertia_pointer(state, geometry, pointer);
+        static_cast<void>(input.set(inertia_state, state));
+        static_cast<void>(input.invalidate(Invalidation::paint));
+        static_cast<void>(input.request_frame(FrameCost::paint));
+        return true;
+    }
+    if (pointer.kind == Pointer::Kind::release) {
+        update_inertia_pointer(state, geometry, pointer);
+        state.dragging = false;
+        if (std::abs(state.velocity) < 0.06)
+            state.velocity = 0.0;
+        static_cast<void>(input.set(inertia_state, state));
+        static_cast<void>(input.invalidate(Invalidation::paint));
+        if (!input.request_frame(FrameCost::paint)) {
+            state.velocity = 0.0;
+            clear_inertia_trail(state);
+            static_cast<void>(input.set(inertia_state, state));
+        }
+        if (state.velocity == 0.0)
+            emit_inertia_commit(input, state.position);
+        return true;
+    }
+    state.dragging = false;
+    state.velocity = 0.0;
+    clear_inertia_trail(state);
+    static_cast<void>(input.set(inertia_state, state));
+    static_cast<void>(input.invalidate(Invalidation::paint));
+    input.cancel_frame();
+    static_cast<void>(input.cancel_gesture());
+    return true;
+}
+
+bool inertia_key(Input& input, const Key& key) {
+    InertiaState state = input.get(inertia_state);
+    const double step = key.shift ? 0.1 : 0.02;
+    if (key.name == "left") {
+        state.position = unit(state.position - step);
+    } else if (key.name == "right") {
+        state.position = unit(state.position + step);
+    } else if (key.name == "home") {
+        state.position = 0.0;
+    } else if (key.name == "end") {
+        state.position = 1.0;
+    } else {
+        return false;
+    }
+    state.velocity = 0.0;
+    state.dragging = false;
+    clear_inertia_trail(state);
+    input.cancel_frame();
+    static_cast<void>(input.set(inertia_state, state));
+    static_cast<void>(input.invalidate(Invalidation::paint));
+    emit_inertia_commit(input, state.position);
+    return true;
+}
+
+void inertia_frame(Input& input, const Frame& frame) {
+    InertiaState state = input.get(inertia_state);
+    const bool was_moving = state.velocity != 0.0;
+    if (frame.reduced_motion) {
+        state.velocity = 0.0;
+        clear_inertia_trail(state);
+        static_cast<void>(input.set(inertia_state, state));
+        input.cancel_frame();
+        if (was_moving && !state.dragging)
+            emit_inertia_commit(input, state.position);
+        return;
+    }
+
+    prune_inertia_trail(state, frame.time_nanoseconds);
+    const double elapsed =
+        std::clamp(static_cast<double>(frame.delta_nanoseconds) / 1'000'000'000.0, 0.0, 0.05);
+    if (elapsed > 0.0 && state.dragging) {
+        state.velocity *= std::exp(-12.0 * elapsed);
+        if (std::abs(state.velocity) < 0.018)
+            state.velocity = 0.0;
+    } else if (elapsed > 0.0 && state.velocity != 0.0) {
+        state.position += state.velocity * elapsed;
+        if (state.position < 0.0) {
+            state.position = 0.0;
+            state.velocity = std::abs(state.velocity) * 0.32;
+        } else if (state.position > 1.0) {
+            state.position = 1.0;
+            state.velocity = -std::abs(state.velocity) * 0.32;
+        }
+        state.velocity *= std::exp(-4.6 * elapsed);
+        if (std::abs(state.velocity) < 0.018)
+            state.velocity = 0.0;
+        append_inertia_trail(state, state.position, frame.time_nanoseconds);
+    }
+
+    static_cast<void>(input.set(inertia_state, state));
+    if (!state.dragging && was_moving && state.velocity == 0.0)
+        emit_inertia_commit(input, state.position);
+    if ((!state.dragging && state.velocity != 0.0) || state.trail_count > 0U) {
+        static_cast<void>(input.request_frame(FrameCost::paint));
+    } else {
+        input.cancel_frame();
+    }
+}
+
+struct InertiaTrailMesh final {
+    std::array<MeshVertex, (inertia_trail_capacity - 1U) * 4U> vertices{};
+    std::array<std::uint32_t, (inertia_trail_capacity - 1U) * 6U> indices{};
+    std::size_t segment_count = 0U;
+};
+
+[[nodiscard]] Color inertia_trail_color(const InertiaState& state,
+                                        const InertiaTrailSample& sample) noexcept {
+    const double age = static_cast<double>(state.trail_time_nanos - sample.time_nanos) /
+                       static_cast<double>(inertia_trail_lifetime_nanos);
+    const double remaining = 1.0 - unit(age);
+    const double eased = remaining * remaining * (3.0 - 2.0 * remaining);
+    return rgba(78U, 207U, 185U, static_cast<std::uint8_t>(std::round(160.0 * eased)));
+}
+
+[[nodiscard]] InertiaTrailMesh inertia_trail_mesh(const InertiaState& state) noexcept {
+    InertiaTrailMesh result;
+    for (std::size_t offset = 1U; offset < state.trail_count; ++offset) {
+        const InertiaTrailSample& previous = state.trail[inertia_trail_index(state, offset - 1U)];
+        const InertiaTrailSample& current = state.trail[inertia_trail_index(state, offset)];
+        if (std::abs(previous.position - current.position) < 0.0001)
+            continue;
+        const bool forward = previous.position < current.position;
+        const InertiaTrailSample& left = forward ? previous : current;
+        const InertiaTrailSample& right = forward ? current : previous;
+        const Color left_color = inertia_trail_color(state, left);
+        const Color right_color = inertia_trail_color(state, right);
+        const std::size_t vertex = result.segment_count * 4U;
+        result.vertices[vertex] = MeshVertex{left.position, 0.18, 0.0, 0.0, 0.0, left_color};
+        result.vertices[vertex + 1U] = MeshVertex{left.position, 0.82, 0.0, 0.0, 1.0, left_color};
+        result.vertices[vertex + 2U] = MeshVertex{right.position, 0.18, 0.0, 1.0, 0.0, right_color};
+        result.vertices[vertex + 3U] = MeshVertex{right.position, 0.82, 0.0, 1.0, 1.0, right_color};
+        const std::size_t index = result.segment_count * 6U;
+        const auto base = static_cast<std::uint32_t>(vertex);
+        result.indices[index] = base;
+        result.indices[index + 1U] = base + 1U;
+        result.indices[index + 2U] = base + 2U;
+        result.indices[index + 3U] = base + 2U;
+        result.indices[index + 4U] = base + 1U;
+        result.indices[index + 5U] = base + 3U;
+        ++result.segment_count;
+    }
+    return result;
+}
+
+void inertia_semantics(Semantics& semantics) {
+    const InertiaState state = semantics.get(inertia_state);
+    std::array<char, 64U> value{};
+    semantics.name("Inertial scrubber");
+    semantics.value_text(formatted(value, "{:.0f} percent", unit(state.position) * 100.0));
+    semantics.value_range(unit(state.position), 0.0, 1.0);
+    semantics.add_action("decrement");
+    semantics.add_action("focus");
+    semantics.add_action("increment");
+}
+
+void inertia_present(Present& present) {
+    const Rect bounds = present.bounds();
+    const InertiaGeometry geometry = inertia_geometry(bounds);
+    const InertiaState state = present.get(inertia_state);
+    const double position = unit(state.position);
+    const double x = geometry.track.x + geometry.track.width * position;
+    present.rounded_rect(bounds, 10.0, chrome, stroke(1.0, line));
+    present.text("KINETIC SCRUBBER",
+                 Rect{geometry.track.x, bounds.y + 12.0, geometry.track.width, 24.0}, value_label,
+                 TextAlignment::start, TextAlignment::center);
+    std::array<char, 64U> value{};
+    present.text(formatted(value, "{:>5.1f}%", position * 100.0), geometry.value, value_label,
+                 TextAlignment::end, TextAlignment::center);
+    for (std::size_t index = 0U; index <= 10U; ++index) {
+        const double tick_x =
+            geometry.track.x + geometry.track.width * static_cast<double>(index) / 10.0;
+        present.rect(Rect{tick_x, geometry.track.y - 5.0, 1.0, 22.0},
+                     index == 5U ? rgba(145U, 164U, 178U, 150U) : rgba(91U, 105U, 116U, 75U));
+    }
+    present.rounded_rect(geometry.track, 6.0, inset, stroke(1.0, line));
+    if (state.trail_count > 0U) {
+        const InertiaTrailMesh trail = inertia_trail_mesh(state);
+        const ClipScope clip = present.clip(geometry.track);
+        if (trail.segment_count > 0U) {
+            const std::span<const MeshVertex> vertices(trail.vertices.data(),
+                                                       trail.segment_count * 4U);
+            const std::span<const std::uint32_t> indices(trail.indices.data(),
+                                                         trail.segment_count * 6U);
+            present.mesh(geometry.track, "deck.motion.sampled-trail", Mesh{vertices, indices});
+        }
+        const InertiaTrailSample& oldest = state.trail[inertia_trail_index(state, 0U)];
+        const InertiaTrailSample& newest =
+            state.trail[inertia_trail_index(state, state.trail_count - 1U)];
+        const double oldest_x = geometry.track.x + geometry.track.width * oldest.position;
+        const double newest_x = geometry.track.x + geometry.track.width * newest.position;
+        present.rounded_rect(Rect{oldest_x - 4.0, geometry.track.y + 2.0, 8.0, 8.0}, 4.0,
+                             inertia_trail_color(state, oldest));
+        if (state.trail_count > 1U) {
+            present.rounded_rect(Rect{newest_x - 4.0, geometry.track.y + 2.0, 8.0, 8.0}, 4.0,
+                                 inertia_trail_color(state, newest));
+        }
+    }
+    present.shadow(Rect{x - 11.0, geometry.track.y - 9.0, 22.0, 30.0}, corners(7.0),
+                   rgba(0U, 0U, 0U, 165U), 9.0, 1.0);
+    present.rounded_rect(Rect{x - 9.0, geometry.track.y - 8.0, 18.0, 28.0}, 6.0,
+                         state.dragging ? rgba(106U, 231U, 207U) : rgba(72U, 198U, 177U),
+                         stroke(2.0, rgba(226U, 250U, 245U)));
+    std::array<char, 96U> status{};
+    const std::string_view status_text =
+        state.dragging ? std::string_view("DIRECT MANIPULATION")
+        : std::abs(state.velocity) >= 0.018
+            ? formatted(status, "INERTIA  {:+.2f} / s", state.velocity)
+        : state.trail_count > 0U ? std::string_view("AFTERGLOW · BOUNDED FRAME")
+                                 : std::string_view("SETTLED · NO FRAME REQUEST");
+    present.text(status_text,
+                 Rect{geometry.track.x, geometry.track.y + 30.0, geometry.track.width, 24.0}, label,
+                 TextAlignment::start, TextAlignment::center);
+    present.text(
+        "Drag and release · Shift+arrows coarse · Home/End bounds",
+        Rect{geometry.track.x, bounds.y + bounds.height - 31.0, geometry.track.width, 24.0}, label,
+        TextAlignment::start, TextAlignment::center);
+    if (present.focus_visible())
+        present.border(bounds, 10.0, stroke(2.0, focus));
+}
+
 [[nodiscard]] std::unique_ptr<Package> control_deck_package() {
     auto picker = widget("DeckColorPicker")
                       .no_children()
@@ -964,10 +1330,32 @@ void gradient_present(Present& present) {
                         .on_semantics(&gradient_semantics)
                         .subtargets(&gradient_subtargets)
                         .present(&gradient_present);
+    auto inertia = widget("DeckInertialScrubber")
+                       .no_children()
+                       .focusable()
+                       .intrinsic_size(600.0, 180.0)
+                       .retained(inertia_state)
+                       .semantics_role("slider")
+                       .depends_on_status()
+                       .emits(ActionContract{
+                           "control-deck.motion.commit",
+                           "Commit the settled Control Deck inertial value",
+                           "MotionValue",
+                           "optional",
+                           {
+                               ActionArgument{"value", "number"},
+                           },
+                       })
+                       .on_pointer(&inertia_pointer)
+                       .on_key(&inertia_key)
+                       .on_frame(&inertia_frame)
+                       .on_semantics(&inertia_semantics)
+                       .present(&inertia_present);
 
     auto created = package("strata.control-deck.v1");
     created->widget(std::move(picker));
     created->widget(std::move(gradient));
+    created->widget(std::move(inertia));
     return created;
 }
 

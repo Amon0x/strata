@@ -432,8 +432,11 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
         if (descriptor.struct_size < STRATA_WIDGET_EXTENSION_VERSION_1_SIZE) {
             throw std::invalid_argument("widget extension descriptor is incomplete");
         }
-        const bool has_subtargets = descriptor.struct_size >= sizeof(strata_widget_extension) &&
-                                    descriptor.subtargets != nullptr;
+        const bool has_subtargets =
+            descriptor.struct_size >= STRATA_WIDGET_EXTENSION_VERSION_2_SIZE &&
+            descriptor.subtargets != nullptr;
+        const bool has_frame = descriptor.struct_size >= sizeof(strata_widget_extension) &&
+                               descriptor.frame != nullptr;
         const std::string type = checked_string(descriptor.type, false, "widget extension type");
         if (result.widgets.find(type) != nullptr) {
             throw std::invalid_argument("widget extension conflicts with lifecycle '" + type + "'");
@@ -544,7 +547,8 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
                         pointer->position.y - bounds.y,
                         pointer->delta.x,
                         pointer->delta.y,
-                        pointer->timestamp_nanos,
+                        pointer->timestamp_nanos > 0 ? pointer->timestamp_nanos
+                                                     : scope.frame_time_nanos(),
                         scope.pointer_target() == &scope.node() ? 1U : 0U,
                         0U,
                         subtarget != nullptr
@@ -591,6 +595,21 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
                 };
             }
             widget_scrolls.erase(scroll);
+        }
+        if (has_frame) {
+            lifecycle.frame.advance = [descriptor,
+                                       fields](strata::ui::WidgetInputScope& scope,
+                                               const strata::ui::WidgetFrameInfo& frame) {
+                strata_widget_input_context context{&scope, fields.get()};
+                const strata_widget_frame_info info{
+                    sizeof(strata_widget_frame_info),
+                    frame.time_nanos,
+                    frame.delta_nanos,
+                    frame.reduced_motion ? 1U : 0U,
+                    0U,
+                };
+                descriptor.frame(descriptor.user_data, &context, &info);
+            };
         }
         lifecycle.semantics.role =
             checked_string(descriptor.semantics_role, true, "widget semantics role");
@@ -926,6 +945,24 @@ strata_result strata_widget_input_invalidate(strata_widget_input_context* const 
     } catch (...) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
+}
+
+strata_result strata_widget_input_request_frame(strata_widget_input_context* const context,
+                                                const strata_widget_frame_cost cost) {
+    if (context == nullptr || context->scope == nullptr || cost > STRATA_WIDGET_FRAME_LAYOUT) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+    const bool requested = context->scope->request_frame(cost == STRATA_WIDGET_FRAME_LAYOUT
+                                                             ? strata::ui::WidgetFrameCost::layout
+                                                             : strata::ui::WidgetFrameCost::paint);
+    return strata::core::result(requested ? STRATA_STATUS_OK : STRATA_STATUS_NOT_FOUND);
+}
+
+uint32_t strata_widget_input_cancel_frame(strata_widget_input_context* const context) {
+    if (context == nullptr || context->scope == nullptr)
+        return 0U;
+    context->scope->cancel_frame();
+    return 1U;
 }
 
 double strata_widget_input_retained_number(const strata_widget_input_context* const context,

@@ -1363,6 +1363,22 @@ typedef uint32_t strata_widget_invalidation;
 /* Updates gesture/session bookkeeping without presentation, layout, or semantic work. */
 #define STRATA_WIDGET_INVALIDATION_INPUT UINT32_C(6)
 
+/** Downstream work admitted for one requested extension frame. */
+typedef uint32_t strata_widget_frame_cost;
+#define STRATA_WIDGET_FRAME_PAINT UINT32_C(0)
+#define STRATA_WIDGET_FRAME_LAYOUT UINT32_C(1)
+
+typedef struct strata_widget_frame_info {
+    size_t struct_size;
+    int64_t time_nanoseconds;
+    int64_t delta_nanoseconds;
+    uint32_t reduced_motion;
+    uint32_t reserved;
+} strata_widget_frame_info;
+
+typedef void (*strata_widget_frame_fn)(void* user_data, strata_widget_input_context* context,
+                                       const strata_widget_frame_info* frame);
+
 /**
  * One retained field owned by a widget extension. Reads and writes of undeclared names fail with
  * STRATA_STATUS_NOT_FOUND instead of silently materializing untracked retained state.
@@ -1443,8 +1459,11 @@ typedef struct strata_widget_extension {
     size_t retained_field_count;
     /* Optional suffix; absent from version-1 descriptors. */
     strata_widget_subtargets_fn subtargets;
+    /* Optional suffix; absent from version-1 and version-2 descriptors. */
+    strata_widget_frame_fn frame;
 } strata_widget_extension;
 #define STRATA_WIDGET_EXTENSION_VERSION_1_SIZE offsetof(strata_widget_extension, subtargets)
+#define STRATA_WIDGET_EXTENSION_VERSION_2_SIZE offsetof(strata_widget_extension, frame)
 
 typedef uint32_t strata_extension_event_phase;
 #define STRATA_EXTENSION_EVENT_CAPTURE UINT32_C(0)
@@ -2063,6 +2082,9 @@ STRATA_API uint32_t strata_widget_input_claim_gesture(strata_widget_input_contex
 STRATA_API uint32_t strata_widget_input_cancel_gesture(strata_widget_input_context* context);
 STRATA_API strata_result strata_widget_input_invalidate(strata_widget_input_context* context,
                                                         strata_widget_invalidation invalidation);
+STRATA_API strata_result strata_widget_input_request_frame(strata_widget_input_context* context,
+                                                           strata_widget_frame_cost cost);
+STRATA_API uint32_t strata_widget_input_cancel_frame(strata_widget_input_context* context);
 STRATA_API double strata_widget_input_retained_number(const strata_widget_input_context* context,
                                                       strata_string_view name, double fallback);
 STRATA_API uint32_t strata_widget_input_retained_boolean(const strata_widget_input_context* context,

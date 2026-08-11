@@ -121,6 +121,9 @@ struct HarnessCounters final {
     std::uint64_t widget_scroll_events = 0U;
     std::uint64_t commit_events = 0U;
     std::uint64_t compound_subtarget_projections = 0U;
+    std::uint64_t frame_callbacks = 0U;
+    std::uint64_t frame_presentations = 0U;
+    std::uint64_t frame_requests = 0U;
     bool declared_write_accepted = false;
     bool undeclared_write_rejected = false;
     bool text_write_accepted = false;
@@ -145,6 +148,9 @@ struct HarnessCounters final {
     bool structured_property_visible = false;
     bool typed_color_visible = false;
     bool compound_subtarget_routed = false;
+    bool reduced_motion_frame = false;
+    std::int64_t last_frame_time = 0;
+    std::int64_t last_frame_delta = 0;
     double last_local_x = 0.0;
     double last_input_value = 0.0;
     double last_presented_value = 0.0;
@@ -172,6 +178,15 @@ constexpr auto compound_state =
     retained<structured<CompoundState>>("harness.compound", CompoundState{}, Invalidation::paint);
 constexpr auto compound_points = parameter<any>("points");
 constexpr auto compound_accent = parameter<color>("accent");
+
+struct FrameHarnessState final {
+    std::uint32_t ticks = 0U;
+    std::uint32_t target_ticks = 0U;
+    FrameCost cost = FrameCost::paint;
+};
+
+constexpr auto frame_state = retained<structured<FrameHarnessState>>(
+    "harness.frame", FrameHarnessState{}, Invalidation::input);
 
 bool harness_activate(Input& input) {
     ++counters.activations;
@@ -304,6 +319,57 @@ void drag_subtargets(Subtargets& subtargets) {
     }));
 }
 
+bool frame_pointer(Input& input, const Pointer& pointer) {
+    if (pointer.kind == Pointer::Kind::cancel) {
+        input.cancel_frame();
+        return true;
+    }
+    if (pointer.kind != Pointer::Kind::press)
+        return false;
+    FrameHarnessState state;
+    const double fraction = pointer.local_x / std::max(1.0, input.bounds().width);
+    if (fraction < 0.34) {
+        state.target_ticks = 2U;
+        state.cost = FrameCost::paint;
+    } else if (fraction < 0.67) {
+        state.target_ticks = 1U;
+        state.cost = FrameCost::layout;
+    } else {
+        state.target_ticks = 100U;
+        state.cost = FrameCost::paint;
+    }
+    static_cast<void>(input.set(frame_state, state));
+    if (input.request_frame(state.cost))
+        ++counters.frame_requests;
+    return true;
+}
+
+void frame_advance(Input& input, const Frame& frame) {
+    ++counters.frame_callbacks;
+    counters.last_frame_time = frame.time_nanoseconds;
+    counters.last_frame_delta = frame.delta_nanoseconds;
+    counters.reduced_motion_frame = counters.reduced_motion_frame || frame.reduced_motion;
+    FrameHarnessState state = input.get(frame_state);
+    ++state.ticks;
+    static_cast<void>(input.set(frame_state, state));
+    if (state.ticks < state.target_ticks) {
+        if (input.request_frame(state.cost))
+            ++counters.frame_requests;
+    } else {
+        input.cancel_frame();
+    }
+}
+
+void frame_present(Present& present) {
+    ++counters.frame_presentations;
+    const FrameHarnessState state = present.get(frame_state);
+    const Rect bounds = present.bounds();
+    present.rounded_rect(bounds, 4.0, rgba(18U, 36U, 34U), stroke(1.0, rgba(72U, 198U, 177U)));
+    present.rect(
+        Rect{bounds.x, bounds.y, bounds.width * std::min(1.0, state.ticks / 2.0), bounds.height},
+        rgba(72U, 198U, 177U, 96U));
+}
+
 constexpr std::array<MeshVertex, 3U> harness_vertices{
     MeshVertex{0.0, 0.0, 0.0, 0.0, 0.0, rgba(255U, 0U, 0U)},
     MeshVertex{1.0, 0.0, 0.0, 1.0, 0.0, rgba(0U, 255U, 0U)},
@@ -426,6 +492,13 @@ bool harness_pointer(BehaviorInput& input, const Pointer& pointer) {
                     .on_semantics(&drag_semantics)
                     .subtargets(&drag_subtargets)
                     .present(&drag_present);
+    auto frame = widget("FrameHarnessWidget")
+                     .no_children()
+                     .intrinsic_size(160.0, 40.0)
+                     .retained(frame_state)
+                     .on_pointer(&frame_pointer)
+                     .on_frame(&frame_advance)
+                     .present(&frame_present);
 
     auto observer = behavior("harness.observe")
                         .on_pointer(&harness_pointer)
@@ -438,7 +511,10 @@ bool harness_pointer(BehaviorInput& input, const Pointer& pointer) {
                         });
 
     auto created = package("strata.harness.v1");
-    created->widget(std::move(harness)).widget(std::move(drag)).behavior(std::move(observer));
+    created->widget(std::move(harness))
+        .widget(std::move(drag))
+        .widget(std::move(frame))
+        .behavior(std::move(observer));
     return created;
 }
 
@@ -517,14 +593,16 @@ void test_external_package_and_schema_projection() {
           "duplicate schema package declarations were accepted");
 
     strata::host::SelectedExtensions control = strata::host::select_extensions(declared);
-    check(control.widgets.size() == 2U && control.widget_inputs.size() == 2U &&
+    check(control.widgets.size() == 3U && control.widget_inputs.size() == 3U &&
               control.behaviors.empty(),
           "the Control Deck package did not project widget pointer input separately");
     const std::string control_schema = control.packages.front().schema_json();
     check(control_schema.find(R"("name":"DeckColorPicker")") != std::string::npos &&
               control_schema.find(R"("name":"DeckGradientEditor")") != std::string::npos &&
+              control_schema.find(R"("name":"DeckInertialScrubber")") != std::string::npos &&
               control_schema.find(R"("id":"control-deck.color.commit")") != std::string::npos &&
-              control_schema.find(R"("id":"control-deck.gradient.commit")") != std::string::npos,
+              control_schema.find(R"("id":"control-deck.gradient.commit")") != std::string::npos &&
+              control_schema.find(R"("id":"control-deck.motion.commit")") != std::string::npos,
           "the Control Deck package schema is missing a public widget or value contract");
 }
 
@@ -612,6 +690,7 @@ screen Main {
       accent: #44BB99FF,
       layout: { width: 160, height: 40 }
     )
+    FrameHarnessWidget(key: "harness.frame", layout: { width: 160, height: 40 })
   }
 }
 )";
@@ -631,7 +710,7 @@ screen Main {
           "a module using only package-declared widgets did not compile against the projected "
           "schema");
 
-    const strata_surface_environment environment{
+    strata_surface_environment environment{
         sizeof(strata_surface_environment),
         1U,
         480,
@@ -873,6 +952,148 @@ screen Main {
               counters.pointer_cancelled,
           "pointer cancellation did not reach the captured extension widget");
 
+    strata_input_event frame_click[2]{};
+    frame_click[0].struct_size = sizeof(strata_input_event);
+    frame_click[0].version = STRATA_INPUT_EVENT_VERSION_2;
+    frame_click[0].kind = STRATA_INPUT_POINTER_PRESS;
+    frame_click[0].x = 20.0;
+    frame_click[0].y = 100.0;
+    frame_click[0].timestamp_nanoseconds = 20'000'000;
+    frame_click[1] = frame_click[0];
+    frame_click[1].kind = STRATA_INPUT_POINTER_RELEASE;
+    const std::uint64_t paint_callback_baseline = counters.frame_callbacks;
+    check(strata_surface_enqueue_input(surface, frame_click, 2U, &batch).status ==
+                  STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 20'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              counters.frame_callbacks == paint_callback_baseline,
+          "a paint frame request ran in the input frame instead of the requested successor");
+    const std::uint64_t paint_presentation_baseline = counters.frame_presentations;
+    const std::uint64_t frame_semantics_baseline = frame_info.semantics_generation;
+    check(strata_surface_frame(surface, 36'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              counters.frame_callbacks == paint_callback_baseline + 1U &&
+              counters.frame_presentations == paint_presentation_baseline + 1U &&
+              counters.last_frame_time == 36'000'000 && counters.last_frame_delta == 16'000'000 &&
+              frame_info.semantics_generation == frame_semantics_baseline,
+          "the requested paint frame lost its time, delta, or paint-only cost");
+    frame_json.clear();
+    const strata_result paint_snapshot = strata_surface_read_frame_json(surface, &frame_sink);
+    check(paint_snapshot.status == STRATA_STATUS_OK &&
+              frame_json.find(R"("layoutWork": 0)") != std::string::npos,
+          "a paint-cost extension frame escaped into layout work: status=" +
+              std::to_string(paint_snapshot.status) + " frame=" + frame_json);
+    check(strata_surface_frame(surface, 52'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              counters.frame_callbacks == paint_callback_baseline + 2U,
+          "the frame callback did not explicitly schedule its bounded successor");
+    const std::uint64_t settled_presentations = counters.frame_presentations;
+    check(strata_surface_frame(surface, 68'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              counters.frame_callbacks == paint_callback_baseline + 2U &&
+              counters.frame_presentations == settled_presentations,
+          "a settled extension widget kept pumping idle frames");
+
+    frame_click[0].x = 80.0;
+    frame_click[0].timestamp_nanoseconds = 80'000'000;
+    frame_click[1] = frame_click[0];
+    frame_click[1].kind = STRATA_INPUT_POINTER_RELEASE;
+    check(strata_surface_enqueue_input(surface, frame_click, 2U, &batch).status ==
+                  STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 80'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 96'000'000, &frame_info).status == STRATA_STATUS_OK,
+          "a layout-cost extension frame did not run");
+    frame_json.clear();
+    check(strata_surface_read_frame_json(surface, &frame_sink).status == STRATA_STATUS_OK &&
+              frame_json.find(R"("layoutWork": 1)") != std::string::npos,
+          "a layout-cost extension frame was incorrectly collapsed into paint work");
+
+    environment.generation = 2U;
+    environment.reduced_motion = 1U;
+    std::uint32_t adopted = 0U;
+    check(strata_surface_adopt_environment(surface, &environment, &adopted).status ==
+                  STRATA_STATUS_OK &&
+              adopted == 1U,
+          "the reduced-motion environment was not adopted");
+    frame_click[0].x = 20.0;
+    frame_click[0].timestamp_nanoseconds = 110'000'000;
+    frame_click[1] = frame_click[0];
+    frame_click[1].kind = STRATA_INPUT_POINTER_RELEASE;
+    const std::uint64_t reduced_baseline = counters.frame_callbacks;
+    check(strata_surface_enqueue_input(surface, frame_click, 2U, &batch).status ==
+                  STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 110'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 126'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              counters.frame_callbacks == reduced_baseline + 1U && counters.reduced_motion_frame &&
+              strata_surface_frame(surface, 142'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              counters.frame_callbacks == reduced_baseline + 1U,
+          "reduced motion did not bound a re-requesting extension to one snap frame");
+
+    environment.generation = 3U;
+    environment.reduced_motion = 0U;
+    adopted = 0U;
+    check(strata_surface_adopt_environment(surface, &environment, &adopted).status ==
+                  STRATA_STATUS_OK &&
+              adopted == 1U,
+          "the ordinary-motion environment was not restored");
+    frame_click[0].x = 145.0;
+    frame_click[0].timestamp_nanoseconds = 160'000'000;
+    frame_click[1] = frame_click[0];
+    frame_click[1].kind = STRATA_INPUT_POINTER_CANCEL;
+    const std::uint64_t cancel_baseline = counters.frame_callbacks;
+    check(strata_surface_enqueue_input(surface, frame_click, 2U, &batch).status ==
+                  STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 160'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 176'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              counters.frame_callbacks == cancel_baseline,
+          "explicit frame cancellation left a callback pending");
+
+    frame_click[0].timestamp_nanoseconds = 190'000'000;
+    frame_click[1] = frame_click[0];
+    frame_click[1].kind = STRATA_INPUT_POINTER_RELEASE;
+    check(strata_surface_enqueue_input(surface, frame_click, 2U, &batch).status ==
+                  STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 190'000'000, &frame_info).status == STRATA_STATUS_OK,
+          "the detachment frame request was not accepted");
+    std::string detached_source = source;
+    const std::string frame_declaration =
+        "    FrameHarnessWidget(key: \"harness.frame\", layout: { width: 160, height: 40 })\n";
+    const std::size_t frame_declaration_offset = detached_source.find(frame_declaration);
+    check(frame_declaration_offset != std::string::npos,
+          "the frame harness declaration could not be removed for detachment");
+    detached_source.erase(frame_declaration_offset, frame_declaration.size());
+    const strata_activation_config detached_activation{
+        sizeof(strata_activation_config),
+        2U,
+        view("harness/main.strata"),
+        view(detached_source),
+        nullptr,
+        nullptr,
+    };
+    activation_info = {};
+    activation_info.struct_size = sizeof(strata_activation_info);
+    check(strata_runtime_compile_and_activate(runtime, &detached_activation, &activation_info)
+                      .status == STRATA_STATUS_OK &&
+              activation_info.status == STRATA_ACTIVATION_ACTIVATED,
+          "the frame harness could not be detached through ordinary reconciliation");
+    const std::uint64_t detach_baseline = counters.frame_callbacks;
+    check(strata_surface_frame(surface, 206'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 222'000'000, &frame_info).status == STRATA_STATUS_OK &&
+              counters.frame_callbacks == detach_baseline,
+          "a detached extension widget retained its requested frame callback");
+
+    strata_surface_release(surface);
+    strata_surface_extension_bundle version_2_widget_extensions = harness->bundle();
+    std::vector<strata_widget_extension> version_2_widgets(
+        version_2_widget_extensions.widgets,
+        version_2_widget_extensions.widgets + version_2_widget_extensions.widget_count);
+    for (strata_widget_extension& descriptor : version_2_widgets) {
+        descriptor.struct_size = STRATA_WIDGET_EXTENSION_VERSION_2_SIZE;
+    }
+    version_2_widget_extensions.widgets = version_2_widgets.data();
+    surface_config.id = view("harness.version-2-widget");
+    surface_config.extensions = &version_2_widget_extensions;
+    surface = nullptr;
+    check(strata_runtime_create_surface(runtime, &surface_config, &surface).status ==
+                  STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 230'000'000, &frame_info).status == STRATA_STATUS_OK,
+          "a version-2 widget descriptor prefix was rejected after frame-hook growth");
     strata_surface_release(surface);
     strata_surface_extension_bundle legacy_widget_extensions = harness->bundle();
     std::vector<strata_widget_extension> legacy_widgets(legacy_widget_extensions.widgets,

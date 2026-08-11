@@ -1,5 +1,5 @@
-#include "host/browser_model.hpp"
 #include "headless/scenario.hpp"
+#include "host/browser_model.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -10,12 +10,12 @@
 namespace {
 
 void check(const bool condition, const std::string& message) {
-    if (!condition) throw std::runtime_error(message);
+    if (!condition)
+        throw std::runtime_error(message);
 }
 
 [[nodiscard]] strata::data::JsonValue frame(const bool row_available) {
-    const std::string subtargets = row_available
-        ? R"([
+    const std::string subtargets = row_available ? R"([
             {
               "bounds":{"x":1084,"y":194,"width":28,"height":26},
               "commandId":null,"detached":false,"enabled":true,"id":"$control",
@@ -28,7 +28,7 @@ void check(const bool condition, const std::string& message) {
               "notificationId":null,"path":[0]
             }
           ])"
-        : R"([
+                                                 : R"([
             {
               "bounds":{"x":1084,"y":194,"width":28,"height":26},
               "commandId":null,"detached":false,"enabled":true,"id":"$control",
@@ -45,7 +45,8 @@ void check(const bool condition, const std::string& message) {
             "children":[{
               "structuralPath":"/0",
               "hitBounds":{"x":1084,"y":194,"width":28,"height":26},
-              "subtargets":)" + subtargets + R"(,
+              "subtargets":)" +
+        subtargets + R"(,
               "children":[]
             }]
           }},
@@ -61,16 +62,14 @@ void check(const bool condition, const std::string& message) {
               }]
             }]
           }}
-        })"
-    );
+        })");
 }
 
-[[nodiscard]] const strata::host::BrowserElement& element(
-    const strata::host::BrowserModel& model,
-    const std::string& path
-) {
+[[nodiscard]] const strata::host::BrowserElement& element(const strata::host::BrowserModel& model,
+                                                          const std::string& path) {
     for (const strata::host::BrowserElement& candidate : model.elements()) {
-        if (candidate.path == path) return candidate;
+        if (candidate.path == path)
+            return candidate;
     }
     throw std::runtime_error("browser element was not found");
 }
@@ -79,21 +78,14 @@ void virtual_menu_rows_require_exact_geometry() {
     const strata::host::BrowserModel open =
         strata::host::BrowserModel::build(frame(true), 1280.0, 800.0);
     const strata::host::BrowserElement& row = element(open, "/0/2100000");
-    check(
-        row.hit_bounds.has_value() &&
-            row.hit_bounds->x == 920.0 &&
-            row.hit_bounds->y == 230.0 &&
-            row.hit_bounds->width == 192.0 &&
-            row.hit_bounds->height == 30.0,
-        "virtual menu row inherited or joined the trigger bounds"
-    );
+    check(row.hit_bounds.has_value() && row.hit_bounds->x == 920.0 && row.hit_bounds->y == 230.0 &&
+              row.hit_bounds->width == 192.0 && row.hit_bounds->height == 30.0,
+          "virtual menu row inherited or joined the trigger bounds");
 
     const strata::host::BrowserModel collapsed =
         strata::host::BrowserModel::build(frame(false), 1280.0, 800.0);
-    check(
-        !element(collapsed, "/0/2100000").hit_bounds.has_value(),
-        "unavailable virtual menu row inherited the control subtarget"
-    );
+    check(!element(collapsed, "/0/2100000").hit_bounds.has_value(),
+          "unavailable virtual menu row inherited the control subtarget");
     bool rejected = false;
     try {
         static_cast<void>(collapsed.resolve(strata::host::Selector{
@@ -138,17 +130,12 @@ void indexed_virtual_controls_keep_index_geometry() {
         }]
       }}
     })");
-    const strata::host::BrowserModel model =
-        strata::host::BrowserModel::build(value, 400.0, 240.0);
+    const strata::host::BrowserModel model = strata::host::BrowserModel::build(value, 400.0, 240.0);
     const strata::host::BrowserElement& option = element(model, "/0/2000000");
-    check(
-        option.hit_bounds.has_value() &&
-            option.hit_bounds->x == 20.0 &&
-            option.hit_bounds->y == 54.0 &&
-            option.hit_bounds->width == 220.0 &&
-            option.hit_bounds->height == 28.0,
-        "indexed virtual choice lost its empty-path subtarget geometry"
-    );
+    check(option.hit_bounds.has_value() && option.hit_bounds->x == 20.0 &&
+              option.hit_bounds->y == 54.0 && option.hit_bounds->width == 220.0 &&
+              option.hit_bounds->height == 28.0,
+          "indexed virtual choice lost its empty-path subtarget geometry");
 
     const strata::data::JsonValue collapsed_value = strata::data::parse_json(R"({
       "inspection":{"root":{
@@ -176,23 +163,28 @@ void indexed_virtual_controls_keep_index_geometry() {
     })");
     const strata::host::BrowserModel collapsed =
         strata::host::BrowserModel::build(collapsed_value, 400.0, 240.0);
-    check(
-        !element(collapsed, "/0/2000000").hit_bounds.has_value(),
-        "collapsed indexed choice inherited its owner's index-zero control bounds"
-    );
+    check(!element(collapsed, "/0/2000000").hit_bounds.has_value(),
+          "collapsed indexed choice inherited its owner's index-zero control bounds");
 }
 
 void click_steps_accept_secondary_buttons() {
+    const strata::headless::ScenarioStep parsed = strata::headless::parse_scenario_step(
+        strata::data::parse_json(R"({"click":{"key":"context.owner","button":"right"}})"));
+    const auto* click = std::get_if<strata::headless::ClickStep>(&parsed);
+    check(click != nullptr && click->target.key == std::optional<std::string>("context.owner") &&
+              click->button == 1,
+          "headless click did not preserve the configured secondary button");
+}
+
+void pointer_drag_steps_preserve_motion_samples() {
     const strata::headless::ScenarioStep parsed =
         strata::headless::parse_scenario_step(strata::data::parse_json(
-            R"({"click":{"key":"context.owner","button":"right"}})"
-        ));
-    const auto* click = std::get_if<strata::headless::ClickStep>(&parsed);
-    check(
-        click != nullptr && click->target.key == std::optional<std::string>("context.owner") &&
-            click->button == 1,
-        "headless click did not preserve the configured secondary button"
-    );
+            R"({"pointerDrag":{"from":{"x":20,"y":40},"to":{"x":180,"y":40},"milliseconds":32,"steps":4}})"));
+    const auto* drag = std::get_if<strata::headless::PointerDragStep>(&parsed);
+    check(drag != nullptr && drag->from.x == std::optional<double>(20.0) &&
+              drag->to.x == std::optional<double>(180.0) &&
+              drag->duration_nanoseconds == 32'000'000 && drag->steps == 4U,
+          "headless pointer drag did not preserve coordinates, duration, or sample count");
 }
 
 } // namespace
@@ -202,6 +194,7 @@ int strata_test_browser_model() {
         virtual_menu_rows_require_exact_geometry();
         indexed_virtual_controls_keep_index_geometry();
         click_steps_accept_secondary_buttons();
+        pointer_drag_steps_preserve_motion_samples();
         std::cout << "strata_browser_model_tests: exact virtual geometry and buttons OK\n";
         return 0;
     } catch (const std::exception& error) {

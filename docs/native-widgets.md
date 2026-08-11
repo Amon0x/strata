@@ -197,6 +197,46 @@ baseline or a control-alignment API. Labels inside buttons, rows, and other boun
 use the rectangle overload with horizontal and vertical `TextAlignment`. That path aligns from the
 actual shaped line metrics, so font, scale, and rasterization changes do not require guessed offsets.
 
+## Bounded frame callbacks
+
+Call `Input::request_frame(FrameCost::paint)` when a gesture releases with velocity or another
+widget-local effect genuinely needs a future sample. The callback registered with `.on_frame(...)`
+receives the surface frame time, the delta from that widget's previous requested frame, and the
+resolved reduced-motion policy. A request schedules one callback only; a running effect must request
+each successor explicitly.
+
+Use `FrameCost::paint` when the callback changes only an input-invalidated draft consumed by
+presentation. Use `FrameCost::layout` only when geometry measurement or arrangement must change.
+`Input::cancel_frame()` cancels the pending callback and clears its delta history. The runtime also
+cancels requests when the retained widget detaches, stops participating, or has no current layout.
+
+Reduced motion admits one callback so the widget can snap and commit its terminal state, then
+suppresses any continued request. A settled callback must omit the successor request or cancel
+explicitly. This
+makes an idle extension disappear from input advancement, layout, and render traversal rather than
+relying on a callback that repeatedly discovers it has nothing to do.
+
+```cpp
+void advance(Input& input, const Frame& frame) {
+    State state = input.get(state_field);
+    if (frame.reduced_motion) {
+        state.velocity = 0.0;
+    } else {
+        const double dt = std::clamp(
+            frame.delta_nanoseconds / 1'000'000'000.0, 0.0, 0.05
+        );
+        integrate(state, dt);
+    }
+    input.set(state_field, state);
+    if (state.velocity == 0.0) {
+        input.cancel_frame();
+        commit(input, state);
+    } else {
+        input.request_frame(FrameCost::paint);
+    }
+}
+```
+
 Build against the installed SDK. The helper creates the shared library, links the authoring layer,
 sets C++23 and symbol visibility, assigns the portable discovery name, records it for same-build
 module validation, and optionally installs it to the platform discovery directory:

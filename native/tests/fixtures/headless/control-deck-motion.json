@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "application": {
+    "id": "control-deck.motion.headless",
+    "module": "assets/strata/ui/control_deck.strata",
+    "schemas": "assets/strata/ui/control_deck.schemas.json",
+    "root": "ControlDeckMenu",
+    "actions": ["control-deck.motion.commit"]
+  },
+  "surface": {
+    "id": "control-deck.motion.headless",
+    "role": "overlay",
+    "backend": "d3d11",
+    "width": 1280,
+    "height": 800,
+    "scale": 1,
+    "clearColor": "#090b0fff",
+    "fonts": [
+      {"id": "strata:fonts/default-medium", "resource": "assets/strata/fonts/medium.ttf"},
+      {"id": "strata:fonts/default", "resource": "assets/strata/fonts/default.ttf"},
+      {"id": "strata:fonts/mono", "resource": "assets/strata/fonts/mono.ttf"}
+    ]
+  },
+  "snapshots": [],
+  "steps": [
+    {"advance": {"milliseconds": 220, "frames": 2}},
+    {"click": {"key": "deck.motion"}},
+    {"advance": {"milliseconds": 180, "frames": 2}},
+    {"capture": "motion"},
+    {"pointerDrag": {
+      "from": {"x": 390, "y": 340},
+      "to": {"x": 950, "y": 340},
+      "milliseconds": 32,
+      "steps": 4
+    }},
+    {"advance": {"milliseconds": 16, "frames": 1}},
+    {"capture": "in-flight"},
+    {"advance": {"milliseconds": 2400, "frames": 150}},
+    {"capture": "settled"},
+    {"advance": {"milliseconds": 200, "frames": 12}},
+    {"capture": "idle"}
+  ]
+}

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -60,6 +61,13 @@ using WidgetClipHook = std::function<std::optional<Rect>(WidgetRenderScope& scop
 using WidgetInputHook = std::function<bool(WidgetInputScope& scope)>;
 using WidgetInspectionHook = std::function<void(WidgetInspectionScope& scope)>;
 using WidgetSemanticsHook = std::function<void(WidgetSemanticsScope& scope)>;
+struct WidgetFrameInfo final {
+    std::int64_t time_nanos = 0;
+    std::int64_t delta_nanos = 0;
+    bool reduced_motion = false;
+};
+using WidgetFrameHook = std::function<void(WidgetInputScope& scope, const WidgetFrameInfo& frame)>;
+enum class WidgetFrameCost { paint, layout };
 using WidgetDescriptionHook = std::function<void(WidgetDescriptionScope& scope)>;
 using WidgetParticipationHook = bool (*)(const RetainedNode& node) noexcept;
 using WidgetSubtargetsHook = std::function<std::vector<WidgetSubtarget>(
@@ -178,6 +186,10 @@ struct WidgetPresentPhase final {
     bool depends_on_motion_progress = false;
 };
 
+struct WidgetFramePhase final {
+    WidgetFrameHook advance = nullptr;
+};
+
 struct WidgetLifecycle final {
     std::string type;
     WidgetParticipationHook participates = nullptr;
@@ -188,6 +200,7 @@ struct WidgetLifecycle final {
     WidgetCommandPhase command;
     WidgetPersistencePhase persistence;
     WidgetPresentPhase present;
+    WidgetFramePhase frame;
 };
 
 /**

@@ -176,6 +176,7 @@ Supported steps are:
 | `capture` | Writes the current PNG and canonical frame JSON; creates the first frame if necessary. |
 | `click` | Resolves a target, then frames pointer move, press, and release through the normal input router. An optional `button` selects `primary`/`left`, `secondary`/`right`, or `middle`. |
 | `move` | Moves the fine pointer to a target. |
+| `pointerDrag` | Resolves `from` and `to`, then frames move, press, sampled moves, and release. Optional `milliseconds`, `steps`, and `button` fields control velocity and sampling. |
 | `scroll` | Sends `deltaX`/`deltaY` at a target. |
 | `key` | Frames a key press and release. Modifiers are `shift`, `control`, `alt`, and `super`. |
 | `text` | Sends committed UTF-8 text to the focused editor. |
@@ -208,6 +209,23 @@ Secondary-click a context-menu owner with the same selector syntax:
 ```json
 {"click": {"key": "settings.row", "button": "right"}}
 ```
+
+Drive a velocity-sensitive control with deterministic samples:
+
+```json
+{
+  "pointerDrag": {
+    "from": {"x": 240, "y": 180},
+    "to": {"x": 620, "y": 180},
+    "milliseconds": 32,
+    "steps": 4
+  }
+}
+```
+
+`milliseconds` must be positive and no greater than 10 seconds; `steps` is bounded to 1,000. Every
+sample receives the deterministic scenario timestamp, so release velocity and subsequent requested
+frames are reproducible.
 
 Collapsed menu descendants remain in the logical semantic tree, but have no current subtarget
 geometry or actions; interactive inspection therefore reports them as `visible: false` and

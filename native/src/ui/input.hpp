@@ -10,8 +10,8 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <vector>
 #include <variant>
+#include <vector>
 
 #include "data/json.hpp"
 #include "runtime/application.hpp"
@@ -36,6 +36,7 @@ class MotionRuntime;
 class StatusFeedbackService;
 class WidgetInputScope;
 class WidgetRegistry;
+enum class WidgetFrameCost;
 
 struct InputOperationResult final {
     std::vector<data::JsonValue> events;
@@ -68,27 +69,14 @@ enum class KeyEventType { press, release, repeat };
 
 struct PointerInputEvent final {
     PointerInputEvent() = default;
-    PointerInputEvent(
-        Point position,
-        PointerEventType type,
-        std::int32_t pointer_id = 0,
-        std::int32_t button = 0,
-        KeyModifiers modifiers = {},
-        Point delta = {},
-        std::int64_t timestamp_nanos = 0,
-        Point coalesced_origin = {},
-        bool has_coalesced_origin = false,
-        bool coalesced_moved_beyond_slop = false
-    ) : position(position),
-        type(type),
-        pointer_id(pointer_id),
-        button(button),
-        modifiers(modifiers),
-        delta(delta),
-        timestamp_nanos(timestamp_nanos),
-        coalesced_origin(coalesced_origin),
-        has_coalesced_origin(has_coalesced_origin),
-        coalesced_moved_beyond_slop(coalesced_moved_beyond_slop) {}
+    PointerInputEvent(Point position, PointerEventType type, std::int32_t pointer_id = 0,
+                      std::int32_t button = 0, KeyModifiers modifiers = {}, Point delta = {},
+                      std::int64_t timestamp_nanos = 0, Point coalesced_origin = {},
+                      bool has_coalesced_origin = false, bool coalesced_moved_beyond_slop = false)
+        : position(position), type(type), pointer_id(pointer_id), button(button),
+          modifiers(modifiers), delta(delta), timestamp_nanos(timestamp_nanos),
+          coalesced_origin(coalesced_origin), has_coalesced_origin(has_coalesced_origin),
+          coalesced_moved_beyond_slop(coalesced_moved_beyond_slop) {}
 
     Point position;
     PointerEventType type = PointerEventType::move;
@@ -173,7 +161,7 @@ struct InputDispatchState final {
  * pointer gesture independently of either propagation choice.
  */
 class InputDispatchContext final {
-public:
+  public:
     [[nodiscard]] RetainedNode& node() noexcept;
     [[nodiscard]] const RetainedNode& node() const noexcept;
     [[nodiscard]] RetainedNode* target() const noexcept;
@@ -201,24 +189,16 @@ public:
     /** Cancels this pointer's gesture and permanently suppresses its release activation. */
     [[nodiscard]] bool cancel_gesture() noexcept;
 
-private:
+  private:
     friend class BehaviorInputScope;
     friend class InputRouter;
 
-    InputDispatchContext(
-        InputRouter& router,
-        RetainedNode& node,
-        RetainedNode* target,
-        RetainedNode* pointer_target,
-        InputEventPhase phase,
-        InputEventKind kind,
-        InputDispatchState& state,
-        const PointerInputEvent* pointer = nullptr,
-        const ScrollInputEvent* scroll = nullptr,
-        const KeyInputEvent* key = nullptr,
-        const TextInputEvent* text = nullptr,
-        const ImePreeditInputEvent* ime_preedit = nullptr
-    ) noexcept;
+    InputDispatchContext(InputRouter& router, RetainedNode& node, RetainedNode* target,
+                         RetainedNode* pointer_target, InputEventPhase phase, InputEventKind kind,
+                         InputDispatchState& state, const PointerInputEvent* pointer = nullptr,
+                         const ScrollInputEvent* scroll = nullptr,
+                         const KeyInputEvent* key = nullptr, const TextInputEvent* text = nullptr,
+                         const ImePreeditInputEvent* ime_preedit = nullptr) noexcept;
 
     InputRouter& router_;
     RetainedNode& node_;
@@ -235,14 +215,8 @@ private:
 };
 
 /** Platform-neutral input packet consumed atomically by one surface-owned queue. */
-using SurfaceInputEvent = std::variant<
-    PointerInputEvent,
-    ScrollInputEvent,
-    KeyInputEvent,
-    TextInputEvent,
-    ImePreeditInputEvent,
-    NavigationInputEvent
->;
+using SurfaceInputEvent = std::variant<PointerInputEvent, ScrollInputEvent, KeyInputEvent,
+                                       TextInputEvent, ImePreeditInputEvent, NavigationInputEvent>;
 
 /** Surface-local input budgets and gesture thresholds shared by every platform adapter. */
 struct InputProcessingConfig final {
@@ -293,60 +267,43 @@ struct DropTargetPresentation final {
 
 /** Retained-identity input/focus router shared by deterministic and platform event adapters. */
 class InputRouter final {
-public:
+  public:
     using SurfaceFrameworkExecutor =
         std::function<runtime::ActionDispatchOutcome(const runtime::Action&)>;
-    using DescriptionInvalidator =
-        std::function<void(const RetainedNode*, std::string_view)>;
+    using DescriptionInvalidator = std::function<void(const RetainedNode*, std::string_view)>;
     using FrameInvalidator = std::function<void()>;
-    using HitBoundsResolver =
-        std::function<Rect(const RetainedNode&, const LayoutRecord&)>;
+    using HitBoundsResolver = std::function<Rect(const RetainedNode&, const LayoutRecord&)>;
     using TextOffsetResolver = std::function<std::optional<std::size_t>(
-        const RetainedNode&,
-        const LayoutRecord&,
-        std::string_view,
-        Point
-    )>;
+        const RetainedNode&, const LayoutRecord&, std::string_view, Point)>;
     using TextWidthResolver = WidgetTextWidthResolver;
     using TextLayoutResolver = WidgetTextLayoutResolver;
     using ImeCursorRectResolver = std::function<std::optional<runtime::HostServiceRect>(
-        const RetainedNode&,
-        const LayoutRecord&,
-        const TextEditorSnapshot&
-    )>;
-    using DragPreviewResolver =
-        std::function<std::vector<RenderCommand>(const RetainedNode&)>;
+        const RetainedNode&, const LayoutRecord&, const TextEditorSnapshot&)>;
+    using DragPreviewResolver = std::function<std::vector<RenderCommand>(const RetainedNode&)>;
     using ScrollMutationObserver = std::function<void(std::string_view)>;
 
-    InputRouter(
-        std::string public_surface_id,
-        std::string host_service_owner,
-        runtime::ApplicationContext& application,
-        const WidgetRegistry& widgets,
-        const BehaviorRegistry& behaviors,
-        StatusFeedbackService& status_feedback,
-        NotificationService& notifications,
-        SurfaceFrameworkExecutor surface_framework_executor = {},
-        DescriptionInvalidator description_invalidator = {},
-        HitBoundsResolver hit_bounds_resolver = {},
-        TextOffsetResolver text_offset_resolver = {},
-        TextWidthResolver text_width_resolver = {},
-        ImeCursorRectResolver ime_cursor_rect_resolver = {},
-        DragPreviewResolver drag_preview_resolver = {},
-        InputProcessingConfig input_config = {},
-        runtime::HostServices* host_services = nullptr,
-        TextLayoutResolver text_layout_resolver = {},
-        ScrollMutationObserver scroll_mutation_observer = {},
-        FrameInvalidator frame_invalidator = {}
-    );
+    InputRouter(std::string public_surface_id, std::string host_service_owner,
+                runtime::ApplicationContext& application, const WidgetRegistry& widgets,
+                const BehaviorRegistry& behaviors, StatusFeedbackService& status_feedback,
+                NotificationService& notifications,
+                SurfaceFrameworkExecutor surface_framework_executor = {},
+                DescriptionInvalidator description_invalidator = {},
+                HitBoundsResolver hit_bounds_resolver = {},
+                TextOffsetResolver text_offset_resolver = {},
+                TextWidthResolver text_width_resolver = {},
+                ImeCursorRectResolver ime_cursor_rect_resolver = {},
+                DragPreviewResolver drag_preview_resolver = {},
+                InputProcessingConfig input_config = {},
+                runtime::HostServices* host_services = nullptr,
+                TextLayoutResolver text_layout_resolver = {},
+                ScrollMutationObserver scroll_mutation_observer = {},
+                FrameInvalidator frame_invalidator = {});
     ~InputRouter();
 
     /** Captures interaction sources before a reconciliation may detach their identities. */
     void begin_tree_update();
-    [[nodiscard]] InputOperationResult prepare(
-        RetainedTree& tree,
-        std::optional<std::string_view> restore_focus_key = std::nullopt
-    );
+    [[nodiscard]] InputOperationResult
+    prepare(RetainedTree& tree, std::optional<std::string_view> restore_focus_key = std::nullopt);
     /** Advances time-owned input state before layout, including stationary drag auto-scroll. */
     [[nodiscard]] InputOperationResult advance_frame();
     [[nodiscard]] InputOperationResult after_layout();
@@ -354,34 +311,28 @@ public:
     void publish_motion(const MotionRuntime& motion) noexcept;
     void publish_commands(CommandIndex& commands) noexcept;
     void publish_frame_time(std::int64_t frame_time_nanos);
+    void publish_reduced_motion(bool reduced_motion) noexcept;
+    /** Schedules one widget-owned frame callback; the callback must explicitly request another. */
+    [[nodiscard]] bool request_widget_frame(const RetainedNode& node, WidgetFrameCost cost);
+    void cancel_widget_frame(std::uint64_t identity) noexcept;
     /** Invalidates cached platform geometry while retaining logical focus/editor state. */
     void invalidate_host_geometry() noexcept;
     [[nodiscard]] InputOperationResult click(std::string_view key);
     [[nodiscard]] InputOperationResult drag(std::string_view from_key, std::string_view to_key);
     [[nodiscard]] InputOperationResult key(std::string_view key, KeyModifiers modifiers = {});
     [[nodiscard]] InputOperationResult text(std::string text);
-    [[nodiscard]] InputOperationResult ime_preedit(
-        std::string text,
-        std::size_t selection_start,
-        std::size_t selection_end
-    );
+    [[nodiscard]] InputOperationResult ime_preedit(std::string text, std::size_t selection_start,
+                                                   std::size_t selection_end);
     [[nodiscard]] InputOperationResult enqueue_click(std::string key);
     [[nodiscard]] InputOperationResult enqueue_pointer(PointerInputEvent event);
     [[nodiscard]] InputOperationResult enqueue_scroll(ScrollInputEvent event);
-    [[nodiscard]] InputOperationResult enqueue_scroll(
-        std::string key,
-        double delta_x,
-        double delta_y,
-        KeyModifiers modifiers = {}
-    );
+    [[nodiscard]] InputOperationResult enqueue_scroll(std::string key, double delta_x,
+                                                      double delta_y, KeyModifiers modifiers = {});
     [[nodiscard]] InputOperationResult enqueue_drag(std::string from_key, std::string to_key);
     [[nodiscard]] InputOperationResult enqueue_key(std::string key, KeyModifiers modifiers = {});
     [[nodiscard]] InputOperationResult enqueue_text(std::string text);
-    [[nodiscard]] InputOperationResult enqueue_ime_preedit(
-        std::string text,
-        std::size_t selection_start,
-        std::size_t selection_end
-    );
+    [[nodiscard]] InputOperationResult
+    enqueue_ime_preedit(std::string text, std::size_t selection_start, std::size_t selection_end);
     /** Enqueues a platform batch atomically; rejection never leaves a partial batch queued. */
     [[nodiscard]] InputOperationResult enqueue(std::vector<SurfaceInputEvent> events);
     /** Cancels all surface-owned focus, capture, hover, press, drag, and queued input state. */
@@ -389,14 +340,10 @@ public:
     /** Drains queued platform events at the surface input phase. */
     [[nodiscard]] InputOperationResult process_queued();
     /** Injects a typed or explicitly dynamic action through the surface event pipeline. */
-    [[nodiscard]] InjectedActionResult dispatch_action(
-        std::string action_id,
-        runtime::Value payload,
-        std::string event_kind,
-        std::optional<std::string> source_key,
-        runtime::Value event_value,
-        bool dynamic = false
-    );
+    [[nodiscard]] InjectedActionResult
+    dispatch_action(std::string action_id, runtime::Value payload, std::string event_kind,
+                    std::optional<std::string> source_key, runtime::Value event_value,
+                    bool dynamic = false);
     [[nodiscard]] std::size_t queued_event_count() const noexcept;
     /** Drains operation counts accumulated since the previous profiler publication. */
     [[nodiscard]] InputProfilerCounters take_profiler_counters() noexcept;
@@ -410,10 +357,8 @@ public:
     [[nodiscard]] std::optional<std::uint64_t> focused_identity() const noexcept;
     [[nodiscard]] std::optional<std::string_view> focused_key() const noexcept;
     /** Constrains all focus acquisition and traversal to one retained subtree; null clears it. */
-    [[nodiscard]] bool set_focus_containment(
-        std::optional<std::string_view> key,
-        InputOperationResult& result
-    );
+    [[nodiscard]] bool set_focus_containment(std::optional<std::string_view> key,
+                                             InputOperationResult& result);
     [[nodiscard]] bool focus_contained() const noexcept;
     /** Semantic focus remains active even when pointer modality suppresses its visual indicator. */
     [[nodiscard]] bool focused(std::uint64_t identity) const noexcept;
@@ -422,33 +367,21 @@ public:
     [[nodiscard]] bool hovered(std::uint64_t identity) const noexcept;
     /** True after a stationary command-bound hover crosses its one-shot disclosure deadline. */
     [[nodiscard]] bool command_tooltip_ready(std::uint64_t identity) const noexcept;
-    [[nodiscard]] bool hover_ready(
-        std::uint64_t identity,
-        std::int64_t delay_nanos
-    ) const noexcept;
+    [[nodiscard]] bool hover_ready(std::uint64_t identity, std::int64_t delay_nanos) const noexcept;
     [[nodiscard]] bool active(std::uint64_t identity) const noexcept;
     [[nodiscard]] std::vector<WidgetSubtarget> subtargets(std::uint64_t identity) const;
-    [[nodiscard]] bool subtarget_hovered(
-        std::uint64_t identity,
-        std::string_view id
-    ) const noexcept;
-    [[nodiscard]] bool subtarget_active(
-        std::uint64_t identity,
-        std::string_view id
-    ) const noexcept;
-    [[nodiscard]] std::optional<DragPreviewPresentation> drag_preview(
-        std::uint64_t identity
-    ) const noexcept;
-    [[nodiscard]] std::optional<DropTargetPresentation> drop_target(
-        std::uint64_t identity
-    ) const noexcept;
+    [[nodiscard]] bool subtarget_hovered(std::uint64_t identity,
+                                         std::string_view id) const noexcept;
+    [[nodiscard]] bool subtarget_active(std::uint64_t identity, std::string_view id) const noexcept;
+    [[nodiscard]] std::optional<DragPreviewPresentation>
+    drag_preview(std::uint64_t identity) const noexcept;
+    [[nodiscard]] std::optional<DropTargetPresentation>
+    drop_target(std::uint64_t identity) const noexcept;
     [[nodiscard]] const std::string* edited_text(std::uint64_t identity) const noexcept;
-    [[nodiscard]] std::optional<TextEditorSnapshot> editor_snapshot(
-        std::uint64_t identity
-    ) const noexcept;
-    [[nodiscard]] std::optional<StaticTextSelectionSnapshot> static_text_selection_snapshot(
-        std::uint64_t identity
-    ) const noexcept;
+    [[nodiscard]] std::optional<TextEditorSnapshot>
+    editor_snapshot(std::uint64_t identity) const noexcept;
+    [[nodiscard]] std::optional<StaticTextSelectionSnapshot>
+    static_text_selection_snapshot(std::uint64_t identity) const noexcept;
     [[nodiscard]] std::vector<std::string> pending_navigation_targets() const;
     [[nodiscard]] const StatusFeedbackService& status_feedback() const noexcept;
     [[nodiscard]] NotificationService& notifications() noexcept;
@@ -456,17 +389,11 @@ public:
     /** Raw topmost retained hit used by the surface-owned inspector. */
     [[nodiscard]] const RetainedNode* inspection_target(Point position) const noexcept;
     [[nodiscard]] std::optional<Point> scroll_offset(std::string_view key) const noexcept;
-    [[nodiscard]] std::optional<Point> constrained_scroll_target(
-        std::string_view key,
-        Point target
-    ) const noexcept;
-    [[nodiscard]] bool scroll_to(
-        std::string_view key,
-        Point target,
-        InputOperationResult& result
-    );
+    [[nodiscard]] std::optional<Point> constrained_scroll_target(std::string_view key,
+                                                                 Point target) const noexcept;
+    [[nodiscard]] bool scroll_to(std::string_view key, Point target, InputOperationResult& result);
 
-private:
+  private:
     friend class BehaviorInputScope;
     friend class InputDispatchContext;
     friend class WidgetInputScope;
@@ -485,145 +412,82 @@ private:
     [[nodiscard]] bool tabbable(const RetainedNode& node) const noexcept;
     [[nodiscard]] RetainedNode* focusable_ancestor(RetainedNode* node) const noexcept;
     [[nodiscard]] RetainedNode* pointer_focusable_ancestor(RetainedNode* node) const noexcept;
-    void apply_pointer_focus_default(
-        const PointerInputEvent& event,
-        RetainedNode* pointer_target,
-        const RetainedNode* interaction_target,
-        InputOperationResult& result
-    );
-    [[nodiscard]] bool passive_pointer_path(
-        const RetainedNode& owner,
-        const RetainedNode* pointer_target
-    ) const noexcept;
+    void apply_pointer_focus_default(const PointerInputEvent& event, RetainedNode* pointer_target,
+                                     const RetainedNode* interaction_target,
+                                     InputOperationResult& result);
+    [[nodiscard]] bool passive_pointer_path(const RetainedNode& owner,
+                                            const RetainedNode* pointer_target) const noexcept;
     [[nodiscard]] RetainedNode* focus_boundary() const noexcept;
     [[nodiscard]] bool within_focus_containment(const RetainedNode& node) const noexcept;
-    void dismiss_transient_popups(
-        const RetainedNode* target,
-        InputOperationResult& result,
-        bool include_modal = true,
-        bool restore_modal_focus = true
-    );
+    void dismiss_transient_popups(const RetainedNode* target, InputOperationResult& result,
+                                  bool include_modal = true, bool restore_modal_focus = true);
     [[nodiscard]] data::JsonValue source(const RetainedNode& node) const;
-    void focus(
-        const RetainedNode& node,
-        std::string_view reason,
-        InputOperationResult& result
-    );
-    void clear_focus(
-        std::string_view reason,
-        InputOperationResult& result,
-        bool dismiss_popups = true
-    );
+    void focus(const RetainedNode& node, std::string_view reason, InputOperationResult& result);
+    void clear_focus(std::string_view reason, InputOperationResult& result,
+                     bool dismiss_popups = true);
     void hover_route(const RetainedNode* target);
-    runtime::ActionDispatchOutcome emit(
-        data::JsonValue event,
-        const std::shared_ptr<const runtime::ActionValue>& action,
-        const RetainedNode& node,
-        runtime::Value event_value,
-        InputOperationResult& result
-    );
-    runtime::ActionDispatchOutcome emit(
-        data::JsonValue event,
-        const std::shared_ptr<const runtime::Action>& action,
-        const RetainedNode& node,
-        runtime::Value event_value,
-        InputOperationResult& result
-    );
-    void report_action_outcome(
-        const runtime::Action& action,
-        const runtime::ActionDispatchOutcome& outcome,
-        const RetainedNode& node
-    );
-    [[nodiscard]] runtime::ActionDispatchOutcome execute_form_action(
-        const runtime::Action& action,
-        InputOperationResult& result
-    );
-    [[nodiscard]] bool validate_form(
-        RetainedNode& form,
-        bool focus_first_invalid,
-        InputOperationResult& result
-    );
+    runtime::ActionDispatchOutcome emit(data::JsonValue event,
+                                        const std::shared_ptr<const runtime::ActionValue>& action,
+                                        const RetainedNode& node, runtime::Value event_value,
+                                        InputOperationResult& result);
+    runtime::ActionDispatchOutcome emit(data::JsonValue event,
+                                        const std::shared_ptr<const runtime::Action>& action,
+                                        const RetainedNode& node, runtime::Value event_value,
+                                        InputOperationResult& result);
+    void report_action_outcome(const runtime::Action& action,
+                               const runtime::ActionDispatchOutcome& outcome,
+                               const RetainedNode& node);
+    [[nodiscard]] runtime::ActionDispatchOutcome execute_form_action(const runtime::Action& action,
+                                                                     InputOperationResult& result);
+    [[nodiscard]] bool validate_form(RetainedNode& form, bool focus_first_invalid,
+                                     InputOperationResult& result);
     [[nodiscard]] bool validate_field(RetainedNode& field, bool mark_touched);
     void note_field_change(RetainedNode& node);
     void note_field_blur(RetainedNode& node);
-    [[nodiscard]] static RetainedNode* ancestor(
-        RetainedNode& node,
-        std::string_view type
-    ) noexcept;
-    [[nodiscard]] std::shared_ptr<const runtime::ActionValue> activation_action(
-        const RetainedNode& node,
-        std::string_view property
-    ) const;
-    [[nodiscard]] data::JsonValue canonical_action(
-        const runtime::ActionValue& action,
-        const RetainedNode& node
-    ) const;
-    [[nodiscard]] data::JsonValue canonical_action(
-        const runtime::Action& action,
-        const RetainedNode& node,
-        bool include_origin = true
-    ) const;
-    [[nodiscard]] runtime::ActionDispatchOutcome execute_action(
-        const runtime::ActionEvent& event,
-        const runtime::ActionValue& action,
-        const RetainedNode& node,
-        InputOperationResult& result
-    );
-    [[nodiscard]] runtime::ActionDispatchOutcome execute_action(
-        const runtime::ActionEvent& event,
-        const runtime::Action& action,
-        const RetainedNode& node,
-        InputOperationResult& result,
-        const runtime::LexicalStateBinding* lexical_state_binding = nullptr
-    );
-    [[nodiscard]] std::optional<runtime::ActionDispatchOutcome> execute_surface_action(
-        const runtime::ActionEvent& event,
-        const runtime::Action& action,
-        const RetainedNode& node,
-        InputOperationResult& result
-    );
-    [[nodiscard]] runtime::ActionDispatchOutcome execute_composition(
-        const runtime::ActionEvent& event,
-        const runtime::ActionValue& composition,
-        const RetainedNode& node,
-        InputOperationResult& result
-    );
-    [[nodiscard]] runtime::ActionDispatchOutcome execute_tree_action(
-        const runtime::Action& action,
-        InputOperationResult& result
-    );
-    [[nodiscard]] runtime::ActionDispatchOutcome execute_command_action(
-        const runtime::Action& action,
-        const RetainedNode& source_node,
-        InputOperationResult& result
-    );
+    [[nodiscard]] static RetainedNode* ancestor(RetainedNode& node, std::string_view type) noexcept;
+    [[nodiscard]] std::shared_ptr<const runtime::ActionValue>
+    activation_action(const RetainedNode& node, std::string_view property) const;
+    [[nodiscard]] data::JsonValue canonical_action(const runtime::ActionValue& action,
+                                                   const RetainedNode& node) const;
+    [[nodiscard]] data::JsonValue canonical_action(const runtime::Action& action,
+                                                   const RetainedNode& node,
+                                                   bool include_origin = true) const;
+    [[nodiscard]] runtime::ActionDispatchOutcome execute_action(const runtime::ActionEvent& event,
+                                                                const runtime::ActionValue& action,
+                                                                const RetainedNode& node,
+                                                                InputOperationResult& result);
+    [[nodiscard]] runtime::ActionDispatchOutcome
+    execute_action(const runtime::ActionEvent& event, const runtime::Action& action,
+                   const RetainedNode& node, InputOperationResult& result,
+                   const runtime::LexicalStateBinding* lexical_state_binding = nullptr);
+    [[nodiscard]] std::optional<runtime::ActionDispatchOutcome>
+    execute_surface_action(const runtime::ActionEvent& event, const runtime::Action& action,
+                           const RetainedNode& node, InputOperationResult& result);
+    [[nodiscard]] runtime::ActionDispatchOutcome
+    execute_composition(const runtime::ActionEvent& event, const runtime::ActionValue& composition,
+                        const RetainedNode& node, InputOperationResult& result);
+    [[nodiscard]] runtime::ActionDispatchOutcome execute_tree_action(const runtime::Action& action,
+                                                                     InputOperationResult& result);
+    [[nodiscard]] runtime::ActionDispatchOutcome
+    execute_command_action(const runtime::Action& action, const RetainedNode& source_node,
+                           InputOperationResult& result);
     struct CommandInvocation final {
         std::string status;
         std::string message;
         bool executed = false;
     };
-    [[nodiscard]] CommandInvocation invoke_command(
-        std::string_view id,
-        const RetainedNode& source_node,
-        bool invoked_from_active_modal,
-        InputOperationResult& result
-    );
-    [[nodiscard]] bool route_command_shortcut(
-        std::string_view key,
-        KeyModifiers modifiers,
-        KeyEventType type,
-        bool editing_owns_key,
-        InputOperationResult& result
-    );
+    [[nodiscard]] CommandInvocation invoke_command(std::string_view id,
+                                                   const RetainedNode& source_node,
+                                                   bool invoked_from_active_modal,
+                                                   InputOperationResult& result);
+    [[nodiscard]] bool route_command_shortcut(std::string_view key, KeyModifiers modifiers,
+                                              KeyEventType type, bool editing_owns_key,
+                                              InputOperationResult& result);
     [[nodiscard]] RetainedNode* active_modal() const;
-    [[nodiscard]] static bool descendant_of(
-        const RetainedNode& node,
-        const RetainedNode& ancestor
-    ) noexcept;
-    [[nodiscard]] static const DescriptionBehavior* behavior(
-        const RetainedNode& node,
-        std::string_view id
-    ) noexcept;
+    [[nodiscard]] static bool descendant_of(const RetainedNode& node,
+                                            const RetainedNode& ancestor) noexcept;
+    [[nodiscard]] static const DescriptionBehavior* behavior(const RetainedNode& node,
+                                                             std::string_view id) noexcept;
     [[nodiscard]] static RetainedNode* drag_source_ancestor(RetainedNode* node) noexcept;
     struct PointerHitEntry final {
         RetainedNode* node = nullptr;
@@ -632,214 +496,106 @@ private:
         MotionTransform transform;
     };
     void prepare_pointer_geometry() const;
-    [[nodiscard]] const std::vector<WidgetSubtarget>& projected_subtargets(
-        const RetainedNode& node
-    ) const;
+    [[nodiscard]] const std::vector<WidgetSubtarget>&
+    projected_subtargets(const RetainedNode& node) const;
     void prepare_detached_subtargets() const;
     [[nodiscard]] RetainedNode* hit_test(Point position) const noexcept;
-    [[nodiscard]] std::optional<WidgetSubtarget> hit_subtarget(
-        Point position,
-        const RetainedNode* ordinary_target
-    ) const;
+    [[nodiscard]] std::optional<WidgetSubtarget>
+    hit_subtarget(Point position, const RetainedNode* ordinary_target) const;
     void set_hovered_subtarget(const std::optional<WidgetSubtarget>& target);
     [[nodiscard]] RetainedNode* interactive_ancestor(RetainedNode* node) const noexcept;
-    [[nodiscard]] InputDispatchState route_event(
-        RetainedNode* target,
-        RetainedNode* pointer_target,
-        InputEventKind kind,
-        const PointerInputEvent* pointer,
-        const ScrollInputEvent* scroll,
-        const KeyInputEvent* key,
-        const TextInputEvent* text,
-        const ImePreeditInputEvent* ime_preedit,
-        InputOperationResult& result
-    );
-    [[nodiscard]] InputDispatchState route_pointer_event(
-        RetainedNode* target,
-        RetainedNode* pointer_target,
-        const PointerInputEvent& event,
-        InputOperationResult& result
-    );
-    [[nodiscard]] InputDispatchState route_key_event(
-        RetainedNode* target,
-        const KeyInputEvent& event,
-        InputOperationResult& result
-    );
-    [[nodiscard]] bool route_widget_pointer(
-        RetainedNode* target,
-        RetainedNode* pointer_target,
-        const PointerInputEvent& event,
-        InputDispatchState& dispatch_state,
-        InputOperationResult& result
-    );
-    void route_active_lifecycle_hooks(
-        bool after_layout,
-        InputOperationResult& result
-    );
+    [[nodiscard]] InputDispatchState
+    route_event(RetainedNode* target, RetainedNode* pointer_target, InputEventKind kind,
+                const PointerInputEvent* pointer, const ScrollInputEvent* scroll,
+                const KeyInputEvent* key, const TextInputEvent* text,
+                const ImePreeditInputEvent* ime_preedit, InputOperationResult& result);
+    [[nodiscard]] InputDispatchState route_pointer_event(RetainedNode* target,
+                                                         RetainedNode* pointer_target,
+                                                         const PointerInputEvent& event,
+                                                         InputOperationResult& result);
+    [[nodiscard]] InputDispatchState
+    route_key_event(RetainedNode* target, const KeyInputEvent& event, InputOperationResult& result);
+    [[nodiscard]] bool route_widget_pointer(RetainedNode* target, RetainedNode* pointer_target,
+                                            const PointerInputEvent& event,
+                                            InputDispatchState& dispatch_state,
+                                            InputOperationResult& result);
+    void route_active_lifecycle_hooks(bool after_layout, InputOperationResult& result);
     [[nodiscard]] InputOperationResult pointer(PointerInputEvent event);
-    [[nodiscard]] InputOperationResult key(
-        KeyInputEvent event,
-        bool navigation_traversal_repeat
-    );
+    [[nodiscard]] InputOperationResult key(KeyInputEvent event, bool navigation_traversal_repeat);
     [[nodiscard]] InputOperationResult text(TextInputEvent event);
     [[nodiscard]] InputOperationResult ime_preedit(ImePreeditInputEvent event);
     /** Routes the pending/captured pointer through the drag gesture state machine. */
-    [[nodiscard]] bool route_pointer_drag(
-        const PointerInputEvent& event,
-        InputOperationResult& result
-    );
+    [[nodiscard]] bool route_pointer_drag(const PointerInputEvent& event,
+                                          InputOperationResult& result);
     [[nodiscard]] bool cancel_active_drag(InputOperationResult& result);
-    [[nodiscard]] DragTarget resolve_drag_target(
-        const DragSession& session,
-        Point position
-    ) const;
+    [[nodiscard]] DragTarget resolve_drag_target(const DragSession& session, Point position) const;
     [[nodiscard]] DragTarget retained_drag_target(const DragSession& session) const;
-    [[nodiscard]] static std::vector<std::string> drag_operations(
-        const runtime::Value* value,
-        std::vector<std::string> fallback
-    );
-    void synchronize_drag_target(
-        DragSession& session,
-        Point position,
-        bool emit_move,
-        InputOperationResult& result
-    );
-    void emit_drag_lifecycle(
-        DragSession& session,
-        std::string_view phase,
-        const DragTarget& target,
-        Point position,
-        InputOperationResult& result
-    );
-    [[nodiscard]] bool auto_scroll_drag(
-        DragSession& session,
-        InputOperationResult& result
-    );
-    [[nodiscard]] bool route_scrollbar_pointer(
-        const PointerInputEvent& event,
-        InputOperationResult& result,
-        RetainedNode* hit_target
-    );
+    [[nodiscard]] static std::vector<std::string>
+    drag_operations(const runtime::Value* value, std::vector<std::string> fallback);
+    void synchronize_drag_target(DragSession& session, Point position, bool emit_move,
+                                 InputOperationResult& result);
+    void emit_drag_lifecycle(DragSession& session, std::string_view phase, const DragTarget& target,
+                             Point position, InputOperationResult& result);
+    [[nodiscard]] bool auto_scroll_drag(DragSession& session, InputOperationResult& result);
+    void advance_widget_frames(InputOperationResult& result);
+    [[nodiscard]] bool route_scrollbar_pointer(const PointerInputEvent& event,
+                                               InputOperationResult& result,
+                                               RetainedNode* hit_target);
     [[nodiscard]] InputOperationResult scroll(ScrollInputEvent event);
     [[nodiscard]] std::optional<Point> scroll_limits(const RetainedNode& node) const;
-    [[nodiscard]] bool set_scroll_offset(
-        const RetainedNode& node,
-        Point offset,
-        InputOperationResult& result
-    );
+    [[nodiscard]] bool set_scroll_offset(const RetainedNode& node, Point offset,
+                                         InputOperationResult& result);
     void reveal_focus(const RetainedNode& node, InputOperationResult& result);
-    [[nodiscard]] bool scroll_focused_ancestor(
-        std::string_view key,
-        InputOperationResult& result
-    );
-    void place_pointer_caret(
-        RetainedNode& node,
-        const PointerInputEvent& event,
-        bool extend_selection,
-        InputOperationResult& result
-    );
-    [[nodiscard]] std::optional<std::size_t> resolve_text_offset(
-        const RetainedNode& node,
-        std::string_view text,
-        Point position
-    ) const;
-    [[nodiscard]] Point logical_pointer_position(
-        const RetainedNode& node,
-        Point position
-    ) const;
-    void seed_pointer_text_navigation(
-        const RetainedNode& node,
-        std::string_view text,
-        std::size_t caret,
-        Point position
-    );
+    [[nodiscard]] bool scroll_focused_ancestor(std::string_view key, InputOperationResult& result);
+    void place_pointer_caret(RetainedNode& node, const PointerInputEvent& event,
+                             bool extend_selection, InputOperationResult& result);
+    [[nodiscard]] std::optional<std::size_t>
+    resolve_text_offset(const RetainedNode& node, std::string_view text, Point position) const;
+    [[nodiscard]] Point logical_pointer_position(const RetainedNode& node, Point position) const;
+    void seed_pointer_text_navigation(const RetainedNode& node, std::string_view text,
+                                      std::size_t caret, Point position);
     [[nodiscard]] bool static_text_node(const RetainedNode& node) const noexcept;
     [[nodiscard]] bool static_text_selectable(const RetainedNode& node) const noexcept;
-    [[nodiscard]] RetainedNode* selectable_static_text_owner(
-        RetainedNode* hit
-    ) const noexcept;
-    [[nodiscard]] std::optional<std::string_view> static_text_value(
-        const RetainedNode& node
-    ) const noexcept;
-    [[nodiscard]] std::optional<std::string_view> static_text_container(
-        const RetainedNode& node
-    ) const noexcept;
-    [[nodiscard]] std::vector<RetainedNode*> static_text_nodes(
-        std::string_view container
-    ) const;
-    void begin_static_text_selection(
-        RetainedNode& node,
-        InputOperationResult& result
-    );
-    void transition_static_text_selection_owner(
-        RetainedNode* owner,
-        InputOperationResult& result
-    );
-    [[nodiscard]] bool static_text_selection_owner_matches(
-        const RetainedNode& node
-    ) const noexcept;
-    void extend_static_text_selection(
-        RetainedNode& candidate,
-        Point position,
-        InputOperationResult& result
-    );
-    [[nodiscard]] bool move_static_text_selection(
-        RetainedNode& node,
-        std::string_view key,
-        KeyModifiers modifiers,
-        InputOperationResult& result
-    );
-    void set_static_text_selection(
-        RetainedNode& node,
-        std::size_t anchor,
-        std::size_t focus,
-        InputOperationResult& result
-    );
-    [[nodiscard]] std::optional<std::size_t> visual_text_navigation_offset(
-        const RetainedNode& node,
-        std::string_view text,
-        std::size_t caret,
-        std::string_view key
-    );
+    [[nodiscard]] RetainedNode* selectable_static_text_owner(RetainedNode* hit) const noexcept;
+    [[nodiscard]] std::optional<std::string_view>
+    static_text_value(const RetainedNode& node) const noexcept;
+    [[nodiscard]] std::optional<std::string_view>
+    static_text_container(const RetainedNode& node) const noexcept;
+    [[nodiscard]] std::vector<RetainedNode*> static_text_nodes(std::string_view container) const;
+    void begin_static_text_selection(RetainedNode& node, InputOperationResult& result);
+    void transition_static_text_selection_owner(RetainedNode* owner, InputOperationResult& result);
+    [[nodiscard]] bool static_text_selection_owner_matches(const RetainedNode& node) const noexcept;
+    void extend_static_text_selection(RetainedNode& candidate, Point position,
+                                      InputOperationResult& result);
+    [[nodiscard]] bool move_static_text_selection(RetainedNode& node, std::string_view key,
+                                                  KeyModifiers modifiers,
+                                                  InputOperationResult& result);
+    void set_static_text_selection(RetainedNode& node, std::size_t anchor, std::size_t focus,
+                                   InputOperationResult& result);
+    [[nodiscard]] std::optional<std::size_t> visual_text_navigation_offset(const RetainedNode& node,
+                                                                           std::string_view text,
+                                                                           std::size_t caret,
+                                                                           std::string_view key);
     [[nodiscard]] bool copy_static_text_selection(RetainedNode& owner);
     [[nodiscard]] bool select_all_static_text(RetainedNode& owner, InputOperationResult& result);
-    void activate(
-        RetainedNode& target,
-        InputOperationResult& result,
-        const PointerInputEvent* pointer = nullptr,
-        RetainedNode* pointer_target = nullptr,
-        std::size_t click_count = 0U,
-        std::optional<WidgetSubtarget> subtarget = std::nullopt
-    );
+    void activate(RetainedNode& target, InputOperationResult& result,
+                  const PointerInputEvent* pointer = nullptr,
+                  RetainedNode* pointer_target = nullptr, std::size_t click_count = 0U,
+                  std::optional<WidgetSubtarget> subtarget = std::nullopt);
     [[nodiscard]] std::vector<RetainedNode*> focusable_nodes() const;
     [[nodiscard]] bool traverse_focus(bool backwards, InputOperationResult& result);
-    [[nodiscard]] bool move_focus_spatial(
-        std::string_view direction,
-        InputOperationResult& result
-    );
+    [[nodiscard]] bool move_focus_spatial(std::string_view direction, InputOperationResult& result);
     [[nodiscard]] bool dismiss_topmost(InputOperationResult& result);
     void sync_modal_focus(InputOperationResult& result);
     void sanitize_focus(InputOperationResult& result);
     void set_focus_visibility(bool visible);
-    void record_editor_mutation(
-        RetainedNode& node,
-        const TextEditorMutation& mutation,
-        InputOperationResult& result
-    );
-    [[nodiscard]] bool insert_editor_text(
-        RetainedNode& node,
-        std::string_view value,
-        InputOperationResult& result
-    );
-    [[nodiscard]] bool clear_editor_text(
-        RetainedNode& node,
-        InputOperationResult& result
-    );
-    void synchronize_editor_text(
-        RetainedNode& node,
-        std::string_view value,
-        bool move_caret_to_end
-    );
+    void record_editor_mutation(RetainedNode& node, const TextEditorMutation& mutation,
+                                InputOperationResult& result);
+    [[nodiscard]] bool insert_editor_text(RetainedNode& node, std::string_view value,
+                                          InputOperationResult& result);
+    [[nodiscard]] bool clear_editor_text(RetainedNode& node, InputOperationResult& result);
+    void synchronize_editor_text(RetainedNode& node, std::string_view value,
+                                 bool move_caret_to_end);
     void commit_editor(RetainedNode& node, InputOperationResult& result);
 
     [[nodiscard]] Point injection_point(std::string_view key) const;
@@ -950,6 +706,14 @@ private:
     std::map<std::int32_t, PointerPress> pressed_pointer_targets_;
     std::map<std::int32_t, DragSession> drag_sessions_;
     std::optional<ScrollbarDrag> scrollbar_drag_;
+    struct RequestedWidgetFrame final {
+        WidgetFrameCost cost;
+        bool pending = true;
+    };
+    std::map<std::uint64_t, RequestedWidgetFrame> requested_widget_frames_;
+    std::map<std::uint64_t, std::int64_t> widget_frame_times_;
+    std::optional<std::uint64_t> advancing_widget_frame_identity_;
+    bool reduced_motion_ = false;
     std::optional<std::uint64_t> last_text_click_;
     Point last_text_click_position_;
     std::int64_t last_text_click_nanos_ = 0;

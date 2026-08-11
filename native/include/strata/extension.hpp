@@ -262,6 +262,17 @@ enum class TextAlignment : std::uint32_t {
     end = STRATA_WIDGET_TEXT_ALIGN_END,
 };
 
+enum class FrameCost : std::uint32_t {
+    paint = STRATA_WIDGET_FRAME_PAINT,
+    layout = STRATA_WIDGET_FRAME_LAYOUT,
+};
+
+struct Frame final {
+    long long time_nanoseconds = 0;
+    long long delta_nanoseconds = 0;
+    bool reduced_motion = false;
+};
+
 /** Borrowed immutable parameter/style value; valid only during the current lifecycle callback. */
 class ValueView final {
   public:
@@ -426,6 +437,10 @@ class Input final {
     bool cancel_gesture() noexcept;
     /** Requests one downstream projection without changing retained state. */
     bool invalidate(Invalidation invalidation) noexcept;
+    /** Requests one callback on the next surface frame; callbacks must opt into every successor. */
+    bool request_frame(FrameCost cost = FrameCost::paint) noexcept;
+    /** Cancels this widget's pending callback and forgets its frame-delta history. */
+    void cancel_frame() noexcept;
 
     /** Dispatches one package-declared action through the ordinary action registry. */
     bool emit(std::string_view action_id, std::string_view payload_json = {},
@@ -651,6 +666,7 @@ class BehaviorInput final {
 using ActivateHook = bool (*)(Input&);
 using KeyHook = bool (*)(Input&, const Key&);
 using WidgetPointerHook = bool (*)(Input&, const Pointer&);
+using FrameHook = void (*)(Input&, const Frame&);
 using ScrollHook = bool (*)(Input&, const Scroll&);
 using SubtargetsHook = void (*)(Subtargets&);
 using PresentHook = void (*)(Present&);
@@ -667,6 +683,7 @@ struct WidgetHooks final {
     WidgetPointerHook pointer = nullptr;
     ScrollHook scroll = nullptr;
     SemanticsHook semantics = nullptr;
+    FrameHook frame = nullptr;
     PresentHook present = nullptr;
     SubtargetsHook subtargets = nullptr;
     PresentHook overlay = nullptr;
@@ -751,6 +768,7 @@ class Widget final {
     Widget& on_scroll(ScrollHook hook);
     Widget& on_semantics(SemanticsHook hook);
     Widget& subtargets(SubtargetsHook hook);
+    Widget& on_frame(FrameHook hook);
     Widget& present(PresentHook hook);
     Widget& overlay(PresentHook hook);
     /** Overlay painted outside this widget's clip, gated by one declared retained boolean. */

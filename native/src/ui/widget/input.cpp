@@ -337,6 +337,14 @@ void WidgetInputScope::invalidate(const DirtyReason reason) {
         router_.frame_invalidator_();
 }
 
+bool WidgetInputScope::request_frame(const WidgetFrameCost cost) {
+    return router_.request_widget_frame(node_, cost);
+}
+
+void WidgetInputScope::cancel_frame() noexcept {
+    router_.cancel_widget_frame(node_.identity());
+}
+
 void WidgetInputScope::set_event_count(const std::size_t count) noexcept {
     result_.injected_events = count;
     result_.processed_events = count;

@@ -184,19 +184,19 @@ void require_relative_resource(const std::filesystem::path& path, const std::str
     return result;
 }
 
-[[nodiscard]] std::int32_t pointer_button(
-    const JsonValue* const value,
-    const std::string_view label
-) {
-    if (value == nullptr) return 0;
+[[nodiscard]] std::int32_t pointer_button(const JsonValue* const value,
+                                          const std::string_view label) {
+    if (value == nullptr)
+        return 0;
     const std::string name = text(*value, label);
-    if (name == "primary" || name == "left") return 0;
-    if (name == "secondary" || name == "right") return 1;
-    if (name == "middle") return 2;
-    throw std::invalid_argument(
-        std::string(label) +
-        " must be 'primary'/'left', 'secondary'/'right', or 'middle'"
-    );
+    if (name == "primary" || name == "left")
+        return 0;
+    if (name == "secondary" || name == "right")
+        return 1;
+    if (name == "middle")
+        return 2;
+    throw std::invalid_argument(std::string(label) +
+                                " must be 'primary'/'left', 'secondary'/'right', or 'middle'");
 }
 
 [[nodiscard]] SnapshotConfig snapshot(const JsonValue& value, const std::string_view label) {
@@ -260,6 +260,31 @@ void require_relative_resource(const std::filesystem::path& path, const std::str
     }
     if (operation == "move")
         return MoveStep{selector(argument, "move")};
+    if (operation == "pointerDrag") {
+        static_cast<void>(as_object(argument, "pointerDrag"));
+        PointerDragStep result{
+            selector(required(argument, "from"), "pointerDrag.from"),
+            selector(required(argument, "to"), "pointerDrag.to"),
+        };
+        if (const JsonValue* field = optional(argument, "milliseconds"); field != nullptr) {
+            const double milliseconds = number(*field, "pointerDrag.milliseconds");
+            if (!std::isfinite(milliseconds) || milliseconds <= 0.0 || milliseconds > 10'000.0) {
+                throw std::invalid_argument(
+                    "pointerDrag.milliseconds is outside the supported range");
+            }
+            result.duration_nanoseconds =
+                static_cast<std::int64_t>(std::llround(milliseconds * 1'000'000.0));
+        }
+        if (const JsonValue* field = optional(argument, "steps"); field != nullptr) {
+            const std::int64_t steps = integer(*field, "pointerDrag.steps");
+            if (steps <= 0 || steps > 1'000) {
+                throw std::invalid_argument("pointerDrag.steps is outside the supported range");
+            }
+            result.steps = static_cast<std::uint32_t>(steps);
+        }
+        result.button = pointer_button(optional(argument, "button"), "pointerDrag.button");
+        return result;
+    }
     if (operation == "scroll") {
         static_cast<void>(as_object(argument, "scroll"));
         ScrollStep result;
@@ -332,14 +357,11 @@ Scenario load_scenario(const std::filesystem::path& path) {
     }
     result.root = text(required(application, "root"), "application.root");
     result.packages = strings(optional(application, "packages"), "application.packages");
-    for (const std::string& directory : strings(
-             optional(application, "extensionPaths"),
-             "application.extensionPaths"
-         )) {
+    for (const std::string& directory :
+         strings(optional(application, "extensionPaths"), "application.extensionPaths")) {
         const std::filesystem::path configured(directory);
         result.extension_search_paths.push_back(
-            configured.is_absolute() ? configured : path.parent_path() / configured
-        );
+            configured.is_absolute() ? configured : path.parent_path() / configured);
     }
     result.actions = strings(optional(application, "actions"), "application.actions");
     require_relative_resource(result.module, "application.module");

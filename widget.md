@@ -210,6 +210,13 @@ Committed values schedule one accessibility projection.
 - `strata.control-deck.v1` supplies the accessible multi-region picker used by the Control Deck
   workspace. Hue, saturation/value, and alpha manipulation use fixed geometry and fixed-capacity
   payload formatting on the hot path.
+- Stable compound subtargets, fixed-capacity structured state, borrowed value views, typed colors,
+  computed styles, aligned text, and material parameters support the public-only gradient editor.
+- Explicit frame request/cancel hooks expose frame time, per-widget delta, reduced motion, and paint
+  versus layout cost. Requests self-expire after one callback and are discarded with detached or
+  non-participating widgets.
+- `DeckInertialScrubber` proves the frame contract with pointer-derived release velocity, bounded
+  friction and edge response, one settled commit, keyboard access, and no idle callback.
 
 ## Acceptance evidence
 
@@ -221,6 +228,9 @@ Committed values schedule one accessibility projection.
   semantic projection.
 - The Control Deck headless scenario exercises plane, hue, alpha, and keyboard changes and records
   committed color events in canonical frame output.
+- `strata.headless.control_deck_gradient` exercises multi-stop editing and stable semantic children.
+- `strata.headless.control_deck_motion` drives a sampled pointer drag through inertia and settlement,
+  records the final action, and verifies subsequent idle frames perform no layout or render traversal.
 
 ## Extension roadmap
 
@@ -254,6 +264,17 @@ Add explicit request/cancel-frame capability with frame time, delta, reduced-mot
 suspension when hidden or detached, and distinct paint versus layout costs. Prove it with a control
 whose behavior genuinely requires inertia or spring motion; never introduce a permanently pumping
 idle widget.
+
+Implemented. The installed SDK now exposes `Input::request_frame`, `Input::cancel_frame`,
+`FrameCost`, and `.on_frame(...)`. Each request admits exactly one callback; retained
+input-invalidated state plus paint cost keeps kinetic movement out of reconciliation, layout, text,
+and semantics. Layout cost remains explicit for geometry-changing callbacks. Reduced motion permits
+one terminal snap frame, and requests are removed when their owner detaches or loses layout.
+
+The proof is `DeckInertialScrubber` in the dedicated Control Deck Motion workspace. Pointer samples
+derive release velocity, bounded frame deltas integrate friction and edge response, keyboard edits
+commit immediately, and settlement emits one `control-deck.motion.commit` action without leaving an
+idle frame request.
 
 ### Milestone C — serious canvas controls
 

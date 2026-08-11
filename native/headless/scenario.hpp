@@ -45,6 +45,13 @@ struct ClickStep final {
 struct MoveStep final {
     Selector target;
 };
+struct PointerDragStep final {
+    Selector from;
+    Selector to;
+    std::int64_t duration_nanoseconds = 48'000'000;
+    std::uint32_t steps = 3U;
+    std::int32_t button = 0;
+};
 struct ScrollStep final {
     Selector target;
     double delta_x = 0.0;
@@ -66,8 +73,8 @@ struct PublishStep final {
     SnapshotConfig snapshot;
 };
 
-using ScenarioStep = std::variant<AdvanceStep, CaptureStep, ClickStep, MoveStep, ScrollStep,
-                                  KeyStep, TextStep, ResizeStep, PublishStep>;
+using ScenarioStep = std::variant<AdvanceStep, CaptureStep, ClickStep, MoveStep, PointerDragStep,
+                                  ScrollStep, KeyStep, TextStep, ResizeStep, PublishStep>;
 
 struct Scenario final {
     std::uint32_t version = 1U;

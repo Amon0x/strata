@@ -1276,6 +1276,15 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_gradient.cmake
             )
             add_test(
+                NAME strata.headless.control_deck_motion
+                COMMAND ${CMAKE_COMMAND}
+                    -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>
+                    -DSTRATA_RESOURCES=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
+                    -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/control-deck-motion.json
+                    -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-control-deck-motion
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_motion.cmake
+            )
+            add_test(
                 NAME strata.headless.d3d11.interactive
                 COMMAND ${CMAKE_COMMAND}
                     -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>

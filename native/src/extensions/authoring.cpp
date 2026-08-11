@@ -155,6 +155,19 @@ strata_extension_input_result key_trampoline(void* const user_data,
     return hooks->key(input, key) ? STRATA_EXTENSION_INPUT_CONSUMED
                                   : STRATA_EXTENSION_INPUT_IGNORED;
 }
+
+void frame_trampoline(void* const user_data, strata_widget_input_context* const context,
+                      const strata_widget_frame_info* const frame) {
+    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+    if (frame == nullptr)
+        return;
+    Input input(context);
+    hooks->frame(input, Frame{
+                            frame->time_nanoseconds,
+                            frame->delta_nanoseconds,
+                            frame->reduced_motion != 0U,
+                        });
+}
 strata_extension_input_result
 widget_pointer_trampoline(void* const user_data, strata_widget_input_context* const context,
                           const strata_widget_pointer_event* const event) {
@@ -392,6 +405,15 @@ bool Input::cancel_gesture() noexcept {
 bool Input::invalidate(const Invalidation value) noexcept {
     return strata_widget_input_invalidate(context_, invalidation_value(value)).status ==
            STRATA_STATUS_OK;
+}
+
+bool Input::request_frame(const FrameCost cost) noexcept {
+    return strata_widget_input_request_frame(context_, static_cast<strata_widget_frame_cost>(cost))
+               .status == STRATA_STATUS_OK;
+}
+
+void Input::cancel_frame() noexcept {
+    static_cast<void>(strata_widget_input_cancel_frame(context_));
 }
 
 bool Input::emit(const std::string_view action_id, const std::string_view payload_json,
@@ -788,6 +810,11 @@ Widget& Widget::subtargets(const SubtargetsHook hook) {
     return *this;
 }
 
+Widget& Widget::on_frame(const FrameHook hook) {
+    hooks_.frame = hook;
+    return *this;
+}
+
 Widget& Widget::present(const PresentHook hook) {
     hooks_.present = hook;
     return *this;
@@ -915,6 +942,7 @@ strata_widget_extension Widget::descriptor() {
     descriptor.retained_fields = retained_fields_.empty() ? nullptr : retained_fields_.data();
     descriptor.retained_field_count = retained_fields_.size();
     descriptor.subtargets = hooks_.subtargets != nullptr ? &subtargets_trampoline : nullptr;
+    descriptor.frame = hooks_.frame != nullptr ? &frame_trampoline : nullptr;
     return descriptor;
 }
 std::optional<strata_widget_input_extension> Widget::input_descriptor() {

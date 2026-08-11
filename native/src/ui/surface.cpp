@@ -12,31 +12,24 @@
 #include <vector>
 
 #include "core/utf8.hpp"
-#include "ui/text_geometry.hpp"
 #include "ui/presentation_geometry.hpp"
+#include "ui/text_geometry.hpp"
 #include "ui/widget/editor_geometry.hpp"
 #include "ui/widget/inspection.hpp"
 
 namespace strata::ui {
 
 bool surface_detail::LazyConvergenceTracker::SignatureLess::operator()(
-    const LazyRangeSignature& left,
-    const LazyRangeSignature& right
-) const noexcept {
+    const LazyRangeSignature& left, const LazyRangeSignature& right) const noexcept {
     return std::lexicographical_compare(
-        left.begin(),
-        left.end(),
-        right.begin(),
-        right.end(),
+        left.begin(), left.end(), right.begin(), right.end(),
         [](const LazyRangeState& left_state, const LazyRangeState& right_state) {
             return left_state < right_state;
-        }
-    );
+        });
 }
 
-surface_detail::LazyConvergenceStatus surface_detail::LazyConvergenceTracker::observe(
-    LazyRangeSignature signature
-) {
+surface_detail::LazyConvergenceStatus
+surface_detail::LazyConvergenceTracker::observe(LazyRangeSignature signature) {
     std::sort(signature.begin(), signature.end());
     for (const LazyRangeState& state : signature) {
         producers_.emplace(state.structural_path, state.child_count);
@@ -51,7 +44,8 @@ surface_detail::LazyConvergenceStatus surface_detail::LazyConvergenceTracker::ob
     if (bound != std::numeric_limits<std::size_t>::max() && observed_.size() > bound) {
         throw std::logic_error("lazy convergence exceeded its canonical finite state bound");
     }
-    if (fixed) return LazyConvergenceStatus::fixed_point;
+    if (fixed)
+        return LazyConvergenceStatus::fixed_point;
     return LazyConvergenceStatus::progress;
 }
 
@@ -62,28 +56,24 @@ std::size_t surface_detail::LazyConvergenceTracker::observed_state_count() const
 std::size_t surface_detail::LazyConvergenceTracker::known_state_bound() const noexcept {
     const auto saturated_multiply = [](const std::size_t left, const std::size_t right) {
         return left != 0U && right > std::numeric_limits<std::size_t>::max() / left
-            ? std::numeric_limits<std::size_t>::max()
-            : left * right;
+                   ? std::numeric_limits<std::size_t>::max()
+                   : left * right;
     };
     const auto saturated_add = [](const std::size_t left, const std::size_t right) {
         return right > std::numeric_limits<std::size_t>::max() - left
-            ? std::numeric_limits<std::size_t>::max()
-            : left + right;
+                   ? std::numeric_limits<std::size_t>::max()
+                   : left + right;
     };
     std::size_t bound = 1U;
     for (const auto& [path, child_count] : producers_) {
         static_cast<void>(path);
         const std::size_t first = saturated_add(child_count, 1U);
         const std::size_t second = saturated_add(child_count, 2U);
-        const std::size_t ranges = first % 2U == 0U
-            ? saturated_multiply(first / 2U, second)
-            : saturated_multiply(first, second / 2U);
+        const std::size_t ranges = first % 2U == 0U ? saturated_multiply(first / 2U, second)
+                                                    : saturated_multiply(first, second / 2U);
         // A previously discovered producer is either absent from the current attached tree or
         // contributes one materialized/visible pair of canonical half-open ranges.
-        const std::size_t component_states = saturated_add(
-            saturated_multiply(ranges, ranges),
-            1U
-        );
+        const std::size_t component_states = saturated_add(saturated_multiply(ranges, ranges), 1U);
         bound = saturated_multiply(bound, component_states);
     }
     return bound;
@@ -91,20 +81,18 @@ std::size_t surface_detail::LazyConvergenceTracker::known_state_bound() const no
 
 surface_detail::MaterializationPublicationClaim
 surface_detail::MaterializationPublicationLedger::claim(
-    const std::shared_ptr<const DescriptionMaterialization>& transaction
-) {
+    const std::shared_ptr<const DescriptionMaterialization>& transaction) {
     if (transaction == nullptr || transaction->transaction_id() == 0U) {
         return MaterializationPublicationClaim::invalid_transaction;
     }
     purge_expired();
     const std::uint64_t id = transaction->transaction_id();
     if (const auto found = published_.find(id); found != published_.end()) {
-        if (const std::shared_ptr<const DescriptionMaterialization> live =
-                found->second.lock();
+        if (const std::shared_ptr<const DescriptionMaterialization> live = found->second.lock();
             live != nullptr) {
             return live.get() == transaction.get()
-                ? MaterializationPublicationClaim::already_published
-                : MaterializationPublicationClaim::duplicate_live_identity;
+                       ? MaterializationPublicationClaim::already_published
+                       : MaterializationPublicationClaim::duplicate_live_identity;
         }
         published_.erase(found);
     }
@@ -127,71 +115,69 @@ namespace {
 }
 
 class RuntimeFrameGuard final {
-public:
+  public:
     explicit RuntimeFrameGuard(runtime::RuntimeServices& services)
         : services_(services), frame_index_(services_.begin_frame()) {}
 
     RuntimeFrameGuard(const RuntimeFrameGuard&) = delete;
     RuntimeFrameGuard& operator=(const RuntimeFrameGuard&) = delete;
-    ~RuntimeFrameGuard() { services_.end_frame(); }
+    ~RuntimeFrameGuard() {
+        services_.end_frame();
+    }
 
-    [[nodiscard]] std::uint64_t frame_index() const noexcept { return frame_index_; }
+    [[nodiscard]] std::uint64_t frame_index() const noexcept {
+        return frame_index_;
+    }
 
-private:
+  private:
     runtime::RuntimeServices& services_;
     std::uint64_t frame_index_;
 };
 
 class BooleanScope final {
-public:
-    explicit BooleanScope(bool& value) noexcept : value_(value) { value_ = true; }
+  public:
+    explicit BooleanScope(bool& value) noexcept : value_(value) {
+        value_ = true;
+    }
     BooleanScope(const BooleanScope&) = delete;
     BooleanScope& operator=(const BooleanScope&) = delete;
-    ~BooleanScope() { value_ = false; }
+    ~BooleanScope() {
+        value_ = false;
+    }
 
-private:
+  private:
     bool& value_;
 };
 
-[[nodiscard]] runtime::Value object(
-    std::initializer_list<std::pair<std::string, runtime::Value>> fields
-) {
+[[nodiscard]] runtime::Value
+object(std::initializer_list<std::pair<std::string, runtime::Value>> fields) {
     return runtime::Value(std::vector<std::pair<std::string, runtime::Value>>(fields));
 }
 
 [[nodiscard]] DescriptionNode::Properties surface_layout() {
-    return {{
-        "$layout",
-        runtime::ExpressionValue(object({
-            {"height", object({{"weight", runtime::Value(1.0)}})},
-            {"kind", runtime::Value("OVERLAY")},
-            {"width", object({{"weight", runtime::Value(1.0)}})},
-        }))
-    }};
+    return {{"$layout", runtime::ExpressionValue(object({
+                            {"height", object({{"weight", runtime::Value(1.0)}})},
+                            {"kind", runtime::Value("OVERLAY")},
+                            {"width", object({{"weight", runtime::Value(1.0)}})},
+                        }))}};
 }
 
-[[nodiscard]] DescriptionNode::Properties surface_layer_properties(
-    const std::optional<std::string>& transition
-) {
+[[nodiscard]] DescriptionNode::Properties
+surface_layer_properties(const std::optional<std::string>& transition) {
     DescriptionNode::Properties properties = surface_layout();
     if (transition.has_value()) {
-        properties.emplace(
-            "transition",
-            runtime::ExpressionValue(runtime::Value(*transition))
-        );
+        properties.emplace("transition", runtime::ExpressionValue(runtime::Value(*transition)));
     }
     return properties;
 }
 
-[[nodiscard]] std::shared_ptr<const DescriptionChildren> eager(
-    std::vector<std::shared_ptr<const DescriptionNode>> children
-) {
+[[nodiscard]] std::shared_ptr<const DescriptionChildren>
+eager(std::vector<std::shared_ptr<const DescriptionNode>> children) {
     return std::make_shared<const EagerDescriptionChildren>(std::move(children));
 }
 
-[[nodiscard]] std::shared_ptr<const DescriptionNode> declaration_root(
-    const std::shared_ptr<const DescriptionNode>& declaration
-) {
+[[nodiscard]] std::shared_ptr<const DescriptionNode>
+declaration_root(const std::shared_ptr<const DescriptionNode>& declaration) {
     if (declaration == nullptr || declaration->children == nullptr ||
         declaration->children->size() != 1U) {
         throw std::logic_error("validated surface declaration must describe exactly one root node");
@@ -199,39 +185,32 @@ private:
     return declaration->children->at(0U);
 }
 
-[[nodiscard]] std::string layer_name(
-    const std::string_view id,
-    const std::string_view prefix
-) {
+[[nodiscard]] std::string layer_name(const std::string_view id, const std::string_view prefix) {
     if (!id.starts_with(prefix) || id.size() == prefix.size()) {
         throw std::logic_error("declarative layer identity does not match its role");
     }
     return std::string(id.substr(prefix.size()));
 }
 
-[[nodiscard]] surface_detail::LazyRangeSignature lazy_range_signature(
-    const RetainedTree& tree,
-    const LayoutResult& layout
-) {
+[[nodiscard]] surface_detail::LazyRangeSignature lazy_range_signature(const RetainedTree& tree,
+                                                                      const LayoutResult& layout) {
     surface_detail::LazyRangeSignature result;
-    if (tree.root() == nullptr) return result;
+    if (tree.root() == nullptr)
+        return result;
     const auto visit = [&result, &layout](const auto& self, const RetainedNode& node) -> void {
-        if (node.lifecycle() != RetainedLifecycle::attached) return;
+        if (node.lifecycle() != RetainedLifecycle::attached)
+            return;
         if (node.description().materialization.has_value()) {
             const DescriptionNode& projected = node.description();
-            const std::shared_ptr<const DescriptionNode>& source =
-                projected.generated_source;
+            const std::shared_ptr<const DescriptionNode>& source = projected.generated_source;
             const std::shared_ptr<const DescriptionChildren> provider =
                 source != nullptr ? source->children : projected.children;
             const std::size_t child_count = provider->size();
             MaterializationRange materialized =
                 node.realized_range().value_or(MaterializationRange{});
             materialized.start = std::min(materialized.start, child_count);
-            materialized.end_exclusive = std::clamp(
-                materialized.end_exclusive,
-                materialized.start,
-                child_count
-            );
+            materialized.end_exclusive =
+                std::clamp(materialized.end_exclusive, materialized.start, child_count);
             MaterializationRange visible;
             if (const LayoutRecord* record = layout.find(node.identity());
                 record != nullptr && record->visible_range.has_value()) {
@@ -246,65 +225,50 @@ private:
                 child_count,
                 materialized,
                 visible,
-                !node.realization_current(
-                    provider,
-                    projected.projected_theme,
-                    projected.projected_theme_scope,
-                    projected.projected_theme_generation,
-                    materialized
-                ),
+                !node.realization_current(provider, projected.projected_theme,
+                                          projected.projected_theme_scope,
+                                          projected.projected_theme_generation, materialized),
             });
         }
-        for (const auto& child : node.children()) self(self, *child);
+        for (const auto& child : node.children())
+            self(self, *child);
     };
     visit(visit, *tree.root());
     std::sort(result.begin(), result.end());
     return result;
 }
 
-[[nodiscard]] MaterializationRange desired_realization_range(
-    const RetainedNode& node,
-    const LayoutResult& layout,
-    const std::size_t child_count
-) {
+[[nodiscard]] MaterializationRange desired_realization_range(const RetainedNode& node,
+                                                             const LayoutResult& layout,
+                                                             const std::size_t child_count) {
     MaterializationRange desired;
     const LayoutRecord* const record = layout.find(node.identity());
-    if (record == nullptr) return desired;
-    if (record->virtual_item_extents.has_value() &&
-        record->virtual_axis.has_value() && record->viewport.has_value()) {
+    if (record == nullptr)
+        return desired;
+    if (record->virtual_item_extents.has_value() && record->virtual_axis.has_value() &&
+        record->viewport.has_value()) {
         const collection::VirtualItemExtents& extents = *record->virtual_item_extents;
         const LayoutAxis axis = *record->virtual_axis;
-        double offset = axis == LayoutAxis::vertical
-            ? record->scroll_offset.y
-            : record->scroll_offset.x;
+        double offset =
+            axis == LayoutAxis::vertical ? record->scroll_offset.y : record->scroll_offset.x;
         if (const runtime::Value* retained = node.retained_value("strata.scroll.offset");
             retained != nullptr && retained->object() != nullptr) {
-            const runtime::Value* value = retained->field(
-                axis == LayoutAxis::vertical ? "y" : "x"
-            );
-            if (value != nullptr && value->number() != nullptr &&
-                std::isfinite(*value->number())) {
+            const runtime::Value* value = retained->field(axis == LayoutAxis::vertical ? "y" : "x");
+            if (value != nullptr && value->number() != nullptr && std::isfinite(*value->number())) {
                 offset = *value->number();
             }
         }
-        const double viewport_extent = axis == LayoutAxis::vertical
-            ? record->viewport->height
-            : record->viewport->width;
+        const double viewport_extent =
+            axis == LayoutAxis::vertical ? record->viewport->height : record->viewport->width;
         const std::size_t item_count = std::min(child_count, extents.size());
         if (item_count == 0U || offset >= extents.total() || viewport_extent <= 0.0) {
             return desired;
         }
         offset = std::max(0.0, offset);
-        const std::size_t start = std::min(
-            item_count,
-            extents.first_index_ending_after(offset)
-        );
+        const std::size_t start = std::min(item_count, extents.first_index_ending_after(offset));
         const std::size_t end = std::min(
             item_count,
-            extents.end_index_starting_before(
-                std::min(extents.total(), offset + viewport_extent)
-            )
-        );
+            extents.end_index_starting_before(std::min(extents.total(), offset + viewport_extent)));
         const std::size_t overscan = record->virtual_overscan;
         return MaterializationRange{
             start > overscan ? start - overscan : 0U,
@@ -321,18 +285,15 @@ private:
     return desired;
 }
 
-[[nodiscard]] bool lazy_ranges_require_realization(
-    const surface_detail::LazyRangeSignature& signature
-) {
+[[nodiscard]] bool
+lazy_ranges_require_realization(const surface_detail::LazyRangeSignature& signature) {
     return std::ranges::any_of(signature, [](const surface_detail::LazyRangeState& state) {
         return state.stale_projection || state.materialized != state.visible;
     });
 }
 
-void add_layout_operations(
-    SurfaceOperationCounters& target,
-    const LayoutOperationCounters& source
-) {
+void add_layout_operations(SurfaceOperationCounters& target,
+                           const LayoutOperationCounters& source) {
     target.layout_measured_nodes += source.measured_nodes;
     target.layout_arranged_nodes += source.arranged_nodes;
     target.layout_translated_nodes += source.translated_nodes;
@@ -340,56 +301,50 @@ void add_layout_operations(
 }
 
 void append_input(InputOperationResult& target, InputOperationResult source) {
-    target.events.insert(
-        target.events.end(),
-        std::make_move_iterator(source.events.begin()),
-        std::make_move_iterator(source.events.end())
-    );
-    target.action_outcomes.insert(
-        target.action_outcomes.end(),
-        std::make_move_iterator(source.action_outcomes.begin()),
-        std::make_move_iterator(source.action_outcomes.end())
-    );
+    target.events.insert(target.events.end(), std::make_move_iterator(source.events.begin()),
+                         std::make_move_iterator(source.events.end()));
+    target.action_outcomes.insert(target.action_outcomes.end(),
+                                  std::make_move_iterator(source.action_outcomes.begin()),
+                                  std::make_move_iterator(source.action_outcomes.end()));
     target.injected_events += source.injected_events;
     target.processed_events += source.processed_events;
 }
 
 [[nodiscard]] std::string resolved_viewport_class(const SurfaceEnvironment& environment) {
-    const double content_width = std::max(
-        0.0,
-        environment.logical_width - environment.safe_insets.horizontal()
-    );
-    if (content_width < 520.0) return "compact";
-    if (content_width < 900.0) return "regular";
+    const double content_width =
+        std::max(0.0, environment.logical_width - environment.safe_insets.horizontal());
+    if (content_width < 520.0)
+        return "compact";
+    if (content_width < 900.0)
+        return "regular";
     return "wide";
 }
 
 [[nodiscard]] std::string resolved_orientation(const SurfaceEnvironment& environment) {
-    if (environment.logical_width > environment.logical_height * 1.05) return "landscape";
-    if (environment.logical_height > environment.logical_width * 1.05) return "portrait";
+    if (environment.logical_width > environment.logical_height * 1.05)
+        return "landscape";
+    if (environment.logical_height > environment.logical_width * 1.05)
+        return "portrait";
     return "square";
 }
 
 [[nodiscard]] std::string pointer_precision_binding(const PointerPrecision precision) {
     switch (precision) {
-    case PointerPrecision::none: return "NONE";
-    case PointerPrecision::coarse: return "COARSE";
-    case PointerPrecision::fine: return "FINE";
+    case PointerPrecision::none:
+        return "NONE";
+    case PointerPrecision::coarse:
+        return "COARSE";
+    case PointerPrecision::fine:
+        return "FINE";
     }
     throw std::logic_error("unknown surface pointer precision");
 }
 
-[[nodiscard]] runtime::Value surface_environment_binding(
-    const SurfaceEnvironment& environment
-) {
-    const double content_width = std::max(
-        0.0,
-        environment.logical_width - environment.safe_insets.horizontal()
-    );
-    const double content_height = std::max(
-        0.0,
-        environment.logical_height - environment.safe_insets.vertical()
-    );
+[[nodiscard]] runtime::Value surface_environment_binding(const SurfaceEnvironment& environment) {
+    const double content_width =
+        std::max(0.0, environment.logical_width - environment.safe_insets.horizontal());
+    const double content_height =
+        std::max(0.0, environment.logical_height - environment.safe_insets.vertical());
     const std::string viewport = resolved_viewport_class(environment);
     const bool compact = environment.density == SurfaceDensity::compact;
     return runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{
@@ -405,7 +360,8 @@ void append_input(InputOperationResult& target, InputOperationResult source) {
         {"controller", runtime::Value(environment.input.controller)},
         {"touch", runtime::Value(environment.input.touch)},
         {"pointer", runtime::Value(environment.input.pointer)},
-        {"pointerPrecision", runtime::Value(pointer_precision_binding(environment.input.pointer_precision))},
+        {"pointerPrecision",
+         runtime::Value(pointer_precision_binding(environment.input.pointer_precision))},
         {"keyboard", runtime::Value(environment.input.keyboard)},
         {"ime", runtime::Value(environment.input.ime)},
         {"density", runtime::Value(std::string(surface_density_name(environment.density)))},
@@ -423,228 +379,174 @@ void append_input(InputOperationResult& target, InputOperationResult source) {
 } // namespace
 
 void SurfaceEnvironment::validate() const {
-    if (framebuffer_width < 0 || framebuffer_height < 0 ||
-        !std::isfinite(logical_width) || logical_width < 0.0 ||
-        !std::isfinite(logical_height) || logical_height < 0.0 ||
+    if (framebuffer_width < 0 || framebuffer_height < 0 || !std::isfinite(logical_width) ||
+        logical_width < 0.0 || !std::isfinite(logical_height) || logical_height < 0.0 ||
         !std::isfinite(scale) || scale <= 0.0) {
-        throw std::invalid_argument("surface environment contains invalid framebuffer, logical size, or scale");
+        throw std::invalid_argument(
+            "surface environment contains invalid framebuffer, logical size, or scale");
     }
     layout_environment(0).validate();
 }
 
-LayoutEnvironment SurfaceEnvironment::layout_environment(
-    const std::int64_t frame_time_nanos
-) const {
+LayoutEnvironment
+SurfaceEnvironment::layout_environment(const std::int64_t frame_time_nanos) const {
     return LayoutEnvironment{
-        generation,
-        Rect{0.0, 0.0, logical_width, logical_height},
-        scale,
-        safe_insets,
-        point_snapping,
-        rectangle_snapping,
-        true,
-        frame_time_nanos,
+        generation,     Rect{0.0, 0.0, logical_width, logical_height},
+        scale,          safe_insets,
+        point_snapping, rectangle_snapping,
+        true,           frame_time_nanos,
         reduced_motion,
     };
 }
 
-Surface::Surface(
-    std::string id,
-    runtime::ApplicationContext& application,
-    const runtime::LayerRole root_role,
-    std::string root_name,
-    SurfaceEnvironment environment,
-    std::shared_ptr<const TextEngine> text_engine,
-    WidgetRegistry widget_registry,
-    BehaviorRegistry behavior_registry,
-    runtime::HostServices* const host_services,
-    Theme initial_theme,
-    std::string host_service_owner,
-    std::shared_ptr<const resource::SvgImageRegistry> svg_images
-) : id_(std::move(id)),
-    profiler_(runtime::ProfilerScope::surface, id_),
-    application_(application),
-    root_role_(root_role),
-    root_name_(std::move(root_name)),
-    environment_(std::move(environment)),
-    adopted_environment_generation_(environment_.generation),
-    viewport_class_(resolved_viewport_class(environment_)),
-    behaviors_(std::move(behavior_registry)),
-    widgets_(std::move(widget_registry)),
-    descriptions_(application_, widgets_),
-    themes_(std::move(initial_theme)),
-    text_engine_(std::move(text_engine)),
-    svg_images_(std::move(svg_images)),
-    layout_engine_(text_engine_ != nullptr
-        ? LayoutEngine::IntrinsicMeasure(
-              [engine = text_engine_](const RetainedNode& node, const Constraints& constraints) {
-                  return engine->measure(node, constraints);
+Surface::Surface(std::string id, runtime::ApplicationContext& application,
+                 const runtime::LayerRole root_role, std::string root_name,
+                 SurfaceEnvironment environment, std::shared_ptr<const TextEngine> text_engine,
+                 WidgetRegistry widget_registry, BehaviorRegistry behavior_registry,
+                 runtime::HostServices* const host_services, Theme initial_theme,
+                 std::string host_service_owner,
+                 std::shared_ptr<const resource::SvgImageRegistry> svg_images)
+    : id_(std::move(id)), profiler_(runtime::ProfilerScope::surface, id_),
+      application_(application), root_role_(root_role), root_name_(std::move(root_name)),
+      environment_(std::move(environment)),
+      adopted_environment_generation_(environment_.generation),
+      viewport_class_(resolved_viewport_class(environment_)),
+      behaviors_(std::move(behavior_registry)), widgets_(std::move(widget_registry)),
+      descriptions_(application_, widgets_), themes_(std::move(initial_theme)),
+      text_engine_(std::move(text_engine)), svg_images_(std::move(svg_images)),
+      layout_engine_(text_engine_ != nullptr
+                         ? LayoutEngine::IntrinsicMeasure(
+                               [engine = text_engine_](const RetainedNode& node,
+                                                       const Constraints& constraints) {
+                                   return engine->measure(node, constraints);
+                               })
+                         : LayoutEngine::IntrinsicMeasure{}),
+      status_feedback_([this] { invalidate_frame(); }),
+      notifications_([this](const NotificationChange& change) { notifications_changed(change); }),
+      input_(
+          id_, host_service_owner.empty() ? id_ : std::move(host_service_owner), application_,
+          widgets_, behaviors_, status_feedback_, notifications_,
+          [this](const runtime::Action& action) { return execute_environment_action(action); },
+          [this](const RetainedNode* const node, const std::string_view name) {
+              bool inside_lazy_materialization = false;
+              for (const RetainedNode* current = node; current != nullptr;
+                   current = current->parent()) {
+                  if (current->description().materialization_result != nullptr) {
+                      inside_lazy_materialization = true;
+                      break;
+                  }
               }
-          )
-        : LayoutEngine::IntrinsicMeasure{}),
-    status_feedback_([this] { invalidate_frame(); }),
-    notifications_([this](const NotificationChange& change) { notifications_changed(change); }),
-    input_(
-        id_,
-        host_service_owner.empty() ? id_ : std::move(host_service_owner),
-        application_,
-        widgets_,
-        behaviors_,
-        status_feedback_,
-        notifications_,
-        [this](const runtime::Action& action) { return execute_environment_action(action); },
-        [this](const RetainedNode* const node, const std::string_view name) {
-            bool inside_lazy_materialization = false;
-            for (const RetainedNode* current = node;
-                 current != nullptr;
-                 current = current->parent()) {
-                if (current->description().materialization_result != nullptr) {
-                    inside_lazy_materialization = true;
-                    break;
-                }
-            }
-            const bool native_slider_value =
-                node != nullptr && node->description().type == "Slider" &&
-                name == "$value" &&
-                !node->description().properties.contains("presentationTemplate") &&
-                !inside_lazy_materialization;
-            if (node == nullptr ||
-                descriptions_.observes_retained_value(
-                    *node,
-                    name,
-                    !native_slider_value
-                )) {
-                invalidate_description();
-            } else {
-                invalidate_frame();
-            }
-        },
-        [this](const RetainedNode& node, const LayoutRecord& layout) {
-            return widget_hit_bounds(*this, node, layout);
-        },
-        [this](
-            const RetainedNode& node,
-            const LayoutRecord& layout,
-            const std::string_view text,
-            const Point position
-        ) -> std::optional<std::size_t> {
-            if (text_engine_ == nullptr) return std::nullopt;
-            const TextLayout text_layout = text_engine_->layout(node, text);
-            const std::vector<WidgetSubtarget> targets = input_.subtargets(node.identity());
-            const std::optional<Rect> viewport = editable_text_viewport(
-                node, layout, targets
-            );
-            if (!viewport.has_value() || viewport->empty()) return std::nullopt;
-            if (node.description().type == "ChipInput" ||
-                node.description().type == "CommandPalette") {
-                if (position.x < viewport->x || position.y < viewport->y ||
-                    position.x > viewport->right() || position.y > viewport->bottom()) {
-                    return std::nullopt;
-                }
-            }
-            const Point origin = text_input_origin(
-                *viewport, text_layout, node.description().type == "TextArea"
-            );
-            const std::size_t utf16 = text_layout_hit_offset(
-                text_layout,
-                Point{position.x - origin.x, position.y - origin.y}
-            );
-            return utf8_byte_for_utf16_offset(text, utf16);
-        },
-        [this](const RetainedNode& node, const std::string_view text) {
-            return text_engine_ != nullptr
-                ? text_engine_->shape(node, text).metrics.width
-                : 0.0;
-        },
-        [this](
-            const RetainedNode& node,
-            const LayoutRecord& layout,
-            const TextEditorSnapshot& editor
-        ) -> std::optional<runtime::HostServiceRect> {
-            if (text_engine_ == nullptr || !environment_.input.ime) return std::nullopt;
-            const std::vector<WidgetSubtarget> targets = input_.subtargets(node.identity());
-            const std::optional<Rect> viewport = editable_text_viewport(
-                node, layout, targets
-            );
-            if (!viewport.has_value() || viewport->empty()) return std::nullopt;
-            const TextLayout text_layout = text_engine_->layout(node, editor.text);
-            const Point origin = text_input_origin(
-                *viewport, text_layout, node.description().type == "TextArea"
-            );
-            Rect caret = text_layout_caret_rect(
-                text_layout, origin, editor.text, editor.caret
-            );
-            MotionTransform transform;
-            std::vector<const RetainedNode*> route;
-            for (const RetainedNode* current = &node; current != nullptr;
-                 current = current->parent()) {
-                route.push_back(current);
-            }
-            for (auto current = route.rbegin(); current != route.rend(); ++current) {
-                const LayoutRecord* current_layout =
-                    layout_engine_.result().find((*current)->identity());
-                if (current_layout == nullptr) continue;
-                transform = concatenate_presentation_transform(
-                    transform,
-                    local_presentation_transform(
-                        **current,
-                        motion_,
-                        current_layout->bounds
-                    )
-                );
-            }
-            caret = transform_presentation_bounds(caret, transform);
-            return runtime::HostServiceRect{
-                caret.x, caret.y, caret.width, caret.height,
-            };
-        },
-        [this](const RetainedNode& node) {
-            return render_engine_.snapshot_subtree(node);
-        },
-        {},
-        host_services,
-        [this](
-            const RetainedNode& node,
-            const std::string_view value,
-            const TextLayoutOptions& options
-        ) {
-            return text_engine_ != nullptr
-                ? text_engine_->layout(node, value, options)
-                : TextLayout{};
-        },
-        [this](const std::string_view key) {
-            if (!advancing_scroll_animation_) {
-                const auto animation = scroll_animations_.find(key);
-                if (animation != scroll_animations_.end()) scroll_animations_.erase(animation);
-            }
-        },
-        [this] { invalidate_frame(); }
-    ),
-    commands_(widgets_, &application_, &application_.durability(), id_),
-    semantics_(widgets_, behaviors_),
-    material_registry_(
-        application_.bundle()->schema_registry(),
-        [this](runtime::RuntimeDiagnostic diagnostic) {
-            application_.services().report(std::move(diagnostic));
-        }
-    ) {
-    if (id_.empty()) throw std::invalid_argument("surface id must not be empty");
-    if (root_name_.empty()) throw std::invalid_argument("surface root name must not be empty");
+              const bool native_slider_value =
+                  node != nullptr && node->description().type == "Slider" && name == "$value" &&
+                  !node->description().properties.contains("presentationTemplate") &&
+                  !inside_lazy_materialization;
+              if (node == nullptr ||
+                  descriptions_.observes_retained_value(*node, name, !native_slider_value)) {
+                  invalidate_description();
+              } else {
+                  invalidate_frame();
+              }
+          },
+          [this](const RetainedNode& node, const LayoutRecord& layout) {
+              return widget_hit_bounds(*this, node, layout);
+          },
+          [this](const RetainedNode& node, const LayoutRecord& layout, const std::string_view text,
+                 const Point position) -> std::optional<std::size_t> {
+              if (text_engine_ == nullptr)
+                  return std::nullopt;
+              const TextLayout text_layout = text_engine_->layout(node, text);
+              const std::vector<WidgetSubtarget> targets = input_.subtargets(node.identity());
+              const std::optional<Rect> viewport = editable_text_viewport(node, layout, targets);
+              if (!viewport.has_value() || viewport->empty())
+                  return std::nullopt;
+              if (node.description().type == "ChipInput" ||
+                  node.description().type == "CommandPalette") {
+                  if (position.x < viewport->x || position.y < viewport->y ||
+                      position.x > viewport->right() || position.y > viewport->bottom()) {
+                      return std::nullopt;
+                  }
+              }
+              const Point origin =
+                  text_input_origin(*viewport, text_layout, node.description().type == "TextArea");
+              const std::size_t utf16 = text_layout_hit_offset(
+                  text_layout, Point{position.x - origin.x, position.y - origin.y});
+              return utf8_byte_for_utf16_offset(text, utf16);
+          },
+          [this](const RetainedNode& node, const std::string_view text) {
+              return text_engine_ != nullptr ? text_engine_->shape(node, text).metrics.width : 0.0;
+          },
+          [this](const RetainedNode& node, const LayoutRecord& layout,
+                 const TextEditorSnapshot& editor) -> std::optional<runtime::HostServiceRect> {
+              if (text_engine_ == nullptr || !environment_.input.ime)
+                  return std::nullopt;
+              const std::vector<WidgetSubtarget> targets = input_.subtargets(node.identity());
+              const std::optional<Rect> viewport = editable_text_viewport(node, layout, targets);
+              if (!viewport.has_value() || viewport->empty())
+                  return std::nullopt;
+              const TextLayout text_layout = text_engine_->layout(node, editor.text);
+              const Point origin =
+                  text_input_origin(*viewport, text_layout, node.description().type == "TextArea");
+              Rect caret = text_layout_caret_rect(text_layout, origin, editor.text, editor.caret);
+              MotionTransform transform;
+              std::vector<const RetainedNode*> route;
+              for (const RetainedNode* current = &node; current != nullptr;
+                   current = current->parent()) {
+                  route.push_back(current);
+              }
+              for (auto current = route.rbegin(); current != route.rend(); ++current) {
+                  const LayoutRecord* current_layout =
+                      layout_engine_.result().find((*current)->identity());
+                  if (current_layout == nullptr)
+                      continue;
+                  transform = concatenate_presentation_transform(
+                      transform,
+                      local_presentation_transform(**current, motion_, current_layout->bounds));
+              }
+              caret = transform_presentation_bounds(caret, transform);
+              return runtime::HostServiceRect{
+                  caret.x,
+                  caret.y,
+                  caret.width,
+                  caret.height,
+              };
+          },
+          [this](const RetainedNode& node) { return render_engine_.snapshot_subtree(node); }, {},
+          host_services,
+          [this](const RetainedNode& node, const std::string_view value,
+                 const TextLayoutOptions& options) {
+              return text_engine_ != nullptr ? text_engine_->layout(node, value, options)
+                                             : TextLayout{};
+          },
+          [this](const std::string_view key) {
+              if (!advancing_scroll_animation_) {
+                  const auto animation = scroll_animations_.find(key);
+                  if (animation != scroll_animations_.end())
+                      scroll_animations_.erase(animation);
+              }
+          },
+          [this] { invalidate_frame(); }),
+      commands_(widgets_, &application_, &application_.durability(), id_),
+      semantics_(widgets_, behaviors_),
+      material_registry_(application_.bundle()->schema_registry(),
+                         [this](runtime::RuntimeDiagnostic diagnostic) {
+                             application_.services().report(std::move(diagnostic));
+                         }) {
+    if (id_.empty())
+        throw std::invalid_argument("surface id must not be empty");
+    if (root_name_.empty())
+        throw std::invalid_argument("surface root name must not be empty");
     environment_.validate();
     tree_.configure_persistence(
         [this](const std::string_view type) {
             const WidgetLifecycle* lifecycle = widgets_.find(type);
-            return lifecycle != nullptr
-                ? lifecycle->persistence.retained_fields
-                : std::vector<std::string>{};
+            return lifecycle != nullptr ? lifecycle->persistence.retained_fields
+                                        : std::vector<std::string>{};
         },
-        [this](
-            const std::string_view type,
-            const std::string_view key,
-            const std::string_view field
-        ) -> std::optional<runtime::Value> {
+        [this](const std::string_view type, const std::string_view key,
+               const std::string_view field) -> std::optional<runtime::Value> {
             const runtime::Value* value = application_.durability().widget_value(key, field);
-            if (value == nullptr) return std::nullopt;
+            if (value == nullptr)
+                return std::nullopt;
             const WidgetLifecycle* lifecycle = widgets_.find(type);
             if (lifecycle == nullptr || lifecycle->persistence.accepts == nullptr ||
                 lifecycle->persistence.accepts(field, *value)) {
@@ -652,8 +554,8 @@ Surface::Surface(
             }
             application_.services().report(runtime::RuntimeDiagnostic{
                 "STRATA.DURABILITY.TYPE_MISMATCH",
-                "Persisted widget field '" + std::string(field) + "' for '" +
-                    std::string(key) + "' has an invalid value and was discarded.",
+                "Persisted widget field '" + std::string(field) + "' for '" + std::string(key) +
+                    "' has an invalid value and was discarded.",
                 id_,
                 std::string(type),
                 runtime::DiagnosticSeverity::warning,
@@ -662,16 +564,10 @@ Surface::Surface(
             static_cast<void>(application_.durability().erase_widget_value(key, field));
             return std::nullopt;
         },
-        [this](
-            const std::string_view key,
-            const std::string_view field,
-            const runtime::Value& value
-        ) {
-            application_.durability().set_widget_value(
-                std::string(key), std::string(field), value
-            );
-        }
-    );
+        [this](const std::string_view key, const std::string_view field,
+               const runtime::Value& value) {
+            application_.durability().set_widget_value(std::string(key), std::string(field), value);
+        });
     motion_.set_supplemental(themes_.declared_animations());
 }
 
@@ -680,51 +576,69 @@ Surface::~Surface() {
     application_.undo().clear(id_);
 }
 
-const std::string& Surface::id() const noexcept { return id_; }
-runtime::ApplicationContext& Surface::application() const noexcept { return application_; }
-const SurfaceEnvironment& Surface::environment() const noexcept { return environment_; }
-runtime::Profiler& Surface::profiler() noexcept { return profiler_; }
-const runtime::Profiler& Surface::profiler() const noexcept { return profiler_; }
-std::string_view Surface::viewport_class() const noexcept { return viewport_class_; }
+const std::string& Surface::id() const noexcept {
+    return id_;
+}
+runtime::ApplicationContext& Surface::application() const noexcept {
+    return application_;
+}
+const SurfaceEnvironment& Surface::environment() const noexcept {
+    return environment_;
+}
+runtime::Profiler& Surface::profiler() noexcept {
+    return profiler_;
+}
+const runtime::Profiler& Surface::profiler() const noexcept {
+    return profiler_;
+}
+std::string_view Surface::viewport_class() const noexcept {
+    return viewport_class_;
+}
 
-const Theme& Surface::theme() const noexcept { return *themes_.root(); }
+const Theme& Surface::theme() const noexcept {
+    return *themes_.root();
+}
 
-const std::shared_ptr<const Theme>* Surface::registered_theme(
-    const std::string_view name
-) const noexcept {
+const std::shared_ptr<const Theme>*
+Surface::registered_theme(const std::string_view name) const noexcept {
     return themes_.find(name);
 }
 
 bool Surface::register_theme(Theme theme) {
-    if (!themes_.register_theme(std::move(theme))) return false;
+    if (!themes_.register_theme(std::move(theme)))
+        return false;
     motion_.set_supplemental(themes_.declared_animations());
     invalidate_description();
     return true;
 }
 
 bool Surface::set_theme(Theme theme) {
-    if (!themes_.set_root(std::move(theme))) return false;
+    if (!themes_.set_root(std::move(theme)))
+        return false;
     motion_.set_supplemental(themes_.declared_animations());
     invalidate_description();
     return true;
 }
 
 bool Surface::unregister_theme(const std::string_view name) {
-    if (!themes_.unregister_theme(name)) return false;
+    if (!themes_.unregister_theme(name))
+        return false;
     motion_.set_supplemental(themes_.declared_animations());
     invalidate_description();
     return true;
 }
 
 bool Surface::set_scoped_theme(std::string node_key, Theme theme) {
-    if (!themes_.set_scoped_theme(std::move(node_key), std::move(theme))) return false;
+    if (!themes_.set_scoped_theme(std::move(node_key), std::move(theme)))
+        return false;
     motion_.set_supplemental(themes_.declared_animations());
     invalidate_description();
     return true;
 }
 
 bool Surface::clear_scoped_theme(const std::string_view node_key) {
-    if (!themes_.clear_scoped_theme(node_key)) return false;
+    if (!themes_.clear_scoped_theme(node_key))
+        return false;
     motion_.set_supplemental(themes_.declared_animations());
     invalidate_description();
     return true;
@@ -733,12 +647,14 @@ bool Surface::clear_scoped_theme(const std::string_view node_key) {
 bool Surface::animate_scroll_to(ScrollAnimationRequest request) {
     if (blank(request.key) || blank(request.timing) ||
         (!request.x.has_value() && !request.y.has_value())) {
-        throw std::invalid_argument("scroll animation requires a non-blank key/timing and a target axis");
+        throw std::invalid_argument(
+            "scroll animation requires a non-blank key/timing and a target axis");
     }
     if ((request.x.has_value() && !std::isfinite(*request.x)) ||
         (request.y.has_value() && !std::isfinite(*request.y)) ||
         (request.duration_nanos.has_value() && *request.duration_nanos <= 0)) {
-        throw std::invalid_argument("scroll animation targets must be finite and duration must be positive");
+        throw std::invalid_argument(
+            "scroll animation targets must be finite and duration must be positive");
     }
     RetainedNode* node = tree_.find_key(request.key);
     const std::optional<Point> current = input_.scroll_offset(request.key);
@@ -747,8 +663,10 @@ bool Surface::animate_scroll_to(ScrollAnimationRequest request) {
         return false;
     }
     Point requested = *current;
-    if (request.x.has_value()) requested.x = *request.x;
-    if (request.y.has_value()) requested.y = *request.y;
+    if (request.x.has_value())
+        requested.x = *request.x;
+    if (request.y.has_value())
+        requested.y = *request.y;
     const std::optional<Point> target = input_.constrained_scroll_target(request.key, requested);
     if (!target.has_value()) {
         scroll_animations_.erase(request.key);
@@ -759,9 +677,11 @@ bool Surface::animate_scroll_to(ScrollAnimationRequest request) {
         return false;
     }
     const bool known_timing = theme_motion_timing_defined(node->description(), request.timing);
-    if (!known_timing) report_unknown_theme_timing(request.timing, node->description());
+    if (!known_timing)
+        report_unknown_theme_timing(request.timing, node->description());
     MotionTiming timing = theme_motion_timing(node->description(), request.timing);
-    if (request.duration_nanos.has_value()) timing.duration_nanos = *request.duration_nanos;
+    if (request.duration_nanos.has_value())
+        timing.duration_nanos = *request.duration_nanos;
     if (theme_motion_reduced(node->description(), environment_.reduced_motion)) {
         scroll_animations_.erase(request.key);
         InputOperationResult result;
@@ -772,8 +692,7 @@ bool Surface::animate_scroll_to(ScrollAnimationRequest request) {
     }
     scroll_animations_.insert_or_assign(
         request.key,
-        ScrollAnimation{node->identity(), *current, *target, std::move(timing), std::nullopt}
-    );
+        ScrollAnimation{node->identity(), *current, *target, std::move(timing), std::nullopt});
     return true;
 }
 
@@ -790,10 +709,8 @@ void Surface::advance_scroll_animations(const std::int64_t frame_time_nanos) {
             continue;
         }
         const std::optional<Point> current = input_.scroll_offset(animation->first);
-        const std::optional<Point> constrained = input_.constrained_scroll_target(
-            animation->first,
-            animation->second.target
-        );
+        const std::optional<Point> constrained =
+            input_.constrained_scroll_target(animation->first, animation->second.target);
         if (!current.has_value() || !constrained.has_value()) {
             animation = scroll_animations_.erase(animation);
             continue;
@@ -810,16 +727,11 @@ void Surface::advance_scroll_animations(const std::int64_t frame_time_nanos) {
         if (!animation->second.started_nanos.has_value()) {
             animation->second.started_nanos = frame_time_nanos;
         }
-        const double elapsed = std::max(
-            0.0,
-            static_cast<double>(frame_time_nanos - *animation->second.started_nanos) -
-                static_cast<double>(animation->second.timing.delay_nanos)
-        );
+        const double elapsed =
+            std::max(0.0, static_cast<double>(frame_time_nanos - *animation->second.started_nanos) -
+                              static_cast<double>(animation->second.timing.delay_nanos));
         const double linear = std::clamp(
-            elapsed / static_cast<double>(animation->second.timing.duration_nanos),
-            0.0,
-            1.0
-        );
+            elapsed / static_cast<double>(animation->second.timing.duration_nanos), 0.0, 1.0);
         const double eased = motion_easing(animation->second.timing.easing, linear);
         const Point sample{
             animation->second.start.x +
@@ -831,8 +743,10 @@ void Surface::advance_scroll_animations(const std::int64_t frame_time_nanos) {
             const BooleanScope advancing(advancing_scroll_animation_);
             static_cast<void>(input_.scroll_to(animation->first, sample, result));
         }
-        if (linear >= 1.0) animation = scroll_animations_.erase(animation);
-        else ++animation;
+        if (linear >= 1.0)
+            animation = scroll_animations_.erase(animation);
+        else
+            ++animation;
     }
     append_input(pending_lifecycle_input_, std::move(result));
 }
@@ -844,12 +758,17 @@ void Surface::retain_scroll_animations() {
     });
 }
 
-NotificationService& Surface::notifications() noexcept { return notifications_; }
-const NotificationService& Surface::notifications() const noexcept { return notifications_; }
+NotificationService& Surface::notifications() noexcept {
+    return notifications_;
+}
+const NotificationService& Surface::notifications() const noexcept {
+    return notifications_;
+}
 
 void Surface::notifications_changed(const NotificationChange& change) {
     const std::vector<RetainedNode*>* regions = tree_.find_type("ToastRegion");
-    if (regions == nullptr) return;
+    if (regions == nullptr)
+        return;
     for (RetainedNode* region : *regions) {
         if (change.input || change.render) {
             static_cast<void>(tree_.mark(region->identity(), DirtyReason::input));
@@ -862,7 +781,8 @@ void Surface::notifications_changed(const NotificationChange& change) {
 
 bool Surface::adopt_environment(SurfaceEnvironment environment) {
     environment.validate();
-    if (environment.generation <= adopted_environment_generation_) return false;
+    if (environment.generation <= adopted_environment_generation_)
+        return false;
     const bool scale_changed = environment_.framebuffer_width != environment.framebuffer_width ||
                                environment_.framebuffer_height != environment.framebuffer_height ||
                                environment_.logical_width != environment.logical_width ||
@@ -941,8 +861,7 @@ bool Surface::adopt_scale_context(const SurfaceEnvironment& source) {
 
 bool Surface::adopt_environment_preferences(const SurfaceEnvironment& source) {
     source.validate();
-    if (environment_.safe_insets == source.safe_insets &&
-        environment_.density == source.density &&
+    if (environment_.safe_insets == source.safe_insets && environment_.density == source.density &&
         environment_.reduced_motion == source.reduced_motion &&
         environment_.input == source.input) {
         return false;
@@ -971,15 +890,14 @@ void Surface::note_resource_reload_duration(const std::uint64_t duration_nanos) 
 
 SurfaceResourceReloadPlan Surface::prepare_resource_reload(
     std::shared_ptr<const TextEngine> text_engine,
-    std::shared_ptr<const resource::SvgImageRegistry> svg_images
-) const {
-    LayoutEngine next_layout = text_engine != nullptr
-        ? LayoutEngine(LayoutEngine::IntrinsicMeasure(
-              [engine = text_engine](const RetainedNode& node, const Constraints& constraints) {
-                  return engine->measure(node, constraints);
-              }
-          ))
-        : LayoutEngine{};
+    std::shared_ptr<const resource::SvgImageRegistry> svg_images) const {
+    LayoutEngine next_layout =
+        text_engine != nullptr
+            ? LayoutEngine(LayoutEngine::IntrinsicMeasure(
+                  [engine = text_engine](const RetainedNode& node, const Constraints& constraints) {
+                      return engine->measure(node, constraints);
+                  }))
+            : LayoutEngine{};
     return SurfaceResourceReloadPlan{
         std::move(text_engine),
         std::move(svg_images),
@@ -989,9 +907,8 @@ SurfaceResourceReloadPlan Surface::prepare_resource_reload(
 
 void Surface::commit_resource_reload(SurfaceResourceReloadPlan plan) noexcept {
     static_assert(std::is_nothrow_move_assignable_v<std::shared_ptr<const TextEngine>>);
-    static_assert(std::is_nothrow_move_assignable_v<
-        std::shared_ptr<const resource::SvgImageRegistry>
-    >);
+    static_assert(
+        std::is_nothrow_move_assignable_v<std::shared_ptr<const resource::SvgImageRegistry>>);
     static_assert(std::is_nothrow_move_assignable_v<LayoutEngine>);
     text_engine_ = std::move(plan.text_engine);
     svg_images_ = std::move(plan.svg_images);
@@ -1012,7 +929,8 @@ void Surface::queue_resource_invalidation() noexcept {
 }
 
 void Surface::apply_pending_resource_invalidation() {
-    if (!resource_invalidation_pending_) return;
+    if (!resource_invalidation_pending_)
+        return;
     // Marking may allocate. Keep the pending flag set until both throwing operations succeed so a
     // failed frame cannot expose the newly installed engine with stale resource generations.
     if (tree_.root() != nullptr) {
@@ -1029,22 +947,22 @@ void Surface::apply_pending_resource_invalidation() {
     invalidate_description();
 }
 
-void Surface::invalidate() noexcept { invalidate_description(); }
+void Surface::invalidate() noexcept {
+    invalidate_description();
+}
 
-void Surface::invalidate_frame() noexcept { frame_invalidated_ = true; }
+void Surface::invalidate_frame() noexcept {
+    frame_invalidated_ = true;
+}
 
 void Surface::invalidate_description() noexcept {
     description_invalidated_ = true;
     frame_invalidated_ = true;
 }
 
-runtime::ActionDispatchOutcome Surface::execute_environment_action(
-    const runtime::Action& action
-) {
-    const auto outcome = [&action](
-                             const runtime::ActionDispatchStatus status,
-                             std::optional<std::string> message = std::nullopt
-                         ) {
+runtime::ActionDispatchOutcome Surface::execute_environment_action(const runtime::Action& action) {
+    const auto outcome = [&action](const runtime::ActionDispatchStatus status,
+                                   std::optional<std::string> message = std::nullopt) {
         return runtime::ActionDispatchOutcome{
             status,
             action.id(),
@@ -1053,10 +971,8 @@ runtime::ActionDispatchOutcome Surface::execute_environment_action(
         };
     };
     if (action.id() != "environment.set") {
-        return outcome(
-            runtime::ActionDispatchStatus::failed,
-            "Surface framework executor does not own action '" + action.id() + "'."
-        );
+        return outcome(runtime::ActionDispatchStatus::failed,
+                       "Surface framework executor does not own action '" + action.id() + "'.");
     }
     SurfaceEnvironment next = environment_;
     if (const runtime::Value* density = action.payload.field("density");
@@ -1066,10 +982,8 @@ runtime::ActionDispatchOutcome Surface::execute_environment_action(
         } else if (*density->string() == "COMFORTABLE" || *density->string() == "comfortable") {
             next.density = SurfaceDensity::comfortable;
         } else {
-            return outcome(
-                runtime::ActionDispatchStatus::failed,
-                "Unknown surface density '" + *density->string() + "'."
-            );
+            return outcome(runtime::ActionDispatchStatus::failed,
+                           "Unknown surface density '" + *density->string() + "'.");
         }
     }
     if (const runtime::Value* reduced = action.payload.field("reducedMotion");
@@ -1078,7 +992,8 @@ runtime::ActionDispatchOutcome Surface::execute_environment_action(
     }
     const auto adopt_inset = [&action](const std::string_view name, double& destination) {
         const runtime::Value* value = action.payload.field(name);
-        if (value != nullptr && value->number() != nullptr) destination = *value->number();
+        if (value != nullptr && value->number() != nullptr)
+            destination = *value->number();
     };
     adopt_inset("safeLeft", next.safe_insets.left);
     adopt_inset("safeTop", next.safe_insets.top);
@@ -1086,12 +1001,11 @@ runtime::ActionDispatchOutcome Surface::execute_environment_action(
     adopt_inset("safeBottom", next.safe_insets.bottom);
     SurfaceEnvironment comparable = next;
     comparable.generation = environment_.generation;
-    if (comparable == environment_) return outcome(runtime::ActionDispatchStatus::ignored);
+    if (comparable == environment_)
+        return outcome(runtime::ActionDispatchStatus::ignored);
     if (environment_.generation == std::numeric_limits<std::uint64_t>::max()) {
-        return outcome(
-            runtime::ActionDispatchStatus::failed,
-            "Surface environment generation is exhausted."
-        );
+        return outcome(runtime::ActionDispatchStatus::failed,
+                       "Surface environment generation is exhausted.");
     }
     next.generation = environment_.generation + 1U;
     next.validate();
@@ -1113,19 +1027,16 @@ std::shared_ptr<const DescriptionNode> Surface::describe(DescriptionBuildResult&
     // The stack retains navigation state, but only its active screen is declarative UI. A
     // displaced screen may remain in the retained tree only through the ordinary EXITING
     // lifecycle; describing the whole stack would keep obsolete screens attached forever.
-    const auto active_screen = std::ranges::find_if(
-        application_layers.rbegin(),
-        application_layers.rend(),
-        [](const runtime::LayerSnapshot& layer) {
-            return layer.role == runtime::LayerRole::screen;
-        }
-    );
+    const auto active_screen =
+        std::ranges::find_if(application_layers.rbegin(), application_layers.rend(),
+                             [](const runtime::LayerSnapshot& layer) {
+                                 return layer.role == runtime::LayerRole::screen;
+                             });
     if (active_screen != application_layers.rend()) {
         const std::string name = layer_name(active_screen->id, "screen:");
-        const runtime::LayerRole declaration_role =
-            application_.active_unit()->screen(name)
-                ? runtime::LayerRole::screen
-                : runtime::LayerRole::overlay;
+        const runtime::LayerRole declaration_role = application_.active_unit()->screen(name)
+                                                        ? runtime::LayerRole::screen
+                                                        : runtime::LayerRole::overlay;
         visible.push_back(VisibleLayer{
             active_screen->id,
             declaration_role,
@@ -1133,9 +1044,7 @@ std::shared_ptr<const DescriptionNode> Surface::describe(DescriptionBuildResult&
             active_screen->transition,
         });
     } else if (!application_.layers().root_replaced()) {
-        visible.push_back(VisibleLayer{
-            "root:" + id_, root_role_, root_name_, std::nullopt
-        });
+        visible.push_back(VisibleLayer{"root:" + id_, root_role_, root_name_, std::nullopt});
     }
     for (const runtime::LayerSnapshot& layer : application_layers) {
         if (layer.role == runtime::LayerRole::overlay) {
@@ -1156,28 +1065,23 @@ std::shared_ptr<const DescriptionNode> Surface::describe(DescriptionBuildResult&
     descriptions_.set_contextual_host_roots({{"env", surface_environment_binding(environment_)}});
     DescriptionLayersBuildResult built = descriptions_.build_layers(requests);
     for (std::size_t index = 0U; index < visible.size(); ++index) {
-        state_scopes_by_layer_.insert_or_assign(
-            visible[index].id,
-            built.layer_state_scopes[index]
-        );
+        state_scopes_by_layer_.insert_or_assign(visible[index].id, built.layer_state_scopes[index]);
     }
     std::set<std::string> attached_layers;
-    if (!application_.layers().root_replaced()) attached_layers.insert("root:" + id_);
-    for (const runtime::LayerSnapshot& layer : application_layers) attached_layers.insert(layer.id);
+    if (!application_.layers().root_replaced())
+        attached_layers.insert("root:" + id_);
+    for (const runtime::LayerSnapshot& layer : application_layers)
+        attached_layers.insert(layer.id);
     std::erase_if(state_scopes_by_layer_, [&attached_layers](const auto& entry) {
         return !attached_layers.contains(entry.first);
     });
     std::vector<std::shared_ptr<const DescriptionNode>> layers;
     layers.reserve(visible.size());
     for (std::size_t index = 0U; index < visible.size(); ++index) {
-        layers.push_back(DescriptionNode::create(
-            "SurfaceLayer",
-            "strata.layer." + visible[index].id,
-            {},
-            {},
-            surface_layer_properties(visible[index].transition),
-            eager({declaration_root(built.roots[index])})
-        ));
+        layers.push_back(
+            DescriptionNode::create("SurfaceLayer", "strata.layer." + visible[index].id, {}, {},
+                                    surface_layer_properties(visible[index].transition),
+                                    eager({declaration_root(built.roots[index])})));
     }
     result = DescriptionBuildResult{
         {},
@@ -1185,20 +1089,11 @@ std::shared_ptr<const DescriptionNode> Surface::describe(DescriptionBuildResult&
         built.evaluated_expressions,
         built.described_nodes,
     };
-    return DescriptionNode::create(
-        "SurfaceLayers",
-        "strata.surface.layers",
-        {},
-        {},
-        surface_layout(),
-        eager(std::move(layers))
-    );
+    return DescriptionNode::create("SurfaceLayers", "strata.surface.layers", {}, {},
+                                   surface_layout(), eager(std::move(layers)));
 }
 
-bool Surface::rebuild_tree(
-    SurfaceFrame& frame,
-    std::optional<std::string_view>& restore_focus
-) {
+bool Surface::rebuild_tree(SurfaceFrame& frame, std::optional<std::string_view>& restore_focus) {
     if (!description_invalidated_ && tree_.root() != nullptr &&
         application_.dirty_generation() == observed_application_generation_) {
         return false;
@@ -1207,7 +1102,8 @@ bool Surface::rebuild_tree(
     const std::vector<runtime::LayerSnapshot> layers = application_.layers().snapshot();
     std::string active_screen = "root:" + id_;
     for (const runtime::LayerSnapshot& layer : layers) {
-        if (layer.role == runtime::LayerRole::screen) active_screen = layer.id;
+        if (layer.role == runtime::LayerRole::screen)
+            active_screen = layer.id;
     }
     if (observed_active_screen_.has_value() && *observed_active_screen_ != active_screen) {
         if (const std::optional<std::string_view> focused = input_.focused_key();
@@ -1233,10 +1129,10 @@ bool Surface::rebuild_tree(
     }
     {
         auto reconcile_profile = profiler_.section("reconcile");
-        static_cast<void>(tree_.reconcile(
-            std::move(materialized),
-            [this](const RetainedNode& node) { return motion_.should_retain_for_exit(node); }
-        ));
+        static_cast<void>(
+            tree_.reconcile(std::move(materialized), [this](const RetainedNode& node) {
+                return motion_.should_retain_for_exit(node);
+            }));
     }
     // Preserve the old viewport across an application/theme rebuild, but refresh its rows against
     // the newly authored provider before input or layout can observe stale source indices.
@@ -1259,14 +1155,13 @@ bool Surface::rebuild_tree(
 
 std::shared_ptr<const DescriptionNode> Surface::project_description_theme() {
     return materialize_theme_tree(
-        raw_description_,
-        themes_,
-        [this](const std::string_view type) { return widgets_.find(type) != nullptr; },
-        [this](const std::string_view name, const DescriptionNode& node) {
-            report_unknown_theme_timing(name, node);
-        },
-        &theme_materialization_cache_
-    ).root;
+               raw_description_, themes_,
+               [this](const std::string_view type) { return widgets_.find(type) != nullptr; },
+               [this](const std::string_view name, const DescriptionNode& node) {
+                   report_unknown_theme_timing(name, node);
+               },
+               &theme_materialization_cache_)
+        .root;
 }
 
 ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
@@ -1289,19 +1184,14 @@ ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
         const std::size_t child_count = provider->size();
         const MaterializationRange desired =
             desired_realization_range(*parent, layout, child_count);
-        if (parent->realization_current(
-                provider,
-                projected.projected_theme,
-                projected.projected_theme_scope,
-                projected.projected_theme_generation,
-                desired
-            )) {
+        if (parent->realization_current(provider, projected.projected_theme,
+                                        projected.projected_theme_scope,
+                                        projected.projected_theme_generation, desired)) {
             continue;
         }
         if (projected.projected_theme == nullptr) {
             throw std::logic_error(
-                "lazy collection is missing its inherited projected theme context"
-            );
+                "lazy collection is missing its inherited projected theme context");
         }
 
         struct RowProjection final {
@@ -1312,16 +1202,12 @@ ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
         std::vector<RowProjection> rows;
         rows.reserve(desired.end_exclusive - desired.start);
         for (std::size_t index = desired.start; index < desired.end_exclusive; ++index) {
-            std::shared_ptr<const DescriptionNode> description =
-                parent->realized_child_description(
-                    index,
-                    provider,
-                    projected.projected_theme,
-                    projected.projected_theme_scope,
-                    projected.projected_theme_generation
-                );
+            std::shared_ptr<const DescriptionNode> description = parent->realized_child_description(
+                index, provider, projected.projected_theme, projected.projected_theme_scope,
+                projected.projected_theme_generation);
             const bool generated = description == nullptr;
-            if (generated) description = provider->at(index);
+            if (generated)
+                description = provider->at(index);
             rows.push_back(RowProjection{index, std::move(description), generated});
         }
 
@@ -1329,23 +1215,21 @@ ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
         realized.reserve(rows.size());
         for (RowProjection& row : rows) {
             if (row.requires_projection) {
-                row.description = materialize_theme_subtree(
-                    row.description,
-                    themes_,
-                    projected.projected_theme,
-                    projected.projected_theme_scope,
-                    [this](const std::string_view type) {
-                        return widgets_.find(type) != nullptr;
-                    },
-                    [this](const std::string_view name, const DescriptionNode& node) {
-                        report_unknown_theme_timing(name, node);
-                    },
-                    &theme_materialization_cache_
-                ).root;
+                row.description =
+                    materialize_theme_subtree(
+                        row.description, themes_, projected.projected_theme,
+                        projected.projected_theme_scope,
+                        [this](const std::string_view type) {
+                            return widgets_.find(type) != nullptr;
+                        },
+                        [this](const std::string_view name, const DescriptionNode& node) {
+                            report_unknown_theme_timing(name, node);
+                        },
+                        &theme_materialization_cache_)
+                        .root;
                 if (row.description->materialization_result != nullptr) {
                     pending_lazy_materializations_.push_back(
-                        row.description->materialization_result
-                    );
+                        row.description->materialization_result);
                 }
             }
             realized.push_back(RealizedDescriptionChild{
@@ -1355,17 +1239,9 @@ ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
         }
 
         ReconcileStats local = tree_.realize_children(
-            identity,
-            provider,
-            projected.projected_theme,
-            projected.projected_theme_scope,
-            projected.projected_theme_generation,
-            desired,
-            std::move(realized),
-            [this](const RetainedNode& node) {
-                return motion_.should_retain_for_exit(node);
-            }
-        );
+            identity, provider, projected.projected_theme, projected.projected_theme_scope,
+            projected.projected_theme_generation, desired, std::move(realized),
+            [this](const RetainedNode& node) { return motion_.should_retain_for_exit(node); });
         aggregate.created += local.created;
         aggregate.reused += local.reused;
         aggregate.updated += local.updated;
@@ -1376,10 +1252,8 @@ ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
     return aggregate;
 }
 
-void Surface::report_unknown_theme_timing(
-    const std::string_view name,
-    const DescriptionNode& node
-) {
+void Surface::report_unknown_theme_timing(const std::string_view name,
+                                          const DescriptionNode& node) {
     constexpr std::size_t maximum_reported_unknown_timings = 128U;
     std::string key = node.source_path;
     key.push_back('\n');
@@ -1401,27 +1275,19 @@ void Surface::report_unknown_theme_timing(
     });
 }
 
-void Surface::sample_motion(
-    SurfaceFrame& frame,
-    const std::int64_t frame_time_nanos,
-    const bool temporal
-) {
+void Surface::sample_motion(SurfaceFrame& frame, const std::int64_t frame_time_nanos,
+                            const bool temporal) {
     const auto motion_started = std::chrono::steady_clock::now();
     auto motion_profile = profiler_.section("motion");
-    const MotionFrameCounters motion = temporal
-        ? motion_.advance(
-              tree_, application_.active_unit(), input_, frame_time_nanos,
-              environment_.reduced_motion
-          )
-        : motion_.discover(
-              tree_, application_.active_unit(), input_, frame_time_nanos,
-              environment_.reduced_motion
-          );
-    frame.operations.animation_nanos += static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - motion_started
-        ).count()
-    );
+    const MotionFrameCounters motion =
+        temporal ? motion_.advance(tree_, application_.active_unit(), input_, frame_time_nanos,
+                                   environment_.reduced_motion)
+                 : motion_.discover(tree_, application_.active_unit(), input_, frame_time_nanos,
+                                    environment_.reduced_motion);
+    frame.operations.animation_nanos +=
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now() - motion_started)
+                                       .count());
     if (motion.evaluated_nodes != 0U) {
         frame.operations.motion_mutated_nodes += motion.mutated_nodes;
     }
@@ -1438,18 +1304,16 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
             auto commit_profile = profiler_.section("commit-materialization");
             commit_lazy_materializations(frame);
         }
-        frame.operations.layout_nanos += static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - layout_started
-            ).count()
-        );
-        if (text_engine_ != nullptr) frame.operations.text = text_engine_->operation_counters();
+        frame.operations.layout_nanos +=
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now() - layout_started)
+                                           .count());
+        if (text_engine_ != nullptr)
+            frame.operations.text = text_engine_->operation_counters();
         record_profiler_counters(frame);
         layout_profile.close();
     };
-    const LayoutEnvironment stable_environment = environment_.layout_environment(
-        frame_time_nanos
-    );
+    const LayoutEnvironment stable_environment = environment_.layout_environment(frame_time_nanos);
     if (tree_.dirty_count() == 0U && motion_.active_count() == 0U &&
         !layout_engine_.requires_layout(tree_, stable_environment)) {
         finish_layout_profile();
@@ -1461,23 +1325,17 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
     // still converge through the checked post-layout path below.
     if (layout_engine_.result().root_identity != 0U) {
         auto prediction_profile = profiler_.section("prediction");
-        const ReconcileStats predicted = realize_virtual_children(
-            layout_engine_.result()
-        );
+        const ReconcileStats predicted = realize_virtual_children(layout_engine_.result());
         if (predicted.changed()) {
             auto prepare_profile = profiler_.section("input-prepare");
             append_input(frame.lifecycle_input, input_.prepare(tree_));
         }
     }
     const bool temporal_motion_sample = motion_sampled_frame_index_ != frame.frame_index;
-    const auto layout_pass = [this, &frame, frame_time_nanos](
-                                 const bool initial_pass,
-                                 const bool evaluate_before_layout,
-                                 const bool temporal_motion
-                             ) -> const LayoutResult& {
-        auto pass_profile = profiler_.section(
-            initial_pass ? "initial-pass" : "convergence-pass"
-        );
+    const auto layout_pass =
+        [this, &frame, frame_time_nanos](const bool initial_pass, const bool evaluate_before_layout,
+                                         const bool temporal_motion) -> const LayoutResult& {
+        auto pass_profile = profiler_.section(initial_pass ? "initial-pass" : "convergence-pass");
         const LayoutEnvironment environment = environment_.layout_environment(frame_time_nanos);
         if (evaluate_before_layout) {
             sample_motion(frame, frame_time_nanos, temporal_motion);
@@ -1493,52 +1351,38 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
             }
         }
         std::vector<MotionMoveOrigin> move_origins;
-        if (!environment_.reduced_motion &&
-            layout_engine_.requires_layout(tree_, environment)) {
+        if (!environment_.reduced_motion && layout_engine_.requires_layout(tree_, environment)) {
             auto capture_profile = profiler_.section("move-capture");
             move_origins = motion_.capture_move_origins(tree_, layout_engine_.result());
         }
         const LayoutResult* result = nullptr;
         {
             auto engine_profile = profiler_.section("engine");
-            result = &layout_engine_.layout(
-                tree_,
-                environment,
-                &motion_,
-                false,
-                frame.frame_index
-            );
+            result = &layout_engine_.layout(tree_, environment, &motion_, false, frame.frame_index);
             profiler_.record_external_timing("measure", result->measure_nanos);
             profiler_.record_external_timing("arrange", result->arrange_nanos);
-            profiler_.record_external_timing(
-                "maintenance",
-                result->maintenance_nanos
-            );
+            profiler_.record_external_timing("maintenance", result->maintenance_nanos);
         }
         {
             auto apply_profile = profiler_.section("move-apply");
-            motion_.apply_move_transitions(
-                tree_, move_origins, *result, frame_time_nanos, environment_.reduced_motion
-            );
+            motion_.apply_move_transitions(tree_, move_origins, *result, frame_time_nanos,
+                                           environment_.reduced_motion);
         }
         return *result;
     };
 
-    const auto report_nonconvergence = [this](
-                                           const surface_detail::LazyRangeSignature& signature,
-                                           const surface_detail::LazyConvergenceTracker& tracker,
-                                           const std::string_view reason
-                                       ) {
+    const auto report_nonconvergence = [this](const surface_detail::LazyRangeSignature& signature,
+                                              const surface_detail::LazyConvergenceTracker& tracker,
+                                              const std::string_view reason) {
         constexpr std::size_t maximum_reported_convergence_failures = 128U;
         std::string fingerprint(reason);
         for (const surface_detail::LazyRangeState& state : signature) {
-            fingerprint += "\n" + state.structural_path + ":" +
-                std::to_string(state.child_count) + ":" +
-                std::to_string(state.materialized.start) + "-" +
-                std::to_string(state.materialized.end_exclusive) + ">" +
-                std::to_string(state.visible.start) + "-" +
-                std::to_string(state.visible.end_exclusive) +
-                (state.stale_projection ? ":stale" : "");
+            fingerprint += "\n" + state.structural_path + ":" + std::to_string(state.child_count) +
+                           ":" + std::to_string(state.materialized.start) + "-" +
+                           std::to_string(state.materialized.end_exclusive) + ">" +
+                           std::to_string(state.visible.start) + "-" +
+                           std::to_string(state.visible.end_exclusive) +
+                           (state.stale_projection ? ":stale" : "");
         }
         if (reported_lazy_convergence_diagnostics_.size() >=
                 maximum_reported_convergence_failures ||
@@ -1553,7 +1397,8 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
                 " distinct range states within a known state-space bound of " +
                 (tracker.known_state_bound() == std::numeric_limits<std::size_t>::max()
                      ? std::string("at least size_t maximum")
-                     : std::to_string(tracker.known_state_bound())) + ".",
+                     : std::to_string(tracker.known_state_bound())) +
+                ".",
             signature.empty() ? std::string{} : signature.front().structural_path,
             std::string("a fixed realized/visible range point"),
             runtime::DiagnosticSeverity::error,
@@ -1570,19 +1415,18 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
     for (;;) {
         const bool current_initial_pass = std::exchange(initial_pass, false);
         const bool initialize_motion = std::exchange(evaluate_before_layout, false);
-        const LayoutResult& laid_out = layout_pass(
-            current_initial_pass,
-            initialize_motion,
-            initialize_motion && temporal_motion_sample
-        );
+        const LayoutResult& laid_out = layout_pass(current_initial_pass, initialize_motion,
+                                                   initialize_motion && temporal_motion_sample);
         add_layout_operations(frame.operations, laid_out.operations);
-        if (raw_description_ == nullptr) break;
+        if (raw_description_ == nullptr)
+            break;
         surface_detail::LazyRangeSignature signature;
         {
             auto signature_profile = profiler_.section("range-signature");
             signature = lazy_range_signature(tree_, laid_out);
         }
-        if (!lazy_ranges_require_realization(signature)) break;
+        if (!lazy_ranges_require_realization(signature))
+            break;
         const surface_detail::LazyConvergenceStatus status = convergence.observe(signature);
         if (status == surface_detail::LazyConvergenceStatus::cycle) {
             report_nonconvergence(signature, convergence, "a repeated range-state cycle");
@@ -1594,7 +1438,8 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
             lazy = realize_virtual_children(laid_out);
         }
         if (!lazy.changed()) {
-            if (status == surface_detail::LazyConvergenceStatus::fixed_point) break;
+            if (status == surface_detail::LazyConvergenceStatus::fixed_point)
+                break;
             surface_detail::LazyRangeSignature terminal;
             {
                 auto signature_profile = profiler_.section("range-signature");
@@ -1602,11 +1447,8 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
             }
             if (convergence.observe(terminal) !=
                 surface_detail::LazyConvergenceStatus::fixed_point) {
-                report_nonconvergence(
-                    terminal,
-                    convergence,
-                    "reconciliation made no range progress"
-                );
+                report_nonconvergence(terminal, convergence,
+                                      "reconciliation made no range progress");
             }
             break;
         }
@@ -1638,7 +1480,8 @@ void Surface::commit_lazy_materializations(SurfaceFrame& frame) {
             });
             continue;
         }
-        if (publication != surface_detail::MaterializationPublicationClaim::publish) continue;
+        if (publication != surface_detail::MaterializationPublicationClaim::publish)
+            continue;
         frame.operations.evaluated_expressions += transaction->evaluated_expressions;
         frame.operations.described_nodes += transaction->described_nodes;
         for (const runtime::RuntimeDiagnostic& diagnostic : transaction->diagnostics) {
@@ -1662,8 +1505,10 @@ void Surface::commit_lazy_materializations(SurfaceFrame& frame) {
 
     std::set<std::string, std::less<>> async_owners;
     if (tree_.root() != nullptr) {
-        const auto collect = [this, &async_owners](const auto& self, const RetainedNode& node) -> void {
-            if (node.lifecycle() != RetainedLifecycle::attached) return;
+        const auto collect = [this, &async_owners](const auto& self,
+                                                   const RetainedNode& node) -> void {
+            if (node.lifecycle() != RetainedLifecycle::attached)
+                return;
             if (!node.description().state_scope.empty()) {
                 async_owners.insert(id_ + ":state:" + node.description().state_scope);
             }
@@ -1673,21 +1518,23 @@ void Surface::commit_lazy_materializations(SurfaceFrame& frame) {
             if (node.description().type == "TreeView") {
                 const auto property = node.description().properties.find("expandedKeys");
                 const runtime::Value* expanded = property != node.description().properties.end()
-                    ? property->second.value() : nullptr;
+                                                     ? property->second.value()
+                                                     : nullptr;
                 if (expanded == nullptr || expanded->list() == nullptr) {
                     expanded = node.retained_value("strata.tree.expanded");
                 }
                 if (expanded != nullptr && expanded->list() != nullptr) {
                     for (const runtime::Value& value : expanded->list()->values) {
-                        const std::string* key = value.key() != nullptr
-                            ? &value.key()->value : value.string();
+                        const std::string* key =
+                            value.key() != nullptr ? &value.key()->value : value.string();
                         if (key != nullptr && !key->empty()) {
                             async_owners.insert(id_ + ":item:" + *key);
                         }
                     }
                 }
             }
-            for (const auto& child : node.children()) self(self, *child);
+            for (const auto& child : node.children())
+                self(self, *child);
         };
         collect(collect, *tree_.root());
     }
@@ -1710,22 +1557,13 @@ void Surface::cancel_interactions() {
     invalidate_frame();
 }
 
-runtime::ActionDispatchOutcome Surface::dispatch_action(
-    std::string action_id,
-    runtime::Value payload,
-    std::string event_kind,
-    std::optional<std::string> source_key,
-    runtime::Value event_value,
-    const bool dynamic
-) {
-    InjectedActionResult injected = input_.dispatch_action(
-        std::move(action_id),
-        std::move(payload),
-        std::move(event_kind),
-        std::move(source_key),
-        std::move(event_value),
-        dynamic
-    );
+runtime::ActionDispatchOutcome
+Surface::dispatch_action(std::string action_id, runtime::Value payload, std::string event_kind,
+                         std::optional<std::string> source_key, runtime::Value event_value,
+                         const bool dynamic) {
+    InjectedActionResult injected =
+        input_.dispatch_action(std::move(action_id), std::move(payload), std::move(event_kind),
+                               std::move(source_key), std::move(event_value), dynamic);
     runtime::ActionDispatchOutcome outcome = std::move(injected.outcome);
     append_input(pending_lifecycle_input_, std::move(injected.input));
     return outcome;
@@ -1739,7 +1577,9 @@ bool Surface::set_focus_containment(const std::optional<std::string_view> key) {
     return contained;
 }
 
-bool Surface::focus_contained() const noexcept { return input_.focus_contained(); }
+bool Surface::focus_contained() const noexcept {
+    return input_.focus_contained();
+}
 
 SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     if (last_frame_.frame_index != 0U && frame_time_nanos < last_frame_.frame_time_nanos) {
@@ -1760,14 +1600,13 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
             "resource-reload",
             static_cast<std::int64_t>(std::min<std::uint64_t>(
                 pending_reload_duration_nanos_,
-                static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
-            ))
-        );
+                static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))));
         pending_reload_timing_recorded_ = true;
     }
     status_feedback_.advance_frame(frame_time_nanos);
     notifications_.advance_frame(frame_time_nanos);
     input_.publish_frame_time(frame_time_nanos);
+    input_.publish_reduced_motion(environment_.reduced_motion);
     application_.async().advance(frame_time_nanos);
     if (declarative_environment_pending_) {
         const std::string resolved = resolved_viewport_class(environment_);
@@ -1784,18 +1623,17 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     const runtime::RuntimeGenerationSnapshot service_generations =
         application_.services().generations();
     const bool pending_lifecycle = !pending_lifecycle_input_.events.empty() ||
-        !pending_lifecycle_input_.action_outcomes.empty() ||
-        pending_lifecycle_input_.injected_events != 0U ||
-        pending_lifecycle_input_.processed_events != 0U;
+                                   !pending_lifecycle_input_.action_outcomes.empty() ||
+                                   pending_lifecycle_input_.injected_events != 0U ||
+                                   pending_lifecycle_input_.processed_events != 0U;
     const bool requested_frame = std::exchange(frame_invalidated_, false);
-    const bool settled_except_input = last_frame_.frame_index != 0U && !requested_frame &&
-        !description_invalidated_ &&
+    const bool settled_except_input =
+        last_frame_.frame_index != 0U && !requested_frame && !description_invalidated_ &&
         tree_.root() != nullptr &&
         application_.dirty_generation() == observed_application_generation_ &&
         service_generations == observed_service_generations_ && tree_.dirty_count() == 0U &&
-        !input_.requires_frame_advance() && !pending_lifecycle &&
-        scroll_animations_.empty() && motion_.active_count() == 0U &&
-        layout_engine_.active_transition_count() == 0U &&
+        !input_.requires_frame_advance() && !pending_lifecycle && scroll_animations_.empty() &&
+        motion_.active_count() == 0U && layout_engine_.active_transition_count() == 0U &&
         !application_.services().has_pending_frame_work();
     if (settled_except_input && input_.queued_event_count() == 0U) {
         SurfaceFrame next;
@@ -1821,11 +1659,8 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     if (text_engine_ != nullptr) {
         const runtime::RuntimeGenerationSnapshot generations =
             application_.services().generations();
-        text_engine_->adopt_generations(
-            scale_context_generation_,
-            generations.style_resources,
-            generations.font_resources
-        );
+        text_engine_->adopt_generations(scale_context_generation_, generations.style_resources,
+                                        generations.font_resources);
         text_engine_->begin_frame();
     }
     next.frame_index = last_frame_.frame_index + 1U;
@@ -1849,14 +1684,12 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         processed_queued_input = queued_input.processed_events != 0U;
         append_input(next.lifecycle_input, std::move(queued_input));
         const std::size_t dirty_after = tree_.dirty_count();
-        next.operations.input_mutated_nodes += dirty_after > dirty_before
-            ? dirty_after - dirty_before
-            : 0U;
-        next.operations.input_nanos += static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - input_started
-            ).count()
-        );
+        next.operations.input_mutated_nodes +=
+            dirty_after > dirty_before ? dirty_after - dirty_before : 0U;
+        next.operations.input_nanos +=
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now() - input_started)
+                                           .count());
         collect_input_profiler_counters(next);
         record_profiler_counters(next);
         input_profile.close();
@@ -1868,10 +1701,8 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
             tree_.dirty_count() == 0U &&
             application_.dirty_generation() == observed_application_generation_ &&
             application_.services().generations() == observed_service_generations_ &&
-            !layout_engine_.requires_layout(
-                tree_,
-                environment_.layout_environment(frame_time_nanos)
-            ) &&
+            !layout_engine_.requires_layout(tree_,
+                                            environment_.layout_environment(frame_time_nanos)) &&
             !input_.requires_frame_advance() && scroll_animations_.empty() &&
             motion_.active_count() == 0U && layout_engine_.active_transition_count() == 0U &&
             !application_.services().has_pending_frame_work()) {
@@ -1893,14 +1724,12 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         append_input(next.lifecycle_input, input_.prepare(tree_, restore_focus));
         append_input(next.lifecycle_input, input_.advance_frame());
         const std::size_t dirty_after = tree_.dirty_count();
-        next.operations.input_mutated_nodes += dirty_after > dirty_before
-            ? dirty_after - dirty_before
-            : 0U;
-        next.operations.input_nanos += static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - input_started
-            ).count()
-        );
+        next.operations.input_mutated_nodes +=
+            dirty_after > dirty_before ? dirty_after - dirty_before : 0U;
+        next.operations.input_nanos +=
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now() - input_started)
+                                           .count());
         collect_input_profiler_counters(next);
         record_profiler_counters(next);
         input_profile.close();
@@ -1908,7 +1737,8 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     layout_tree(next, frame_time_nanos);
     input_.publish_layout(layout_engine_.result());
     const std::uint64_t pre_input_layout_generation = tree_.layout_invalidation_generation();
-    if (!input_processed_before_layout) process_queued_input();
+    if (!input_processed_before_layout)
+        process_queued_input();
 
     std::optional<std::string_view> input_restore_focus;
     const bool input_rebuilt = rebuild_tree(next, input_restore_focus);
@@ -1921,7 +1751,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         sample_motion(next, frame_time_nanos, false);
     }
     if (input_rebuilt || (!input_processed_before_layout &&
-        tree_.layout_invalidation_generation() != pre_input_layout_generation)) {
+                          tree_.layout_invalidation_generation() != pre_input_layout_generation)) {
         layout_tree(next, frame_time_nanos);
     }
     tree_.consume_layout_dirty();
@@ -1934,14 +1764,12 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         auto after_layout_profile = profiler_.section("input");
         append_input(next.lifecycle_input, input_.after_layout());
         const std::size_t dirty_after = tree_.dirty_count();
-        next.operations.input_mutated_nodes += dirty_after > dirty_before
-            ? dirty_after - dirty_before
-            : 0U;
-        next.operations.input_nanos += static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - input_started
-            ).count()
-        );
+        next.operations.input_mutated_nodes +=
+            dirty_after > dirty_before ? dirty_after - dirty_before : 0U;
+        next.operations.input_nanos +=
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now() - input_started)
+                                           .count());
         collect_input_profiler_counters(next);
         record_profiler_counters(next);
         after_layout_profile.close();
@@ -1957,25 +1785,15 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     {
         auto render_profile = profiler_.section("render");
         next.operations.render = render_engine_.render(
-            tree_,
-            laid_out,
-            input_,
-            commands_,
-            widgets_,
-            behaviors_,
-            motion_,
-            text_engine_.get(),
-            svg_images_.get(),
-            material_registry_,
-            RenderGenerationToken{
-                scale_context_generation_,
-                application_.active_generation().value_or(0U),
-                application_.services().generations()
-            },
-            render_commands_
-        );
+            tree_, laid_out, input_, commands_, widgets_, behaviors_, motion_, text_engine_.get(),
+            svg_images_.get(), material_registry_,
+            RenderGenerationToken{scale_context_generation_,
+                                  application_.active_generation().value_or(0U),
+                                  application_.services().generations()},
+            render_commands_);
         if (const RetainedNode* inspected = inspected_node(); inspected != nullptr) {
-            if (const LayoutRecord* record = laid_out.find(inspected->identity()); record != nullptr) {
+            if (const LayoutRecord* record = laid_out.find(inspected->identity());
+                record != nullptr) {
                 render_commands_.append(BorderRenderCommand{
                     record->bounds,
                     RenderBorder{2.0, RenderColor{255U, 191U, 76U, 255U}, true},
@@ -1995,21 +1813,15 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
                     route.push_back(current);
                 }
                 for (auto current = route.rbegin(); current != route.rend(); ++current) {
-                    const LayoutRecord* current_layout =
-                        laid_out.find((*current)->identity());
-                    if (current_layout == nullptr) continue;
+                    const LayoutRecord* current_layout = laid_out.find((*current)->identity());
+                    if (current_layout == nullptr)
+                        continue;
                     transform = concatenate_presentation_transform(
                         transform,
-                        local_presentation_transform(
-                            **current,
-                            motion_,
-                            current_layout->bounds
-                        )
-                    );
+                        local_presentation_transform(**current, motion_, current_layout->bounds));
                 }
-                const Rect hit_bounds = transform_presentation_bounds(
-                    record->hit_bounds, transform
-                );
+                const Rect hit_bounds =
+                    transform_presentation_bounds(record->hit_bounds, transform);
                 if (hit_bounds != record->bounds) {
                     render_commands_.append(BorderRenderCommand{
                         hit_bounds,
@@ -2020,7 +1832,8 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
                 next.operations.render.commands_emitted = render_commands_.size();
             }
         }
-        if (text_engine_ != nullptr) next.operations.text = text_engine_->operation_counters();
+        if (text_engine_ != nullptr)
+            next.operations.text = text_engine_->operation_counters();
         // Freeze the phase-relevant frame state before a render spike closes and snapshots it.
         record_profiler_counters(next);
     }
@@ -2029,7 +1842,8 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
 
 SurfaceFrame Surface::complete_frame(SurfaceFrame next) {
     application_.flush_durable();
-    if (text_engine_ != nullptr) next.operations.text = text_engine_->operation_counters();
+    if (text_engine_ != nullptr)
+        next.operations.text = text_engine_->operation_counters();
     if (text_engine_ != nullptr) {
         for (runtime::RuntimeDiagnostic& diagnostic : text_engine_->take_diagnostics()) {
             application_.services().report(std::move(diagnostic));
@@ -2049,10 +1863,8 @@ SurfaceFrame Surface::complete_frame(SurfaceFrame next) {
     tree_.clear_dirty();
     observed_service_generations_ = application_.services().generations();
     frame_invalidated_ = false;
-    const std::size_t publication_count = std::max(
-        next.lifecycle_input.events.size(),
-        next.lifecycle_input.action_outcomes.size()
-    );
+    const std::size_t publication_count =
+        std::max(next.lifecycle_input.events.size(), next.lifecycle_input.action_outcomes.size());
     constexpr std::size_t maximum_published_events = 512U;
     for (std::size_t index = 0U; index < publication_count; ++index) {
         if (next_event_sequence_ == std::numeric_limits<std::uint64_t>::max()) {
@@ -2061,9 +1873,8 @@ SurfaceFrame Surface::complete_frame(SurfaceFrame next) {
         published_events_.push_back(SurfaceEventRecord{
             next_event_sequence_++,
             next.frame_index,
-            index < next.lifecycle_input.events.size()
-                ? next.lifecycle_input.events[index]
-                : data::JsonValue{},
+            index < next.lifecycle_input.events.size() ? next.lifecycle_input.events[index]
+                                                       : data::JsonValue{},
             index < next.lifecycle_input.action_outcomes.size()
                 ? next.lifecycle_input.action_outcomes[index]
                 : data::JsonValue{},
@@ -2103,8 +1914,7 @@ void Surface::record_profiler_counters(const SurfaceFrame& frame) {
         {runtime::ProfilerCounter::layout_nanos, value.layout_nanos},
         {runtime::ProfilerCounter::layout_measured_nodes, value.layout_measured_nodes},
         {runtime::ProfilerCounter::layout_arranged_nodes, value.layout_arranged_nodes},
-        {runtime::ProfilerCounter::layout_translated_nodes,
-         value.layout_translated_nodes},
+        {runtime::ProfilerCounter::layout_translated_nodes, value.layout_translated_nodes},
         {runtime::ProfilerCounter::layout_reused_nodes, value.layout_measurement_cache_hits},
         {runtime::ProfilerCounter::resource_reloads, value.resource_reloads},
         {runtime::ProfilerCounter::reload_duration_nanos, value.reload_duration_nanos},
@@ -2115,11 +1925,9 @@ void Surface::record_profiler_counters(const SurfaceFrame& frame) {
         {runtime::ProfilerCounter::text_layout_cache_restore_nanos, value.text.cache_restore_nanos},
         {runtime::ProfilerCounter::text_layout_cache_store_nanos, value.text.cache_store_nanos},
         {runtime::ProfilerCounter::text_shaping_nanos, value.text.shaping_nanos},
-        {runtime::ProfilerCounter::text_font_resolution_nanos,
-         value.text.font_resolution_nanos},
+        {runtime::ProfilerCounter::text_font_resolution_nanos, value.text.font_resolution_nanos},
         {runtime::ProfilerCounter::text_opentype_nanos, value.text.opentype_nanos},
-        {runtime::ProfilerCounter::text_line_assembly_nanos,
-         value.text.line_assembly_nanos},
+        {runtime::ProfilerCounter::text_line_assembly_nanos, value.text.line_assembly_nanos},
         {runtime::ProfilerCounter::render_commands, value.render.commands_emitted},
         {runtime::ProfilerCounter::render_fragments_built, value.render.fragments_built},
         {runtime::ProfilerCounter::render_fragments_reused, value.render.fragments_reused},
@@ -2154,33 +1962,59 @@ void Surface::clear_diagnostics() noexcept {
     layout_engine_.clear_diagnostics();
     semantics_.clear_diagnostics();
     material_registry_.clear_diagnostics();
-    if (text_engine_ != nullptr) text_engine_->clear_diagnostics();
+    if (text_engine_ != nullptr)
+        text_engine_->clear_diagnostics();
     reported_theme_motion_diagnostics_.clear();
     reported_lazy_convergence_diagnostics_.clear();
     last_frame_.diagnostics = application_.services().diagnostics_snapshot();
 }
 
-const RetainedTree& Surface::tree() const noexcept { return tree_; }
-RetainedTree& Surface::tree() noexcept { return tree_; }
-const LayoutResult& Surface::layout() const noexcept { return layout_engine_.result(); }
-const SurfaceFrame& Surface::last_frame() const noexcept { return last_frame_; }
-InputRouter& Surface::input() noexcept { return input_; }
-const InputRouter& Surface::input() const noexcept { return input_; }
-const SemanticsEngine& Surface::semantics() const noexcept { return semantics_; }
-const CommandIndex& Surface::commands() const noexcept { return commands_; }
-const WidgetRegistry& Surface::widget_registry() const noexcept { return widgets_; }
-const BehaviorRegistry& Surface::behavior_registry() const noexcept { return behaviors_; }
-const MotionRuntime& Surface::motion() const noexcept { return motion_; }
-const TextEngine* Surface::text_engine() const noexcept { return text_engine_.get(); }
-const RenderCommandBuffer& Surface::render_commands() const noexcept { return render_commands_; }
+const RetainedTree& Surface::tree() const noexcept {
+    return tree_;
+}
+RetainedTree& Surface::tree() noexcept {
+    return tree_;
+}
+const LayoutResult& Surface::layout() const noexcept {
+    return layout_engine_.result();
+}
+const SurfaceFrame& Surface::last_frame() const noexcept {
+    return last_frame_;
+}
+InputRouter& Surface::input() noexcept {
+    return input_;
+}
+const InputRouter& Surface::input() const noexcept {
+    return input_;
+}
+const SemanticsEngine& Surface::semantics() const noexcept {
+    return semantics_;
+}
+const CommandIndex& Surface::commands() const noexcept {
+    return commands_;
+}
+const WidgetRegistry& Surface::widget_registry() const noexcept {
+    return widgets_;
+}
+const BehaviorRegistry& Surface::behavior_registry() const noexcept {
+    return behaviors_;
+}
+const MotionRuntime& Surface::motion() const noexcept {
+    return motion_;
+}
+const TextEngine* Surface::text_engine() const noexcept {
+    return text_engine_.get();
+}
+const RenderCommandBuffer& Surface::render_commands() const noexcept {
+    return render_commands_;
+}
 
 std::vector<runtime::LayerSnapshot> Surface::layer_snapshot() const {
     const std::vector<runtime::LayerSnapshot> application_layers = application_.layers().snapshot();
     std::vector<runtime::LayerSnapshot> result;
     if (!application_.layers().root_replaced()) {
-        result.push_back(runtime::LayerSnapshot{
-            "root:" + id_, runtime::LayerRole::screen, std::nullopt
-        });
+        result.push_back(
+            runtime::LayerSnapshot{"root:" + id_, runtime::LayerRole::screen, std::nullopt});
     }
     result.insert(result.end(), application_layers.begin(), application_layers.end());
     return result;
@@ -2188,47 +2022,55 @@ std::vector<runtime::LayerSnapshot> Surface::layer_snapshot() const {
 
 bool Surface::inspect_select(const std::string_view key) {
     const RetainedNode* node = tree_.find_key(key);
-    if (node == nullptr) return false;
+    if (node == nullptr)
+        return false;
     const bool changed = inspected_identity_ != node->identity();
     inspected_identity_ = node->identity();
-    if (changed) invalidate_frame();
+    if (changed)
+        invalidate_frame();
     return true;
 }
 
 bool Surface::inspect_pick(const Point position) {
     const RetainedNode* node = input_.inspection_target(position);
-    if (node == nullptr) return false;
+    if (node == nullptr)
+        return false;
     const bool changed = inspected_identity_ != node->identity();
     inspected_identity_ = node->identity();
-    if (changed) invalidate_frame();
+    if (changed)
+        invalidate_frame();
     return true;
 }
 
 void Surface::inspect_clear() noexcept {
-    if (!inspected_identity_.has_value()) return;
+    if (!inspected_identity_.has_value())
+        return;
     inspected_identity_.reset();
     invalidate_frame();
 }
 
 const RetainedNode* Surface::inspected_node() const noexcept {
-    return inspected_identity_.has_value()
-        ? tree_.find_identity(*inspected_identity_)
-        : nullptr;
+    return inspected_identity_.has_value() ? tree_.find_identity(*inspected_identity_) : nullptr;
 }
 
 std::string_view surface_density_name(const SurfaceDensity value) noexcept {
     switch (value) {
-    case SurfaceDensity::compact: return "compact";
-    case SurfaceDensity::comfortable: return "comfortable";
+    case SurfaceDensity::compact:
+        return "compact";
+    case SurfaceDensity::comfortable:
+        return "comfortable";
     }
     return "comfortable";
 }
 
 std::string_view pointer_precision_name(const PointerPrecision value) noexcept {
     switch (value) {
-    case PointerPrecision::none: return "none";
-    case PointerPrecision::coarse: return "coarse";
-    case PointerPrecision::fine: return "fine";
+    case PointerPrecision::none:
+        return "none";
+    case PointerPrecision::coarse:
+        return "coarse";
+    case PointerPrecision::fine:
+        return "fine";
     }
     return "none";
 }

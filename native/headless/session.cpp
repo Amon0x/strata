@@ -199,6 +199,32 @@ struct Session::Impl final {
         frame();
     }
 
+    void execute(const PointerDragStep& step) {
+        const auto [start_x, start_y] = resolve(step.from);
+        const auto [end_x, end_y] = resolve(step.to);
+        advance_clock();
+        enqueue(pointer_event(STRATA_INPUT_POINTER_MOVE, start_x, start_y));
+        frame();
+        advance_clock(1'000'000);
+        enqueue(pointer_event(STRATA_INPUT_POINTER_PRESS, start_x, start_y, step.button));
+        frame();
+        const std::int64_t base = time_nanoseconds_;
+        for (std::uint32_t index = 0U; index < step.steps; ++index) {
+            const long double fraction =
+                static_cast<long double>(index + 1U) / static_cast<long double>(step.steps);
+            time_nanoseconds_ =
+                base + static_cast<std::int64_t>(std::llround(
+                           static_cast<long double>(step.duration_nanoseconds) * fraction));
+            const double x = start_x + (end_x - start_x) * static_cast<double>(fraction);
+            const double y = start_y + (end_y - start_y) * static_cast<double>(fraction);
+            enqueue(pointer_event(STRATA_INPUT_POINTER_MOVE, x, y, step.button));
+            frame();
+        }
+        advance_clock(1'000'000);
+        enqueue(pointer_event(STRATA_INPUT_POINTER_RELEASE, end_x, end_y, step.button));
+        frame();
+    }
+
     void execute(const ClickStep& step) {
         const auto [x, y] = resolve(step.target);
         advance_clock();
