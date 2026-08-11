@@ -61,8 +61,11 @@ if(Strata_AUTHORING)
     add_test(NAME strata_installed_contract COMMAND strata_installed_contract)
 endif()
 
-add_library(strata_installed_extension SHARED external_extension.cpp)
-strata_configure_extension(strata_installed_extension installed.smoke.v1)
+strata_add_extension_package(
+    TARGET strata_installed_extension
+    PACKAGE installed.smoke.v1
+    SOURCES external_extension.cpp
+)
 set_target_properties(strata_installed_extension PROPERTIES CXX_EXTENSIONS OFF)
 add_executable(strata_installed_extension_loader extension_loader_smoke.cpp)
 target_link_libraries(strata_installed_extension_loader PRIVATE Strata::c ${CMAKE_DL_LIBS})

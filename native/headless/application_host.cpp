@@ -392,10 +392,15 @@ struct ApplicationHost::Impl final {
         const std::string schemas =
             scenario.schemas.empty() ? std::string{}
                                      : read_text(resource_path(scenario.schemas.generic_string()));
-        extensions = host::select_extensions(
-            scenario.packages,
-            scenario.extension_search_paths
-        );
+        std::vector<std::string> packages = host::declared_extension_packages(schemas);
+        if (packages.empty()) {
+            packages = scenario.packages;
+        } else if (!scenario.packages.empty() && scenario.packages != packages) {
+            throw std::invalid_argument(
+                "headless extension packages disagree with the application schema declaration"
+            );
+        }
+        extensions = host::select_extensions(packages, scenario.extension_search_paths);
         std::vector<std::string> extension_schemas = extensions.schemas();
         std::vector<strata_string_view> extension_schema_views;
         extension_schema_views.reserve(extension_schemas.size());

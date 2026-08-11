@@ -20,6 +20,17 @@
 namespace strata::ui {
 using namespace input_detail;
 namespace {
+[[nodiscard]] bool pointer_geometry_generations_match(
+    const DirtyGenerationSnapshot& left,
+    const DirtyGenerationSnapshot& right
+) noexcept {
+    return left.structure == right.structure && left.properties == right.properties &&
+        left.layout == right.layout && left.text == right.text && left.style == right.style &&
+        left.input == right.input && left.scale == right.scale &&
+        left.animation == right.animation && left.resource == right.resource &&
+        left.editor == right.editor;
+}
+
 
 [[nodiscard]] bool contains(const Rect& bounds, const Point point) noexcept {
     return point.x >= bounds.x && point.y >= bounds.y &&
@@ -782,7 +793,7 @@ void InputRouter::prepare_pointer_geometry() const {
         pointer_geometry_tree_generation_ == tree_->generation() &&
         pointer_geometry_layout_generation_ == layout_->generation &&
         pointer_geometry_notification_generation_ == notifications &&
-        pointer_geometry_dirty_generations_ == dirty) {
+        pointer_geometry_generations_match(pointer_geometry_dirty_generations_, dirty)) {
         return;
     }
 
@@ -1455,6 +1466,10 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
     pressed = pressed_pointer_targets_.find(event.pointer_id);
     const bool gesture_claimed = pressed != pressed_pointer_targets_.end() &&
         pressed->second.gesture == GestureClaimState::claimed;
+    const std::optional<std::uint64_t> widget_claim_owner =
+        gesture_claimed && pressed->second.widget_lifecycle_claim
+        ? pressed->second.gesture_owner
+        : std::nullopt;
     if (route_pointer_drag(event, result)) {
         if (event.type == PointerEventType::release || event.type == PointerEventType::cancel) {
             finish_capture();
@@ -1466,6 +1481,18 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
             finish_capture();
         }
         return result;
+    }
+    if (widget_claim_owner.has_value()) {
+        if (RetainedNode* owner = tree_->find_identity(*widget_claim_owner);
+            owner != nullptr) {
+            static_cast<void>(route_widget_pointer(
+                owner,
+                hover_target,
+                event,
+                dispatch,
+                result
+            ));
+        }
     }
     if (gesture_claimed) {
         if (event.type == PointerEventType::release || event.type == PointerEventType::cancel) {

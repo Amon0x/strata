@@ -4,7 +4,6 @@
     "id": "portable.headless",
     "module": "assets/strata/samples/desktop_app.strata",
     "root": "DesktopExample",
-    "packages": [],
     "actions": []
   },
   "surface": {

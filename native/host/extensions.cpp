@@ -250,9 +250,15 @@ LoadedExtension load_extension(
         plugin.plugin_abi_version != STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT ||
         plugin.core_abi_version < STRATA_ABI_VERSION_MINIMUM ||
         plugin.core_abi_version > STRATA_ABI_VERSION_CURRENT || plugin.extensions == nullptr ||
-        plugin.extensions->struct_size < sizeof(strata_surface_extension_bundle) ||
+        plugin.extensions->struct_size < STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE ||
         (plugin.extensions->widget_count != 0U && plugin.extensions->widgets == nullptr) ||
-        (plugin.extensions->behavior_count != 0U && plugin.extensions->behaviors == nullptr)) {
+        (plugin.extensions->behavior_count != 0U && plugin.extensions->behaviors == nullptr) ||
+        (plugin.extensions->struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE &&
+         plugin.extensions->widget_input_count != 0U &&
+         plugin.extensions->widget_inputs == nullptr) ||
+        (plugin.extensions->struct_size >= sizeof(strata_surface_extension_bundle) &&
+         plugin.extensions->widget_scroll_count != 0U &&
+         plugin.extensions->widget_scrolls == nullptr)) {
         throw std::runtime_error(
             "external extension '" + result.path_.generic_string() +
             "' returned an incompatible package descriptor"
@@ -282,13 +288,20 @@ LoadedExtension load_extension(
 }
 
 const strata_surface_extension_bundle* SelectedExtensions::pointer() noexcept {
-    if (widgets.empty() && behaviors.empty()) return nullptr;
+    if (widgets.empty() && widget_inputs.empty() && widget_scrolls.empty() &&
+        behaviors.empty()) {
+        return nullptr;
+    }
     bundle = strata_surface_extension_bundle{
         sizeof(strata_surface_extension_bundle),
         widgets.empty() ? nullptr : widgets.data(),
         widgets.size(),
         behaviors.empty() ? nullptr : behaviors.data(),
         behaviors.size(),
+        widget_inputs.empty() ? nullptr : widget_inputs.data(),
+        widget_inputs.size(),
+        widget_scrolls.empty() ? nullptr : widget_scrolls.data(),
+        widget_scrolls.size(),
     };
     return &bundle;
 }
@@ -299,6 +312,30 @@ std::vector<std::string> SelectedExtensions::schemas() const {
     for (const LoadedExtension& package : packages) documents.push_back(package.schema_json());
     return documents;
 }
+std::vector<std::string> declared_extension_packages(const std::string_view schemas_json) {
+    if (schemas_json.empty()) return {};
+    const data::JsonValue schemas = data::parse_json(schemas_json);
+    const data::JsonValue* const packages = schemas.find("extensionPackages");
+    if (packages == nullptr) return {};
+    if (packages->array() == nullptr) {
+        throw std::runtime_error("extensionPackages must be an array of package ids");
+    }
+    std::vector<std::string> result;
+    result.reserve(packages->array()->size());
+    std::set<std::string, std::less<>> seen;
+    for (const data::JsonValue& package : *packages->array()) {
+        if (package.string() == nullptr) {
+            throw std::runtime_error("extensionPackages entries must be package id strings");
+        }
+        require_package_id(*package.string());
+        if (!seen.insert(*package.string()).second) {
+            throw std::runtime_error("extensionPackages package ids must be unique");
+        }
+        result.push_back(*package.string());
+    }
+    return result;
+}
+
 
 SelectedExtensions select_extensions(
     const std::vector<std::string>& package_ids,
@@ -318,6 +355,22 @@ SelectedExtensions select_extensions(
                 result.widgets.end(),
                 package.widgets,
                 package.widgets + package.widget_count
+            );
+        }
+        if (package.struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE &&
+            package.widget_input_count != 0U) {
+            result.widget_inputs.insert(
+                result.widget_inputs.end(),
+                package.widget_inputs,
+                package.widget_inputs + package.widget_input_count
+            );
+        }
+        if (package.struct_size >= sizeof(strata_surface_extension_bundle) &&
+            package.widget_scroll_count != 0U) {
+            result.widget_scrolls.insert(
+                result.widget_scrolls.end(),
+                package.widget_scrolls,
+                package.widget_scrolls + package.widget_scroll_count
             );
         }
         if (package.behavior_count != 0U) {

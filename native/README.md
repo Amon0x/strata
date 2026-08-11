@@ -112,8 +112,9 @@ The default prefixes are `build/install/windows-x64` and `build/install/linux-x6
 exports `Strata::c`, `Strata::host`, `Strata::extensions`, and `Strata::render_host`, plus public
 headers, a generated JSON catalog projection, runtime assets, tools, and samples.
 `Strata::extensions` is static authoring support linked into independently loaded package
-libraries; the installed `strata_configure_extension` CMake helper assigns their discovery-safe
-names. Windows also exports `Strata::d3d11`, `Strata::win32`, and `Strata::desktop`.
+libraries; the installed `strata_add_extension_package` CMake helper creates, names, records, and
+optionally installs them. Windows also exports `Strata::d3d11`, `Strata::win32`, and
+`Strata::desktop`.
 `Strata::d3d11` includes both low-level packet submission and a Surface presenter;
 `Strata::win32` translates messages for hosts that retain window-loop ownership.
 `Strata_RESOURCES` names the installed `share` directory so consumers do not reconstruct package paths;

@@ -135,7 +135,7 @@ struct Material final {
 };
 
 /** Frame work invalidated when an extension writes one declared retained field. */
-enum class Invalidation { properties, layout, style, text, semantics };
+enum class Invalidation { properties, layout, style, text, semantics, paint, input };
 
 /** Typed `.strata` parameter kinds understood by the compiler schema. */
 struct number final {
@@ -224,8 +224,33 @@ struct Pointer final {
     int pointer_id = 0;
     double x = 0.0;
     double y = 0.0;
+    double local_x = 0.0;
+    double local_y = 0.0;
+    double delta_x = 0.0;
+    double delta_y = 0.0;
+    long long timestamp_nanoseconds = 0;
     bool on_target = false;
+    bool has_local_position = false;
+    bool shift = false;
+    bool control = false;
+    bool alt = false;
+    bool super = false;
 };
+struct Scroll final {
+    Pointer::Phase phase = Pointer::Phase::target;
+    double x = 0.0;
+    double y = 0.0;
+    double local_x = 0.0;
+    double local_y = 0.0;
+    double delta_x = 0.0;
+    double delta_y = 0.0;
+    bool on_target = false;
+    bool shift = false;
+    bool control = false;
+    bool alt = false;
+    bool super = false;
+};
+
 
 struct Size final {
     double width = 0.0;
@@ -243,11 +268,26 @@ public:
     [[nodiscard]] double get(const Parameter<number>& field) const noexcept;
     [[nodiscard]] bool get(const Parameter<boolean>& field) const noexcept;
     [[nodiscard]] std::string get(const Parameter<text>& field) const;
+    template <typename Kind>
+    [[nodiscard]] bool has(const Parameter<Kind>& field) const noexcept {
+        return strata_widget_input_has_property(
+                   context_, strata_string_view{field.name.data(), field.name.size()}
+               ) != 0U;
+    }
+    [[nodiscard]] Rect bounds() const noexcept;
+    [[nodiscard]] double scale() const noexcept;
 
     /** Writes reach only fields this widget declared; the handle makes that a compile-time fact. */
     bool set(const Retained<number>& field, double value) noexcept;
     bool set(const Retained<boolean>& field, bool value) noexcept;
     bool set(const Retained<text>& field, std::string_view value) noexcept;
+
+    /** Wins arbitration for the active pressed pointer; release and cancellation end capture. */
+    bool claim_gesture() noexcept;
+    /** Stops an active claimed gesture without manufacturing a release event. */
+    bool cancel_gesture() noexcept;
+    /** Requests one downstream projection without changing retained state. */
+    bool invalidate(Invalidation invalidation) noexcept;
 
     /** Dispatches one package-declared action through the ordinary action registry. */
     bool emit(
@@ -257,7 +297,17 @@ public:
         std::string_view event_value_json = {}
     ) noexcept;
     bool emit_event(std::string_view event_kind, std::string_view event_value_json = {}) noexcept;
+    bool emit_event(std::string_view event_kind, double value) noexcept;
+    bool emit_event(std::string_view event_kind, bool value) noexcept;
+    bool emit_text_event(std::string_view event_kind, std::string_view value) noexcept;
 
+    /** Typed local feedback; these events do not dispatch a host action. */
+    bool live(double value) noexcept;
+    bool live(bool value) noexcept;
+    bool live_text(std::string_view value) noexcept;
+    bool commit(double value) noexcept;
+    bool commit(bool value) noexcept;
+    bool commit_text(std::string_view value) noexcept;
 private:
     strata_widget_input_context* context_;
 };
@@ -299,6 +349,13 @@ public:
     [[nodiscard]] double get(const Parameter<number>& field) const noexcept;
     [[nodiscard]] bool get(const Parameter<boolean>& field) const noexcept;
     [[nodiscard]] std::string get(const Parameter<text>& field) const;
+    template <typename Kind>
+    [[nodiscard]] bool has(const Parameter<Kind>& field) const noexcept {
+        return strata_widget_render_has_property(
+                   context_, strata_string_view{field.name.data(), field.name.size()}
+               ) != 0U;
+    }
+    [[nodiscard]] double scale() const noexcept;
     /** Measures one line through the shaping cache the paint path already uses. */
     [[nodiscard]] std::optional<Size> measure(std::string_view value) const noexcept;
 
@@ -346,13 +403,24 @@ public:
     explicit Semantics(strata_widget_semantics_context* const context) noexcept : context_(context) {}
 
     [[nodiscard]] double get(const Retained<number>& field) const noexcept;
+    [[nodiscard]] std::string get(const Retained<text>& field) const;
     [[nodiscard]] bool get(const Retained<boolean>& field) const noexcept;
 
+    [[nodiscard]] double get(const Parameter<number>& field) const noexcept;
+    [[nodiscard]] std::string get(const Parameter<text>& field) const;
+    [[nodiscard]] bool get(const Parameter<boolean>& field) const noexcept;
+    template <typename Kind>
+    [[nodiscard]] bool has(const Parameter<Kind>& field) const noexcept {
+        return strata_widget_semantics_has_property(
+                   context_, strata_string_view{field.name.data(), field.name.size()}
+               ) != 0U;
+    }
     void name(std::string_view value) noexcept;
     void value_text(std::string_view value) noexcept;
     void add_action(std::string_view value) noexcept;
     void checked(bool value) noexcept;
     void expanded(bool value) noexcept;
+    void value_range(double current, double minimum, double maximum) noexcept;
     void selected(bool value) noexcept;
 
 private:
@@ -389,6 +457,8 @@ private:
 
 using ActivateHook = bool (*)(Input&);
 using KeyHook = bool (*)(Input&, const Key&);
+using WidgetPointerHook = bool (*)(Input&, const Pointer&);
+using ScrollHook = bool (*)(Input&, const Scroll&);
 using PresentHook = void (*)(Present&);
 using SemanticsHook = void (*)(Semantics&);
 using HitBoundsHook = Rect (*)(Inspect&);
@@ -400,6 +470,8 @@ namespace detail {
 struct WidgetHooks final {
     ActivateHook activate = nullptr;
     KeyHook key = nullptr;
+    WidgetPointerHook pointer = nullptr;
+    ScrollHook scroll = nullptr;
     SemanticsHook semantics = nullptr;
     PresentHook present = nullptr;
     PresentHook overlay = nullptr;
@@ -486,6 +558,8 @@ public:
 
     Widget& on_activate(ActivateHook hook);
     Widget& on_key(KeyHook hook);
+    Widget& on_pointer(WidgetPointerHook hook);
+    Widget& on_scroll(ScrollHook hook);
     Widget& on_semantics(SemanticsHook hook);
     Widget& present(PresentHook hook);
     Widget& overlay(PresentHook hook);
@@ -521,6 +595,8 @@ private:
     Widget& declare_retained(std::string name, Invalidation invalidation);
     /** Materializes descriptor-owned storage once; the package holds the widget in place. */
     [[nodiscard]] strata_widget_extension descriptor();
+    [[nodiscard]] std::optional<strata_widget_input_extension> input_descriptor();
+    [[nodiscard]] std::optional<strata_widget_scroll_extension> scroll_descriptor();
     [[nodiscard]] std::string schema_json() const;
 
     std::string type_;
@@ -596,6 +672,8 @@ private:
     std::deque<Widget> widgets_;
     std::deque<Behavior> behaviors_;
     std::vector<strata_widget_extension> widget_descriptors_;
+    std::vector<strata_widget_input_extension> widget_input_descriptors_;
+    std::vector<strata_widget_scroll_extension> widget_scroll_descriptors_;
     std::vector<strata_behavior_extension> behavior_descriptors_;
     strata_surface_extension_bundle bundle_{};
     bool finalized_ = false;

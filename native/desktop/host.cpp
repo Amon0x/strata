@@ -864,8 +864,7 @@ struct Host::Impl final {
 
     [[nodiscard]] Session create_session(
         std::string id,
-        const std::string_view schemas_resource,
-        const std::span<const std::string_view> extension_packages = {}
+        const std::string_view schemas_resource
     ) {
         frame_time = now();
         strata_runtime_config config{};
@@ -910,12 +909,9 @@ struct Host::Impl final {
         );
 
         const std::string schemas = services.text(schemas_resource);
-        std::vector<std::string> extension_ids;
-        extension_ids.reserve(extension_packages.size());
-        for (const std::string_view package_id : extension_packages) {
-            extension_ids.emplace_back(package_id);
-        }
-        result.extensions = host::select_extensions(extension_ids);
+        result.extensions = host::select_extensions(
+            host::declared_extension_packages(schemas)
+        );
         const std::vector<std::string> extension_schemas = result.extensions.schemas();
         std::vector<strata_string_view> extension_schema_views;
         extension_schema_views.reserve(extension_schemas.size());
@@ -1097,11 +1093,9 @@ struct Host::Impl final {
         std::string id,
         const std::string_view root_name
     ) {
-        static constexpr std::array extension_packages{std::string_view("strata.demo.v1")};
         session = create_session(
             std::move(id),
-            "assets/strata/ui/demo_surface.schemas.json",
-            extension_packages
+            "assets/strata/ui/demo_surface.schemas.json"
         );
         bind_showcase_model(session);
         static constexpr std::array showcase_images{

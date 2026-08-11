@@ -1,4 +1,7 @@
 {
+  "extensionPackages": [
+    "strata.control-deck.v1"
+  ],
   "widgets": {
     "registry": "strata.builtins.v1",
     "required": [],

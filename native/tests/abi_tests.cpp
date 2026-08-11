@@ -739,6 +739,10 @@ screen Main {
         1U,
         &behavior_extension,
         1U,
+        nullptr,
+        0U,
+        nullptr,
+        0U,
     };
     const strata_surface_config surface_config{
         sizeof(strata_surface_config),

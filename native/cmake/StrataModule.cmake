@@ -1,4 +1,72 @@
 include_guard(GLOBAL)
+function(strata_add_extension_package)
+    set(options INSTALL)
+    set(one_value TARGET PACKAGE)
+    set(multi_value SOURCES)
+    cmake_parse_arguments(
+        STRATA_EXTENSION
+        "${options}"
+        "${one_value}"
+        "${multi_value}"
+        ${ARGN}
+    )
+    if(STRATA_EXTENSION_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "strata_add_extension_package received unknown arguments: "
+            "${STRATA_EXTENSION_UNPARSED_ARGUMENTS}")
+    endif()
+    if(NOT STRATA_EXTENSION_TARGET)
+        message(FATAL_ERROR "strata_add_extension_package requires TARGET")
+    endif()
+    if(TARGET "${STRATA_EXTENSION_TARGET}")
+        message(FATAL_ERROR
+            "strata_add_extension_package target '${STRATA_EXTENSION_TARGET}' already exists")
+    endif()
+    if(NOT STRATA_EXTENSION_PACKAGE MATCHES "^[A-Za-z0-9][A-Za-z0-9._-]*$")
+        message(FATAL_ERROR
+            "invalid Strata extension package id '${STRATA_EXTENSION_PACKAGE}'")
+    endif()
+    if(NOT STRATA_EXTENSION_SOURCES)
+        message(FATAL_ERROR "strata_add_extension_package requires SOURCES")
+    endif()
+
+    add_library("${STRATA_EXTENSION_TARGET}" SHARED ${STRATA_EXTENSION_SOURCES})
+    target_link_libraries("${STRATA_EXTENSION_TARGET}" PRIVATE Strata::extensions)
+    target_compile_features("${STRATA_EXTENSION_TARGET}" PRIVATE cxx_std_23)
+    set_target_properties(
+        "${STRATA_EXTENSION_TARGET}"
+        PROPERTIES
+            OUTPUT_NAME "strata-extension-${STRATA_EXTENSION_PACKAGE}"
+            CXX_EXTENSIONS OFF
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN YES
+    )
+    if(APPLE)
+        set_property(
+            TARGET "${STRATA_EXTENSION_TARGET}"
+            PROPERTY INSTALL_RPATH "@loader_path/../.."
+        )
+    elseif(UNIX)
+        set_property(
+            TARGET "${STRATA_EXTENSION_TARGET}"
+            PROPERTY INSTALL_RPATH "$ORIGIN/../.."
+        )
+    endif()
+
+    set_property(
+        GLOBAL APPEND PROPERTY STRATA_EXTENSION_PACKAGE_TARGETS
+        "${STRATA_EXTENSION_TARGET}"
+    )
+    if(STRATA_EXTENSION_INSTALL)
+        include(GNUInstallDirs)
+        install(
+            TARGETS "${STRATA_EXTENSION_TARGET}"
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/strata/extensions"
+        )
+    endif()
+endfunction()
+
 
 function(strata_validate_module)
     set(options)
@@ -53,6 +121,13 @@ function(strata_validate_module)
 
     set(command "${compiler}")
     set(dependencies ${module_sources} ${tool_dependency})
+    get_property(local_extension_targets GLOBAL PROPERTY STRATA_EXTENSION_PACKAGE_TARGETS)
+    if(local_extension_targets)
+        list(GET local_extension_targets 0 extension_path_target)
+        list(APPEND command
+            --extension-path "$<TARGET_FILE_DIR:${extension_path_target}>")
+        list(APPEND dependencies ${local_extension_targets})
+    endif()
     foreach(extension_path IN LISTS STRATA_VALIDATE_EXTENSION_PATHS)
         cmake_path(ABSOLUTE_PATH extension_path
             BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

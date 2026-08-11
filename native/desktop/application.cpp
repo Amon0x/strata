@@ -268,10 +268,16 @@ struct ApplicationHost::Impl final {
 
         schemas = config.schemas_resource.empty() ? std::string{}
                                                   : services.text(config.schemas_resource);
-        extensions = host::select_extensions(
-            config.extension_packages,
-            config.extension_search_paths
-        );
+        std::vector<std::string> packages = host::declared_extension_packages(schemas);
+        if (packages.empty()) {
+            packages = config.extension_packages;
+        } else if (!config.extension_packages.empty() &&
+                   config.extension_packages != packages) {
+            throw std::invalid_argument(
+                "desktop application extension packages disagree with its schema declaration"
+            );
+        }
+        extensions = host::select_extensions(packages, config.extension_search_paths);
         extension_schemas = extensions.schemas();
         std::vector<strata_string_view> extension_views;
         extension_views.reserve(extension_schemas.size());

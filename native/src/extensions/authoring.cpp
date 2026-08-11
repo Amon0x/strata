@@ -58,6 +58,8 @@ template <typename Reader>
     case Invalidation::style: return STRATA_WIDGET_INVALIDATION_STYLE;
     case Invalidation::text: return STRATA_WIDGET_INVALIDATION_TEXT;
     case Invalidation::semantics: return STRATA_WIDGET_INVALIDATION_SEMANTICS;
+    case Invalidation::paint: return STRATA_WIDGET_INVALIDATION_PAINT;
+    case Invalidation::input: return STRATA_WIDGET_INVALIDATION_INPUT;
     case Invalidation::properties: break;
     }
     return STRATA_WIDGET_INVALIDATION_PROPERTIES;
@@ -158,6 +160,73 @@ strata_extension_input_result key_trampoline(
     Input input(context);
     return hooks->key(input, key) ? STRATA_EXTENSION_INPUT_CONSUMED : STRATA_EXTENSION_INPUT_IGNORED;
 }
+strata_extension_input_result widget_pointer_trampoline(
+    void* const user_data,
+    strata_widget_input_context* const context,
+    const strata_widget_pointer_event* const event
+) {
+    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+    if (event == nullptr) return STRATA_EXTENSION_INPUT_IGNORED;
+    Pointer pointer;
+    switch (event->kind) {
+    case STRATA_INPUT_POINTER_MOVE: pointer.kind = Pointer::Kind::move; break;
+    case STRATA_INPUT_POINTER_PRESS: pointer.kind = Pointer::Kind::press; break;
+    case STRATA_INPUT_POINTER_RELEASE: pointer.kind = Pointer::Kind::release; break;
+    default: pointer.kind = Pointer::Kind::cancel; break;
+    }
+    switch (event->phase) {
+    case STRATA_EXTENSION_EVENT_CAPTURE: pointer.phase = Pointer::Phase::capture; break;
+    case STRATA_EXTENSION_EVENT_BUBBLE: pointer.phase = Pointer::Phase::bubble; break;
+    default: pointer.phase = Pointer::Phase::target; break;
+    }
+    pointer.button = event->button;
+    pointer.pointer_id = event->pointer_id;
+    pointer.x = event->x;
+    pointer.y = event->y;
+    pointer.local_x = event->local_x;
+    pointer.local_y = event->local_y;
+    pointer.delta_x = event->delta_x;
+    pointer.delta_y = event->delta_y;
+    pointer.timestamp_nanoseconds = event->timestamp_nanoseconds;
+    pointer.on_target = event->target != 0U;
+    pointer.has_local_position = true;
+    pointer.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
+    pointer.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
+    pointer.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
+    pointer.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
+    Input input(context);
+    return hooks->pointer(input, pointer) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                          : STRATA_EXTENSION_INPUT_IGNORED;
+}
+strata_extension_input_result widget_scroll_trampoline(
+    void* const user_data,
+    strata_widget_input_context* const context,
+    const strata_widget_scroll_event* const event
+) {
+    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+    if (event == nullptr) return STRATA_EXTENSION_INPUT_IGNORED;
+    Scroll scroll;
+    switch (event->phase) {
+    case STRATA_EXTENSION_EVENT_CAPTURE: scroll.phase = Pointer::Phase::capture; break;
+    case STRATA_EXTENSION_EVENT_BUBBLE: scroll.phase = Pointer::Phase::bubble; break;
+    default: scroll.phase = Pointer::Phase::target; break;
+    }
+    scroll.x = event->x;
+    scroll.y = event->y;
+    scroll.local_x = event->local_x;
+    scroll.local_y = event->local_y;
+    scroll.delta_x = event->delta_x;
+    scroll.delta_y = event->delta_y;
+    scroll.on_target = event->target != 0U;
+    scroll.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
+    scroll.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
+    scroll.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
+    scroll.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
+    Input input(context);
+    return hooks->scroll(input, scroll) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                        : STRATA_EXTENSION_INPUT_IGNORED;
+}
+
 
 void present_trampoline(void* const user_data, strata_widget_render_context* const context) {
     const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
@@ -186,7 +255,7 @@ strata_rect hit_bounds_trampoline(
     return hooks->hit_bounds(inspect);
 }
 
-strata_extension_input_result pointer_trampoline(
+strata_extension_input_result behavior_pointer_trampoline(
     void* const user_data,
     strata_behavior_input_context* const context,
     const strata_behavior_pointer_event* const event
@@ -210,6 +279,10 @@ strata_extension_input_result pointer_trampoline(
     pointer.x = event->x;
     pointer.y = event->y;
     pointer.on_target = event->target != 0U;
+    pointer.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
+    pointer.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
+    pointer.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
+    pointer.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
     BehaviorInput input(context);
     return hooks->pointer(input, pointer) ? STRATA_EXTENSION_INPUT_CONSUMED
                                           : STRATA_EXTENSION_INPUT_IGNORED;
@@ -262,6 +335,9 @@ std::string Input::get(const Parameter<extension::text>& field) const {
         field.name
     ).value_or(std::string(field.value.value_or(std::string_view{})));
 }
+Rect Input::bounds() const noexcept { return strata_widget_input_bounds(context_); }
+double Input::scale() const noexcept { return strata_widget_input_scale(context_); }
+
 
 bool Input::set(const Retained<number>& field, const double value) noexcept {
     return strata_widget_input_set_retained_number(context_, view(field.name), value).status ==
@@ -280,6 +356,18 @@ bool Input::set(const Retained<extension::text>& field, const std::string_view v
     return strata_widget_input_set_retained_text(context_, view(field.name), view(value)).status ==
         STRATA_STATUS_OK;
 }
+bool Input::claim_gesture() noexcept {
+    return strata_widget_input_claim_gesture(context_) != 0U;
+}
+
+bool Input::cancel_gesture() noexcept {
+    return strata_widget_input_cancel_gesture(context_) != 0U;
+}
+bool Input::invalidate(const Invalidation value) noexcept {
+    return strata_widget_input_invalidate(context_, invalidation_value(value)).status ==
+        STRATA_STATUS_OK;
+}
+
 
 bool Input::emit(
     const std::string_view action_id,
@@ -303,6 +391,42 @@ bool Input::emit_event(
     return strata_widget_input_emit_event_json(context_, view(event_kind), view(event_value_json))
                .status == STRATA_STATUS_OK;
 }
+bool Input::emit_event(const std::string_view event_kind, const double value) noexcept {
+    return strata_widget_input_emit_number_event(context_, view(event_kind), value).status ==
+        STRATA_STATUS_OK;
+}
+
+bool Input::emit_event(const std::string_view event_kind, const bool value) noexcept {
+    return strata_widget_input_emit_boolean_event(
+               context_,
+               view(event_kind),
+               value ? 1U : 0U
+           ).status == STRATA_STATUS_OK;
+}
+
+bool Input::emit_text_event(
+    const std::string_view event_kind,
+    const std::string_view value
+) noexcept {
+    return strata_widget_input_emit_text_event(context_, view(event_kind), view(value)).status ==
+        STRATA_STATUS_OK;
+}
+
+bool Input::live(const double value) noexcept { return emit_event("number-changing", value); }
+bool Input::live(const bool value) noexcept { return emit_event("boolean-changing", value); }
+bool Input::live_text(const std::string_view value) noexcept {
+    return emit_text_event("text-changing", value);
+}
+bool Input::commit(const double value) noexcept {
+    return invalidate(Invalidation::semantics) && emit_event("number-changed", value);
+}
+bool Input::commit(const bool value) noexcept {
+    return invalidate(Invalidation::semantics) && emit_event("boolean-changed", value);
+}
+bool Input::commit_text(const std::string_view value) noexcept {
+    return invalidate(Invalidation::semantics) && emit_text_event("text-changed", value);
+}
+
 
 Rect Present::bounds() const noexcept { return strata_widget_render_bounds(context_); }
 Rect Present::root_bounds() const noexcept { return strata_widget_render_root_bounds(context_); }
@@ -313,6 +437,7 @@ bool Present::focus_visible() const noexcept {
 bool Present::hovered() const noexcept { return strata_widget_render_hovered(context_) != 0U; }
 bool Present::enabled() const noexcept { return strata_widget_render_enabled(context_) != 0U; }
 bool Present::active() const noexcept { return strata_widget_render_active(context_) != 0U; }
+double Present::scale() const noexcept { return strata_widget_render_scale(context_); }
 
 double Present::motion(const std::string_view channel, const double fallback) const noexcept {
     return strata_widget_render_motion_progress(context_, view(channel), fallback);
@@ -472,6 +597,15 @@ ClipScope Present::clip(const Rect bounds) {
 double Semantics::get(const Retained<number>& field) const noexcept {
     return strata_widget_semantics_retained_number(context_, view(field.name), field.fallback);
 }
+std::string Semantics::get(const Retained<extension::text>& field) const {
+    return read_text(
+        [this](const auto... arguments) {
+            return strata_widget_semantics_retained_text(context_, arguments...);
+        },
+        field.name
+    ).value_or(std::string(field.fallback));
+}
+
 
 bool Semantics::get(const Retained<boolean>& field) const noexcept {
     return strata_widget_semantics_retained_boolean(
@@ -480,6 +614,31 @@ bool Semantics::get(const Retained<boolean>& field) const noexcept {
         field.fallback ? 1U : 0U
     ) != 0U;
 }
+double Semantics::get(const Parameter<number>& field) const noexcept {
+    return strata_widget_semantics_property_number(
+        context_,
+        view(field.name),
+        field.value.value_or(0.0)
+    );
+}
+
+std::string Semantics::get(const Parameter<extension::text>& field) const {
+    return read_text(
+        [this](const auto... arguments) {
+            return strata_widget_semantics_property_text(context_, arguments...);
+        },
+        field.name
+    ).value_or(std::string(field.value.value_or(std::string_view{})));
+}
+
+bool Semantics::get(const Parameter<boolean>& field) const noexcept {
+    return strata_widget_semantics_property_boolean(
+        context_,
+        view(field.name),
+        field.value.value_or(false) ? 1U : 0U
+    ) != 0U;
+}
+
 
 void Semantics::name(const std::string_view value) noexcept {
     static_cast<void>(strata_widget_semantics_set_name(context_, view(value)));
@@ -500,6 +659,14 @@ void Semantics::checked(const bool value) noexcept {
 void Semantics::expanded(const bool value) noexcept {
     strata_widget_semantics_set_expanded(context_, value ? 1U : 0U);
 }
+void Semantics::value_range(
+    const double current,
+    const double minimum,
+    const double maximum
+) noexcept {
+    strata_widget_semantics_set_value_range(context_, current, minimum, maximum);
+}
+
 
 void Semantics::selected(const bool value) noexcept {
     strata_widget_semantics_set_selected(context_, value ? 1U : 0U);
@@ -637,6 +804,15 @@ Widget& Widget::on_key(const KeyHook hook) {
     hooks_.key = hook;
     return *this;
 }
+Widget& Widget::on_pointer(const WidgetPointerHook hook) {
+    hooks_.pointer = hook;
+    return *this;
+}
+Widget& Widget::on_scroll(const ScrollHook hook) {
+    hooks_.scroll = hook;
+    return *this;
+}
+
 
 Widget& Widget::on_semantics(const SemanticsHook hook) {
     hooks_.semantics = hook;
@@ -772,6 +948,26 @@ strata_widget_extension Widget::descriptor() {
     descriptor.retained_field_count = retained_fields_.size();
     return descriptor;
 }
+std::optional<strata_widget_input_extension> Widget::input_descriptor() {
+    if (hooks_.pointer == nullptr) return std::nullopt;
+    return strata_widget_input_extension{
+        sizeof(strata_widget_input_extension),
+        view(type_),
+        &hooks_,
+        &widget_pointer_trampoline,
+    };
+}
+std::optional<strata_widget_scroll_extension> Widget::scroll_descriptor() {
+    if (hooks_.scroll == nullptr) return std::nullopt;
+    return strata_widget_scroll_extension{
+        sizeof(strata_widget_scroll_extension),
+        view(type_),
+        &hooks_,
+        &widget_scroll_trampoline,
+    };
+}
+
+
 
 std::string Widget::schema_json() const {
     std::string parameters;
@@ -818,7 +1014,7 @@ strata_behavior_extension Behavior::descriptor() {
         view(id_),
         flags,
         &hooks_,
-        hooks_.pointer != nullptr ? &pointer_trampoline : nullptr,
+        hooks_.pointer != nullptr ? &behavior_pointer_trampoline : nullptr,
     };
 }
 
@@ -861,7 +1057,20 @@ Package& Package::behavior(Behavior definition) {
 void Package::finalize() {
     if (finalized_) return;
     widget_descriptors_.reserve(widgets_.size());
-    for (Widget& definition : widgets_) widget_descriptors_.push_back(definition.descriptor());
+    widget_input_descriptors_.reserve(widgets_.size());
+    widget_scroll_descriptors_.reserve(widgets_.size());
+    for (Widget& definition : widgets_) {
+        widget_descriptors_.push_back(definition.descriptor());
+        if (std::optional<strata_widget_input_extension> input = definition.input_descriptor();
+            input.has_value()) {
+            widget_input_descriptors_.push_back(*input);
+        }
+        if (std::optional<strata_widget_scroll_extension> scroll =
+                definition.scroll_descriptor();
+            scroll.has_value()) {
+            widget_scroll_descriptors_.push_back(*scroll);
+        }
+    }
     behavior_descriptors_.reserve(behaviors_.size());
     for (Behavior& definition : behaviors_) behavior_descriptors_.push_back(definition.descriptor());
     bundle_ = strata_surface_extension_bundle{
@@ -870,6 +1079,10 @@ void Package::finalize() {
         widget_descriptors_.size(),
         behavior_descriptors_.empty() ? nullptr : behavior_descriptors_.data(),
         behavior_descriptors_.size(),
+        widget_input_descriptors_.empty() ? nullptr : widget_input_descriptors_.data(),
+        widget_input_descriptors_.size(),
+        widget_scroll_descriptors_.empty() ? nullptr : widget_scroll_descriptors_.data(),
+        widget_scroll_descriptors_.size(),
     };
     finalized_ = true;
 }

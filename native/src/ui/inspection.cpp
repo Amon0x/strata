@@ -104,6 +104,7 @@ using data::JsonValue;
     case DirtyReason::animation: return "animation";
     case DirtyReason::resource: return "resource";
     case DirtyReason::editor: return "editor";
+    case DirtyReason::paint: return "paint";
     }
     return "properties";
 }
@@ -120,6 +121,7 @@ constexpr DirtyReason dirty_reasons[] = {
     DirtyReason::animation,
     DirtyReason::resource,
     DirtyReason::editor,
+    DirtyReason::paint,
 };
 
 [[nodiscard]] JsonValue dirty_set(const DirtySet& dirty) {

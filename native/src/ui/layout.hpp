@@ -341,6 +341,7 @@ struct LayoutResult final {
     std::uint64_t generation = 0U;
     std::uint64_t root_identity = 0U;
     std::map<std::uint64_t, LayoutRecord> records;
+    double scale = 1.0;
     LayoutOperationCounters operations;
     std::int64_t measure_nanos = 0;
     std::int64_t arrange_nanos = 0;

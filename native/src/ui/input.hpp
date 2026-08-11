@@ -869,6 +869,7 @@ private:
         bool long_press_emitted = false;
         GestureClaimState gesture = GestureClaimState::unclaimed;
         std::optional<std::uint64_t> gesture_owner = std::nullopt;
+        bool widget_lifecycle_claim = false;
         std::string subtarget_id;
     };
 

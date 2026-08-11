@@ -82,6 +82,7 @@ void validate_text(const std::string_view value, const std::string_view label, c
     case DirtyReason::animation: return 8U;
     case DirtyReason::resource: return 9U;
     case DirtyReason::editor: return 10U;
+    case DirtyReason::paint: return 11U;
     }
     return 0U;
 }
@@ -369,7 +370,7 @@ DirtyGenerationSnapshot RetainedNode::dirty_generations() const noexcept {
         dirty_generations_[0U], dirty_generations_[1U], dirty_generations_[2U],
         dirty_generations_[3U], dirty_generations_[4U], dirty_generations_[5U],
         dirty_generations_[6U], dirty_generations_[7U], dirty_generations_[8U],
-        dirty_generations_[9U], dirty_generations_[10U]
+        dirty_generations_[9U], dirty_generations_[10U], dirty_generations_[11U]
     };
 }
 
@@ -514,6 +515,7 @@ DirtyGenerationSnapshot RetainedTree::dirty_generations() const noexcept {
         dirty_generations_[8U],
         dirty_generations_[9U],
         dirty_generations_[10U],
+        dirty_generations_[11U],
     };
 }
 std::size_t RetainedTree::dirty_count() const noexcept { return dirty_index_.size(); }
@@ -587,9 +589,7 @@ bool RetainedTree::set_presentation_value(
     runtime::Value value
 ) {
     RetainedNode* node = find_identity(identity);
-    if (node == nullptr || !node->set_retained_value(std::move(name), std::move(value))) {
-        return false;
-    }
+    if (node == nullptr || !node->set_retained_value(name, value)) return false;
     if (node->presentation_generation_ == std::numeric_limits<std::uint64_t>::max()) {
         throw std::overflow_error("retained node presentation generation exhausted");
     }
@@ -605,6 +605,33 @@ bool RetainedTree::set_presentation_value(
     }
     // A later declarative rebuild still needs a current retained snapshot, but an overlay-only
     // mutation must not invalidate cached widget fragments, semantics, or layout.
+    invalidate_description_snapshot();
+    return true;
+}
+
+bool RetainedTree::set_paint_value(
+    const std::uint64_t identity,
+    std::string name,
+    runtime::Value value
+) {
+    RetainedNode* node = find_identity(identity);
+    if (node == nullptr || !node->set_retained_value(std::move(name), std::move(value))) {
+        return false;
+    }
+    invalidate_description_snapshot();
+    static_cast<void>(mark(identity, DirtyReason::paint));
+    return true;
+}
+
+bool RetainedTree::set_input_value(
+    const std::uint64_t identity,
+    std::string name,
+    runtime::Value value
+) {
+    RetainedNode* node = find_identity(identity);
+    if (node == nullptr || !node->set_retained_value(std::move(name), std::move(value))) {
+        return false;
+    }
     invalidate_description_snapshot();
     return true;
 }

@@ -169,6 +169,7 @@ using ValueFields = std::map<std::string, Value, std::less<>>;
     return STRATA_BEHAVIOR_EVENT_TARGET;
 }
 
+
 [[nodiscard]] Value json_value(const strata_string_view json, const bool empty_is_null) {
     if (json.size == 0U && empty_is_null) return Value{};
     return strata::runtime::value_from_json(
@@ -176,9 +177,27 @@ using ValueFields = std::map<std::string, Value, std::less<>>;
     );
 }
 
-[[nodiscard]] strata::ui::DirtyReason invalidation(
+[[nodiscard]] strata_widget_invalidation retained_invalidation(
     const strata_widget_invalidation value,
     const std::string_view field
+) {
+    switch (value) {
+    case STRATA_WIDGET_INVALIDATION_PROPERTIES:
+    case STRATA_WIDGET_INVALIDATION_LAYOUT:
+    case STRATA_WIDGET_INVALIDATION_STYLE:
+    case STRATA_WIDGET_INVALIDATION_TEXT:
+    case STRATA_WIDGET_INVALIDATION_SEMANTICS:
+    case STRATA_WIDGET_INVALIDATION_PAINT:
+    case STRATA_WIDGET_INVALIDATION_INPUT: return value;
+    default: break;
+    }
+    throw std::invalid_argument(
+        "retained field '" + std::string(field) + "' declares an unknown invalidation class"
+    );
+}
+
+[[nodiscard]] strata::ui::DirtyReason dirty_invalidation(
+    const strata_widget_invalidation value
 ) {
     switch (value) {
     case STRATA_WIDGET_INVALIDATION_PROPERTIES: return strata::ui::DirtyReason::properties;
@@ -188,9 +207,7 @@ using ValueFields = std::map<std::string, Value, std::less<>>;
     case STRATA_WIDGET_INVALIDATION_SEMANTICS: return strata::ui::DirtyReason::semantics;
     default: break;
     }
-    throw std::invalid_argument(
-        "retained field '" + std::string(field) + "' declares an unknown invalidation class"
-    );
+    throw std::invalid_argument("paint and input invalidation do not use the dirty scheduler");
 }
 
 /** Shared buffer-out convention for every extension text read. */
@@ -233,9 +250,17 @@ template <typename Context>
     }
     try {
         std::string field = checked_string(name, false, "retained field");
-        const strata::ui::DirtyReason* const reason = context->fields->find(field);
-        if (reason == nullptr) return strata::core::result(STRATA_STATUS_NOT_FOUND);
-        context->scope->set_retained(std::move(field), std::move(value), *reason);
+        const strata_widget_invalidation* const field_invalidation = context->fields->find(field);
+        if (field_invalidation == nullptr) return strata::core::result(STRATA_STATUS_NOT_FOUND);
+        if (*field_invalidation == STRATA_WIDGET_INVALIDATION_PAINT) {
+            context->scope->set_paint(std::move(field), std::move(value));
+        } else if (*field_invalidation == STRATA_WIDGET_INVALIDATION_INPUT) {
+            context->scope->set_input(std::move(field), std::move(value));
+        } else {
+            context->scope->set_retained(
+                std::move(field), std::move(value), dirty_invalidation(*field_invalidation)
+            );
+        }
         return strata::core::result(STRATA_STATUS_OK);
     } catch (...) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
@@ -265,13 +290,18 @@ template <typename Scope>
 
 namespace strata::abi_detail {
 
-void ExtensionRetainedFields::declare(std::string name, const ui::DirtyReason field_invalidation) {
+void ExtensionRetainedFields::declare(
+    std::string name,
+    const strata_widget_invalidation field_invalidation
+) {
     fields_.emplace_back(std::move(name), field_invalidation);
 }
 
-const ui::DirtyReason* ExtensionRetainedFields::find(const std::string_view name) const noexcept {
-    for (const auto& [field, reason] : fields_) {
-        if (field == name) return &reason;
+const strata_widget_invalidation* ExtensionRetainedFields::find(
+    const std::string_view name
+) const noexcept {
+    for (const auto& [field, field_invalidation] : fields_) {
+        if (field == name) return &field_invalidation;
     }
     return nullptr;
 }
@@ -279,14 +309,62 @@ const ui::DirtyReason* ExtensionRetainedFields::find(const std::string_view name
 ExtensionRegistries extension_registries(const strata_surface_extension_bundle* const bundle) {
     ExtensionRegistries result;
     if (bundle == nullptr) return result;
-    if (bundle->struct_size < sizeof(strata_surface_extension_bundle) ||
+    const bool has_widget_inputs =
+        bundle->struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE;
+    const bool has_widget_scrolls =
+        bundle->struct_size >= sizeof(strata_surface_extension_bundle);
+    if (bundle->struct_size < STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE ||
         (bundle->widgets == nullptr && bundle->widget_count != 0U) ||
-        (bundle->behaviors == nullptr && bundle->behavior_count != 0U)) {
+        (bundle->behaviors == nullptr && bundle->behavior_count != 0U) ||
+        (has_widget_inputs && bundle->widget_inputs == nullptr &&
+         bundle->widget_input_count != 0U) ||
+        (has_widget_scrolls && bundle->widget_scrolls == nullptr &&
+         bundle->widget_scroll_count != 0U)) {
         throw std::invalid_argument("surface extension bundle is incomplete");
     }
     constexpr std::size_t maximum_extensions = 256U;
-    if (bundle->widget_count > maximum_extensions || bundle->behavior_count > maximum_extensions) {
+    if (bundle->widget_count > maximum_extensions || bundle->behavior_count > maximum_extensions ||
+        (has_widget_inputs && bundle->widget_input_count > maximum_extensions) ||
+        (has_widget_scrolls && bundle->widget_scroll_count > maximum_extensions)) {
         throw std::invalid_argument("surface extension bundle exceeds its bounded lifecycle count");
+    }
+    std::map<std::string, strata_widget_input_extension, std::less<>> widget_inputs;
+    if (has_widget_inputs) {
+        for (std::size_t index = 0U; index < bundle->widget_input_count; ++index) {
+            const strata_widget_input_extension descriptor = bundle->widget_inputs[index];
+            if (descriptor.struct_size < sizeof(strata_widget_input_extension)) {
+                throw std::invalid_argument("widget input extension descriptor is incomplete");
+            }
+            std::string type = checked_string(
+                descriptor.type,
+                false,
+                "widget input extension type"
+            );
+            if (!widget_inputs.emplace(std::move(type), descriptor).second) {
+                throw std::invalid_argument(
+                    "widget input extension declares one widget type twice"
+                );
+            }
+        }
+    }
+    std::map<std::string, strata_widget_scroll_extension, std::less<>> widget_scrolls;
+    if (has_widget_scrolls) {
+        for (std::size_t index = 0U; index < bundle->widget_scroll_count; ++index) {
+            const strata_widget_scroll_extension descriptor = bundle->widget_scrolls[index];
+            if (descriptor.struct_size < sizeof(strata_widget_scroll_extension)) {
+                throw std::invalid_argument("widget scroll extension descriptor is incomplete");
+            }
+            std::string type = checked_string(
+                descriptor.type,
+                false,
+                "widget scroll extension type"
+            );
+            if (!widget_scrolls.emplace(std::move(type), descriptor).second) {
+                throw std::invalid_argument(
+                    "widget scroll extension declares one widget type twice"
+                );
+            }
+        }
     }
     for (std::size_t index = 0U; index < bundle->widget_count; ++index) {
         const strata_widget_extension descriptor = bundle->widgets[index];
@@ -329,8 +407,9 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
                     "widget extension '" + type + "' declares retained field '" + name + "' twice"
                 );
             }
-            const strata::ui::DirtyReason reason = invalidation(entry.invalidation, name);
-            fields->declare(std::move(name), reason);
+            const strata_widget_invalidation field_invalidation =
+                retained_invalidation(entry.invalidation, name);
+            fields->declare(std::move(name), field_invalidation);
         }
         const ValueFields description = parsed_fields(
             descriptor.description_properties_json,
@@ -391,6 +470,79 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
                     STRATA_EXTENSION_INPUT_CONSUMED;
             };
         }
+        if (const auto input = widget_inputs.find(type); input != widget_inputs.end()) {
+            const strata_widget_input_extension input_descriptor = input->second;
+            if (input_descriptor.pointer != nullptr) {
+                lifecycle.input.pointer =
+                    [input_descriptor, fields](strata::ui::WidgetInputScope& scope) {
+                        const strata::ui::PointerInputEvent* pointer = scope.pointer();
+                        if (pointer == nullptr) return false;
+                        const strata::ui::LayoutRecord* layout = scope.layout();
+                        const strata::ui::Rect bounds =
+                            layout != nullptr ? layout->bounds : strata::ui::Rect{};
+                        const strata_widget_pointer_event event{
+                            sizeof(strata_widget_pointer_event),
+                            event_kind(pointer->type),
+                            event_phase(scope.phase()),
+                            modifiers(scope.modifiers()),
+                            pointer->pointer_id,
+                            pointer->button,
+                            pointer->position.x,
+                            pointer->position.y,
+                            pointer->position.x - bounds.x,
+                            pointer->position.y - bounds.y,
+                            pointer->delta.x,
+                            pointer->delta.y,
+                            pointer->timestamp_nanos,
+                            scope.pointer_target() == &scope.node() ? 1U : 0U,
+                            0U,
+                        };
+                        strata_widget_input_context context{&scope, fields.get()};
+                        return input_descriptor.pointer(
+                                   input_descriptor.user_data,
+                                   &context,
+                                   &event
+                               ) == STRATA_EXTENSION_INPUT_CONSUMED;
+                    };
+            }
+            widget_inputs.erase(input);
+        }
+        if (const auto scroll = widget_scrolls.find(type); scroll != widget_scrolls.end()) {
+            const strata_widget_scroll_extension scroll_descriptor = scroll->second;
+            if (scroll_descriptor.scroll != nullptr) {
+                lifecycle.input.event =
+                    [scroll_descriptor, fields](strata::ui::WidgetInputScope& scope) {
+                        const strata::ui::ScrollInputEvent* input = scope.scroll();
+                        if (input == nullptr) return false;
+                        const strata::ui::LayoutRecord* layout = scope.layout();
+                        const strata::ui::Rect bounds =
+                            layout != nullptr ? layout->bounds : strata::ui::Rect{};
+                        const strata_widget_scroll_event event{
+                            sizeof(strata_widget_scroll_event),
+                            event_phase(scope.phase()),
+                            modifiers(input->modifiers),
+                            input->position.x,
+                            input->position.y,
+                            input->position.x - bounds.x,
+                            input->position.y - bounds.y,
+                            input->delta_x,
+                            input->delta_y,
+                            scope.dispatch() != nullptr &&
+                                    scope.dispatch()->target() == &scope.node()
+                                ? 1U
+                                : 0U,
+                            0U,
+                        };
+                        strata_widget_input_context context{&scope, fields.get()};
+                        return scroll_descriptor.scroll(
+                                   scroll_descriptor.user_data,
+                                   &context,
+                                   &event
+                               ) == STRATA_EXTENSION_INPUT_CONSUMED;
+                    };
+            }
+            widget_scrolls.erase(scroll);
+        }
         lifecycle.semantics.role = checked_string(
             descriptor.semantics_role,
             true,
@@ -430,6 +582,12 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
             };
         }
         result.widgets.register_lifecycle(std::move(lifecycle));
+    }
+    if (!widget_inputs.empty()) {
+        throw std::invalid_argument(
+            "widget input extension names unknown widget type '" +
+            widget_inputs.begin()->first + "'"
+        );
     }
     for (std::size_t index = 0U; index < bundle->behavior_count; ++index) {
         const strata_behavior_extension descriptor = bundle->behaviors[index];
@@ -479,6 +637,44 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
 } // namespace strata::abi_detail
 
 extern "C" {
+strata_rect strata_widget_input_bounds(const strata_widget_input_context* const context) {
+    if (context == nullptr || context->scope == nullptr) return strata_rect{};
+    const strata::ui::LayoutRecord* const layout = context->scope->layout();
+    return layout != nullptr ? rect(layout->bounds) : strata_rect{};
+}
+double strata_widget_input_scale(const strata_widget_input_context* const context) {
+    return context != nullptr && context->scope != nullptr ? context->scope->scale() : 1.0;
+}
+
+uint32_t strata_widget_input_claim_gesture(strata_widget_input_context* const context) {
+    return context != nullptr && context->scope != nullptr && context->scope->claim_gesture()
+        ? 1U
+        : 0U;
+}
+
+uint32_t strata_widget_input_cancel_gesture(strata_widget_input_context* const context) {
+    return context != nullptr && context->scope != nullptr && context->scope->cancel_gesture()
+        ? 1U
+        : 0U;
+}
+strata_result strata_widget_input_invalidate(
+    strata_widget_input_context* const context,
+    const strata_widget_invalidation value
+) {
+    if (context == nullptr || context->scope == nullptr ||
+        value == STRATA_WIDGET_INVALIDATION_PAINT ||
+        value == STRATA_WIDGET_INVALIDATION_INPUT) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+    try {
+        context->scope->invalidate(dirty_invalidation(value));
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (...) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+}
+
+
 
 double strata_widget_input_retained_number(
     const strata_widget_input_context* const context,
@@ -557,6 +753,19 @@ strata_result strata_widget_input_set_retained_text(
         );
     } catch (...) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+}
+uint32_t strata_widget_input_has_property(
+    const strata_widget_input_context* const context,
+    const strata_string_view name
+) {
+    if (context == nullptr || context->scope == nullptr) return 0U;
+    try {
+        return context->scope->property(checked_string(name, false, "property")) != nullptr
+            ? 1U
+            : 0U;
+    } catch (...) {
+        return 0U;
     }
 }
 
@@ -675,6 +884,63 @@ strata_result strata_widget_input_emit_event_json(
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
 }
+strata_result strata_widget_input_emit_number_event(
+    strata_widget_input_context* const context,
+    const strata_string_view event_kind_value,
+    const double value
+) {
+    if (context == nullptr || context->scope == nullptr || !std::isfinite(value)) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+    try {
+        context->scope->emit_event(
+            checked_string(event_kind_value, false, "extension event kind"),
+            Value(value)
+        );
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (...) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+}
+
+strata_result strata_widget_input_emit_boolean_event(
+    strata_widget_input_context* const context,
+    const strata_string_view event_kind_value,
+    const uint32_t value
+) {
+    if (context == nullptr || context->scope == nullptr || value > 1U) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+    try {
+        context->scope->emit_event(
+            checked_string(event_kind_value, false, "extension event kind"),
+            Value(value != 0U)
+        );
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (...) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+}
+
+strata_result strata_widget_input_emit_text_event(
+    strata_widget_input_context* const context,
+    const strata_string_view event_kind_value,
+    const strata_string_view value
+) {
+    if (context == nullptr || context->scope == nullptr) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+    try {
+        context->scope->emit_event(
+            checked_string(event_kind_value, false, "extension event kind"),
+            Value(checked_string(value, true, "extension event text"))
+        );
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (...) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+}
+
 
 strata_rect strata_widget_render_bounds(const strata_widget_render_context* const context) {
     return context != nullptr && context->scope != nullptr
@@ -686,6 +952,11 @@ strata_rect strata_widget_render_root_bounds(const strata_widget_render_context*
     return context != nullptr && context->scope != nullptr
         ? rect(context->scope->root_bounds())
         : strata_rect{};
+}
+double strata_widget_render_scale(const strata_widget_render_context* const context) {
+    return context != nullptr && context->scope != nullptr
+        ? context->scope->layout_result().scale
+        : 1.0;
 }
 
 uint32_t strata_widget_render_focused(const strata_widget_render_context* const context) {
@@ -754,6 +1025,19 @@ uint32_t strata_widget_render_enabled(const strata_widget_render_context* const 
 
 uint32_t strata_widget_render_active(const strata_widget_render_context* const context) {
     return context != nullptr && context->scope != nullptr && context->scope->active() ? 1U : 0U;
+}
+uint32_t strata_widget_render_has_property(
+    const strata_widget_render_context* const context,
+    const strata_string_view name
+) {
+    if (context == nullptr || context->scope == nullptr) return 0U;
+    try {
+        return context->scope->property(checked_string(name, false, "property")) != nullptr
+            ? 1U
+            : 0U;
+    } catch (...) {
+        return 0U;
+    }
 }
 
 double strata_widget_render_property_number(
@@ -1076,6 +1360,23 @@ strata_result strata_widget_semantics_set_value_text(
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
 }
+void strata_widget_semantics_set_value_range(
+    strata_widget_semantics_context* const context,
+    const double current,
+    const double minimum,
+    const double maximum
+) {
+    if (context == nullptr || context->scope == nullptr || !std::isfinite(current) ||
+        !std::isfinite(minimum) || !std::isfinite(maximum) || minimum > maximum) {
+        return;
+    }
+    context->scope->value_range(strata::data::JsonValue(strata::data::JsonValue::Object{
+        {"current", strata::data::JsonValue(current)},
+        {"maximum", strata::data::JsonValue(maximum)},
+        {"minimum", strata::data::JsonValue(minimum)},
+    }));
+}
+
 
 strata_result strata_widget_semantics_add_action(
     strata_widget_semantics_context* const context,
@@ -1144,6 +1445,87 @@ uint32_t strata_widget_semantics_retained_boolean(
             : fallback != 0U ? 1U : 0U;
     } catch (...) {
         return fallback != 0U ? 1U : 0U;
+    }
+}
+strata_result strata_widget_semantics_retained_text(
+    const strata_widget_semantics_context* const context,
+    const strata_string_view name,
+    char* const buffer,
+    const size_t capacity,
+    size_t* const out_length
+) {
+    try {
+        const Value* value = declared_retained(context, name);
+        return copied_text(value != nullptr ? value->string() : nullptr, buffer, capacity, out_length);
+    } catch (...) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+}
+
+uint32_t strata_widget_semantics_has_property(
+    const strata_widget_semantics_context* const context,
+    const strata_string_view name
+) {
+    if (context == nullptr || context->scope == nullptr) return 0U;
+    try {
+        return context->scope->property(checked_string(name, false, "property")) != nullptr
+            ? 1U
+            : 0U;
+    } catch (...) {
+        return 0U;
+    }
+}
+
+double strata_widget_semantics_property_number(
+    const strata_widget_semantics_context* const context,
+    const strata_string_view name,
+    const double fallback
+) {
+    if (context == nullptr || context->scope == nullptr || !std::isfinite(fallback)) return fallback;
+    try {
+        const Value* const value =
+            context->scope->property(checked_string(name, false, "property"));
+        return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
+            ? *value->number()
+            : fallback;
+    } catch (...) {
+        return fallback;
+    }
+}
+
+uint32_t strata_widget_semantics_property_boolean(
+    const strata_widget_semantics_context* const context,
+    const strata_string_view name,
+    const uint32_t fallback
+) {
+    if (context == nullptr || context->scope == nullptr) return fallback != 0U ? 1U : 0U;
+    try {
+        const Value* const value =
+            context->scope->property(checked_string(name, false, "property"));
+        return value != nullptr && value->boolean() != nullptr
+            ? *value->boolean() ? 1U : 0U
+            : fallback != 0U ? 1U : 0U;
+    } catch (...) {
+        return fallback != 0U ? 1U : 0U;
+    }
+}
+
+strata_result strata_widget_semantics_property_text(
+    const strata_widget_semantics_context* const context,
+    const strata_string_view name,
+    char* const buffer,
+    const size_t capacity,
+    size_t* const out_length
+) {
+    if (context == nullptr || context->scope == nullptr) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+    try {
+        const Value* const value =
+            context->scope->property(checked_string(name, false, "property"));
+        return copied_text(value != nullptr ? value->string() : nullptr, buffer, capacity, out_length);
+    } catch (...) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
 }
 

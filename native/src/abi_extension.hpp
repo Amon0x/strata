@@ -22,11 +22,11 @@ namespace strata::abi_detail {
 /** Declared retained surface of one widget extension, resolved once at surface creation. */
 class ExtensionRetainedFields final {
 public:
-    void declare(std::string name, ui::DirtyReason invalidation);
-    [[nodiscard]] const ui::DirtyReason* find(std::string_view name) const noexcept;
+    void declare(std::string name, strata_widget_invalidation invalidation);
+    [[nodiscard]] const strata_widget_invalidation* find(std::string_view name) const noexcept;
 
 private:
-    std::vector<std::pair<std::string, ui::DirtyReason>> fields_;
+    std::vector<std::pair<std::string, strata_widget_invalidation>> fields_;
 };
 
 } // namespace strata::abi_detail

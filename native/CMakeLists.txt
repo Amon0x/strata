@@ -568,22 +568,22 @@ set_target_properties(
 )
 strata_target_defaults(strata_extensions)
 
-add_library(strata_demo_extension SHARED src/extensions/demo_package.cpp)
-target_link_libraries(strata_demo_extension PRIVATE Strata::extensions)
-target_include_directories(strata_demo_extension PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-set_target_properties(
-    strata_demo_extension
-    PROPERTIES
-        OUTPUT_NAME "strata-extension-strata.demo.v1"
-        CXX_VISIBILITY_PRESET hidden
-        VISIBILITY_INLINES_HIDDEN YES
+strata_add_extension_package(
+    TARGET strata_demo_extension
+    PACKAGE strata.demo.v1
+    SOURCES src/extensions/demo_package.cpp
+    INSTALL
 )
-if(APPLE)
-    set_property(TARGET strata_demo_extension PROPERTY INSTALL_RPATH "@loader_path/../..")
-elseif(UNIX)
-    set_property(TARGET strata_demo_extension PROPERTY INSTALL_RPATH "$ORIGIN/../..")
-endif()
+target_include_directories(strata_demo_extension PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 strata_target_defaults(strata_demo_extension)
+strata_add_extension_package(
+    TARGET strata_control_deck_extension
+    PACKAGE strata.control-deck.v1
+    SOURCES src/extensions/control_deck_package.cpp
+    INSTALL
+)
+strata_target_defaults(strata_control_deck_extension)
+
 
 if(WIN32)
     add_library(
@@ -721,7 +721,11 @@ if(STRATA_BUILD_TOOLS)
         tools/compiler_check.hpp
     )
     target_link_libraries(strata_compile PRIVATE Strata::core strata_host_support)
-    add_dependencies(strata_compile strata_demo_extension)
+    add_dependencies(
+        strata_compile
+        strata_demo_extension
+        strata_control_deck_extension
+    )
     target_include_directories(
         strata_compile
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/tools
@@ -1180,7 +1184,11 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
 
     add_executable(strata_extension_tests tests/extension_tests.cpp)
     target_link_libraries(strata_extension_tests PRIVATE strata_extensions strata_host_support)
-    add_dependencies(strata_extension_tests strata_demo_extension)
+    add_dependencies(
+        strata_extension_tests
+        strata_demo_extension
+        strata_control_deck_extension
+    )
     strata_target_defaults(strata_extension_tests)
     add_test(
         NAME strata.extension
@@ -1338,11 +1346,6 @@ if(WIN32)
         ARCHIVE DESTINATION lib
     )
 endif()
-install(
-    TARGETS strata_demo_extension
-    RUNTIME DESTINATION bin
-    LIBRARY DESTINATION lib/strata/extensions
-)
 if(WIN32 AND STRATA_BUILD_DESKTOP)
     install(
         TARGETS strata_desktop_host

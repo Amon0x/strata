@@ -46,12 +46,19 @@ struct SelectedExtensions final {
     /* Declared first so libraries are destroyed last, after every copied callback descriptor. */
     std::vector<LoadedExtension> packages;
     std::vector<strata_widget_extension> widgets;
+    std::vector<strata_widget_input_extension> widget_inputs;
+    std::vector<strata_widget_scroll_extension> widget_scrolls;
     std::vector<strata_behavior_extension> behaviors;
     strata_surface_extension_bundle bundle{};
 
     [[nodiscard]] const strata_surface_extension_bundle* pointer() noexcept;
     [[nodiscard]] std::vector<std::string> schemas() const;
 };
+
+/** Reads the single extension package declaration from an application schema document. */
+[[nodiscard]] std::vector<std::string> declared_extension_packages(
+    std::string_view schemas_json
+);
 
 /** Loads each selected package from a shared library and merges its runtime descriptor bundle. */
 [[nodiscard]] SelectedExtensions select_extensions(

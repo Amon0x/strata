@@ -130,25 +130,15 @@ struct ModuleCompilation final {
             schemas_path,
             "application schema declarations"
         );
-        const data::JsonValue schemas = data::parse_json(load_file(schemas_file));
+        const std::string schemas_source = load_file(schemas_file);
+        const data::JsonValue schemas = data::parse_json(schemas_source);
         /*
          * Native extension packages declare their widgets, behaviors, and action contracts once in
-         * C++; the application only names the packages it activates, so schema and runtime
-         * registration cannot drift.
+         * C++; the application schema is the single package-selection source for compiler and hosts.
          */
-        if (const data::JsonValue* const packages = schemas.find("extensionPackages");
-            packages != nullptr) {
-            if (packages->array() == nullptr) {
-                throw std::runtime_error("extensionPackages must be an array of package ids");
-            }
-            std::vector<std::string> package_ids;
-            package_ids.reserve(packages->array()->size());
-            for (const data::JsonValue& package : *packages->array()) {
-                if (package.string() == nullptr) {
-                    throw std::runtime_error("extensionPackages entries must be package id strings");
-                }
-                package_ids.push_back(*package.string());
-            }
+        const std::vector<std::string> package_ids =
+            host::declared_extension_packages(schemas_source);
+        if (!package_ids.empty()) {
             const host::SelectedExtensions extensions = host::select_extensions(
                 package_ids,
                 extension_paths

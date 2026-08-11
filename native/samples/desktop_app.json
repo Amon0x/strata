@@ -4,7 +4,6 @@
     "id": "example.desktop.runner",
     "module": "assets/strata/samples/desktop_app.strata",
     "root": "DesktopExample",
-    "packages": [],
     "actions": []
   },
   "surface": {

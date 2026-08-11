@@ -108,7 +108,6 @@ the initialized application and accept operations from the control stream instea
     "module": "assets/example/app.strata",
     "schemas": "assets/example/app.schemas.json",
     "root": "ExampleRoot",
-    "packages": [],
     "extensionPaths": [],
     "actions": ["example.save"]
   },
@@ -162,9 +161,10 @@ a Surface root is selected, so this list must cover every required or forwarded 
 referenced by any screen, overlay, or component in that module—not only the scenario's `root`.
 Activation failures print every captured diagnostic code/message (including all missing action
 handlers) before the process exits. `extensionPaths` are absolute or relative to the scenario
-document. Selected package shared libraries export both their schemas and runtime bundles, so
-compiler and Surface capabilities cannot drift; the headless host keeps them loaded through Surface
-release.
+document. When a schema is present its `extensionPackages` list is the package-id source; the
+scenario package list is only a schema-less fallback. Loaded package libraries export both schemas
+and runtime bundles, so compiler and Surface capabilities cannot drift, and the headless host keeps
+them loaded through Surface release.
 
 ## Steps and selectors
 

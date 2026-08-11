@@ -41,6 +41,7 @@ public:
     [[nodiscard]] std::string_view input_text() const noexcept;
     [[nodiscard]] const KeyModifiers& modifiers() const noexcept;
     [[nodiscard]] const PointerInputEvent* pointer() const noexcept;
+    [[nodiscard]] const ScrollInputEvent* scroll() const noexcept;
     [[nodiscard]] RetainedNode* pointer_target() const noexcept;
     [[nodiscard]] std::size_t click_count() const noexcept;
     [[nodiscard]] const WidgetSubtarget* subtarget() const noexcept;
@@ -61,6 +62,7 @@ public:
     [[nodiscard]] const LayoutRecord* layout() const noexcept;
     [[nodiscard]] const LayoutRecord* layout(const RetainedNode& node) const noexcept;
     [[nodiscard]] const LayoutResult* layout_result() const noexcept;
+    [[nodiscard]] double scale() const noexcept;
     [[nodiscard]] const CommandIndex* command_index() const noexcept;
     [[nodiscard]] NotificationService& notifications() noexcept;
     void synchronize_modal_focus();
@@ -101,6 +103,9 @@ public:
 
     void set_retained(std::string name, runtime::Value value, DirtyReason reason);
     void set_presentation(std::string name, runtime::Value value);
+    void set_paint(std::string name, runtime::Value value);
+    void set_input(std::string name, runtime::Value value);
+    void invalidate(DirtyReason reason);
     void set_event_count(std::size_t count) noexcept;
     void activated(std::string_view action_property);
     void boolean_changed(std::string_view action_property, bool value);

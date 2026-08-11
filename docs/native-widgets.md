@@ -11,64 +11,91 @@ shared library. That single definition exports both the runtime bundle passed to
 name, parameter, or action contract cannot drift between the two. Hosts load the library through the
 stable C ABI in `<strata/extension_plugin.h>`; no C++ object crosses the library boundary.
 
-## A complete package
+## A complete draggable widget
 
 ```cpp
 #include <strata/extension.hpp>
+
+#include <algorithm>
 
 using namespace strata::extension;
 
 namespace {
 
-/* Fields are declared once: name, type, and default live here and nowhere else. */
-constexpr auto level = retained<number>("meter.level");
-constexpr auto step = parameter<number>("step", 1.0);
+constexpr auto level = retained<number>("meter.level", 0.5, Invalidation::paint);
+constexpr auto dragging = retained<boolean>("meter.dragging", false, Invalidation::input);
 
-bool activate_meter(Input& input) {
-    input.set(level, input.get(level) + input.get(step));
-    input.emit("meter.changed", R"({"level":1})");
-    return true;                       // consumed
+bool point_meter(Input& input, const Pointer& pointer) {
+    if (pointer.button != 0) return false;
+    if (pointer.kind == Pointer::Kind::press) {
+        input.set(dragging, true);
+        static_cast<void>(input.claim_gesture());
+    } else if (!input.get(dragging)) {
+        return false;
+    }
+
+    if (pointer.kind == Pointer::Kind::cancel) {
+        input.set(dragging, false);
+        static_cast<void>(input.cancel_gesture());
+        return true;
+    }
+
+    const Rect bounds = input.bounds();
+    const double next = std::clamp(pointer.local_x / bounds.width, 0.0, 1.0);
+    input.set(level, next);
+    if (pointer.kind == Pointer::Kind::move) {
+        static_cast<void>(input.live(next));
+    } else if (pointer.kind == Pointer::Kind::release) {
+        input.set(dragging, false);
+        static_cast<void>(input.commit(next));
+    }
+    return true;
 }
 
 bool key_meter(Input& input, const Key& key) {
-    if (key.name != "right") return false;
-    input.set(level, input.get(level) + 1.0);
+    if (key.name != "left" && key.name != "right") return false;
+    const double direction = key.name == "right" ? 1.0 : -1.0;
+    const double next = std::clamp(input.get(level) + direction * 0.01, 0.0, 1.0);
+    input.set(level, next);
+    static_cast<void>(input.commit(next));
     return true;
 }
 
 void present_meter(Present& present) {
     const Rect bounds = present.bounds();
-    present.rounded_rect(bounds, 6.0, rgba(31U, 39U, 54U), stroke(1.0, rgba(93U, 109U, 137U)));
+    present.rounded_rect(
+        bounds,
+        6.0,
+        rgba(31U, 39U, 54U),
+        stroke(1.0, rgba(93U, 109U, 137U))
+    );
     Rect fill = bounds;
-    fill.width *= std::clamp(present.get(level) / 10.0, 0.0, 1.0);
+    fill.width *= present.get(level);
     present.rounded_rect(fill, 6.0, rgba(65U, 151U, 130U));
-    if (present.focus_visible()) present.border(bounds, 6.0, stroke(2.0, rgba(116U, 194U, 255U)));
+    if (present.focus_visible()) {
+        present.border(bounds, 6.0, stroke(2.0, rgba(116U, 194U, 255U)));
+    }
 }
 
 void describe_meter(Semantics& semantics) {
-    semantics.value_text("level");
-    semantics.add_action("activate");
+    const double current = semantics.get(level);
+    semantics.name("Meter level");
+    semantics.value_range(current, 0.0, 1.0);
+    semantics.add_action("decrement");
+    semantics.add_action("focus");
+    semantics.add_action("increment");
 }
-
-} // namespace
 
 std::unique_ptr<Package> meter_package() {
     auto meter = widget("Meter")
-        .parameter(step)
         .retained(level)
+        .retained(dragging)
         .no_children()
         .focusable()
         .intrinsic_size(220.0, 24.0)
-        .semantics_role("button")
-        .semantics_actions({"activate"})
-        .emits(ActionContract{
-            "meter.changed",
-            "Report a meter level change",
-            "MeterLevel",
-            "optional",
-            {ActionArgument{"level", "number"}},
-        })
-        .on_activate(&activate_meter)
+        .semantics_role("slider")
+        .depends_on_status()
+        .on_pointer(&point_meter)
         .on_key(&key_meter)
         .on_semantics(&describe_meter)
         .present(&present_meter);
@@ -78,32 +105,55 @@ std::unique_ptr<Package> meter_package() {
     return created;
 }
 
+} // namespace
+
 STRATA_EXTENSION_PACKAGE(meter_package)
 ```
 
+The pressed widget retains pointer capture through release or cancellation, including movement
+outside its bounds. `claim_gesture()` wins arbitration against competing gestures; cancellation is
+always delivered to the owner. `Pointer::x`/`y` are surface coordinates, `local_x`/`local_y` are
+relative to the widget, and `delta_x`/`delta_y` preserve the host-provided movement delta.
+`on_scroll` receives the same capture/target/bubble route with surface and local coordinates plus
+wheel or trackpad deltas.
+
+`Invalidation::paint` rebuilds this widget's content fragment without description reconciliation,
+layout, text shaping, or semantics. `Invalidation::input` stores transient gesture/session state
+without scheduling any downstream projection. Typed `live` helpers publish local
+number/boolean/text events without dispatching a host action. Typed `commit` helpers publish the
+committed event and schedule one semantic projection, so accessibility updates once on release
+rather than on every pointer move. Use a package-declared action only when the value actually
+crosses the application boundary.
+
 Use `Present::focused()` for semantic state and `Present::focus_visible()` for focus paint. Pointer
 focus intentionally keeps the former while suppressing the latter; keyboard and spatial input
-restore the visible indicator.
+restore the visible indicator. `Input::scale()` and `Present::scale()` expose the logical-to-display
+scale without requiring host access.
 
 `retained<Kind>` and `parameter<Kind>` produce constexpr handles. The widget adopts them, every hook
-reads and writes through them, and `get` on a parameter uses the default declared with it — so a
-field name is never spelled twice, a default is never restated at a call site, and a mistyped or
-wrongly typed field is a compile error rather than a silent fallback.
+reads and writes through them, and `get` on a parameter uses its declared default. `has(parameter)`
+distinguishes an omitted optional property from an authored controlled value, enabling one widget
+to support controlled and retained fallback modes without stringly typed property checks. A field
+name and default are never restated at call sites, and undeclared writes fail rather than
+materializing hidden state.
 
-Build it against an installed SDK. The package id supplied to the CMake helper must equal the id
-returned by the factory; the helper links the authoring implementation, hides the C++ symbols, and
-assigns the portable discovery name (`strata-extension-example.meter.v1.dll` on Windows or
-`libstrata-extension-example.meter.v1.so` on Linux):
+Build against the installed SDK. The helper creates the shared library, links the authoring layer,
+sets C++23 and symbol visibility, assigns the portable discovery name, records it for same-build
+module validation, and optionally installs it to the platform discovery directory:
 
 ```cmake
 find_package(Strata CONFIG REQUIRED)
-add_library(example_meter SHARED meter.cpp)
-strata_configure_extension(example_meter example.meter.v1)
-install(TARGETS example_meter RUNTIME DESTINATION bin LIBRARY DESTINATION lib/strata/extensions)
+strata_add_extension_package(
+    TARGET example_meter
+    PACKAGE example.meter.v1
+    SOURCES meter.cpp
+    INSTALL
+)
 ```
 
-The extension library links the static `Strata::extensions` authoring layer and the shared stable
-`Strata::c` ABI. It is not linked into the compiler, desktop host, or headless host.
+The package id supplied to CMake must equal the id returned by the factory. The extension links the
+static `Strata::extensions` authoring layer and shared stable `Strata::c` ABI; it is not linked into
+the compiler or a host.
 
 ## Activating a package
 
@@ -129,9 +179,9 @@ The option is repeatable. Discovery checks explicit paths first, then `STRATA_EX
 the executable directory and the installed `lib/strata/extensions` location. VS Code exposes the
 same list as `strata.extensions.paths`.
 
-Hosts select the same ids. `desktop::ApplicationConfig` accepts `extension_packages` and
-`extension_search_paths`; headless scenario applications use `packages` and `extensionPaths`.
-Each host loads a package once, forwards its copied schema through
+Hosts read package ids from the same schema document. `desktop::ApplicationConfig` and headless
+scenarios still accept extension search paths, but a second package-id list is unnecessary when a
+schema is present. Each host loads a package once, forwards its copied schema through
 `strata_application_config::extension_schemas_json`, forwards its descriptor bundle through
 `strata_surface_config::extensions`, and keeps the library loaded until the Surface has been
 released. A missing library, mismatched exported id, incompatible plugin/core ABI, missing entry
@@ -140,19 +190,19 @@ the error.
 
 ## Supported lifecycle
 
-The authoring layer is a projection of the internal `WidgetLifecycle` model. The publicly supported
-surface is exactly what the builder exposes:
+The authoring layer is a public projection of the internal lifecycle. Widget authors consume only
+these capabilities:
 
 | Phase | Public capability |
 | --- | --- |
-| describe | typed parameter handles with defaults, child policy, intrinsic size, padding, clip, framework disclosure motion |
-| input | activation, key press, focusability, popup retained field |
-| retained | typed field handles with an invalidation class and fallback; number, boolean, and text reads and writes |
-| semantics | role, declared actions, and a derive hook for name, value, checked, expanded, selected |
-| inspection | hit bounds narrowing |
-| present | content, overlay, detached overlay, motion and status feedback participation |
-| render | solid and rounded rects, borders, text, images and atlas regions, nine-patch, custom mesh with material state, blur, shadow, scoped clip, and text measurement |
-| behaviors | pointer events across capture/target/bubble, focusability, emitted actions |
+| describe | typed parameter handles with defaults/presence, child policy, intrinsic size, padding, clip, framework disclosure motion |
+| input | activation, continuous pointer and scroll lifecycles with phased routing, capture arbitration, local coordinates, scale, key press, focusability, typed live/commit events, popup retained field |
+| retained | typed per-instance number, boolean, and text fields with declared input-only, paint-only, or broader invalidation and fallback |
+| semantics | typed retained/parameter reads plus role and derive hook for name, text value, numeric range, actions, checked, expanded, and selected state |
+| inspection | hit-bounds narrowing; local coordinates let one widget own multiple internal hit regions |
+| present | content, overlay, detached overlay, motion/status participation, property presence, bounds, scale, and state |
+| render | solid and rounded rects, borders, text, images, atlas regions, nine-patch, custom mesh/material state, blur, shadow, scoped clip, and text measurement |
+| behaviors | ambient pointer events across capture/target/bubble and emitted actions |
 
 Not public, by decision rather than omission: custom layout measurement and arrangement, custom
 frame simulation, text editing, and command surfaces. The first two have no internal hook either —
@@ -166,10 +216,10 @@ only, so a package projects its behavior ids and their option objects are not ty
 ## Rules the layer enforces
 
 - Retained fields must be declared. Writing a field the widget never adopted returns
-  `STRATA_STATUS_NOT_FOUND` — `Input::set` reports it as `false` — instead of silently creating
-  untracked state. Each declaration carries its invalidation class (`properties`, `layout`, `style`,
-  `text`, `semantics`), recorded on every write, and its read fallback.
-- A detached overlay requires the retained boolean that gates it, and that field must be declared.
+  `STRATA_STATUS_NOT_FOUND`—`Input::set` reports it as `false`—instead of silently creating
+  untracked state. `input` invalidation stores session state only; `paint` invalidation rebuilds
+  widget content only; `layout`, `text`, `style`, `semantics`, and `properties` opt into broader
+  work. Equal values cause no invalidation.
 - Duplicate widget types, behavior ids, parameters, retained fields, or package ids are rejected at
   definition time with a message naming the offender.
 - A package is sealed once its bundle is taken; a late addition raises `std::logic_error`.
@@ -183,20 +233,29 @@ only, so a package projects its behavior ids and their option objects are not ty
   parameter is dropped from the packet with a diagnostic.
 - Clipping is only reachable through the `ClipScope` guard returned by `Present::clip`, so a push
   cannot outlive its pop.
-- Hooks are plain function pointers over a package-owned hook table passed as `user_data`. Nothing
-  is allocated per callback, per frame, or per catalog lookup: descriptors, JSON defaults, and the
-  retained table are materialized once when the bundle is first taken.
+- Hooks are plain function pointers over a package-owned hook table passed as `user_data`.
+  Descriptors, defaults, and retained-field lookup tables are materialized once when the bundle is
+  taken. Number/boolean pointer and paint paths require no JSON parsing; explicit text/JSON events
+  may allocate according to their payload.
 
 ## Testing
 
-`native/tests/extension_tests.cpp` (`ctest --preset <platform> -R strata.extension`) is
-the harness. It builds a package covering every supported phase, then checks registration, duplicate
-rejection, schema and compile parity, retained identity and rejection of undeclared fields,
-activation, key input, semantics, hit bounds, detached overlay painting, behavior dispatch, and
-action contracts against a headless Surface — no host window involved.
+`native/tests/extension_tests.cpp` (`ctest --preset <platform> -R strata.extension`) builds a
+package covering every supported phase. It checks registration, schema/compiler parity, retained
+identity, pointer capture outside bounds, cancellation, local coordinates, scroll routing,
+controlled-property presence, display scale, typed live/commit events, keyboard input, numeric
+semantics, hit bounds, detached overlays, behavior dispatch, and action contracts against a
+headless Surface.
 
-The shipped `strata_demo_extension` shared library
-(`native/src/extensions/demo_package.cpp`) is the reference: `DemoPulse`, `DemoDisclosure`, and
-`demo.inspector-pick` in roughly 200 lines with no schema copy and no host wiring. Installed-package
-tests independently build and query another extension against only the installed SDK, proving the
-package is not relying on repository linkage.
+The drag regression establishes capture, then enqueues 120 moves before one frame. It verifies that
+the queue coalesces the burst, the frame performs one content-presentation rebuild, leaves semantic
+generation and pointer-hit geometry unchanged, and does not advance runtime ABI allocator counts.
+Release runs separately and schedules the single committed semantic projection. A scroll write
+through `Invalidation::input` also proves that session bookkeeping causes neither presentation nor
+semantic work. These assertions defend the lifecycle contract instead of benchmarking
+machine-dependent wall-clock timing.
+
+The shipped packages are the references: `strata_demo_extension` covers activation, children,
+disclosure, motion, overlays, and behaviors; `strata_control_deck_extension` implements a
+multi-region continuous color control through public headers only. Installed-package tests
+independently build and query another extension against the installed SDK.

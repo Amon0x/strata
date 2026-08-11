@@ -114,19 +114,38 @@ struct HarnessCounters final {
     std::uint64_t activations = 0U;
     std::uint64_t keys = 0U;
     std::uint64_t presentations = 0U;
+    std::uint64_t drag_presentations = 0U;
     std::uint64_t overlays = 0U;
     std::uint64_t semantics = 0U;
+    std::uint64_t drag_semantics = 0U;
     std::uint64_t hit_bounds = 0U;
     std::uint64_t behavior_events = 0U;
+    std::uint64_t widget_pointer_events = 0U;
+    std::uint64_t widget_scroll_events = 0U;
+    std::uint64_t commit_events = 0U;
     bool declared_write_accepted = false;
     bool undeclared_write_rejected = false;
     bool text_write_accepted = false;
     bool retained_text_round_tripped = false;
     bool parameter_default_visible = false;
+    bool parameter_presence_visible = false;
+    bool input_scale_visible = false;
+    bool presentation_context_visible = false;
+    bool semantics_parameter_visible = false;
+    bool input_state_round_tripped = false;
+    bool scroll_local_position = false;
     bool measured_text = false;
     bool behavior_emit_accepted = false;
     bool pointer_focus_hidden = false;
     bool keyboard_focus_visible = false;
+    bool pointer_claimed = false;
+    bool pointer_local_position = false;
+    bool pointer_cancelled = false;
+    bool live_event_emitted = false;
+    bool commit_event_emitted = false;
+    double last_local_x = 0.0;
+    double last_input_value = 0.0;
+    double last_presented_value = 0.0;
     std::string last_key;
 };
 
@@ -139,10 +158,16 @@ constexpr auto harness_step = parameter<number>("step", 4.0);
 constexpr auto harness_caption = parameter<text>("caption");
 /* Never declared by the widget: writes through it must fail instead of creating hidden state. */
 constexpr auto harness_undeclared = retained<number>("harness.undeclared");
+constexpr auto drag_value = retained<number>("harness.drag", 0.0, Invalidation::paint);
+constexpr auto drag_session = retained<number>("harness.drag-session", 0.0, Invalidation::input);
+
 
 bool harness_activate(Input& input) {
     ++counters.activations;
     counters.parameter_default_visible = input.get(harness_step) == 4.0;
+    counters.parameter_presence_visible =
+        input.has(harness_step) && !input.has(harness_caption);
+    counters.input_scale_visible = input.scale() == 1.25;
     counters.declared_write_accepted = input.set(harness_count, input.get(harness_count) + input.get(harness_step));
     counters.undeclared_write_rejected = !input.set(harness_undeclared, 1.0);
     counters.text_write_accepted = input.set(harness_label, "pressed");
@@ -159,6 +184,70 @@ bool harness_key(Input& input, const Key& key) {
     input.set(harness_count, input.get(harness_count) + 10.0);
     return true;
 }
+bool drag_pointer(Input& input, const Pointer& pointer) {
+    ++counters.widget_pointer_events;
+    counters.pointer_local_position = counters.pointer_local_position ||
+        pointer.has_local_position;
+    counters.last_local_x = pointer.local_x;
+    if (pointer.kind == Pointer::Kind::press) {
+        counters.pointer_claimed = input.claim_gesture();
+        input.set(drag_value, pointer.local_x);
+        counters.last_input_value = input.get(drag_value);
+        return true;
+    }
+    if (pointer.kind == Pointer::Kind::move) {
+        input.set(drag_value, pointer.local_x);
+        counters.last_input_value = input.get(drag_value);
+        if (!counters.live_event_emitted) {
+            counters.live_event_emitted = input.live(pointer.local_x);
+        }
+        return true;
+    }
+    if (pointer.kind == Pointer::Kind::release) {
+        input.set(drag_value, pointer.local_x);
+        counters.last_input_value = input.get(drag_value);
+        ++counters.commit_events;
+        counters.commit_event_emitted = input.commit(pointer.local_x);
+        return true;
+    }
+    counters.pointer_cancelled = true;
+    static_cast<void>(input.cancel_gesture());
+    return true;
+}
+bool drag_scroll(Input& input, const Scroll& scroll) {
+    ++counters.widget_scroll_events;
+    const double value = input.get(drag_session) + scroll.delta_y;
+    counters.input_state_round_tripped =
+        input.set(drag_session, value) && input.get(drag_session) == value;
+    counters.scroll_local_position =
+        scroll.on_target && scroll.local_x == 8.0 && scroll.local_y == 8.0;
+    return true;
+}
+
+
+void drag_present(Present& present) {
+    ++counters.drag_presentations;
+    counters.last_presented_value = present.get(drag_value);
+    const Rect bounds = present.bounds();
+    present.rounded_rect(bounds, 4.0, rgba(22U, 28U, 38U), stroke(1.0, rgba(80U, 98U, 120U)));
+    const double x = std::clamp(present.get(drag_value), 0.0, bounds.width);
+    present.rounded_rect(
+        Rect{bounds.x + x - 3.0, bounds.y + 4.0, 6.0, bounds.height - 8.0},
+        3.0,
+        rgba(80U, 180U, 150U)
+    );
+}
+
+void drag_semantics(Semantics& semantics) {
+    ++counters.drag_semantics;
+    const double value = semantics.get(drag_value);
+    semantics.name("Drag harness");
+    semantics.value_range(value, 0.0, 160.0);
+    semantics.add_action("decrement");
+    semantics.add_action("focus");
+    semantics.add_action("increment");
+}
+
 
 constexpr std::array<MeshVertex, 3U> harness_vertices{
     MeshVertex{0.0, 0.0, 0.0, 0.0, 0.0, rgba(255U, 0U, 0U)},
@@ -175,6 +264,9 @@ constexpr std::array<MeshVertex, 3U> invalid_vertices{
 
 void harness_present(Present& present) {
     ++counters.presentations;
+    counters.presentation_context_visible = counters.presentation_context_visible ||
+        (present.has(harness_step) && !present.has(harness_caption) &&
+         present.scale() == 1.25);
     const Rect bounds = present.bounds();
     present.shadow(bounds, corners(4.0), rgba(0U, 0U, 0U, 90U), 6.0, 1.0);
     present.rounded_rect(bounds, 4.0, rgba(30U, 40U, 60U), stroke(1.0, rgba(90U, 110U, 140U)));
@@ -219,6 +311,9 @@ void harness_overlay(Present& present) {
 
 void harness_semantics(Semantics& semantics) {
     ++counters.semantics;
+    counters.semantics_parameter_visible = counters.semantics_parameter_visible ||
+        (semantics.has(harness_step) && !semantics.has(harness_caption) &&
+         semantics.get(harness_step) == 4.0);
     semantics.name("Harness widget");
     semantics.value_text("value");
     semantics.expanded(semantics.get(harness_open));
@@ -265,6 +360,18 @@ bool harness_pointer(BehaviorInput& input, const Pointer& pointer) {
         .present(&harness_present)
         .detached_overlay(&harness_overlay, harness_open)
         .hit_bounds(&harness_hit_bounds);
+    auto drag = widget("DragHarnessWidget")
+        .no_children()
+        .focusable()
+        .intrinsic_size(160.0, 40.0)
+        .retained(drag_value)
+        .retained(drag_session)
+        .semantics_role("slider")
+        .on_pointer(&drag_pointer)
+        .on_scroll(&drag_scroll)
+        .on_semantics(&drag_semantics)
+        .present(&drag_present);
+
 
     auto observer = behavior("harness.observe")
         .on_pointer(&harness_pointer)
@@ -277,7 +384,9 @@ bool harness_pointer(BehaviorInput& input, const Pointer& pointer) {
         });
 
     auto created = package("strata.harness.v1");
-    created->widget(std::move(harness)).behavior(std::move(observer));
+    created->widget(std::move(harness))
+        .widget(std::move(drag))
+        .behavior(std::move(observer));
     return created;
 }
 
@@ -372,6 +481,35 @@ void test_external_package_and_schema_projection() {
             "projected package schema is missing a declaration"
         );
     }
+    const std::vector<std::string> declared = strata::host::declared_extension_packages(
+        R"({"extensionPackages":["strata.control-deck.v1"]})"
+    );
+    check(
+        declared == std::vector<std::string>{"strata.control-deck.v1"},
+        "application schema package discovery did not preserve its single declaration"
+    );
+    check(
+        rejection([] {
+            static_cast<void>(strata::host::declared_extension_packages(
+                R"({"extensionPackages":["duplicate","duplicate"]})"
+            ));
+        }).find("must be unique") != std::string::npos,
+        "duplicate schema package declarations were accepted"
+    );
+
+    strata::host::SelectedExtensions control =
+        strata::host::select_extensions(declared);
+    check(
+        control.widgets.size() == 1U && control.widget_inputs.size() == 1U &&
+            control.behaviors.empty(),
+        "the Control Deck package did not project widget pointer input separately"
+    );
+    const std::string control_schema = control.packages.front().schema_json();
+    check(
+        control_schema.find(R"("name":"DeckColorPicker")") != std::string::npos &&
+            control_schema.find(R"("id":"control-deck.color.commit")") != std::string::npos,
+        "the Control Deck package schema is missing its public widget or value contract"
+    );
 }
 
 [[nodiscard]] strata_runtime_config runtime_config(Clock& clock, DiagnosticLog& diagnostics) {
@@ -449,6 +587,7 @@ void test_surface_lifecycle(const std::filesystem::path& resource_root) {
 screen Main {
   root Panel(key: "harness.root", layout: { kind: "COLUMN" }, behaviors: [{ id: "harness.observe" }]) {
     HarnessWidget(key: "harness.widget", layout: { width: 160, height: 40 })
+    DragHarnessWidget(key: "harness.drag", layout: { width: 160, height: 40 })
   }
 }
 )";
@@ -476,7 +615,7 @@ screen Main {
         320,
         480.0,
         320.0,
-        1.0,
+        1.25,
         0.0,
         0.0,
         0.0,
@@ -568,6 +707,11 @@ screen Main {
     check(counters.undeclared_write_rejected, "an undeclared retained write silently succeeded");
     check(counters.text_write_accepted, "a declared retained text write was rejected");
     check(counters.retained_text_round_tripped, "retained text did not round-trip");
+    check(
+        counters.parameter_presence_visible && counters.input_scale_visible &&
+            counters.presentation_context_visible && counters.semantics_parameter_visible,
+        "property presence or display scale was not exposed consistently to extension hooks"
+    );
     check(counters.behavior_events != 0U, "the behavior pointer hook did not run");
     check(counters.hit_bounds != 0U, "the inspection hook did not narrow pointer hit testing");
     check(
@@ -599,7 +743,172 @@ screen Main {
         counters.keyboard_focus_visible,
         "keyboard input did not expose focus-visible state to the extension presenter"
     );
+    strata_input_event focus_drag[2]{};
+    focus_drag[0].struct_size = sizeof(strata_input_event);
+    focus_drag[0].version = STRATA_INPUT_EVENT_VERSION_2;
+    focus_drag[0].kind = STRATA_INPUT_POINTER_PRESS;
+    focus_drag[0].x = 8.0;
+    focus_drag[0].y = 48.0;
+    focus_drag[1] = focus_drag[0];
+    focus_drag[1].kind = STRATA_INPUT_POINTER_RELEASE;
+    focus_drag[1].x = 240.0;
+    check(
+        strata_surface_enqueue_input(surface, focus_drag, 2U, &batch).status == STRATA_STATUS_OK &&
+            strata_surface_frame(surface, 11'000, &frame_info).status == STRATA_STATUS_OK &&
+            counters.last_local_x > 160.0,
+        "widget pointer capture did not retain release outside its bounds"
+    );
+    strata_input_event hover_drag = focus_drag[0];
+    hover_drag.kind = STRATA_INPUT_POINTER_MOVE;
+    hover_drag.x = 8.0;
+    check(
+        strata_surface_enqueue_input(surface, &hover_drag, 1U, &batch).status ==
+                STRATA_STATUS_OK &&
+            strata_surface_frame(surface, 11'250, &frame_info).status == STRATA_STATUS_OK,
+        "pointer hover could not return to the extension before scroll"
+    );
+    const std::uint64_t scroll_presentation_baseline = counters.drag_presentations;
+    const std::uint64_t scroll_semantics_baseline = counters.drag_semantics;
+    strata_input_event scroll{};
+    scroll.struct_size = sizeof(strata_input_event);
+    scroll.version = STRATA_INPUT_EVENT_VERSION_2;
+    scroll.kind = STRATA_INPUT_SCROLL;
+    scroll.x = 8.0;
+    scroll.y = 48.0;
+    scroll.delta_y = 2.0;
+    check(
+        strata_surface_enqueue_input(surface, &scroll, 1U, &batch).status == STRATA_STATUS_OK &&
+            strata_surface_frame(surface, 11'500, &frame_info).status == STRATA_STATUS_OK,
+        "scroll input was not accepted by the extension surface"
+    );
+    check(
+        counters.widget_scroll_events == 1U && counters.scroll_local_position &&
+            counters.input_state_round_tripped,
+        "the extension scroll lifecycle lost target geometry or retained input state"
+    );
+    check(
+        counters.drag_presentations == scroll_presentation_baseline &&
+            counters.drag_semantics == scroll_semantics_baseline,
+        "input-only retained state escaped into presentation or semantic work"
+    );
 
+
+    strata_input_event drag_press = focus_drag[0];
+    check(
+        strata_surface_enqueue_input(surface, &drag_press, 1U, &batch).status ==
+                STRATA_STATUS_OK &&
+            strata_surface_frame(surface, 11'750, &frame_info).status == STRATA_STATUS_OK,
+        "the extension drag did not establish pointer capture"
+    );
+    strata_input_event drag_warmup = focus_drag[0];
+    drag_warmup.kind = STRATA_INPUT_POINTER_MOVE;
+    check(
+        strata_surface_enqueue_input(surface, &drag_warmup, 1U, &batch).status ==
+                STRATA_STATUS_OK &&
+            strata_surface_frame(surface, 11'875, &frame_info).status == STRATA_STATUS_OK,
+        "the captured drag did not warm its post-press hit geometry"
+    );
+    const std::uint64_t semantic_baseline = counters.drag_semantics;
+    const std::uint64_t semantic_generation_baseline = frame_info.semantics_generation;
+    const std::uint64_t presentation_baseline = counters.drag_presentations;
+    const std::uint64_t commit_baseline = counters.commit_events;
+    const std::uint64_t hit_bounds_baseline = counters.hit_bounds;
+    strata_runtime_memory_info memory_before{};
+    memory_before.struct_size = sizeof(memory_before);
+    check(
+        strata_runtime_get_memory_info(runtime, &memory_before).status == STRATA_STATUS_OK,
+        "runtime allocation telemetry was unavailable before the drag"
+    );
+    constexpr std::size_t move_count = 120U;
+    std::array<strata_input_event, move_count> drag{};
+    for (std::size_t index = 0U; index < move_count; ++index) {
+        drag[index] = focus_drag[0];
+        drag[index].kind = STRATA_INPUT_POINTER_MOVE;
+        drag[index].x = 8.0 + 144.0 * static_cast<double>(index + 1U) /
+            static_cast<double>(move_count);
+    }
+    check(
+        strata_surface_enqueue_input(surface, drag.data(), drag.size(), &batch).status ==
+                STRATA_STATUS_OK &&
+            batch.accepted_event_count == drag.size() && batch.queued_event_count <= 1U &&
+            strata_surface_frame(surface, 12'000, &frame_info).status == STRATA_STATUS_OK,
+        "continuous pointer input was not accepted or coalesced before the extension frame"
+    );
+    check(
+        counters.pointer_claimed && counters.pointer_local_position &&
+            counters.widget_pointer_events >= 4U && counters.last_local_x > 150.0,
+        "widget pointer capture did not retain the coalesced movement"
+    );
+    check(
+        counters.live_event_emitted && counters.commit_events == commit_baseline,
+        "live movement emitted no typed event or committed before release"
+    );
+    check(
+        counters.drag_presentations == presentation_baseline + 1U &&
+            counters.drag_semantics == semantic_baseline &&
+            counters.hit_bounds == hit_bounds_baseline &&
+            frame_info.semantics_generation == semantic_generation_baseline,
+        "paint-only move counts: presentation " +
+            std::to_string(counters.drag_presentations - presentation_baseline) +
+            ", semantics hooks " + std::to_string(counters.drag_semantics - semantic_baseline) +
+            ", semantics generation " +
+            std::to_string(frame_info.semantics_generation - semantic_generation_baseline) +
+            ", hit bounds " + std::to_string(counters.hit_bounds - hit_bounds_baseline) +
+            ", input " + std::to_string(counters.last_input_value) +
+            ", presented " + std::to_string(counters.last_presented_value)
+    );
+    strata_runtime_memory_info memory_after{};
+    memory_after.struct_size = sizeof(memory_after);
+    check(
+        strata_runtime_get_memory_info(runtime, &memory_after).status == STRATA_STATUS_OK &&
+            memory_after.routed_allocation_count == memory_before.routed_allocation_count,
+        "the coalesced drag allocated through the runtime ABI allocator"
+    );
+
+    strata_input_event release = drag.back();
+    release.kind = STRATA_INPUT_POINTER_RELEASE;
+    check(
+        strata_surface_enqueue_input(surface, &release, 1U, &batch).status == STRATA_STATUS_OK &&
+            strata_surface_frame(surface, 12'500, &frame_info).status == STRATA_STATUS_OK &&
+            counters.commit_event_emitted && counters.commit_events == commit_baseline + 1U &&
+            frame_info.semantics_generation == semantic_generation_baseline + 1U,
+        "release did not emit one typed commit and schedule its semantic projection"
+    );
+
+    strata_input_event cancel[2]{};
+    cancel[0] = focus_drag[0];
+    cancel[1] = cancel[0];
+    cancel[1].kind = STRATA_INPUT_POINTER_CANCEL;
+    check(
+        strata_surface_enqueue_input(surface, cancel, 2U, &batch).status == STRATA_STATUS_OK &&
+            strata_surface_frame(surface, 13'000, &frame_info).status == STRATA_STATUS_OK &&
+            counters.pointer_cancelled,
+        "pointer cancellation did not reach the captured extension widget"
+    );
+
+
+    strata_surface_release(surface);
+    strata_surface_extension_bundle legacy_extensions = harness->bundle();
+    legacy_extensions.struct_size = STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE;
+    surface_config.id = view("harness.legacy-surface");
+    surface_config.extensions = &legacy_extensions;
+    surface = nullptr;
+    check(
+        strata_runtime_create_surface(runtime, &surface_config, &surface).status ==
+                STRATA_STATUS_OK &&
+            strata_surface_frame(surface, 14'000, &frame_info).status == STRATA_STATUS_OK,
+        "a version-1 extension bundle prefix was rejected after input-table growth"
+    );
+    strata_surface_release(surface);
+    legacy_extensions.struct_size = STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE;
+    surface_config.id = view("harness.version-2-surface");
+    surface = nullptr;
+    check(
+        strata_runtime_create_surface(runtime, &surface_config, &surface).status ==
+                STRATA_STATUS_OK &&
+            strata_surface_frame(surface, 15'000, &frame_info).status == STRATA_STATUS_OK,
+        "a version-2 extension bundle prefix was rejected after scroll-table growth"
+    );
     strata_surface_release(surface);
     strata_action_registration_release(activation_registration);
     strata_action_registration_release(observation_registration);

@@ -49,6 +49,9 @@ std::string_view WidgetInputScope::key() const noexcept { return key_; }
 std::string_view WidgetInputScope::input_text() const noexcept { return input_text_; }
 const KeyModifiers& WidgetInputScope::modifiers() const noexcept { return modifiers_; }
 const PointerInputEvent* WidgetInputScope::pointer() const noexcept { return pointer_; }
+const ScrollInputEvent* WidgetInputScope::scroll() const noexcept {
+    return dispatch_ != nullptr ? dispatch_->scroll() : nullptr;
+}
 RetainedNode* WidgetInputScope::pointer_target() const noexcept { return pointer_target_; }
 std::size_t WidgetInputScope::click_count() const noexcept { return click_count_; }
 const WidgetSubtarget* WidgetInputScope::subtarget() const noexcept {
@@ -84,7 +87,12 @@ void WidgetInputScope::stop_propagation() noexcept {
     if (dispatch_ != nullptr) dispatch_->stop_propagation();
 }
 bool WidgetInputScope::claim_gesture() noexcept {
-    return dispatch_ != nullptr && dispatch_->claim_gesture();
+    if (dispatch_ == nullptr || !dispatch_->claim_gesture() || pointer_ == nullptr) return false;
+    const auto pressed = router_.pressed_pointer_targets_.find(pointer_->pointer_id);
+    if (pressed != router_.pressed_pointer_targets_.end()) {
+        pressed->second.widget_lifecycle_claim = true;
+    }
+    return true;
 }
 bool WidgetInputScope::cancel_gesture() noexcept {
     return dispatch_ != nullptr && dispatch_->cancel_gesture();
@@ -135,6 +143,9 @@ const LayoutRecord* WidgetInputScope::layout(const RetainedNode& node) const noe
 
 const LayoutResult* WidgetInputScope::layout_result() const noexcept {
     return router_.layout_;
+}
+double WidgetInputScope::scale() const noexcept {
+    return router_.layout_ != nullptr ? router_.layout_->scale : 1.0;
 }
 
 const CommandIndex* WidgetInputScope::command_index() const noexcept {
@@ -282,6 +293,27 @@ void WidgetInputScope::set_presentation(std::string name, runtime::Value value) 
         node_.identity(), std::move(name), std::move(value)
     );
     if (changed && router_.frame_invalidator_) router_.frame_invalidator_();
+}
+void WidgetInputScope::set_paint(std::string name, runtime::Value value) {
+    if (router_.tree_ == nullptr) return;
+    const bool changed = router_.tree_->set_paint_value(
+        node_.identity(), std::move(name), std::move(value)
+    );
+    if (changed && router_.frame_invalidator_) router_.frame_invalidator_();
+}
+
+
+void WidgetInputScope::set_input(std::string name, runtime::Value value) {
+    if (router_.tree_ == nullptr) return;
+    static_cast<void>(router_.tree_->set_input_value(
+        node_.identity(), std::move(name), std::move(value)
+    ));
+}
+
+void WidgetInputScope::invalidate(const DirtyReason reason) {
+    if (router_.tree_ == nullptr) return;
+    static_cast<void>(router_.tree_->mark(node_.identity(), reason));
+    if (router_.frame_invalidator_) router_.frame_invalidator_();
 }
 
 void WidgetInputScope::set_event_count(const std::size_t count) noexcept {

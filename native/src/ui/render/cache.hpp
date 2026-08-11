@@ -169,7 +169,7 @@ struct RenderEngine::Impl final {
             retained.properties == current.properties && retained.text == current.text &&
             retained.style == current.style && retained.input == current.input &&
             retained.scale == current.scale && retained.resource == current.resource &&
-            retained.editor == current.editor;
+            retained.editor == current.editor && retained.paint == current.paint;
     }
 
     [[nodiscard]] static CachedFragment::MotionSnapshot fragment_motion_snapshot(

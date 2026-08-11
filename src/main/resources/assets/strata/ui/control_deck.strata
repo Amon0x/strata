@@ -447,6 +447,27 @@ component CategoryIcon(icon: string, selected: boolean) {
         strokeStyle: { width: 1.5 }
       }
     ])
+  } else if icon == "COLOR" {
+    Draw(style: CategoryIconDraw, shapes: [
+      {
+        kind: "circle",
+        center: { x: 0.38, y: 0.42 },
+        radius: 0.23,
+        fill: selected ? #FF657FFF : #A65767FF
+      },
+      {
+        kind: "circle",
+        center: { x: 0.62, y: 0.42 },
+        radius: 0.23,
+        fill: selected ? #5DD99BFF : #5F9A7DFF
+      },
+      {
+        kind: "circle",
+        center: { x: 0.50, y: 0.64 },
+        radius: 0.23,
+        fill: selected ? #669CFFFF : #627DAAFF
+      }
+    ])
   } else if icon == "INPUT" {
     Draw(style: CategoryIconDraw, shapes: [
       {
@@ -896,6 +917,24 @@ component ProfilesPage() {
   }
 }
 
+component ColorPage() {
+  Panel(style: SettingsStack) {
+    SectionTitle(label: "WORKSPACE ACCENT")
+    DeckColorPicker(
+      key: "deck.color.picker",
+      layout: { width: { weight: 1 }, height: 330 }
+    )
+    Panel(style: StatusCard) {
+      Panel(style: StatusDot)
+      Panel(style: ChoiceCopy) {
+        Text(text: "Native paint path", style: StatusTitle)
+        Text(text: "Drag feedback stays local · value commits on release", style: StatusMeta)
+      }
+      Text(text: "FRAME-BOUND", style: DeckScope)
+    }
+  }
+}
+
 component AdvancedPage() {
   Panel(style: SettingsStack) {
     SectionTitle(label: "DIAGNOSTICS")
@@ -940,6 +979,7 @@ component ControlDeck() {
         Panel(style: DeckSidebar) {
           CategoryButton(id: "deck.general", icon: "GENERAL", label: "General", selected: category == "GENERAL", activate: action("state.set", name: "category", value: "GENERAL"))
           CategoryButton(id: "deck.display", icon: "DISPLAY", label: "Display", selected: category == "DISPLAY", activate: action("state.set", name: "category", value: "DISPLAY"))
+          CategoryButton(id: "deck.color", icon: "COLOR", label: "Color", selected: category == "COLOR", activate: action("state.set", name: "category", value: "COLOR"))
           CategoryButton(id: "deck.input", icon: "INPUT", label: "Input", selected: category == "INPUT", activate: action("state.set", name: "category", value: "INPUT"))
           CategoryButton(id: "deck.audio", icon: "AUDIO", label: "Audio", selected: category == "AUDIO", activate: action("state.set", name: "category", value: "AUDIO"))
           CategoryButton(id: "deck.profiles", icon: "PROFILES", label: "Profiles", selected: category == "PROFILES", activate: action("state.set", name: "category", value: "PROFILES"))
@@ -955,10 +995,10 @@ component ControlDeck() {
           Panel(style: ContentHeader) {
             Panel(style: ChoiceCopy) {
               Text(
-                text: category == "GENERAL" ? "General" : category == "DISPLAY" ? "Display" : category == "INPUT" ? "Input" : category == "AUDIO" ? "Audio" : category == "PROFILES" ? "Profiles" : "Advanced",
+                text: category == "GENERAL" ? "General" : category == "DISPLAY" ? "Display" : category == "COLOR" ? "Color" : category == "INPUT" ? "Input" : category == "AUDIO" ? "Audio" : category == "PROFILES" ? "Profiles" : "Advanced",
                 style: ContentTitle
               )
-              Text(text: "Workspace configuration and behavior", style: ContentSubtitle)
+              Text(text: category == "COLOR" ? "Frame-bound native color authoring" : "Workspace configuration and behavior", style: ContentSubtitle)
             }
             if category == "GENERAL" {
               Panel(style: SegmentRail) {
@@ -969,7 +1009,9 @@ component ControlDeck() {
           }
 
           Scroll(key: "deck.settings.scroll", vertical: true, horizontal: false, style: DeckScroll) {
-            if category == "DISPLAY" {
+            if category == "COLOR" {
+              ColorPage()
+            } else if category == "DISPLAY" {
               DisplayPage()
             } else if category == "INPUT" {
               InputPage()

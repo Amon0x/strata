@@ -167,6 +167,8 @@ enum class DirtyReason : std::uint32_t {
     resource = UINT32_C(1) << 9U,
     /** Editor-local selection/composition invalidation, intentionally outside semantic generations. */
     editor = UINT32_C(1) << 10U,
+    /** Widget content changed without description, layout, text, or semantic work. */
+    paint = UINT32_C(1) << 11U,
 };
 
 class DirtySet final {
@@ -195,6 +197,7 @@ struct DirtyGenerationSnapshot final {
     std::uint64_t animation = 0U;
     std::uint64_t resource = 0U;
     std::uint64_t editor = 0U;
+    std::uint64_t paint = 0U;
     [[nodiscard]] friend bool operator==(const DirtyGenerationSnapshot&, const DirtyGenerationSnapshot&) = default;
 };
 
@@ -309,7 +312,7 @@ private:
     std::uint64_t subtree_presentation_generation_ = 0U;
     RetainedLifecycle lifecycle_ = RetainedLifecycle::attached;
     DirtySet dirty_;
-    std::array<std::uint64_t, 11U> dirty_generations_{};
+    std::array<std::uint64_t, 12U> dirty_generations_{};
     std::map<std::string, runtime::Value, std::less<>> retained_values_;
     std::vector<Cleanup> cleanups_;
     std::optional<MaterializationRange> realized_range_;
@@ -423,6 +426,14 @@ public:
         std::string name,
         runtime::Value value
     );
+    /** Updates retained state consumed by the widget content paint callback only. */
+    [[nodiscard]] bool set_paint_value(
+        std::uint64_t identity,
+        std::string name,
+        runtime::Value value
+    );
+    /** Retained input/session state with no downstream frame work. */
+    bool set_input_value(std::uint64_t identity, std::string name, runtime::Value value);
     /** Updates retained geometry state that requires arrangement but cannot affect measurement. */
     [[nodiscard]] bool set_arrangement_value(
         std::uint64_t identity,
@@ -471,10 +482,10 @@ private:
     ) const;
 
     std::unique_ptr<RetainedNode> root_;
-    std::uint64_t next_identity_;
+    std::array<std::uint64_t, 12U> dirty_generations_{};
     std::uint64_t generation_ = 0U;
     std::uint64_t layout_invalidation_generation_ = 0U;
-    std::array<std::uint64_t, 11U> dirty_generations_{};
+    std::uint64_t next_identity_ = 1U;
     std::map<std::string, std::vector<RetainedNode*>, std::less<>> key_index_;
     std::map<std::uint64_t, RetainedNode*> identity_index_;
     std::map<std::string, std::vector<RetainedNode*>, std::less<>> source_index_;

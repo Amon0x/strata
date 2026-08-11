@@ -191,6 +191,7 @@ const LayoutResult& LayoutEngine::layout(
     structural_measurements_.clear();
     result_.generation = ++next_generation_;
     result_.root_identity = root->identity();
+    result_.scale = environment.scale;
     result_.operations = {};
     result_.measure_nanos = 0;
     result_.arrange_nanos = 0;

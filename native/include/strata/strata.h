@@ -1371,13 +1371,17 @@ typedef strata_extension_input_result (*strata_widget_key_fn)(
     const strata_widget_key_event* event
 );
 
-/** Invalidation class recorded when an extension writes one declared retained field. */
+/** Work invalidated when an extension writes one declared retained field. */
 typedef uint32_t strata_widget_invalidation;
 #define STRATA_WIDGET_INVALIDATION_PROPERTIES UINT32_C(0)
 #define STRATA_WIDGET_INVALIDATION_LAYOUT UINT32_C(1)
 #define STRATA_WIDGET_INVALIDATION_STYLE UINT32_C(2)
 #define STRATA_WIDGET_INVALIDATION_TEXT UINT32_C(3)
 #define STRATA_WIDGET_INVALIDATION_SEMANTICS UINT32_C(4)
+/* Rebuilds this widget's presentation without description reconciliation or layout. */
+#define STRATA_WIDGET_INVALIDATION_PAINT UINT32_C(5)
+/* Updates gesture/session bookkeeping without presentation, layout, or semantic work. */
+#define STRATA_WIDGET_INVALIDATION_INPUT UINT32_C(6)
 
 /**
  * One retained field owned by a widget extension. Reads and writes of undeclared names fail with
@@ -1422,10 +1426,15 @@ typedef struct strata_widget_extension {
     size_t retained_field_count;
 } strata_widget_extension;
 
-typedef uint32_t strata_behavior_event_phase;
-#define STRATA_BEHAVIOR_EVENT_CAPTURE UINT32_C(0)
-#define STRATA_BEHAVIOR_EVENT_TARGET UINT32_C(1)
-#define STRATA_BEHAVIOR_EVENT_BUBBLE UINT32_C(2)
+typedef uint32_t strata_extension_event_phase;
+#define STRATA_EXTENSION_EVENT_CAPTURE UINT32_C(0)
+#define STRATA_EXTENSION_EVENT_TARGET UINT32_C(1)
+#define STRATA_EXTENSION_EVENT_BUBBLE UINT32_C(2)
+
+typedef strata_extension_event_phase strata_behavior_event_phase;
+#define STRATA_BEHAVIOR_EVENT_CAPTURE STRATA_EXTENSION_EVENT_CAPTURE
+#define STRATA_BEHAVIOR_EVENT_TARGET STRATA_EXTENSION_EVENT_TARGET
+#define STRATA_BEHAVIOR_EVENT_BUBBLE STRATA_EXTENSION_EVENT_BUBBLE
 
 typedef struct strata_behavior_pointer_event {
     size_t struct_size;
@@ -1457,13 +1466,87 @@ typedef struct strata_behavior_extension {
     strata_behavior_pointer_fn pointer;
 } strata_behavior_extension;
 
+/** Widget-local pointer event. Surface coordinates remain available while capture leaves bounds. */
+typedef struct strata_widget_pointer_event {
+    size_t struct_size;
+    uint32_t kind;
+    strata_extension_event_phase phase;
+    uint32_t modifiers;
+    int32_t pointer_id;
+    int32_t button;
+    double x;
+    double y;
+    double local_x;
+    double local_y;
+    double delta_x;
+    double delta_y;
+    int64_t timestamp_nanoseconds;
+    uint32_t target;
+    uint32_t reserved;
+} strata_widget_pointer_event;
+
+typedef strata_extension_input_result (*strata_widget_pointer_fn)(
+    void* user_data,
+    strata_widget_input_context* context,
+    const strata_widget_pointer_event* event
+);
+/** Widget-local wheel/trackpad event delivered through capture, target, and bubble phases. */
+typedef struct strata_widget_scroll_event {
+    size_t struct_size;
+    strata_extension_event_phase phase;
+    uint32_t modifiers;
+    double x;
+    double y;
+    double local_x;
+    double local_y;
+    double delta_x;
+    double delta_y;
+    uint32_t target;
+    uint32_t reserved;
+} strata_widget_scroll_event;
+
+typedef strata_extension_input_result (*strata_widget_scroll_fn)(
+    void* user_data,
+    strata_widget_input_context* context,
+    const strata_widget_scroll_event* event
+);
+
+
+/**
+ * Optional input phases for one widget descriptor. This table is separate so extending widget
+ * input never changes the stride of the version-1 `strata_widget_extension` descriptor array.
+ */
+typedef struct strata_widget_input_extension {
+    size_t struct_size;
+    strata_string_view type;
+    void* user_data;
+    strata_widget_pointer_fn pointer;
+} strata_widget_input_extension;
+/** Optional scroll lifecycle kept separate so version-2 pointer descriptor strides stay stable. */
+typedef struct strata_widget_scroll_extension {
+    size_t struct_size;
+    strata_string_view type;
+    void* user_data;
+    strata_widget_scroll_fn scroll;
+} strata_widget_scroll_extension;
+
+
 typedef struct strata_surface_extension_bundle {
     size_t struct_size;
     const strata_widget_extension* widgets;
     size_t widget_count;
     const strata_behavior_extension* behaviors;
     size_t behavior_count;
+    const strata_widget_input_extension* widget_inputs;
+    size_t widget_input_count;
+    const strata_widget_scroll_extension* widget_scrolls;
+    size_t widget_scroll_count;
 } strata_surface_extension_bundle;
+
+#define STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE \
+    offsetof(strata_surface_extension_bundle, widget_inputs)
+#define STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE \
+    offsetof(strata_surface_extension_bundle, widget_scrolls)
 
 typedef struct strata_surface_config {
     size_t struct_size;
@@ -2076,6 +2159,23 @@ STRATA_API strata_result strata_surface_read_inspector_selection_json(
 );
 
 /* Extension callback capabilities. Context pointers are valid only for their callback invocation. */
+STRATA_API strata_rect strata_widget_input_bounds(
+    const strata_widget_input_context* context
+);
+STRATA_API double strata_widget_input_scale(
+    const strata_widget_input_context* context
+);
+/* The framework retains press capture through release/cancel; claiming wins gesture arbitration. */
+STRATA_API uint32_t strata_widget_input_claim_gesture(
+    strata_widget_input_context* context
+);
+STRATA_API uint32_t strata_widget_input_cancel_gesture(
+    strata_widget_input_context* context
+);
+STRATA_API strata_result strata_widget_input_invalidate(
+    strata_widget_input_context* context,
+    strata_widget_invalidation invalidation
+);
 STRATA_API double strata_widget_input_retained_number(
     const strata_widget_input_context* context,
     strata_string_view name,
@@ -2113,6 +2213,11 @@ STRATA_API strata_result strata_widget_input_set_retained_text(
     strata_string_view name,
     strata_string_view value
 );
+/** Reports whether the authored property exists, independent of its typed fallback. */
+STRATA_API uint32_t strata_widget_input_has_property(
+    const strata_widget_input_context* context,
+    strata_string_view name
+);
 STRATA_API double strata_widget_input_property_number(
     const strata_widget_input_context* context,
     strata_string_view name,
@@ -2142,6 +2247,21 @@ STRATA_API strata_result strata_widget_input_emit_event_json(
     strata_string_view event_kind,
     strata_string_view event_value_json
 );
+STRATA_API strata_result strata_widget_input_emit_number_event(
+    strata_widget_input_context* context,
+    strata_string_view event_kind,
+    double value
+);
+STRATA_API strata_result strata_widget_input_emit_boolean_event(
+    strata_widget_input_context* context,
+    strata_string_view event_kind,
+    uint32_t value
+);
+STRATA_API strata_result strata_widget_input_emit_text_event(
+    strata_widget_input_context* context,
+    strata_string_view event_kind,
+    strata_string_view value
+);
 STRATA_API strata_result strata_behavior_input_emit_action_json(
     strata_behavior_input_context* context,
     strata_string_view action_id,
@@ -2153,6 +2273,9 @@ STRATA_API strata_rect strata_widget_render_bounds(
     const strata_widget_render_context* context
 );
 STRATA_API strata_rect strata_widget_render_root_bounds(
+    const strata_widget_render_context* context
+);
+STRATA_API double strata_widget_render_scale(
     const strata_widget_render_context* context
 );
 STRATA_API uint32_t strata_widget_render_focused(
@@ -2273,6 +2396,10 @@ STRATA_API strata_result strata_widget_render_retained_text(
     size_t capacity,
     size_t* out_length
 );
+STRATA_API uint32_t strata_widget_render_has_property(
+    const strata_widget_render_context* context,
+    strata_string_view name
+);
 STRATA_API double strata_widget_render_property_number(
     const strata_widget_render_context* context,
     strata_string_view name,
@@ -2302,6 +2429,12 @@ STRATA_API strata_result strata_widget_semantics_set_value_text(
     strata_widget_semantics_context* context,
     strata_string_view value
 );
+STRATA_API void strata_widget_semantics_set_value_range(
+    strata_widget_semantics_context* context,
+    double current,
+    double minimum,
+    double maximum
+);
 STRATA_API strata_result strata_widget_semantics_add_action(
     strata_widget_semantics_context* context,
     strata_string_view action
@@ -2328,7 +2461,35 @@ STRATA_API uint32_t strata_widget_semantics_retained_boolean(
     strata_string_view name,
     uint32_t fallback
 );
+STRATA_API uint32_t strata_widget_semantics_has_property(
+    const strata_widget_semantics_context* context,
+    strata_string_view name
+);
+STRATA_API double strata_widget_semantics_property_number(
+    const strata_widget_semantics_context* context,
+    strata_string_view name,
+    double fallback
+);
+STRATA_API uint32_t strata_widget_semantics_property_boolean(
+    const strata_widget_semantics_context* context,
+    strata_string_view name,
+    uint32_t fallback
+);
 
+STRATA_API strata_result strata_widget_semantics_retained_text(
+    const strata_widget_semantics_context* context,
+    strata_string_view name,
+    char* buffer,
+    size_t capacity,
+    size_t* out_length
+);
+STRATA_API strata_result strata_widget_semantics_property_text(
+    const strata_widget_semantics_context* context,
+    strata_string_view name,
+    char* buffer,
+    size_t capacity,
+    size_t* out_length
+);
 STRATA_API strata_result strata_snapshot_get_info(
     const strata_snapshot* snapshot,
     strata_snapshot_info* out_info

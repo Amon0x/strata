@@ -102,9 +102,8 @@ The complete buildable example is installed at
 strata::desktop::ApplicationConfig config;
 config.application_id = "my.tool";
 config.module_resource = "assets/my_tool/app.strata";
-config.schemas_resource = "assets/my_tool/app.schemas.json"; // optional
+config.schemas_resource = "assets/my_tool/app.schemas.json"; // optional; owns extensionPackages
 config.root_name = "Main";
-config.extension_packages = {"example.meter.v1"};             // optional
 config.extension_search_paths = {resource_root / "extensions"};
 
 strata::desktop::ApplicationHost host(window, resource_root, std::move(config));
@@ -172,7 +171,6 @@ example is `share/strata/samples/desktop_app.json`:
     "module": "assets/my_tool/app.strata",
     "schemas": "assets/my_tool/app.schemas.json",
     "root": "Main",
-    "packages": [],
     "extensionPaths": [],
     "actions": ["tool.save"]
   },

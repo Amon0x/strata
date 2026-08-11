@@ -5,7 +5,6 @@
     "module": "assets/strata/ui/demo_surface.strata",
     "schemas": "assets/strata/ui/demo_surface.schemas.json",
     "root": "MainShowcase",
-    "packages": ["strata.demo.v1"],
     "actions": [
       "control.alpha.action",
       "control.beta.action",
