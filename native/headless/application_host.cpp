@@ -46,18 +46,17 @@ namespace {
                                      std::istreambuf_iterator<char>());
 }
 
-[[nodiscard]] std::string initialization_failure(
-    const std::string_view reason,
-    const std::vector<CapturedDiagnostic>& diagnostics
-) {
+[[nodiscard]] std::string
+initialization_failure(const std::string_view reason,
+                       const std::vector<CapturedDiagnostic>& diagnostics) {
     std::string result(reason);
-    if (diagnostics.empty()) return result;
+    if (diagnostics.empty())
+        return result;
     result += "\nCaptured diagnostics:";
     for (const CapturedDiagnostic& diagnostic : diagnostics) {
         result += "\n  ";
-        result += diagnostic.code.empty()
-            ? "diagnostic " + std::to_string(diagnostic.id)
-            : diagnostic.code;
+        result += diagnostic.code.empty() ? "diagnostic " + std::to_string(diagnostic.id)
+                                          : diagnostic.code;
         if (!diagnostic.source.empty()) {
             result += " [";
             result += diagnostic.source;
@@ -91,10 +90,12 @@ struct ApplicationHost::Impl final {
         try {
             initialize();
         } catch (const std::exception& error) {
-            if (surface.has_value()) surface->abandon();
+            if (surface.has_value())
+                surface->abandon();
             throw std::runtime_error(initialization_failure(error.what(), diagnostics));
         } catch (...) {
-            if (surface.has_value()) surface->abandon();
+            if (surface.has_value())
+                surface->abandon();
             throw;
         }
     }
@@ -357,7 +358,6 @@ struct ApplicationHost::Impl final {
         const strata_resource_adapter resources{
             sizeof(strata_resource_adapter),
             this,
-            1U,
             &Impl::load_resource,
         };
         strata::require_ok(
@@ -397,8 +397,7 @@ struct ApplicationHost::Impl final {
             packages = scenario.packages;
         } else if (!scenario.packages.empty() && scenario.packages != packages) {
             throw std::invalid_argument(
-                "headless extension packages disagree with the application schema declaration"
-            );
+                "headless extension packages disagree with the application schema declaration");
         }
         extensions = host::select_extensions(packages, scenario.extension_search_paths);
         std::vector<std::string> extension_schemas = extensions.schemas();
@@ -415,30 +414,20 @@ struct ApplicationHost::Impl final {
             extension_schema_views.size(),
         };
         runtime->configure_application(application);
-        for (const strata::MaterialDeclaration& material :
-             runtime->material_declarations("hlsl")) {
-            if (material.source.empty()) continue;
-            renderer->declare_material(
-                material.id,
-                read_text(resource_path(material.source))
-            );
+        for (const strata::MaterialDeclaration& material : runtime->material_declarations("hlsl")) {
+            if (material.source.empty())
+                continue;
+            renderer->declare_material(material.id, read_text(resource_path(material.source)));
         }
         const std::string_view effect_backend =
             renderer->backend() == "d3d11" ? "hlsl" : "reference";
         for (const strata::EffectPassDeclaration& pass :
              runtime->effect_pass_declarations(effect_backend)) {
             renderer->declare_effect_pass(
-                pass.effect_id,
-                pass.index,
-                static_cast<std::uint32_t>(pass.kind),
-                pass.radius,
-                pass.downsample,
-                pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
+                pass.effect_id, pass.index, static_cast<std::uint32_t>(pass.kind), pass.radius,
+                pass.downsample, pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
                 pass.downsample_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
-                pass.source.empty()
-                    ? std::string{}
-                    : read_text(resource_path(pass.source))
-            );
+                pass.source.empty() ? std::string{} : read_text(resource_path(pass.source)));
         }
 
         const strata_durable_store_adapter durable_adapter{

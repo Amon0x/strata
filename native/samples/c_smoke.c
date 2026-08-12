@@ -60,26 +60,26 @@ int main(void) {
     (void)scroll_contract;
 
     if (failed(strata_theme_visual_style_defaults(&theme_visual)) ||
-        failed(strata_theme_layout_style_defaults(&theme_layout))) return 66;
+        failed(strata_theme_layout_style_defaults(&theme_layout)))
+        return 66;
 
     runtime_config.struct_size = sizeof(runtime_config);
     runtime_config.abi_version = STRATA_ABI_VERSION_CURRENT;
-    runtime_config.required_capabilities = STRATA_CAPABILITY_CORE_LIFECYCLE |
-        STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
-        STRATA_CAPABILITY_COMPILER_ACTIVATION |
-        STRATA_CAPABILITY_SURFACE_RUNTIME |
-        STRATA_CAPABILITY_SURFACE_RENDER_PACKET |
-        STRATA_CAPABILITY_ALLOCATOR_TELEMETRY |
-        STRATA_CAPABILITY_SURFACE_RESOURCE_RELOAD;
+    runtime_config.required_capabilities =
+        STRATA_CAPABILITY_CORE_LIFECYCLE | STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
+        STRATA_CAPABILITY_COMPILER_ACTIVATION | STRATA_CAPABILITY_SURFACE_RUNTIME |
+        STRATA_CAPABILITY_SURFACE_RENDER_PACKET | STRATA_CAPABILITY_ALLOCATOR_TELEMETRY;
     runtime_config.clock.struct_size = sizeof(runtime_config.clock);
     runtime_config.clock.user_data = &now;
     runtime_config.clock.now_nanoseconds = smoke_clock;
-    if (failed(strata_runtime_create(&runtime_config, &runtime))) goto cleanup;
+    if (failed(strata_runtime_create(&runtime_config, &runtime)))
+        goto cleanup;
 
     application.struct_size = sizeof(application);
     application.id.data = application_id;
     application.id.size = sizeof(application_id) - 1U;
-    if (failed(strata_runtime_configure_application(runtime, &application))) goto cleanup;
+    if (failed(strata_runtime_configure_application(runtime, &application)))
+        goto cleanup;
 
     activation.struct_size = sizeof(activation);
     activation.generation = 1U;
@@ -89,7 +89,8 @@ int main(void) {
     activation.entry_text.size = sizeof(source) - 1U;
     activation_info.struct_size = sizeof(activation_info);
     if (failed(strata_runtime_compile_and_activate(runtime, &activation, &activation_info)) ||
-        activation_info.status != STRATA_ACTIVATION_ACTIVATED) goto cleanup;
+        activation_info.status != STRATA_ACTIVATION_ACTIVATED)
+        goto cleanup;
 
     surface_config.struct_size = sizeof(surface_config);
     surface_config.id.data = surface_id;
@@ -110,35 +111,43 @@ int main(void) {
     surface_config.environment.pointer_precision = STRATA_POINTER_PRECISION_FINE;
     surface_config.environment.input_capabilities =
         STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD;
-    if (failed(strata_runtime_create_surface(runtime, &surface_config, &surface))) goto cleanup;
+    if (failed(strata_runtime_create_surface(runtime, &surface_config, &surface)))
+        goto cleanup;
 
     frame_info.struct_size = sizeof(frame_info);
-    if (failed(strata_surface_frame(surface, now, &frame_info)) ||
-        frame_info.frame_index != 1U || frame_info.render_command_count == 0U) goto cleanup;
+    if (failed(strata_surface_frame(surface, now, &frame_info)) || frame_info.frame_index != 1U ||
+        frame_info.render_command_count == 0U)
+        goto cleanup;
     packet_sink.struct_size = sizeof(packet_sink);
     packet_sink.user_data = &packet;
     packet_sink.emit = capture_packet;
     if (failed(strata_surface_read_render_packet(surface, &packet_sink)) ||
-        packet.size < sizeof(packet.header) || memcmp(packet.header, "STRATARP", 8U) != 0) goto cleanup;
-    if (failed(strata_surface_reload_resources(surface))) goto cleanup;
+        packet.size < sizeof(packet.header) || memcmp(packet.header, "STRATARP", 8U) != 0)
+        goto cleanup;
     memory_info.struct_size = sizeof(memory_info);
     if (failed(strata_runtime_get_memory_info(runtime, &memory_info)) ||
         memory_info.routed_current_bytes == 0U ||
-        memory_info.routed_peak_bytes < memory_info.routed_current_bytes) goto cleanup;
+        memory_info.routed_peak_bytes < memory_info.routed_current_bytes)
+        goto cleanup;
     memset(&packet, 0, sizeof(packet));
     if (failed(strata_surface_prepare_release_packet(surface, &packet_sink)) ||
-        packet.size < sizeof(packet.header) || memcmp(packet.header, "STRATARP", 8U) != 0) goto cleanup;
-    if (failed(strata_surface_acknowledge_release_packet(surface))) goto cleanup;
+        packet.size < sizeof(packet.header) || memcmp(packet.header, "STRATARP", 8U) != 0)
+        goto cleanup;
+    if (failed(strata_surface_acknowledge_release_packet(surface)))
+        goto cleanup;
 
     exit_code = 0;
 cleanup:
     if (surface != NULL) {
-        strata_result released = exit_code == 0
-            ? strata_surface_release(surface)
-            : strata_surface_abandon(surface);
-        if (failed(released)) exit_code = 1;
+        strata_result released =
+            exit_code == 0 ? strata_surface_release(surface) : strata_surface_abandon(surface);
+        if (failed(released))
+            exit_code = 1;
     }
-    if (failed(strata_runtime_release(runtime))) exit_code = 1;
-    if (exit_code == 0) puts("strata_c_smoke: compiled, activated, framed, emitted a packet, and read allocator telemetry");
+    if (failed(strata_runtime_release(runtime)))
+        exit_code = 1;
+    if (exit_code == 0)
+        puts("strata_c_smoke: compiled, activated, framed, emitted a packet, and read allocator "
+             "telemetry");
     return exit_code;
 }

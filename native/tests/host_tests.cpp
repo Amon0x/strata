@@ -32,9 +32,7 @@ struct HostTestAction final {
     std::string name;
     std::optional<std::int64_t> count;
 
-    [[nodiscard]] static HostTestAction decode(
-        const strata::host::ActionEvent& event
-    ) {
+    [[nodiscard]] static HostTestAction decode(const strata::host::ActionEvent& event) {
         return {
             event.kind,
             event.source_key,
@@ -48,14 +46,15 @@ void generated_contracts_round_trip() {
     namespace settings = strata::contracts::settings_app;
     const settings::Settings source{
         .saved_message = "generated",
-        .profile_tree = {
-            settings::SettingsProfileTreeItem{
-                .key = "profile.generated",
-                .label = "Generated profile",
-                .may_have_children = false,
-                .children_loaded = true,
+        .profile_tree =
+            {
+                settings::SettingsProfileTreeItem{
+                    .key = "profile.generated",
+                    .label = "Generated profile",
+                    .may_have_children = false,
+                    .children_loaded = true,
+                },
             },
-        },
     };
     const strata::host::Value snapshot = settings::encode_settings(source);
     const settings::Settings decoded = settings::decode_settings(snapshot.require("settings"));
@@ -64,28 +63,25 @@ void generated_contracts_round_trip() {
           "generated host snapshot contract did not round-trip");
 
     namespace demo = strata::contracts::demo_surface;
-    const demo::DemoHostMessageAction action = demo::DemoHostMessageAction::decode(
-        strata::host::ActionEvent{
+    const demo::DemoHostMessageAction action =
+        demo::DemoHostMessageAction::decode(strata::host::ActionEvent{
             std::string(demo::DemoHostMessageAction::id),
             strata::host::Value::object({{"message", "typed"}}),
             "activate",
             std::nullopt,
             {},
-        }
-    );
+        });
     check(action.message == "typed" && action.priority == 0.0,
           "generated action decoder did not apply its schema default");
 
     namespace debug = strata::contracts::debug_overlay;
-    const auto mode = debug::StrataDebugSelectModeAction::decode(
-        strata::host::ActionEvent{
-            std::string(debug::StrataDebugSelectModeAction::id),
-            strata::host::Value::object({{"mode", "HOT_TREE"}}),
-            "activate",
-            std::nullopt,
-            {},
-        }
-    );
+    const auto mode = debug::StrataDebugSelectModeAction::decode(strata::host::ActionEvent{
+        std::string(debug::StrataDebugSelectModeAction::id),
+        strata::host::Value::object({{"mode", "HOT_TREE"}}),
+        "activate",
+        std::nullopt,
+        {},
+    });
     check(debug::wire_name(mode.mode) == "HOT_TREE",
           "generated enum action contract changed its wire value");
 }
@@ -199,8 +195,7 @@ void action_bindings_decode_at_the_boundary() {
     check(info.status == strata::ActionDispatchStatus::handled && captured.has_value() &&
               captured->kind == "host-test-event" &&
               captured->source_key == std::optional<std::string>("host.source") &&
-              captured->name == "alpha" &&
-              captured->count == std::optional<std::int64_t>(3),
+              captured->name == "alpha" && captured->count == std::optional<std::int64_t>(3),
           "typed action binding leaked or mistranslated the ABI JSON call");
 }
 
@@ -210,10 +205,8 @@ void raw_runtime_config_retains_activation_diagnostics() {
     config.struct_size = sizeof(config);
     config.abi_version = STRATA_ABI_VERSION_CURRENT;
     config.required_capabilities =
-        STRATA_CAPABILITY_CORE_LIFECYCLE |
-        STRATA_CAPABILITY_CALLER_CLOCK |
-        STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
-        STRATA_CAPABILITY_COMPILER_ACTIVATION |
+        STRATA_CAPABILITY_CORE_LIFECYCLE | STRATA_CAPABILITY_CALLER_CLOCK |
+        STRATA_CAPABILITY_APPLICATION_LIFECYCLE | STRATA_CAPABILITY_COMPILER_ACTIVATION |
         STRATA_CAPABILITY_ACTION_DISPATCH;
     config.clock = strata_clock{sizeof(strata_clock), &now, &clock};
     strata::Runtime runtime(config);
@@ -253,13 +246,10 @@ void raw_runtime_config_retains_activation_diagnostics() {
         }));
     } catch (const strata::AbiError& error) {
         enriched = error.diagnostic().has_value() &&
-            error.diagnostic()->code == "STRATA.DSL.ACTION_HANDLER_MISSING" &&
-            std::string_view(error.what()).find("host.required") != std::string_view::npos;
+                   error.diagnostic()->code == "STRATA.DSL.ACTION_HANDLER_MISSING" &&
+                   std::string_view(error.what()).find("host.required") != std::string_view::npos;
     }
-    check(
-        enriched,
-        "raw-config Runtime activation lost its diagnostic code and message"
-    );
+    check(enriched, "raw-config Runtime activation lost its diagnostic code and message");
     runtime.close();
 }
 
@@ -274,10 +264,9 @@ void public_runtime_facade_owns_host_boundaries() {
     strata::Runtime runtime(std::move(options));
 
     runtime.set_resource_adapter(strata::ResourceAdapter{
-        .generation = 1U,
-        .load = [](const std::string_view id)
-            -> std::optional<std::vector<std::uint8_t>> {
-            if (id != "host-tests.resource") return std::nullopt;
+        .load = [](const std::string_view id) -> std::optional<std::vector<std::uint8_t>> {
+            if (id != "host-tests.resource")
+                return std::nullopt;
             return std::vector<std::uint8_t>{1U, 2U, 3U};
         },
     });
@@ -327,13 +316,14 @@ void public_runtime_facade_owns_host_boundaries() {
         .begin = [](const strata::AsyncRequest&) {},
         .cancel = [](std::uint64_t) {},
     });
-    constexpr std::string_view source =
-        "overlay Main { root Panel(key: \"facade.root\") }";
-    check(runtime.activate(strata::SourceActivation{
-              .generation = 1U,
-              .entry_source_id = "host-tests/facade.strata",
-              .entry_text = std::string(source),
-          }).activated(),
+    constexpr std::string_view source = "overlay Main { root Panel(key: \"facade.root\") }";
+    check(runtime
+              .activate(strata::SourceActivation{
+                  .generation = 1U,
+                  .entry_source_id = "host-tests/facade.strata",
+                  .entry_text = std::string(source),
+              })
+              .activated(),
           "owned source activation facade rejected valid source");
 
     const strata::Snapshot snapshot = runtime.snapshot();
@@ -351,9 +341,9 @@ void public_runtime_facade_owns_host_boundaries() {
     surface_options.environment.logical_height = 200.0;
     strata::Surface surface = runtime.create_surface(surface_options);
     surface.set_profiler_capture(true);
-    check(surface.enqueue(strata::InputEvent::pointer(
-              strata::InputKind::pointer_move, strata::Point{10.0, 20.0}
-          )).accepted_event_count == 1U,
+    check(surface.enqueue(strata::InputEvent::pointer(strata::InputKind::pointer_move,
+                                                      strata::Point{10.0, 20.0}))
+                  .accepted_event_count == 1U,
           "owned input event did not enqueue");
     ++now;
     check(surface.frame(now).processed_input_event_count == 1U,
@@ -369,17 +359,16 @@ void public_runtime_facade_owns_host_boundaries() {
     resized.generation = 2U;
     resized.framebuffer_width = 640;
     resized.logical_width = 640.0;
-    check(surface.adopt_environment(resized),
-          "owned Surface environment was not adopted");
+    check(surface.adopt_environment(resized), "owned Surface environment was not adopted");
 
     bool enriched = false;
     try {
         surface.close();
     } catch (const strata::AbiError& error) {
         enriched = error.diagnostic().has_value() &&
-            error.diagnostic()->code == "STRATA.SURFACE.RELEASE_BARRIER_INCOMPLETE" &&
-            std::string_view(error.what()).find("prepared, synchronously consumed") !=
-                std::string_view::npos;
+                   error.diagnostic()->code == "STRATA.SURFACE.RELEASE_BARRIER_INCOMPLETE" &&
+                   std::string_view(error.what()).find("prepared, synchronously consumed") !=
+                       std::string_view::npos;
     }
     check(enriched, "AbiError did not include the retained diagnostic code and message");
     check(surface.diagnostics().frame_index == 1U,
@@ -395,9 +384,10 @@ void public_runtime_facade_owns_host_boundaries() {
         strata::Surface abandoned = runtime.create_surface(surface_options);
         static_cast<void>(abandoned);
     }
-    check(std::ranges::any_of(observed_diagnostics, [](const strata::Diagnostic& diagnostic) {
-              return diagnostic.code == "STRATA.SURFACE.RELEASE_ABANDONED";
-          }),
+    check(std::ranges::any_of(observed_diagnostics,
+                              [](const strata::Diagnostic& diagnostic) {
+                                  return diagnostic.code == "STRATA.SURFACE.RELEASE_ABANDONED";
+                              }),
           "forgotten Surface did not auto-abandon with a diagnostic");
     runtime.close();
 }
@@ -468,30 +458,18 @@ void generated_root_models_publish_changed_fields_only() {
     model.bind(bindings, "host-tests.settings");
     static_cast<void>(model.set(settings::Settings{}));
     bindings.synchronize();
-    const std::uint64_t initial_generation =
-        active_runtime.host_snapshot_info().generation;
+    const std::uint64_t initial_generation = active_runtime.host_snapshot_info().generation;
 
-    check(
-        model.set_saved_message("changed"),
-        "generated root model ignored a changed field"
-    );
+    check(model.set_saved_message("changed"), "generated root model ignored a changed field");
     bindings.synchronize();
-    const std::uint64_t changed_generation =
-        active_runtime.host_snapshot_info().generation;
-    check(
-        changed_generation == initial_generation + 1U,
-        "generated root model published more than the changed field"
-    );
+    const std::uint64_t changed_generation = active_runtime.host_snapshot_info().generation;
+    check(changed_generation == initial_generation + 1U,
+          "generated root model published more than the changed field");
 
-    check(
-        !model.set_saved_message("changed"),
-        "generated root model accepted an unchanged field"
-    );
+    check(!model.set_saved_message("changed"), "generated root model accepted an unchanged field");
     bindings.synchronize();
-    check(
-        active_runtime.host_snapshot_info().generation == changed_generation,
-        "generated root model republished an unchanged field"
-    );
+    check(active_runtime.host_snapshot_info().generation == changed_generation,
+          "generated root model republished an unchanged field");
     active_runtime.close();
 }
 

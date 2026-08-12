@@ -14,7 +14,8 @@
   "activationEvents": [
     "onLanguage:strata",
     "onCommand:strata.validateModule",
-    "onCommand:strata.reloadSchema"
+    "onCommand:strata.reloadSchema",
+    "onCommand:strata.previewApplication"
   ],
   "contributes": {
     "languages": [
@@ -40,6 +41,10 @@
       {
         "command": "strata.reloadSchema",
         "title": "Strata: Reload Completion Schema"
+      },
+      {
+        "command": "strata.previewApplication",
+        "title": "Strata: Preview Application"
       }
     ],
     "configuration": {
@@ -49,6 +54,11 @@
           "type": "string",
           "default": "",
           "description": "Path to the installed strata_compile executable. Relative paths resolve from the workspace folder."
+        },
+        "strata.desktopRunner.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to strata_desktop. Relative paths resolve from the workspace folder."
         },
         "strata.applicationSchemas.path": {
           "type": "string",

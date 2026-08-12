@@ -1,5 +1,10 @@
 {
   "version": 1,
+  "launch": {
+    "kind": "generic",
+    "resourceRoot": "../..",
+    "title": "Strata Desktop Example"
+  },
   "application": {
     "id": "example.desktop.runner",
     "module": "assets/strata/samples/desktop_app.strata",

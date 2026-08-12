@@ -695,7 +695,6 @@ void test_surface_lifecycle(const std::filesystem::path& resource_root) {
     const strata_resource_adapter adapter{
         sizeof(strata_resource_adapter),
         &resources,
-        1U,
         &load_resource,
     };
     check(strata_runtime_set_resource_adapter(runtime, &adapter).status == STRATA_STATUS_OK,

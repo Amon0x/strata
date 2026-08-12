@@ -55,11 +55,6 @@ class TextEngine;
 
 namespace strata::ui {
 
-/** Fully allocated releases for raster images already published to a host. */
-struct HostRenderResourceInvalidationPlan final {
-    std::vector<font::AtlasOperation> releases;
-};
-
 /**
  * Packet v10: retained geometry epochs, incremental geometry patches, rate-limited effects,
  * explicit current/surface backdrop sources, ordered application effect programs, and rounded
@@ -90,10 +85,6 @@ class HostRenderPacketCache final {
            double logical_height);
     /** Emits a compact packet referencing the settled geometry epoch. */
     [[nodiscard]] bool reuse(std::uint64_t frame_index);
-    /** Plans release records for raster images already published by this cache. */
-    [[nodiscard]] HostRenderResourceInvalidationPlan plan_resource_invalidation() const;
-    /** Clears retained geometry and queues a prepared release plan for the next frame packet. */
-    void commit_resource_invalidation(HostRenderResourceInvalidationPlan plan) noexcept;
     /**
      * Compatibility terminal entry point. It releases the surface-owned glyph atlas and every
      * static texture descriptor already retained by this cache. Call prepare_resource_release()
@@ -124,7 +115,6 @@ class HostRenderPacketCache final {
     HostRenderPacketTelemetry telemetry_;
     std::size_t planned_draws_ = 0U;
     std::size_t skipped_draws_ = 0U;
-    std::vector<font::AtlasOperation> pending_static_releases_;
     // A failed packet encode must be retried even if the retained UI becomes settled meanwhile.
     bool frame_encoding_incomplete_ = false;
     bool terminal_release_prepared_ = false;

@@ -238,15 +238,15 @@ motion, layout, semantics, and packet planning.
 Adding a reusable custom composition is not an extension reason—write a `.strata` component. Adding
 a game callback is not an extension reason—register a typed host action.
 
-## Diagnostics and live editing
+## Diagnostics and source reactivation
 
 Diagnostics carry stable codes, exact source ranges, component paths, expected types/names, and
 occurrence counts. The full catalog is [generated/diagnostics.md](generated/diagnostics.md).
 
-Activation is last-good. Rejected source never replaces the active unit. A host resource reload can
-read new source and call activation on the same runtime/Surface, preserving compatible stable-key
-state. Fonts and PNG/SVG images are also candidate-loaded before adoption; rejected resources retain the
-previous usable set.
+Activation is last-good. Rejected source never replaces the active unit. A host may explicitly
+reactivate compatible `.strata` source on the same runtime and preserve stable-key state. Fonts,
+images, extension packages, schemas, generated bindings, and native handlers remain build/restart
+boundaries rather than live-editable inputs.
 
 Regenerate catalog-derived authoring files explicitly:
 

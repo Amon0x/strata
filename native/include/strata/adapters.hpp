@@ -14,13 +14,13 @@ namespace strata {
 
 /** Resource provider retained by Runtime. A missing id returns std::nullopt. */
 struct ResourceAdapter final {
-    std::uint64_t generation = 1U;
     std::function<std::optional<std::vector<std::uint8_t>>(std::string_view)> load{};
 };
 
 struct DurableStoreAdapter final {
     std::function<std::optional<std::vector<std::uint8_t>>(std::string_view application_id)> load{};
-    std::function<void(std::string_view application_id, std::span<const std::uint8_t> bytes)> write{};
+    std::function<void(std::string_view application_id, std::span<const std::uint8_t> bytes)>
+        write{};
 };
 
 struct AsyncRequest final {

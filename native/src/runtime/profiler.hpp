@@ -1,8 +1,8 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -41,17 +41,6 @@ enum class ProfilerCounter : std::size_t {
     pending_texture_creations,
     deferred_gpu_resources,
     deferred_gpu_resource_deletions,
-    reload_duration_nanos,
-    // Canonical zeros until the host GPU queue retains a causal hot-reload tag; ordinary
-    // create/upload/queued/deferred counters below are still populated with genuine host data.
-    hot_reload_gpu_upload_jobs,
-    hot_reload_gpu_upload_bytes,
-    hot_reload_gpu_upload_deferred_jobs,
-    hot_reload_gpu_upload_deferred_bytes,
-    hot_reload_gpu_upload_over_budget_jobs,
-    hot_reload_gpu_upload_over_budget_bytes,
-    hot_reload_gpu_upload_rejected_jobs,
-    hot_reload_gpu_upload_rejected_bytes,
     text_layout_requests,
     text_layout_cache_hits,
     text_layout_cache_misses,
@@ -94,7 +83,6 @@ enum class ProfilerCounter : std::size_t {
     packet_bytes,
     host_submissions,
     host_submit_nanos,
-    resource_reloads,
     diagnostics,
     input_pointer_geometry_rebuilds,
     input_fast_path_frames,
@@ -193,11 +181,11 @@ struct ProfilerSnapshot final {
  * safe to query from host threads. All retained collections are bounded by ProfilerConfig.
  */
 class Profiler final {
-public:
+  public:
     using Clock = std::function<std::int64_t()>;
 
     class Section final {
-    public:
+      public:
         Section() noexcept = default;
         Section(const Section&) = delete;
         Section& operator=(const Section&) = delete;
@@ -208,14 +196,10 @@ public:
         void close() noexcept;
         [[nodiscard]] bool active() const noexcept;
 
-    private:
+      private:
         friend class Profiler;
-        Section(
-            Profiler* profiler,
-            std::uint64_t generation,
-            std::uint64_t token,
-            std::string_view name
-        ) noexcept;
+        Section(Profiler* profiler, std::uint64_t generation, std::uint64_t token,
+                std::string_view name) noexcept;
 
         Profiler* profiler_ = nullptr;
         std::uint64_t generation_ = 0U;
@@ -225,7 +209,7 @@ public:
     };
 
     class Frame final {
-    public:
+      public:
         Frame() noexcept = default;
         Frame(const Frame&) = delete;
         Frame& operator=(const Frame&) = delete;
@@ -236,7 +220,7 @@ public:
         void close() noexcept;
         [[nodiscard]] bool active() const noexcept;
 
-    private:
+      private:
         friend class Profiler;
         Frame(Profiler* profiler, std::uint64_t generation) noexcept;
 
@@ -244,12 +228,8 @@ public:
         std::uint64_t generation_ = 0U;
     };
 
-    explicit Profiler(
-        ProfilerScope scope,
-        std::string scope_id,
-        ProfilerConfig config = {},
-        Clock clock = {}
-    );
+    explicit Profiler(ProfilerScope scope, std::string scope_id, ProfilerConfig config = {},
+                      Clock clock = {});
 
     [[nodiscard]] Frame frame(std::uint64_t frame_index);
     [[nodiscard]] Section section(std::string_view name);
@@ -257,17 +237,16 @@ public:
     [[nodiscard]] bool capture_enabled() const noexcept;
     void increment(ProfilerCounter counter, std::uint64_t amount = 1U);
     void record(ProfilerCounter counter, std::uint64_t value);
-    void record_counters(
-        std::initializer_list<std::pair<ProfilerCounter, std::uint64_t>> values
-    );
+    void record_counters(std::initializer_list<std::pair<ProfilerCounter, std::uint64_t>> values);
     /** Atomically attaches host-GPU telemetry to the latest completed surface frame. */
     void record_host_frame(const HostFrameProfilerTelemetry& telemetry);
-    /** Records a host-owned phase against the latest completed frame under the canonical frame root. */
+    /** Records a host-owned phase against the latest completed frame under the canonical frame
+     * root. */
     void record_external_timing(std::string_view name, std::int64_t duration_nanos);
     [[nodiscard]] ProfilerSnapshot snapshot() const;
     void reset();
 
-private:
+  private:
     struct RollingWindow final {
         explicit RollingWindow(std::size_t capacity);
         /** Returns true when the bounded window evicts its oldest retained sample. */
@@ -309,17 +288,12 @@ private:
     void begin_frame(std::uint64_t frame_index);
     void end_frame(std::uint64_t generation);
     void close_section(std::uint64_t generation, std::uint64_t token);
-    [[nodiscard]] std::optional<std::uint64_t> find_or_create_section_locked(
-        std::string_view name,
-        std::optional<std::uint64_t> parent_id
-    );
+    [[nodiscard]] std::optional<std::uint64_t>
+    find_or_create_section_locked(std::string_view name, std::optional<std::uint64_t> parent_id);
     void close_top_locked(std::int64_t ended_at_nanos);
     void record_timing_locked(std::uint64_t section_id, std::int64_t duration_nanos);
-    void record_spike_locked(
-        const SectionRecord& section,
-        std::int64_t duration_nanos,
-        std::int64_t baseline_nanos
-    );
+    void record_spike_locked(const SectionRecord& section, std::int64_t duration_nanos,
+                             std::int64_t baseline_nanos);
     [[nodiscard]] std::vector<std::uint64_t> stack_locked(std::uint64_t section_id) const;
     [[nodiscard]] std::vector<ProfilerCounterSnapshot> counters_locked(bool nonzero_only) const;
     [[nodiscard]] ProfilerSnapshot snapshot_locked() const;

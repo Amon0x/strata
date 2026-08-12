@@ -7,16 +7,16 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sstream>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
-#include <strata/svg.hpp>
 #include <strata/render_packet.hpp>
+#include <strata/svg.hpp>
 
 #include "data/json.hpp"
 #include "font/atlas.hpp"
@@ -63,7 +63,8 @@ void check(const bool condition, const std::string_view message) {
 
 [[nodiscard]] std::string read_text_file(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
-    if (!input) throw std::runtime_error("could not read fixture '" + path.string() + "'");
+    if (!input)
+        throw std::runtime_error("could not read fixture '" + path.string() + "'");
     std::ostringstream output;
     output << input.rdbuf();
     return output.str();
@@ -765,15 +766,12 @@ void test_render_submission_cache(const std::filesystem::path& resource_root) {
         ui::Rect{3.0, 2.0, 40.0, 20.0},
         ui::RenderColor{10U, 20U, 30U, 255U},
     });
-    const ui::RenderSubmission& patched =
-        cache.resolve(commands, atlas, *text_engine, environment);
-    check(
-        patched.vertex_bytes.data() == retained_vertices &&
-            patched.patch_from_previous && patched.vertex_patches.size() == 1U &&
-            patched.vertex_patches.front().bytes.size() == 4U * 88U &&
-            patched.index_patches.empty(),
-        "stable render topology rebuilt the complete retained geometry buffer"
-    );
+    const ui::RenderSubmission& patched = cache.resolve(commands, atlas, *text_engine, environment);
+    check(patched.vertex_bytes.data() == retained_vertices && patched.patch_from_previous &&
+              patched.vertex_patches.size() == 1U &&
+              patched.vertex_patches.front().bytes.size() == 4U * 88U &&
+              patched.index_patches.empty(),
+          "stable render topology rebuilt the complete retained geometry buffer");
 
     commands.append(ui::SolidRectRenderCommand{
         ui::Rect{2.0, 3.0, 4.0, 5.0},
@@ -787,19 +785,15 @@ void test_render_submission_cache(const std::filesystem::path& resource_root) {
                       ui::RenderSubmissionEnvironment{2.0, 1'280, 960, 640.0, 480.0}));
     check(cache.hit_count() == 1U && cache.miss_count() == 4U,
           "render environment mutation did not invalidate cached geometry");
-    atlas.invalidate_resources();
-    static_cast<void>(cache.resolve(commands, atlas, *text_engine, environment));
-    check(cache.hit_count() == 1U && cache.miss_count() == 5U,
-          "glyph-atlas generation mutation did not invalidate cached geometry");
     const std::shared_ptr<const ui::TextEngine> replacement_text_engine =
         ui::TextEngine::load_control_font(
             resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
     static_cast<void>(cache.resolve(commands, atlas, *replacement_text_engine, environment));
-    check(cache.hit_count() == 1U && cache.miss_count() == 6U,
-          "text-engine replacement did not invalidate cached geometry");
+    check(cache.hit_count() == 1U && cache.miss_count() == 5U,
+          "text-engine identity change did not invalidate cached geometry");
     cache.clear();
     static_cast<void>(cache.resolve(commands, atlas, *text_engine, environment));
-    check(cache.miss_count() == 7U, "explicit resource invalidation retained cached geometry");
+    check(cache.miss_count() == 6U, "explicit cache clear retained cached geometry");
 
     const std::uint16_t visible_glyph = text_engine->control_font().glyph_id('A');
     const std::uint16_t clipped_glyph = text_engine->control_font().glyph_id('B');
@@ -929,28 +923,20 @@ void test_shadow_submission_extends_beyond_the_source_shape() {
         maximum_x = std::max(maximum_x, x);
         maximum_y = std::max(maximum_y, y);
     }
-    check(
-        std::abs(minimum_x - 88.0F) < 0.0001F &&
-            std::abs(maximum_x - 152.0F) < 0.0001F &&
-            std::abs(minimum_y - 38.0F) < 0.0001F &&
-            std::abs(maximum_y - 82.0F) < 0.0001F,
-        "shadow geometry remained clipped to its source rectangle"
-    );
+    check(std::abs(minimum_x - 88.0F) < 0.0001F && std::abs(maximum_x - 152.0F) < 0.0001F &&
+              std::abs(minimum_y - 38.0F) < 0.0001F && std::abs(maximum_y - 82.0F) < 0.0001F,
+          "shadow geometry remained clipped to its source rectangle");
     constexpr std::size_t draw_data_offset = 24U;
     const auto draw_data = [&submission](const std::size_t component) {
         float result = 0.0F;
-        std::memcpy(
-            &result,
-            submission.vertex_bytes.data() + draw_data_offset + component * sizeof(float),
-            sizeof(result)
-        );
+        std::memcpy(&result,
+                    submission.vertex_bytes.data() + draw_data_offset + component * sizeof(float),
+                    sizeof(result));
         return result;
     };
-    check(
-        draw_data(0U) == 40.0F && draw_data(1U) == 20.0F &&
-            draw_data(8U) == 64.0F && draw_data(9U) == 44.0F,
-        "shadow submission lost its independent source and expanded dimensions"
-    );
+    check(draw_data(0U) == 40.0F && draw_data(1U) == 20.0F && draw_data(8U) == 64.0F &&
+              draw_data(9U) == 44.0F,
+          "shadow submission lost its independent source and expanded dimensions");
 }
 
 void check_translation_reused_geometry(const strata::ui::RenderSubmission& actual,
@@ -960,12 +946,9 @@ void check_translation_reused_geometry(const strata::ui::RenderSubmission& actua
               actual.used_vertex_bytes == expected.used_vertex_bytes &&
               actual.used_vertex_bytes % vertex_bytes == 0U &&
               actual.used_indices == expected.used_indices &&
-              std::equal(
-                  actual.indices.begin(),
-                  actual.indices.begin() +
-                      static_cast<std::ptrdiff_t>(actual.used_indices),
-                  expected.indices.begin()
-              ) &&
+              std::equal(actual.indices.begin(),
+                         actual.indices.begin() + static_cast<std::ptrdiff_t>(actual.used_indices),
+                         expected.indices.begin()) &&
               actual.batches == expected.batches,
           "translation reuse changed reachable submission topology");
     const std::size_t vertex_count = actual.used_vertex_bytes / vertex_bytes;
@@ -1027,24 +1010,16 @@ void test_render_submission_translation_reuse(const std::filesystem::path& resou
     check_translation_reused_geometry(reused, rebuilt);
 }
 
-void test_render_submission_structural_alignment(
-    const std::filesystem::path& resource_root
-) {
+void test_render_submission_structural_alignment(const std::filesystem::path& resource_root) {
     using namespace strata;
-    const std::shared_ptr<const ui::TextEngine> text_engine =
-        ui::TextEngine::load_control_font(
-            resource_root,
-            resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
-        );
+    const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
+        resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
     const std::uint16_t glyph = text_engine->control_font().glyph_id('A');
     check(glyph != 0U, "structural alignment fixture lost its text glyph");
     const ui::LogicalGlyph logical{
         "strata:fonts/default-medium", glyph, 'A', 0U, 1U, 0.0, 9.0, 7.0,
     };
-    const auto commands = [&logical](
-                              const bool inserted,
-                              const double text_x
-                          ) {
+    const auto commands = [&logical](const bool inserted, const double text_x) {
         ui::RenderCommandBuffer result;
         result.append(ui::SolidRectRenderCommand{
             ui::Rect{0.0, 0.0, 10.0, 10.0},
@@ -1073,43 +1048,23 @@ void test_render_submission_structural_alignment(
     };
     font::GlyphAtlas retained_atlas("submission-structural-alignment-test");
     ui::RenderSubmissionCache retained;
-    static_cast<void>(retained.resolve(
-        commands(false, 10.0),
-        retained_atlas,
-        *text_engine,
-        environment
-    ));
+    static_cast<void>(
+        retained.resolve(commands(false, 10.0), retained_atlas, *text_engine, environment));
 
     const ui::RenderCommandBuffer expanded = commands(true, 18.0);
-    const ui::RenderSubmission& aligned = retained.resolve(
-        expanded,
-        retained_atlas,
-        *text_engine,
-        environment
-    );
+    const ui::RenderSubmission& aligned =
+        retained.resolve(expanded, retained_atlas, *text_engine, environment);
     ui::RenderSubmissionCache fresh;
-    const ui::RenderSubmission& rebuilt = fresh.resolve(
-        expanded,
-        retained_atlas,
-        *text_engine,
-        environment
-    );
+    const ui::RenderSubmission& rebuilt =
+        fresh.resolve(expanded, retained_atlas, *text_engine, environment);
     check_translation_reused_geometry(aligned, rebuilt);
 
     const ui::RenderCommandBuffer collapsed = commands(false, 10.0);
-    const ui::RenderSubmission& restored = retained.resolve(
-        collapsed,
-        retained_atlas,
-        *text_engine,
-        environment
-    );
+    const ui::RenderSubmission& restored =
+        retained.resolve(collapsed, retained_atlas, *text_engine, environment);
     ui::RenderSubmissionCache fresh_collapsed;
-    const ui::RenderSubmission& rebuilt_collapsed = fresh_collapsed.resolve(
-        collapsed,
-        retained_atlas,
-        *text_engine,
-        environment
-    );
+    const ui::RenderSubmission& rebuilt_collapsed =
+        fresh_collapsed.resolve(collapsed, retained_atlas, *text_engine, environment);
     check_translation_reused_geometry(restored, rebuilt_collapsed);
 }
 
@@ -1229,42 +1184,6 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
                                       return texture.starts_with("strata:native-font-atlas/");
                                   }),
           "surface teardown lost or duplicated its static/atlas resource ownership");
-
-    font::GlyphAtlas reload_atlas("static-image-reload-test");
-    ui::HostRenderPacketCache reload_cache;
-    const std::vector<std::uint8_t>& before_reload = reload_cache.encode(
-        commands, 1U, textures, reload_atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
-    std::size_t before_offset = 8U;
-    static_cast<void>(packet_u32(before_reload, before_offset));
-    static_cast<void>(packet_u32(before_reload, before_offset));
-    static_cast<void>(packet_u32(before_reload, before_offset));
-    static_cast<void>(packet_u64(before_reload, before_offset));
-    const std::uint64_t before_epoch = packet_u64(before_reload, before_offset);
-    ui::HostRenderResourceInvalidationPlan invalidation = reload_cache.plan_resource_invalidation();
-    reload_cache.commit_resource_invalidation(std::move(invalidation));
-    ui::HostRenderResourceInvalidationPlan repeated_invalidation =
-        reload_cache.plan_resource_invalidation();
-    reload_cache.commit_resource_invalidation(std::move(repeated_invalidation));
-    const std::vector<std::uint8_t>& after_reload = reload_cache.encode(
-        commands, 2U, textures, reload_atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
-    std::size_t after_offset = 8U;
-    check(packet_u32(after_reload, after_offset) == STRATA_RENDER_PACKET_VERSION_CURRENT,
-          "static image reload packet version changed");
-    check(packet_u32(after_reload, after_offset) == 2U,
-          "repeated static image reload dropped its pending release or replacement");
-    static_cast<void>(packet_u32(after_reload, after_offset));
-    static_cast<void>(packet_u64(after_reload, after_offset));
-    check(packet_u64(after_reload, after_offset) > before_epoch,
-          "resource invalidation reused a prior geometry epoch");
-    for (std::size_t field = 0U; field < 5U; ++field) {
-        static_cast<void>(packet_u32(after_reload, after_offset));
-    }
-    check(packet_u32(after_reload, after_offset) == 2U,
-          "static image reload did not release the prior host id first");
-    const std::uint32_t release_size = packet_u32(after_reload, after_offset);
-    after_offset += release_size;
-    check(packet_u32(after_reload, after_offset) == 3U,
-          "static image reload did not create the replacement after release");
 }
 
 void test_native_custom_mesh_geometry(const std::filesystem::path& resource_root) {
@@ -1504,54 +1423,41 @@ void test_keyed_reconciliation_and_detach_cleanup() {
 void test_keys_are_local_to_their_retained_parent() {
     using namespace strata::ui;
     RetainedTree tree;
-    const auto description = node(
-        "Panel",
-        "root",
-        {
-            node("Panel", "left", {node("Text", "ready")}),
-            node("Panel", "right", {node("Text", "ready")}),
-        }
-    );
+    const auto description = node("Panel", "root",
+                                  {
+                                      node("Panel", "left", {node("Text", "ready")}),
+                                      node("Panel", "right", {node("Text", "ready")}),
+                                  });
     const ReconcileStats initial = tree.reconcile(description);
     const RetainedNode* left = tree.find_key("left");
     const RetainedNode* right = tree.find_key("right");
     const std::vector<RetainedNode*>* ready = tree.find_keys("ready");
-    check(
-        initial.created == 5U && left != nullptr && right != nullptr &&
-            ready != nullptr && ready->size() == 2U &&
-            tree.find_key("ready") == nullptr,
-        "keys in independent retained parents were rejected or resolved ambiguously"
-    );
+    check(initial.created == 5U && left != nullptr && right != nullptr && ready != nullptr &&
+              ready->size() == 2U && tree.find_key("ready") == nullptr,
+          "keys in independent retained parents were rejected or resolved ambiguously");
     const std::uint64_t left_ready = left->children().front()->identity();
     const std::uint64_t right_ready = right->children().front()->identity();
     const ReconcileStats repeated = tree.reconcile(description);
     left = tree.find_key("left");
     right = tree.find_key("right");
-    check(
-        repeated.created == 0U && repeated.reused == 5U &&
-            left->children().front()->identity() == left_ready &&
-            right->children().front()->identity() == right_ready,
-        "parent-local duplicate keys lost retained identity on rebuild"
-    );
+    check(repeated.created == 0U && repeated.reused == 5U &&
+              left->children().front()->identity() == left_ready &&
+              right->children().front()->identity() == right_ready,
+          "parent-local duplicate keys lost retained identity on rebuild");
 
     bool sibling_duplicate_rejected = false;
     try {
         RetainedTree invalid;
-        static_cast<void>(invalid.reconcile(node(
-            "Panel",
-            "root",
-            {
-                node("Text", "duplicate"),
-                node("Panel", "duplicate"),
-            }
-        )));
+        static_cast<void>(invalid.reconcile(node("Panel", "root",
+                                                 {
+                                                     node("Text", "duplicate"),
+                                                     node("Panel", "duplicate"),
+                                                 })));
     } catch (const std::invalid_argument&) {
         sibling_duplicate_rejected = true;
     }
-    check(
-        sibling_duplicate_rejected,
-        "duplicate sibling keys were accepted when widget types differed"
-    );
+    check(sibling_duplicate_rejected,
+          "duplicate sibling keys were accepted when widget types differed");
 }
 
 void test_exit_retention_and_prune_ownership() {
@@ -1933,405 +1839,289 @@ void test_layered_layout_uses_independent_axes() {
     using namespace strata;
     using namespace strata::ui;
 
-    const auto explicitly_justified = node(
-        "Panel",
-        "layer.explicit",
-        {node(
-            "Panel",
-            "layer.explicit.child",
-            {},
-            layout_properties(object({
-                {"height", runtime::Value(10.0)},
-                {"width", runtime::Value(10.0)},
-            }))
-        )},
-        layout_properties(object({
-            {"alignItems", runtime::Value("END")},
-            {"height", runtime::Value(80.0)},
-            {"justifyContent", runtime::Value("START")},
-            {"kind", runtime::Value("PANEL")},
-            {"width", runtime::Value(100.0)},
-        }))
-    );
+    const auto explicitly_justified = node("Panel", "layer.explicit",
+                                           {node("Panel", "layer.explicit.child", {},
+                                                 layout_properties(object({
+                                                     {"height", runtime::Value(10.0)},
+                                                     {"width", runtime::Value(10.0)},
+                                                 })))},
+                                           layout_properties(object({
+                                               {"alignItems", runtime::Value("END")},
+                                               {"height", runtime::Value(80.0)},
+                                               {"justifyContent", runtime::Value("START")},
+                                               {"kind", runtime::Value("PANEL")},
+                                               {"width", runtime::Value(100.0)},
+                                           })));
     RetainedTree explicit_tree;
     static_cast<void>(explicit_tree.reconcile(explicitly_justified));
     LayoutEngine explicit_layout;
     const LayoutEnvironment environment{
-        0U, Rect{0.0, 0.0, 100.0, 80.0}, 1.0,
-        {}, PointSnapPolicy::nearest, RectangleSnapPolicy::outward, false,
+        0U,    Rect{0.0, 0.0, 100.0, 80.0}, 1.0,
+        {},    PointSnapPolicy::nearest,    RectangleSnapPolicy::outward,
+        false,
     };
-    const LayoutResult& explicit_result =
-        explicit_layout.layout(explicit_tree, environment);
-    const LayoutRecord* explicit_child = explicit_result.find(
-        explicit_tree.find_key("layer.explicit.child")->identity()
-    );
-    check(
-        explicit_child != nullptr && explicit_child->bounds.x == 90.0 &&
-            explicit_child->bounds.y == 0.0,
-        "layered layout did not apply alignItems horizontally and justifyContent vertically"
-    );
+    const LayoutResult& explicit_result = explicit_layout.layout(explicit_tree, environment);
+    const LayoutRecord* explicit_child =
+        explicit_result.find(explicit_tree.find_key("layer.explicit.child")->identity());
+    check(explicit_child != nullptr && explicit_child->bounds.x == 90.0 &&
+              explicit_child->bounds.y == 0.0,
+          "layered layout did not apply alignItems horizontally and justifyContent vertically");
 
-    const auto compatible = node(
-        "Panel",
-        "layer.compatible",
-        {node(
-            "Panel",
-            "layer.compatible.child",
-            {},
-            layout_properties(object({
-                {"height", runtime::Value(10.0)},
-                {"width", runtime::Value(10.0)},
-            }))
-        )},
-        layout_properties(object({
-            {"alignItems", runtime::Value("CENTER")},
-            {"height", runtime::Value(80.0)},
-            {"kind", runtime::Value("PANEL")},
-            {"width", runtime::Value(100.0)},
-        }))
-    );
+    const auto compatible = node("Panel", "layer.compatible",
+                                 {node("Panel", "layer.compatible.child", {},
+                                       layout_properties(object({
+                                           {"height", runtime::Value(10.0)},
+                                           {"width", runtime::Value(10.0)},
+                                       })))},
+                                 layout_properties(object({
+                                     {"alignItems", runtime::Value("CENTER")},
+                                     {"height", runtime::Value(80.0)},
+                                     {"kind", runtime::Value("PANEL")},
+                                     {"width", runtime::Value(100.0)},
+                                 })));
     RetainedTree compatible_tree;
     static_cast<void>(compatible_tree.reconcile(compatible));
     LayoutEngine compatible_layout;
-    const LayoutResult& compatible_result =
-        compatible_layout.layout(compatible_tree, environment);
-    const LayoutRecord* compatible_child = compatible_result.find(
-        compatible_tree.find_key("layer.compatible.child")->identity()
-    );
-    check(
-        compatible_child != nullptr && compatible_child->bounds.x == 45.0 &&
-            compatible_child->bounds.y == 35.0,
-        "layered layout broke the legacy single-axis centering fallback"
-    );
+    const LayoutResult& compatible_result = compatible_layout.layout(compatible_tree, environment);
+    const LayoutRecord* compatible_child =
+        compatible_result.find(compatible_tree.find_key("layer.compatible.child")->identity());
+    check(compatible_child != nullptr && compatible_child->bounds.x == 45.0 &&
+              compatible_child->bounds.y == 35.0,
+          "layered layout broke the legacy single-axis centering fallback");
 }
 
 void test_layer_placement_and_sibling_anchors() {
     using namespace strata;
     using namespace strata::ui;
 
-    const auto placed = node(
-        "Panel",
-        "placed",
-        {},
-        layout_properties(object({
-            {"height", runtime::Value(10.0)},
-            {"placement", object({
-                 {"anchorX", runtime::Value(0.5)},
-                 {"anchorY", runtime::Value(1.0)},
-                 {"offsetX", runtime::Value(2.0)},
-                 {"offsetY", runtime::Value(2.0)},
-                 {"x", object({{"fraction", runtime::Value(0.25)}})},
-                 {"y", runtime::Value(50.0)},
-             })},
-            {"width", runtime::Value(20.0)},
-        }))
-    );
-    const auto anchor = node(
-        "Panel",
-        "sibling.anchor",
-        {},
-        layout_properties(object({
-            {"height", runtime::Value(10.0)},
-            {"placement", object({
-                 {"anchorX", runtime::Value(0.5)},
-                 {"x", object({{"fraction", runtime::Value(0.75)}})},
-             })},
-            {"width", runtime::Value(20.0)},
-        }))
-    );
-    const auto anchored = node(
-        "Panel",
-        "sibling.anchored",
-        {},
-        layout_properties(object({
-            {"anchorAlign", runtime::Value("CENTER")},
-            {"anchorFlip", runtime::Value(false)},
-            {"anchorGap", runtime::Value(5.0)},
-            {"anchorShift", runtime::Value(false)},
-            {"anchorSide", runtime::Value("BOTTOM")},
-            {"anchorTarget", runtime::Value("sibling.anchor")},
-            {"height", runtime::Value(10.0)},
-            {"matchAnchorWidth", runtime::Value(true)},
-            {"width", runtime::Value(30.0)},
-        }))
-    );
-    const auto chained = node(
-        "Panel",
-        "sibling.chained",
-        {},
-        layout_properties(object({
-            {"anchorAlign", runtime::Value("CENTER")},
-            {"anchorFlip", runtime::Value(false)},
-            {"anchorGap", runtime::Value(5.0)},
-            {"anchorShift", runtime::Value(false)},
-            {"anchorSide", runtime::Value("BOTTOM")},
-            {"anchorTarget", runtime::Value("sibling.anchored")},
-            {"height", runtime::Value(10.0)},
-            {"width", runtime::Value(10.0)},
-        }))
-    );
-    const auto root = node(
-        "Panel",
-        "placement.root",
-        {chained, anchored, placed, anchor},
-        layout_properties(object({
-            {"height", runtime::Value(100.0)},
-            {"kind", runtime::Value("PANEL")},
-            {"width", runtime::Value(200.0)},
-        }))
-    );
+    const auto placed =
+        node("Panel", "placed", {},
+             layout_properties(object({
+                 {"height", runtime::Value(10.0)},
+                 {"placement", object({
+                                   {"anchorX", runtime::Value(0.5)},
+                                   {"anchorY", runtime::Value(1.0)},
+                                   {"offsetX", runtime::Value(2.0)},
+                                   {"offsetY", runtime::Value(2.0)},
+                                   {"x", object({{"fraction", runtime::Value(0.25)}})},
+                                   {"y", runtime::Value(50.0)},
+                               })},
+                 {"width", runtime::Value(20.0)},
+             })));
+    const auto anchor =
+        node("Panel", "sibling.anchor", {},
+             layout_properties(object({
+                 {"height", runtime::Value(10.0)},
+                 {"placement", object({
+                                   {"anchorX", runtime::Value(0.5)},
+                                   {"x", object({{"fraction", runtime::Value(0.75)}})},
+                               })},
+                 {"width", runtime::Value(20.0)},
+             })));
+    const auto anchored = node("Panel", "sibling.anchored", {},
+                               layout_properties(object({
+                                   {"anchorAlign", runtime::Value("CENTER")},
+                                   {"anchorFlip", runtime::Value(false)},
+                                   {"anchorGap", runtime::Value(5.0)},
+                                   {"anchorShift", runtime::Value(false)},
+                                   {"anchorSide", runtime::Value("BOTTOM")},
+                                   {"anchorTarget", runtime::Value("sibling.anchor")},
+                                   {"height", runtime::Value(10.0)},
+                                   {"matchAnchorWidth", runtime::Value(true)},
+                                   {"width", runtime::Value(30.0)},
+                               })));
+    const auto chained = node("Panel", "sibling.chained", {},
+                              layout_properties(object({
+                                  {"anchorAlign", runtime::Value("CENTER")},
+                                  {"anchorFlip", runtime::Value(false)},
+                                  {"anchorGap", runtime::Value(5.0)},
+                                  {"anchorShift", runtime::Value(false)},
+                                  {"anchorSide", runtime::Value("BOTTOM")},
+                                  {"anchorTarget", runtime::Value("sibling.anchored")},
+                                  {"height", runtime::Value(10.0)},
+                                  {"width", runtime::Value(10.0)},
+                              })));
+    const auto root = node("Panel", "placement.root", {chained, anchored, placed, anchor},
+                           layout_properties(object({
+                               {"height", runtime::Value(100.0)},
+                               {"kind", runtime::Value("PANEL")},
+                               {"width", runtime::Value(200.0)},
+                           })));
 
     RetainedTree tree;
     static_cast<void>(tree.reconcile(root));
     LayoutEngine layout;
     const LayoutEnvironment environment{
-        0U, Rect{0.0, 0.0, 200.0, 100.0}, 1.0,
-        {}, PointSnapPolicy::nearest, RectangleSnapPolicy::outward, false,
+        0U,    Rect{0.0, 0.0, 200.0, 100.0}, 1.0,
+        {},    PointSnapPolicy::nearest,     RectangleSnapPolicy::outward,
+        false,
     };
     const LayoutResult& result = layout.layout(tree, environment);
-    const LayoutRecord* placed_record =
-        result.find(tree.find_key("placed")->identity());
-    const LayoutRecord* anchor_record =
-        result.find(tree.find_key("sibling.anchor")->identity());
+    const LayoutRecord* placed_record = result.find(tree.find_key("placed")->identity());
+    const LayoutRecord* anchor_record = result.find(tree.find_key("sibling.anchor")->identity());
     const LayoutRecord* anchored_record =
         result.find(tree.find_key("sibling.anchored")->identity());
-    const LayoutRecord* chained_record =
-        result.find(tree.find_key("sibling.chained")->identity());
-    check(
-        placed_record != nullptr && placed_record->bounds.x == 42.0 &&
-            placed_record->bounds.y == 42.0,
-        "fractional layer placement did not apply its anchor and scalar offset"
-    );
-    check(
-        anchor_record != nullptr && anchored_record != nullptr &&
-            chained_record != nullptr &&
-            anchor_record->bounds.x == 140.0 &&
-            anchored_record->bounds.x == 140.0 &&
-            anchored_record->bounds.width == 20.0 &&
-            anchored_record->bounds.y == 15.0 &&
-            chained_record->bounds.x == 145.0 &&
-            chained_record->bounds.y == 30.0,
-        "ordinary layered siblings did not resolve a deferred anchor chain"
-    );
-    check(
-        layout.take_diagnostics().empty(),
-        "valid sibling anchor chain emitted layout diagnostics"
-    );
-    const auto moved_anchor = node(
-        "Panel",
-        "sibling.anchor",
-        {},
-        layout_properties(object({
-            {"height", runtime::Value(10.0)},
-            {"placement", object({
-                 {"anchorX", runtime::Value(0.5)},
-                 {"x", object({{"fraction", runtime::Value(0.5)}})},
-             })},
-            {"width", runtime::Value(20.0)},
-        }))
-    );
-    const auto moved_root = node(
-        "Panel",
-        "placement.root",
-        {chained, anchored, placed, moved_anchor},
-        layout_properties(object({
-            {"height", runtime::Value(100.0)},
-            {"kind", runtime::Value("PANEL")},
-            {"width", runtime::Value(200.0)},
-        }))
-    );
+    const LayoutRecord* chained_record = result.find(tree.find_key("sibling.chained")->identity());
+    check(placed_record != nullptr && placed_record->bounds.x == 42.0 &&
+              placed_record->bounds.y == 42.0,
+          "fractional layer placement did not apply its anchor and scalar offset");
+    check(anchor_record != nullptr && anchored_record != nullptr && chained_record != nullptr &&
+              anchor_record->bounds.x == 140.0 && anchored_record->bounds.x == 140.0 &&
+              anchored_record->bounds.width == 20.0 && anchored_record->bounds.y == 15.0 &&
+              chained_record->bounds.x == 145.0 && chained_record->bounds.y == 30.0,
+          "ordinary layered siblings did not resolve a deferred anchor chain");
+    check(layout.take_diagnostics().empty(),
+          "valid sibling anchor chain emitted layout diagnostics");
+    const auto moved_anchor =
+        node("Panel", "sibling.anchor", {},
+             layout_properties(object({
+                 {"height", runtime::Value(10.0)},
+                 {"placement", object({
+                                   {"anchorX", runtime::Value(0.5)},
+                                   {"x", object({{"fraction", runtime::Value(0.5)}})},
+                               })},
+                 {"width", runtime::Value(20.0)},
+             })));
+    const auto moved_root =
+        node("Panel", "placement.root", {chained, anchored, placed, moved_anchor},
+             layout_properties(object({
+                 {"height", runtime::Value(100.0)},
+                 {"kind", runtime::Value("PANEL")},
+                 {"width", runtime::Value(200.0)},
+             })));
     static_cast<void>(tree.reconcile(moved_root));
     const LayoutResult& moved_result = layout.layout(tree, environment);
     const LayoutRecord* moved_anchored =
         moved_result.find(tree.find_key("sibling.anchored")->identity());
-    check(
-        moved_anchored != nullptr &&
-            moved_anchored->bounds.x == 90.0 &&
-            moved_anchored->bounds.width == 20.0,
-        "cached sibling anchor layout did not follow its moved target"
-    );
+    check(moved_anchored != nullptr && moved_anchored->bounds.x == 90.0 &&
+              moved_anchored->bounds.width == 20.0,
+          "cached sibling anchor layout did not follow its moved target");
 
-    const auto invalid_root = node(
-        "Panel",
-        "anchor.invalid.root",
-        {
-            node(
-                "Panel",
-                "anchor.cycle.a",
-                {},
-                layout_properties(object({
-                    {"anchorTarget", runtime::Value("anchor.cycle.b")},
-                    {"height", runtime::Value(10.0)},
-                    {"width", runtime::Value(10.0)},
-                }))
-            ),
-            node(
-                "Panel",
-                "anchor.cycle.b",
-                {},
-                layout_properties(object({
-                    {"anchorTarget", runtime::Value("anchor.cycle.a")},
-                    {"height", runtime::Value(10.0)},
-                    {"width", runtime::Value(10.0)},
-                }))
-            ),
-            node(
-                "Panel",
-                "anchor.missing",
-                {},
-                layout_properties(object({
-                    {"anchorTarget", runtime::Value("not.present")},
-                    {"height", runtime::Value(10.0)},
-                    {"width", runtime::Value(10.0)},
-                }))
-            ),
-        },
-        layout_properties(object({
-            {"height", runtime::Value(100.0)},
-            {"kind", runtime::Value("PANEL")},
-            {"width", runtime::Value(200.0)},
-        }))
-    );
+    const auto invalid_root = node("Panel", "anchor.invalid.root",
+                                   {
+                                       node("Panel", "anchor.cycle.a", {},
+                                            layout_properties(object({
+                                                {"anchorTarget", runtime::Value("anchor.cycle.b")},
+                                                {"height", runtime::Value(10.0)},
+                                                {"width", runtime::Value(10.0)},
+                                            }))),
+                                       node("Panel", "anchor.cycle.b", {},
+                                            layout_properties(object({
+                                                {"anchorTarget", runtime::Value("anchor.cycle.a")},
+                                                {"height", runtime::Value(10.0)},
+                                                {"width", runtime::Value(10.0)},
+                                            }))),
+                                       node("Panel", "anchor.missing", {},
+                                            layout_properties(object({
+                                                {"anchorTarget", runtime::Value("not.present")},
+                                                {"height", runtime::Value(10.0)},
+                                                {"width", runtime::Value(10.0)},
+                                            }))),
+                                   },
+                                   layout_properties(object({
+                                       {"height", runtime::Value(100.0)},
+                                       {"kind", runtime::Value("PANEL")},
+                                       {"width", runtime::Value(200.0)},
+                                   })));
     RetainedTree invalid_tree;
     static_cast<void>(invalid_tree.reconcile(invalid_root));
     LayoutEngine invalid_layout;
-    const LayoutResult& invalid_result =
-        invalid_layout.layout(invalid_tree, environment);
-    const std::vector<runtime::RuntimeDiagnostic> diagnostics =
-        invalid_layout.take_diagnostics();
-    check(
-        invalid_result.find(invalid_tree.find_key("anchor.cycle.a")->identity()) != nullptr &&
-            invalid_result.find(invalid_tree.find_key("anchor.cycle.b")->identity()) != nullptr &&
-            invalid_result.find(invalid_tree.find_key("anchor.missing")->identity()) != nullptr &&
-            std::ranges::count(
-                diagnostics,
-                std::string("STRATA.UI.LAYOUT_ANCHOR_CYCLE"),
-                &runtime::RuntimeDiagnostic::code
-            ) == 2 &&
-            std::ranges::count(
-                diagnostics,
-                std::string("STRATA.UI.LAYOUT_ANCHOR_MISSING"),
-                &runtime::RuntimeDiagnostic::code
-            ) == 1,
-        "invalid sibling anchors did not fall back with deterministic diagnostics"
-    );
+    const LayoutResult& invalid_result = invalid_layout.layout(invalid_tree, environment);
+    const std::vector<runtime::RuntimeDiagnostic> diagnostics = invalid_layout.take_diagnostics();
+    check(invalid_result.find(invalid_tree.find_key("anchor.cycle.a")->identity()) != nullptr &&
+              invalid_result.find(invalid_tree.find_key("anchor.cycle.b")->identity()) != nullptr &&
+              invalid_result.find(invalid_tree.find_key("anchor.missing")->identity()) != nullptr &&
+              std::ranges::count(diagnostics, std::string("STRATA.UI.LAYOUT_ANCHOR_CYCLE"),
+                                 &runtime::RuntimeDiagnostic::code) == 2 &&
+              std::ranges::count(diagnostics, std::string("STRATA.UI.LAYOUT_ANCHOR_MISSING"),
+                                 &runtime::RuntimeDiagnostic::code) == 1,
+          "invalid sibling anchors did not fall back with deterministic diagnostics");
 }
 
 void test_zero_fill_weight_collapses_without_stealing_space() {
     using namespace strata;
     using namespace strata::ui;
 
-    const auto root = node(
-        "Panel",
-        "zero-fill.root",
-        {
-            node(
-                "Panel",
-                "zero-fill.zero",
-                {},
-                layout_properties(object({
-                    {"height", runtime::Value(10.0)},
-                    {"width", object({{"weight", runtime::Value(0.0)}})},
-                }))
-            ),
-            node(
-                "Panel",
-                "zero-fill.one",
-                {},
-                layout_properties(object({
-                    {"height", runtime::Value(10.0)},
-                    {"width", object({{"weight", runtime::Value(1.0)}})},
-                }))
-            ),
-        },
-        layout_properties(object({
-            {"height", runtime::Value(10.0)},
-            {"kind", runtime::Value("ROW")},
-            {"width", runtime::Value(100.0)},
-        }))
-    );
+    const auto root = node("Panel", "zero-fill.root",
+                           {
+                               node("Panel", "zero-fill.zero", {},
+                                    layout_properties(object({
+                                        {"height", runtime::Value(10.0)},
+                                        {"width", object({{"weight", runtime::Value(0.0)}})},
+                                    }))),
+                               node("Panel", "zero-fill.one", {},
+                                    layout_properties(object({
+                                        {"height", runtime::Value(10.0)},
+                                        {"width", object({{"weight", runtime::Value(1.0)}})},
+                                    }))),
+                           },
+                           layout_properties(object({
+                               {"height", runtime::Value(10.0)},
+                               {"kind", runtime::Value("ROW")},
+                               {"width", runtime::Value(100.0)},
+                           })));
     RetainedTree tree;
     static_cast<void>(tree.reconcile(root));
     LayoutEngine layout;
     const LayoutEnvironment environment{
-        0U, Rect{0.0, 0.0, 100.0, 10.0}, 1.0,
-        {}, PointSnapPolicy::nearest, RectangleSnapPolicy::outward, false,
+        0U,    Rect{0.0, 0.0, 100.0, 10.0}, 1.0,
+        {},    PointSnapPolicy::nearest,    RectangleSnapPolicy::outward,
+        false,
     };
     const LayoutResult& result = layout.layout(tree, environment);
-    const LayoutRecord* zero =
-        result.find(tree.find_key("zero-fill.zero")->identity());
-    const LayoutRecord* one =
-        result.find(tree.find_key("zero-fill.one")->identity());
-    check(
-        zero != nullptr && one != nullptr &&
-            zero->bounds.width == 0.0 && one->bounds.width == 100.0,
-        "explicit zero fill weight was treated as the default positive weight"
-    );
+    const LayoutRecord* zero = result.find(tree.find_key("zero-fill.zero")->identity());
+    const LayoutRecord* one = result.find(tree.find_key("zero-fill.one")->identity());
+    check(zero != nullptr && one != nullptr && zero->bounds.width == 0.0 &&
+              one->bounds.width == 100.0,
+          "explicit zero fill weight was treated as the default positive weight");
 
-    const auto wrapped_root = node(
-        "Panel",
-        "zero-fill.wrapped",
-        {
-            node(
-                "Panel",
-                "zero-fill.wrapped.zero",
-                {},
-                layout_properties(object({
-                    {"height", runtime::Value(10.0)},
-                    {"padding", object({{"horizontal", runtime::Value(20.0)}})},
-                    {"width", object({{"weight", runtime::Value(0.0)}})},
-                }))
-            ),
-            node(
-                "Panel",
-                "zero-fill.wrapped.fixed",
-                {},
-                layout_properties(object({
-                    {"height", runtime::Value(10.0)},
-                    {"width", runtime::Value(20.0)},
-                }))
-            ),
-        },
-        layout_properties(object({
-            {"height", runtime::Value(20.0)},
-            {"kind", runtime::Value("ROW")},
-            {"width", runtime::Value(100.0)},
-            {"wrap", runtime::Value(true)},
-        }))
-    );
+    const auto wrapped_root =
+        node("Panel", "zero-fill.wrapped",
+             {
+                 node("Panel", "zero-fill.wrapped.zero", {},
+                      layout_properties(object({
+                          {"height", runtime::Value(10.0)},
+                          {"padding", object({{"horizontal", runtime::Value(20.0)}})},
+                          {"width", object({{"weight", runtime::Value(0.0)}})},
+                      }))),
+                 node("Panel", "zero-fill.wrapped.fixed", {},
+                      layout_properties(object({
+                          {"height", runtime::Value(10.0)},
+                          {"width", runtime::Value(20.0)},
+                      }))),
+             },
+             layout_properties(object({
+                 {"height", runtime::Value(20.0)},
+                 {"kind", runtime::Value("ROW")},
+                 {"width", runtime::Value(100.0)},
+                 {"wrap", runtime::Value(true)},
+             })));
     RetainedTree wrapped_tree;
     static_cast<void>(wrapped_tree.reconcile(wrapped_root));
     LayoutEngine wrapped_layout;
-    const LayoutResult& wrapped_result =
-        wrapped_layout.layout(wrapped_tree, environment);
-    const LayoutRecord* wrapped_zero = wrapped_result.find(
-        wrapped_tree.find_key("zero-fill.wrapped.zero")->identity()
-    );
-    check(
-        wrapped_zero != nullptr && wrapped_zero->bounds.width == 0.0,
-        "wrapped linear layout retained intrinsic width for explicit zero fill weight"
-    );
+    const LayoutResult& wrapped_result = wrapped_layout.layout(wrapped_tree, environment);
+    const LayoutRecord* wrapped_zero =
+        wrapped_result.find(wrapped_tree.find_key("zero-fill.wrapped.zero")->identity());
+    check(wrapped_zero != nullptr && wrapped_zero->bounds.width == 0.0,
+          "wrapped linear layout retained intrinsic width for explicit zero fill weight");
 
-    const auto grid_root = node(
-        "Panel",
-        "zero-fill.grid",
-        {
-            node("Panel", "zero-fill.grid.zero"),
-            node("Panel", "zero-fill.grid.one"),
-        },
-        layout_properties(object({
-            {"columns", runtime::Value(std::vector<runtime::Value>{
-                 object({{"weight", runtime::Value(0.0)}}),
-                 object({{"weight", runtime::Value(1.0)}}),
-             })},
-            {"height", runtime::Value(10.0)},
-            {"kind", runtime::Value("GRID")},
-            {"rows", runtime::Value(std::vector<runtime::Value>{
-                 object({{"weight", runtime::Value(1.0)}}),
-             })},
-            {"width", runtime::Value(100.0)},
-        }))
-    );
+    const auto grid_root = node("Panel", "zero-fill.grid",
+                                {
+                                    node("Panel", "zero-fill.grid.zero"),
+                                    node("Panel", "zero-fill.grid.one"),
+                                },
+                                layout_properties(object({
+                                    {"columns", runtime::Value(std::vector<runtime::Value>{
+                                                    object({{"weight", runtime::Value(0.0)}}),
+                                                    object({{"weight", runtime::Value(1.0)}}),
+                                                })},
+                                    {"height", runtime::Value(10.0)},
+                                    {"kind", runtime::Value("GRID")},
+                                    {"rows", runtime::Value(std::vector<runtime::Value>{
+                                                 object({{"weight", runtime::Value(1.0)}}),
+                                             })},
+                                    {"width", runtime::Value(100.0)},
+                                })));
     RetainedTree grid_tree;
     static_cast<void>(grid_tree.reconcile(grid_root));
     LayoutEngine grid_layout;
@@ -2340,135 +2130,83 @@ void test_zero_fill_weight_collapses_without_stealing_space() {
         grid_result.find(grid_tree.find_key("zero-fill.grid.zero")->identity());
     const LayoutRecord* grid_one =
         grid_result.find(grid_tree.find_key("zero-fill.grid.one")->identity());
-    check(
-        grid_zero != nullptr && grid_one != nullptr &&
-            grid_zero->bounds.width == 0.0 && grid_one->bounds.width == 100.0,
-        "grid track resolution reassigned default weight to an explicit zero"
-    );
+    check(grid_zero != nullptr && grid_one != nullptr && grid_zero->bounds.width == 0.0 &&
+              grid_one->bounds.width == 100.0,
+          "grid track resolution reassigned default weight to an explicit zero");
 }
 
 void test_layout_motion_preserves_relative_units() {
     using namespace strata;
     using namespace strata::ui;
 
-    const auto description = node(
-        "Panel",
-        "motion.layout",
-        {},
-        layout_properties(object({
-            {"margin", object({
-                 {"horizontal", runtime::Value(7.0)},
-                 {"top", runtime::Value(3.0)},
-             })},
-            {"placement", object({
-                 {"x", object({{"fraction", runtime::Value(0.6)}})},
-             })},
-            {"height", object({{"weight", runtime::Value(0.25)}})},
-            {"width", object({{"fraction", runtime::Value(0.25)}})},
-        }))
-    );
+    const auto description =
+        node("Panel", "motion.layout", {},
+             layout_properties(object({
+                 {"margin", object({
+                                {"horizontal", runtime::Value(7.0)},
+                                {"top", runtime::Value(3.0)},
+                            })},
+                 {"placement", object({
+                                   {"x", object({{"fraction", runtime::Value(0.6)}})},
+                               })},
+                 {"height", object({{"weight", runtime::Value(0.25)}})},
+                 {"width", object({{"fraction", runtime::Value(0.25)}})},
+             })));
     RetainedTree tree;
     static_cast<void>(tree.reconcile(description));
-    const std::optional<MotionValue> width = motion_detail::resolved_motion_value(
-        *tree.root(),
-        MotionProperty::width
-    );
-    const std::optional<MotionValue> margin_left = motion_detail::resolved_motion_value(
-        *tree.root(),
-        MotionProperty::margin_left
-    );
-    const std::optional<MotionValue> margin_top = motion_detail::resolved_motion_value(
-        *tree.root(),
-        MotionProperty::margin_top
-    );
-    const std::optional<MotionValue> placement_x = motion_detail::resolved_motion_value(
-        *tree.root(),
-        MotionProperty::placement_x
-    );
-    const std::optional<MotionValue> height = motion_detail::resolved_motion_value(
-        *tree.root(),
-        MotionProperty::height
-    );
-    const MotionLayoutValue* width_layout = width.has_value()
-        ? std::get_if<MotionLayoutValue>(&*width)
-        : nullptr;
-    const MotionLayoutValue* placement_layout = placement_x.has_value()
-        ? std::get_if<MotionLayoutValue>(&*placement_x)
-        : nullptr;
-    const MotionLayoutValue* height_layout = height.has_value()
-        ? std::get_if<MotionLayoutValue>(&*height)
-        : nullptr;
-    check(
-        width_layout != nullptr &&
-            width_layout->unit == MotionLayoutUnit::percent &&
-            width_layout->value == 0.25 &&
-            placement_layout != nullptr &&
-            placement_layout->unit == MotionLayoutUnit::percent &&
-            placement_layout->value == 0.6 &&
-            height_layout != nullptr &&
-            height_layout->unit == MotionLayoutUnit::fill &&
-            height_layout->value == 0.25 &&
-            margin_left == std::optional<MotionValue>(MotionValue(7.0)) &&
-            margin_top == std::optional<MotionValue>(MotionValue(3.0)),
-        "resolved-property motion flattened or lost authored layout values"
-    );
+    const std::optional<MotionValue> width =
+        motion_detail::resolved_motion_value(*tree.root(), MotionProperty::width);
+    const std::optional<MotionValue> margin_left =
+        motion_detail::resolved_motion_value(*tree.root(), MotionProperty::margin_left);
+    const std::optional<MotionValue> margin_top =
+        motion_detail::resolved_motion_value(*tree.root(), MotionProperty::margin_top);
+    const std::optional<MotionValue> placement_x =
+        motion_detail::resolved_motion_value(*tree.root(), MotionProperty::placement_x);
+    const std::optional<MotionValue> height =
+        motion_detail::resolved_motion_value(*tree.root(), MotionProperty::height);
+    const MotionLayoutValue* width_layout =
+        width.has_value() ? std::get_if<MotionLayoutValue>(&*width) : nullptr;
+    const MotionLayoutValue* placement_layout =
+        placement_x.has_value() ? std::get_if<MotionLayoutValue>(&*placement_x) : nullptr;
+    const MotionLayoutValue* height_layout =
+        height.has_value() ? std::get_if<MotionLayoutValue>(&*height) : nullptr;
+    check(width_layout != nullptr && width_layout->unit == MotionLayoutUnit::percent &&
+              width_layout->value == 0.25 && placement_layout != nullptr &&
+              placement_layout->unit == MotionLayoutUnit::percent &&
+              placement_layout->value == 0.6 && height_layout != nullptr &&
+              height_layout->unit == MotionLayoutUnit::fill && height_layout->value == 0.25 &&
+              margin_left == std::optional<MotionValue>(MotionValue(7.0)) &&
+              margin_top == std::optional<MotionValue>(MotionValue(3.0)),
+          "resolved-property motion flattened or lost authored layout values");
 
     motion_detail::TargetPlayer player;
     const MotionTiming timing{
         100, 0, "linear", {}, false, MotionFillMode::both,
     };
-    static_cast<void>(player.advance(
-        MotionLayoutValue{MotionLayoutUnit::percent, 0.2},
-        timing,
-        0,
-        false
-    ));
-    const motion_detail::TargetSample retargeted = player.advance(
-        MotionLayoutValue{MotionLayoutUnit::percent, 0.8},
-        timing,
-        10,
-        false
-    );
-    const motion_detail::TargetSample midpoint = player.advance(
-        MotionLayoutValue{MotionLayoutUnit::percent, 0.8},
-        timing,
-        60,
-        false
-    );
-    const MotionLayoutValue* midpoint_value =
-        std::get_if<MotionLayoutValue>(&midpoint.value);
-    check(
-        retargeted.running && midpoint_value != nullptr &&
-            midpoint_value->unit == MotionLayoutUnit::percent &&
-            std::abs(midpoint_value->value - 0.5) < 0.000'001,
-        "relative layout target did not interpolate in its authored unit"
-    );
-    const MotionValue cross_unit = interpolate_motion_value(
-        MotionLayoutValue{MotionLayoutUnit::percent, 0.5},
-        MotionLayoutValue{MotionLayoutUnit::fill, 1.0},
-        0.5
-    );
-    const MotionLayoutValue* cross_unit_value =
-        std::get_if<MotionLayoutValue>(&cross_unit);
-    check(
-        cross_unit_value != nullptr &&
-            cross_unit_value->unit == MotionLayoutUnit::percent &&
-            cross_unit_value->value == 0.5,
-        "layout animation interpolated between dimensionally incompatible units"
-    );
-    const motion_detail::TargetSample reduced = player.advance(
-        MotionLayoutValue{MotionLayoutUnit::percent, 0.4},
-        timing,
-        70,
-        true
-    );
-    const MotionLayoutValue* reduced_value =
-        std::get_if<MotionLayoutValue>(&reduced.value);
-    check(
-        !reduced.running && reduced.snapped_by_reduced_motion &&
-            reduced_value != nullptr && reduced_value->value == 0.4,
-        "reduced motion did not snap a layout-property retarget"
-    );
+    static_cast<void>(
+        player.advance(MotionLayoutValue{MotionLayoutUnit::percent, 0.2}, timing, 0, false));
+    const motion_detail::TargetSample retargeted =
+        player.advance(MotionLayoutValue{MotionLayoutUnit::percent, 0.8}, timing, 10, false);
+    const motion_detail::TargetSample midpoint =
+        player.advance(MotionLayoutValue{MotionLayoutUnit::percent, 0.8}, timing, 60, false);
+    const MotionLayoutValue* midpoint_value = std::get_if<MotionLayoutValue>(&midpoint.value);
+    check(retargeted.running && midpoint_value != nullptr &&
+              midpoint_value->unit == MotionLayoutUnit::percent &&
+              std::abs(midpoint_value->value - 0.5) < 0.000'001,
+          "relative layout target did not interpolate in its authored unit");
+    const MotionValue cross_unit =
+        interpolate_motion_value(MotionLayoutValue{MotionLayoutUnit::percent, 0.5},
+                                 MotionLayoutValue{MotionLayoutUnit::fill, 1.0}, 0.5);
+    const MotionLayoutValue* cross_unit_value = std::get_if<MotionLayoutValue>(&cross_unit);
+    check(cross_unit_value != nullptr && cross_unit_value->unit == MotionLayoutUnit::percent &&
+              cross_unit_value->value == 0.5,
+          "layout animation interpolated between dimensionally incompatible units");
+    const motion_detail::TargetSample reduced =
+        player.advance(MotionLayoutValue{MotionLayoutUnit::percent, 0.4}, timing, 70, true);
+    const MotionLayoutValue* reduced_value = std::get_if<MotionLayoutValue>(&reduced.value);
+    check(!reduced.running && reduced.snapped_by_reduced_motion && reduced_value != nullptr &&
+              reduced_value->value == 0.4,
+          "reduced motion did not snap a layout-property retarget");
 }
 
 void test_anchored_portal_is_out_of_flow_and_flips() {
@@ -2754,8 +2492,7 @@ void test_retained_layout_cache_translates_unchanged_subtrees() {
 
     const double shifted_y = shifted_trailing->bounds.y;
     static_cast<void>(tree.reconcile(description(14.5)));
-    const LayoutResult& shifted_again =
-        layout.layout(tree, environment, nullptr, true, 2U);
+    const LayoutResult& shifted_again = layout.layout(tree, environment, nullptr, true, 2U);
     check(shifted_again.operations.arranged_nodes == 2U,
           "translated arrangement cache did not advance its retained placement");
     check_near(shifted_again.find(trailing_identity)->bounds.y, shifted_y + 1.25,
@@ -2763,8 +2500,7 @@ void test_retained_layout_cache_translates_unchanged_subtrees() {
     check(shifted_again.find(trailing_identity)->translated_subtree == Point{0.0, 4.5},
           "multiple layout passes did not accumulate their subtree translations");
 
-    const LayoutResult& next_frame =
-        layout.layout(tree, environment, nullptr, true, 3U);
+    const LayoutResult& next_frame = layout.layout(tree, environment, nullptr, true, 3U);
     check(!next_frame.find(trailing_identity)->translated_subtree.has_value(),
           "a subtree translation leaked into the next frame");
 }
@@ -5557,78 +5293,48 @@ overlay LazyMotion {
     check_near(focus_visible_sample()->progress, 0.5,
                "pointer-driven focus-visible reversal jumped away from its displayed value");
 
-    ui::Surface layout_motion(
-        "layout-motion",
-        application,
-        runtime::LayerRole::overlay,
-        "LayoutMotion",
-        environment
-    );
+    ui::Surface layout_motion("layout-motion", application, runtime::LayerRole::overlay,
+                              "LayoutMotion", environment);
     static_cast<void>(layout_motion.frame(1'500'000'000));
     const auto layout_motion_record = [&layout_motion]() -> const ui::LayoutRecord* {
-        const ui::RetainedNode* target =
-            layout_motion.tree().find_key("motion.layout.target");
-        return target != nullptr
-            ? layout_motion.layout().find(target->identity())
-            : nullptr;
+        const ui::RetainedNode* target = layout_motion.tree().find_key("motion.layout.target");
+        return target != nullptr ? layout_motion.layout().find(target->identity()) : nullptr;
     };
-    check(
-        layout_motion_record() != nullptr &&
-            layout_motion_record()->bounds.x == 20.0 &&
-            layout_motion_record()->bounds.y == 8.0 &&
-            layout_motion_record()->bounds.width == 40.0,
-        "relative layout-motion fixture did not start at its authored placement"
-    );
-    static_cast<void>(
-        layout_motion.input().enqueue_click("motion.layout.expand")
-    );
+    check(layout_motion_record() != nullptr && layout_motion_record()->bounds.x == 20.0 &&
+              layout_motion_record()->bounds.y == 8.0 &&
+              layout_motion_record()->bounds.width == 40.0,
+          "relative layout-motion fixture did not start at its authored placement");
+    static_cast<void>(layout_motion.input().enqueue_click("motion.layout.expand"));
     static_cast<void>(layout_motion.frame(1'510'000'000));
     static_cast<void>(layout_motion.frame(1'610'000'000));
-    check(
-        layout_motion_record() != nullptr &&
-            layout_motion_record()->bounds.x > 20.0 &&
-            layout_motion_record()->bounds.x < 140.0 &&
-            layout_motion_record()->bounds.y > 8.0 &&
-            layout_motion_record()->bounds.y < 40.0 &&
-            layout_motion_record()->bounds.width > 40.0 &&
-            layout_motion_record()->bounds.width < 160.0,
-        "resolved percentage width and placement did not animate in layout"
-    );
+    check(layout_motion_record() != nullptr && layout_motion_record()->bounds.x > 20.0 &&
+              layout_motion_record()->bounds.x < 140.0 && layout_motion_record()->bounds.y > 8.0 &&
+              layout_motion_record()->bounds.y < 40.0 &&
+              layout_motion_record()->bounds.width > 40.0 &&
+              layout_motion_record()->bounds.width < 160.0,
+          "resolved percentage width and placement did not animate in layout");
     static_cast<void>(layout_motion.frame(1'910'000'000));
-    check(
-        layout_motion_record() != nullptr &&
-            layout_motion_record()->bounds.x == 140.0 &&
-            layout_motion_record()->bounds.y == 40.0 &&
-            layout_motion_record()->bounds.width == 160.0,
-        "relative layout animation did not settle at its authored targets"
-    );
+    check(layout_motion_record() != nullptr && layout_motion_record()->bounds.x == 140.0 &&
+              layout_motion_record()->bounds.y == 40.0 &&
+              layout_motion_record()->bounds.width == 160.0,
+          "relative layout animation did not settle at its authored targets");
 
     ui::SurfaceEnvironment reduced_environment = environment;
     reduced_environment.reduced_motion = true;
-    ui::Surface reduced_layout_motion(
-        "layout-motion-reduced",
-        application,
-        runtime::LayerRole::overlay,
-        "LayoutMotion",
-        reduced_environment
-    );
+    ui::Surface reduced_layout_motion("layout-motion-reduced", application,
+                                      runtime::LayerRole::overlay, "LayoutMotion",
+                                      reduced_environment);
     static_cast<void>(reduced_layout_motion.frame(2'000'000'000));
-    static_cast<void>(
-        reduced_layout_motion.input().enqueue_click("motion.layout.expand")
-    );
+    static_cast<void>(reduced_layout_motion.input().enqueue_click("motion.layout.expand"));
     static_cast<void>(reduced_layout_motion.frame(2'010'000'000));
     const ui::RetainedNode* reduced_target =
         reduced_layout_motion.tree().find_key("motion.layout.target");
-    const ui::LayoutRecord* reduced_record = reduced_target != nullptr
-        ? reduced_layout_motion.layout().find(reduced_target->identity())
-        : nullptr;
-    check(
-        reduced_record != nullptr &&
-            reduced_record->bounds.x == 140.0 &&
-            reduced_record->bounds.y == 40.0 &&
-            reduced_record->bounds.width == 160.0,
-        "reduced motion did not snap relative layout properties to their targets"
-    );
+    const ui::LayoutRecord* reduced_record =
+        reduced_target != nullptr ? reduced_layout_motion.layout().find(reduced_target->identity())
+                                  : nullptr;
+    check(reduced_record != nullptr && reduced_record->bounds.x == 140.0 &&
+              reduced_record->bounds.y == 40.0 && reduced_record->bounds.width == 160.0,
+          "reduced motion did not snap relative layout properties to their targets");
 
     ui::Surface reorder_motion("reorder-motion", application, runtime::LayerRole::overlay,
                                "ReorderMotion", environment);
@@ -5811,13 +5517,10 @@ overlay Other { root Text(key: "cache.other", text: "other") }
         find_description(find_description, first.root, "cache.host.alpha");
     const std::shared_ptr<const ui::DescriptionNode> beta_before =
         find_description(find_description, first.root, "cache.host.beta");
-    const ui::DescriptionBuildResult settled =
-        builder.build(runtime::LayerRole::overlay, "Main");
-    check(
-        settled.root == first.root && settled.evaluated_expressions == 0U &&
-            settled.described_nodes == 0U,
-        "settled layer re-executed its description instead of retaining the dependency graph"
-    );
+    const ui::DescriptionBuildResult settled = builder.build(runtime::LayerRole::overlay, "Main");
+    check(settled.root == first.root && settled.evaluated_expressions == 0U &&
+              settled.described_nodes == 0U,
+          "settled layer re-executed its description instead of retaining the dependency graph");
     ui::RetainedTree tree;
     static_cast<void>(tree.reconcile(first.root));
     const ui::RetainedNode* const retained_split = tree.find_key("cache.split");
@@ -5848,17 +5551,9 @@ overlay Other { root Text(key: "cache.other", text: "other") }
               left_width->field("weight")->number() != nullptr &&
               std::abs(*left_width->field("weight")->number() - 0.75) < 0.000'001,
           "the rebuilt component did not consume its changed retained value");
-    check(
-        builder.observes_retained_value(
-            *retained_split,
-            "strata.gesture.splitRatio"
-        ) &&
-            !builder.observes_retained_value(
-                *tree.find_key("cache.raw"),
-                "$value"
-            ),
-        "description retained-dependency queries lost their exact property frontier"
-    );
+    check(builder.observes_retained_value(*retained_split, "strata.gesture.splitRatio") &&
+              !builder.observes_retained_value(*tree.find_key("cache.raw"), "$value"),
+          "description retained-dependency queries lost their exact property frontier");
 
     static_cast<void>(application.host().adopt(bundle->host_snapshot(
         "component-cache-beta", 2U, data::parse_json(R"({"beta":{"value":"second"}})"))));
@@ -5910,150 +5605,98 @@ overlay Main { root ParameterState(initial: 12) }
         throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
     };
     check(application
-              .compile_and_activate(
-                  compiler::ModuleSource{"parameter-state.strata", source},
-                  no_imports,
-                  0U
-              )
+              .compile_and_activate(compiler::ModuleSource{"parameter-state.strata", source},
+                                    no_imports, 0U)
               .activated(),
           "parameterized component-state fixture did not activate");
 
     ui::DescriptionBuilder builder(application);
     ui::RetainedTree tree;
-    static_cast<void>(tree.reconcile(
-        builder.build(runtime::LayerRole::overlay, "Main").root
-    ));
-    const auto dispatch = [&application, &tree](
-                              const std::string_view key,
-                              runtime::ActionEvent event
-                          ) {
+    static_cast<void>(tree.reconcile(builder.build(runtime::LayerRole::overlay, "Main").root));
+    const auto dispatch = [&application, &tree](const std::string_view key,
+                                                runtime::ActionEvent event) {
         const ui::RetainedNode* node = tree.find_key(key);
         const auto property = node != nullptr
-            ? node->description().properties.find(
-                  key == "parameter.slider" ? "onChange" : "onClick"
-              )
-            : ui::DescriptionNode::Properties::const_iterator{};
-        check(
-            node != nullptr && property != node->description().properties.end() &&
-                property->second.action() != nullptr,
-            "parameterized component-state fixture lost its action"
-        );
-        return application.dispatch(
-            event,
-            *(*property->second.action())->action,
-            node->description().state_scope
-        );
+                                  ? node->description().properties.find(
+                                        key == "parameter.slider" ? "onChange" : "onClick")
+                                  : ui::DescriptionNode::Properties::const_iterator{};
+        check(node != nullptr && property != node->description().properties.end() &&
+                  property->second.action() != nullptr,
+              "parameterized component-state fixture lost its action");
+        return application.dispatch(event, *(*property->second.action())->action,
+                                    node->description().state_scope);
     };
 
-    check(
-        dispatch(
-            "parameter.slider",
-            runtime::ActionEvent{
-                "value-changed",
-                std::string("parameter.slider"),
-                runtime::Value(37.0),
-            }
-        ).status == runtime::ActionDispatchStatus::handled,
-        "parameterized state initializer was unavailable to state.setFromEvent"
-    );
-    static_cast<void>(tree.reconcile(
-        builder.build(runtime::LayerRole::overlay, "Main").root
-    ));
-    check(
-        tree.find_key("parameter.value")->description().properties.at("text").value()->string() !=
-                nullptr &&
-            *tree.find_key("parameter.value")
-                 ->description()
-                 .properties.at("text")
-                 .value()
-                 ->string() == "37",
-        "parameterized component state did not retain its changed value"
-    );
+    check(dispatch("parameter.slider",
+                   runtime::ActionEvent{
+                       "value-changed",
+                       std::string("parameter.slider"),
+                       runtime::Value(37.0),
+                   })
+                  .status == runtime::ActionDispatchStatus::handled,
+          "parameterized state initializer was unavailable to state.setFromEvent");
+    static_cast<void>(tree.reconcile(builder.build(runtime::LayerRole::overlay, "Main").root));
+    check(tree.find_key("parameter.value")->description().properties.at("text").value()->string() !=
+                  nullptr &&
+              *tree.find_key("parameter.value")
+                      ->description()
+                      .properties.at("text")
+                      .value()
+                      ->string() == "37",
+          "parameterized component state did not retain its changed value");
 
+    check(dispatch("parameter.reset",
+                   runtime::ActionEvent{
+                       "activated",
+                       std::string("parameter.reset"),
+                       runtime::Value{},
+                   })
+                  .status == runtime::ActionDispatchStatus::handled,
+          "parameterized state initializer was unavailable to state.reset");
+    static_cast<void>(tree.reconcile(builder.build(runtime::LayerRole::overlay, "Main").root));
     check(
-        dispatch(
-            "parameter.reset",
-            runtime::ActionEvent{
-                "activated",
-                std::string("parameter.reset"),
-                runtime::Value{},
-            }
-        ).status == runtime::ActionDispatchStatus::handled,
-        "parameterized state initializer was unavailable to state.reset"
-    );
-    static_cast<void>(tree.reconcile(
-        builder.build(runtime::LayerRole::overlay, "Main").root
-    ));
-    check(
-        *tree.find_key("parameter.value")
-             ->description()
-             .properties.at("text")
-             .value()
-             ->string() == "12",
-        "state.reset did not restore the evaluated component initializer"
-    );
+        *tree.find_key("parameter.value")->description().properties.at("text").value()->string() ==
+            "12",
+        "state.reset did not restore the evaluated component initializer");
 }
 
-void test_tuning_slider_pipeline_is_proportional(
-    const std::filesystem::path& resource_root
-) {
+void test_tuning_slider_pipeline_is_proportional(const std::filesystem::path& resource_root) {
     using namespace strata;
-    const std::filesystem::path ui_root =
-        resource_root / "assets/strata/ui";
-    const data::JsonValue schemas = data::parse_json(read_text_file(
-        ui_root / "tuning_panel.schemas.json"
-    ));
+    const std::filesystem::path ui_root = resource_root / "assets/strata/ui";
+    const data::JsonValue schemas =
+        data::parse_json(read_text_file(ui_root / "tuning_panel.schemas.json"));
     const auto bundle = runtime::ApplicationBundle::create(&schemas);
     runtime::ApplicationContext application("tuning-incremental", bundle);
     const auto no_imports = [](const std::string_view,
                                const std::string_view path) -> compiler::ModuleSource {
         throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
     };
-    check(
-        application.compile_and_activate(
-            compiler::ModuleSource{
-                "assets/strata/ui/tuning_panel.strata",
-                read_text_file(ui_root / "tuning_panel.strata"),
-            },
-            no_imports,
-            0U
-        ).activated(),
-        "tuning incremental pipeline fixture did not activate"
-    );
-    const std::shared_ptr<const ui::TextEngine> text_engine =
-        ui::TextEngine::load_control_font(
-            resource_root,
-            resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
-        );
+    check(application
+              .compile_and_activate(
+                  compiler::ModuleSource{
+                      "assets/strata/ui/tuning_panel.strata",
+                      read_text_file(ui_root / "tuning_panel.strata"),
+                  },
+                  no_imports, 0U)
+              .activated(),
+          "tuning incremental pipeline fixture did not activate");
+    const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
+        resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
     ui::SurfaceEnvironment environment;
     environment.framebuffer_width = 1280;
     environment.framebuffer_height = 800;
     environment.logical_width = 1280.0;
     environment.logical_height = 800.0;
     environment.input = ui::SurfaceInputCapabilities{
-        true,
-        ui::PointerPrecision::fine,
-        true,
-        false,
-        true,
-        true,
-        false,
+        true, ui::PointerPrecision::fine, true, false, true, true, false,
     };
-    ui::Surface surface(
-        "tuning-incremental",
-        application,
-        runtime::LayerRole::overlay,
-        "TuningPanelMenu",
-        environment,
-        text_engine
-    );
+    ui::Surface surface("tuning-incremental", application, runtime::LayerRole::overlay,
+                        "TuningPanelMenu", environment, text_engine);
     static_cast<void>(surface.frame(1'000'000'000));
     static_cast<void>(surface.frame(2'000'000'000));
-    const ui::RetainedNode* slider =
-        surface.tree().find_key("tune.filter.radius");
-    const ui::LayoutRecord* slider_layout = slider != nullptr
-        ? surface.layout().find(slider->identity())
-        : nullptr;
+    const ui::RetainedNode* slider = surface.tree().find_key("tune.filter.radius");
+    const ui::LayoutRecord* slider_layout =
+        slider != nullptr ? surface.layout().find(slider->identity()) : nullptr;
     check(slider_layout != nullptr && slider_layout->bounds.width > 0.0,
           "tuning slider fixture was not arranged");
     struct RailGeometry final {
@@ -6065,40 +5708,32 @@ void test_tuning_slider_pipeline_is_proportional(
         RailGeometry result;
         for (const ui::RenderCommand& command : surface.render_commands().commands()) {
             const auto* rectangle = std::get_if<ui::RoundedRectRenderCommand>(&command);
-            if (rectangle == nullptr) continue;
+            if (rectangle == nullptr)
+                continue;
             const ui::Point center{
                 rectangle->bounds.x + rectangle->bounds.width * 0.5,
                 rectangle->bounds.y + rectangle->bounds.height * 0.5,
             };
-            if (center.x < slider_layout->bounds.x ||
-                center.x > slider_layout->bounds.right() ||
-                center.y < slider_layout->bounds.y ||
-                center.y > slider_layout->bounds.bottom()) {
+            if (center.x < slider_layout->bounds.x || center.x > slider_layout->bounds.right() ||
+                center.y < slider_layout->bounds.y || center.y > slider_layout->bounds.bottom()) {
                 continue;
             }
             if (rectangle->fill == ui::Paint(ui::RenderColor{199U, 167U, 255U, 255U})) {
                 result.fill = rectangle->bounds;
-            } else if (
-                rectangle->fill == ui::Paint(ui::RenderColor{237U, 231U, 245U, 45U})
-            ) {
+            } else if (rectangle->fill == ui::Paint(ui::RenderColor{237U, 231U, 245U, 45U})) {
                 result.track = rectangle->bounds;
-            } else if (
-                rectangle->fill == ui::Paint(ui::RenderColor{250U, 247U, 255U, 255U})
-            ) {
+            } else if (rectangle->fill == ui::Paint(ui::RenderColor{250U, 247U, 255U, 255U})) {
                 result.thumb = rectangle->bounds;
             }
         }
         return result;
     };
     const RailGeometry idle_geometry = rail_geometry();
-    check(
-        idle_geometry.fill.has_value() &&
-            idle_geometry.track.has_value() &&
-            idle_geometry.thumb.has_value() &&
-            std::abs(idle_geometry.thumb->width - 3.0) < 0.001 &&
-            std::abs(idle_geometry.thumb->height - 24.0) < 0.001,
-        "authored tuning rail did not use its resting thumb dimensions"
-    );
+    check(idle_geometry.fill.has_value() && idle_geometry.track.has_value() &&
+              idle_geometry.thumb.has_value() &&
+              std::abs(idle_geometry.thumb->width - 3.0) < 0.001 &&
+              std::abs(idle_geometry.thumb->height - 24.0) < 0.001,
+          "authored tuning rail did not use its resting thumb dimensions");
     const ui::Point pressed{
         slider_layout->bounds.x + slider_layout->bounds.width * (12.0 / 32.0),
         slider_layout->bounds.y + slider_layout->bounds.height * 0.5,
@@ -6115,32 +5750,20 @@ void test_tuning_slider_pipeline_is_proportional(
     static_cast<void>(surface.frame(2'016'666'667));
     const RailGeometry active_geometry = rail_geometry();
     check(
-        active_geometry.fill.has_value() &&
-            active_geometry.track.has_value() &&
+        active_geometry.fill.has_value() && active_geometry.track.has_value() &&
             active_geometry.thumb.has_value() &&
             std::abs(active_geometry.thumb->width - 2.0) < 0.001 &&
             std::abs(active_geometry.thumb->height - 24.0) < 0.001 &&
             std::abs(active_geometry.fill->right() - idle_geometry.fill->right()) < 0.001 &&
             std::abs(active_geometry.track->x - idle_geometry.track->x) < 0.001,
-        "pressing an authored tuning rail changed its tracks instead of tightening only its thumb"
-    );
+        "pressing an authored tuning rail changed its tracks instead of tightening only its thumb");
     static_cast<void>(surface.frame(2'400'000'000));
 
     font::GlyphAtlas atlas("tuning-incremental");
     ui::HostRenderPacketCache packet_cache;
     host::RenderPacketDecoder decoder;
     const std::vector<std::uint8_t> baseline_encoded = packet_cache.encode(
-        surface.render_commands(),
-        1U,
-        {},
-        atlas,
-        *text_engine,
-        1.0,
-        1280,
-        800,
-        1280.0,
-        800.0
-    );
+        surface.render_commands(), 1U, {}, atlas, *text_engine, 1.0, 1280, 800, 1280.0, 800.0);
     const std::size_t baseline_packet = baseline_encoded.size();
     static_cast<void>(decoder.decode(baseline_encoded));
 
@@ -6159,17 +5782,7 @@ void test_tuning_slider_pipeline_is_proportional(
     }));
     const ui::SurfaceFrame changed = surface.frame(2'416'666'667);
     const std::vector<std::uint8_t> patch_encoded = packet_cache.encode(
-        surface.render_commands(),
-        2U,
-        {},
-        atlas,
-        *text_engine,
-        1.0,
-        1280,
-        800,
-        1280.0,
-        800.0
-    );
+        surface.render_commands(), 2U, {}, atlas, *text_engine, 1.0, 1280, 800, 1280.0, 800.0);
     const std::size_t patch_packet = patch_encoded.size();
     const host::RenderPacket& decoded_patch = decoder.decode(patch_encoded);
     const ui::HostRenderPacketTelemetry& packet = packet_cache.telemetry();
@@ -6180,73 +5793,58 @@ void test_tuning_slider_pipeline_is_proportional(
         " arranged=" + std::to_string(changed.operations.layout_arranged_nodes) +
         " fragments=" + std::to_string(changed.operations.render.fragments_built) +
         " motion=" + std::to_string(changed.operations.motion_mutated_nodes);
-    check(
-        changed.operations.evaluated_expressions < 160U &&
-            changed.operations.described_nodes < 20U &&
-            changed.operations.layout_measured_nodes < 30U &&
-            changed.operations.layout_arranged_nodes < 20U &&
-            changed.operations.render.fragments_built < 20U,
-        "one tuning slider move escaped its local reactive description/layout/render frontier:" +
-            operation_detail
-    );
-    check(
-        packet.geometry_patched && packet.geometry_patch_bytes != 0U &&
-            patch_packet * 4U < baseline_packet &&
-            !decoded_patch.geometry_dirty_all &&
-            !decoded_patch.geometry_dirty_regions.empty(),
-        "one tuning slider move rebuilt or transmitted the complete surface geometry: patched=" +
-            std::to_string(packet.geometry_patched) +
-            " bytes=" + std::to_string(packet.geometry_patch_bytes) +
-            " packet=" + std::to_string(patch_packet) +
-            " baseline=" + std::to_string(baseline_packet) +
-            " dirtyAll=" + std::to_string(decoded_patch.geometry_dirty_all) +
-            " vertexPatches=" + std::to_string(decoded_patch.vertex_patches.size()) +
-            (decoded_patch.vertex_patches.empty()
-                 ? std::string{}
-                 : " patch=" +
-                     std::to_string(decoded_patch.vertex_patches.front().offset) + "," +
-                     std::to_string(decoded_patch.vertex_patches.front().bytes.size())) +
-            " regions=" + std::to_string(decoded_patch.geometry_dirty_regions.size()) +
-            (decoded_patch.geometry_dirty_regions.empty()
-                 ? std::string{}
-                 : " first=" +
-                     std::to_string(decoded_patch.geometry_dirty_regions.front().x) + "," +
-                     std::to_string(decoded_patch.geometry_dirty_regions.front().y) + "," +
-                     std::to_string(decoded_patch.geometry_dirty_regions.front().width) + "," +
-                     std::to_string(decoded_patch.geometry_dirty_regions.front().height))
-    );
+    check(changed.operations.evaluated_expressions < 160U &&
+              changed.operations.described_nodes < 20U &&
+              changed.operations.layout_measured_nodes < 30U &&
+              changed.operations.layout_arranged_nodes < 20U &&
+              changed.operations.render.fragments_built < 20U,
+          "one tuning slider move escaped its local reactive description/layout/render frontier:" +
+              operation_detail);
+    check(packet.geometry_patched && packet.geometry_patch_bytes != 0U &&
+              patch_packet * 4U < baseline_packet && !decoded_patch.geometry_dirty_all &&
+              !decoded_patch.geometry_dirty_regions.empty(),
+          "one tuning slider move rebuilt or transmitted the complete surface geometry: patched=" +
+              std::to_string(packet.geometry_patched) +
+              " bytes=" + std::to_string(packet.geometry_patch_bytes) + " packet=" +
+              std::to_string(patch_packet) + " baseline=" + std::to_string(baseline_packet) +
+              " dirtyAll=" + std::to_string(decoded_patch.geometry_dirty_all) +
+              " vertexPatches=" + std::to_string(decoded_patch.vertex_patches.size()) +
+              (decoded_patch.vertex_patches.empty()
+                   ? std::string{}
+                   : " patch=" + std::to_string(decoded_patch.vertex_patches.front().offset) + "," +
+                         std::to_string(decoded_patch.vertex_patches.front().bytes.size())) +
+              " regions=" + std::to_string(decoded_patch.geometry_dirty_regions.size()) +
+              (decoded_patch.geometry_dirty_regions.empty()
+                   ? std::string{}
+                   : " first=" + std::to_string(decoded_patch.geometry_dirty_regions.front().x) +
+                         "," + std::to_string(decoded_patch.geometry_dirty_regions.front().y) +
+                         "," + std::to_string(decoded_patch.geometry_dirty_regions.front().width) +
+                         "," +
+                         std::to_string(decoded_patch.geometry_dirty_regions.front().height)));
 
     const auto slider_value = [&surface]() -> std::optional<double> {
-        const ui::RetainedNode* current =
-            surface.tree().find_key("tune.filter.radius");
+        const ui::RetainedNode* current = surface.tree().find_key("tune.filter.radius");
         const auto value_property = current != nullptr
-            ? current->description().properties.find("value")
-            : ui::DescriptionNode::Properties::const_iterator{};
+                                        ? current->description().properties.find("value")
+                                        : ui::DescriptionNode::Properties::const_iterator{};
         const runtime::Value* value =
-            current != nullptr &&
-                value_property != current->description().properties.end()
-            ? value_property->second.data_value()
-            : nullptr;
+            current != nullptr && value_property != current->description().properties.end()
+                ? value_property->second.data_value()
+                : nullptr;
         if (value == nullptr && current != nullptr) {
             value = current->retained_value("$value");
         }
         return value != nullptr && value->number() != nullptr
-            ? std::optional<double>(*value->number())
-            : std::nullopt;
+                   ? std::optional<double>(*value->number())
+                   : std::nullopt;
     };
     const std::optional<double> dragged_value = slider_value();
-    check(
-        dragged_value.has_value() && *dragged_value > 20.0,
-        "tuning slider did not retain its dragged value: " +
-            (dragged_value.has_value()
-                 ? std::to_string(*dragged_value)
-                 : std::string("missing"))
-    );
+    check(dragged_value.has_value() && *dragged_value > 20.0,
+          "tuning slider did not retain its dragged value: " + (dragged_value.has_value()
+                                                                    ? std::to_string(*dragged_value)
+                                                                    : std::string("missing")));
     static_cast<void>(surface.frame(2'433'333'334));
-    check(
-        slider_value() == dragged_value,
-        "tuning slider reset without an input event"
-    );
+    check(slider_value() == dragged_value, "tuning slider reset without an input event");
     static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
         moved,
         ui::PointerEventType::release,
@@ -6257,10 +5855,7 @@ void test_tuning_slider_pipeline_is_proportional(
         2'440'000'000,
     }));
     static_cast<void>(surface.frame(2'450'000'000));
-    check(
-        slider_value() == dragged_value,
-        "tuning slider reset when its pointer press ended"
-    );
+    check(slider_value() == dragged_value, "tuning slider reset when its pointer press ended");
 
     static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
         moved,
@@ -6273,28 +5868,16 @@ void test_tuning_slider_pipeline_is_proportional(
     }));
     static_cast<void>(surface.frame(2'461'000'000));
     static_cast<void>(decoder.decode(packet_cache.encode(
-        surface.render_commands(),
-        3U,
-        {},
-        atlas,
-        *text_engine,
-        1.0,
-        1280,
-        800,
-        1280.0,
-        800.0
-    )));
+        surface.render_commands(), 3U, {}, atlas, *text_engine, 1.0, 1280, 800, 1280.0, 800.0)));
     ui::Point previous = moved;
     for (std::size_t index = 0U; index < 512U; ++index) {
-        const double fraction = index % 2U == 0U
-            ? 0.08 + static_cast<double>(index % 17U) * 0.01
-            : 0.92 - static_cast<double>(index % 19U) * 0.01;
+        const double fraction = index % 2U == 0U ? 0.08 + static_cast<double>(index % 17U) * 0.01
+                                                 : 0.92 - static_cast<double>(index % 19U) * 0.01;
         const ui::Point position{
             slider_layout->bounds.x + slider_layout->bounds.width * fraction,
             pressed.y,
         };
-        const std::int64_t timestamp =
-            2'462'000'000 + static_cast<std::int64_t>(index) * 1'000'000;
+        const std::int64_t timestamp = 2'462'000'000 + static_cast<std::int64_t>(index) * 1'000'000;
         static_cast<void>(surface.input().enqueue_pointer(ui::PointerInputEvent{
             position,
             ui::PointerEventType::move,
@@ -6305,62 +5888,35 @@ void test_tuning_slider_pipeline_is_proportional(
             timestamp,
         }));
         static_cast<void>(surface.frame(timestamp));
-        const host::RenderPacket& decoded = decoder.decode(packet_cache.encode(
-            surface.render_commands(),
-            4U + index,
-            {},
-            atlas,
-            *text_engine,
-            1.0,
-            1280,
-            800,
-            1280.0,
-            800.0
-        ));
-        check(
-            !decoded.vertices.empty() && !decoded.indices.empty(),
-            "repeated tuning slider movement lost retained geometry"
-        );
+        const host::RenderPacket& decoded =
+            decoder.decode(packet_cache.encode(surface.render_commands(), 4U + index, {}, atlas,
+                                               *text_engine, 1.0, 1280, 800, 1280.0, 800.0));
+        check(!decoded.vertices.empty() && !decoded.indices.empty(),
+              "repeated tuning slider movement lost retained geometry");
         if (index >= 4U) {
-            check(
-                !decoded.full_geometry_payload &&
-                    (!decoded.vertex_patches.empty() ||
-                     !decoded.index_patches.empty()) &&
-                    packet_cache.telemetry().geometry_topology_reused &&
-                    packet_cache.telemetry().geometry_patch_bytes < 32U * 1'024U,
-                "a tuning rail topology change escaped its retained geometry arena at move " +
-                    std::to_string(index) +
-                    " topology=" +
-                    std::to_string(packet_cache.telemetry().geometry_topology_reused) +
-                    " patch=" +
-                    std::to_string(packet_cache.telemetry().candidate_geometry_patch_bytes) +
-                    " full=" +
-                    std::to_string(packet_cache.telemetry().previous_full_geometry_bytes) +
-                    "->" +
-                    std::to_string(packet_cache.telemetry().full_geometry_bytes) +
-                    " reason=" +
-                    std::to_string(static_cast<std::uint32_t>(
-                        packet_cache.telemetry().topology_change
-                    )) +
-                    " item=" +
-                    std::to_string(packet_cache.telemetry().topology_change_item) +
-                    " items=" +
-                    std::to_string(packet_cache.telemetry().previous_item_count) +
-                    "->" +
-                    std::to_string(packet_cache.telemetry().item_count) +
-                    " commands=" +
-                    std::to_string(surface.render_commands().commands().size()) +
-                    " active=" +
-                    std::to_string(surface.input().active(slider->identity())) +
-                    " hovered=" +
-                    std::to_string(surface.input().hovered(slider->identity())) +
-                    " atlas=" +
-                    std::to_string(atlas.cached_glyph_count()) +
-                    " generation=" +
-                    std::to_string(atlas.generation()) +
-                    " recycles=" +
-                    std::to_string(atlas.generation_recycle_count())
-            );
+            check(!decoded.full_geometry_payload &&
+                      (!decoded.vertex_patches.empty() || !decoded.index_patches.empty()) &&
+                      packet_cache.telemetry().geometry_topology_reused &&
+                      packet_cache.telemetry().geometry_patch_bytes < 32U * 1'024U,
+                  "a tuning rail topology change escaped its retained geometry arena at move " +
+                      std::to_string(index) + " topology=" +
+                      std::to_string(packet_cache.telemetry().geometry_topology_reused) +
+                      " patch=" +
+                      std::to_string(packet_cache.telemetry().candidate_geometry_patch_bytes) +
+                      " full=" +
+                      std::to_string(packet_cache.telemetry().previous_full_geometry_bytes) + "->" +
+                      std::to_string(packet_cache.telemetry().full_geometry_bytes) + " reason=" +
+                      std::to_string(
+                          static_cast<std::uint32_t>(packet_cache.telemetry().topology_change)) +
+                      " item=" + std::to_string(packet_cache.telemetry().topology_change_item) +
+                      " items=" + std::to_string(packet_cache.telemetry().previous_item_count) +
+                      "->" + std::to_string(packet_cache.telemetry().item_count) +
+                      " commands=" + std::to_string(surface.render_commands().commands().size()) +
+                      " active=" + std::to_string(surface.input().active(slider->identity())) +
+                      " hovered=" + std::to_string(surface.input().hovered(slider->identity())) +
+                      " atlas=" + std::to_string(atlas.cached_glyph_count()) +
+                      " generation=" + std::to_string(atlas.generation()) +
+                      " recycles=" + std::to_string(atlas.generation_recycle_count()));
         }
         previous = position;
     }

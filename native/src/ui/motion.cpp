@@ -80,8 +80,7 @@ namespace {
            dirty.contains(DirtyReason::style) ||
            dirty.contains(DirtyReason::input) ||
            dirty.contains(DirtyReason::scale) ||
-           dirty.contains(DirtyReason::animation) ||
-           dirty.contains(DirtyReason::resource);
+           dirty.contains(DirtyReason::animation);
 }
 
 [[nodiscard]] bool motion_generation_changed(
@@ -93,8 +92,7 @@ namespace {
            observed.style != current.style ||
            observed.input != current.input ||
            observed.scale != current.scale ||
-           observed.animation != current.animation ||
-           observed.resource != current.resource;
+           observed.animation != current.animation;
 }
 
 [[nodiscard]] bool has_motion(const motion_detail::NodeMotionConfig& config) noexcept {

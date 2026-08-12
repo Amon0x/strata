@@ -5,25 +5,15 @@
 #include <utility>
 
 namespace strata::runtime {
-namespace {
-
-void bump(std::uint64_t& generation, const char* const name) {
-    if (generation == std::numeric_limits<std::uint64_t>::max()) {
-        throw std::overflow_error(std::string("runtime ") + name + " generation exhausted");
-    }
-    ++generation;
-}
-
-} // namespace
 
 RuntimeServices::RuntimeServices(PublishedDiagnosticSink diagnostic_sink)
     : diagnostic_sink_(std::move(diagnostic_sink)) {}
 
 void RuntimeServices::publish_active_diagnostic(RuntimeDiagnostic diagnostic) {
-    const RuntimeDiagnosticRecord& record = diagnostics_.append(
-        frame_index_, std::move(diagnostic)
-    );
-    if (!diagnostic_sink_) return;
+    const RuntimeDiagnosticRecord& record =
+        diagnostics_.append(frame_index_, std::move(diagnostic));
+    if (!diagnostic_sink_)
+        return;
     try {
         diagnostic_sink_(record, diagnostics_.dropped_count());
     } catch (...) {
@@ -32,7 +22,8 @@ void RuntimeServices::publish_active_diagnostic(RuntimeDiagnostic diagnostic) {
 }
 
 std::uint64_t RuntimeServices::begin_frame() {
-    if (frame_active_) throw std::logic_error("runtime frame is already active");
+    if (frame_active_)
+        throw std::logic_error("runtime frame is already active");
     if (frame_index_ == std::numeric_limits<std::uint64_t>::max()) {
         throw std::overflow_error("runtime service frame index exhausted");
     }
@@ -72,7 +63,9 @@ std::uint64_t RuntimeServices::begin_frame() {
     return frame_index_;
 }
 
-void RuntimeServices::end_frame() noexcept { frame_active_ = false; }
+void RuntimeServices::end_frame() noexcept {
+    frame_active_ = false;
+}
 
 void RuntimeServices::report(RuntimeDiagnostic diagnostic) {
     pending_diagnostics_.push_back(std::move(diagnostic));
@@ -95,14 +88,18 @@ void RuntimeServices::clear_diagnostics() noexcept {
 }
 
 void RuntimeServices::schedule_frame_boundary_task(std::string id, FrameBoundaryTask task) {
-    if (id.empty()) throw std::invalid_argument("frame boundary task id must not be empty");
-    if (!task) throw std::invalid_argument("frame boundary task callback must not be empty");
+    if (id.empty())
+        throw std::invalid_argument("frame boundary task id must not be empty");
+    if (!task)
+        throw std::invalid_argument("frame boundary task callback must not be empty");
     pending_tasks_.push_back(ScheduledTask{std::move(id), std::move(task)});
 }
 
 bool RuntimeServices::open_profile_section(const std::string_view name) {
-    if (name.empty()) throw std::invalid_argument("profiler section name must not be empty");
-    if (frame_active_) return true;
+    if (name.empty())
+        throw std::invalid_argument("profiler section name must not be empty");
+    if (frame_active_)
+        return true;
     report(RuntimeDiagnostic{
         "STRATA.PROFILER.MISUSE",
         "section '" + std::string(name) +
@@ -115,43 +112,12 @@ bool RuntimeServices::open_profile_section(const std::string_view name) {
     return false;
 }
 
-void RuntimeServices::bump_style_resources() {
-    bump(generations_.style_resources, "style resource");
+std::uint64_t RuntimeServices::frame_index() const noexcept {
+    return frame_index_;
 }
-
-void RuntimeServices::bump_font_resources() {
-    bump(generations_.font_resources, "font resource");
+bool RuntimeServices::frame_active() const noexcept {
+    return frame_active_;
 }
-
-void RuntimeServices::bump_image_resources() {
-    bump(generations_.image_resources, "image resource");
-}
-
-void RuntimeServices::bump_shader_resources() {
-    bump(generations_.shader_resources, "shader resource");
-}
-
-void RuntimeServices::bump_material_resources() {
-    bump(generations_.material_resources, "material resource");
-}
-
-void RuntimeServices::bump_resource_reload_generations() {
-    RuntimeGenerationSnapshot next = generations_;
-    bump(next.style_resources, "style resource");
-    bump(next.font_resources, "font resource");
-    bump(next.image_resources, "image resource");
-    bump(next.shader_resources, "shader resource");
-    bump(next.material_resources, "material resource");
-    generations_ = next;
-}
-
-RuntimeGenerationSnapshot RuntimeServices::generations() const noexcept { return generations_; }
-
-std::uint64_t RuntimeServices::style_generation() const noexcept {
-    return generations_.style_resources;
-}
-std::uint64_t RuntimeServices::frame_index() const noexcept { return frame_index_; }
-bool RuntimeServices::frame_active() const noexcept { return frame_active_; }
 bool RuntimeServices::has_pending_frame_work() const noexcept {
     return !pending_diagnostics_.empty() || !pending_tasks_.empty();
 }

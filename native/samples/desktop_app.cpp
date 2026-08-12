@@ -50,9 +50,8 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
         if (app->host != nullptr && message != WM_CLOSE && message != WM_DESTROY) {
             const std::optional<std::intptr_t> handled =
                 app->host->handle_window_message(message, word, long_value);
-            return handled.has_value()
-                ? static_cast<LRESULT>(*handled)
-                : DefWindowProcW(window, message, word, long_value);
+            return handled.has_value() ? static_cast<LRESULT>(*handled)
+                                       : DefWindowProcW(window, message, word, long_value);
         }
         switch (message) {
         case WM_CLOSE:
@@ -62,7 +61,8 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
             app->host.reset();
             PostQuitMessage(0);
             return 0;
-        default: return DefWindowProcW(window, message, word, long_value);
+        default:
+            return DefWindowProcW(window, message, word, long_value);
         }
     } catch (const std::exception& error) {
         app->fail(error);
@@ -83,10 +83,12 @@ int wmain(const int argument_count, wchar_t** const arguments) {
             else if (resources.empty())
                 resources = argument;
             else
-                throw std::invalid_argument("usage: strata_desktop_sample [--smoke] <resource-root>");
+                throw std::invalid_argument(
+                    "usage: strata_desktop_sample [--smoke] <resource-root>");
         }
         if (resources.empty())
-            throw std::invalid_argument("desktop example requires the installed Strata resource root");
+            throw std::invalid_argument(
+                "desktop example requires the installed Strata resource root");
 
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         const HINSTANCE instance = GetModuleHandleW(nullptr);
@@ -102,8 +104,8 @@ int wmain(const int argument_count, wchar_t** const arguments) {
 
         WindowState app;
         const HWND window = CreateWindowExW(0U, window_class_name, L"Strata desktop example",
-                                             WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                                             900, 560, nullptr, nullptr, instance, &app);
+                                            WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 900,
+                                            560, nullptr, nullptr, instance, &app);
         if (window == nullptr)
             throw std::runtime_error("could not create the desktop example window");
 
@@ -117,22 +119,18 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         if (smoke) {
             const std::optional<std::intptr_t> unicode_query =
                 app.host->handle_window_message(WM_UNICHAR, UNICODE_NOCHAR, 0);
-            const std::optional<std::intptr_t> pointer_move = app.host->handle_window_message(
-                WM_MOUSEMOVE,
-                0U,
-                MAKELPARAM(4, 4)
-            );
+            const std::optional<std::intptr_t> pointer_move =
+                app.host->handle_window_message(WM_MOUSEMOVE, 0U, MAKELPARAM(4, 4));
             const std::optional<std::intptr_t> pointer_leave =
                 app.host->handle_window_message(WM_MOUSELEAVE, 0U, 0);
             const std::optional<std::intptr_t> ime_start =
                 app.host->handle_window_message(WM_IME_STARTCOMPOSITION, 0U, 0);
             const std::optional<std::intptr_t> ime_end =
                 app.host->handle_window_message(WM_IME_ENDCOMPOSITION, 0U, 0);
-            if (unicode_query != 1 || pointer_move != 0 || pointer_leave != 0 ||
-                ime_start != 0 || ime_end != 0) {
+            if (unicode_query != 1 || pointer_move != 0 || pointer_leave != 0 || ime_start != 0 ||
+                ime_end != 0) {
                 throw std::runtime_error("desktop window-message integration rejected smoke input");
             }
-            app.host->reload_resources();
         } else {
             ShowWindow(window, SW_SHOW);
             UpdateWindow(window);
@@ -158,8 +156,8 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                 std::cout << "STRATA_DESKTOP_SAMPLE_READY\n";
                 break;
             }
-            static_cast<void>(MsgWaitForMultipleObjectsEx(0U, nullptr, 16U, QS_ALLINPUT,
-                                                           MWMO_INPUTAVAILABLE));
+            static_cast<void>(
+                MsgWaitForMultipleObjectsEx(0U, nullptr, 16U, QS_ALLINPUT, MWMO_INPUTAVAILABLE));
         }
         app.host.reset();
         if (IsWindow(window))

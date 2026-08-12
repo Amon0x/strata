@@ -26,9 +26,8 @@ int main() {
         constexpr std::string_view source =
             "style Root { width: { weight: 1 }; height: { weight: 1 }; background: #334155FF; } "
             "overlay Main { root Panel(key: \"embedded.panel\", style: Root) }";
-        const strata::svg::Document svg = strata::svg::parse(
-            "<svg width='16' height='16'><path d='M1 1h14v14H1z'/></svg>"
-        );
+        const strata::svg::Document svg =
+            strata::svg::parse("<svg width='16' height='16'><path d='M1 1h14v14H1z'/></svg>");
         if (svg.commands.size() != 1U) {
             throw std::runtime_error("installed Strata::svg parser lost static geometry");
         }
@@ -43,20 +42,20 @@ int main() {
             strata::host::Revision model_revision;
             strata::host::Bindings bindings(runtime, "installed.cpp.host");
             bindings.snapshot(
-                "installed.cpp.model",
-                [&model_revision] { return model_revision.value(); },
+                "installed.cpp.model", [&model_revision] { return model_revision.value(); },
                 [] {
                     return strata::host::Value::object({
                         {"model", strata::host::Value::object({{"title", "Typed host model"}})},
                     });
-                }
-            );
+                });
             bindings.synchronize();
-            if (!runtime.activate(strata::SourceActivation{
-                    .generation = 1U,
-                    .entry_source_id = "installed/cpp/main.strata",
-                    .entry_text = std::string(source),
-                }).activated()) {
+            if (!runtime
+                     .activate(strata::SourceActivation{
+                         .generation = 1U,
+                         .entry_source_id = "installed/cpp/main.strata",
+                         .entry_text = std::string(source),
+                     })
+                     .activated()) {
                 throw std::runtime_error("installed C++ source did not activate");
             }
             if (runtime.memory_info().routed_current_bytes == 0U) {
@@ -75,21 +74,16 @@ int main() {
         }();
 
         const strata::InputEvent pointer = strata::InputEvent::pointer(
-            strata::InputKind::pointer_move,
-            strata::Point{400.0, 300.0}
-        );
+            strata::InputKind::pointer_move, strata::Point{400.0, 300.0});
         if (surface.enqueue(pointer).accepted_event_count != 1U) {
             throw std::runtime_error("installed C++ input facade rejected pointer input");
         }
-        static_cast<void>(surface.frame(now));
-        surface.reload_resources();
-        ++now;
         const strata_surface_frame_info frame = surface.frame(now);
         const std::vector<std::uint8_t> packet = surface.render_packet();
         strata::host::RenderPacketDecoder decoder;
         const strata::host::RenderPacket& decoded = decoder.decode(packet);
         const std::string json = surface.frame_json();
-        if (frame.frame_index != 2U || frame.render_command_count == 0U || packet.size() < 12U ||
+        if (frame.frame_index != 1U || frame.render_command_count == 0U || packet.size() < 12U ||
             decoded.frame_index != frame.frame_index || decoded.batches.empty() ||
             json.find("embedded.panel") == std::string::npos) {
             throw std::runtime_error("installed C++ frame or packet was invalid");

@@ -331,17 +331,6 @@ component DiagnosticsPage() {
       Stat(label: "INFO", value: format("{0}", debug.infos))
       Stat(label: "DROPPED", value: format("{0}", debug.droppedDiagnostics))
     }
-    Panel(style: AutoCard) {
-      Text(text: "HOT RELOAD", style: SectionText, maxLines: 1)
-      Panel(style: MetricStrip) {
-        for metric in debug.reloadMetrics {
-          Panel(style: MiniMetric) {
-            Text(text: metric.label, layout: { width: { weight: 1 } }, style: MutedText, maxLines: 1)
-            Text(text: metric.value, style: MonoText, maxLines: 1)
-          }
-        }
-      }
-    }
     Scroll(key: "strata.debug.diagnostics.scroll", vertical: true, horizontal: false, style: DebugScroll) {
       Panel(style: ScrollColumn) {
         if debug.diagnosticCount == 0 {

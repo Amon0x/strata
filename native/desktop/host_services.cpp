@@ -32,7 +32,8 @@ namespace {
 
 [[nodiscard]] std::vector<std::uint8_t> read_bytes(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary | std::ios::ate);
-    if (!input) throw std::runtime_error("could not open desktop resource: " + path.string());
+    if (!input)
+        throw std::runtime_error("could not open desktop resource: " + path.string());
     const std::streampos end = input.tellg();
     if (end < 0) {
         throw std::runtime_error("could not size desktop resource: " + path.string());
@@ -45,64 +46,41 @@ namespace {
     std::vector<std::uint8_t> result(static_cast<std::size_t>(size));
     input.seekg(0, std::ios::beg);
     if (!result.empty()) {
-        input.read(
-            reinterpret_cast<char*>(result.data()),
-            static_cast<std::streamsize>(result.size())
-        );
+        input.read(reinterpret_cast<char*>(result.data()),
+                   static_cast<std::streamsize>(result.size()));
     }
-    if (!input) throw std::runtime_error("could not read desktop resource: " + path.string());
+    if (!input)
+        throw std::runtime_error("could not read desktop resource: " + path.string());
     return result;
 }
 
 [[nodiscard]] std::string wide_to_utf8(const std::wstring_view value) {
-    if (value.empty()) return {};
-    const int size = WideCharToMultiByte(
-        CP_UTF8,
-        WC_ERR_INVALID_CHARS,
-        value.data(),
-        static_cast<int>(value.size()),
-        nullptr,
-        0,
-        nullptr,
-        nullptr
-    );
-    if (size <= 0) throw std::runtime_error("Win32 text could not be converted to UTF-8");
+    if (value.empty())
+        return {};
+    const int size =
+        WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+                            static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (size <= 0)
+        throw std::runtime_error("Win32 text could not be converted to UTF-8");
     std::string result(static_cast<std::size_t>(size), '\0');
-    if (WideCharToMultiByte(
-            CP_UTF8,
-            WC_ERR_INVALID_CHARS,
-            value.data(),
-            static_cast<int>(value.size()),
-            result.data(),
-            size,
-            nullptr,
-            nullptr
-        ) != size) {
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+                            static_cast<int>(value.size()), result.data(), size, nullptr,
+                            nullptr) != size) {
         throw std::runtime_error("Win32 UTF-8 conversion was incomplete");
     }
     return result;
 }
 
 [[nodiscard]] std::wstring utf8_to_wide(const std::string_view value) {
-    if (value.empty()) return {};
-    const int size = MultiByteToWideChar(
-        CP_UTF8,
-        MB_ERR_INVALID_CHARS,
-        value.data(),
-        static_cast<int>(value.size()),
-        nullptr,
-        0
-    );
-    if (size <= 0) throw std::runtime_error("UTF-8 clipboard text is invalid");
+    if (value.empty())
+        return {};
+    const int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+                                         static_cast<int>(value.size()), nullptr, 0);
+    if (size <= 0)
+        throw std::runtime_error("UTF-8 clipboard text is invalid");
     std::wstring result(static_cast<std::size_t>(size), L'\0');
-    if (MultiByteToWideChar(
-            CP_UTF8,
-            MB_ERR_INVALID_CHARS,
-            value.data(),
-            static_cast<int>(value.size()),
-            result.data(),
-            size
-        ) != size) {
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+                            static_cast<int>(value.size()), result.data(), size) != size) {
         throw std::runtime_error("UTF-8 clipboard conversion was incomplete");
     }
     return result;
@@ -115,9 +93,9 @@ struct HostServices::Impl final {
         Impl* host = nullptr;
     };
 
-    Impl(HWND window, std::filesystem::path root)
-        : window(window), root(std::move(root)) {
-        if (window == nullptr) throw std::invalid_argument("desktop services require a window");
+    Impl(HWND window, std::filesystem::path root) : window(window), root(std::move(root)) {
+        if (window == nullptr)
+            throw std::invalid_argument("desktop services require a window");
         if (!std::filesystem::is_directory(this->root)) {
             throw std::invalid_argument("desktop resource root is not a directory");
         }
@@ -129,9 +107,7 @@ struct HostServices::Impl final {
         }
     }
 
-    [[nodiscard]] std::filesystem::path resource_path(
-        const std::filesystem::path& relative
-    ) const {
+    [[nodiscard]] std::filesystem::path resource_path(const std::filesystem::path& relative) const {
         if (relative.empty() || relative.is_absolute()) {
             throw std::invalid_argument("desktop resource id must be relative");
         }
@@ -148,24 +124,21 @@ struct HostServices::Impl final {
         return std::string(bytes.begin(), bytes.end());
     }
 
-    [[nodiscard]] std::vector<std::uint8_t> bytes(
-        const std::filesystem::path& relative
-    ) const {
+    [[nodiscard]] std::vector<std::uint8_t> bytes(const std::filesystem::path& relative) const {
         return read_bytes(resource_path(relative));
     }
 
-    static strata_status load_resource(
-        void* const user_data,
-        const strata_string_view id,
-        strata_bytes_view* const output
-    ) noexcept {
-        if (output == nullptr) return STRATA_STATUS_INVALID_ARGUMENT;
+    static strata_status load_resource(void* const user_data, const strata_string_view id,
+                                       strata_bytes_view* const output) noexcept {
+        if (output == nullptr)
+            return STRATA_STATUS_INVALID_ARGUMENT;
         try {
             auto& self = *static_cast<Impl*>(user_data);
             const std::string resource_id = copy(id);
             const std::filesystem::path relative(resource_id);
             auto [found, inserted] = self.resource_cache.try_emplace(resource_id);
-            if (inserted) found->second = read_bytes(self.resource_path(relative));
+            if (inserted)
+                found->second = read_bytes(self.resource_path(relative));
             output->data = found->second.data();
             output->size = found->second.size();
             return output->size == 0U ? STRATA_STATUS_NOT_FOUND : STRATA_STATUS_OK;
@@ -174,13 +147,13 @@ struct HostServices::Impl final {
         }
     }
 
-    static strata_status clipboard_read(
-        void* const user_data,
-        strata_string_view* const output
-    ) noexcept {
-        if (output == nullptr) return STRATA_STATUS_INVALID_ARGUMENT;
+    static strata_status clipboard_read(void* const user_data,
+                                        strata_string_view* const output) noexcept {
+        if (output == nullptr)
+            return STRATA_STATUS_INVALID_ARGUMENT;
         auto& self = *static_cast<Impl*>(user_data);
-        if (!OpenClipboard(self.window)) return STRATA_STATUS_SERVICE_UNAVAILABLE;
+        if (!OpenClipboard(self.window))
+            return STRATA_STATUS_SERVICE_UNAVAILABLE;
         const HANDLE data = GetClipboardData(CF_UNICODETEXT);
         if (data == nullptr) {
             CloseClipboard();
@@ -204,14 +177,13 @@ struct HostServices::Impl final {
         }
     }
 
-    static strata_status clipboard_write(
-        void* const user_data,
-        const strata_string_view input
-    ) noexcept {
+    static strata_status clipboard_write(void* const user_data,
+                                         const strata_string_view input) noexcept {
         auto& self = *static_cast<Impl*>(user_data);
         try {
             const std::wstring text = utf8_to_wide(copy(input));
-            if (!OpenClipboard(self.window)) return STRATA_STATUS_SERVICE_UNAVAILABLE;
+            if (!OpenClipboard(self.window))
+                return STRATA_STATUS_SERVICE_UNAVAILABLE;
             if (!EmptyClipboard()) {
                 CloseClipboard();
                 return STRATA_STATUS_SERVICE_UNAVAILABLE;
@@ -254,13 +226,16 @@ struct HostServices::Impl final {
         return *found->second;
     }
 
-    static strata_status ime_set_active(void* const user_data, const std::uint32_t active) noexcept {
-        if (user_data == nullptr || active > 1U) return STRATA_STATUS_INVALID_ARGUMENT;
+    static strata_status ime_set_active(void* const user_data,
+                                        const std::uint32_t active) noexcept {
+        if (user_data == nullptr || active > 1U)
+            return STRATA_STATUS_INVALID_ARGUMENT;
         auto& client = *static_cast<ImeClient*>(user_data);
         Impl& self = *client.host;
         const bool enabled = active != 0U;
         if (enabled) {
-            if (self.active_ime_client == &client) return STRATA_STATUS_OK;
+            if (self.active_ime_client == &client)
+                return STRATA_STATUS_OK;
             if (self.active_ime_client == nullptr) {
                 if (self.detached_ime_context != nullptr) {
                     static_cast<void>(ImmAssociateContext(self.window, self.detached_ime_context));
@@ -279,23 +254,22 @@ struct HostServices::Impl final {
 
     [[nodiscard]] static LONG pixel(const double logical, const double scale) noexcept {
         const double value = std::round(logical * scale);
-        return static_cast<LONG>(std::clamp(
-            value,
-            static_cast<double>(std::numeric_limits<LONG>::min()),
-            static_cast<double>(std::numeric_limits<LONG>::max())
-        ));
+        return static_cast<LONG>(std::clamp(value,
+                                            static_cast<double>(std::numeric_limits<LONG>::min()),
+                                            static_cast<double>(std::numeric_limits<LONG>::max())));
     }
 
-    static strata_status ime_set_cursor_rect(
-        void* const user_data,
-        const strata_rect logical_rect
-    ) noexcept {
-        if (user_data == nullptr) return STRATA_STATUS_INVALID_ARGUMENT;
+    static strata_status ime_set_cursor_rect(void* const user_data,
+                                             const strata_rect logical_rect) noexcept {
+        if (user_data == nullptr)
+            return STRATA_STATUS_INVALID_ARGUMENT;
         auto& client = *static_cast<ImeClient*>(user_data);
         Impl& self = *client.host;
-        if (self.active_ime_client != &client) return STRATA_STATUS_OK;
+        if (self.active_ime_client != &client)
+            return STRATA_STATUS_OK;
         const HIMC context = ImmGetContext(self.window);
-        if (context == nullptr) return STRATA_STATUS_OK;
+        if (context == nullptr)
+            return STRATA_STATUS_OK;
         const LONG left = pixel(logical_rect.x, self.surface_scale);
         const LONG top = pixel(logical_rect.y, self.surface_scale);
         const LONG right = pixel(logical_rect.x + logical_rect.width, self.surface_scale);
@@ -319,7 +293,6 @@ struct HostServices::Impl final {
     std::map<std::string, std::vector<std::uint8_t>, std::less<>> resource_cache;
     std::map<std::string, std::unique_ptr<ImeClient>, std::less<>> ime_clients;
     std::string clipboard_text;
-    std::uint64_t resource_generation = 1U;
     HIMC detached_ime_context = nullptr;
     ImeClient* active_ime_client = nullptr;
     double surface_scale = 1.0;
@@ -333,9 +306,7 @@ std::string HostServices::text(const std::filesystem::path& relative) const {
     return impl_->text(relative);
 }
 
-std::vector<std::uint8_t> HostServices::bytes(
-    const std::filesystem::path& relative
-) const {
+std::vector<std::uint8_t> HostServices::bytes(const std::filesystem::path& relative) const {
     return impl_->bytes(relative);
 }
 
@@ -347,36 +318,34 @@ strata_resource_adapter HostServices::resource_adapter() noexcept {
     return strata_resource_adapter{
         sizeof(strata_resource_adapter),
         impl_.get(),
-        impl_->resource_generation,
         &Impl::load_resource,
     };
 }
 
-strata_resource_adapter HostServices::reload_resource_adapter() {
-    if (impl_->resource_generation == std::numeric_limits<std::uint64_t>::max()) {
-        throw std::overflow_error("desktop resource generation is exhausted");
-    }
-    impl_->resource_cache.clear();
-    ++impl_->resource_generation;
-    return resource_adapter();
-}
-
 strata_clipboard_adapter HostServices::clipboard_adapter() noexcept {
     return strata_clipboard_adapter{
-        sizeof(strata_clipboard_adapter), impl_.get(), &Impl::clipboard_read, &Impl::clipboard_write,
+        sizeof(strata_clipboard_adapter),
+        impl_.get(),
+        &Impl::clipboard_read,
+        &Impl::clipboard_write,
     };
 }
 
 strata_ime_adapter HostServices::ime_adapter(std::string owner) {
-    if (owner.empty()) throw std::invalid_argument("desktop IME owner must not be empty");
+    if (owner.empty())
+        throw std::invalid_argument("desktop IME owner must not be empty");
     Impl::ImeClient& client = impl_->ime_client(std::move(owner));
     return strata_ime_adapter{
-        sizeof(strata_ime_adapter), &client, &Impl::ime_set_active, &Impl::ime_set_cursor_rect,
+        sizeof(strata_ime_adapter),
+        &client,
+        &Impl::ime_set_active,
+        &Impl::ime_set_cursor_rect,
     };
 }
 
 void HostServices::set_surface_scale(const double scale) noexcept {
-    if (std::isfinite(scale) && scale > 0.0) impl_->surface_scale = scale;
+    if (std::isfinite(scale) && scale > 0.0)
+        impl_->surface_scale = scale;
 }
 
 } // namespace strata::desktop

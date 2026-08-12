@@ -37,8 +37,7 @@ void validate_text(const std::string_view value, const std::string_view label,
 [[nodiscard]] bool affects_layout(const DirtyReason reason) noexcept {
     return reason == DirtyReason::structure || reason == DirtyReason::layout ||
            reason == DirtyReason::text || reason == DirtyReason::style ||
-           reason == DirtyReason::scale || reason == DirtyReason::resource ||
-           reason == DirtyReason::editor;
+           reason == DirtyReason::scale || reason == DirtyReason::editor;
 }
 
 [[nodiscard]] bool invalidates_render(const DirtyReason reason) noexcept {
@@ -87,12 +86,10 @@ void validate_text(const std::string_view value, const std::string_view label,
         return 7U;
     case DirtyReason::animation:
         return 8U;
-    case DirtyReason::resource:
-        return 9U;
     case DirtyReason::editor:
-        return 10U;
+        return 9U;
     case DirtyReason::paint:
-        return 11U;
+        return 10U;
     }
     return 0U;
 }
@@ -391,10 +388,11 @@ const runtime::StateScopeSet& RetainedNode::warm_realization_state_scopes() cons
 
 DirtyGenerationSnapshot RetainedNode::dirty_generations() const noexcept {
     return DirtyGenerationSnapshot{
-        dirty_generations_[0U], dirty_generations_[1U],  dirty_generations_[2U],
-        dirty_generations_[3U], dirty_generations_[4U],  dirty_generations_[5U],
-        dirty_generations_[6U], dirty_generations_[7U],  dirty_generations_[8U],
-        dirty_generations_[9U], dirty_generations_[10U], dirty_generations_[11U]};
+        dirty_generations_[0U], dirty_generations_[1U], dirty_generations_[2U],
+        dirty_generations_[3U], dirty_generations_[4U], dirty_generations_[5U],
+        dirty_generations_[6U], dirty_generations_[7U], dirty_generations_[8U],
+        dirty_generations_[9U], dirty_generations_[10U],
+    };
 }
 
 const runtime::Value* RetainedNode::retained_value(const std::string_view name) const noexcept {
@@ -557,10 +555,10 @@ std::uint64_t RetainedTree::dirty_generation(const DirtyReason reason) const noe
 
 DirtyGenerationSnapshot RetainedTree::dirty_generations() const noexcept {
     return DirtyGenerationSnapshot{
-        dirty_generations_[0U], dirty_generations_[1U],  dirty_generations_[2U],
-        dirty_generations_[3U], dirty_generations_[4U],  dirty_generations_[5U],
-        dirty_generations_[6U], dirty_generations_[7U],  dirty_generations_[8U],
-        dirty_generations_[9U], dirty_generations_[10U], dirty_generations_[11U],
+        dirty_generations_[0U], dirty_generations_[1U], dirty_generations_[2U],
+        dirty_generations_[3U], dirty_generations_[4U], dirty_generations_[5U],
+        dirty_generations_[6U], dirty_generations_[7U], dirty_generations_[8U],
+        dirty_generations_[9U], dirty_generations_[10U],
     };
 }
 std::size_t RetainedTree::dirty_count() const noexcept {

@@ -35,15 +35,6 @@ constexpr std::array<std::string_view, static_cast<std::size_t>(ProfilerCounter:
         "textures.pending_creations",
         "gpu.deferred_resources",
         "gpu.deferred_resource_deletions",
-        "resources.reload_duration_nanos",
-        "hot_reload.gpu_upload_jobs",
-        "hot_reload.gpu_upload_bytes",
-        "hot_reload.gpu_upload_deferred_jobs",
-        "hot_reload.gpu_upload_deferred_bytes",
-        "hot_reload.gpu_upload_over_budget_jobs",
-        "hot_reload.gpu_upload_over_budget_bytes",
-        "hot_reload.gpu_upload_rejected_jobs",
-        "hot_reload.gpu_upload_rejected_bytes",
         "text.layout_requests",
         "text.layout_cache_hits",
         "text.layout_cache_misses",
@@ -85,7 +76,6 @@ constexpr std::array<std::string_view, static_cast<std::size_t>(ProfilerCounter:
         "render.packet_bytes",
         "host.submissions",
         "host.submit_nanos",
-        "resources.reloads",
         "diagnostics.records",
         "input.pointer_geometry_rebuilds",
         "input.fast_path_frames",
@@ -99,8 +89,8 @@ constexpr std::array<std::string_view, static_cast<std::size_t>(ProfilerCounter:
 
 [[nodiscard]] std::int64_t steady_now_nanos() noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()
-    ).count();
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
 }
 
 [[nodiscard]] bool valid_section_name(const std::string_view name) noexcept {
@@ -115,11 +105,11 @@ std::string_view profiler_counter_name(const ProfilerCounter counter) noexcept {
 }
 
 void ProfilerConfig::validate() const {
-    if (timing_window_size == 0U || maximum_sections == 0U ||
-        maximum_recent_spikes == 0U || spike_absolute_floor_nanos < 0 ||
-        !std::isfinite(spike_baseline_multiplier) || spike_baseline_multiplier < 1.0 ||
-        spike_minimum_baseline_samples == 0U) {
-        throw std::invalid_argument("profiler configuration contains an invalid bound or spike policy");
+    if (timing_window_size == 0U || maximum_sections == 0U || maximum_recent_spikes == 0U ||
+        spike_absolute_floor_nanos < 0 || !std::isfinite(spike_baseline_multiplier) ||
+        spike_baseline_multiplier < 1.0 || spike_minimum_baseline_samples == 0U) {
+        throw std::invalid_argument(
+            "profiler configuration contains an invalid bound or spike policy");
     }
 }
 
@@ -129,7 +119,8 @@ Profiler::RollingWindow::RollingWindow(const std::size_t requested_capacity)
 }
 
 bool Profiler::RollingWindow::add(const std::int64_t value) {
-    if (value < 0) throw std::invalid_argument("profiler timing samples must be non-negative");
+    if (value < 0)
+        throw std::invalid_argument("profiler timing samples must be non-negative");
     const bool evicted = samples.size() == capacity;
     if (samples.size() == capacity) {
         const std::int64_t removed = samples.front();
@@ -138,54 +129,46 @@ bool Profiler::RollingWindow::add(const std::int64_t value) {
         ordered_samples.erase(std::ranges::lower_bound(ordered_samples, removed));
     }
     samples.push_back(value);
-    ordered_samples.insert(
-        std::ranges::upper_bound(ordered_samples, value),
-        value
-    );
+    ordered_samples.insert(std::ranges::upper_bound(ordered_samples, value), value);
     const std::uint64_t converted = static_cast<std::uint64_t>(value);
     sum = converted > std::numeric_limits<std::uint64_t>::max() - sum
-        ? std::numeric_limits<std::uint64_t>::max()
-        : sum + converted;
+              ? std::numeric_limits<std::uint64_t>::max()
+              : sum + converted;
     maximum_value = ordered_samples.back();
     return evicted;
 }
 
 std::int64_t Profiler::RollingWindow::average() const noexcept {
-    if (samples.empty()) return 0;
+    if (samples.empty())
+        return 0;
     const std::uint64_t value = sum / samples.size();
     return value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
-        ? std::numeric_limits<std::int64_t>::max()
-        : static_cast<std::int64_t>(value);
+               ? std::numeric_limits<std::int64_t>::max()
+               : static_cast<std::int64_t>(value);
 }
 
-std::int64_t Profiler::RollingWindow::maximum() const noexcept { return maximum_value; }
+std::int64_t Profiler::RollingWindow::maximum() const noexcept {
+    return maximum_value;
+}
 
 std::int64_t Profiler::RollingWindow::percentile(const double fraction) const {
     if (!std::isfinite(fraction) || fraction < 0.0 || fraction > 1.0) {
         throw std::invalid_argument("profiler percentile must be in [0, 1]");
     }
-    if (samples.empty()) return 0;
-    const std::size_t rank = static_cast<std::size_t>(std::ceil(
-        fraction * static_cast<double>(ordered_samples.size())
-    ));
-    const std::size_t index =
-        std::clamp(rank, std::size_t{1U}, ordered_samples.size()) - 1U;
+    if (samples.empty())
+        return 0;
+    const std::size_t rank =
+        static_cast<std::size_t>(std::ceil(fraction * static_cast<double>(ordered_samples.size())));
+    const std::size_t index = std::clamp(rank, std::size_t{1U}, ordered_samples.size()) - 1U;
     return ordered_samples[index];
 }
 
-Profiler::Section::Section(
-    Profiler* const profiler,
-    const std::uint64_t generation,
-    const std::uint64_t token,
-    const std::string_view name
-) noexcept : profiler_(profiler), generation_(generation), token_(token) {
+Profiler::Section::Section(Profiler* const profiler, const std::uint64_t generation,
+                           const std::uint64_t token, const std::string_view name) noexcept
+    : profiler_(profiler), generation_(generation), token_(token) {
 #ifdef STRATA_ENABLE_TRACY
     static constexpr ___tracy_source_location_data source_location{
-        nullptr,
-        "strata::runtime::Profiler::Section",
-        __FILE__,
-        __LINE__,
-        0U,
+        nullptr, "strata::runtime::Profiler::Section", __FILE__, __LINE__, 0U,
     };
     const TracyCZoneCtx trace = ___tracy_emit_zone_begin(&source_location, 1);
     trace_id_ = trace.id;
@@ -197,14 +180,13 @@ Profiler::Section::Section(
 }
 
 Profiler::Section::Section(Section&& other) noexcept
-    : profiler_(std::exchange(other.profiler_, nullptr)),
-      generation_(other.generation_),
-      token_(other.token_),
-      trace_id_(other.trace_id_),
+    : profiler_(std::exchange(other.profiler_, nullptr)), generation_(other.generation_),
+      token_(other.token_), trace_id_(other.trace_id_),
       trace_active_(std::exchange(other.trace_active_, 0)) {}
 
 Profiler::Section& Profiler::Section::operator=(Section&& other) noexcept {
-    if (this == &other) return *this;
+    if (this == &other)
+        return *this;
     close();
     profiler_ = std::exchange(other.profiler_, nullptr);
     generation_ = other.generation_;
@@ -214,7 +196,9 @@ Profiler::Section& Profiler::Section::operator=(Section&& other) noexcept {
     return *this;
 }
 
-Profiler::Section::~Section() { close(); }
+Profiler::Section::~Section() {
+    close();
+}
 
 void Profiler::Section::close() noexcept {
 #ifdef STRATA_ENABLE_TRACY
@@ -223,7 +207,8 @@ void Profiler::Section::close() noexcept {
     }
 #endif
     Profiler* const profiler = std::exchange(profiler_, nullptr);
-    if (profiler == nullptr) return;
+    if (profiler == nullptr)
+        return;
     try {
         profiler->close_section(generation_, token_);
     } catch (...) {
@@ -231,7 +216,9 @@ void Profiler::Section::close() noexcept {
     }
 }
 
-bool Profiler::Section::active() const noexcept { return profiler_ != nullptr; }
+bool Profiler::Section::active() const noexcept {
+    return profiler_ != nullptr;
+}
 
 Profiler::Frame::Frame(Profiler* const profiler, const std::uint64_t generation) noexcept
     : profiler_(profiler), generation_(generation) {}
@@ -240,18 +227,22 @@ Profiler::Frame::Frame(Frame&& other) noexcept
     : profiler_(std::exchange(other.profiler_, nullptr)), generation_(other.generation_) {}
 
 Profiler::Frame& Profiler::Frame::operator=(Frame&& other) noexcept {
-    if (this == &other) return *this;
+    if (this == &other)
+        return *this;
     close();
     profiler_ = std::exchange(other.profiler_, nullptr);
     generation_ = other.generation_;
     return *this;
 }
 
-Profiler::Frame::~Frame() { close(); }
+Profiler::Frame::~Frame() {
+    close();
+}
 
 void Profiler::Frame::close() noexcept {
     Profiler* const profiler = std::exchange(profiler_, nullptr);
-    if (profiler == nullptr) return;
+    if (profiler == nullptr)
+        return;
     try {
         profiler->end_frame(generation_);
     } catch (...) {
@@ -259,28 +250,25 @@ void Profiler::Frame::close() noexcept {
     }
 }
 
-bool Profiler::Frame::active() const noexcept { return profiler_ != nullptr; }
+bool Profiler::Frame::active() const noexcept {
+    return profiler_ != nullptr;
+}
 
-Profiler::Profiler(
-    const ProfilerScope scope,
-    std::string scope_id,
-    ProfilerConfig config,
-    Clock clock
-) : scope_(scope),
-    scope_id_(std::move(scope_id)),
-    config_(config),
-    clock_(std::move(clock)) {
+Profiler::Profiler(const ProfilerScope scope, std::string scope_id, ProfilerConfig config,
+                   Clock clock)
+    : scope_(scope), scope_id_(std::move(scope_id)), config_(config), clock_(std::move(clock)) {
     config_.validate();
-    if (scope_id_.empty()) throw std::invalid_argument("profiler scope id must not be empty");
-    if (!clock_) clock_ = &steady_now_nanos;
+    if (scope_id_.empty())
+        throw std::invalid_argument("profiler scope id must not be empty");
+    if (!clock_)
+        clock_ = &steady_now_nanos;
 }
 
 Profiler::Frame Profiler::frame(const std::uint64_t frame_index) {
     begin_frame(frame_index);
     std::scoped_lock lock(mutex_);
-    return frame_active_ && owner_thread_ == std::this_thread::get_id()
-        ? Frame(this, generation_)
-        : Frame{};
+    return frame_active_ && owner_thread_ == std::this_thread::get_id() ? Frame(this, generation_)
+                                                                        : Frame{};
 }
 
 Profiler::Section Profiler::section(const std::string_view name) {
@@ -289,10 +277,10 @@ Profiler::Section Profiler::section(const std::string_view name) {
     }
     const std::int64_t started_at = now();
     std::scoped_lock lock(mutex_);
-    if (!enabled_ || !frame_active_ || owner_thread_ != std::this_thread::get_id()) return {};
-    const std::optional<std::uint64_t> parent = open_sections_.empty()
-        ? std::nullopt
-        : std::optional(open_sections_.back().section_id);
+    if (!enabled_ || !frame_active_ || owner_thread_ != std::this_thread::get_id())
+        return {};
+    const std::optional<std::uint64_t> parent =
+        open_sections_.empty() ? std::nullopt : std::optional(open_sections_.back().section_id);
     const std::optional<std::uint64_t> id = find_or_create_section_locked(name, parent);
     if (!id.has_value()) {
         increment_saturated(dropped_section_samples_);
@@ -310,15 +298,18 @@ Profiler::Section Profiler::section(const std::string_view name) {
 void Profiler::set_capture_enabled(const bool enabled) {
     const std::int64_t ended_at = now();
     std::scoped_lock lock(mutex_);
-    if (enabled_ == enabled) return;
+    if (enabled_ == enabled)
+        return;
     if (frame_active_) {
-        while (!open_sections_.empty()) close_top_locked(ended_at);
+        while (!open_sections_.empty())
+            close_top_locked(ended_at);
         frame_active_ = false;
         owner_thread_ = {};
     }
     enabled_ = enabled;
     ++generation_;
-    if (!frame_active_) publish_completed_snapshot_locked();
+    if (!frame_active_)
+        publish_completed_snapshot_locked();
 }
 
 bool Profiler::capture_enabled() const noexcept {
@@ -328,28 +319,33 @@ bool Profiler::capture_enabled() const noexcept {
 
 void Profiler::increment(const ProfilerCounter counter, const std::uint64_t amount) {
     const std::size_t index = static_cast<std::size_t>(counter);
-    if (index >= counters_.size()) throw std::invalid_argument("profiler counter identity is invalid");
+    if (index >= counters_.size())
+        throw std::invalid_argument("profiler counter identity is invalid");
     std::scoped_lock lock(mutex_);
-    if (!enabled_) return;
+    if (!enabled_)
+        return;
     increment_saturated(counters_[index], amount);
-    if (!frame_active_) invalidate_completed_snapshot_locked();
+    if (!frame_active_)
+        invalidate_completed_snapshot_locked();
 }
 
 void Profiler::record(const ProfilerCounter counter, const std::uint64_t value) {
     const std::size_t index = static_cast<std::size_t>(counter);
-    if (index >= counters_.size()) throw std::invalid_argument("profiler counter identity is invalid");
+    if (index >= counters_.size())
+        throw std::invalid_argument("profiler counter identity is invalid");
     std::scoped_lock lock(mutex_);
     if (enabled_) {
         counters_[index] = value;
-        if (!frame_active_) invalidate_completed_snapshot_locked();
+        if (!frame_active_)
+            invalidate_completed_snapshot_locked();
     }
 }
 
 void Profiler::record_counters(
-    const std::initializer_list<std::pair<ProfilerCounter, std::uint64_t>> values
-) {
+    const std::initializer_list<std::pair<ProfilerCounter, std::uint64_t>> values) {
     std::scoped_lock lock(mutex_);
-    if (!enabled_) return;
+    if (!enabled_)
+        return;
     for (const auto& [counter, value] : values) {
         const std::size_t index = static_cast<std::size_t>(counter);
         if (index >= counters_.size()) {
@@ -357,7 +353,8 @@ void Profiler::record_counters(
         }
         counters_[index] = value;
     }
-    if (!frame_active_) invalidate_completed_snapshot_locked();
+    if (!frame_active_)
+        invalidate_completed_snapshot_locked();
 }
 
 void Profiler::record_host_frame(const HostFrameProfilerTelemetry& value) {
@@ -365,7 +362,8 @@ void Profiler::record_host_frame(const HostFrameProfilerTelemetry& value) {
         throw std::invalid_argument("host frame profiler duration must be non-negative");
     }
     std::scoped_lock lock(mutex_);
-    if (!enabled_) return;
+    if (!enabled_)
+        return;
     const auto set = [this](const ProfilerCounter counter, const std::uint64_t amount) {
         counters_[static_cast<std::size_t>(counter)] = amount;
     };
@@ -380,10 +378,7 @@ void Profiler::record_host_frame(const HostFrameProfilerTelemetry& value) {
     set(ProfilerCounter::queued_texture_uploads, value.queued_texture_uploads);
     set(ProfilerCounter::queued_texture_upload_bytes, value.queued_texture_upload_bytes);
     set(ProfilerCounter::deferred_gpu_resources, value.deferred_gpu_resources);
-    set(
-        ProfilerCounter::deferred_gpu_resource_deletions,
-        value.deferred_gpu_resource_deletions
-    );
+    set(ProfilerCounter::deferred_gpu_resource_deletions, value.deferred_gpu_resource_deletions);
     set(ProfilerCounter::blur_passes, value.blur_passes);
     set(ProfilerCounter::blur_target_width, value.blur_target_width);
     set(ProfilerCounter::blur_target_height, value.blur_target_height);
@@ -403,18 +398,18 @@ void Profiler::record_host_frame(const HostFrameProfilerTelemetry& value) {
     } else {
         increment_saturated(dropped_section_samples_);
     }
-    if (!frame_active_) invalidate_completed_snapshot_locked();
+    if (!frame_active_)
+        invalidate_completed_snapshot_locked();
 }
 
-void Profiler::record_external_timing(
-    const std::string_view name,
-    const std::int64_t duration_nanos
-) {
+void Profiler::record_external_timing(const std::string_view name,
+                                      const std::int64_t duration_nanos) {
     if (!valid_section_name(name) || duration_nanos < 0) {
         throw std::invalid_argument("external profiler timing requires a valid name and duration");
     }
     std::scoped_lock lock(mutex_);
-    if (!enabled_) return;
+    if (!enabled_)
+        return;
     if (!frame_root_id_.has_value()) {
         frame_root_id_ = find_or_create_section_locked("frame", std::nullopt);
     }
@@ -428,12 +423,14 @@ void Profiler::record_external_timing(
         return;
     }
     record_timing_locked(*id, duration_nanos);
-    if (!frame_active_) invalidate_completed_snapshot_locked();
+    if (!frame_active_)
+        invalidate_completed_snapshot_locked();
 }
 
 ProfilerSnapshot Profiler::snapshot() const {
     std::scoped_lock lock(mutex_);
-    if (completed_snapshot_dirty_) publish_completed_snapshot_locked();
+    if (completed_snapshot_dirty_)
+        publish_completed_snapshot_locked();
     if (has_completed_snapshot_) {
         ProfilerSnapshot result = completed_snapshot_;
         result.capture_enabled = enabled_;
@@ -443,15 +440,22 @@ ProfilerSnapshot Profiler::snapshot() const {
         return result;
     }
     return ProfilerSnapshot{
-        scope_, scope_id_, 0U, enabled_, dropped_section_samples_, dropped_timing_samples_,
-        dropped_spikes_, {}, {}, {},
+        scope_,          scope_id_, 0U, enabled_, dropped_section_samples_, dropped_timing_samples_,
+        dropped_spikes_, {},        {}, {},
     };
 }
 
 ProfilerSnapshot Profiler::snapshot_locked() const {
     ProfilerSnapshot result{
-        scope_, scope_id_, frame_index_, enabled_, dropped_section_samples_,
-        dropped_timing_samples_, dropped_spikes_, {}, counters_locked(false),
+        scope_,
+        scope_id_,
+        frame_index_,
+        enabled_,
+        dropped_section_samples_,
+        dropped_timing_samples_,
+        dropped_spikes_,
+        {},
+        counters_locked(false),
         std::vector<ProfilerSpikeSnapshot>(spikes_.begin(), spikes_.end()),
     };
     result.sections.reserve(sections_.size());
@@ -524,13 +528,15 @@ std::int64_t Profiler::now() const noexcept {
 void Profiler::begin_frame(const std::uint64_t frame_index) {
     const std::int64_t started_at = now();
     std::scoped_lock lock(mutex_);
-    if (!enabled_) return;
+    if (!enabled_)
+        return;
     if (frame_active_) {
         if (owner_thread_ != std::this_thread::get_id()) {
             increment_saturated(dropped_timing_samples_);
             return;
         }
-        while (!open_sections_.empty()) close_top_locked(started_at);
+        while (!open_sections_.empty())
+            close_top_locked(started_at);
         frame_active_ = false;
         owner_thread_ = {};
         publish_completed_snapshot_locked();
@@ -563,9 +569,10 @@ void Profiler::begin_frame(const std::uint64_t frame_index) {
 void Profiler::end_frame(const std::uint64_t generation) {
     const std::int64_t ended_at = now();
     std::scoped_lock lock(mutex_);
-    if (!frame_active_ || generation != generation_ ||
-        owner_thread_ != std::this_thread::get_id()) return;
-    while (!open_sections_.empty()) close_top_locked(ended_at);
+    if (!frame_active_ || generation != generation_ || owner_thread_ != std::this_thread::get_id())
+        return;
+    while (!open_sections_.empty())
+        close_top_locked(ended_at);
     frame_active_ = false;
     owner_thread_ = {};
     publish_completed_snapshot_locked();
@@ -574,53 +581,61 @@ void Profiler::end_frame(const std::uint64_t generation) {
 void Profiler::close_section(const std::uint64_t generation, const std::uint64_t token) {
     const std::int64_t ended_at = now();
     std::scoped_lock lock(mutex_);
-    if (!frame_active_ || generation != generation_ ||
-        owner_thread_ != std::this_thread::get_id()) return;
+    if (!frame_active_ || generation != generation_ || owner_thread_ != std::this_thread::get_id())
+        return;
     const auto found = std::ranges::find(open_sections_, token, &OpenSection::token);
-    if (found == open_sections_.end()) return;
+    if (found == open_sections_.end())
+        return;
     const std::size_t index = static_cast<std::size_t>(found - open_sections_.begin());
-    while (open_sections_.size() > index) close_top_locked(ended_at);
+    while (open_sections_.size() > index)
+        close_top_locked(ended_at);
 }
 
-std::optional<std::uint64_t> Profiler::find_or_create_section_locked(
-    const std::string_view name,
-    const std::optional<std::uint64_t> parent_id
-) {
+std::optional<std::uint64_t>
+Profiler::find_or_create_section_locked(const std::string_view name,
+                                        const std::optional<std::uint64_t> parent_id) {
     SectionKey key{parent_id, std::string(name)};
     if (const auto found = section_ids_.find(key); found != section_ids_.end()) {
         return found->second;
     }
     if (sections_.size() == config_.maximum_sections ||
-        next_section_id_ == std::numeric_limits<std::uint64_t>::max()) return std::nullopt;
+        next_section_id_ == std::numeric_limits<std::uint64_t>::max())
+        return std::nullopt;
     std::string path;
     if (parent_id.has_value()) {
         const SectionRecord* const parent = section_locked(*parent_id);
-        if (parent == nullptr) return std::nullopt;
+        if (parent == nullptr)
+            return std::nullopt;
         path = parent->path + "/" + std::string(name);
     } else {
         path = name;
     }
     const std::uint64_t id = next_section_id_++;
     sections_.push_back(SectionRecord{
-        id, parent_id, std::string(name), std::move(path),
-        RollingWindow(config_.timing_window_size), 0U,
+        id,
+        parent_id,
+        std::string(name),
+        std::move(path),
+        RollingWindow(config_.timing_window_size),
+        0U,
     });
     section_ids_.emplace(std::move(key), id);
     return id;
 }
 
 void Profiler::close_top_locked(const std::int64_t ended_at_nanos) {
-    if (open_sections_.empty()) return;
+    if (open_sections_.empty())
+        return;
     const OpenSection open = open_sections_.back();
     open_sections_.pop_back();
-    if (open.generation != generation_) return;
-    record_timing_locked(open.section_id, std::max<std::int64_t>(0, ended_at_nanos - open.started_at_nanos));
+    if (open.generation != generation_)
+        return;
+    record_timing_locked(open.section_id,
+                         std::max<std::int64_t>(0, ended_at_nanos - open.started_at_nanos));
 }
 
-void Profiler::record_timing_locked(
-    const std::uint64_t section_id,
-    const std::int64_t duration_nanos
-) {
+void Profiler::record_timing_locked(const std::uint64_t section_id,
+                                    const std::int64_t duration_nanos) {
     SectionRecord* const section = section_locked(section_id);
     if (section == nullptr) {
         increment_saturated(dropped_timing_samples_);
@@ -628,26 +643,24 @@ void Profiler::record_timing_locked(
     }
     const std::size_t prior_samples = section->timings.samples.size();
     const std::int64_t baseline = section->timings.average();
-    const bool spike = prior_samples >= config_.spike_minimum_baseline_samples &&
-        baseline > 0 && duration_nanos >= config_.spike_absolute_floor_nanos &&
-        static_cast<long double>(duration_nanos) >=
-            static_cast<long double>(baseline) * config_.spike_baseline_multiplier;
-    if (section->timings.add(duration_nanos)) increment_saturated(dropped_timing_samples_);
+    const bool spike = prior_samples >= config_.spike_minimum_baseline_samples && baseline > 0 &&
+                       duration_nanos >= config_.spike_absolute_floor_nanos &&
+                       static_cast<long double>(duration_nanos) >=
+                           static_cast<long double>(baseline) * config_.spike_baseline_multiplier;
+    if (section->timings.add(duration_nanos))
+        increment_saturated(dropped_timing_samples_);
     section->last_sample_frame_index = frame_index_;
-    if (spike) record_spike_locked(*section, duration_nanos, baseline);
+    if (spike)
+        record_spike_locked(*section, duration_nanos, baseline);
 }
 
-void Profiler::record_spike_locked(
-    const SectionRecord& section,
-    const std::int64_t duration_nanos,
-    const std::int64_t baseline_nanos
-) {
-    const long double adaptive = std::ceil(
-        static_cast<long double>(baseline_nanos) * config_.spike_baseline_multiplier
-    );
+void Profiler::record_spike_locked(const SectionRecord& section, const std::int64_t duration_nanos,
+                                   const std::int64_t baseline_nanos) {
+    const long double adaptive =
+        std::ceil(static_cast<long double>(baseline_nanos) * config_.spike_baseline_multiplier);
     const std::int64_t adaptive_nanos = adaptive >= std::numeric_limits<std::int64_t>::max()
-        ? std::numeric_limits<std::int64_t>::max()
-        : static_cast<std::int64_t>(adaptive);
+                                            ? std::numeric_limits<std::int64_t>::max()
+                                            : static_cast<std::int64_t>(adaptive);
     ProfilerSpikeSnapshot spike{
         section.id,
         section.parent_id,
@@ -684,9 +697,11 @@ std::vector<ProfilerCounterSnapshot> Profiler::counters_locked(const bool nonzer
     std::vector<ProfilerCounterSnapshot> result;
     result.reserve(counters_.size());
     for (std::size_t index = 0U; index < counters_.size(); ++index) {
-        if (nonzero_only && counters_[index] == 0U) continue;
+        if (nonzero_only && counters_[index] == 0U)
+            continue;
         result.push_back(ProfilerCounterSnapshot{
-            static_cast<ProfilerCounter>(index), counters_[index],
+            static_cast<ProfilerCounter>(index),
+            counters_[index],
         });
     }
     return result;
@@ -700,12 +715,14 @@ const Profiler::SectionRecord* Profiler::section_locked(const std::uint64_t id) 
     return id == 0U || id > sections_.size() ? nullptr : &sections_[id - 1U];
 }
 
-void Profiler::reset_counters_locked() noexcept { counters_.fill(0U); }
+void Profiler::reset_counters_locked() noexcept {
+    counters_.fill(0U);
+}
 
 void Profiler::increment_saturated(std::uint64_t& value, const std::uint64_t amount) noexcept {
     value = amount > std::numeric_limits<std::uint64_t>::max() - value
-        ? std::numeric_limits<std::uint64_t>::max()
-        : value + amount;
+                ? std::numeric_limits<std::uint64_t>::max()
+                : value + amount;
 }
 
 } // namespace strata::runtime

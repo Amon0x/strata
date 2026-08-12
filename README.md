@@ -113,17 +113,18 @@ settings, `F7` toggles the application showcase, `F8` cycles the diagnostics sur
 the passive frame-time HUD, and `F10` toggles Morrow. `--multi-window` opens two independent hosts
 in one process; `--uncapped` disables VSync and the message-loop frame cap.
 
-Run an arbitrary application from a launch document instead of opening the bundled showcase:
+Run a self-contained generic application manifest instead of the bundled showcase. Add `--watch`
+for last-good preview of compatible `.strata` modules and predeclared HLSL bodies:
 
 ```bat
 build\cmake\windows-x64\native\RelWithDebInfo\strata_desktop.exe ^
-  --application path\to\application.json ^
-  --resources path\to\resource-root
+  path\to\app.strata-app.json --watch
 ```
 
-Applications embedded in another executable link the installed `Strata::desktop` target. The
-complete Win32 window/input example is
-[`native/samples/desktop_app.cpp`](native/samples/desktop_app.cpp).
+The same manifest may name a prebuilt custom host executable; the runner launches it and propagates
+its exit status. It never guesses a CMake target or fabricates native actions/models. Applications
+embedded directly in another executable link the installed `Strata::desktop` target. The complete
+Win32 window/input example is [`native/samples/desktop_app.cpp`](native/samples/desktop_app.cpp).
 
 ## Headless application testing
 

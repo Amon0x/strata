@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "runtime/diagnostic.hpp"
-#include "runtime/generations.hpp"
 
 namespace strata::runtime {
 
@@ -17,12 +16,10 @@ namespace strata::runtime {
  * hidden process-global channel or a second, disconnected diagnostic history.
  */
 class RuntimeServices final {
-public:
+  public:
     using FrameBoundaryTask = std::function<void()>;
-    using PublishedDiagnosticSink = std::function<void(
-        const RuntimeDiagnosticRecord&,
-        std::uint64_t dropped_count
-    )>;
+    using PublishedDiagnosticSink =
+        std::function<void(const RuntimeDiagnosticRecord&, std::uint64_t dropped_count)>;
 
     explicit RuntimeServices(PublishedDiagnosticSink diagnostic_sink = {});
 
@@ -42,20 +39,12 @@ public:
     /** Returns false and reports misuse when no runtime frame is active. */
     [[nodiscard]] bool open_profile_section(std::string_view name);
 
-    void bump_style_resources();
-    void bump_font_resources();
-    void bump_image_resources();
-    void bump_shader_resources();
-    void bump_material_resources();
-    void bump_resource_reload_generations();
-    [[nodiscard]] RuntimeGenerationSnapshot generations() const noexcept;
-    [[nodiscard]] std::uint64_t style_generation() const noexcept;
     [[nodiscard]] std::uint64_t frame_index() const noexcept;
     [[nodiscard]] bool frame_active() const noexcept;
     /** Pending diagnostics/tasks require the next Surface frame boundary to run. */
     [[nodiscard]] bool has_pending_frame_work() const noexcept;
 
-private:
+  private:
     void publish_active_diagnostic(RuntimeDiagnostic diagnostic);
 
     struct ScheduledTask final {
@@ -68,7 +57,6 @@ private:
     std::vector<ScheduledTask> pending_tasks_;
     PublishedDiagnosticSink diagnostic_sink_;
     std::uint64_t frame_index_ = 0U;
-    RuntimeGenerationSnapshot generations_;
     bool frame_active_ = false;
 };
 

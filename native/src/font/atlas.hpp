@@ -54,19 +54,12 @@ struct GlyphAtlasEntry final {
     SubpixelPhase phase;
 };
 
-/** Throwing preparation for an otherwise noexcept nonterminal host-resource invalidation. */
-struct AtlasResourceInvalidationPlan final {
-    std::vector<AtlasOperation> releases;
-    std::uint64_t generation = 0U;
-    std::size_t page_count = 0U;
-    std::size_t operation_count = 0U;
-};
-
 struct GlyphAtlasConfig final {
     std::uint32_t page_size = 1'024U;
     std::uint32_t maximum_pages = 8U;
     std::uint32_t maximum_cached_glyphs = 4'096U;
-    /** Bounds full-generation recycling work admitted during one explicit safe preparation phase. */
+    /** Bounds full-generation recycling work admitted during one explicit safe preparation phase.
+     */
     std::uint32_t maximum_generation_recycles_per_preparation = 1U;
     std::uint32_t gutter_pixels = 1U;
     CoverageRasterConfig coverage;
@@ -88,7 +81,7 @@ struct GlyphAtlasWarmupRequest final {
  * parsed font identity; atlas coordinates, pages, resource ownership, and invalidation stay local.
  */
 class GlyphAtlas final {
-public:
+  public:
     explicit GlyphAtlas(std::string_view owner_id, GlyphAtlasConfig config = {});
     ~GlyphAtlas();
 
@@ -99,12 +92,6 @@ public:
 
     /** Invalidates scale-dependent coverage pages and plans explicit host releases. */
     void adopt_display_scale(double display_scale);
-    /** Invalidates every page after a host resource reload and plans explicit host releases. */
-    void invalidate_resources();
-    /** Builds releases and reserves pending-operation capacity without changing logical state. */
-    [[nodiscard]] AtlasResourceInvalidationPlan plan_resource_invalidation();
-    /** Applies a matching prepared plan without allocation or failure. */
-    void commit_resource_invalidation(AtlasResourceInvalidationPlan plan) noexcept;
 
     /**
      * Opens the frame-safe glyph preparation phase. If a prior submission hit capacity, old pages
@@ -116,25 +103,15 @@ public:
     /** Seals the atlas against page recycling before atlas-backed geometry is published. */
     void end_frame_preparation() noexcept;
 
-    [[nodiscard]] std::optional<GlyphAtlasEntry> request_coverage(
-        std::string_view font_id,
-        const OpenTypeFont& font,
-        std::uint16_t glyph,
-        double pixel_size,
-        SubpixelPhase phase,
-        std::uint32_t font_style_flags = 0U
-    );
+    [[nodiscard]] std::optional<GlyphAtlasEntry>
+    request_coverage(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
+                     double pixel_size, SubpixelPhase phase, std::uint32_t font_style_flags = 0U);
 
     /** Requests an explicit raster mode; ordinary callers default to size-specific grayscale. */
-    [[nodiscard]] std::optional<GlyphAtlasEntry> request(
-        std::string_view font_id,
-        const OpenTypeFont& font,
-        std::uint16_t glyph,
-        double pixel_size,
-        SubpixelPhase coverage_phase,
-        std::uint32_t font_style_flags = 0U,
-        GlyphRasterMode mode = GlyphRasterMode::coverage
-    );
+    [[nodiscard]] std::optional<GlyphAtlasEntry>
+    request(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
+            double pixel_size, SubpixelPhase coverage_phase, std::uint32_t font_style_flags = 0U,
+            GlyphRasterMode mode = GlyphRasterMode::coverage);
 
     /**
      * Rasterizes and packs a unique request set before draw planning. Expensive cache misses run
@@ -173,39 +150,22 @@ public:
     [[nodiscard]] bool frame_preparation_active() const noexcept;
     [[nodiscard]] std::uint64_t generation_recycle_count() const noexcept;
 
-private:
+  private:
     struct Key;
     struct Page;
     struct Allocation;
 
-    [[nodiscard]] std::optional<Allocation> allocate(
-        std::uint32_t width,
-        std::uint32_t height,
-        GlyphRasterMode mode
-    );
-    [[nodiscard]] Allocation create_page_and_allocate(
-        std::uint32_t width,
-        std::uint32_t height,
-        GlyphRasterMode mode
-    );
-    [[nodiscard]] GlyphAtlasEntry insert(
-        const Key& key,
-        const GlyphRasterBitmap& bitmap,
-        const Allocation& allocation
-    );
-    [[nodiscard]] GlyphAtlasEntry insert_bitmap(
-        Key& key,
-        const GlyphRasterBitmap& bitmap
-    );
-    [[nodiscard]] std::optional<GlyphAtlasEntry> request_mode(
-        std::string_view font_id,
-        const OpenTypeFont& font,
-        std::uint16_t glyph,
-        double pixel_size,
-        SubpixelPhase phase,
-        GlyphRasterMode mode,
-        std::uint32_t font_style_flags
-    );
+    [[nodiscard]] std::optional<Allocation> allocate(std::uint32_t width, std::uint32_t height,
+                                                     GlyphRasterMode mode);
+    [[nodiscard]] Allocation create_page_and_allocate(std::uint32_t width, std::uint32_t height,
+                                                      GlyphRasterMode mode);
+    [[nodiscard]] GlyphAtlasEntry insert(const Key& key, const GlyphRasterBitmap& bitmap,
+                                         const Allocation& allocation);
+    [[nodiscard]] GlyphAtlasEntry insert_bitmap(Key& key, const GlyphRasterBitmap& bitmap);
+    [[nodiscard]] std::optional<GlyphAtlasEntry>
+    request_mode(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
+                 double pixel_size, SubpixelPhase phase, GlyphRasterMode mode,
+                 std::uint32_t font_style_flags);
     [[nodiscard]] bool recycle_for_capacity(Key& key);
     void flush_pending_uploads();
     void flush_page_upload(std::size_t page_index);

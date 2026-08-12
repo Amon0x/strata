@@ -460,27 +460,6 @@ struct DebugCollectionsItem final {
     return result;
 }
 
-struct DebugReloadMetricsItem final {
-    std::string label{};
-    std::string value{};
-    [[nodiscard]] friend bool operator==(const DebugReloadMetricsItem&, const DebugReloadMetricsItem&) = default;
-};
-
-[[nodiscard]] inline strata::host::Value to_value(const DebugReloadMetricsItem& value) {
-    strata::host::Value::Object fields;
-    fields.emplace("label", to_value(value.label));
-    fields.emplace("value", to_value(value.value));
-    return strata::host::Value(std::move(fields));
-}
-
-[[nodiscard]] inline DebugReloadMetricsItem decode_debug_reload_metrics_item(const strata::host::Value& value) {
-    static_cast<void>(detail::decode_object(value, "DebugReloadMetricsItem"));
-    DebugReloadMetricsItem result;
-    result.label = detail::decode_string(detail::required_field(value, "label", "DebugReloadMetricsItem"), "DebugReloadMetricsItem.label");
-    result.value = detail::decode_string(detail::required_field(value, "value", "DebugReloadMetricsItem"), "DebugReloadMetricsItem.value");
-    return result;
-}
-
 struct Debug final {
     std::string mode{};
     double frame{};
@@ -503,7 +482,6 @@ struct Debug final {
     std::vector<DebugMotionsItem> motions{};
     std::vector<DebugSemanticsItem> semantics{};
     std::vector<DebugCollectionsItem> collections{};
-    std::vector<DebugReloadMetricsItem> reload_metrics{};
     [[nodiscard]] friend bool operator==(const Debug&, const Debug&) = default;
 };
 
@@ -530,7 +508,6 @@ struct Debug final {
     fields.emplace("motions", to_value(value.motions));
     fields.emplace("semantics", to_value(value.semantics));
     fields.emplace("collections", to_value(value.collections));
-    fields.emplace("reloadMetrics", to_value(value.reload_metrics));
     return strata::host::Value(std::move(fields));
 }
 
@@ -558,7 +535,6 @@ struct Debug final {
     result.motions = detail::decode_list<DebugMotionsItem>(detail::required_field(value, "motions", "Debug"), "Debug.motions", [](const strata::host::Value& item) { return decode_debug_motions_item(item); });
     result.semantics = detail::decode_list<DebugSemanticsItem>(detail::required_field(value, "semantics", "Debug"), "Debug.semantics", [](const strata::host::Value& item) { return decode_debug_semantics_item(item); });
     result.collections = detail::decode_list<DebugCollectionsItem>(detail::required_field(value, "collections", "Debug"), "Debug.collections", [](const strata::host::Value& item) { return decode_debug_collections_item(item); });
-    result.reload_metrics = detail::decode_list<DebugReloadMetricsItem>(detail::required_field(value, "reloadMetrics", "Debug"), "Debug.reloadMetrics", [](const strata::host::Value& item) { return decode_debug_reload_metrics_item(item); });
     return result;
 }
 
@@ -686,10 +662,6 @@ enum class StrataDebugSelectModeActionMode {
     return strata::host::Value::object({{"debug", strata::host::Value::object({{"collections", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_reload_metrics(const std::vector<DebugReloadMetricsItem>& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"reloadMetrics", to_value(value)}})}});
-}
-
 class DebugModel final {
 public:
     DebugModel() = default;
@@ -721,7 +693,6 @@ public:
         changed = set_motions(std::move(value.motions)) || changed;
         changed = set_semantics(std::move(value.semantics)) || changed;
         changed = set_collections(std::move(value.collections)) || changed;
-        changed = set_reload_metrics(std::move(value.reload_metrics)) || changed;
         return changed;
     }
 
@@ -871,13 +842,6 @@ public:
 
     [[nodiscard]] const std::vector<DebugCollectionsItem>& collections() const noexcept {
         return collections_.get();
-    }
-    [[nodiscard]] bool set_reload_metrics(std::vector<DebugReloadMetricsItem> value) {
-        return reload_metrics_.set(std::move(value));
-    }
-
-    [[nodiscard]] const std::vector<DebugReloadMetricsItem>& reload_metrics() const noexcept {
-        return reload_metrics_.get();
     }
 
     void bind(strata::host::Bindings& bindings, const std::string_view id) const {
@@ -1031,13 +995,6 @@ public:
                 return encode_debug_collections(model.get());
             }
         );
-        bindings.snapshot(
-            std::string(id) + ".reload_metrics",
-            reload_metrics_,
-            [](const auto& model) {
-                return encode_debug_reload_metrics(model.get());
-            }
-        );
     }
 
 private:
@@ -1062,7 +1019,6 @@ private:
     strata::host::Observable<std::vector<DebugMotionsItem>> motions_{};
     strata::host::Observable<std::vector<DebugSemanticsItem>> semantics_{};
     strata::host::Observable<std::vector<DebugCollectionsItem>> collections_{};
-    strata::host::Observable<std::vector<DebugReloadMetricsItem>> reload_metrics_{};
 };
 
 struct StrataDebugClearDiagnosticsAction final {

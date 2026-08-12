@@ -1,10 +1,10 @@
 #include "ui/inspection.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <array>
-#include <charconv>
+#include <atomic>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <optional>
 #include <set>
@@ -51,16 +51,26 @@ using data::JsonValue;
 
 [[nodiscard]] std::string_view subtarget_kind_name(const WidgetSubtargetKind kind) noexcept {
     switch (kind) {
-    case WidgetSubtargetKind::control: return "control";
-    case WidgetSubtargetKind::link: return "link";
-    case WidgetSubtargetKind::choice: return "choice";
-    case WidgetSubtargetKind::command: return "command";
-    case WidgetSubtargetKind::action: return "action";
-    case WidgetSubtargetKind::dismiss: return "dismiss";
-    case WidgetSubtargetKind::scrim: return "scrim";
-    case WidgetSubtargetKind::token: return "token";
-    case WidgetSubtargetKind::separator: return "separator";
-    case WidgetSubtargetKind::notification: return "notification";
+    case WidgetSubtargetKind::control:
+        return "control";
+    case WidgetSubtargetKind::link:
+        return "link";
+    case WidgetSubtargetKind::choice:
+        return "choice";
+    case WidgetSubtargetKind::command:
+        return "command";
+    case WidgetSubtargetKind::action:
+        return "action";
+    case WidgetSubtargetKind::dismiss:
+        return "dismiss";
+    case WidgetSubtargetKind::scrim:
+        return "scrim";
+    case WidgetSubtargetKind::token:
+        return "token";
+    case WidgetSubtargetKind::separator:
+        return "separator";
+    case WidgetSubtargetKind::notification:
+        return "notification";
     }
     return "control";
 }
@@ -93,41 +103,43 @@ using data::JsonValue;
 
 [[nodiscard]] std::string_view dirty_name(const DirtyReason reason) noexcept {
     switch (reason) {
-    case DirtyReason::structure: return "structure";
-    case DirtyReason::properties: return "properties";
-    case DirtyReason::layout: return "layout";
-    case DirtyReason::text: return "text";
-    case DirtyReason::style: return "style";
-    case DirtyReason::semantics: return "semantics";
-    case DirtyReason::input: return "input";
-    case DirtyReason::scale: return "scale";
-    case DirtyReason::animation: return "animation";
-    case DirtyReason::resource: return "resource";
-    case DirtyReason::editor: return "editor";
-    case DirtyReason::paint: return "paint";
+    case DirtyReason::structure:
+        return "structure";
+    case DirtyReason::properties:
+        return "properties";
+    case DirtyReason::layout:
+        return "layout";
+    case DirtyReason::text:
+        return "text";
+    case DirtyReason::style:
+        return "style";
+    case DirtyReason::semantics:
+        return "semantics";
+    case DirtyReason::input:
+        return "input";
+    case DirtyReason::scale:
+        return "scale";
+    case DirtyReason::animation:
+        return "animation";
+    case DirtyReason::editor:
+        return "editor";
+    case DirtyReason::paint:
+        return "paint";
     }
     return "properties";
 }
 
 constexpr DirtyReason dirty_reasons[] = {
-    DirtyReason::structure,
-    DirtyReason::properties,
-    DirtyReason::layout,
-    DirtyReason::text,
-    DirtyReason::style,
-    DirtyReason::semantics,
-    DirtyReason::input,
-    DirtyReason::scale,
-    DirtyReason::animation,
-    DirtyReason::resource,
-    DirtyReason::editor,
-    DirtyReason::paint,
+    DirtyReason::structure, DirtyReason::properties, DirtyReason::layout, DirtyReason::text,
+    DirtyReason::style,     DirtyReason::semantics,  DirtyReason::input,  DirtyReason::scale,
+    DirtyReason::animation, DirtyReason::editor,     DirtyReason::paint,
 };
 
 [[nodiscard]] JsonValue dirty_set(const DirtySet& dirty) {
     std::vector<JsonValue> names;
     for (const DirtyReason reason : dirty_reasons) {
-        if (dirty.contains(reason)) names.emplace_back(std::string(dirty_name(reason)));
+        if (dirty.contains(reason))
+            names.emplace_back(std::string(dirty_name(reason)));
     }
     std::ranges::sort(names, {}, [](const JsonValue& value) { return *value.string(); });
     return array(std::move(names));
@@ -136,21 +148,26 @@ constexpr DirtyReason dirty_reasons[] = {
 void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
     for (const auto& child : node.children()) {
         for (const DirtyReason reason : dirty_reasons) {
-            if (child->dirty().contains(reason)) result.add(reason);
+            if (child->dirty().contains(reason))
+                result.add(reason);
         }
         collect_descendant_dirty(*child, result);
     }
 }
 
-[[nodiscard]] std::string_view action_policy_name(
-    const runtime::ActionDispatchPolicy policy
-) noexcept {
+[[nodiscard]] std::string_view
+action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
     switch (policy) {
-    case runtime::ActionDispatchPolicy::required: return "required";
-    case runtime::ActionDispatchPolicy::optional: return "optional";
-    case runtime::ActionDispatchPolicy::broadcast: return "broadcast";
-    case runtime::ActionDispatchPolicy::forwarded: return "forwarded";
-    case runtime::ActionDispatchPolicy::framework: return "framework";
+    case runtime::ActionDispatchPolicy::required:
+        return "required";
+    case runtime::ActionDispatchPolicy::optional:
+        return "optional";
+    case runtime::ActionDispatchPolicy::broadcast:
+        return "broadcast";
+    case runtime::ActionDispatchPolicy::forwarded:
+        return "forwarded";
+    case runtime::ActionDispatchPolicy::framework:
+        return "framework";
     }
     return "required";
 }
@@ -166,37 +183,43 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
                                     (!input->action_capability_requires_binding || binding_present);
     if (exposes_capability) {
         const auto property = node.description().properties.find(input->action_property);
-        if (property != node.description().properties.end() && property->second.action() != nullptr) {
+        if (property != node.description().properties.end() &&
+            property->second.action() != nullptr) {
             action_expression_present = true;
             const auto& binding = *property->second.action();
-            if (binding != nullptr && binding->action != nullptr) values.push_back(binding->action);
+            if (binding != nullptr && binding->action != nullptr)
+                values.push_back(binding->action);
         }
         if (values.empty() && !action_expression_present && !input->fallback_action.empty()) {
-            const auto contract = surface.application().bundle()->action_registry().contract(
-                input->fallback_action
-            );
-            if (contract != nullptr) values.push_back(std::make_shared<const runtime::Action>(contract));
+            const auto contract =
+                surface.application().bundle()->action_registry().contract(input->fallback_action);
+            if (contract != nullptr)
+                values.push_back(std::make_shared<const runtime::Action>(contract));
         }
     }
     if (values.empty() && !action_expression_present) {
         const auto default_property = node.description().properties.find("$defaultAction");
-        const runtime::Value* default_value = default_property != node.description().properties.end()
-                                                  ? default_property->second.value()
-                                                  : nullptr;
+        const runtime::Value* default_value =
+            default_property != node.description().properties.end()
+                ? default_property->second.value()
+                : nullptr;
         if (default_value != nullptr && default_value->string() != nullptr) {
             if (const auto contract = surface.application().bundle()->action_registry().contract(
-                    *default_value->string()
-                ); contract != nullptr) {
+                    *default_value->string());
+                contract != nullptr) {
                 values.push_back(std::make_shared<const runtime::Action>(contract));
             }
         }
     }
     for (const DescriptionBehavior& behavior : node.description().behaviors) {
-        if (behavior.action == nullptr) continue;
-        const auto collect = [&values](const auto& self, const runtime::ActionValue& action) -> void {
+        if (behavior.action == nullptr)
+            continue;
+        const auto collect = [&values](const auto& self,
+                                       const runtime::ActionValue& action) -> void {
             if (action.composition.has_value()) {
                 for (const auto& child : action.children) {
-                    if (child != nullptr) self(self, *child);
+                    if (child != nullptr)
+                        self(self, *child);
                 }
             } else if (action.action != nullptr) {
                 values.push_back(action.action);
@@ -205,9 +228,10 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
         collect(collect, *behavior.action);
     }
     std::ranges::sort(values, {}, [](const auto& value) { return value->id(); });
-    values.erase(std::unique(values.begin(), values.end(), [](const auto& left, const auto& right) {
-        return left->id() == right->id();
-    }), values.end());
+    values.erase(
+        std::unique(values.begin(), values.end(),
+                    [](const auto& left, const auto& right) { return left->id() == right->id(); }),
+        values.end());
     std::vector<JsonValue> encoded;
     encoded.reserve(values.size());
     for (const auto& action : values) {
@@ -222,12 +246,14 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
             }
         }
         std::ranges::sort(action_owners);
-        action_owners.erase(std::unique(action_owners.begin(), action_owners.end()), action_owners.end());
+        action_owners.erase(std::unique(action_owners.begin(), action_owners.end()),
+                            action_owners.end());
         for (std::string owner : action_owners) {
             owners.emplace_back(std::move(owner));
         }
         encoded.push_back(object({
-            {"dispatchPolicy", JsonValue(std::string(action_policy_name(action->contract->dispatch_policy)))},
+            {"dispatchPolicy",
+             JsonValue(std::string(action_policy_name(action->contract->dispatch_policy)))},
             {"dynamic", JsonValue(action->dynamic)},
             {"handlerOwners", array(std::move(owners))},
             {"id", JsonValue(action->id())},
@@ -240,7 +266,8 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
 [[nodiscard]] JsonValue behaviors(const RetainedNode& node) {
     std::vector<JsonValue> values;
     for (const DescriptionBehavior& behavior : node.description().behaviors) {
-        if (behavior.enabled) values.emplace_back(behavior.id);
+        if (behavior.enabled)
+            values.emplace_back(behavior.id);
     }
     return array(std::move(values));
 }
@@ -252,9 +279,8 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
             {"enabled", JsonValue(command->enabled)},
             {"id", JsonValue(command->id)},
             {"label", JsonValue(command->label)},
-            {"owningScope", command->owning_scope.has_value()
-                                ? JsonValue(*command->owning_scope)
-                                : JsonValue{}},
+            {"owningScope",
+             command->owning_scope.has_value() ? JsonValue(*command->owning_scope) : JsonValue{}},
         }));
     }
     return array(std::move(values));
@@ -269,19 +295,16 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
 
 [[nodiscard]] std::string motion_number(double value) {
     std::array<char, 64U> buffer{};
-    const auto encoded = std::to_chars(
-        buffer.data(), buffer.data() + buffer.size(), value, std::chars_format::general
-    );
+    const auto encoded = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
+                                       std::chars_format::general);
     std::string result(buffer.data(), encoded.ptr);
-    if (result.find_first_of(".eE") == std::string::npos) result += ".0";
+    if (result.find_first_of(".eE") == std::string::npos)
+        result += ".0";
     return result;
 }
 
-[[nodiscard]] JsonValue motion_channels(
-    const Surface& surface,
-    const RetainedNode& node,
-    const LayoutRecord& layout
-) {
+[[nodiscard]] JsonValue motion_channels(const Surface& surface, const RetainedNode& node,
+                                        const LayoutRecord& layout) {
     std::vector<JsonValue> channels;
     if (const auto* runtime_channels = surface.motion().inspection_channels(node.identity());
         runtime_channels != nullptr) {
@@ -299,16 +322,16 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
                                      : JsonValue{}},
                 {"direction", JsonValue(std::string(motion_direction_name(channel.direction)))},
                 {"id", JsonValue(channel.id)},
-                {"interaction", channel.interaction.has_value()
-                                    ? JsonValue(std::string(motion_interaction_name(*channel.interaction)))
-                                    : JsonValue{}},
+                {"interaction",
+                 channel.interaction.has_value()
+                     ? JsonValue(std::string(motion_interaction_name(*channel.interaction)))
+                     : JsonValue{}},
                 {"progress", JsonValue(channel.progress)},
                 {"running", JsonValue(channel.running)},
                 {"snappedByReducedMotion", JsonValue(channel.snapped_by_reduced_motion)},
                 {"source", JsonValue(channel.source)},
-                {"targetValue", channel.target_value.has_value()
-                                    ? JsonValue(*channel.target_value)
-                                    : JsonValue{}},
+                {"targetValue",
+                 channel.target_value.has_value() ? JsonValue(*channel.target_value) : JsonValue{}},
                 {"trigger", channel.trigger.has_value()
                                 ? JsonValue(std::string(motion_trigger_name(*channel.trigger)))
                                 : JsonValue{}},
@@ -318,25 +341,25 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
     const std::optional<DisclosureMotionSpec> disclosure = disclosure_motion(node);
     if (disclosure.has_value()) {
         const NormalizedMotionSample* target = surface.motion().disclosure_sample(node.identity());
-        const double current = target != nullptr
-                                   ? target->current
-                                   : disclosure->expanded ? 1.0 : 0.0;
+        const double current = target != nullptr      ? target->current
+                               : disclosure->expanded ? 1.0
+                                                      : 0.0;
         channels.push_back(object({
             {"affectedProperties", array({
-                JsonValue("height"), JsonValue("clip"), JsonValue("inputEligibility"),
-            })},
+                                       JsonValue("height"),
+                                       JsonValue("clip"),
+                                       JsonValue("inputEligibility"),
+                                   })},
             {"currentValue", JsonValue("Number(value=" + motion_number(current) + ")")},
             {"direction", JsonValue(disclosure->expanded ? "EXPAND" : "COLLAPSE")},
             {"id", JsonValue("strata.disclosure")},
             {"interaction", JsonValue{}},
             {"progress", JsonValue(layout.content_motion_progress)},
-            {"running", JsonValue(
-                layout.content_motion_running || (target != nullptr && target->running)
-            )},
-            {"snappedByReducedMotion", JsonValue(
-                layout.content_motion_snapped_by_reduced_motion ||
-                (target != nullptr && target->snapped_by_reduced_motion)
-            )},
+            {"running",
+             JsonValue(layout.content_motion_running || (target != nullptr && target->running))},
+            {"snappedByReducedMotion",
+             JsonValue(layout.content_motion_snapped_by_reduced_motion ||
+                       (target != nullptr && target->snapped_by_reduced_motion))},
             {"source", JsonValue("disclosure/content-size")},
             {"targetValue", JsonValue(disclosure->expanded ? "true" : "false")},
             {"trigger", JsonValue{}},
@@ -345,9 +368,12 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
                    content_size_motion(node.description());
                content.has_value()) {
         std::vector<JsonValue> affected;
-        if (content->animate_width) affected.emplace_back("width");
-        if (content->animate_height) affected.emplace_back("height");
-        if (content->clip) affected.emplace_back("clip");
+        if (content->animate_width)
+            affected.emplace_back("width");
+        if (content->animate_height)
+            affected.emplace_back("height");
+        if (content->clip)
+            affected.emplace_back("clip");
         const std::string size = motion_number(layout.content_size.width) + "x" +
                                  motion_number(layout.content_size.height);
         const std::string target_size = motion_number(layout.content_motion_target_size.width) +
@@ -361,9 +387,7 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
             {"interaction", JsonValue{}},
             {"progress", JsonValue(layout.content_motion_progress)},
             {"running", JsonValue(layout.content_motion_running)},
-            {"snappedByReducedMotion", JsonValue(
-                layout.content_motion_snapped_by_reduced_motion
-            )},
+            {"snappedByReducedMotion", JsonValue(layout.content_motion_snapped_by_reduced_motion)},
             {"source", JsonValue("measured-content-size")},
             {"targetValue", JsonValue(target_size)},
             {"trigger", JsonValue{}},
@@ -375,14 +399,13 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
 [[nodiscard]] JsonValue authoring_type(const RetainedNode& node) {
     const std::string& type = node.description().type;
     if (node.description().source_path.empty() || type == "SurfaceLayers" ||
-        type == "SurfaceLayer" || type == "AnimatedContent" ||
-        type == "AnimatedContentItem" || type.starts_with('$')) {
+        type == "SurfaceLayer" || type == "AnimatedContent" || type == "AnimatedContentItem" ||
+        type.starts_with('$')) {
         return JsonValue{};
     }
     const auto authored = node.description().properties.find("$authoringType");
-    const runtime::Value* authored_value = authored != node.description().properties.end()
-                                               ? authored->second.value()
-                                               : nullptr;
+    const runtime::Value* authored_value =
+        authored != node.description().properties.end() ? authored->second.value() : nullptr;
     return authored_value != nullptr && authored_value->string() != nullptr
                ? JsonValue(*authored_value->string())
                : JsonValue(type);
@@ -391,21 +414,18 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
 [[nodiscard]] std::string component_type(const RetainedNode& node) {
     const std::string& type = node.description().type;
     constexpr std::string_view component_prefix = "$component:";
-    if (type.starts_with(component_prefix)) return type.substr(component_prefix.size());
+    if (type.starts_with(component_prefix))
+        return type.substr(component_prefix.size());
     return type;
 }
 
-[[nodiscard]] JsonValue node_inspection(
-    const Surface& surface,
-    const RetainedNode& node,
-    const MotionTransform inherited_transform
-) {
+[[nodiscard]] JsonValue node_inspection(const Surface& surface, const RetainedNode& node,
+                                        const MotionTransform inherited_transform) {
     const LayoutRecord* layout = surface.layout().find(node.identity());
-    if (layout == nullptr) throw std::logic_error("retained inspection node has no layout record");
+    if (layout == nullptr)
+        throw std::logic_error("retained inspection node has no layout record");
     const MotionTransform effective_transform = concatenate_presentation_transform(
-        inherited_transform,
-        local_presentation_transform(node, surface.motion(), layout->bounds)
-    );
+        inherited_transform, local_presentation_transform(node, surface.motion(), layout->bounds));
     std::vector<JsonValue> children;
     children.reserve(node.children().size());
     for (const auto& child : node.children()) {
@@ -431,18 +451,19 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
         {"derivedCollection", inspection.derived_collection()},
         {"descendantLayoutDirtyReasons", dirty_set(descendant_dirty)},
         {"dirtyReasons", dirty_set(node.dirty())},
-        {"hitBounds", rectangle(transform_presentation_bounds(
-            inspection.hit_bounds(), effective_transform
-        ))},
-        {"interaction", object({
-            {"active", JsonValue(surface.input().active(node.identity()))},
-            {"focused", JsonValue(surface.input().focused(node.identity()))},
-            {"focusVisible", JsonValue(surface.input().focus_visible(node.identity()))},
-            {"hovered", JsonValue(surface.input().hovered(node.identity()))},
-            {"movementOffset", point(Point{})},
-            {"scrollOffset", point(layout->scroll_offset)},
-        })},
-        {"key", node.description().key.has_value() ? JsonValue(*node.description().key) : JsonValue{}},
+        {"hitBounds",
+         rectangle(transform_presentation_bounds(inspection.hit_bounds(), effective_transform))},
+        {"interaction",
+         object({
+             {"active", JsonValue(surface.input().active(node.identity()))},
+             {"focused", JsonValue(surface.input().focused(node.identity()))},
+             {"focusVisible", JsonValue(surface.input().focus_visible(node.identity()))},
+             {"hovered", JsonValue(surface.input().hovered(node.identity()))},
+             {"movementOffset", point(Point{})},
+             {"scrollOffset", point(layout->scroll_offset)},
+         })},
+        {"key",
+         node.description().key.has_value() ? JsonValue(*node.description().key) : JsonValue{}},
         {"layoutKind", JsonValue(std::string(layout_kind_name(layout->kind)))},
         {"motionChannels", motion_channels(surface, node, *layout)},
         {"semantics", surface.semantics().find(node.identity()) != nullptr
@@ -453,17 +474,13 @@ void collect_descendant_dirty(const RetainedNode& node, DirtySet& result) {
                            : JsonValue(node.description().source_path)},
         {"structuralPath", JsonValue(std::string(node.structural_path()))},
         {"subtargets", subtargets(surface, node)},
-        {"visibleRange", layout->visible_range.has_value()
-                             ? visible_range(*layout->visible_range)
-                             : JsonValue{}},
+        {"visibleRange",
+         layout->visible_range.has_value() ? visible_range(*layout->visible_range) : JsonValue{}},
     });
 }
 
-void collect_editor_inspection(
-    const Surface& surface,
-    const RetainedNode& node,
-    std::vector<JsonValue>& editors
-) {
+void collect_editor_inspection(const Surface& surface, const RetainedNode& node,
+                               std::vector<JsonValue>& editors) {
     if (const std::optional<TextEditorSnapshot> snapshot =
             surface.input().editor_snapshot(node.identity());
         snapshot.has_value()) {
@@ -472,15 +489,12 @@ void collect_editor_inspection(
             {"composition", snapshot->preedit.has_value()
                                 ? JsonValue(std::string(*snapshot->preedit))
                                 : JsonValue{}},
-            {"compositionSelectionEndUtf8", JsonValue(static_cast<std::int64_t>(
-                snapshot->preedit_selection_end
-            ))},
-            {"compositionSelectionStartUtf8", JsonValue(static_cast<std::int64_t>(
-                snapshot->preedit_selection_start
-            ))},
-            {"key", node.description().key.has_value()
-                        ? JsonValue(*node.description().key)
-                        : JsonValue{}},
+            {"compositionSelectionEndUtf8",
+             JsonValue(static_cast<std::int64_t>(snapshot->preedit_selection_end))},
+            {"compositionSelectionStartUtf8",
+             JsonValue(static_cast<std::int64_t>(snapshot->preedit_selection_start))},
+            {"key",
+             node.description().key.has_value() ? JsonValue(*node.description().key) : JsonValue{}},
             {"selectionEndUtf8", JsonValue(static_cast<std::int64_t>(snapshot->selection_end))},
             {"selectionStartUtf8", JsonValue(static_cast<std::int64_t>(snapshot->selection_start))},
             {"structuralPath", JsonValue(std::string(node.structural_path()))},
@@ -493,8 +507,10 @@ void collect_editor_inspection(
 }
 
 [[nodiscard]] std::string orientation(const SurfaceEnvironment& environment) {
-    if (environment.logical_width > environment.logical_height * 1.05) return "landscape";
-    if (environment.logical_height > environment.logical_width * 1.05) return "portrait";
+    if (environment.logical_width > environment.logical_height * 1.05)
+        return "landscape";
+    if (environment.logical_height > environment.logical_width * 1.05)
+        return "portrait";
     return "square";
 }
 
@@ -508,46 +524,47 @@ JsonValue inspect_surface(const Surface& surface) {
         pending_navigation.emplace_back(std::move(key));
     }
     std::vector<JsonValue> editors;
-    if (root != nullptr) collect_editor_inspection(surface, *root, editors);
+    if (root != nullptr)
+        collect_editor_inspection(surface, *root, editors);
     const RetainedNode* selected = surface.inspected_node();
     return object({
         {"editors", array(std::move(editors))},
-        {"environment", object({
-            {"density", JsonValue(std::string(surface_density_name(environment.density)))},
-            {"displayScale", JsonValue(environment.scale)},
-            {"framebufferHeight", JsonValue(environment.framebuffer_height)},
-            {"framebufferWidth", JsonValue(environment.framebuffer_width)},
-            {"generation", JsonValue(static_cast<std::int64_t>(environment.generation))},
-            {"input", object({
-                {"controller", JsonValue(environment.input.controller)},
-                {"ime", JsonValue(environment.input.ime)},
-                {"keyboard", JsonValue(environment.input.keyboard)},
-                {"pointer", JsonValue(environment.input.pointer)},
-                {"pointerPrecision", JsonValue(std::string(pointer_precision_name(environment.input.pointer_precision)))},
-                {"touch", JsonValue(environment.input.touch)},
-            })},
-            {"logicalHeight", JsonValue(environment.logical_height)},
-            {"logicalWidth", JsonValue(environment.logical_width)},
-            {"orientation", JsonValue(orientation(environment))},
-            {"reducedMotion", JsonValue(environment.reduced_motion)},
-            {"safeInsets", object({
-                {"bottom", JsonValue(environment.safe_insets.bottom)},
-                {"left", JsonValue(environment.safe_insets.left)},
-                {"right", JsonValue(environment.safe_insets.right)},
-                {"top", JsonValue(environment.safe_insets.top)},
-            })},
-            {"viewportClass", JsonValue(std::string(surface.viewport_class()))},
-        })},
+        {"environment",
+         object({
+             {"density", JsonValue(std::string(surface_density_name(environment.density)))},
+             {"displayScale", JsonValue(environment.scale)},
+             {"framebufferHeight", JsonValue(environment.framebuffer_height)},
+             {"framebufferWidth", JsonValue(environment.framebuffer_width)},
+             {"generation", JsonValue(static_cast<std::int64_t>(environment.generation))},
+             {"input", object({
+                           {"controller", JsonValue(environment.input.controller)},
+                           {"ime", JsonValue(environment.input.ime)},
+                           {"keyboard", JsonValue(environment.input.keyboard)},
+                           {"pointer", JsonValue(environment.input.pointer)},
+                           {"pointerPrecision", JsonValue(std::string(pointer_precision_name(
+                                                    environment.input.pointer_precision)))},
+                           {"touch", JsonValue(environment.input.touch)},
+                       })},
+             {"logicalHeight", JsonValue(environment.logical_height)},
+             {"logicalWidth", JsonValue(environment.logical_width)},
+             {"orientation", JsonValue(orientation(environment))},
+             {"reducedMotion", JsonValue(environment.reduced_motion)},
+             {"safeInsets", object({
+                                {"bottom", JsonValue(environment.safe_insets.bottom)},
+                                {"left", JsonValue(environment.safe_insets.left)},
+                                {"right", JsonValue(environment.safe_insets.right)},
+                                {"top", JsonValue(environment.safe_insets.top)},
+                            })},
+             {"viewportClass", JsonValue(std::string(surface.viewport_class()))},
+         })},
         {"pendingNavigationTargets", array(std::move(pending_navigation))},
-        {"root", root != nullptr
-                     ? node_inspection(surface, *root, MotionTransform{})
-                     : JsonValue{}},
+        {"root",
+         root != nullptr ? node_inspection(surface, *root, MotionTransform{}) : JsonValue{}},
         {"selectedKey", selected != nullptr && selected->description().key.has_value()
                             ? JsonValue(*selected->description().key)
                             : JsonValue{}},
-        {"selectedPath", selected != nullptr
-                             ? JsonValue(std::string(selected->structural_path()))
-                             : JsonValue{}},
+        {"selectedPath",
+         selected != nullptr ? JsonValue(std::string(selected->structural_path())) : JsonValue{}},
         {"surfaceId", JsonValue(surface.id())},
     });
 }
@@ -557,30 +574,40 @@ JsonValue inspect_operation_counters(const SurfaceFrame& frame) {
     return object({
         {"arrangedNodes", JsonValue(static_cast<std::int64_t>(operations.layout_arranged_nodes))},
         {"describedNodes", JsonValue(static_cast<std::int64_t>(operations.described_nodes))},
-        {"evaluatedExpressions", JsonValue(static_cast<std::int64_t>(operations.evaluated_expressions))},
+        {"evaluatedExpressions",
+         JsonValue(static_cast<std::int64_t>(operations.evaluated_expressions))},
         {"glyphWork", JsonValue(std::int64_t{operations.text.cache_misses == 0U ? 0 : 1})},
         {"injectedEvents", JsonValue(static_cast<std::int64_t>(operations.injected_events))},
-        {"inputEventsProcessed", JsonValue(static_cast<std::int64_t>(operations.input_events_processed))},
+        {"inputEventsProcessed",
+         JsonValue(static_cast<std::int64_t>(operations.input_events_processed))},
         {"measuredNodes", JsonValue(static_cast<std::int64_t>(operations.layout_measured_nodes))},
-        {"layoutWork", JsonValue(std::int64_t{
-            operations.layout_measured_nodes == 0U &&
-                    operations.layout_measurement_cache_hits == 0U &&
-                    operations.layout_arranged_nodes == 0U
-                ? 0
-                : 1
-        })},
-        {"motionMutatedNodes", JsonValue(static_cast<std::int64_t>(operations.motion_mutated_nodes))},
-        {"motionRunningPlayers", JsonValue(static_cast<std::int64_t>(operations.motion_running_players))},
+        {"layoutWork",
+         JsonValue(std::int64_t{operations.layout_measured_nodes == 0U &&
+                                        operations.layout_measurement_cache_hits == 0U &&
+                                        operations.layout_arranged_nodes == 0U
+                                    ? 0
+                                    : 1})},
+        {"motionMutatedNodes",
+         JsonValue(static_cast<std::int64_t>(operations.motion_mutated_nodes))},
+        {"motionRunningPlayers",
+         JsonValue(static_cast<std::int64_t>(operations.motion_running_players))},
         {"rebuilds", JsonValue(static_cast<std::int64_t>(operations.rebuilds))},
-        {"reusedMeasurements", JsonValue(static_cast<std::int64_t>(operations.layout_measurement_cache_hits))},
+        {"reusedMeasurements",
+         JsonValue(static_cast<std::int64_t>(operations.layout_measurement_cache_hits))},
         {"render", object({
-            {"commandsEmitted", JsonValue(static_cast<std::int64_t>(operations.render.commands_emitted))},
-            {"fragmentsBuilt", JsonValue(static_cast<std::int64_t>(operations.render.fragments_built))},
-            {"fragmentsReused", JsonValue(static_cast<std::int64_t>(operations.render.fragments_reused))},
-            {"nodesVisited", JsonValue(static_cast<std::int64_t>(operations.render.nodes_visited))},
-            {"overlaysRendered", JsonValue(static_cast<std::int64_t>(operations.render.overlays_rendered))},
-            {"portalsRendered", JsonValue(static_cast<std::int64_t>(operations.render.portals_rendered))},
-        })},
+                       {"commandsEmitted",
+                        JsonValue(static_cast<std::int64_t>(operations.render.commands_emitted))},
+                       {"fragmentsBuilt",
+                        JsonValue(static_cast<std::int64_t>(operations.render.fragments_built))},
+                       {"fragmentsReused",
+                        JsonValue(static_cast<std::int64_t>(operations.render.fragments_reused))},
+                       {"nodesVisited",
+                        JsonValue(static_cast<std::int64_t>(operations.render.nodes_visited))},
+                       {"overlaysRendered",
+                        JsonValue(static_cast<std::int64_t>(operations.render.overlays_rendered))},
+                       {"portalsRendered",
+                        JsonValue(static_cast<std::int64_t>(operations.render.portals_rendered))},
+                   })},
     });
 }
 
@@ -599,16 +626,17 @@ JsonValue inspect_state(runtime::ApplicationContext& application) {
 
 JsonValue inspect_selection(const Surface& surface) {
     const RetainedNode* node = surface.inspected_node();
-    if (node == nullptr) return JsonValue{};
+    if (node == nullptr)
+        return JsonValue{};
     const LayoutRecord* layout = surface.layout().find(node->identity());
-    if (layout == nullptr) return JsonValue{};
+    if (layout == nullptr)
+        return JsonValue{};
     return object({
         {"actions", actions(surface, *node)},
         {"bounds", rectangle(layout->bounds)},
         {"componentType", JsonValue(component_type(*node))},
-        {"key", node->description().key.has_value()
-                    ? JsonValue(*node->description().key)
-                    : JsonValue{}},
+        {"key",
+         node->description().key.has_value() ? JsonValue(*node->description().key) : JsonValue{}},
         {"motionChannels", motion_channels(surface, *node, *layout)},
         {"path", JsonValue(std::string(node->structural_path()))},
     });

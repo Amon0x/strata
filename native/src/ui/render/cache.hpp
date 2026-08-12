@@ -7,8 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "ui/render.hpp"
 #include "ui/motion/model.hpp"
+#include "ui/render.hpp"
 
 namespace strata::ui {
 
@@ -19,10 +19,8 @@ struct RenderEngine::Impl final {
         std::string type;
         Rect bounds;
 
-        [[nodiscard]] friend bool operator==(
-            const ChildLayoutSnapshot&,
-            const ChildLayoutSnapshot&
-        ) = default;
+        [[nodiscard]] friend bool operator==(const ChildLayoutSnapshot&,
+                                             const ChildLayoutSnapshot&) = default;
     };
 
     // Fragment producers may consume both their own layout slot and the arranged slots of
@@ -49,16 +47,15 @@ struct RenderEngine::Impl final {
         bool detached_from_parent_clip = false;
         std::vector<ChildLayoutSnapshot> children;
 
-        [[nodiscard]] friend bool operator==(const LayoutSnapshot&, const LayoutSnapshot&) = default;
+        [[nodiscard]] friend bool operator==(const LayoutSnapshot&,
+                                             const LayoutSnapshot&) = default;
     };
 
     struct CachedFragment final {
         struct MotionSnapshot final {
             std::vector<std::pair<MotionProperty, MotionValue>> values;
-            [[nodiscard]] friend bool operator==(
-                const MotionSnapshot&,
-                const MotionSnapshot&
-            ) = default;
+            [[nodiscard]] friend bool operator==(const MotionSnapshot&,
+                                                 const MotionSnapshot&) = default;
         };
 
         struct CompositionPlan final {
@@ -78,7 +75,8 @@ struct RenderEngine::Impl final {
             bool render_portals = false;
             std::vector<RenderCommand> prefix;
             std::vector<RenderCommand> suffix;
-            /** Stable retained identities; raw node pointers become invalid under virtualization. */
+            /** Stable retained identities; raw node pointers become invalid under virtualization.
+             */
             std::vector<std::uint64_t> ordered_children;
             std::vector<std::uint64_t> ordered_child_layout_generations;
             std::optional<Rect> child_render_clip;
@@ -145,57 +143,43 @@ struct RenderEngine::Impl final {
     std::uint64_t retained_presentation_generation = 0U;
     std::uint64_t retained_status_generation = 0U;
 
-    [[nodiscard]] bool base_matches(
-        const RetainedTree& tree,
-        const LayoutResult& layout,
-        const InputRouter& input,
-        const MotionRuntime& motion,
-        const RenderGenerationToken& generations
-    ) const noexcept;
+    [[nodiscard]] bool base_matches(const RetainedTree& tree, const LayoutResult& layout,
+                                    const InputRouter& input, const MotionRuntime& motion,
+                                    const RenderGenerationToken& generations) const noexcept;
 
-    void retain_base(
-        const RetainedTree& tree,
-        const LayoutResult& layout,
-        const InputRouter& input,
-        const RenderGenerationToken& generations,
-        const RenderCommandBuffer& commands
-    );
+    void retain_base(const RetainedTree& tree, const LayoutResult& layout, const InputRouter& input,
+                     const RenderGenerationToken& generations, const RenderCommandBuffer& commands);
 
-    [[nodiscard]] static bool fragment_generations_match(
-        const DirtyGenerationSnapshot& retained,
-        const DirtyGenerationSnapshot& current
-    ) noexcept {
+    [[nodiscard]] static bool
+    fragment_generations_match(const DirtyGenerationSnapshot& retained,
+                               const DirtyGenerationSnapshot& current) noexcept {
         return retained.structure == current.structure &&
-            retained.properties == current.properties && retained.text == current.text &&
-            retained.style == current.style && retained.input == current.input &&
-            retained.scale == current.scale && retained.resource == current.resource &&
-            retained.editor == current.editor && retained.paint == current.paint;
+               retained.properties == current.properties && retained.text == current.text &&
+               retained.style == current.style && retained.input == current.input &&
+               retained.scale == current.scale && retained.editor == current.editor &&
+               retained.paint == current.paint;
     }
 
-    [[nodiscard]] static CachedFragment::MotionSnapshot fragment_motion_snapshot(
-        const MotionComputedValues* computed
-    ) {
+    [[nodiscard]] static CachedFragment::MotionSnapshot
+    fragment_motion_snapshot(const MotionComputedValues* computed) {
         CachedFragment::MotionSnapshot result;
-        if (computed == nullptr) return result;
+        if (computed == nullptr)
+            return result;
         for (const auto& [property, value] : computed->values) {
-            if (property >= MotionProperty::x && property <= MotionProperty::scale_y) continue;
+            if (property >= MotionProperty::x && property <= MotionProperty::scale_y)
+                continue;
             result.values.emplace_back(property, value);
         }
         return result;
     }
 
-    [[nodiscard]] static bool matches(
-        const LayoutSnapshot& snapshot,
-        const RetainedNode& node,
-        const LayoutRecord& record,
-        const LayoutResult& layout
-    ) {
-        if (snapshot.measured_size != record.measured_size ||
-            snapshot.bounds != record.bounds ||
+    [[nodiscard]] static bool matches(const LayoutSnapshot& snapshot, const RetainedNode& node,
+                                      const LayoutRecord& record, const LayoutResult& layout) {
+        if (snapshot.measured_size != record.measured_size || snapshot.bounds != record.bounds ||
             snapshot.snapped_bounds != record.snapped_bounds ||
             snapshot.hit_bounds != record.hit_bounds ||
-            snapshot.content_bounds != record.content_bounds ||
-            snapshot.clip != record.clip || snapshot.local_clip != record.local_clip ||
+            snapshot.content_bounds != record.content_bounds || snapshot.clip != record.clip ||
+            snapshot.local_clip != record.local_clip ||
             snapshot.scroll_frame != record.scroll_frame || snapshot.viewport != record.viewport ||
             snapshot.content_size != record.content_size ||
             snapshot.requested_scroll_offset != record.requested_scroll_offset ||
@@ -210,8 +194,10 @@ struct RenderEngine::Impl final {
         std::size_t child_index = 0U;
         for (const auto& child : node.children()) {
             const LayoutRecord* child_layout = layout.find(child->identity());
-            if (child_layout == nullptr) continue;
-            if (child_index >= snapshot.children.size()) return false;
+            if (child_layout == nullptr)
+                continue;
+            if (child_index >= snapshot.children.size())
+                return false;
             const ChildLayoutSnapshot& retained = snapshot.children[child_index++];
             if (retained.key != child->description().key ||
                 retained.type != child->description().type ||
@@ -222,12 +208,10 @@ struct RenderEngine::Impl final {
         return child_index == snapshot.children.size();
     }
 
-    [[nodiscard]] static std::optional<Point> uniform_translation(
-        const LayoutSnapshot& snapshot,
-        const RetainedNode& node,
-        const LayoutRecord& record,
-        const LayoutResult& layout
-    ) {
+    [[nodiscard]] static std::optional<Point> uniform_translation(const LayoutSnapshot& snapshot,
+                                                                  const RetainedNode& node,
+                                                                  const LayoutRecord& record,
+                                                                  const LayoutResult& layout) {
         const Point delta{
             record.bounds.x - snapshot.bounds.x,
             record.bounds.y - snapshot.bounds.y,
@@ -246,15 +230,13 @@ struct RenderEngine::Impl final {
         const auto translated = [delta](const Rect& retained, const Rect& current) {
             constexpr double coordinate_tolerance = 1.0e-9;
             return retained.width == current.width && retained.height == current.height &&
-                std::abs(retained.x + delta.x - current.x) <= coordinate_tolerance &&
-                std::abs(retained.y + delta.y - current.y) <= coordinate_tolerance;
+                   std::abs(retained.x + delta.x - current.x) <= coordinate_tolerance &&
+                   std::abs(retained.y + delta.y - current.y) <= coordinate_tolerance;
         };
-        const auto translated_optional = [&translated](
-                                             const std::optional<Rect>& retained,
-                                             const std::optional<Rect>& current
-                                         ) {
+        const auto translated_optional = [&translated](const std::optional<Rect>& retained,
+                                                       const std::optional<Rect>& current) {
             return retained.has_value() == current.has_value() &&
-                (!retained.has_value() || translated(*retained, *current));
+                   (!retained.has_value() || translated(*retained, *current));
         };
         if (!translated(snapshot.bounds, record.bounds)) {
             return std::nullopt;
@@ -272,8 +254,10 @@ struct RenderEngine::Impl final {
         std::size_t child_index = 0U;
         for (const auto& child : node.children()) {
             const LayoutRecord* child_layout = layout.find(child->identity());
-            if (child_layout == nullptr) continue;
-            if (child_index >= snapshot.children.size()) return std::nullopt;
+            if (child_layout == nullptr)
+                continue;
+            if (child_index >= snapshot.children.size())
+                return std::nullopt;
             const ChildLayoutSnapshot& retained = snapshot.children[child_index++];
             if (retained.key != child->description().key ||
                 retained.type != child->description().type ||
@@ -281,16 +265,11 @@ struct RenderEngine::Impl final {
                 return std::nullopt;
             }
         }
-        return child_index == snapshot.children.size()
-            ? std::optional<Point>(delta)
-            : std::nullopt;
+        return child_index == snapshot.children.size() ? std::optional<Point>(delta) : std::nullopt;
     }
 
-    [[nodiscard]] static LayoutSnapshot snapshot(
-        const RetainedNode& node,
-        const LayoutRecord& record,
-        const LayoutResult& layout
-    ) {
+    [[nodiscard]] static LayoutSnapshot
+    snapshot(const RetainedNode& node, const LayoutRecord& record, const LayoutResult& layout) {
         LayoutSnapshot result{
             record.measured_size,
             record.bounds,

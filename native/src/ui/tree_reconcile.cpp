@@ -125,7 +125,7 @@ struct SiblingKey final {
 [[nodiscard]] bool affects_layout(const DirtyReason reason) noexcept {
     return reason == DirtyReason::structure || reason == DirtyReason::layout ||
            reason == DirtyReason::text || reason == DirtyReason::style ||
-           reason == DirtyReason::scale || reason == DirtyReason::resource;
+           reason == DirtyReason::scale;
 }
 
 [[nodiscard]] std::string child_path(

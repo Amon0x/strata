@@ -1363,7 +1363,6 @@ struct Host::Impl final {
             .motions = {},
             .semantics = {},
             .collections = {},
-            .reload_metrics = {},
         }).json();
     }
 

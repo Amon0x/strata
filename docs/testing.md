@@ -75,6 +75,6 @@ Use `windows-x64` on Windows. Validation-only targets are `strata_validate_modul
 ## Manual acceptance
 
 Human acceptance remains appropriate for physical window behavior, clipboard/IME integration,
-interactive resource reload, final hardware/driver output, and subjective animation quality.
-Windows D3D11/WARP captures are the deterministic production-renderer oracle; the desktop host is
-the final window-system acceptance path. Linux deliberately has no bundled GUI backend.
+final hardware/driver output, and subjective animation quality. Windows D3D11/WARP captures are the
+deterministic production-renderer oracle; the desktop host is the final window-system acceptance
+path. Linux deliberately has no bundled GUI backend.

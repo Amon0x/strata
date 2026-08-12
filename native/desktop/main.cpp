@@ -23,7 +23,9 @@
 #include "headless/scenario.hpp"
 #include "host.hpp"
 #include "ime.hpp"
+#include "launch.hpp"
 #include "performance.hpp"
+#include "preview.hpp"
 
 namespace {
 
@@ -31,16 +33,15 @@ constexpr wchar_t window_class_name[] = L"StrataNativeDesktopWindow";
 std::size_t active_window_count = 0U;
 
 [[nodiscard]] std::wstring utf8_to_wide(const std::string_view value) {
-    if (value.empty()) return {};
-    const int size = MultiByteToWideChar(
-        CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0
-    );
-    if (size <= 0) throw std::runtime_error("desktop title is not valid UTF-8");
+    if (value.empty())
+        return {};
+    const int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+                                         static_cast<int>(value.size()), nullptr, 0);
+    if (size <= 0)
+        throw std::runtime_error("desktop title is not valid UTF-8");
     std::wstring result(static_cast<std::size_t>(size), L'\0');
-    if (MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
-            result.data(), size
-        ) != size) {
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+                            static_cast<int>(value.size()), result.data(), size) != size) {
         throw std::runtime_error("desktop title conversion was incomplete");
     }
     return result;
@@ -49,6 +50,7 @@ std::size_t active_window_count = 0U;
 struct WindowApplication final {
     std::unique_ptr<strata::desktop::Host> host;
     std::unique_ptr<strata::desktop::ApplicationHost> application_host;
+    std::unique_ptr<strata::desktop::PreviewSession> preview;
     std::string failure;
     HWND window_handle = nullptr;
     wchar_t high_surrogate = 0;
@@ -70,25 +72,33 @@ struct WindowApplication final {
     }
 
     void resize(const HWND window, const LPARAM dimensions) {
-        if (!has_host()) return;
+        if (!has_host())
+            return;
         const std::uint32_t width = static_cast<std::uint32_t>(LOWORD(dimensions));
         const std::uint32_t height = static_cast<std::uint32_t>(HIWORD(dimensions));
-        if (width == 0U || height == 0U) return;
+        if (width == 0U || height == 0U)
+            return;
         const UINT dpi = GetDpiForWindow(window);
         const double scale = dpi == 0U ? 1.0 : static_cast<double>(dpi) / 96.0;
-        if (host != nullptr) host->resize(width, height, scale);
-        else application_host->resize(width, height, scale);
+        if (host != nullptr)
+            host->resize(width, height, scale);
+        else
+            application_host->resize(width, height, scale);
     }
 
-    void pointer(const std::uint32_t kind, const std::int32_t button,
-                 const double x, const double y) {
-        if (host != nullptr) host->pointer(kind, button, x, y);
-        else if (application_host != nullptr) application_host->pointer(kind, button, x, y);
+    void pointer(const std::uint32_t kind, const std::int32_t button, const double x,
+                 const double y) {
+        if (host != nullptr)
+            host->pointer(kind, button, x, y);
+        else if (application_host != nullptr)
+            application_host->pointer(kind, button, x, y);
     }
 
     void scroll(const double x, const double y, const double delta_x, const double delta_y) {
-        if (host != nullptr) host->scroll(x, y, delta_x, delta_y);
-        else if (application_host != nullptr) application_host->scroll(x, y, delta_x, delta_y);
+        if (host != nullptr)
+            host->scroll(x, y, delta_x, delta_y);
+        else if (application_host != nullptr)
+            application_host->scroll(x, y, delta_x, delta_y);
     }
 
     void key(const std::uint32_t virtual_key, const std::uint32_t action) {
@@ -100,15 +110,14 @@ struct WindowApplication final {
     }
 
     void text(std::string value) {
-        if (host != nullptr) host->text(std::move(value));
-        else if (application_host != nullptr) application_host->text(std::move(value));
+        if (host != nullptr)
+            host->text(std::move(value));
+        else if (application_host != nullptr)
+            application_host->text(std::move(value));
     }
 
-    void ime_preedit(
-        std::string value,
-        const std::size_t selection_start,
-        const std::size_t selection_end
-    ) {
+    void ime_preedit(std::string value, const std::size_t selection_start,
+                     const std::size_t selection_end) {
         if (host != nullptr) {
             host->ime_preedit(std::move(value), selection_start, selection_end);
         } else if (application_host != nullptr) {
@@ -119,23 +128,31 @@ struct WindowApplication final {
     void ime_composition(const std::intptr_t flags) {
         const strata::desktop::win32::ImeUpdate update =
             strata::desktop::win32::read_ime_update(window_handle, flags);
-        if (update.committed.has_value() && !update.committed->empty()) text(*update.committed);
+        if (update.committed.has_value() && !update.committed->empty())
+            text(*update.committed);
         if (update.preedit.has_value()) {
             ime_preedit(*update.preedit, update.selection_start, update.selection_end);
         }
     }
 
     void cancel_interactions() noexcept {
-        if (host != nullptr) host->cancel_interactions();
-        else if (application_host != nullptr) application_host->cancel_interactions();
+        if (host != nullptr)
+            host->cancel_interactions();
+        else if (application_host != nullptr)
+            application_host->cancel_interactions();
     }
 
     void frame() {
-        if (host != nullptr) host->frame();
-        else if (application_host != nullptr) application_host->frame();
+        if (preview != nullptr)
+            preview->poll();
+        if (host != nullptr)
+            host->frame();
+        else if (application_host != nullptr)
+            application_host->frame();
     }
 
     void reset_host() noexcept {
+        preview.reset();
         application_host.reset();
         host.reset();
     }
@@ -146,7 +163,8 @@ struct WindowApplication final {
             return;
         }
         if (value >= 0xDC00 && value <= 0xDFFF) {
-            if (high_surrogate == 0) return;
+            if (high_surrogate == 0)
+                return;
             text(strata::desktop::win32::utf8_character(high_surrogate, value));
             high_surrogate = 0;
             return;
@@ -163,15 +181,15 @@ struct WindowApplication final {
 }
 
 [[nodiscard]] bool activate_foreground_window(const HWND window) noexcept {
-    if (window == nullptr || !IsWindow(window)) return false;
+    if (window == nullptr || !IsWindow(window))
+        return false;
     ShowWindow(window, SW_RESTORE);
     const HWND previous = GetForegroundWindow();
     const DWORD current_thread = GetCurrentThreadId();
-    const DWORD foreground_thread = previous != nullptr
-        ? GetWindowThreadProcessId(previous, nullptr)
-        : 0U;
+    const DWORD foreground_thread =
+        previous != nullptr ? GetWindowThreadProcessId(previous, nullptr) : 0U;
     const bool attached = foreground_thread != 0U && foreground_thread != current_thread &&
-        AttachThreadInput(current_thread, foreground_thread, TRUE) != 0;
+                          AttachThreadInput(current_thread, foreground_thread, TRUE) != 0;
     BringWindowToTop(window);
     SetActiveWindow(window);
     SetForegroundWindow(window);
@@ -182,63 +200,50 @@ struct WindowApplication final {
     return GetForegroundWindow() == window;
 }
 
-LRESULT CALLBACK window_procedure(
-    const HWND window,
-    const UINT message,
-    const WPARAM word,
-    const LPARAM long_value
-) {
+LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM word,
+                                  const LPARAM long_value) {
     if (message == WM_NCCREATE) {
         const auto* const create = reinterpret_cast<const CREATESTRUCTW*>(long_value);
-        SetWindowLongPtrW(
-            window,
-            GWLP_USERDATA,
-            reinterpret_cast<LONG_PTR>(create->lpCreateParams)
-        );
+        SetWindowLongPtrW(window, GWLP_USERDATA,
+                          reinterpret_cast<LONG_PTR>(create->lpCreateParams));
     }
     WindowApplication* const app = application(window);
-    if (app == nullptr) return DefWindowProcW(window, message, word, long_value);
+    if (app == nullptr)
+        return DefWindowProcW(window, message, word, long_value);
     try {
         if (app->application_host != nullptr && message != WM_CLOSE && message != WM_DESTROY) {
             const std::optional<std::intptr_t> handled =
                 app->application_host->handle_window_message(message, word, long_value);
-            return handled.has_value()
-                ? static_cast<LRESULT>(*handled)
-                : DefWindowProcW(window, message, word, long_value);
+            return handled.has_value() ? static_cast<LRESULT>(*handled)
+                                       : DefWindowProcW(window, message, word, long_value);
         }
         switch (message) {
         case WM_SIZE:
             app->resize(window, long_value);
             return 0;
         case WM_EXITSIZEMOVE:
-            if (app->host != nullptr) app->host->persist_window_geometry();
+            if (app->host != nullptr)
+                app->host->persist_window_geometry();
             return 0;
         case WM_DPICHANGED: {
             const auto* const suggested = reinterpret_cast<const RECT*>(long_value);
-            SetWindowPos(
-                window,
-                nullptr,
-                suggested->left,
-                suggested->top,
-                suggested->right - suggested->left,
-                suggested->bottom - suggested->top,
-                SWP_NOACTIVATE | SWP_NOZORDER
-            );
+            SetWindowPos(window, nullptr, suggested->left, suggested->top,
+                         suggested->right - suggested->left, suggested->bottom - suggested->top,
+                         SWP_NOACTIVATE | SWP_NOZORDER);
             return 0;
         }
         case WM_MOUSEMOVE:
             if (!app->tracking_mouse_leave) {
                 TRACKMOUSEEVENT tracking{
-                    sizeof(TRACKMOUSEEVENT), TME_LEAVE, window, HOVER_DEFAULT,
+                    sizeof(TRACKMOUSEEVENT),
+                    TME_LEAVE,
+                    window,
+                    HOVER_DEFAULT,
                 };
                 app->tracking_mouse_leave = TrackMouseEvent(&tracking) != FALSE;
             }
-            app->pointer(
-                STRATA_INPUT_POINTER_MOVE,
-                0,
-                GET_X_LPARAM(long_value),
-                GET_Y_LPARAM(long_value)
-            );
+            app->pointer(STRATA_INPUT_POINTER_MOVE, 0, GET_X_LPARAM(long_value),
+                         GET_Y_LPARAM(long_value));
             return 0;
         case WM_MOUSELEAVE:
             app->tracking_mouse_leave = false;
@@ -251,82 +256,64 @@ LRESULT CALLBACK window_procedure(
             app->captured_buttons |= first ? 8U : 16U;
             SetFocus(window);
             SetCapture(window);
-            app->pointer(
-                STRATA_INPUT_POINTER_PRESS,
-                first ? 3 : 4,
-                GET_X_LPARAM(long_value),
-                GET_Y_LPARAM(long_value)
-            );
+            app->pointer(STRATA_INPUT_POINTER_PRESS, first ? 3 : 4, GET_X_LPARAM(long_value),
+                         GET_Y_LPARAM(long_value));
             return 1;
         }
         case WM_LBUTTONDOWN:
         case WM_RBUTTONDOWN:
         case WM_MBUTTONDOWN:
-            app->captured_buttons |= message == WM_LBUTTONDOWN ? 1U
-                : message == WM_RBUTTONDOWN ? 2U : 4U;
+            app->captured_buttons |= message == WM_LBUTTONDOWN   ? 1U
+                                     : message == WM_RBUTTONDOWN ? 2U
+                                                                 : 4U;
             SetFocus(window);
             SetCapture(window);
-            app->pointer(
-                STRATA_INPUT_POINTER_PRESS,
-                message == WM_LBUTTONDOWN ? 0 : message == WM_RBUTTONDOWN ? 1 : 2,
-                GET_X_LPARAM(long_value),
-                GET_Y_LPARAM(long_value)
-            );
+            app->pointer(STRATA_INPUT_POINTER_PRESS,
+                         message == WM_LBUTTONDOWN   ? 0
+                         : message == WM_RBUTTONDOWN ? 1
+                                                     : 2,
+                         GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value));
             return 0;
         case WM_XBUTTONUP: {
             const bool first = GET_XBUTTON_WPARAM(word) == XBUTTON1;
-            app->pointer(
-                STRATA_INPUT_POINTER_RELEASE,
-                first ? 3 : 4,
-                GET_X_LPARAM(long_value),
-                GET_Y_LPARAM(long_value)
-            );
+            app->pointer(STRATA_INPUT_POINTER_RELEASE, first ? 3 : 4, GET_X_LPARAM(long_value),
+                         GET_Y_LPARAM(long_value));
             app->captured_buttons &= first ? ~8U : ~16U;
-            if (app->captured_buttons == 0U && GetCapture() == window) ReleaseCapture();
+            if (app->captured_buttons == 0U && GetCapture() == window)
+                ReleaseCapture();
             return 1;
         }
         case WM_LBUTTONUP:
         case WM_RBUTTONUP:
         case WM_MBUTTONUP:
-            app->pointer(
-                STRATA_INPUT_POINTER_RELEASE,
-                message == WM_LBUTTONUP ? 0 : message == WM_RBUTTONUP ? 1 : 2,
-                GET_X_LPARAM(long_value),
-                GET_Y_LPARAM(long_value)
-            );
-            app->captured_buttons &= message == WM_LBUTTONUP ? ~1U
-                : message == WM_RBUTTONUP ? ~2U : ~4U;
-            if (app->captured_buttons == 0U && GetCapture() == window) ReleaseCapture();
+            app->pointer(STRATA_INPUT_POINTER_RELEASE,
+                         message == WM_LBUTTONUP   ? 0
+                         : message == WM_RBUTTONUP ? 1
+                                                   : 2,
+                         GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value));
+            app->captured_buttons &= message == WM_LBUTTONUP   ? ~1U
+                                     : message == WM_RBUTTONUP ? ~2U
+                                                               : ~4U;
+            if (app->captured_buttons == 0U && GetCapture() == window)
+                ReleaseCapture();
             return 0;
         case WM_MOUSEWHEEL: {
             POINT point{GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value)};
             ScreenToClient(window, &point);
-            app->scroll(
-                point.x,
-                point.y,
-                0.0,
-                static_cast<double>(GET_WHEEL_DELTA_WPARAM(word)) / WHEEL_DELTA
-            );
+            app->scroll(point.x, point.y, 0.0,
+                        static_cast<double>(GET_WHEEL_DELTA_WPARAM(word)) / WHEEL_DELTA);
             return 0;
         }
         case WM_MOUSEHWHEEL: {
             POINT point{GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value)};
             ScreenToClient(window, &point);
-            app->scroll(
-                point.x,
-                point.y,
-                static_cast<double>(GET_WHEEL_DELTA_WPARAM(word)) / WHEEL_DELTA,
-                0.0
-            );
+            app->scroll(point.x, point.y,
+                        static_cast<double>(GET_WHEEL_DELTA_WPARAM(word)) / WHEEL_DELTA, 0.0);
             return 0;
         }
         case WM_KEYDOWN:
-            app->key(
-                static_cast<std::uint32_t>(word),
-                (HIWORD(long_value) & KF_REPEAT) != 0U
-                    ? STRATA_KEY_REPEAT
-                    : STRATA_KEY_PRESS
-            );
+            app->key(static_cast<std::uint32_t>(word),
+                     (HIWORD(long_value) & KF_REPEAT) != 0U ? STRATA_KEY_REPEAT : STRATA_KEY_PRESS);
             return 0;
         case WM_KEYUP:
             app->key(static_cast<std::uint32_t>(word), STRATA_KEY_RELEASE);
@@ -336,34 +323,30 @@ LRESULT CALLBACK window_procedure(
             // it as an application shortcut, so forwarding it to DefWindowProc would logically
             // toggle the surface and then stall visible presentation until menu mode is dismissed.
             if (word == VK_F10) {
-                app->key(
-                    VK_F10,
-                    (HIWORD(long_value) & KF_REPEAT) != 0U
-                        ? STRATA_KEY_REPEAT
-                        : STRATA_KEY_PRESS
-                );
+                app->key(VK_F10, (HIWORD(long_value) & KF_REPEAT) != 0U ? STRATA_KEY_REPEAT
+                                                                        : STRATA_KEY_PRESS);
                 return 0;
             }
-            app->key(
-                static_cast<std::uint32_t>(word),
-                (HIWORD(long_value) & KF_REPEAT) != 0U
-                    ? STRATA_KEY_REPEAT
-                    : STRATA_KEY_PRESS
-            );
+            app->key(static_cast<std::uint32_t>(word),
+                     (HIWORD(long_value) & KF_REPEAT) != 0U ? STRATA_KEY_REPEAT : STRATA_KEY_PRESS);
             return DefWindowProcW(window, message, word, long_value);
         case WM_SYSKEYUP:
             app->key(static_cast<std::uint32_t>(word), STRATA_KEY_RELEASE);
-            if (word == VK_F10) return 0;
+            if (word == VK_F10)
+                return 0;
             return DefWindowProcW(window, message, word, long_value);
         case WM_CHAR:
-            if (app->host != nullptr) app->character(static_cast<wchar_t>(word));
+            if (app->host != nullptr)
+                app->character(static_cast<wchar_t>(word));
             return 0;
         case WM_UNICHAR:
-            if (word == UNICODE_NOCHAR) return 1;
-            if (word < 0x20U || word == 0x7FU) return 0;
-            if (const std::string value = strata::desktop::win32::utf8_code_point(
-                    static_cast<std::uint32_t>(word)
-                ); !value.empty()) {
+            if (word == UNICODE_NOCHAR)
+                return 1;
+            if (word < 0x20U || word == 0x7FU)
+                return 0;
+            if (const std::string value =
+                    strata::desktop::win32::utf8_code_point(static_cast<std::uint32_t>(word));
+                !value.empty()) {
                 app->text(value);
             }
             return 0;
@@ -384,7 +367,8 @@ LRESULT CALLBACK window_procedure(
             app->high_surrogate = 0;
             app->ime_preedit({}, 0U, 0U);
             app->cancel_interactions();
-            if (GetCapture() == window) ReleaseCapture();
+            if (GetCapture() == window)
+                ReleaseCapture();
             return 0;
         case WM_CAPTURECHANGED:
             if (app->captured_buttons != 0U) {
@@ -399,11 +383,14 @@ LRESULT CALLBACK window_procedure(
             app->reset_host();
             if (app->registered) {
                 app->registered = false;
-                if (active_window_count > 0U) --active_window_count;
-                if (active_window_count == 0U) PostQuitMessage(0);
+                if (active_window_count > 0U)
+                    --active_window_count;
+                if (active_window_count == 0U)
+                    PostQuitMessage(0);
             }
             return 0;
-        default: return DefWindowProcW(window, message, word, long_value);
+        default:
+            return DefWindowProcW(window, message, word, long_value);
         }
     } catch (const std::exception& error) {
         app->failed(error);
@@ -413,9 +400,8 @@ LRESULT CALLBACK window_procedure(
 
 [[nodiscard]] std::filesystem::path default_resource_root() {
     std::wstring executable(32'768U, L'\0');
-    const DWORD size = GetModuleFileNameW(
-        nullptr, executable.data(), static_cast<DWORD>(executable.size())
-    );
+    const DWORD size =
+        GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
     if (size == 0U || size == executable.size()) {
         throw std::runtime_error("could not locate the native desktop executable");
     }
@@ -431,10 +417,11 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         bool profile_showcase = false;
         bool multi_window = false;
         bool uncapped = false;
+        bool watch = false;
         std::filesystem::path performance_scenario_path;
         std::filesystem::path performance_output;
         std::filesystem::path performance_baseline;
-        std::filesystem::path application_launch_path;
+        std::filesystem::path manifest_path;
         std::filesystem::path resources;
         const auto require_value = [&](int& index, const std::string_view option) {
             if (++index >= argument_count)
@@ -444,20 +431,23 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         for (int index = 1; index < argument_count; ++index) {
             const std::wstring_view argument(arguments[index]);
             if (argument == L"--help" || argument == L"-h") {
-                std::cout
-                    << "usage:\n"
-                       "  strata_desktop --application launch.json [--resources resource-root]\n"
-                       "  strata_desktop [--multi-window] [--uncapped] [resource-root]\n"
-                       "  strata_desktop --performance scenario.json --output directory "
-                       "[--baseline performance.json] [resource-root]\n";
+                std::cout << "usage:\n"
+                             "  strata_desktop app.strata-app.json [--watch] [--uncapped]\n"
+                             "  strata_desktop [--multi-window] [--uncapped] [resource-root]\n"
+                             "  strata_desktop --performance scenario.json --output directory "
+                             "[--baseline performance.json] [resource-root]\n";
                 return 0;
             }
-            if (argument == L"--smoke") smoke = true;
-            else if (argument == L"--profile-showcase") profile_showcase = true;
-            else if (argument == L"--multi-window") multi_window = true;
-            else if (argument == L"--uncapped") uncapped = true;
-            else if (argument == L"--application")
-                application_launch_path = require_value(index, "--application");
+            if (argument == L"--smoke")
+                smoke = true;
+            else if (argument == L"--profile-showcase")
+                profile_showcase = true;
+            else if (argument == L"--multi-window")
+                multi_window = true;
+            else if (argument == L"--uncapped")
+                uncapped = true;
+            else if (argument == L"--watch")
+                watch = true;
             else if (argument == L"--resources")
                 resources = require_value(index, "--resources");
             else if (argument == L"--performance")
@@ -466,38 +456,67 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                 performance_output = require_value(index, "--output");
             else if (argument == L"--baseline")
                 performance_baseline = require_value(index, "--baseline");
-            else if (resources.empty()) resources = argument;
+            else if (argument.ends_with(L".strata-app.json") && manifest_path.empty())
+                manifest_path = argument;
+            else if (resources.empty())
+                resources = argument;
             else
                 throw std::invalid_argument("unknown desktop option");
         }
-        const bool application_mode = !application_launch_path.empty();
+        const bool manifest_mode = !manifest_path.empty();
         const bool performance = !performance_scenario_path.empty();
-        const int exclusive_modes = (profile_showcase ? 1 : 0) + (performance ? 1 : 0) +
-                                    (application_mode ? 1 : 0);
+        const int exclusive_modes =
+            (profile_showcase ? 1 : 0) + (performance ? 1 : 0) + (manifest_mode ? 1 : 0);
         if (exclusive_modes > 1)
+            throw std::invalid_argument("application manifest, showcase-profile, and performance "
+                                        "modes are mutually exclusive");
+        if (manifest_mode && multi_window)
             throw std::invalid_argument(
-                "application, showcase-profile, and performance modes are mutually exclusive");
-        if (application_mode && multi_window)
-            throw std::invalid_argument("--multi-window is available only for the bundled showcase");
+                "--multi-window is available only for the bundled showcase");
         if (!performance && (!performance_output.empty() || !performance_baseline.empty()))
             throw std::invalid_argument("--output and --baseline require --performance");
         if (performance && performance_output.empty())
             throw std::invalid_argument("--performance requires --output");
-        if (smoke && !application_mode) multi_window = true;
-        if (profile_showcase || performance || application_mode) multi_window = false;
-        if (performance) uncapped = true;
+
+        std::optional<strata::desktop::LaunchManifest> launch_manifest =
+            manifest_mode ? std::optional(strata::desktop::load_launch_manifest(manifest_path))
+                          : std::nullopt;
+        if (launch_manifest.has_value() &&
+            launch_manifest->kind == strata::desktop::LaunchKind::custom) {
+            if (watch || launch_manifest->watch) {
+                throw std::invalid_argument("custom hosts own their preview lifecycle; "
+                                            "launch.watch and --watch require a generic manifest");
+            }
+            if (!resources.empty() || uncapped || smoke) {
+                throw std::invalid_argument(
+                    "--resources, --uncapped, and --smoke are generic-runner options");
+            }
+            return strata::desktop::run_custom_host(*launch_manifest);
+        }
+
+        const bool application_mode = launch_manifest.has_value();
+        if (application_mode) {
+            watch = watch || launch_manifest->watch;
+            if (resources.empty())
+                resources = launch_manifest->resource_root;
+        } else if (watch) {
+            throw std::invalid_argument("--watch requires a generic .strata-app.json manifest");
+        }
+        if (smoke && !application_mode)
+            multi_window = true;
+        if (profile_showcase || performance || application_mode)
+            multi_window = false;
+        if (performance)
+            uncapped = true;
         const bool headless = smoke || profile_showcase;
-        if (resources.empty()) resources = default_resource_root();
+        if (resources.empty())
+            resources = default_resource_root();
         const std::optional<strata::desktop::PerformanceScenario> performance_scenario =
-            performance
-                ? std::optional(strata::desktop::load_performance_scenario(
-                      performance_scenario_path
-                  ))
-                : std::nullopt;
+            performance ? std::optional(
+                              strata::desktop::load_performance_scenario(performance_scenario_path))
+                        : std::nullopt;
         const std::optional<strata::headless::Scenario> application_launch =
-            application_mode
-                ? std::optional(strata::headless::load_scenario(application_launch_path))
-                : std::nullopt;
+            application_mode ? std::optional(launch_manifest->application) : std::nullopt;
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
         const HINSTANCE instance = GetModuleHandleW(nullptr);
@@ -513,59 +532,50 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         }
 
         strata::desktop::PerformanceStartup performance_startup;
-        if (performance) performance_startup.started_at = std::chrono::steady_clock::now();
+        if (performance)
+            performance_startup.started_at = std::chrono::steady_clock::now();
         const std::size_t window_count = multi_window ? 2U : 1U;
         std::vector<std::unique_ptr<WindowApplication>> applications;
         applications.reserve(window_count);
         for (std::size_t index = 0U; index < window_count; ++index) {
             auto app = std::make_unique<WindowApplication>();
             const std::wstring application_title = application_launch.has_value()
-                ? utf8_to_wide(application_launch->application_id)
-                : std::wstring{};
-            const wchar_t* const title = application_launch.has_value()
-                ? application_title.c_str()
-                : index == 0U ? L"Strata Native Showcase — Alpha"
-                              : L"Strata Native Showcase — Omega";
+                                                       ? utf8_to_wide(launch_manifest->title)
+                                                       : std::wstring{};
+            const wchar_t* const title = application_launch.has_value() ? application_title.c_str()
+                                         : index == 0U ? L"Strata Native Showcase — Alpha"
+                                                       : L"Strata Native Showcase — Omega";
             constexpr DWORD window_style = WS_OVERLAPPEDWINDOW;
             RECT window_bounds{
                 0,
                 0,
                 static_cast<LONG>(performance_scenario.has_value()
-                    ? performance_scenario->client_width
-                    : application_launch.has_value() ? application_launch->width : 1120U),
+                                      ? performance_scenario->client_width
+                                  : application_launch.has_value() ? application_launch->width
+                                                                   : 1120U),
                 static_cast<LONG>(performance_scenario.has_value()
-                    ? performance_scenario->client_height
-                    : application_launch.has_value() ? application_launch->height : 760U),
+                                      ? performance_scenario->client_height
+                                  : application_launch.has_value() ? application_launch->height
+                                                                   : 760U),
             };
             if ((performance_scenario.has_value() || application_launch.has_value()) &&
-                !AdjustWindowRectExForDpi(
-                    &window_bounds, window_style, FALSE, 0U, GetDpiForSystem()
-                )) {
+                !AdjustWindowRectExForDpi(&window_bounds, window_style, FALSE, 0U,
+                                          GetDpiForSystem())) {
                 throw std::runtime_error("could not resolve desktop window bounds");
             }
             const auto window_create_started = std::chrono::steady_clock::now();
             const HWND window = CreateWindowExW(
-                0U,
-                window_class_name,
-                title,
-                window_style,
-                index == 0U ? CW_USEDEFAULT : 160,
-                index == 0U ? CW_USEDEFAULT : 120,
-                window_bounds.right - window_bounds.left,
-                window_bounds.bottom - window_bounds.top,
-                nullptr,
-                nullptr,
-                instance,
-                app.get()
-            );
+                0U, window_class_name, title, window_style, index == 0U ? CW_USEDEFAULT : 160,
+                index == 0U ? CW_USEDEFAULT : 120, window_bounds.right - window_bounds.left,
+                window_bounds.bottom - window_bounds.top, nullptr, nullptr, instance, app.get());
             if (window == nullptr) {
                 throw std::runtime_error("could not create a native desktop window");
             }
             if (performance && index == 0U) {
                 performance_startup.window_create_nanos =
                     std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        std::chrono::steady_clock::now() - window_create_started
-                    ).count();
+                        std::chrono::steady_clock::now() - window_create_started)
+                        .count();
             }
             app->window_handle = window;
             if (performance_scenario.has_value()) {
@@ -575,14 +585,11 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                     static_cast<LONG>(performance_scenario->client_width),
                     static_cast<LONG>(performance_scenario->client_height),
                 };
-                if (!AdjustWindowRectExForDpi(
-                        &exact_bounds, window_style, FALSE, 0U, GetDpiForWindow(window)
-                    ) || !SetWindowPos(
-                        window, nullptr, 0, 0,
-                        exact_bounds.right - exact_bounds.left,
-                        exact_bounds.bottom - exact_bounds.top,
-                        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
-                    )) {
+                if (!AdjustWindowRectExForDpi(&exact_bounds, window_style, FALSE, 0U,
+                                              GetDpiForWindow(window)) ||
+                    !SetWindowPos(window, nullptr, 0, 0, exact_bounds.right - exact_bounds.left,
+                                  exact_bounds.bottom - exact_bounds.top,
+                                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)) {
                     DestroyWindow(window);
                     throw std::runtime_error("could not establish performance client bounds");
                 }
@@ -597,15 +604,14 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                     config.schemas_resource = application_launch->schemas.generic_string();
                     config.root_name = application_launch->root;
                     config.root_role = application_launch->root_role == "screen"
-                        ? strata::desktop::SurfaceRole::screen
-                        : strata::desktop::SurfaceRole::overlay;
+                                           ? strata::desktop::SurfaceRole::screen
+                                           : strata::desktop::SurfaceRole::overlay;
                     config.extension_packages = application_launch->packages;
                     config.extension_search_paths = application_launch->extension_search_paths;
                     config.reduced_motion = application_launch->reduced_motion;
                     if (!application_launch->fonts.empty()) {
                         config.fonts.clear();
-                        for (const strata::headless::FontConfig& font :
-                             application_launch->fonts) {
+                        for (const strata::headless::FontConfig& font : application_launch->fonts) {
                             config.fonts.push_back({font.id, font.resource});
                         }
                     }
@@ -616,62 +622,71 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                             config.images.push_back({
                                 image.id,
                                 image.resource,
-                                image.sampling == 0U
-                                    ? strata::desktop::ImageSampling::nearest
-                                    : strata::desktop::ImageSampling::linear,
+                                image.sampling == 0U ? strata::desktop::ImageSampling::nearest
+                                                     : strata::desktop::ImageSampling::linear,
                             });
                         }
                     }
-                    app->application_host =
-                        std::make_unique<strata::desktop::ApplicationHost>(
-                            window,
-                            resources,
-                            std::move(config),
-                            strata::desktop::ApplicationOptions{.vsync = !uncapped && !headless}
-                        );
+                    std::vector<std::string> immutable_resources;
+                    if (!config.schemas_resource.empty()) {
+                        immutable_resources.push_back(config.schemas_resource);
+                    }
+                    for (const strata::desktop::FontResource& font : config.fonts) {
+                        immutable_resources.push_back(font.resource);
+                    }
+                    for (const strata::desktop::ImageResource& image : config.images) {
+                        immutable_resources.push_back(image.resource);
+                    }
+                    const std::vector<std::filesystem::path> extension_search_paths =
+                        config.extension_search_paths;
+                    app->application_host = std::make_unique<strata::desktop::ApplicationHost>(
+                        window, resources, std::move(config),
+                        strata::desktop::ApplicationOptions{
+                            .vsync = !uncapped && !headless,
+                            .asynchronous_shader_compilation = !watch,
+                        });
                     for (const std::string& action_id : application_launch->actions) {
                         app->application_host->bindings().on(
-                            action_id,
-                            [](const strata::host::ActionEvent& event) {
+                            action_id, [](const strata::host::ActionEvent& event) {
                                 std::cout << "STRATA ACTION " << event.id
                                           << " payload=" << event.payload.json() << '\n';
                                 return strata::host::ActionResult::handled;
-                            }
-                        );
+                            });
                     }
                     for (const strata::headless::SnapshotConfig& snapshot :
                          application_launch->snapshots) {
                         app->application_host->publish(
-                            snapshot.id,
-                            strata::host::Value::parse(
-                                strata::data::encode_canonical_json(snapshot.values)
-                            )
-                        );
+                            snapshot.id, strata::host::Value::parse(
+                                             strata::data::encode_canonical_json(snapshot.values)));
                     }
                     app->application_host->activate();
+                    if (watch) {
+                        app->preview = std::make_unique<strata::desktop::PreviewSession>(
+                            launch_manifest->path, resources, *app->application_host,
+                            std::move(immutable_resources), extension_search_paths);
+                    }
                 } else {
-                    const std::string instance_label = performance
-                        ? "Performance benchmark " + std::to_string(GetCurrentProcessId())
+                    const std::string instance_label =
+                        performance
+                            ? "Performance benchmark " + std::to_string(GetCurrentProcessId())
                         : index == 0U ? "Independent window alpha 7"
                                       : "Independent window omega 9";
                     app->host = std::make_unique<strata::desktop::Host>(
-                        window,
-                        resources,
-                        instance_label,
+                        window, resources, instance_label,
                         strata::desktop::HostOptions{
                             .vsync = !uncapped && !headless,
                             .restore_window_geometry = !performance,
                             .performance_hud = !performance,
                             .profile_sampling = !performance,
-                        }
-                    );
-                    if (smoke) app->host->key(VK_F7);
+                        });
+                    if (smoke)
+                        app->host->key(VK_F7);
                 }
                 if (performance && index == 0U) {
                     performance_startup.host_create_nanos =
                         std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            std::chrono::steady_clock::now() - host_create_started
-                        ).count();
+                            std::chrono::steady_clock::now() - host_create_started)
+                            .count();
                 }
             } catch (...) {
                 DestroyWindow(window);
@@ -682,8 +697,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
             if (!headless && (!performance || performance_scenario->require_visible)) {
                 ShowWindow(window, performance ? SW_SHOWNOACTIVATE : SW_SHOW);
                 UpdateWindow(window);
-                if (performance_scenario.has_value() &&
-                    performance_scenario->require_foreground) {
+                if (performance_scenario.has_value() && performance_scenario->require_foreground) {
                     static_cast<void>(activate_foreground_window(window));
                 }
             }
@@ -694,11 +708,10 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         bool running = true;
         if (performance) {
             const bool foreground = !performance_scenario->require_foreground ||
-                activate_foreground_window(applications.front()->window_handle);
+                                    activate_foreground_window(applications.front()->window_handle);
             if (!foreground) {
                 throw std::runtime_error(
-                    "could not make the performance window foreground; no objective run was made"
-                );
+                    "could not make the performance window foreground; no objective run was made");
             }
             auto pump_messages = [&applications, &exit_code]() {
                 MSG message{};
@@ -707,9 +720,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                         MSG next{};
                         while (PeekMessageW(&next, nullptr, 0U, 0U, PM_NOREMOVE) &&
                                next.message == WM_MOUSEMOVE && next.hwnd == message.hwnd) {
-                            static_cast<void>(PeekMessageW(
-                                &message, nullptr, 0U, 0U, PM_REMOVE
-                            ));
+                            static_cast<void>(PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE));
                         }
                     }
                     if (message.message == WM_QUIT) {
@@ -723,14 +734,10 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                     return app->failure.empty() && app->host != nullptr;
                 });
             };
-            strata::desktop::PerformanceRunner runner(
-                applications.front()->window_handle,
-                *applications.front()->host,
-                *performance_scenario,
-                performance_output,
-                performance_baseline,
-                performance_startup
-            );
+            strata::desktop::PerformanceRunner runner(applications.front()->window_handle,
+                                                      *applications.front()->host,
+                                                      *performance_scenario, performance_output,
+                                                      performance_baseline, performance_startup);
             const bool valid = runner.run(pump_messages);
             exit_code = valid ? 0 : 2;
             running = false;
@@ -755,9 +762,11 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
-            if (!running) break;
+            if (!running)
+                break;
             for (const auto& app : applications) {
-                if (!app->has_host()) continue;
+                if (!app->has_host())
+                    continue;
                 try {
                     app->frame();
                 } catch (const std::exception& error) {
@@ -787,32 +796,31 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                        std::ranges::all_of(applications, [](const auto& app) {
                            return app->host != nullptr && app->host->smoke_ready();
                        })) {
-                if (applications.size() != 2U ||
-                    !applications[0]->host->smoke_identity_bound() ||
+                if (applications.size() != 2U || !applications[0]->host->smoke_identity_bound() ||
                     !applications[1]->host->smoke_identity_bound() ||
                     applications[0]->host->smoke_fingerprint() ==
                         applications[1]->host->smoke_fingerprint()) {
                     throw std::runtime_error(
-                        "desktop isolation smoke did not observe distinct per-window host state"
-                    );
+                        "desktop isolation smoke did not observe distinct per-window host state");
                 }
                 std::cout << "STRATA_NATIVE_DESKTOP_SMOKE_READY windows=2 isolatedPackets=true\n";
                 running = false;
             }
             if (!headless && !uncapped) {
-                static_cast<void>(MsgWaitForMultipleObjectsEx(
-                    0U, nullptr, 16U, QS_ALLINPUT, MWMO_INPUTAVAILABLE
-                ));
+                static_cast<void>(MsgWaitForMultipleObjectsEx(0U, nullptr, 16U, QS_ALLINPUT,
+                                                              MWMO_INPUTAVAILABLE));
             }
         }
-        for (const auto& app : applications) app->reset_host();
+        for (const auto& app : applications)
+            app->reset_host();
         for (const auto& app : applications) {
             if (app->window_handle != nullptr && IsWindow(app->window_handle)) {
                 DestroyWindow(app->window_handle);
             }
         }
         for (const auto& app : applications) {
-            if (!app->failure.empty()) throw std::runtime_error(app->failure);
+            if (!app->failure.empty())
+                throw std::runtime_error(app->failure);
         }
         return exit_code;
     } catch (const std::exception& error) {

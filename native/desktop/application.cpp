@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -21,12 +22,12 @@
 
 #include <strata/strata.hpp>
 
-#include "host_services.hpp"
-#include "ime.hpp"
 #include "host/extensions.hpp"
 #include "host/module_path.hpp"
-#include <strata/render_packet.hpp>
+#include "host_services.hpp"
+#include "ime.hpp"
 #include "renderer.hpp"
+#include <strata/render_packet.hpp>
 
 namespace strata::desktop {
 namespace {
@@ -36,8 +37,7 @@ namespace {
 }
 
 [[nodiscard]] double display_scale(const std::uint32_t framebuffer_width,
-                                   const std::uint32_t framebuffer_height,
-                                   const double dpi_scale) {
+                                   const std::uint32_t framebuffer_height, const double dpi_scale) {
     strata_scale_policy_config policy{sizeof(strata_scale_policy_config)};
     strata::require_ok(strata_scale_policy_defaults(STRATA_SCALE_POLICY_AUTO_FIT, &policy),
                        "desktop scale-policy defaults");
@@ -67,21 +67,36 @@ namespace {
 
 [[nodiscard]] std::string key_name(const std::uint32_t key) {
     switch (key) {
-    case VK_TAB: return "tab";
-    case VK_RETURN: return "enter";
-    case VK_SPACE: return "space";
-    case VK_ESCAPE: return "escape";
-    case VK_BACK: return "backspace";
-    case VK_DELETE: return "delete";
-    case VK_LEFT: return "left";
-    case VK_RIGHT: return "right";
-    case VK_UP: return "up";
-    case VK_DOWN: return "down";
-    case VK_HOME: return "home";
-    case VK_END: return "end";
-    case VK_PRIOR: return "page_up";
-    case VK_NEXT: return "page_down";
-    case VK_INSERT: return "insert";
+    case VK_TAB:
+        return "tab";
+    case VK_RETURN:
+        return "enter";
+    case VK_SPACE:
+        return "space";
+    case VK_ESCAPE:
+        return "escape";
+    case VK_BACK:
+        return "backspace";
+    case VK_DELETE:
+        return "delete";
+    case VK_LEFT:
+        return "left";
+    case VK_RIGHT:
+        return "right";
+    case VK_UP:
+        return "up";
+    case VK_DOWN:
+        return "down";
+    case VK_HOME:
+        return "home";
+    case VK_END:
+        return "end";
+    case VK_PRIOR:
+        return "page_up";
+    case VK_NEXT:
+        return "page_down";
+    case VK_INSERT:
+        return "insert";
     default:
         if (key >= 'A' && key <= 'Z')
             return std::string(1U, static_cast<char>('a' + key - 'A'));
@@ -101,13 +116,18 @@ void require_resource_id(const std::string_view value, const std::string_view la
     }
 }
 
+void append_unique(std::vector<std::string>& values, const std::string_view value) {
+    if (std::ranges::find(values, value) == values.end())
+        values.emplace_back(value);
+}
+
 } // namespace
 
 struct ApplicationHost::Impl final {
     Impl(HWND window, std::filesystem::path resource_root, ApplicationConfig config,
          const ApplicationOptions options)
         : window(window), config(std::move(config)), services(window, std::move(resource_root)),
-          renderer(window, options.vsync) {
+          renderer(window, options.vsync, options.asynchronous_shader_compilation) {
         try {
             initialize();
         } catch (...) {
@@ -157,6 +177,7 @@ struct ApplicationHost::Impl final {
             auto& self = *static_cast<Impl*>(user_data);
             self.module_id_scratch =
                 host::resolve_module_id(copy(importer_source_id), copy(import_path));
+            append_unique(self.module_resources, self.module_id_scratch);
             self.module_text_scratch = self.services.text(self.module_id_scratch);
             *output = strata_module_source{
                 sizeof(strata_module_source),
@@ -198,10 +219,8 @@ struct ApplicationHost::Impl final {
         result.rectangle_snapping = STRATA_RECTANGLE_SNAP_OUTWARD;
         result.density = STRATA_SURFACE_DENSITY_COMFORTABLE;
         result.pointer_precision = STRATA_POINTER_PRECISION_FINE;
-        result.input_capabilities = STRATA_SURFACE_INPUT_POINTER |
-                                    STRATA_SURFACE_INPUT_KEYBOARD |
-                                    STRATA_SURFACE_INPUT_IME |
-                                    STRATA_SURFACE_INPUT_CLIPBOARD;
+        result.input_capabilities = STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD |
+                                    STRATA_SURFACE_INPUT_IME | STRATA_SURFACE_INPUT_CLIPBOARD;
         result.reduced_motion = config.reduced_motion ? 1U : 0U;
         return result;
     }
@@ -249,33 +268,32 @@ struct ApplicationHost::Impl final {
         runtime_config.stable_identity_seed = 0x5354524154414150ULL;
         runtime_config.clock = strata_clock{sizeof(strata_clock), this, &Impl::clock};
         runtime_config.diagnostics = strata_diagnostic_sink{
-            sizeof(strata_diagnostic_sink), this, &Impl::diagnostic,
+            sizeof(strata_diagnostic_sink),
+            this,
+            &Impl::diagnostic,
         };
         runtime = std::make_unique<strata::Runtime>(runtime_config);
 
         const strata_resource_adapter resources = services.resource_adapter();
-        strata::require_ok(strata_runtime_set_resource_adapter(runtime->native_handle(), &resources),
-                           "desktop resource adapter installation");
+        strata::require_ok(
+            strata_runtime_set_resource_adapter(runtime->native_handle(), &resources),
+            "desktop resource adapter installation");
         const strata_clipboard_adapter clipboard = services.clipboard_adapter();
         strata::require_ok(
             strata_runtime_set_clipboard_adapter(runtime->native_handle(), &clipboard),
             "desktop clipboard adapter installation");
         const strata_ime_adapter ime = services.ime_adapter(config.application_id);
-        strata::require_ok(
-            strata_runtime_set_ime_adapter(runtime->native_handle(), &ime),
-            "desktop IME adapter installation"
-        );
+        strata::require_ok(strata_runtime_set_ime_adapter(runtime->native_handle(), &ime),
+                           "desktop IME adapter installation");
 
         schemas = config.schemas_resource.empty() ? std::string{}
                                                   : services.text(config.schemas_resource);
         std::vector<std::string> packages = host::declared_extension_packages(schemas);
         if (packages.empty()) {
             packages = config.extension_packages;
-        } else if (!config.extension_packages.empty() &&
-                   config.extension_packages != packages) {
+        } else if (!config.extension_packages.empty() && config.extension_packages != packages) {
             throw std::invalid_argument(
-                "desktop application extension packages disagree with its schema declaration"
-            );
+                "desktop application extension packages disagree with its schema declaration");
         }
         extensions = host::select_extensions(packages, config.extension_search_paths);
         extension_schemas = extensions.schemas();
@@ -295,42 +313,52 @@ struct ApplicationHost::Impl final {
 
         for (const strata::MaterialDeclaration& declaration :
              runtime->material_declarations("hlsl")) {
-            if (declaration.source.empty()) continue;
+            if (declaration.source.empty())
+                continue;
+            append_unique(program_resources, declaration.source);
             renderer.declare_material(declaration.id, services.text(declaration.source));
         }
         for (const strata::EffectPassDeclaration& pass :
              runtime->effect_pass_declarations("hlsl")) {
+            if (!pass.source.empty())
+                append_unique(program_resources, pass.source);
             renderer.declare_effect_pass(
-                pass.effect_id,
-                pass.index,
-                static_cast<std::uint32_t>(pass.kind),
-                pass.radius,
-                pass.downsample,
-                pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
+                pass.effect_id, pass.index, static_cast<std::uint32_t>(pass.kind), pass.radius,
+                pass.downsample, pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
                 pass.downsample_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
-                pass.source.empty() ? std::string{} : services.text(pass.source)
-            );
+                pass.source.empty() ? std::string{} : services.text(pass.source));
         }
+    }
+
+    [[nodiscard]] bool activate_source() {
+        if (activation_generation == std::numeric_limits<std::uint64_t>::max()) {
+            throw std::overflow_error("desktop application activation generation is exhausted");
+        }
+        bindings->synchronize();
+        append_unique(module_resources, config.module_resource);
+        std::string candidate = services.text(config.module_resource);
+        const strata_activation_config activation{
+            sizeof(strata_activation_config),
+            ++activation_generation,
+            strata::view(config.module_resource),
+            strata::view(candidate),
+            this,
+            &Impl::load_module,
+        };
+        const strata_activation_info activated = runtime->activate(activation);
+        if (activated.status != STRATA_ACTIVATION_ACTIVATED)
+            return false;
+        source = std::move(candidate);
+        return true;
     }
 
     void activate() {
         if (surface.has_value())
             throw std::logic_error("desktop application is already active");
-        bindings->synchronize();
-        source = services.text(config.module_resource);
-        const strata_activation_config activation{
-            sizeof(strata_activation_config),
-            1U,
-            strata::view(config.module_resource),
-            strata::view(source),
-            this,
-            &Impl::load_module,
-        };
-        const strata_activation_info activated = runtime->activate(activation);
-        if (activated.status != STRATA_ACTIVATION_ACTIVATED) {
-            const std::string detail = diagnostics.empty()
-                ? std::string("no compiler diagnostic was published")
-                : diagnostics.back().code + ": " + diagnostics.back().message;
+        if (!activate_source()) {
+            const std::string detail =
+                diagnostics.empty() ? std::string("no compiler diagnostic was published")
+                                    : diagnostics.back().code + ": " + diagnostics.back().message;
             throw std::runtime_error("desktop application activation was rejected: " + detail);
         }
 
@@ -367,6 +395,29 @@ struct ApplicationHost::Impl final {
             images.size(),
         };
         surface.emplace(runtime->create_surface(surface_config));
+    }
+
+    [[nodiscard]] bool reload_program_source(const std::string_view resource_id) {
+        if (std::ranges::find(program_resources, resource_id) == program_resources.end()) {
+            return false;
+        }
+        const std::string hlsl_source = services.text(std::filesystem::path(resource_id));
+        for (const strata::MaterialDeclaration& declaration :
+             runtime->material_declarations("hlsl")) {
+            if (declaration.source == resource_id) {
+                renderer.declare_material(declaration.id, hlsl_source);
+            }
+        }
+        for (const strata::EffectPassDeclaration& pass :
+             runtime->effect_pass_declarations("hlsl")) {
+            if (pass.source != resource_id)
+                continue;
+            renderer.declare_effect_pass(
+                pass.effect_id, pass.index, static_cast<std::uint32_t>(pass.kind), pass.radius,
+                pass.downsample, pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
+                pass.downsample_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE), hlsl_source);
+        }
+        return true;
     }
 
     void resize_viewport(const std::uint32_t width, const std::uint32_t height,
@@ -417,18 +468,6 @@ struct ApplicationHost::Impl final {
         enqueue(event);
     }
 
-    void reload_resources() {
-        if (!surface.has_value()) {
-            throw std::logic_error("desktop application must be activated before reloading resources");
-        }
-        const strata_resource_adapter resources = services.reload_resource_adapter();
-        strata::require_ok(
-            strata_runtime_set_resource_adapter(runtime->native_handle(), &resources),
-            "desktop resource adapter refresh"
-        );
-        surface->reload_resources();
-    }
-
     void frame() {
         if (!surface.has_value())
             throw std::logic_error("desktop application must be activated before framing");
@@ -448,9 +487,8 @@ struct ApplicationHost::Impl final {
         telemetry.vertices = packet.vertices.size() / 88U;
         telemetry.submit_nanos = 0;
         static_cast<void>(info);
-        strata::require_ok(
-            strata_surface_record_host_frame(surface->native_handle(), &telemetry),
-            "desktop host profiler publication");
+        strata::require_ok(strata_surface_record_host_frame(surface->native_handle(), &telemetry),
+                           "desktop host profiler publication");
     }
 
     void close() {
@@ -494,6 +532,8 @@ struct ApplicationHost::Impl final {
     host::RenderPacketDecoder decoder;
     std::vector<Diagnostic> diagnostics;
     std::vector<std::string> extension_schemas;
+    std::vector<std::string> module_resources;
+    std::vector<std::string> program_resources;
     std::string schemas;
     std::string source;
     std::string module_id_scratch;
@@ -502,6 +542,7 @@ struct ApplicationHost::Impl final {
     std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
     std::int64_t frame_time = 0;
     std::uint64_t environment_generation = 1U;
+    std::uint64_t activation_generation = 0U;
     std::uint32_t framebuffer_width = 1U;
     std::uint32_t framebuffer_height = 1U;
     std::uint32_t captured_buttons = 0U;
@@ -517,15 +558,40 @@ ApplicationHost::ApplicationHost(HWND window, std::filesystem::path resource_roo
 
 ApplicationHost::~ApplicationHost() = default;
 
-strata::Runtime& ApplicationHost::runtime() noexcept { return *impl_->runtime; }
-strata::host::Bindings& ApplicationHost::bindings() noexcept { return *impl_->bindings; }
+strata::Runtime& ApplicationHost::runtime() noexcept {
+    return *impl_->runtime;
+}
+strata::host::Bindings& ApplicationHost::bindings() noexcept {
+    return *impl_->bindings;
+}
 
 void ApplicationHost::publish(const std::string_view snapshot_id,
                               const strata::host::Value& value) {
     static_cast<void>(impl_->runtime->publish_host_snapshot(snapshot_id, value.json()));
 }
 
-void ApplicationHost::activate() { impl_->activate(); }
+void ApplicationHost::activate() {
+    impl_->activate();
+}
+
+bool ApplicationHost::reactivate() {
+    if (!impl_->surface.has_value()) {
+        throw std::logic_error("desktop application must be active before source reactivation");
+    }
+    return impl_->activate_source();
+}
+
+bool ApplicationHost::reload_program_source(const std::string_view resource_id) {
+    return impl_->reload_program_source(resource_id);
+}
+
+const std::vector<std::string>& ApplicationHost::module_resources() const noexcept {
+    return impl_->module_resources;
+}
+
+const std::vector<std::string>& ApplicationHost::program_resources() const noexcept {
+    return impl_->program_resources;
+}
 
 void ApplicationHost::resize(const std::uint32_t framebuffer_width,
                              const std::uint32_t framebuffer_height, const double dpi_scale) {
@@ -575,11 +641,8 @@ void ApplicationHost::text(std::string utf8) {
     impl_->enqueue(event, utf8);
 }
 
-void ApplicationHost::ime_preedit(
-    std::string utf8,
-    const std::size_t selection_start,
-    const std::size_t selection_end
-) {
+void ApplicationHost::ime_preedit(std::string utf8, const std::size_t selection_start,
+                                  const std::size_t selection_end) {
     impl_->flush_pointer_move();
     strata_input_event event{};
     event.kind = STRATA_INPUT_IME_PREEDIT;
@@ -588,11 +651,9 @@ void ApplicationHost::ime_preedit(
     impl_->enqueue(event, utf8);
 }
 
-std::optional<std::intptr_t> ApplicationHost::handle_window_message(
-    const std::uint32_t message,
-    const std::uintptr_t word,
-    const std::intptr_t long_value
-) {
+std::optional<std::intptr_t>
+ApplicationHost::handle_window_message(const std::uint32_t message, const std::uintptr_t word,
+                                       const std::intptr_t long_value) {
     const WPARAM word_parameter = static_cast<WPARAM>(word);
     const LPARAM long_parameter = static_cast<LPARAM>(long_value);
     switch (message) {
@@ -608,31 +669,24 @@ std::optional<std::intptr_t> ApplicationHost::handle_window_message(
     case WM_DPICHANGED: {
         const auto* const bounds = reinterpret_cast<const RECT*>(long_parameter);
         if (bounds != nullptr) {
-            SetWindowPos(
-                impl_->window,
-                nullptr,
-                bounds->left,
-                bounds->top,
-                bounds->right - bounds->left,
-                bounds->bottom - bounds->top,
-                SWP_NOACTIVATE | SWP_NOZORDER
-            );
+            SetWindowPos(impl_->window, nullptr, bounds->left, bounds->top,
+                         bounds->right - bounds->left, bounds->bottom - bounds->top,
+                         SWP_NOACTIVATE | SWP_NOZORDER);
         }
         return 0;
     }
     case WM_MOUSEMOVE: {
         if (!impl_->tracking_mouse_leave) {
             TRACKMOUSEEVENT tracking{
-                sizeof(TRACKMOUSEEVENT), TME_LEAVE, impl_->window, HOVER_DEFAULT,
+                sizeof(TRACKMOUSEEVENT),
+                TME_LEAVE,
+                impl_->window,
+                HOVER_DEFAULT,
             };
             impl_->tracking_mouse_leave = TrackMouseEvent(&tracking) != FALSE;
         }
-        pointer(
-            STRATA_INPUT_POINTER_MOVE,
-            0,
-            GET_X_LPARAM(long_parameter),
-            GET_Y_LPARAM(long_parameter)
-        );
+        pointer(STRATA_INPUT_POINTER_MOVE, 0, GET_X_LPARAM(long_parameter),
+                GET_Y_LPARAM(long_parameter));
         return 0;
     }
     case WM_MOUSELEAVE:
@@ -646,87 +700,72 @@ std::optional<std::intptr_t> ApplicationHost::handle_window_message(
         impl_->captured_buttons |= first ? 8U : 16U;
         SetFocus(impl_->window);
         SetCapture(impl_->window);
-        pointer(
-            STRATA_INPUT_POINTER_PRESS,
-            first ? 3 : 4,
-            GET_X_LPARAM(long_parameter),
-            GET_Y_LPARAM(long_parameter)
-        );
+        pointer(STRATA_INPUT_POINTER_PRESS, first ? 3 : 4, GET_X_LPARAM(long_parameter),
+                GET_Y_LPARAM(long_parameter));
         return 1;
     }
     case WM_LBUTTONDOWN:
     case WM_RBUTTONDOWN:
     case WM_MBUTTONDOWN:
-        impl_->captured_buttons |= message == WM_LBUTTONDOWN ? 1U
-            : message == WM_RBUTTONDOWN ? 2U : 4U;
+        impl_->captured_buttons |= message == WM_LBUTTONDOWN   ? 1U
+                                   : message == WM_RBUTTONDOWN ? 2U
+                                                               : 4U;
         SetFocus(impl_->window);
         SetCapture(impl_->window);
-        pointer(
-            STRATA_INPUT_POINTER_PRESS,
-            message == WM_LBUTTONDOWN ? 0 : message == WM_RBUTTONDOWN ? 1 : 2,
-            GET_X_LPARAM(long_parameter),
-            GET_Y_LPARAM(long_parameter)
-        );
+        pointer(STRATA_INPUT_POINTER_PRESS,
+                message == WM_LBUTTONDOWN   ? 0
+                : message == WM_RBUTTONDOWN ? 1
+                                            : 2,
+                GET_X_LPARAM(long_parameter), GET_Y_LPARAM(long_parameter));
         return 0;
     case WM_XBUTTONUP: {
         const bool first = GET_XBUTTON_WPARAM(word_parameter) == XBUTTON1;
-        pointer(
-            STRATA_INPUT_POINTER_RELEASE,
-            first ? 3 : 4,
-            GET_X_LPARAM(long_parameter),
-            GET_Y_LPARAM(long_parameter)
-        );
+        pointer(STRATA_INPUT_POINTER_RELEASE, first ? 3 : 4, GET_X_LPARAM(long_parameter),
+                GET_Y_LPARAM(long_parameter));
         impl_->captured_buttons &= first ? ~8U : ~16U;
-        if (impl_->captured_buttons == 0U && GetCapture() == impl_->window) ReleaseCapture();
+        if (impl_->captured_buttons == 0U && GetCapture() == impl_->window)
+            ReleaseCapture();
         return 1;
     }
     case WM_LBUTTONUP:
     case WM_RBUTTONUP:
     case WM_MBUTTONUP:
-        pointer(
-            STRATA_INPUT_POINTER_RELEASE,
-            message == WM_LBUTTONUP ? 0 : message == WM_RBUTTONUP ? 1 : 2,
-            GET_X_LPARAM(long_parameter),
-            GET_Y_LPARAM(long_parameter)
-        );
-        impl_->captured_buttons &= message == WM_LBUTTONUP ? ~1U
-            : message == WM_RBUTTONUP ? ~2U : ~4U;
-        if (impl_->captured_buttons == 0U && GetCapture() == impl_->window) ReleaseCapture();
+        pointer(STRATA_INPUT_POINTER_RELEASE,
+                message == WM_LBUTTONUP   ? 0
+                : message == WM_RBUTTONUP ? 1
+                                          : 2,
+                GET_X_LPARAM(long_parameter), GET_Y_LPARAM(long_parameter));
+        impl_->captured_buttons &= message == WM_LBUTTONUP   ? ~1U
+                                   : message == WM_RBUTTONUP ? ~2U
+                                                             : ~4U;
+        if (impl_->captured_buttons == 0U && GetCapture() == impl_->window)
+            ReleaseCapture();
         return 0;
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL: {
         POINT point{GET_X_LPARAM(long_parameter), GET_Y_LPARAM(long_parameter)};
         ScreenToClient(impl_->window, &point);
-        const double delta = static_cast<double>(GET_WHEEL_DELTA_WPARAM(word_parameter)) /
-            WHEEL_DELTA;
-        scroll(
-            point.x,
-            point.y,
-            message == WM_MOUSEHWHEEL ? delta : 0.0,
-            message == WM_MOUSEWHEEL ? delta : 0.0
-        );
+        const double delta =
+            static_cast<double>(GET_WHEEL_DELTA_WPARAM(word_parameter)) / WHEEL_DELTA;
+        scroll(point.x, point.y, message == WM_MOUSEHWHEEL ? delta : 0.0,
+               message == WM_MOUSEWHEEL ? delta : 0.0);
         return 0;
     }
     case WM_KEYDOWN:
     case WM_KEYUP:
-        key(
-            static_cast<std::uint32_t>(word_parameter),
-            message == WM_KEYUP ? STRATA_KEY_RELEASE
-                : (HIWORD(long_parameter) & KF_REPEAT) != 0U
-                    ? STRATA_KEY_REPEAT
-                    : STRATA_KEY_PRESS
-        );
+        key(static_cast<std::uint32_t>(word_parameter), message == WM_KEYUP ? STRATA_KEY_RELEASE
+                                                        : (HIWORD(long_parameter) & KF_REPEAT) != 0U
+                                                            ? STRATA_KEY_REPEAT
+                                                            : STRATA_KEY_PRESS);
         return 0;
     case WM_SYSKEYDOWN:
     case WM_SYSKEYUP:
-        key(
-            static_cast<std::uint32_t>(word_parameter),
-            message == WM_SYSKEYUP ? STRATA_KEY_RELEASE
-                : (HIWORD(long_parameter) & KF_REPEAT) != 0U
-                    ? STRATA_KEY_REPEAT
-                    : STRATA_KEY_PRESS
-        );
-        if (word_parameter == VK_F10) return 0;
+        key(static_cast<std::uint32_t>(word_parameter), message == WM_SYSKEYUP ? STRATA_KEY_RELEASE
+                                                        : (HIWORD(long_parameter) & KF_REPEAT) != 0U
+                                                            ? STRATA_KEY_REPEAT
+                                                            : STRATA_KEY_PRESS);
+        if (word_parameter == VK_F10)
+            return 0;
         return std::nullopt;
     case WM_CHAR: {
         const wchar_t value = static_cast<wchar_t>(word_parameter);
@@ -748,11 +787,13 @@ std::optional<std::intptr_t> ApplicationHost::handle_window_message(
         return 0;
     }
     case WM_UNICHAR:
-        if (word_parameter == UNICODE_NOCHAR) return 1;
-        if (word_parameter < 0x20U || word_parameter == 0x7FU) return 0;
-        if (const std::string value = win32::utf8_code_point(
-                static_cast<std::uint32_t>(word_parameter)
-            ); !value.empty()) {
+        if (word_parameter == UNICODE_NOCHAR)
+            return 1;
+        if (word_parameter < 0x20U || word_parameter == 0x7FU)
+            return 0;
+        if (const std::string value =
+                win32::utf8_code_point(static_cast<std::uint32_t>(word_parameter));
+            !value.empty()) {
             text(value);
         }
         return 0;
@@ -761,7 +802,8 @@ std::optional<std::intptr_t> ApplicationHost::handle_window_message(
         return 0;
     case WM_IME_COMPOSITION: {
         const win32::ImeUpdate update = win32::read_ime_update(impl_->window, long_value);
-        if (update.committed.has_value() && !update.committed->empty()) text(*update.committed);
+        if (update.committed.has_value() && !update.committed->empty())
+            text(*update.committed);
         if (update.preedit.has_value()) {
             ime_preedit(*update.preedit, update.selection_start, update.selection_end);
         }
@@ -778,7 +820,8 @@ std::optional<std::intptr_t> ApplicationHost::handle_window_message(
         impl_->high_surrogate = 0;
         ime_preedit({}, 0U, 0U);
         cancel_interactions();
-        if (GetCapture() == impl_->window) ReleaseCapture();
+        if (GetCapture() == impl_->window)
+            ReleaseCapture();
         return 0;
     case WM_CAPTURECHANGED:
         if (impl_->captured_buttons != 0U) {
@@ -786,7 +829,8 @@ std::optional<std::intptr_t> ApplicationHost::handle_window_message(
             cancel_interactions();
         }
         return 0;
-    default: return std::nullopt;
+    default:
+        return std::nullopt;
     }
 }
 
@@ -796,12 +840,21 @@ void ApplicationHost::cancel_interactions() noexcept {
         static_cast<void>(strata_surface_cancel_interactions(impl_->surface->native_handle()));
 }
 
-void ApplicationHost::reload_resources() { impl_->reload_resources(); }
-void ApplicationHost::frame() { impl_->frame(); }
-void ApplicationHost::close() { impl_->close(); }
-bool ApplicationHost::active() const noexcept { return impl_->surface.has_value(); }
-bool ApplicationHost::has_frame() const noexcept { return impl_->frame_available; }
-double ApplicationHost::scale() const noexcept { return impl_->scale; }
+void ApplicationHost::frame() {
+    impl_->frame();
+}
+void ApplicationHost::close() {
+    impl_->close();
+}
+bool ApplicationHost::active() const noexcept {
+    return impl_->surface.has_value();
+}
+bool ApplicationHost::has_frame() const noexcept {
+    return impl_->frame_available;
+}
+double ApplicationHost::scale() const noexcept {
+    return impl_->scale;
+}
 const std::vector<Diagnostic>& ApplicationHost::diagnostics() const noexcept {
     return impl_->diagnostics;
 }

@@ -26,8 +26,9 @@ extern "C" {
 #define STRATA_ABI_VERSION_4 UINT32_C(4)
 #define STRATA_ABI_VERSION_5 UINT32_C(5)
 #define STRATA_ABI_VERSION_6 UINT32_C(6)
-#define STRATA_ABI_VERSION_CURRENT STRATA_ABI_VERSION_6
-#define STRATA_ABI_VERSION_MINIMUM STRATA_ABI_VERSION_6
+#define STRATA_ABI_VERSION_7 UINT32_C(7)
+#define STRATA_ABI_VERSION_CURRENT STRATA_ABI_VERSION_7
+#define STRATA_ABI_VERSION_MINIMUM STRATA_ABI_VERSION_7
 
 typedef uint32_t strata_status;
 
@@ -281,7 +282,6 @@ typedef uint64_t strata_capabilities;
 #define STRATA_CAPABILITY_SURFACE_RENDER_PACKET (UINT64_C(1) << 14)
 #define STRATA_CAPABILITY_SURFACE_EXTENSIONS (UINT64_C(1) << 15)
 #define STRATA_CAPABILITY_ALLOCATOR_TELEMETRY (UINT64_C(1) << 16)
-#define STRATA_CAPABILITY_SURFACE_RESOURCE_RELOAD (UINT64_C(1) << 17)
 #define STRATA_CAPABILITY_SOURCE_MAP_LOOKUP (UINT64_C(1) << 18)
 #define STRATA_CAPABILITY_SURFACE_EVENT_DRAIN (UINT64_C(1) << 19)
 #define STRATA_CAPABILITY_DIAGNOSTIC_SNAPSHOTS (UINT64_C(1) << 20)
@@ -400,7 +400,8 @@ typedef struct strata_activation_config {
     strata_module_load_fn load_module;
 } strata_activation_config;
 
-/* Compact build-time artifact activation; source compilation remains available for live reload. */
+/* Compact build-time artifact activation; source compilation supports explicit same-contract
+ * module reactivation. */
 typedef struct strata_compiled_activation_config {
     size_t struct_size;
     uint64_t generation;
@@ -506,7 +507,6 @@ typedef strata_status (*strata_resource_load_fn)(void* user_data, strata_string_
 typedef struct strata_resource_adapter {
     size_t struct_size;
     void* user_data;
-    uint64_t generation;
     strata_resource_load_fn load;
 } strata_resource_adapter;
 
@@ -1890,7 +1890,7 @@ STRATA_API void strata_action_registration_release(strata_action_registration* r
 STRATA_API strata_result strata_runtime_dispatch_action_json(
     strata_runtime* runtime, const strata_action_dispatch_config* config,
     strata_action_dispatch_info* out_info);
-/* Installs a non-null adapter whose nonzero generation is strictly newer than the active one. */
+/* Installs the Runtime's immutable resource provider. Replacing it is rejected. */
 STRATA_API strata_result strata_runtime_set_resource_adapter(
     strata_runtime* runtime, const strata_resource_adapter* adapter);
 STRATA_API strata_result strata_runtime_read_resource(strata_runtime* runtime,
@@ -1970,8 +1970,6 @@ STRATA_API strata_result strata_surface_clear_scoped_theme(strata_surface* surfa
                                                            uint32_t* out_removed);
 STRATA_API strata_result strata_surface_animate_scroll_to(
     strata_surface* surface, const strata_scroll_animation_request* request, uint32_t* out_started);
-/* Reloads the original font/image bindings transactionally; failure retains prior resources. */
-STRATA_API strata_result strata_surface_reload_resources(strata_surface* surface);
 STRATA_API strata_result strata_runtime_create_application_state_snapshot(
     strata_runtime* runtime, strata_application_state_snapshot** out_snapshot);
 STRATA_API strata_result strata_runtime_restore_application_state(

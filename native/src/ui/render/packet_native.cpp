@@ -146,7 +146,8 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
         output.number(clip.radii.top_right);
         output.number(clip.radii.bottom_right);
         output.number(clip.radii.bottom_left);
-        for (const double value : clip.inverse_transform) output.number(value);
+        for (const double value : clip.inverse_transform)
+            output.number(value);
     }
     if (batch.kind == SubmissionBatchKind::draw) {
         output.text(batch.material);
@@ -216,8 +217,7 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
               const std::uint64_t geometry_epoch,
               const std::span<const resource::EncodedTextureResource> texture_resources,
               const std::span<const font::AtlasOperation> resources,
-              const bool include_geometry = true,
-              const bool patch_geometry = false) {
+              const bool include_geometry = true, const bool patch_geometry = false) {
     std::size_t reserve = 56U;
     if (include_geometry && !patch_geometry) {
         reserve += submission.vertex_bytes.size() +
@@ -248,28 +248,23 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     }
     output.integer(
         checked_count(texture_resources.size() + resources.size(), "render resource count"));
-    output.integer(
-        include_geometry ? checked_count(submission.batches.size(), "render batch count") : 0U
-    );
+    output.integer(include_geometry ? checked_count(submission.batches.size(), "render batch count")
+                                    : 0U);
     output.integer(frame_index);
     output.integer(geometry_epoch);
-    output.integer(
-        patch_geometry
-            ? geometry_patch_flag
-            : include_geometry ? geometry_payload_flag : std::uint32_t{0U}
-    );
+    output.integer(patch_geometry     ? geometry_patch_flag
+                   : include_geometry ? geometry_payload_flag
+                                      : std::uint32_t{0U});
     output.integer((include_geometry || patch_geometry)
                        ? checked_count(submission.vertex_bytes.size(), "render vertex byte count")
                        : 0U);
-    output.integer(
-        (include_geometry || patch_geometry)
-            ? checked_count(submission.indices.size(), "render index count")
-            : 0U
-    );
+    output.integer((include_geometry || patch_geometry)
+                       ? checked_count(submission.indices.size(), "render index count")
+                       : 0U);
     output.integer(checked_count(submission.planned_draws, "render planned draw count"));
     output.integer(checked_count(submission.skipped_draws, "render skipped draw count"));
-    // Releases queued by a resource reload must precede creates that may reuse the same
-    // Surface-scoped host id. Atlas operations use disjoint ids and retain their own order.
+    // Resource operations preserve atlas order: releases precede creates that may reuse a
+    // Surface-scoped host id.
     for (const font::AtlasOperation& operation : resources) {
         const Bytes payload = resource_payload(operation);
         record(output, static_cast<std::uint32_t>(operation.kind), payload);
@@ -280,19 +275,15 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     }
     if (include_geometry) {
         if (patch_geometry) {
-            output.integer(checked_count(
-                submission.vertex_patches.size(),
-                "render vertex patch count"
-            ));
+            output.integer(
+                checked_count(submission.vertex_patches.size(), "render vertex patch count"));
             for (const SubmissionGeometryPatch& patch : submission.vertex_patches) {
                 output.integer(patch.offset);
                 output.integer(checked_count(patch.bytes.size(), "render vertex patch bytes"));
                 output.raw(patch.bytes);
             }
-            output.integer(checked_count(
-                submission.index_patches.size(),
-                "render index patch count"
-            ));
+            output.integer(
+                checked_count(submission.index_patches.size(), "render index patch count"));
             for (const SubmissionGeometryPatch& patch : submission.index_patches) {
                 output.integer(patch.offset);
                 output.integer(checked_count(patch.bytes.size(), "render index patch bytes"));
@@ -351,17 +342,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                                                          : std::chrono::steady_clock::time_point{};
     // Submission planning has finished mutating the atlas. Keep a stable view of its pending
     // operations until every packet that references them has been encoded and retained.
-    const std::span<const font::AtlasOperation> atlas_resources = glyph_atlas.pending_operations();
-    std::vector<font::AtlasOperation> combined_resources;
-    std::span<const font::AtlasOperation> resources = atlas_resources;
-    if (!pending_static_releases_.empty()) {
-        combined_resources.reserve(pending_static_releases_.size() + atlas_resources.size());
-        combined_resources.insert(combined_resources.end(), pending_static_releases_.begin(),
-                                  pending_static_releases_.end());
-        combined_resources.insert(combined_resources.end(), atlas_resources.begin(),
-                                  atlas_resources.end());
-        resources = combined_resources;
-    }
+    const std::span<const font::AtlasOperation> resources = glyph_atlas.pending_operations();
     const bool submission_reused = submission_cache_.hit_count() != prior_hits;
     telemetry_ = HostRenderPacketTelemetry{
         submission.used_vertex_bytes / 88U,
@@ -383,19 +364,16 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         0,
         0,
     };
-    telemetry_.submission_nanos =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            submission_completed - submission_started
-        ).count();
+    telemetry_.submission_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                      submission_completed - submission_started)
+                                      .count();
     telemetry_.submission_planning_nanos = submission.planning_nanos;
     telemetry_.submission_atlas_warmup_nanos = submission.atlas_warmup_nanos;
     telemetry_.submission_text_preparation_nanos = submission.text_preparation_nanos;
     telemetry_.submission_mesh_encoding_nanos = submission.mesh_encoding_nanos;
     telemetry_.geometry_topology_reused = submission.geometry_topology_reused;
-    telemetry_.candidate_geometry_patch_bytes =
-        submission.candidate_geometry_patch_bytes;
-    telemetry_.previous_full_geometry_bytes =
-        submission.previous_full_geometry_bytes;
+    telemetry_.candidate_geometry_patch_bytes = submission.candidate_geometry_patch_bytes;
+    telemetry_.previous_full_geometry_bytes = submission.previous_full_geometry_bytes;
     telemetry_.full_geometry_bytes = submission.full_geometry_bytes;
     telemetry_.topology_change = submission.topology_change;
     telemetry_.topology_change_item = submission.topology_change_item;
@@ -403,9 +381,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     telemetry_.item_count = submission.item_count;
     const bool geometry_changed =
         retrying_incomplete_frame || !submission_reused || geometry_packet_.empty();
-    const bool patch_geometry =
-        geometry_changed && !retrying_incomplete_frame && !geometry_packet_.empty() &&
-        submission.patch_from_previous;
+    const bool patch_geometry = geometry_changed && !retrying_incomplete_frame &&
+                                !geometry_packet_.empty() && submission.patch_from_previous;
     telemetry_.geometry_patched = patch_geometry;
     if (patch_geometry) {
         for (const SubmissionGeometryPatch& patch : submission.vertex_patches) {
@@ -422,22 +399,14 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         }
         encoded_geometry_epoch = geometry_epoch_ + 1U;
         const auto geometry_encode_started = std::chrono::steady_clock::now();
-        std::vector<std::uint8_t> next_geometry =
-            encode_packet(
-                submission,
-                frame_index,
-                encoded_geometry_epoch,
-                {},
-                {},
-                true,
-                patch_geometry
-            );
+        std::vector<std::uint8_t> next_geometry = encode_packet(
+            submission, frame_index, encoded_geometry_epoch, {}, {}, true, patch_geometry);
         static_assert(noexcept(geometry_packet_.swap(next_geometry)));
         geometry_packet_.swap(next_geometry);
         telemetry_.geometry_packet_nanos =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - geometry_encode_started
-            ).count();
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
+                                                                 geometry_encode_started)
+                .count();
         reuse_packet_.clear();
         if (profile_cold_encode) {
             telemetry_.cold_geometry_packet_nanos =
@@ -477,7 +446,6 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     }
     // This is the final state transition. All retained packet/cache operations above are complete
     // and the noexcept commit merely consumes operations now owned by the host packet.
-    pending_static_releases_.clear();
     glyph_atlas.commit_operations();
     planned_draws_ = submission.planned_draws;
     skipped_draws_ = submission.skipped_draws;
@@ -498,10 +466,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
 }
 
 bool HostRenderPacketCache::reuse(const std::uint64_t frame_index) {
-    if (frame_encoding_incomplete_ || geometry_packet_.empty() ||
-        !pending_static_releases_.empty()) {
+    if (frame_encoding_incomplete_ || geometry_packet_.empty())
         return false;
-    }
     if (reuse_packet_.empty()) {
         RenderSubmission retained_submission;
         retained_submission.planned_draws = planned_draws_;
@@ -514,22 +480,6 @@ bool HostRenderPacketCache::reuse(const std::uint64_t frame_index) {
     current_packet_ = &reuse_packet_;
     telemetry_.geometry_reused = true;
     return true;
-}
-
-HostRenderResourceInvalidationPlan HostRenderPacketCache::plan_resource_invalidation() const {
-    HostRenderResourceInvalidationPlan plan;
-    plan.releases = pending_static_releases_;
-    for (const resource::TextureResourceDescriptor& texture : texture_descriptors_) {
-        append_terminal_release(plan.releases, texture.host_id);
-    }
-    return plan;
-}
-
-void HostRenderPacketCache::commit_resource_invalidation(
-    HostRenderResourceInvalidationPlan plan) noexcept {
-    static_assert(noexcept(pending_static_releases_.swap(plan.releases)));
-    clear();
-    pending_static_releases_.swap(plan.releases);
 }
 
 const std::vector<std::uint8_t>&
@@ -546,7 +496,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
 
     // Snapshotting and encoding are deliberately non-mutating. An allocation failure therefore
     // leaves live pages, pending releases and the retained static descriptor table retryable.
-    std::vector<font::AtlasOperation> operations = pending_static_releases_;
+    std::vector<font::AtlasOperation> operations;
     std::vector<font::AtlasOperation> atlas_releases = glyph_atlas.plan_terminal_release();
     operations.insert(operations.end(), std::make_move_iterator(atlas_releases.begin()),
                       std::make_move_iterator(atlas_releases.end()));
@@ -582,7 +532,6 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
     planned_draws_ = 0U;
     skipped_draws_ = 0U;
     frame_encoding_incomplete_ = false;
-    pending_static_releases_.clear();
     glyph_atlas.commit_terminal_release();
     return resource_packet_;
 }
@@ -597,7 +546,6 @@ void HostRenderPacketCache::clear() noexcept {
     telemetry_ = {};
     planned_draws_ = 0U;
     skipped_draws_ = 0U;
-    pending_static_releases_.clear();
     frame_encoding_incomplete_ = false;
     terminal_release_prepared_ = false;
 }

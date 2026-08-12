@@ -26,8 +26,7 @@ pointer_geometry_generations_match(const DirtyGenerationSnapshot& left,
     return left.structure == right.structure && left.properties == right.properties &&
            left.layout == right.layout && left.text == right.text && left.style == right.style &&
            left.input == right.input && left.scale == right.scale &&
-           left.animation == right.animation && left.resource == right.resource &&
-           left.editor == right.editor;
+           left.animation == right.animation && left.editor == right.editor;
 }
 
 [[nodiscard]] bool contains(const Rect& bounds, const Point point) noexcept {

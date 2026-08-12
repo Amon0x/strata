@@ -1,8 +1,8 @@
 #pragma once
 
+#include <array>
 #include <compare>
 #include <cstdint>
-#include <array>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -24,10 +24,8 @@ namespace strata::ui {
 /** Canonical authoring fields that participate in text measurement/layout cache identity. */
 [[nodiscard]] bool text_layout_field(std::string_view name) noexcept;
 /** Compares only text-layout-affecting fields of two style/object values. */
-[[nodiscard]] bool text_layout_projection_equal(
-    const runtime::Value* current,
-    const runtime::Value* next
-) noexcept;
+[[nodiscard]] bool text_layout_projection_equal(const runtime::Value* current,
+                                                const runtime::Value* next) noexcept;
 
 struct TextOperationCounters final {
     std::size_t requests = 0U;
@@ -91,12 +89,12 @@ struct TextLayoutData final {
  * geometry. Copies retain one cache-produced geometry object rather than cloning its vectors.
  */
 class TextLayout final {
-private:
+  private:
     std::shared_ptr<const TextLayoutData> storage_;
     explicit TextLayout(std::shared_ptr<const TextLayoutData> storage) noexcept;
     friend class TextEngine;
 
-public:
+  public:
     const font::ShapedText& shaped;
     const std::vector<std::string>& glyph_font_ids;
     const std::vector<double>& glyph_pixel_sizes;
@@ -125,30 +123,25 @@ struct TextLayoutOptions final {
     std::optional<std::size_t> max_lines;
     std::optional<std::string> alignment;
 
-    [[nodiscard]] friend auto operator<=>(const TextLayoutOptions&, const TextLayoutOptions&) = default;
+    [[nodiscard]] friend auto operator<=>(const TextLayoutOptions&,
+                                          const TextLayoutOptions&) = default;
 };
 
 /** Surface-owned portable text metrics service; shaping/render caches build on this same font. */
 class TextEngine final {
-public:
+  public:
     using FontRegistry = std::map<std::string, font::OpenTypeFont, std::less<>>;
 
     explicit TextEngine(font::OpenTypeFont control_font);
     TextEngine(font::OpenTypeFont control_font, font::OpenTypeFont regular_font);
     explicit TextEngine(FontRegistry fonts);
 
-    [[nodiscard]] static std::shared_ptr<const TextEngine> load_control_font(
-        const std::filesystem::path& root,
-        const resource::ResourceId& resource
-    );
-    [[nodiscard]] static std::shared_ptr<const TextEngine> load_default_fonts(
-        const std::filesystem::path& root
-    );
+    [[nodiscard]] static std::shared_ptr<const TextEngine>
+    load_control_font(const std::filesystem::path& root, const resource::ResourceId& resource);
+    [[nodiscard]] static std::shared_ptr<const TextEngine>
+    load_default_fonts(const std::filesystem::path& root);
 
-    [[nodiscard]] Size measure(
-        const RetainedNode& node,
-        const Constraints& constraints
-    ) const;
+    [[nodiscard]] Size measure(const RetainedNode& node, const Constraints& constraints) const;
 
     [[nodiscard]] const font::OpenTypeFont& control_font() const noexcept;
     [[nodiscard]] const font::OpenTypeFont& font(std::string_view id) const noexcept;
@@ -160,24 +153,18 @@ public:
     [[nodiscard]] double letter_spacing(const RetainedNode& node) const noexcept;
     [[nodiscard]] font::ShapedText shape(const RetainedNode& node, std::string_view text) const;
     [[nodiscard]] TextLayout layout(const RetainedNode& node, std::string_view text) const;
-    /** Uses the same immutable/cache-backed layout path as authored text with explicit overrides. */
-    [[nodiscard]] TextLayout layout(
-        const RetainedNode& node,
-        std::string_view text,
-        const TextLayoutOptions& options
-    ) const;
-    /** Atomically invalidates shape/layout entries when their external cache token changes. */
-    void adopt_generations(
-        std::uint64_t scale_context,
-        std::uint64_t style_resources,
-        std::uint64_t font_resources
-    ) const;
+    /** Uses the same immutable/cache-backed layout path as authored text with explicit overrides.
+     */
+    [[nodiscard]] TextLayout layout(const RetainedNode& node, std::string_view text,
+                                    const TextLayoutOptions& options) const;
+    /** Invalidates shape/layout entries when the logical-to-framebuffer scale changes. */
+    void adopt_scale_context(std::uint64_t scale_context) const;
     void begin_frame() const noexcept;
     [[nodiscard]] TextOperationCounters operation_counters() const noexcept;
     [[nodiscard]] std::vector<runtime::RuntimeDiagnostic> take_diagnostics() const;
     void clear_diagnostics() const noexcept;
 
-private:
+  private:
     struct StyleRun final {
         std::size_t start = 0U;
         std::size_t end = 0U;
@@ -215,22 +202,13 @@ private:
         [[nodiscard]] friend auto operator<=>(const CacheKey&, const CacheKey&) = default;
     };
 
-    [[nodiscard]] CacheKey request_key(
-        const RetainedNode& node,
-        std::string_view text,
-        std::optional<double> measured_wrap_width,
-        const TextLayoutOptions* overrides = nullptr
-    ) const;
-    [[nodiscard]] const TextLayout& cached_layout(
-        CacheKey key,
-        bool count_request
-    ) const;
+    [[nodiscard]] CacheKey request_key(const RetainedNode& node, std::string_view text,
+                                       std::optional<double> measured_wrap_width,
+                                       const TextLayoutOptions* overrides = nullptr) const;
+    [[nodiscard]] const TextLayout& cached_layout(CacheKey key, bool count_request) const;
     [[nodiscard]] TextLayout build_layout(const CacheKey& key) const;
     [[nodiscard]] std::string requested_font_id(const RetainedNode& node) const;
-    void record_missing_glyphs(
-        std::string_view font_id,
-        const font::ShapedText& shaped
-    ) const;
+    void record_missing_glyphs(std::string_view font_id, const font::ShapedText& shaped) const;
     void record_missing_font(std::string_view font_id) const;
 
     FontRegistry fonts_;
@@ -240,10 +218,7 @@ private:
     mutable std::set<std::string, std::less<>> missing_glyph_groups_;
     mutable std::vector<runtime::RuntimeDiagnostic> diagnostics_;
     mutable TextOperationCounters operation_counters_;
-    mutable std::uint64_t scale_context_generation_ = 0U;
-    mutable std::uint64_t style_generation_ = 0U;
-    mutable std::uint64_t font_generation_ = 0U;
-    mutable bool generations_initialized_ = false;
+    mutable std::optional<std::uint64_t> scale_context_generation_;
 };
 
 } // namespace strata::ui

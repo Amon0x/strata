@@ -55,6 +55,7 @@ struct ApplicationConfig final {
 
 struct ApplicationOptions final {
     bool vsync = true;
+    bool asynchronous_shader_compilation = true;
 };
 
 struct Diagnostic final {
@@ -73,14 +74,14 @@ struct Diagnostic final {
  * Reusable Win32/D3D11 host for one application and one Surface.
  *
  * Construct the host, register actions and snapshots through bindings(), then call activate(). The
- * window procedure delegates to handle_window_message() and the message loop calls frame(). The host
- * owns resource loading, source imports, clipboard/IME integration, packet decoding, D3D11
+ * window procedure delegates to handle_window_message() and the message loop calls frame(). The
+ * host owns resource loading, source imports, clipboard/IME integration, packet decoding, D3D11
  * submission, and the ordered Surface release barrier.
  */
 class ApplicationHost final {
   public:
-    ApplicationHost(HWND window, std::filesystem::path resource_root,
-                    ApplicationConfig config, ApplicationOptions options = {});
+    ApplicationHost(HWND window, std::filesystem::path resource_root, ApplicationConfig config,
+                    ApplicationOptions options = {});
     ~ApplicationHost();
 
     ApplicationHost(const ApplicationHost&) = delete;
@@ -93,14 +94,19 @@ class ApplicationHost final {
     void publish(std::string_view snapshot_id, const strata::host::Value& value);
     /** Compiles the configured source module and creates the Surface. */
     void activate();
+    /** Reactivates compatible source while retaining the current Surface and stable-key state. */
+    [[nodiscard]] bool reactivate();
+    /** Replaces one predeclared HLSL body. Returns false when the resource id is not declared. */
+    [[nodiscard]] bool reload_program_source(std::string_view resource_id);
+    [[nodiscard]] const std::vector<std::string>& module_resources() const noexcept;
+    [[nodiscard]] const std::vector<std::string>& program_resources() const noexcept;
 
     void resize(std::uint32_t framebuffer_width, std::uint32_t framebuffer_height,
                 double dpi_scale);
     void pointer(std::uint32_t kind, std::int32_t button, double framebuffer_x,
                  double framebuffer_y);
     void scroll(double framebuffer_x, double framebuffer_y, double delta_x, double delta_y);
-    void key(std::uint32_t virtual_key,
-             std::uint32_t action = STRATA_KEY_PRESS);
+    void key(std::uint32_t virtual_key, std::uint32_t action = STRATA_KEY_PRESS);
     void text(std::string utf8);
     void ime_preedit(std::string utf8, std::size_t selection_start, std::size_t selection_end);
     void cancel_interactions() noexcept;
@@ -109,14 +115,9 @@ class ApplicationHost final {
      * Handles resize, DPI, pointer capture/leave, wheel, keyboard, Unicode, focus cancellation,
      * and Win32 IME messages. A value is the consumed LRESULT; nullopt means call DefWindowProcW.
      */
-    [[nodiscard]] std::optional<std::intptr_t> handle_window_message(
-        std::uint32_t message,
-        std::uintptr_t word,
-        std::intptr_t long_value
-    );
+    [[nodiscard]] std::optional<std::intptr_t>
+    handle_window_message(std::uint32_t message, std::uintptr_t word, std::intptr_t long_value);
 
-    /** Drops cached files and reloads Surface-owned fonts, images, and other resources. */
-    void reload_resources();
     /** Synchronizes host bindings, frames the Surface, submits D3D11 work, and presents. */
     void frame();
     /** Performs the packet consumption barrier and releases all runtime ownership. */

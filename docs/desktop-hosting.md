@@ -4,8 +4,9 @@ Strata ships two desktop entry points:
 
 - `Strata::desktop` is the reusable C++23 Win32/D3D11 host library for an application that owns its
   process and window loop.
-- `strata_desktop.exe --application ...` is a configurable runner for viewing an application without
-  writing host code. With no `--application`, the executable opens Strata's bundled showcase.
+- `strata_desktop.exe app.strata-app.json` runs a self-contained generic application manifest or
+  launches the prebuilt executable named by a custom-host manifest. With no manifest, the executable
+  opens Strata's bundled showcase.
 
 Both paths use the same public C ABI, packet-v10 decoder, D3D11 renderer, resource loader,
 clipboard/IMM32 adapters, source-import resolver, complete window-message translator, and ordered
@@ -139,11 +140,11 @@ UTF-8 byte ranges required by Strata. The installed IME adapter positions the sy
 and candidate windows at the logical editor caret using the current Surface scale.
 
 Low-level `resize`, `pointer`, `scroll`, `key`, `text`, and `ime_preedit` methods remain available to
-applications with an existing platform translation layer. `reload_resources()` invalidates the
-file cache, advances the adapter generation, and performs the Surface reload barrier for changed
-fonts and PNG/SVG images. The message loop calls `host.frame()`. The host synchronizes revision-watched bindings, frames the
-Surface, decodes packet v10, submits D3D11 work, and presents. `close()` is optional during ordinary
-scope destruction; calling it explicitly reports release errors. Either path consumes and
+applications with an existing platform translation layer. The message loop calls `host.frame()`.
+The host synchronizes revision-watched bindings, frames the Surface, decodes packet v10, submits
+D3D11 work, and presents. Fonts and images are immutable session resources; editing them requires
+rebuilding the owning artifact and recreating the desktop application. `close()` is optional during
+ordinary scope destruction; calling it explicitly reports release errors. Either path consumes and
 acknowledges the terminal resource packet before releasing the Surface.
 
 At application configuration the host enumerates material declarations and ordered effect-pass
@@ -157,15 +158,21 @@ the configured application schema. Use `bindings().snapshot(...)` for revision-w
 `publish(...)` for an immediate standalone snapshot. `runtime()` remains available when the
 application installs optional durability, async-data, IME, or effect adapters.
 
-## Configurable desktop runner
+## Application manifests and preview
 
-A launch document uses the same application/surface document accepted by `strata_headless`. This
-lets one file drive interactive desktop viewing and deterministic headless tests. The installed
-example is `share/strata/samples/desktop_app.json`:
+A `*.strata-app.json` manifest selects the launch boundary and, for a generic application, embeds
+the same application/surface document accepted by `strata_headless`. `launch.resourceRoot` resolves
+relative to the manifest, so the file is relocatable and needs no working-directory convention. The
+installed example is `share/strata/samples/desktop_app.strata-app.json`:
 
 ```json
 {
   "version": 1,
+  "launch": {
+    "kind": "generic",
+    "resourceRoot": "../..",
+    "title": "My Tool"
+  },
   "application": {
     "id": "my.tool",
     "module": "assets/my_tool/app.strata",
@@ -192,22 +199,46 @@ example is `share/strata/samples/desktop_app.json`:
 }
 ```
 
-Run it with:
+Run or preview it directly:
 
 ```bat
-bin\strata_desktop.exe ^
-  --application share\strata\samples\desktop_app.json ^
-  --resources share
+bin\strata_desktop.exe share\strata\samples\desktop_app.strata-app.json
+bin\strata_desktop.exe share\strata\samples\desktop_app.strata-app.json --watch
 ```
 
-The runner compiles the configured module and imports, creates one ordinary window, publishes the
-initial snapshots, and installs recording handlers for the listed domain actions. Relative
-`extensionPaths` resolve from the launch document; each selected package is loaded from its own
-shared library and retained through Surface release. Invoked actions
-are written to standard output as `STRATA ACTION ...`. The visible host derives scale from the
-window's monitor DPI and viewport; `surface.backend`, `surface.scale`, and scripted `steps` remain
-headless-test settings. Use `Strata::desktop` instead when actions must call directly into the tool's
-application model.
+The generic runner compiles the module/import graph, creates one ordinary window, publishes initial
+snapshots, and installs recording handlers for the listed domain actions. Relative `extensionPaths`
+resolve from the manifest; each selected package remains loaded through Surface release. Invoked
+actions are written to standard output as `STRATA ACTION ...`. Use `Strata::desktop` instead when
+actions must call application-specific C++ models or services.
 
-`--smoke` creates the application window without showing it, presents one frame, and exits. It is
-used by the repository and installed-package CTest gates.
+Preview polling is debounced and restricted to two in-process-safe boundaries:
+
+- compatible `.strata` module changes reactivate transactionally and retain stable-key state;
+- HLSL bodies already declared by the immutable application schema replace their compiled program.
+
+Rejected source or shader changes print immediate diagnostics and keep the last-good UI/program.
+Manifest, schema, extension package, font, image, generated-binding, and native-handler changes print
+`STRATA PREVIEW RESTART REQUIRED`; rebuild the owning target and recreate the session. Native code
+and contract changes are never presented as live-editable. The VS Code command **Strata: Preview
+Application** launches this same manifest and watch path.
+
+A custom-host manifest names an already-built executable and optional arguments:
+
+```json
+{
+  "version": 1,
+  "launch": {
+    "kind": "custom",
+    "executable": "build/MyTool.exe",
+    "arguments": ["--project", "example.tool"]
+  }
+}
+```
+
+The runner starts that process from the manifest directory and propagates its exit status. A missing
+executable is an explicit startup error with the resolved path; the runner never invokes CMake or
+guesses which target implements the application's bindings and native actions.
+
+`--resources` overrides `launch.resourceRoot` for build/test orchestration. `--smoke` creates a
+generic application window without showing it, presents one frame, and exits.

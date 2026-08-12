@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "data/json.hpp"
-#include "runtime/generations.hpp"
 #include "runtime/value.hpp"
 #include "ui/layout.hpp"
 #include "ui/paint.hpp"
@@ -342,7 +341,6 @@ struct RenderOperationCounters final {
 struct RenderGenerationToken final {
     std::uint64_t scale_context = 0U;
     std::uint64_t runtime_unit = 0U;
-    runtime::RuntimeGenerationSnapshot resources;
     [[nodiscard]] friend bool operator==(const RenderGenerationToken&,
                                          const RenderGenerationToken&) = default;
 };

@@ -6,10 +6,11 @@ rather than exposing implementation classes.
 
 ## ABI and ownership
 
-- ABI v6 uses opaque runtime, snapshot, registration, and Surface handles with paired release
-  functions and exposes modality-aware focus presentation, durable-state, and typed asynchronous
-  host-data contracts. Built-in language declarations are native, and typed visual effect programs
-  are enumerable by render backends. Releasing `NULL` is harmless; v6 is the minimum negotiable host
+- ABI v7 uses opaque runtime, snapshot, registration, and Surface handles with paired release
+  functions and exposes immutable host resources, modality-aware focus presentation, durable-state,
+  and typed asynchronous host-data contracts. Built-in language declarations are native, and typed
+  visual effect programs are enumerable by render backends. Releasing `NULL` is harmless; v7 is the
+  minimum negotiable host
   contract.
 - All public structures start with `struct_size`; reserved fields are zeroed. Required capabilities
   are negotiated before construction and fail explicitly when unsupported.
@@ -46,18 +47,12 @@ packets that reference the latest full geometry epoch. Consume every framed pack
 stateful decoder per Surface/backend stream. Reading canonical frame JSON is optional and lazily
 materialized.
 
-`strata_surface_reload_resources` constructs candidate fonts/images before adoption. On success it
-invalidates the prior frame and packet; call `strata_surface_frame` again before reading them. On
-failure, the prior resources remain active and the result carries a diagnostic.
-
-Replacing a runtime resource adapter is a host-wide loader transition, not a lazy cache hint. Every
-live Surface enters `RESOURCE_RELOAD_REQUIRED`; the host must call
-`strata_surface_reload_resources` successfully for each Surface before framing it again. Each
-Surface reload remains transactional. A failed Surface keeps its prior materialized resources but
-stays gated, preventing a frame that mixes an old font/image set with the new adapter. Adapter
-generations are nonzero and strictly increasing; null, repeated, or stale replacements are rejected
-without changing the active adapter or gating any Surface. Source resource paths remain private to
-the adapter. Packets use collision-free process/runtime/Surface host resource identities.
+The resource adapter is an immutable Runtime dependency. Install it once before loading modules or
+creating Surfaces; replacement and removal are rejected. Fonts, PNG images, and SVG documents are
+materialized when a Surface is created and remain fixed for that Surface's lifetime. Source
+resource paths remain private to the adapter. Packets use collision-free process/runtime/Surface
+host resource identities. Editing resource files or changing extension packages therefore requires
+rebuilding the owning artifact and recreating the application session.
 
 Surface destruction is an ordered host-consumption barrier for every Surface-owned static texture
 and glyph atlas. Call
@@ -122,7 +117,7 @@ optionally installs them. Windows also exports `Strata::d3d11`, `Strata::win32`,
 
 The installed sample project configures against only the install prefix. Its portable C and C++
 programs configure an application, activate `.strata`, create/frame a Surface, decode packet v10,
-exercise resource reload, inspect allocator telemetry, and release every handle. The public C++
+inspect allocator telemetry, and release every handle. The public C++
 facade is split into focused owned-value headers (`diagnostic.hpp`, `input.hpp`, `adapters.hpp`,
 `profiler.hpp`, and `config.hpp`) aggregated by `strata.hpp`; custom hosts do not need to keep
 borrowed C strings or callback bridge records alive. `Strata_AUTHORING` names the installed

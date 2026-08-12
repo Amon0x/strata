@@ -258,9 +258,9 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.RENDER2D.MATERIAL_PARAMETER_UNKNOWN` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.MATERIAL_UNKNOWN` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RESOURCE.ADAPTER_UNAVAILABLE` | `native/src/abi_services.cpp` |
+| `STRATA.RESOURCE.IMMUTABLE_ADAPTER` | `native/src/abi_services.cpp` |
 | `STRATA.RESOURCE.INVALID_RESULT` | `native/src/abi_services.cpp` |
 | `STRATA.RESOURCE.LOAD_FAILED` | `native/src/abi_services.cpp` |
-| `STRATA.RESOURCE.NON_MONOTONIC_GENERATION` | `native/src/abi_services.cpp` |
 | `STRATA.RUNTIME.ACTION_CONTRACT_MISSING` | `native/src/runtime/application.cpp` |
 | `STRATA.RUNTIME.ACTIVATION_GENERATION` | `native/src/runtime/application.cpp` |
 | `STRATA.RUNTIME.ACTIVATION_REJECTED` | `native/src/abi_application.cpp` |
@@ -278,8 +278,6 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.SURFACE.RELEASE_ABANDONED` | `native/src/surface_abi.cpp` |
 | `STRATA.SURFACE.RELEASE_BARRIER_INCOMPLETE` | `native/src/surface_abi.cpp` |
 | `STRATA.SURFACE.RELEASE_PACKET_NOT_PREPARED` | `native/src/surface_abi.cpp` |
-| `STRATA.SURFACE.RESOURCE_RELOAD_REJECTED` | `native/src/surface_abi.cpp` |
-| `STRATA.SURFACE.RESOURCE_RELOAD_REQUIRED` | `native/src/surface_abi.cpp` |
 | `STRATA.SURFACE.RESOURCE_UNAVAILABLE` | `native/src/surface_abi.cpp` |
 | `STRATA.SURFACE.TERMINAL_RELEASE_PREPARED` | `native/src/abi_support.hpp` |
 | `STRATA.TEXT.FONT_NOT_REGISTERED` | `native/src/ui/text.cpp` |

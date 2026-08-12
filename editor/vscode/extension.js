@@ -13,6 +13,7 @@ const extensionSchemaCache = new Map();
 const validatedUris = new Map();
 let discoveredSchemas = [];
 let missingCompilerReported = false;
+let previewTerminal;
 
 function workspaceFolder(document) {
     const folder = vscode.workspace.getWorkspaceFolder(document.uri);
@@ -55,6 +56,81 @@ function compilerPath(document) {
         path.join(root, 'build', 'cmake', 'linux-x64', 'native', executable),
         path.join(root, 'build', 'cmake', 'windows-x64', 'native', 'RelWithDebInfo', executable),
     ]) || executable;
+}
+
+function desktopRunnerPath(document, root) {
+    const configured = vscode.workspace.getConfiguration('strata', document?.uri)
+        .get('desktopRunner.path', '');
+    if (configured) {
+        const expanded = configured.replaceAll('${workspaceFolder}', root);
+        return path.isAbsolute(expanded) ? expanded : path.resolve(root, expanded);
+    }
+    const executable = process.platform === 'win32' ? 'strata_desktop.exe' : 'strata_desktop';
+    return existing([
+        process.env.STRATA_DESKTOP_RUNNER,
+        path.join(root, 'build', 'install', process.platform === 'win32' ? 'windows-x64' : 'linux-x64', 'bin', executable),
+        path.join(root, 'build', 'cmake', 'windows-x64', 'native', 'RelWithDebInfo', executable),
+    ]) || executable;
+}
+
+function manifestModule(manifest) {
+    try {
+        const value = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+        if (value.launch?.kind !== 'generic' || typeof value.launch.resourceRoot !== 'string' ||
+            typeof value.application?.module !== 'string') return '';
+        return path.resolve(path.dirname(manifest), value.launch.resourceRoot, value.application.module);
+    } catch (_) {
+        return '';
+    }
+}
+
+async function previewApplication() {
+    const document = vscode.window.activeTextEditor?.document;
+    const root = document
+        ? workspaceFolder(document)
+        : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) {
+        vscode.window.showWarningMessage('Open a workspace containing a *.strata-app.json manifest.');
+        return;
+    }
+    const manifests = await vscode.workspace.findFiles(
+        '**/*.strata-app.json',
+        '**/{build,node_modules,.git}/**',
+        64
+    );
+    if (manifests.length === 0) {
+        vscode.window.showWarningMessage('No *.strata-app.json application manifest was found.');
+        return;
+    }
+    let selected;
+    if (document?.uri.scheme === 'file') {
+        selected = manifests.find(uri =>
+            path.normalize(manifestModule(uri.fsPath)) === path.normalize(document.uri.fsPath));
+    }
+    if (!selected && manifests.length === 1) selected = manifests[0];
+    if (!selected) {
+        const picked = await vscode.window.showQuickPick(
+            manifests.map(uri => ({
+                label: path.relative(root, uri.fsPath),
+                description: uri.fsPath,
+                uri,
+            })),
+            { placeHolder: 'Select the Strata application manifest to preview' }
+        );
+        selected = picked?.uri;
+    }
+    if (!selected) return;
+    if (!(await vscode.workspace.saveAll(false))) return;
+
+    const runner = desktopRunnerPath(document, root);
+    if (previewTerminal) previewTerminal.dispose();
+    previewTerminal = vscode.window.createTerminal({
+        name: 'Strata Preview',
+        shellPath: runner,
+        shellArgs: [selected.fsPath, '--watch'],
+        cwd: root,
+    });
+    previewTerminal.show();
 }
 
 function readSchema(file) {
@@ -533,6 +609,7 @@ function activate(context) {
     context.subscriptions.push(diagnostics, output);
 
     discoverApplicationSchemas();
+    const schemaWatcher = vscode.workspace.createFileSystemWatcher('**/*.schemas.json');
     context.subscriptions.push(
         vscode.languages.registerCompletionItemProvider(selector, completionProvider(), '.', '"', ':'),
         vscode.languages.registerHoverProvider(selector, hoverProvider()),
@@ -543,6 +620,7 @@ function activate(context) {
             const document = vscode.window.activeTextEditor?.document;
             if (document) await validateDocument(document, diagnostics, output, true);
         }),
+        vscode.commands.registerCommand('strata.previewApplication', previewApplication),
         vscode.commands.registerCommand('strata.reloadSchema', async () => {
             schemaCache.clear();
             extensionSchemaCache.clear();
@@ -576,9 +654,12 @@ function activate(context) {
                 if (document.languageId === 'strata') validateDocument(document, diagnostics, output, false);
             }
         }),
-        vscode.workspace.createFileSystemWatcher('**/*.schemas.json')
+        schemaWatcher,
+        vscode.window.onDidCloseTerminal(terminal => {
+            if (terminal === previewTerminal) previewTerminal = undefined;
+        })
     );
-    const watcher = context.subscriptions[context.subscriptions.length - 1];
+    const watcher = schemaWatcher;
     watcher.onDidCreate(discoverApplicationSchemas);
     watcher.onDidDelete(discoverApplicationSchemas);
     watcher.onDidChange(() => {

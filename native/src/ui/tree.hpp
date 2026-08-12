@@ -158,7 +158,6 @@ enum class DirtyReason : std::uint32_t {
     input = UINT32_C(1) << 6U,
     scale = UINT32_C(1) << 7U,
     animation = UINT32_C(1) << 8U,
-    resource = UINT32_C(1) << 9U,
     /** Editor-local selection/composition invalidation, intentionally outside semantic generations.
      */
     editor = UINT32_C(1) << 10U,
@@ -190,7 +189,6 @@ struct DirtyGenerationSnapshot final {
     std::uint64_t input = 0U;
     std::uint64_t scale = 0U;
     std::uint64_t animation = 0U;
-    std::uint64_t resource = 0U;
     std::uint64_t editor = 0U;
     std::uint64_t paint = 0U;
     [[nodiscard]] friend bool operator==(const DirtyGenerationSnapshot&,
@@ -296,7 +294,7 @@ class RetainedNode final {
     std::uint64_t subtree_presentation_generation_ = 0U;
     RetainedLifecycle lifecycle_ = RetainedLifecycle::attached;
     DirtySet dirty_;
-    std::array<std::uint64_t, 12U> dirty_generations_{};
+    std::array<std::uint64_t, 11U> dirty_generations_{};
     std::map<std::string, runtime::Value, std::less<>> retained_values_;
     std::map<std::string, std::vector<std::byte>, std::less<>> retained_bytes_;
     std::vector<Cleanup> cleanups_;
@@ -429,7 +427,7 @@ class RetainedTree final {
     [[nodiscard]] bool field_persisted(std::string_view type, std::string_view name) const;
 
     std::unique_ptr<RetainedNode> root_;
-    std::array<std::uint64_t, 12U> dirty_generations_{};
+    std::array<std::uint64_t, 11U> dirty_generations_{};
     std::uint64_t generation_ = 0U;
     std::uint64_t layout_invalidation_generation_ = 0U;
     std::uint64_t next_identity_ = 1U;

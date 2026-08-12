@@ -106,8 +106,7 @@ if(WIN32 AND TARGET Strata::desktop)
         add_test(
             NAME strata_installed_desktop_runner
             COMMAND "${Strata_DESKTOP_RUNNER}"
-                --application "${CMAKE_CURRENT_LIST_DIR}/desktop_app.json"
-                --resources "${Strata_RESOURCES}"
+                "${CMAKE_CURRENT_LIST_DIR}/desktop_app.strata-app.json"
                 --smoke
         )
     endif()

@@ -22,7 +22,7 @@ struct CompileResult final {
     [[nodiscard]] bool succeeded() const noexcept;
 };
 
-/** Shared compiler pipeline used by validation tools, hot reload, and embedding hosts. */
+/** Shared compiler pipeline used by validation tools, explicit source reactivation, and hosts. */
 [[nodiscard]] CompileResult compile_program(
     const ModuleSource& entry,
     const ModuleLoader& loader,

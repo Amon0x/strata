@@ -877,76 +877,6 @@ bool Surface::adopt_environment_preferences(const SurfaceEnvironment& source) {
     return true;
 }
 
-void Surface::invalidate_resources() {
-    queue_resource_invalidation();
-}
-
-void Surface::note_resource_reload_duration(const std::uint64_t duration_nanos) noexcept {
-    pending_reload_duration_nanos_ =
-        duration_nanos > std::numeric_limits<std::uint64_t>::max() - pending_reload_duration_nanos_
-            ? std::numeric_limits<std::uint64_t>::max()
-            : pending_reload_duration_nanos_ + duration_nanos;
-}
-
-SurfaceResourceReloadPlan Surface::prepare_resource_reload(
-    std::shared_ptr<const TextEngine> text_engine,
-    std::shared_ptr<const resource::SvgImageRegistry> svg_images) const {
-    LayoutEngine next_layout =
-        text_engine != nullptr
-            ? LayoutEngine(LayoutEngine::IntrinsicMeasure(
-                  [engine = text_engine](const RetainedNode& node, const Constraints& constraints) {
-                      return engine->measure(node, constraints);
-                  }))
-            : LayoutEngine{};
-    return SurfaceResourceReloadPlan{
-        std::move(text_engine),
-        std::move(svg_images),
-        std::move(next_layout),
-    };
-}
-
-void Surface::commit_resource_reload(SurfaceResourceReloadPlan plan) noexcept {
-    static_assert(std::is_nothrow_move_assignable_v<std::shared_ptr<const TextEngine>>);
-    static_assert(
-        std::is_nothrow_move_assignable_v<std::shared_ptr<const resource::SvgImageRegistry>>);
-    static_assert(std::is_nothrow_move_assignable_v<LayoutEngine>);
-    text_engine_ = std::move(plan.text_engine);
-    svg_images_ = std::move(plan.svg_images);
-    layout_engine_ = std::move(plan.layout_engine);
-    queue_resource_invalidation();
-}
-
-void Surface::replace_text_engine(std::shared_ptr<const TextEngine> text_engine) {
-    commit_resource_reload(prepare_resource_reload(std::move(text_engine), svg_images_));
-}
-
-void Surface::queue_resource_invalidation() noexcept {
-    if (queued_resource_invalidations_ != std::numeric_limits<std::size_t>::max()) {
-        ++queued_resource_invalidations_;
-    }
-    resource_invalidation_pending_ = true;
-    invalidate_description();
-}
-
-void Surface::apply_pending_resource_invalidation() {
-    if (!resource_invalidation_pending_)
-        return;
-    // Marking may allocate. Keep the pending flag set until both throwing operations succeed so a
-    // failed frame cannot expose the newly installed engine with stale resource generations.
-    if (tree_.root() != nullptr) {
-        static_cast<void>(tree_.mark(tree_.root()->identity(), DirtyReason::resource));
-    }
-    application_.services().bump_resource_reload_generations();
-    pending_resource_reloads_ =
-        queued_resource_invalidations_ >
-                std::numeric_limits<std::size_t>::max() - pending_resource_reloads_
-            ? std::numeric_limits<std::size_t>::max()
-            : pending_resource_reloads_ + queued_resource_invalidations_;
-    queued_resource_invalidations_ = 0U;
-    resource_invalidation_pending_ = false;
-    invalidate_description();
-}
-
 void Surface::invalidate() noexcept {
     invalidate_description();
 }
@@ -1589,20 +1519,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         throw std::overflow_error("surface frame index exhausted");
     }
     pending_lazy_materializations_.clear();
-    apply_pending_resource_invalidation();
     auto profiler_frame = profiler_.frame(last_frame_.frame_index + 1U);
-    if (pending_resource_reloads_ != 0U && !pending_reload_timing_recorded_) {
-        profiler_.record_counters({
-            {runtime::ProfilerCounter::resource_reloads, pending_resource_reloads_},
-            {runtime::ProfilerCounter::reload_duration_nanos, pending_reload_duration_nanos_},
-        });
-        profiler_.record_external_timing(
-            "resource-reload",
-            static_cast<std::int64_t>(std::min<std::uint64_t>(
-                pending_reload_duration_nanos_,
-                static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))));
-        pending_reload_timing_recorded_ = true;
-    }
     status_feedback_.advance_frame(frame_time_nanos);
     notifications_.advance_frame(frame_time_nanos);
     input_.publish_frame_time(frame_time_nanos);
@@ -1620,8 +1537,6 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         }
         declarative_environment_pending_ = false;
     }
-    const runtime::RuntimeGenerationSnapshot service_generations =
-        application_.services().generations();
     const bool pending_lifecycle = !pending_lifecycle_input_.events.empty() ||
                                    !pending_lifecycle_input_.action_outcomes.empty() ||
                                    pending_lifecycle_input_.injected_events != 0U ||
@@ -1631,16 +1546,14 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         last_frame_.frame_index != 0U && !requested_frame && !description_invalidated_ &&
         tree_.root() != nullptr &&
         application_.dirty_generation() == observed_application_generation_ &&
-        service_generations == observed_service_generations_ && tree_.dirty_count() == 0U &&
-        !input_.requires_frame_advance() && !pending_lifecycle && scroll_animations_.empty() &&
-        motion_.active_count() == 0U && layout_engine_.active_transition_count() == 0U &&
+        tree_.dirty_count() == 0U && !input_.requires_frame_advance() && !pending_lifecycle &&
+        scroll_animations_.empty() && motion_.active_count() == 0U &&
+        layout_engine_.active_transition_count() == 0U &&
         !application_.services().has_pending_frame_work();
     if (settled_except_input && input_.queued_event_count() == 0U) {
         SurfaceFrame next;
         next.frame_index = last_frame_.frame_index + 1U;
         next.frame_time_nanos = frame_time_nanos;
-        next.operations.resource_reloads = pending_resource_reloads_;
-        next.operations.reload_duration_nanos = pending_reload_duration_nanos_;
         {
             auto services_profile = profiler_.section("runtime-services");
             RuntimeFrameGuard runtime_frame(application_.services());
@@ -1650,23 +1563,15 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         }
         record_profiler_counters(next);
         last_frame_ = std::move(next);
-        pending_resource_reloads_ = 0U;
-        pending_reload_duration_nanos_ = 0U;
-        pending_reload_timing_recorded_ = false;
         return last_frame_;
     }
     SurfaceFrame next;
     if (text_engine_ != nullptr) {
-        const runtime::RuntimeGenerationSnapshot generations =
-            application_.services().generations();
-        text_engine_->adopt_generations(scale_context_generation_, generations.style_resources,
-                                        generations.font_resources);
+        text_engine_->adopt_scale_context(scale_context_generation_);
         text_engine_->begin_frame();
     }
     next.frame_index = last_frame_.frame_index + 1U;
     next.frame_time_nanos = frame_time_nanos;
-    next.operations.resource_reloads = pending_resource_reloads_;
-    next.operations.reload_duration_nanos = pending_reload_duration_nanos_;
     RuntimeFrameGuard runtime_frame(application_.services());
     application_.flush_durable();
     {
@@ -1700,7 +1605,6 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         if (processed_queued_input && !frame_invalidated_ && !description_invalidated_ &&
             tree_.dirty_count() == 0U &&
             application_.dirty_generation() == observed_application_generation_ &&
-            application_.services().generations() == observed_service_generations_ &&
             !layout_engine_.requires_layout(tree_,
                                             environment_.layout_environment(frame_time_nanos)) &&
             !input_.requires_frame_advance() && scroll_animations_.empty() &&
@@ -1784,13 +1688,14 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     }
     {
         auto render_profile = profiler_.section("render");
-        next.operations.render = render_engine_.render(
-            tree_, laid_out, input_, commands_, widgets_, behaviors_, motion_, text_engine_.get(),
-            svg_images_.get(), material_registry_,
-            RenderGenerationToken{scale_context_generation_,
-                                  application_.active_generation().value_or(0U),
-                                  application_.services().generations()},
-            render_commands_);
+        next.operations.render =
+            render_engine_.render(tree_, laid_out, input_, commands_, widgets_, behaviors_, motion_,
+                                  text_engine_.get(), svg_images_.get(), material_registry_,
+                                  RenderGenerationToken{
+                                      scale_context_generation_,
+                                      application_.active_generation().value_or(0U),
+                                  },
+                                  render_commands_);
         if (const RetainedNode* inspected = inspected_node(); inspected != nullptr) {
             if (const LayoutRecord* record = laid_out.find(inspected->identity());
                 record != nullptr) {
@@ -1861,7 +1766,6 @@ SurfaceFrame Surface::complete_frame(SurfaceFrame next) {
     next.diagnostics = application_.services().diagnostics_snapshot();
     record_profiler_counters(next);
     tree_.clear_dirty();
-    observed_service_generations_ = application_.services().generations();
     frame_invalidated_ = false;
     const std::size_t publication_count =
         std::max(next.lifecycle_input.events.size(), next.lifecycle_input.action_outcomes.size());
@@ -1885,9 +1789,6 @@ SurfaceFrame Surface::complete_frame(SurfaceFrame next) {
         }
     }
     last_frame_ = std::move(next);
-    pending_resource_reloads_ = 0U;
-    pending_reload_duration_nanos_ = 0U;
-    pending_reload_timing_recorded_ = false;
     return last_frame_;
 }
 
@@ -1916,8 +1817,6 @@ void Surface::record_profiler_counters(const SurfaceFrame& frame) {
         {runtime::ProfilerCounter::layout_arranged_nodes, value.layout_arranged_nodes},
         {runtime::ProfilerCounter::layout_translated_nodes, value.layout_translated_nodes},
         {runtime::ProfilerCounter::layout_reused_nodes, value.layout_measurement_cache_hits},
-        {runtime::ProfilerCounter::resource_reloads, value.resource_reloads},
-        {runtime::ProfilerCounter::reload_duration_nanos, value.reload_duration_nanos},
         {runtime::ProfilerCounter::text_layout_requests, value.text.requests},
         {runtime::ProfilerCounter::text_layout_cache_hits, value.text.cache_hits},
         {runtime::ProfilerCounter::text_layout_cache_misses, value.text.cache_misses},

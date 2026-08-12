@@ -46,8 +46,8 @@ then tessellates those paths at the current logical size and device scale.
 
 SVG is therefore resolution-independent and needs no SVG feature in D3D11, the CPU reference
 renderer, or a custom packet-v10 backend. Both desktop and headless rendering consume the same
-vertices, indices, materials, and scissors. Resource reload parses candidate PNG/SVG images before
-atomically replacing the live font/image set; malformed candidates leave prior resources active.
+vertices, indices, materials, and scissors. PNG/SVG image content is immutable for a Surface
+lifetime; edited assets take effect after rebuilding the owning artifact and recreating the session.
 
 `Image.tint` modulates literal SVG colors. SVG `currentColor` resolves directly to the tint, which
 makes monochrome icon assets naturally themeable. The default white tint preserves literal colors

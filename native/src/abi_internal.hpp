@@ -245,10 +245,6 @@ struct strata_surface final {
     std::vector<strata_surface_image_binding> image_bindings;
     std::vector<strata::resource::EncodedTextureResource> textures;
     bool texture_resources_pending = true;
-    /** A runtime adapter swap must not mix old materialized resources with the new loader. */
-    bool resource_reload_required = false;
-    std::uint64_t materialized_resource_generation = 0U;
-    std::uint64_t required_resource_generation = 0U;
     /** Preparing the final atlas-release packet is a terminal Surface lifecycle transition. */
     bool release_packet_prepared = false;
     /** Set only after the host confirms synchronous consumption of the terminal packet. */

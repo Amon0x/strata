@@ -3,21 +3,21 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
-#include <memory>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "resource/svg_image.hpp"
 #include "runtime/application.hpp"
 #include "runtime/host_services.hpp"
 #include "runtime/layer.hpp"
 #include "runtime/profiler.hpp"
-#include "resource/svg_image.hpp"
-#include "ui/command.hpp"
 #include "ui/behavior/registry.hpp"
+#include "ui/command.hpp"
 #include "ui/description.hpp"
 #include "ui/input.hpp"
 #include "ui/layout.hpp"
@@ -46,10 +46,8 @@ struct SurfaceInputCapabilities final {
     bool clipboard = false;
     bool controller = false;
 
-    [[nodiscard]] friend bool operator==(
-        const SurfaceInputCapabilities&,
-        const SurfaceInputCapabilities&
-    ) = default;
+    [[nodiscard]] friend bool operator==(const SurfaceInputCapabilities&,
+                                         const SurfaceInputCapabilities&) = default;
 };
 
 /** Complete caller-owned environment snapshot adopted atomically at a frame boundary. */
@@ -69,7 +67,8 @@ struct SurfaceEnvironment final {
 
     void validate() const;
     [[nodiscard]] LayoutEnvironment layout_environment(std::int64_t frame_time_nanos) const;
-    [[nodiscard]] friend bool operator==(const SurfaceEnvironment&, const SurfaceEnvironment&) = default;
+    [[nodiscard]] friend bool operator==(const SurfaceEnvironment&,
+                                         const SurfaceEnvironment&) = default;
 };
 
 struct SurfaceOperationCounters final {
@@ -94,8 +93,6 @@ struct SurfaceOperationCounters final {
     std::size_t motion_running_players = 0U;
     std::uint64_t animation_nanos = 0U;
     std::uint64_t layout_nanos = 0U;
-    std::size_t resource_reloads = 0U;
-    std::uint64_t reload_duration_nanos = 0U;
     RenderOperationCounters render;
     TextOperationCounters text;
 };
@@ -128,13 +125,6 @@ struct ScrollAnimationRequest final {
     std::optional<std::int64_t> duration_nanos;
 };
 
-/** Fully prepared text/layout half of an atomic host-resource reload. */
-struct SurfaceResourceReloadPlan final {
-    std::shared_ptr<const TextEngine> text_engine;
-    std::shared_ptr<const resource::SvgImageRegistry> svg_images;
-    LayoutEngine layout_engine;
-};
-
 namespace surface_detail {
 
 /** Canonical state of one attached lazy producer at a layout/reconcile boundary. */
@@ -146,14 +136,13 @@ struct LazyRangeState final {
     bool stale_projection = false;
 
     [[nodiscard]] friend bool operator==(const LazyRangeState&, const LazyRangeState&) = default;
-    [[nodiscard]] friend bool operator<(
-        const LazyRangeState& left,
-        const LazyRangeState& right
-    ) noexcept {
+    [[nodiscard]] friend bool operator<(const LazyRangeState& left,
+                                        const LazyRangeState& right) noexcept {
         if (left.structural_path != right.structural_path) {
             return left.structural_path < right.structural_path;
         }
-        if (left.child_count != right.child_count) return left.child_count < right.child_count;
+        if (left.child_count != right.child_count)
+            return left.child_count < right.child_count;
         if (left.materialized.start != right.materialized.start) {
             return left.materialized.start < right.materialized.start;
         }
@@ -183,18 +172,16 @@ enum class LazyConvergenceStatus {
  * Every non-terminal observation is new; a repeated signature is a proven cycle.
  */
 class LazyConvergenceTracker final {
-public:
+  public:
     [[nodiscard]] LazyConvergenceStatus observe(LazyRangeSignature signature);
     [[nodiscard]] std::size_t observed_state_count() const noexcept;
     /** Saturating upper bound for the range states of every producer observed so far. */
     [[nodiscard]] std::size_t known_state_bound() const noexcept;
 
-private:
+  private:
     struct SignatureLess final {
-        [[nodiscard]] bool operator()(
-            const LazyRangeSignature& left,
-            const LazyRangeSignature& right
-        ) const noexcept;
+        [[nodiscard]] bool operator()(const LazyRangeSignature& left,
+                                      const LazyRangeSignature& right) const noexcept;
     };
 
     std::set<LazyRangeSignature, SignatureLess> observed_;
@@ -210,14 +197,13 @@ enum class MaterializationPublicationClaim {
 };
 
 class MaterializationPublicationLedger final {
-public:
-    [[nodiscard]] MaterializationPublicationClaim claim(
-        const std::shared_ptr<const DescriptionMaterialization>& transaction
-    );
+  public:
+    [[nodiscard]] MaterializationPublicationClaim
+    claim(const std::shared_ptr<const DescriptionMaterialization>& transaction);
     void purge_expired();
     [[nodiscard]] std::size_t tracked_count() const noexcept;
 
-private:
+  private:
     std::map<std::uint64_t, std::weak_ptr<const DescriptionMaterialization>> published_;
 };
 
@@ -228,21 +214,15 @@ private:
  * pipeline; later input, semantics and rendering consume these same retained identities.
  */
 class Surface final {
-public:
-    Surface(
-        std::string id,
-        runtime::ApplicationContext& application,
-        runtime::LayerRole root_role,
-        std::string root_name,
-        SurfaceEnvironment environment,
-        std::shared_ptr<const TextEngine> text_engine = {},
-        WidgetRegistry widget_registry = WidgetRegistry{},
-        BehaviorRegistry behavior_registry = BehaviorRegistry{},
-        runtime::HostServices* host_services = nullptr,
-        Theme initial_theme = Theme{},
-        std::string host_service_owner = {},
-        std::shared_ptr<const resource::SvgImageRegistry> svg_images = {}
-    );
+  public:
+    Surface(std::string id, runtime::ApplicationContext& application, runtime::LayerRole root_role,
+            std::string root_name, SurfaceEnvironment environment,
+            std::shared_ptr<const TextEngine> text_engine = {},
+            WidgetRegistry widget_registry = WidgetRegistry{},
+            BehaviorRegistry behavior_registry = BehaviorRegistry{},
+            runtime::HostServices* host_services = nullptr, Theme initial_theme = Theme{},
+            std::string host_service_owner = {},
+            std::shared_ptr<const resource::SvgImageRegistry> svg_images = {});
     ~Surface();
 
     [[nodiscard]] const std::string& id() const noexcept;
@@ -256,31 +236,14 @@ public:
     [[nodiscard]] bool adopt_scale_context(const SurfaceEnvironment& environment);
     /** Adopts input, inset, density, and motion preferences as a separate generation domain. */
     [[nodiscard]] bool adopt_environment_preferences(const SurfaceEnvironment& environment);
-    /** Invalidates resource-derived text/style/render state without rebuilding the application. */
-    void invalidate_resources();
-    /** Performs every potentially throwing text/layout step without changing the live surface. */
-    [[nodiscard]] SurfaceResourceReloadPlan prepare_resource_reload(
-        std::shared_ptr<const TextEngine> text_engine,
-        std::shared_ptr<const resource::SvgImageRegistry> svg_images
-    ) const;
-    /** Installs a matching prepared text/layout state; frame-time invalidation remains retryable. */
-    void commit_resource_reload(SurfaceResourceReloadPlan plan) noexcept;
-    /** Atomically adopts a fully constructed text engine and invalidates dependent caches. */
-    void replace_text_engine(std::shared_ptr<const TextEngine> text_engine);
-    /** Completes the reload measurement queued by replace_text_engine for the next frame. */
-    void note_resource_reload_duration(std::uint64_t duration_nanos) noexcept;
     void invalidate() noexcept;
     /** Releases all surface-owned interaction state; lifecycle output is published next frame. */
     void cancel_interactions();
     /** Injects an action as a surface event and publishes its event/outcome on the next frame. */
-    [[nodiscard]] runtime::ActionDispatchOutcome dispatch_action(
-        std::string action_id,
-        runtime::Value payload,
-        std::string event_kind,
-        std::optional<std::string> source_key,
-        runtime::Value event_value,
-        bool dynamic = false
-    );
+    [[nodiscard]] runtime::ActionDispatchOutcome
+    dispatch_action(std::string action_id, runtime::Value payload, std::string event_kind,
+                    std::optional<std::string> source_key, runtime::Value event_value,
+                    bool dynamic = false);
     [[nodiscard]] SurfaceFrame frame(std::int64_t frame_time_nanos);
     /** Drains the bounded ordered event/outcome publication stream exactly once. */
     [[nodiscard]] SurfaceEventDrain drain_events();
@@ -301,9 +264,8 @@ public:
     [[nodiscard]] const BehaviorRegistry& behavior_registry() const noexcept;
     [[nodiscard]] const MotionRuntime& motion() const noexcept;
     [[nodiscard]] const Theme& theme() const noexcept;
-    [[nodiscard]] const std::shared_ptr<const Theme>* registered_theme(
-        std::string_view name
-    ) const noexcept;
+    [[nodiscard]] const std::shared_ptr<const Theme>*
+    registered_theme(std::string_view name) const noexcept;
     /** Registers/replaces a named immutable theme and invalidates materialized theme state. */
     [[nodiscard]] bool register_theme(Theme theme);
     /** Registers and selects a root theme. */
@@ -313,7 +275,8 @@ public:
     /** Installs an immutable local theme scope at a keyed description node. */
     [[nodiscard]] bool set_scoped_theme(std::string node_key, Theme theme);
     [[nodiscard]] bool clear_scoped_theme(std::string_view node_key);
-    /** Interruptibly animates a keyed scroll container through the canonical input mutation path. */
+    /** Interruptibly animates a keyed scroll container through the canonical input mutation path.
+     */
     [[nodiscard]] bool animate_scroll_to(ScrollAnimationRequest request);
     [[nodiscard]] std::size_t active_scroll_animation_count() const noexcept;
     [[nodiscard]] NotificationService& notifications() noexcept;
@@ -328,35 +291,23 @@ public:
     [[nodiscard]] bool set_focus_containment(std::optional<std::string_view> key);
     [[nodiscard]] bool focus_contained() const noexcept;
 
-private:
+  private:
     void advance_environment_generation();
     void queue_resource_invalidation() noexcept;
     void apply_pending_resource_invalidation();
     void invalidate_frame() noexcept;
     void invalidate_description() noexcept;
-    [[nodiscard]] std::shared_ptr<const DescriptionNode> describe(
-        DescriptionBuildResult& result
-    );
-    [[nodiscard]] runtime::ActionDispatchOutcome execute_environment_action(
-        const runtime::Action& action
-    );
-    [[nodiscard]] bool rebuild_tree(
-        SurfaceFrame& frame,
-        std::optional<std::string_view>& restore_focus
-    );
+    [[nodiscard]] std::shared_ptr<const DescriptionNode> describe(DescriptionBuildResult& result);
+    [[nodiscard]] runtime::ActionDispatchOutcome
+    execute_environment_action(const runtime::Action& action);
+    [[nodiscard]] bool rebuild_tree(SurfaceFrame& frame,
+                                    std::optional<std::string_view>& restore_focus);
     [[nodiscard]] std::shared_ptr<const DescriptionNode> project_description_theme();
     [[nodiscard]] ReconcileStats realize_virtual_children(const LayoutResult& layout);
-    void report_unknown_theme_timing(
-        std::string_view name,
-        const DescriptionNode& node
-    );
+    void report_unknown_theme_timing(std::string_view name, const DescriptionNode& node);
     void advance_scroll_animations(std::int64_t frame_time_nanos);
     void retain_scroll_animations();
-    void sample_motion(
-        SurfaceFrame& frame,
-        std::int64_t frame_time_nanos,
-        bool temporal
-    );
+    void sample_motion(SurfaceFrame& frame, std::int64_t frame_time_nanos, bool temporal);
     void layout_tree(SurfaceFrame& frame, std::int64_t frame_time_nanos);
     void commit_lazy_materializations(SurfaceFrame& frame);
     void collect_input_profiler_counters(SurfaceFrame& frame);
@@ -395,8 +346,7 @@ private:
     std::optional<std::string> observed_active_screen_;
     std::map<std::string, std::string, std::less<>> focus_by_screen_;
     std::map<std::string, runtime::StateScopeSet, std::less<>> state_scopes_by_layer_;
-    std::vector<std::shared_ptr<const DescriptionMaterialization>>
-        pending_lazy_materializations_;
+    std::vector<std::shared_ptr<const DescriptionMaterialization>> pending_lazy_materializations_;
     surface_detail::MaterializationPublicationLedger materialization_publications_;
     std::set<std::string, std::less<>> reported_theme_motion_diagnostics_;
     std::set<std::string, std::less<>> reported_lazy_convergence_diagnostics_;
@@ -412,17 +362,11 @@ private:
     std::uint64_t scale_context_generation_ = 0U;
     /** Surface frame index whose temporal motion clocks were sampled; discovery is separate. */
     std::uint64_t motion_sampled_frame_index_ = 0U;
-    std::size_t pending_resource_reloads_ = 0U;
-    std::uint64_t pending_reload_duration_nanos_ = 0U;
-    bool pending_reload_timing_recorded_ = false;
-    std::size_t queued_resource_invalidations_ = 0U;
-    bool resource_invalidation_pending_ = false;
     bool advancing_scroll_animation_ = false;
     bool frame_invalidated_ = true;
     bool description_invalidated_ = true;
     bool declarative_environment_pending_ = false;
     InputOperationResult pending_lifecycle_input_;
-    runtime::RuntimeGenerationSnapshot observed_service_generations_;
     SurfaceFrame last_frame_;
     std::deque<SurfaceEventRecord> published_events_;
     std::uint64_t next_event_sequence_ = 1U;

@@ -8,6 +8,7 @@ It provides:
 - hovers and signature help from generated type/dispatch metadata;
 - document symbols and local/import definition navigation;
 - exact source-ranged diagnostics from the production `strata_compile` executable;
+- manifest-driven application preview with compatible `.strata` and predeclared-HLSL watching;
 - automatic adjacent `*.schemas.json` discovery plus explicit workspace settings.
 
 ## Native diagnostics
@@ -18,6 +19,11 @@ a workspace-relative path, or
 `${workspaceFolder}` placeholders. External package directories go in `strata.extensions.paths` and
 are forwarded as repeatable native compiler `--extension-path` options. The command **Strata:
 Validate Current Module** saves and checks the active module immediately.
+The command **Strata: Preview Application** finds the current `*.strata-app.json`, launches the
+configured `strata_desktop` runner, and keeps its last-good UI open while compatible `.strata`
+modules and predeclared HLSL bodies are edited. Configure `strata.desktopRunner.path` when the
+runner is not discoverable. Manifest, schema, extension, font, image, generated-binding, and native
+handler changes are reported in the preview terminal as rebuild/restart boundaries.
 
 Validation intentionally runs on open/save rather than against a second JavaScript parser. The
 native compiler remains the only authority for imports, schema composition, semantic types, and

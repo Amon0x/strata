@@ -640,7 +640,7 @@ channel timeline, is a compile error rather than an order-dependent override.
 A `motions` entry with `property` and a numeric or color `target` is a typed value channel; it does
 not require duplicated endpoints. `animateChanges` is the opt-in implicit path for concrete
 resolved style/layout values and retargets from the current presentation after rapid state, theme,
-or hot-reload changes. Fixed, percentage, and fill-unit width/height targets interpolate without
+or compatible source-reactivation changes. Fixed, percentage, and fill-unit width/height targets interpolate without
 being flattened to pixels; `placementX`/`placementY` animate the corresponding layer-placement
 axis. Per-edge `marginLeft`/`marginTop`/`marginRight`/`marginBottom` and padding properties resolve
 from the authored edge object. Unit changes and unsupported non-concrete endpoints snap rather
@@ -656,8 +656,8 @@ Fixed/fill/percentage axes remain owned by layout and cannot be silently
 overridden by content-size motion. All named `policy` values resolve through the effective theme's
 `UiMotionPolicy`; reduced motion reaches the same final style and layout in the same frame.
 
-During hot reload, an already-running single-run keyframed timeline is compatible when it still
-owns the same animation properties and keeps the same reverse model. Duration, delay, easing, fill mode,
+During compatible source reactivation, an already-running single-run keyframed timeline remains
+compatible when it owns the same animation properties and keeps the same reverse model. Duration, delay, easing, fill mode,
 keyframe offsets, and keyframe values may change compatibly: the runtime preserves the exact
 currently displayed numeric/color values and blends them into the edited timeline. Changing the
 owned property set, reverse mode, or repeating timeline is structural and restarts it from its new

@@ -327,13 +327,14 @@ reserved for cases where delivery is impossible and the host independently disca
 resources. The C++ destructor treats a forgotten live Surface as that failure mode and reports it
 through the diagnostic sink.
 
-## Reload and failure recovery
+## Reactivation and failure recovery
 
 Compilation/activation is last-good: a rejected generation returns diagnostics and leaves the active
-unit and compatible state untouched. Resource reload similarly builds candidate font/image state
-before swapping it into a Surface. After successful resource reload, frame again before reading the
-new packet or canonical frame. A rejected reload leaves the prior resources usable. Host-facing
-texture identities are generated per process/runtime/Surface and never reuse adapter source paths.
+unit and compatible state untouched. A host may explicitly reactivate compatible `.strata` source
+against the configured application contract. Fonts, images, extension packages, schemas, generated
+bindings, and native handlers are immutable session inputs; changing any of them requires rebuilding
+the owning artifact and recreating the Runtime and its Surfaces. Host-facing texture identities are
+generated per process/runtime/Surface and never expose adapter source paths.
 
 ## Allocator and memory telemetry
 

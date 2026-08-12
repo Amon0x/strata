@@ -290,27 +290,6 @@
                 ]
               }
             }
-          },
-          {
-            "name": "reloadMetrics",
-            "required": true,
-            "nullable": false,
-            "type": {
-              "kind": "list",
-              "maximumItems": 32,
-              "minimumItems": 0,
-              "elementNullable": false,
-              "element": {
-                "kind": "object",
-                "label": "debug reload metric",
-                "allowUnknownFields": false,
-                "valueNullable": false,
-                "fields": [
-                  { "name": "label", "type": { "kind": "string" }, "required": true, "nullable": false },
-                  { "name": "value", "type": { "kind": "string" }, "required": true, "nullable": false }
-                ]
-              }
-            }
           }
         ]
       }

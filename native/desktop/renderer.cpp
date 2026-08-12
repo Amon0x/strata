@@ -53,7 +53,8 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
 } // namespace
 
 struct Renderer::Impl final {
-    Impl(HWND window, const bool vsync) : window(window), vsync(vsync) {
+    Impl(HWND window, const bool vsync, const bool asynchronous_shader_compilation)
+        : window(window), vsync(vsync) {
         if (window == nullptr)
             throw std::invalid_argument("desktop renderer requires a window");
         const HRESULT com_status = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -63,11 +64,8 @@ struct Renderer::Impl final {
             fail_hresult("COM initialization", com_status);
         create_device();
         capture_adapter_info();
-        renderer = std::make_unique<d3d11::RenderContext>(
-            device.Get(),
-            context.Get(),
-            true
-        );
+        renderer = std::make_unique<d3d11::RenderContext>(device.Get(), context.Get(),
+                                                          asynchronous_shader_compilation);
         RECT client{};
         if (!GetClientRect(window, &client))
             throw std::runtime_error("could not read window size");
@@ -180,7 +178,8 @@ struct Renderer::Impl final {
     std::chrono::steady_clock::time_point started_at = std::chrono::steady_clock::now();
 };
 
-Renderer::Renderer(HWND window, const bool vsync) : impl_(std::make_unique<Impl>(window, vsync)) {}
+Renderer::Renderer(HWND window, const bool vsync, const bool asynchronous_shader_compilation)
+    : impl_(std::make_unique<Impl>(window, vsync, asynchronous_shader_compilation)) {}
 Renderer::~Renderer() = default;
 Renderer::Renderer(Renderer&&) noexcept = default;
 Renderer& Renderer::operator=(Renderer&&) noexcept = default;

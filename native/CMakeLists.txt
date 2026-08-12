@@ -820,8 +820,10 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
     add_executable(
         strata_desktop
         desktop/host.cpp
+        desktop/launch.cpp
         desktop/main.cpp
         desktop/performance.cpp
+        desktop/preview.cpp
         desktop/showcase.cpp
         headless/scenario.cpp
     )
@@ -1322,10 +1324,26 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         add_test(
             NAME strata.desktop.application
             COMMAND strata_desktop
-                --application ${CMAKE_CURRENT_SOURCE_DIR}/samples/desktop_app.json
+                ${CMAKE_CURRENT_SOURCE_DIR}/samples/desktop_app.strata-app.json
                 --resources ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
                 --smoke
         )
+        if(TARGET strata_c_smoke)
+            set(
+                strata_custom_host_manifest
+                "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/custom-host.strata-app.json"
+            )
+            file(
+                GENERATE
+                OUTPUT "${strata_custom_host_manifest}"
+                CONTENT
+                    "{\"version\":1,\"launch\":{\"kind\":\"custom\",\"executable\":\"$<TARGET_FILE:strata_c_smoke>\",\"arguments\":[]}}\n"
+            )
+            add_test(
+                NAME strata.desktop.custom_host
+                COMMAND strata_desktop "${strata_custom_host_manifest}"
+            )
+        endif()
         add_test(
             NAME strata.desktop.performance_smoke
             COMMAND strata_desktop
@@ -1422,7 +1440,7 @@ install(
         samples/installed/external_extension.cpp
         samples/installed/extension_loader_smoke.cpp
         samples/desktop_app.cpp
-        samples/desktop_app.json
+        samples/desktop_app.strata-app.json
         samples/adapter_c_smoke.c
         samples/d3d11_target_smoke.cpp
     DESTINATION share/strata/samples

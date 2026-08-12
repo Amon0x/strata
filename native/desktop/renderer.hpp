@@ -30,7 +30,7 @@ struct RendererInfo final {
 /** Win32 fidelity renderer for the backend-ready native render submission protocol. */
 class Renderer final {
   public:
-    explicit Renderer(HWND window, bool vsync = true);
+    explicit Renderer(HWND window, bool vsync = true, bool asynchronous_shader_compilation = true);
     ~Renderer();
 
     Renderer(const Renderer&) = delete;
