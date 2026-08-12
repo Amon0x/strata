@@ -87,12 +87,14 @@ class WidgetInputScope final {
     /** Synchronizes widget-owned text without emitting a second editor change event. */
     void synchronize_editor_text(std::string_view value, bool move_caret_to_end = false);
 
-    void set_retained(std::string name, runtime::Value value, DirtyReason reason);
+    void set_retained(std::string_view name, runtime::Value value, DirtyReason reason);
     void set_retained_bytes(std::string name, std::span<const std::byte> value, DirtyReason reason);
     void set_presentation(std::string name, runtime::Value value);
-    void set_paint(std::string name, runtime::Value value);
-    void set_input(std::string name, runtime::Value value);
+    void set_paint(std::string_view name, runtime::Value value);
+    void set_input(std::string_view name, runtime::Value value);
     void set_input_bytes(std::string name, std::span<const std::byte> value);
+    [[nodiscard]] bool set_target_paint_bytes(std::string_view target_key, std::string_view name,
+                                              std::span<const std::byte> value);
     void invalidate(DirtyReason reason);
     [[nodiscard]] bool request_frame(WidgetFrameCost cost = WidgetFrameCost::paint);
     void cancel_frame() noexcept;

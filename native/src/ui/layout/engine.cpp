@@ -89,13 +89,13 @@ namespace {
     double x = anchor.x;
     double y = anchor.y;
     if (side == LayoutAnchorSide::bottom || side == LayoutAnchorSide::top) {
-        x = aligned(anchor.x, anchor.width, size.width);
+        x = aligned(anchor.x, anchor.width, size.width) + style.anchor_cross_offset;
         y = side == LayoutAnchorSide::bottom ? anchor.bottom() + style.anchor_gap
                                              : anchor.y - style.anchor_gap - size.height;
     } else {
         x = side == LayoutAnchorSide::right ? anchor.right() + style.anchor_gap
                                             : anchor.x - style.anchor_gap - size.width;
-        y = aligned(anchor.y, anchor.height, size.height);
+        y = aligned(anchor.y, anchor.height, size.height) + style.anchor_cross_offset;
     }
     if (style.anchor_shift) {
         x = std::clamp(x, viewport.x, std::max(viewport.x, viewport.right() - size.width));
@@ -208,11 +208,16 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
     std::map<std::pair<std::size_t, std::uint64_t>, const RetainedNode*, std::greater<>>
         pending_measurements;
     std::unordered_set<std::uint64_t> scheduled_measurements;
-    const auto schedule_measurement = [&pending_measurements,
-                                       &scheduled_measurements](const RetainedNode* node) {
-        if (node == nullptr || !scheduled_measurements.insert(node->identity()).second) {
+    std::unordered_set<std::uint64_t> forced_measurements;
+    const auto schedule_measurement = [&pending_measurements, &scheduled_measurements,
+                                       &forced_measurements](const RetainedNode* node,
+                                                             const bool force) {
+        if (node == nullptr)
             return;
-        }
+        if (force)
+            forced_measurements.insert(node->identity());
+        if (!scheduled_measurements.insert(node->identity()).second)
+            return;
         std::size_t depth = 0U;
         for (const RetainedNode* current = node; current != nullptr; current = current->parent()) {
             ++depth;
@@ -230,10 +235,10 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
         while (measurable != root && !measurement_cache_.contains(measurable->identity())) {
             measurable = measurable->parent();
         }
-        schedule_measurement(measurable);
+        schedule_measurement(measurable, false);
     }
     if (measurement_cache_.empty() || content_size_transitions_.active_count() != 0U) {
-        schedule_measurement(root);
+        schedule_measurement(root, false);
     }
     MeasuredNodePtr measured;
     while (!pending_measurements.empty()) {
@@ -246,15 +251,16 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
             : cached != measurement_cache_.end() ? cached->second.constraints
                                                  : Constraints{};
         if (current != root && cached == measurement_cache_.end()) {
-            schedule_measurement(current->parent());
+            schedule_measurement(current->parent(), false);
             continue;
         }
         MeasuredNodePtr current_measured =
-            measure(*current, constraints, environment, next.operations);
+            measure(*current, constraints, environment, next.operations,
+                    forced_measurements.contains(current->identity()));
         if (current == root)
             measured = std::move(current_measured);
         if (!measurement_frontier_.contains(current->identity())) {
-            schedule_measurement(current->parent());
+            schedule_measurement(current->parent(), true);
         }
     }
     if (measured == nullptr) {
@@ -315,6 +321,7 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
             if (!changed)
                 continue;
             cached->second.measured = std::make_shared<const MeasuredNode>(std::move(updated));
+            cached->second.propagated = cached->second.measured;
             replacements.insert_or_assign(ancestor.node->identity(), cached->second.measured);
             if (auto frontier = measurement_frontier_.find(ancestor.node->identity());
                 frontier != measurement_frontier_.end()) {
@@ -330,6 +337,13 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
             }
             return false;
         });
+        if (measured->subtree_portals) {
+            const auto cached_root = measurement_cache_.find(root->identity());
+            if (cached_root != measurement_cache_.end() &&
+                cached_root->second.measured != nullptr) {
+                measured = cached_root->second.measured;
+            }
+        }
     }
     next.measure_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
                              std::chrono::steady_clock::now() - measure_started)

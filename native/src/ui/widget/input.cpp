@@ -273,16 +273,15 @@ void WidgetInputScope::synchronize_editor_text(const std::string_view value,
     router_.synchronize_editor_text(node_, value, move_caret_to_end);
 }
 
-void WidgetInputScope::set_retained(std::string name, runtime::Value value,
+void WidgetInputScope::set_retained(const std::string_view name, runtime::Value value,
                                     const DirtyReason reason) {
     if (router_.tree_ == nullptr)
         return;
-    const std::string retained_name = name;
-    const bool changed = router_.tree_->set_retained_value(node_.identity(), std::move(name),
-                                                           std::move(value), reason);
+    const bool changed =
+        router_.tree_->set_retained_value(node_.identity(), name, std::move(value), reason);
     if (changed && (reason == DirtyReason::structure || reason == DirtyReason::properties) &&
         router_.description_invalidator_) {
-        router_.description_invalidator_(&node_, retained_name);
+        router_.description_invalidator_(&node_, name);
     }
 }
 
@@ -304,6 +303,24 @@ void WidgetInputScope::set_input_bytes(std::string name, const std::span<const s
         return;
     static_cast<void>(router_.tree_->set_input_bytes(node_.identity(), std::move(name), value));
 }
+bool WidgetInputScope::set_target_paint_bytes(const std::string_view target_key,
+                                              const std::string_view name,
+                                              const std::span<const std::byte> value) {
+    if (router_.tree_ == nullptr)
+        return false;
+    RetainedNode* const target = router_.tree_->find_key(target_key);
+    const WidgetLifecycle* const lifecycle =
+        target != nullptr ? router_.widgets_.find(target->description().type) : nullptr;
+    if (lifecycle == nullptr || std::ranges::find(lifecycle->extension_paint_fields, name) ==
+                                    lifecycle->extension_paint_fields.end()) {
+        return false;
+    }
+    const bool changed = router_.tree_->set_retained_bytes(target->identity(), std::string(name),
+                                                           value, DirtyReason::paint);
+    if (changed && router_.frame_invalidator_)
+        router_.frame_invalidator_();
+    return true;
+}
 
 void WidgetInputScope::set_presentation(std::string name, runtime::Value value) {
     if (router_.tree_ == nullptr)
@@ -313,20 +330,18 @@ void WidgetInputScope::set_presentation(std::string name, runtime::Value value) 
     if (changed && router_.frame_invalidator_)
         router_.frame_invalidator_();
 }
-void WidgetInputScope::set_paint(std::string name, runtime::Value value) {
+void WidgetInputScope::set_paint(const std::string_view name, runtime::Value value) {
     if (router_.tree_ == nullptr)
         return;
-    const bool changed =
-        router_.tree_->set_paint_value(node_.identity(), std::move(name), std::move(value));
+    const bool changed = router_.tree_->set_paint_value(node_.identity(), name, std::move(value));
     if (changed && router_.frame_invalidator_)
         router_.frame_invalidator_();
 }
 
-void WidgetInputScope::set_input(std::string name, runtime::Value value) {
+void WidgetInputScope::set_input(const std::string_view name, runtime::Value value) {
     if (router_.tree_ == nullptr)
         return;
-    static_cast<void>(
-        router_.tree_->set_input_value(node_.identity(), std::move(name), std::move(value)));
+    static_cast<void>(router_.tree_->set_input_value(node_.identity(), name, std::move(value)));
 }
 
 void WidgetInputScope::invalidate(const DirtyReason reason) {

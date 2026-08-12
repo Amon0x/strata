@@ -11,11 +11,14 @@
 namespace strata::ui {
 namespace {
 
-bool text_selection_click(WidgetInputScope&) { return false; }
+bool text_selection_click(WidgetInputScope&) {
+    return false;
+}
 
 bool rich_text_click(WidgetInputScope& scope) {
     const std::vector<RichTextLink> links = rich_text_links(scope.node());
-    if (links.empty()) return false;
+    if (links.empty())
+        return false;
     std::size_t selected = 0U;
     if (scope.pointer() != nullptr) {
         const WidgetSubtarget* target = scope.subtarget();
@@ -26,26 +29,22 @@ bool rich_text_click(WidgetInputScope& scope) {
         selected = target->index;
     } else if (const runtime::Value* active = scope.retained("$activeLink");
                active != nullptr && active->number() != nullptr && *active->number() >= 0.0) {
-        selected = std::min(
-            static_cast<std::size_t>(*active->number()), links.size() - 1U
-        );
+        selected = std::min(static_cast<std::size_t>(*active->number()), links.size() - 1U);
     }
-    scope.set_retained(
-        "$activeLink", runtime::Value(static_cast<double>(selected)), DirtyReason::input
-    );
+    scope.set_retained("$activeLink", runtime::Value(static_cast<double>(selected)),
+                       DirtyReason::input);
     scope.dispatch_action(links[selected].action, "rich-text-link-activated");
     return true;
 }
 
 bool rich_text_key(WidgetInputScope& scope) {
     const std::vector<RichTextLink> links = rich_text_links(scope.node());
-    if (links.empty()) return false;
+    if (links.empty())
+        return false;
     std::size_t selected = 0U;
     if (const runtime::Value* active = scope.retained("$activeLink");
         active != nullptr && active->number() != nullptr && *active->number() >= 0.0) {
-        selected = std::min(
-            static_cast<std::size_t>(*active->number()), links.size() - 1U
-        );
+        selected = std::min(static_cast<std::size_t>(*active->number()), links.size() - 1U);
     }
     if (scope.key() == "left" || scope.key() == "up") {
         selected = selected == 0U ? links.size() - 1U : selected - 1U;
@@ -57,9 +56,8 @@ bool rich_text_key(WidgetInputScope& scope) {
     } else {
         return false;
     }
-    scope.set_retained(
-        "$activeLink", runtime::Value(static_cast<double>(selected)), DirtyReason::input
-    );
+    scope.set_retained("$activeLink", runtime::Value(static_cast<double>(selected)),
+                       DirtyReason::input);
     return true;
 }
 
@@ -69,10 +67,9 @@ bool activate(WidgetInputScope& scope) {
 }
 
 bool section_toggle(WidgetInputScope& scope) {
-    if (scope.pointer() != nullptr && scope.pointer_target() != &scope.node()) return false;
-    const bool next = !scope.effective_boolean(
-        "expanded", "$expanded", "defaultExpanded", false
-    );
+    if (scope.pointer() != nullptr && scope.pointer_target() != &scope.node())
+        return false;
+    const bool next = !scope.effective_boolean("expanded", "$expanded", "defaultExpanded", false);
     scope.set_retained("$expanded", runtime::Value(next), DirtyReason::properties);
     scope.boolean_changed({}, next);
     return true;
@@ -96,13 +93,9 @@ bool list_select(WidgetInputScope& scope) {
 
 void set_menu_path(WidgetInputScope& scope, const std::vector<std::size_t>& path) {
     const bool authored_presentation =
-        scope.property("popupTemplate") != nullptr ||
-        scope.property("itemTemplate") != nullptr;
-    scope.set_retained(
-        "$menuPath",
-        menu_path_value(path),
-        authored_presentation ? DirtyReason::properties : DirtyReason::input
-    );
+        scope.property("popupTemplate") != nullptr || scope.property("itemTemplate") != nullptr;
+    scope.set_retained("$menuPath", menu_path_value(path),
+                       authored_presentation ? DirtyReason::properties : DirtyReason::input);
 }
 
 void close_menu(WidgetInputScope& scope) {
@@ -112,22 +105,21 @@ void close_menu(WidgetInputScope& scope) {
 
 [[nodiscard]] std::optional<MenuProjection> menu_projection(WidgetInputScope& scope) {
     const LayoutResult* layout = scope.layout_result();
-    if (layout == nullptr) return std::nullopt;
+    if (layout == nullptr)
+        return std::nullopt;
     return project_menu(scope.node(), *layout, scope.command_index());
 }
 
-[[nodiscard]] std::size_t adjacent_menu_item(
-    const std::vector<MenuItemModel>& items,
-    const std::size_t current,
-    const int direction
-) {
-    if (items.empty()) return 0U;
+[[nodiscard]] std::size_t adjacent_menu_item(const std::vector<MenuItemModel>& items,
+                                             const std::size_t current, const int direction) {
+    if (items.empty())
+        return 0U;
     std::size_t index = std::min(current, items.size() - 1U);
     for (std::size_t attempt = 0U; attempt < items.size(); ++attempt) {
-        index = direction < 0
-            ? index == 0U ? items.size() - 1U : index - 1U
-            : (index + 1U) % items.size();
-        if (items[index].enabled && !items[index].separator) return index;
+        index = direction < 0 ? index == 0U ? items.size() - 1U : index - 1U
+                              : (index + 1U) % items.size();
+        if (items[index].enabled && !items[index].separator)
+            return index;
     }
     return current;
 }
@@ -139,11 +131,8 @@ void close_menu(WidgetInputScope& scope) {
     return value;
 }
 
-[[nodiscard]] bool menu_typeahead(
-    WidgetInputScope& scope,
-    const MenuProjection& projection,
-    const bool open
-) {
+[[nodiscard]] bool menu_typeahead(WidgetInputScope& scope, const MenuProjection& projection,
+                                  const bool open) {
     if (scope.key().size() != 1U ||
         !std::isalnum(static_cast<unsigned char>(scope.key().front()))) {
         return false;
@@ -162,16 +151,17 @@ void close_menu(WidgetInputScope& scope) {
 
     std::vector<std::size_t> path = projection.active_path;
     std::vector<std::size_t> parent;
-    if (!path.empty()) parent.assign(path.begin(), path.end() - 1);
+    if (!path.empty())
+        parent.assign(path.begin(), path.end() - 1);
     const std::vector<MenuItemModel>* items = projection.level_at(parent);
-    if (items == nullptr || items->empty()) return false;
+    if (items == nullptr || items->empty())
+        return false;
     const std::size_t current = path.empty() ? items->size() - 1U : path.back();
     const auto match = [&items, current](const std::string& prefix) {
         for (std::size_t offset = 1U; offset <= items->size(); ++offset) {
             const std::size_t index = (current + offset) % items->size();
             const MenuItemModel& item = (*items)[index];
-            if (item.enabled && !item.separator &&
-                lower_ascii(item.label).starts_with(prefix)) {
+            if (item.enabled && !item.separator && lower_ascii(item.label).starts_with(prefix)) {
                 return std::optional<std::size_t>(index);
             }
         }
@@ -183,12 +173,11 @@ void close_menu(WidgetInputScope& scope) {
         selected = match(query);
     }
     scope.set_retained("$menuTypeahead", runtime::Value(query), DirtyReason::input);
-    scope.set_retained(
-        "$menuTypeaheadDeadline",
-        runtime::Value(static_cast<double>(scope.frame_time_nanos() + timeout)),
-        DirtyReason::input
-    );
-    if (!selected.has_value()) return true;
+    scope.set_retained("$menuTypeaheadDeadline",
+                       runtime::Value(static_cast<double>(scope.frame_time_nanos() + timeout)),
+                       DirtyReason::input);
+    if (!selected.has_value())
+        return true;
     parent.push_back(*selected);
     if (!open) {
         scope.set_retained("$expanded", runtime::Value(true), DirtyReason::properties);
@@ -197,11 +186,9 @@ void close_menu(WidgetInputScope& scope) {
     return true;
 }
 
-[[nodiscard]] bool activate_menu_target(
-    WidgetInputScope& scope,
-    const WidgetSubtarget& target
-) {
-    if (!target.enabled || target.separator) return false;
+[[nodiscard]] bool activate_menu_target(WidgetInputScope& scope, const WidgetSubtarget& target) {
+    if (!target.enabled || target.separator)
+        return false;
     if (target.has_children) {
         std::optional<MenuProjection> projection = menu_projection(scope);
         std::vector<std::size_t> next = target.path;
@@ -227,7 +214,8 @@ void close_menu(WidgetInputScope& scope) {
 
 bool menu_pointer(WidgetInputScope& scope) {
     const PointerInputEvent* pointer = scope.pointer();
-    if (pointer == nullptr) return false;
+    if (pointer == nullptr)
+        return false;
     if (context_menu(scope) && pointer->type == PointerEventType::press && pointer->button == 1) {
         scope.set_retained("$menuAnchorX", runtime::Value(pointer->position.x), DirtyReason::input);
         scope.set_retained("$menuAnchorY", runtime::Value(pointer->position.y), DirtyReason::input);
@@ -241,8 +229,8 @@ bool menu_pointer(WidgetInputScope& scope) {
     }
     const WidgetSubtarget* target = scope.subtarget();
     if (pointer->type == PointerEventType::move &&
-        scope.effective_boolean("open", "$expanded", "defaultOpen", false) &&
-        target != nullptr && !target->path.empty() && target->enabled && !target->separator) {
+        scope.effective_boolean("open", "$expanded", "defaultOpen", false) && target != nullptr &&
+        !target->path.empty() && target->enabled && !target->separator) {
         set_menu_path(scope, target->path);
         return true;
     }
@@ -251,9 +239,11 @@ bool menu_pointer(WidgetInputScope& scope) {
 
 bool menu_activate(WidgetInputScope& scope) {
     const WidgetSubtarget* target = scope.subtarget();
-    if (target == nullptr || !target->enabled) return false;
+    if (target == nullptr || !target->enabled)
+        return false;
     if (target->kind == WidgetSubtargetKind::control) {
-        if (context_menu(scope)) return false;
+        if (context_menu(scope))
+            return false;
         const bool next = !scope.effective_boolean("open", "$expanded", "defaultOpen", false);
         scope.set_retained("$expanded", runtime::Value(next), DirtyReason::properties);
         if (next) {
@@ -276,8 +266,10 @@ bool menu_key(WidgetInputScope& scope) {
         return true;
     }
     std::optional<MenuProjection> projection = menu_projection(scope);
-    if (!projection.has_value() || projection->items.empty()) return false;
-    if (menu_typeahead(scope, *projection, open)) return true;
+    if (!projection.has_value() || projection->items.empty())
+        return false;
+    if (menu_typeahead(scope, *projection, open))
+        return true;
     if (!open) {
         if (scope.key() != "enter" && scope.key() != "space" && scope.key() != "down") {
             return false;
@@ -287,10 +279,12 @@ bool menu_key(WidgetInputScope& scope) {
         return true;
     }
     std::vector<std::size_t> path = projection->active_path;
-    if (path.empty()) path.push_back(first_enabled_menu_item(projection->items));
+    if (path.empty())
+        path.push_back(first_enabled_menu_item(projection->items));
     std::vector<std::size_t> parent(path.begin(), path.end() - 1);
     const std::vector<MenuItemModel>* level = projection->level_at(parent);
-    if (level == nullptr || level->empty()) return false;
+    if (level == nullptr || level->empty())
+        return false;
     path.back() = std::min(path.back(), level->size() - 1U);
     if (scope.key() == "up" || scope.key() == "down") {
         path.back() = adjacent_menu_item(*level, path.back(), scope.key() == "up" ? -1 : 1);
@@ -300,9 +294,8 @@ bool menu_key(WidgetInputScope& scope) {
     if (scope.key() == "home" || scope.key() == "end") {
         std::size_t selected = path.back();
         for (std::size_t attempt = 0U; attempt < level->size(); ++attempt) {
-            const std::size_t candidate = scope.key() == "home"
-                ? attempt
-                : level->size() - 1U - attempt;
+            const std::size_t candidate =
+                scope.key() == "home" ? attempt : level->size() - 1U - attempt;
             if ((*level)[candidate].enabled && !(*level)[candidate].separator) {
                 selected = candidate;
                 break;
@@ -334,14 +327,13 @@ bool menu_key(WidgetInputScope& scope) {
     return false;
 }
 
-void add(
-    WidgetRegistry& registry,
-    std::string type,
-    const bool focusable,
-    const WidgetInputHook click = nullptr,
-    std::string action_property = {},
-    std::string fallback_action = {}
-) {
+bool popup_pointer(WidgetInputScope&) {
+    return false;
+}
+
+void add(WidgetRegistry& registry, std::string type, const bool focusable,
+         const WidgetInputHook click = nullptr, std::string action_property = {},
+         std::string fallback_action = {}) {
     WidgetInputPhase phase;
     phase.click = click;
     phase.action_property = std::move(action_property);
@@ -372,6 +364,13 @@ void register_primitive_widget_inputs(WidgetRegistry& registry) {
     rich_text.tabbable = true;
     rich_text.text_edit_mode = WidgetTextEditMode::static_text;
     registry.register_input_phase("RichText", std::move(rich_text));
+    WidgetInputPhase popup;
+    popup.pointer = &popup_pointer;
+    popup.popup_controlled = "open";
+    popup.popup_retained = "$expanded";
+    popup.popup_initial = "defaultOpen";
+    popup.popup_dismiss_action_property = "onDismiss";
+    registry.register_input_phase("Popup", std::move(popup));
 
     WidgetInputPhase menu;
     menu.focusable = true;

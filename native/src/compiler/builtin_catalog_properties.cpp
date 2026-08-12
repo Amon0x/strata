@@ -5,6 +5,7 @@ namespace strata::compiler {
 void add_builtin_properties(BuiltinCatalog& catalog) {
     catalog.layout_properties = {
         DeclaredProperty{.name = "anchorAlign", .type = declared_type_reference("t162")},
+        DeclaredProperty{.name = "anchorCrossOffset", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "anchorFlip", .type = declared_type_reference("t2")},
         DeclaredProperty{.name = "anchorGap", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "anchorPoint", .type = declared_type_reference("t139")},
@@ -52,6 +53,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{
             .name = "activeOverlay", .type = declared_type_reference("t8"), .nullable = true},
         DeclaredProperty{.name = "anchorAlign", .type = declared_type_reference("t162")},
+        DeclaredProperty{.name = "anchorCrossOffset", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "anchorFlip", .type = declared_type_reference("t2")},
         DeclaredProperty{.name = "anchorGap", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "anchorPoint", .type = declared_type_reference("t139")},

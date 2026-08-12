@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "application": {
+    "id": "control-deck.color-popup.headless",
+    "module": "assets/strata/ui/control_deck.strata",
+    "schemas": "assets/strata/ui/control_deck.schemas.json",
+    "root": "ControlDeckMenu",
+    "actions": ["control-deck.color.commit"]
+  },
+  "surface": {
+    "id": "control-deck.color-popup.headless",
+    "role": "overlay",
+    "backend": "d3d11",
+    "width": 1280,
+    "height": 800,
+    "scale": 1,
+    "clearColor": "#090b0fff",
+    "fonts": [
+      {"id": "strata:fonts/default-medium", "resource": "assets/strata/fonts/medium.ttf"},
+      {"id": "strata:fonts/default", "resource": "assets/strata/fonts/default.ttf"},
+      {"id": "strata:fonts/mono", "resource": "assets/strata/fonts/mono.ttf"}
+    ]
+  },
+  "snapshots": [],
+  "steps": [
+    {"advance": {"milliseconds": 220, "frames": 2}},
+    {"click": {"key": "deck.color"}},
+    {"advance": {"milliseconds": 180, "frames": 2}},
+    {"capture": "closed"},
+    {"click": {"key": "deck.color.swatch"}},
+    {"advance": {"milliseconds": 140, "frames": 2}},
+    {"capture": "open"},
+    {"pointerDrag": {
+      "from": {"x": 840, "y": 220},
+      "to": {"x": 700, "y": 335},
+      "milliseconds": 32,
+      "steps": 24
+    }},
+    {"capture": "plane"},
+    {"key": {"name": "escape"}},
+    {"advance": {"milliseconds": 160, "frames": 10}},
+    {"capture": "selected-dismissed"},
+    {"key": {"name": "enter"}},
+    {"advance": {"milliseconds": 140, "frames": 2}},
+    {"capture": "reopened"},
+    {"pointerDrag": {
+      "from": {"x": 800, "y": 379},
+      "to": {"x": 700, "y": 379},
+      "milliseconds": 32,
+      "steps": 24
+    }},
+    {"capture": "hue"},
+    {"pointerDrag": {
+      "from": {"x": 870, "y": 407},
+      "to": {"x": 740, "y": 407},
+      "milliseconds": 32,
+      "steps": 24
+    }},
+    {"capture": "alpha"},
+    {"key": {"name": "escape"}},
+    {"capture": "closing"},
+    {"advance": {"milliseconds": 32, "frames": 2}},
+    {"capture": "dismissed"},
+    {"advance": {"milliseconds": 160, "frames": 10}},
+    {"capture": "idle"},
+    {"click": {"key": "deck.color"}},
+    {"advance": {"milliseconds": 32, "frames": 2}},
+    {"capture": "outside-baseline"},
+    {"click": {"key": "deck.color.swatch"}},
+    {"advance": {"milliseconds": 140, "frames": 2}},
+    {"click": {"key": "deck.color"}},
+    {"advance": {"milliseconds": 32, "frames": 2}},
+    {"capture": "outside-dismissed"},
+    {"click": {"key": "deck.color.swatch"}},
+    {"advance": {"milliseconds": 140, "frames": 2}},
+    {"click": {"key": "deck.gradient"}},
+    {"capture": "switched"},
+    {"advance": {"milliseconds": 160, "frames": 10}},
+    {"capture": "gradient"}
+  ]
+}

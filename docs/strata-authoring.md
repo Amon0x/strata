@@ -112,11 +112,37 @@ presentation suppression through nullable paint fields.
 
 ### Anchored overlays and authored controls
 
-`PORTAL` layout is out of parent flow and can be anchored to any stable widget key. `anchorSide`,
-`anchorAlign`, `anchorGap`, `anchorFlip`, `anchorShift`, and `matchAnchorWidth` control placement;
-`portalTarget` and `detachFromParentClip` control the detached render root. Flip chooses the side
-with more room and shift keeps the result inside the root viewport. `anchorPoint: { x, y }`
+`PORTAL` layout is absolutely positioned in the root application-surface plane, outside parent flow
+and ancestor clips, and can be anchored to any stable widget key. `anchorSide`, `anchorAlign`,
+`anchorGap`, `anchorCrossOffset`, `anchorFlip`, `anchorShift`, and `matchAnchorWidth` control
+placement; `portalTarget` and `detachFromParentClip` control the detached render root. Flip chooses
+the side with more room and shift keeps the result inside the root viewport. `anchorPoint: { x, y }`
 replaces the target rectangle for pointer-positioned overlays.
+
+`Popup` is the general authored lifecycle around that layout. It accepts ordinary interactive
+children, controlled or default open state, and `onDismiss`; Escape or pointer activation outside
+the popup and its anchor requests dismissal. The anchor is named with `layout.anchorTarget`. The
+popup restores focus to that anchor, while styling, effects, and all child composition remain
+ordinary `.strata`:
+
+```strata
+Button(key: "accent.trigger", label: "Edit accent", onClick: action("state.toggle", name: "open"))
+Popup(
+  key: "accent.popup",
+  open: open,
+  onDismiss: action("state.set", name: "open", value: false),
+  layout: {
+    anchorTarget: "accent.trigger",
+    anchorSide: "RIGHT",
+    anchorAlign: "CENTER",
+    anchorGap: 8,
+    anchorFlip: true,
+    anchorShift: true
+  }
+) {
+  AccentEditor()
+}
+```
 
 `Menu` and `Select` accept typed `triggerTemplate`, `popupTemplate`, and `itemTemplate` components.
 Each layer is independent. A popup-only template replaces the surface while retaining native rows;

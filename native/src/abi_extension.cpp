@@ -30,19 +30,19 @@ using strata::runtime::Value;
     return (value.data != nullptr || value.size == 0U) && (allow_empty || value.size != 0U);
 }
 
-[[nodiscard]] std::string copied_string(const strata_string_view value) {
-    return value.size == 0U ? std::string{} : std::string(value.data, value.size);
+[[nodiscard]] std::string_view checked_view(const strata_string_view value, const bool allow_empty,
+                                            const char* const name) {
+    if (!valid_view(value, allow_empty))
+        throw std::invalid_argument(std::string(name) + " view is invalid");
+    const std::string_view result(value.data != nullptr ? value.data : "", value.size);
+    if (!strata::core::valid_utf8(result))
+        throw std::invalid_argument(std::string(name) + " must be valid UTF-8");
+    return result;
 }
 
 [[nodiscard]] std::string checked_string(const strata_string_view value, const bool allow_empty,
                                          const char* const name) {
-    if (!valid_view(value, allow_empty))
-        throw std::invalid_argument(std::string(name) + " view is invalid");
-    std::string result = copied_string(value);
-    if (!strata::core::valid_utf8(result)) {
-        throw std::invalid_argument(std::string(name) + " must be valid UTF-8");
-    }
-    return result;
+    return std::string(checked_view(value, allow_empty, name));
 }
 
 using ValueFields = std::map<std::string, Value, std::less<>>;
@@ -253,7 +253,7 @@ template <typename Context>
                                              const strata_string_view name) {
     if (context == nullptr || context->scope == nullptr || context->fields == nullptr)
         return nullptr;
-    const std::string field = checked_string(name, false, "retained field");
+    const std::string_view field = checked_view(name, false, "retained field");
     return context->fields->find(field) != nullptr ? context->scope->retained(field) : nullptr;
 }
 
@@ -262,7 +262,7 @@ template <typename Context>
                                                                  const strata_string_view name) {
     if (context == nullptr || context->scope == nullptr || context->fields == nullptr)
         return {};
-    const std::string field = checked_string(name, false, "retained field");
+    const std::string_view field = checked_view(name, false, "retained field");
     return context->fields->find(field) != nullptr ? context->scope->node().retained_bytes(field)
                                                    : std::span<const std::byte>{};
 }
@@ -293,16 +293,16 @@ template <typename Context>
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     try {
-        std::string field = checked_string(name, false, "retained field");
+        const std::string_view field = checked_view(name, false, "retained field");
         const strata_widget_invalidation* const field_invalidation = context->fields->find(field);
         if (field_invalidation == nullptr)
             return strata::core::result(STRATA_STATUS_NOT_FOUND);
         if (*field_invalidation == STRATA_WIDGET_INVALIDATION_PAINT) {
-            context->scope->set_paint(std::move(field), std::move(value));
+            context->scope->set_paint(field, std::move(value));
         } else if (*field_invalidation == STRATA_WIDGET_INVALIDATION_INPUT) {
-            context->scope->set_input(std::move(field), std::move(value));
+            context->scope->set_input(field, std::move(value));
         } else {
-            context->scope->set_retained(std::move(field), std::move(value),
+            context->scope->set_retained(field, std::move(value),
                                          dirty_invalidation(*field_invalidation));
         }
         return strata::core::result(STRATA_STATUS_OK);
@@ -457,6 +457,7 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
                                         "' declares retained fields without a table");
         }
         auto fields = std::make_shared<ExtensionRetainedFields>();
+        std::vector<std::string> paint_fields;
         for (std::size_t field = 0U; field < descriptor.retained_field_count; ++field) {
             const strata_widget_retained_field entry = descriptor.retained_fields[field];
             if (entry.struct_size < sizeof(strata_widget_retained_field)) {
@@ -470,6 +471,8 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
             }
             const strata_widget_invalidation field_invalidation =
                 retained_invalidation(entry.invalidation, name);
+            if (field_invalidation == STRATA_WIDGET_INVALIDATION_PAINT)
+                paint_fields.push_back(name);
             fields->declare(std::move(name), field_invalidation);
         }
         const ValueFields description =
@@ -485,6 +488,7 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
         }
         strata::ui::WidgetLifecycle lifecycle;
         lifecycle.type = type;
+        lifecycle.extension_paint_fields = std::move(paint_fields);
         if (!layout.empty()) {
             lifecycle.describe.layout_defaults =
                 [layout](strata::ui::WidgetLayoutDefaultsScope& scope) {
@@ -1027,6 +1031,23 @@ strata_result strata_widget_input_set_retained_bytes(strata_widget_input_context
                                                      const void* const value, const size_t size) {
     return set_declared_retained_bytes(context, name, value, size);
 }
+strata_result strata_widget_input_set_target_retained_bytes(
+    strata_widget_input_context* const context, const strata_string_view target_key,
+    const strata_string_view name, const void* const value, const size_t size) {
+    if (context == nullptr || context->scope == nullptr || value == nullptr || size == 0U) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+    try {
+        const std::string_view key = checked_view(target_key, false, "target widget key");
+        const std::string_view field = checked_view(name, false, "target retained field");
+        const std::span bytes(static_cast<const std::byte*>(value), size);
+        return strata::core::result(context->scope->set_target_paint_bytes(key, field, bytes)
+                                        ? STRATA_STATUS_OK
+                                        : STRATA_STATUS_NOT_FOUND);
+    } catch (...) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+}
 
 strata_result strata_widget_input_set_retained_number(strata_widget_input_context* const context,
                                                       const strata_string_view name,
@@ -1120,6 +1141,38 @@ strata_result strata_widget_input_emit_action_json(strata_widget_input_context* 
     try {
         return emit_action_json(*context->scope, action_id, payload_json, event_kind_value,
                                 event_value_json);
+    } catch (...) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+}
+strata_result strata_widget_input_emit_property_action_json(
+    strata_widget_input_context* const context, const strata_string_view action_property,
+    const strata_string_view event_kind_value, const strata_string_view event_value_json) {
+    if (context == nullptr || context->scope == nullptr) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+    try {
+        context->scope->value_changed(
+            checked_string(action_property, false, "extension action property"),
+            checked_string(event_kind_value, false, "extension event kind"),
+            json_value(event_value_json, true));
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (...) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+}
+strata_result strata_widget_input_emit_property_color_event(
+    strata_widget_input_context* const context, const strata_string_view action_property,
+    const strata_string_view event_kind_value, const strata_color value) {
+    if (context == nullptr || context->scope == nullptr) {
+        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    }
+    try {
+        context->scope->value_changed(
+            checked_string(action_property, false, "extension action property"),
+            checked_string(event_kind_value, false, "extension event kind"),
+            Value(strata::runtime::ColorValue{value.red, value.green, value.blue, value.alpha}));
+        return strata::core::result(STRATA_STATUS_OK);
     } catch (...) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }

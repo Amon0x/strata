@@ -557,6 +557,15 @@ class Input final {
                    sizeof(value))
                    .status == STRATA_STATUS_OK;
     }
+    /** Sends bounded paint state directly to another keyed extension widget. */
+    template <typename T>
+    bool set_target(std::string_view target_key, const Retained<structured<T>>& field,
+                    const T& value) noexcept {
+        return strata_widget_input_set_target_retained_bytes(
+                   context_, strata_string_view{target_key.data(), target_key.size()},
+                   strata_string_view{field.name.data(), field.name.size()}, &value, sizeof(value))
+                   .status == STRATA_STATUS_OK;
+    }
 
     /** Wins arbitration for the active pressed pointer; release and cancellation end capture. */
     bool claim_gesture() noexcept;
@@ -573,6 +582,10 @@ class Input final {
     bool emit(std::string_view action_id, std::string_view payload_json = {},
               std::string_view event_kind = "activated",
               std::string_view event_value_json = {}) noexcept;
+    /** Dispatches the action supplied through one declared widget parameter. */
+    bool emit(const Parameter<action>& field, std::string_view event_kind,
+              std::string_view event_value_json = {}) noexcept;
+    bool emit(const Parameter<action>& field, std::string_view event_kind, Color value) noexcept;
     bool emit_event(std::string_view event_kind, std::string_view event_value_json = {}) noexcept;
     bool emit_event(std::string_view event_kind, double value) noexcept;
     bool emit_event(std::string_view event_kind, bool value) noexcept;

@@ -125,6 +125,13 @@ committed event and schedule one semantic projection, so accessibility updates o
 rather than on every pointer move. Use a package-declared action only when the value actually
 crosses the application boundary.
 
+An `action` parameter keeps reusable widgets coupled to the caller's binding rather than to a
+package-global action id. Declare it with `parameter<action>("onChange")`, adopt it with
+`.parameter(on_change)`, then call `input.emit(on_change, "color-changed", color)` on commit. The
+typed color overload preserves the color value for bindings such as `state.setFromEvent`; the JSON
+overload carries structured event values. An omitted optional action still emits an unhandled local
+event, matching built-in widget behavior.
+
 Use `Present::focused()` for semantic state and `Present::focus_visible()` for focus paint. Pointer
 focus intentionally keeps the former while suppressing the latter; keyboard and spatial input
 restore the visible indicator. `Input::scale()` and `Present::scale()` expose the logical-to-display
@@ -136,6 +143,13 @@ distinguishes an omitted optional property from an authored controlled value, en
 to support controlled and retained fallback modes without stringly typed property checks. A field
 name and default are never restated at call sites, and undeclared writes fail rather than
 materializing hidden state.
+
+`set_target(key, paint_field, value)` is the bounded exception for a compound control whose
+separate keyed extension leaves must repaint together. The destination must declare that retained
+field as `Invalidation::paint`; arbitrary peer state and declarative properties are not writable.
+Fixed-size structured updates reuse destination storage, invalidate only its paint fragment, and do
+not dispatch actions or reconcile descriptions. Use an ordinary action for committed application
+state.
 
 ## Compound controls
 

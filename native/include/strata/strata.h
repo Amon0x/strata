@@ -2113,6 +2113,13 @@ STRATA_API strata_result strata_widget_input_retained_bytes(
     const strata_widget_input_context* context, strata_string_view name, void* buffer, size_t size);
 STRATA_API strata_result strata_widget_input_set_retained_bytes(
     strata_widget_input_context* context, strata_string_view name, const void* value, size_t size);
+/**
+ * Updates a paint-invalidating retained byte field on another keyed extension widget.
+ * The target field must be declared by its widget; equal-size updates reuse target storage.
+ */
+STRATA_API strata_result strata_widget_input_set_target_retained_bytes(
+    strata_widget_input_context* context, strata_string_view target_key, strata_string_view name,
+    const void* value, size_t size);
 /** Reports whether the authored property exists, independent of its typed fallback. */
 STRATA_API uint32_t strata_widget_input_has_property(const strata_widget_input_context* context,
                                                      strata_string_view name);
@@ -2129,6 +2136,16 @@ STRATA_API strata_result strata_widget_input_emit_action_json(strata_widget_inpu
                                                               strata_string_view payload_json,
                                                               strata_string_view event_kind,
                                                               strata_string_view event_value_json);
+/**
+ * Dispatches the action authored in `action_property` with a canonical JSON event value.
+ * An absent optional action property is accepted and produces an unhandled local event.
+ */
+STRATA_API strata_result strata_widget_input_emit_property_action_json(
+    strata_widget_input_context* context, strata_string_view action_property,
+    strata_string_view event_kind, strata_string_view event_value_json);
+STRATA_API strata_result strata_widget_input_emit_property_color_event(
+    strata_widget_input_context* context, strata_string_view action_property,
+    strata_string_view event_kind, strata_color value);
 STRATA_API strata_result strata_widget_input_emit_event_json(strata_widget_input_context* context,
                                                              strata_string_view event_kind,
                                                              strata_string_view event_value_json);

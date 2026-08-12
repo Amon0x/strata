@@ -421,6 +421,7 @@ class InputRouter final {
     [[nodiscard]] bool within_focus_containment(const RetainedNode& node) const noexcept;
     void dismiss_transient_popups(const RetainedNode* target, InputOperationResult& result,
                                   bool include_modal = true, bool restore_modal_focus = true);
+    void restore_popup_focus(const RetainedNode& popup, InputOperationResult& result);
     [[nodiscard]] data::JsonValue source(const RetainedNode& node) const;
     void focus(const RetainedNode& node, std::string_view reason, InputOperationResult& result);
     void clear_focus(std::string_view reason, InputOperationResult& result,

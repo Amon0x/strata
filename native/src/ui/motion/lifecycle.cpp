@@ -8,12 +8,24 @@
 #include "ui/motion/runtime_state.hpp"
 
 namespace strata::ui {
+namespace {
+
+[[nodiscard]] bool layout_participates(const RetainedNode& node) noexcept {
+    const auto found = node.description().properties.find("$layoutParticipates");
+    if (found == node.description().properties.end())
+        return true;
+    const runtime::Value* value = found->second.value();
+    return value == nullptr || value->boolean() == nullptr || *value->boolean();
+}
+
+} // namespace
 
 MotionRuntime::MotionRuntime() : implementation_(std::make_unique<Impl>()) {}
 MotionRuntime::~MotionRuntime() = default;
 
 void MotionRuntime::bind(const std::shared_ptr<const runtime::RuntimeUnit>& unit) {
-    if (implementation_->unit == unit) return;
+    if (implementation_->unit == unit)
+        return;
     implementation_->unit = unit;
     implementation_->catalog.bind(unit);
     implementation_->nodes.clear();
@@ -23,9 +35,7 @@ void MotionRuntime::bind(const std::shared_ptr<const runtime::RuntimeUnit>& unit
     implementation_->reduced_motion.reset();
 }
 
-void MotionRuntime::set_supplemental(
-    std::map<std::string, CompiledMotion, std::less<>> motions
-) {
+void MotionRuntime::set_supplemental(std::map<std::string, CompiledMotion, std::less<>> motions) {
     implementation_->catalog.set_supplemental(std::move(motions));
     implementation_->nodes.clear();
     implementation_->active_nodes.clear();
@@ -37,6 +47,8 @@ void MotionRuntime::set_supplemental(
 bool MotionRuntime::should_retain_for_exit(const RetainedNode& node) {
     bool retain = false;
     const auto visit = [&](auto&& self, const RetainedNode& candidate) -> void {
+        if (!layout_participates(candidate))
+            return;
         const motion_detail::NodeMotionConfig config =
             motion_detail::node_motion_config(candidate, implementation_->catalog);
         if (std::ranges::any_of(config.triggers, [](const auto& binding) {
@@ -48,7 +60,8 @@ bool MotionRuntime::should_retain_for_exit(const RetainedNode& node) {
             return;
         }
         for (const auto& child : candidate.children()) {
-            if (!retain) self(self, *child);
+            if (!retain)
+                self(self, *child);
         }
     };
     visit(visit, node);
@@ -79,12 +92,13 @@ bool MotionRuntime::exit_finished(const RetainedNode& node) {
                 finished = false;
                 continue;
             }
-            const double terminal = motion_terminal_progress(
-                *binding.animation, binding.active_direction
-            );
-            if (std::abs(player->second.progress() - terminal) > 1.0e-9) finished = false;
+            const double terminal =
+                motion_terminal_progress(*binding.animation, binding.active_direction);
+            if (std::abs(player->second.progress() - terminal) > 1.0e-9)
+                finished = false;
         }
-        for (const auto& child : candidate.children()) self(self, *child);
+        for (const auto& child : candidate.children())
+            self(self, *child);
     };
     visit(visit, node);
     return saw_exit && finished;

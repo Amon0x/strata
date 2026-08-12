@@ -12,10 +12,10 @@
 #include <unordered_set>
 #include <vector>
 
+#include "runtime/diagnostic.hpp"
 #include "ui/collection/virtualization.hpp"
 #include "ui/motion/model.hpp"
 #include "ui/tree.hpp"
-#include "runtime/diagnostic.hpp"
 
 namespace strata::ui {
 
@@ -90,7 +90,8 @@ struct LayoutEnvironment final {
     bool reduced_motion = false;
 
     void validate() const;
-    [[nodiscard]] friend bool operator==(const LayoutEnvironment&, const LayoutEnvironment&) = default;
+    [[nodiscard]] friend bool operator==(const LayoutEnvironment&,
+                                         const LayoutEnvironment&) = default;
 };
 
 enum class LayoutKind { stack, row, column, grid, panel, overlay, spacer, scroll, portal };
@@ -111,11 +112,8 @@ struct LayoutSize final {
 
     LayoutSize() = default;
     explicit LayoutSize(Kind kind, double value = 0.0) : kind(kind), value(value) {}
-    [[nodiscard]] static LayoutSize clamp(
-        std::optional<LayoutSize> minimum,
-        LayoutSize preferred,
-        std::optional<LayoutSize> maximum
-    );
+    [[nodiscard]] static LayoutSize clamp(std::optional<LayoutSize> minimum, LayoutSize preferred,
+                                          std::optional<LayoutSize> maximum);
     friend bool operator==(const LayoutSize& left, const LayoutSize& right);
 };
 
@@ -195,6 +193,7 @@ struct LayoutStyle final {
     LayoutAnchorSide anchor_side = LayoutAnchorSide::bottom;
     LayoutAnchorAlign anchor_align = LayoutAnchorAlign::start;
     double anchor_gap = 0.0;
+    double anchor_cross_offset = 0.0;
     bool anchor_flip = true;
     bool anchor_shift = true;
     bool match_anchor_width = false;
@@ -215,10 +214,8 @@ struct LinearLayoutResolution final {
     bool horizontal = true;
     std::vector<LayoutLine> lines;
     Size intrinsic_size;
-    [[nodiscard]] friend bool operator==(
-        const LinearLayoutResolution&,
-        const LinearLayoutResolution&
-    ) = default;
+    [[nodiscard]] friend bool operator==(const LinearLayoutResolution&,
+                                         const LinearLayoutResolution&) = default;
 };
 
 /** A child-to-track assignment shared by grid measurement and arrangement. */
@@ -236,10 +233,8 @@ struct GridSpanContribution final {
     std::size_t start = 0U;
     std::size_t span = 1U;
     double extent = 0.0;
-    [[nodiscard]] friend bool operator==(
-        const GridSpanContribution&,
-        const GridSpanContribution&
-    ) = default;
+    [[nodiscard]] friend bool operator==(const GridSpanContribution&,
+                                         const GridSpanContribution&) = default;
 };
 
 /** Track definitions and their intrinsic child contributions for one grid axis. */
@@ -247,10 +242,8 @@ struct GridAxisResolution final {
     std::vector<LayoutSize> tracks;
     std::vector<double> contributions;
     std::vector<GridSpanContribution> spanning_contributions;
-    [[nodiscard]] friend bool operator==(
-        const GridAxisResolution&,
-        const GridAxisResolution&
-    ) = default;
+    [[nodiscard]] friend bool operator==(const GridAxisResolution&,
+                                         const GridAxisResolution&) = default;
 };
 
 /**
@@ -262,10 +255,8 @@ struct GridLayoutResolution final {
     GridAxisResolution rows;
     std::vector<GridPlacement> placements;
     Size intrinsic_size;
-    [[nodiscard]] friend bool operator==(
-        const GridLayoutResolution&,
-        const GridLayoutResolution&
-    ) = default;
+    [[nodiscard]] friend bool operator==(const GridLayoutResolution&,
+                                         const GridLayoutResolution&) = default;
 };
 
 struct VisibleRange final {
@@ -357,7 +348,8 @@ struct ContentSizeMotionSpec final {
     MotionTiming timing{
         180'000'000, 0, "cubic-in-out", {}, false, MotionFillMode::both,
     };
-    [[nodiscard]] friend bool operator==(const ContentSizeMotionSpec&, const ContentSizeMotionSpec&) = default;
+    [[nodiscard]] friend bool operator==(const ContentSizeMotionSpec&,
+                                         const ContentSizeMotionSpec&) = default;
 };
 
 struct ContentSizeMotionSample final {
@@ -371,21 +363,18 @@ struct ContentSizeMotionSample final {
 
 /** Interruption-safe measured content-size transitions indexed only while active. */
 class ContentSizeTransitions final {
-public:
-    [[nodiscard]] ContentSizeMotionSample retarget(
-        std::uint64_t identity,
-        Size target,
-        std::int64_t now_nanos,
-        const ContentSizeMotionSpec& spec,
-        bool reduced_motion
-    );
+  public:
+    [[nodiscard]] ContentSizeMotionSample retarget(std::uint64_t identity, Size target,
+                                                   std::int64_t now_nanos,
+                                                   const ContentSizeMotionSpec& spec,
+                                                   bool reduced_motion);
     [[nodiscard]] std::size_t active_count() const noexcept;
     [[nodiscard]] std::vector<std::uint64_t> active_identities() const;
     void remove(std::uint64_t identity) noexcept;
     void retain(const std::map<std::uint64_t, LayoutRecord>& records);
     void clear() noexcept;
 
-private:
+  private:
     struct Active final {
         Size from;
         Size target;
@@ -393,10 +382,7 @@ private:
         ContentSizeMotionSpec spec;
     };
 
-    [[nodiscard]] ContentSizeMotionSample sample(
-        std::uint64_t identity,
-        std::int64_t now_nanos
-    );
+    [[nodiscard]] ContentSizeMotionSample sample(std::uint64_t identity, std::int64_t now_nanos);
 
     std::map<std::uint64_t, Size> targets_;
     std::map<std::uint64_t, Active> active_;
@@ -404,28 +390,24 @@ private:
 
 /** Retained, backend-independent measurement and arrangement engine. */
 class LayoutEngine final {
-public:
+  public:
     using IntrinsicMeasure = std::function<Size(const RetainedNode&, const Constraints&)>;
 
     explicit LayoutEngine(IntrinsicMeasure intrinsic_measure = {});
-    [[nodiscard]] const LayoutResult& layout(
-        RetainedTree& tree,
-        const LayoutEnvironment& environment,
-        const MotionRuntime* motion = nullptr,
-        bool consume_dirty = true,
-        std::uint64_t frame_index = 0U
-    );
+    [[nodiscard]] const LayoutResult& layout(RetainedTree& tree,
+                                             const LayoutEnvironment& environment,
+                                             const MotionRuntime* motion = nullptr,
+                                             bool consume_dirty = true,
+                                             std::uint64_t frame_index = 0U);
     [[nodiscard]] const LayoutResult& result() const noexcept;
     [[nodiscard]] std::size_t active_transition_count() const noexcept;
-    [[nodiscard]] bool requires_layout(
-        const RetainedTree& tree,
-        const LayoutEnvironment& environment
-    ) const;
+    [[nodiscard]] bool requires_layout(const RetainedTree& tree,
+                                       const LayoutEnvironment& environment) const;
     [[nodiscard]] std::vector<runtime::RuntimeDiagnostic> take_diagnostics();
     void clear_diagnostics() noexcept;
     void clear();
 
-private:
+  private:
     struct MeasuredNode;
     using MeasuredNodePtr = std::shared_ptr<const MeasuredNode>;
 
@@ -487,29 +469,17 @@ private:
         std::uint64_t node_arrangement_revision = 0U;
     };
 
-    [[nodiscard]] MeasuredNodePtr measure(
-        const RetainedNode& node,
-        const Constraints& constraints,
-        const LayoutEnvironment& environment,
-        LayoutOperationCounters& operations
-    );
-    [[nodiscard]] static bool measured_model_equal(
-        const MeasuredNode& left,
-        const MeasuredNode& right
-    );
-    void arrange(
-        const MeasuredNodePtr& measured,
-        Rect bounds,
-        std::optional<Rect> inherited_clip,
-        PinContext pin_context,
-        const LayoutEnvironment& environment,
-        LayoutResult& result
-    );
+    [[nodiscard]] MeasuredNodePtr measure(const RetainedNode& node, const Constraints& constraints,
+                                          const LayoutEnvironment& environment,
+                                          LayoutOperationCounters& operations, bool force = false);
+    [[nodiscard]] static bool measured_model_equal(const MeasuredNode& left,
+                                                   const MeasuredNode& right);
+    void arrange(const MeasuredNodePtr& measured, Rect bounds, std::optional<Rect> inherited_clip,
+                 PinContext pin_context, const LayoutEnvironment& environment,
+                 LayoutResult& result);
     [[nodiscard]] LayoutStyle resolved_style(const RetainedNode& node) const;
-    [[nodiscard]] static Point resolved_scroll_offset(
-        const RetainedNode& node,
-        Point fallback
-    ) noexcept;
+    [[nodiscard]] static Point resolved_scroll_offset(const RetainedNode& node,
+                                                      Point fallback) noexcept;
     [[nodiscard]] std::uint64_t advance_render_generation();
     [[nodiscard]] bool arranged_in_current_pass(const RetainedNode& node) const noexcept;
 
@@ -546,9 +516,8 @@ private:
 };
 
 [[nodiscard]] LayoutStyle layout_style(const DescriptionNode& description);
-[[nodiscard]] std::optional<ContentSizeMotionSpec> content_size_motion(
-    const DescriptionNode& description
-);
+[[nodiscard]] std::optional<ContentSizeMotionSpec>
+content_size_motion(const DescriptionNode& description);
 [[nodiscard]] Rect snap_rectangle(Rect rectangle, const LayoutEnvironment& environment);
 [[nodiscard]] Point snap_point(Point point, const LayoutEnvironment& environment);
 [[nodiscard]] std::string_view layout_kind_name(LayoutKind kind) noexcept;

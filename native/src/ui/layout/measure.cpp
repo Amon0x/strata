@@ -10,8 +10,8 @@
 #include <utility>
 
 #include "ui/layout/detail_algorithms.hpp"
-#include "ui/theme.hpp"
 #include "ui/motion.hpp"
+#include "ui/theme.hpp"
 
 namespace strata::ui {
 using namespace layout_detail;
@@ -19,29 +19,38 @@ namespace {
 
 [[nodiscard]] std::string layout_number(const double value) {
     char buffer[64];
-    const auto encoded = std::to_chars(
-        std::begin(buffer), std::end(buffer), value, std::chars_format::general, 16
-    );
-    if (encoded.ec != std::errc{}) return "0.0";
+    const auto encoded =
+        std::to_chars(std::begin(buffer), std::end(buffer), value, std::chars_format::general, 16);
+    if (encoded.ec != std::errc{})
+        return "0.0";
     std::string result(buffer, encoded.ptr);
-    if (result.find_first_of(".eE") == std::string::npos) result += ".0";
+    if (result.find_first_of(".eE") == std::string::npos)
+        result += ".0";
     return result;
 }
 
 [[nodiscard]] std::string layout_size_description(const LayoutSize& size) {
     switch (size.kind) {
-    case LayoutSize::Kind::automatic: return "Auto";
-    case LayoutSize::Kind::content: return "Content";
-    case LayoutSize::Kind::fixed: return "Fixed(value=" + layout_number(size.value) + ")";
-    case LayoutSize::Kind::percent: return "Percent(value=" + layout_number(size.value) + ")";
-    case LayoutSize::Kind::fill: return "Fill(weight=" + layout_number(size.value) + ")";
+    case LayoutSize::Kind::automatic:
+        return "Auto";
+    case LayoutSize::Kind::content:
+        return "Content";
+    case LayoutSize::Kind::fixed:
+        return "Fixed(value=" + layout_number(size.value) + ")";
+    case LayoutSize::Kind::percent:
+        return "Percent(value=" + layout_number(size.value) + ")";
+    case LayoutSize::Kind::fill:
+        return "Fill(weight=" + layout_number(size.value) + ")";
     case LayoutSize::Kind::clamp:
         return "Clamp(min=" +
-               (size.minimum != nullptr ? layout_size_description(*size.minimum) : std::string("null")) +
+               (size.minimum != nullptr ? layout_size_description(*size.minimum)
+                                        : std::string("null")) +
                ", preferred=" +
-               (size.preferred != nullptr ? layout_size_description(*size.preferred) : std::string("Auto")) +
+               (size.preferred != nullptr ? layout_size_description(*size.preferred)
+                                          : std::string("Auto")) +
                ", max=" +
-               (size.maximum != nullptr ? layout_size_description(*size.maximum) : std::string("null")) +
+               (size.maximum != nullptr ? layout_size_description(*size.maximum)
+                                        : std::string("null")) +
                ")";
     }
     return "Auto";
@@ -54,53 +63,43 @@ namespace {
 
 } // namespace
 
-bool LayoutEngine::measured_model_equal(
-    const LayoutEngine::MeasuredNode& left,
-    const LayoutEngine::MeasuredNode& right
-) {
-    return left.node == right.node &&
-        left.style == right.style &&
-        left.measured_size == right.measured_size &&
-        left.content_size == right.content_size &&
-        left.content_motion_clip == right.content_motion_clip &&
-        left.content_motion_progress == right.content_motion_progress &&
-        left.content_motion_running == right.content_motion_running &&
-        left.content_motion_snapped_by_reduced_motion ==
-            right.content_motion_snapped_by_reduced_motion &&
-        left.subtree_pins_horizontal == right.subtree_pins_horizontal &&
-        left.subtree_pins_vertical == right.subtree_pins_vertical &&
-        left.subtree_portals == right.subtree_portals &&
-        left.content_motion_target_size == right.content_motion_target_size &&
-        left.children == right.children &&
-        left.flow_child_count == right.flow_child_count &&
-        left.linear == right.linear &&
-        left.grid == right.grid;
+bool LayoutEngine::measured_model_equal(const LayoutEngine::MeasuredNode& left,
+                                        const LayoutEngine::MeasuredNode& right) {
+    return left.node == right.node && left.style == right.style &&
+           left.measured_size == right.measured_size && left.content_size == right.content_size &&
+           left.content_motion_clip == right.content_motion_clip &&
+           left.content_motion_progress == right.content_motion_progress &&
+           left.content_motion_running == right.content_motion_running &&
+           left.content_motion_snapped_by_reduced_motion ==
+               right.content_motion_snapped_by_reduced_motion &&
+           left.subtree_pins_horizontal == right.subtree_pins_horizontal &&
+           left.subtree_pins_vertical == right.subtree_pins_vertical &&
+           left.subtree_portals == right.subtree_portals &&
+           left.content_motion_target_size == right.content_motion_target_size &&
+           left.children == right.children && left.flow_child_count == right.flow_child_count &&
+           left.linear == right.linear && left.grid == right.grid;
 }
 
-LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
-    const RetainedNode& node,
-    const Constraints& constraints,
-    const LayoutEnvironment& environment,
-    LayoutOperationCounters& operations
-) {
+LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
+                                                    const Constraints& constraints,
+                                                    const LayoutEnvironment& environment,
+                                                    LayoutOperationCounters& operations,
+                                                    const bool force) {
     constraints.validate();
     const auto cached = measurement_cache_.find(node.identity());
     const DirtySet& dirty = node.dirty();
-    const bool measure_dirty = dirty.contains(DirtyReason::structure) ||
-                               dirty.contains(DirtyReason::layout) ||
-                               dirty.contains(DirtyReason::text) ||
-                               dirty.contains(DirtyReason::editor) ||
-                               dirty.contains(DirtyReason::style) ||
-                               dirty.contains(DirtyReason::scale);
-    if (cached != measurement_cache_.end() && cached->second.constraints == constraints &&
+    const bool measure_dirty =
+        dirty.contains(DirtyReason::structure) || dirty.contains(DirtyReason::layout) ||
+        dirty.contains(DirtyReason::text) || dirty.contains(DirtyReason::editor) ||
+        dirty.contains(DirtyReason::style) || dirty.contains(DirtyReason::scale);
+    if (!force && cached != measurement_cache_.end() && cached->second.constraints == constraints &&
         cached->second.node_revision == node.revision() &&
         cached->second.environment_generation == environment.generation &&
         cached->second.scale == environment.scale &&
         (!measure_dirty || measurement_pass_.contains(node.identity()))) {
         ++operations.measurement_cache_hits;
-        return cached->second.propagated != nullptr
-            ? cached->second.propagated
-            : cached->second.measured;
+        return cached->second.propagated != nullptr ? cached->second.propagated
+                                                    : cached->second.measured;
     }
     ++operations.measured_nodes;
     MeasuredNode measured;
@@ -114,19 +113,17 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
     };
     Edges child_constraint_edges = frame_edges;
     if (measured.style.kind == LayoutKind::scroll) {
-        child_constraint_edges = add_edges(child_constraint_edges, scroll_viewport_edges(measured.style));
-        child_constraint_edges = add_edges(child_constraint_edges, measured.style.scroll_content_padding);
+        child_constraint_edges =
+            add_edges(child_constraint_edges, scroll_viewport_edges(measured.style));
+        child_constraint_edges =
+            add_edges(child_constraint_edges, measured.style.scroll_content_padding);
     }
     const Constraints framed = constraints.deflate(child_constraint_edges);
     const Constraints inner = framed.loosen();
     const double available_content_width = std::min(
-        measurement_content_available(measured.style, constraints, inner, true),
-        inner.max_width
-    );
+        measurement_content_available(measured.style, constraints, inner, true), inner.max_width);
     const double available_content_height = std::min(
-        measurement_content_available(measured.style, constraints, inner, false),
-        inner.max_height
-    );
+        measurement_content_available(measured.style, constraints, inner, false), inner.max_height);
     Constraints content_constraints = inner;
     content_constraints.max_width = available_content_width;
     content_constraints.max_height = available_content_height;
@@ -138,8 +135,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
     portal_children.reserve(node.children().size());
     for (const auto& child : node.children()) {
         const LayoutStyle child_style = resolved_style(*child);
-        if (child_style.participates &&
-            child->lifecycle() != RetainedLifecycle::exiting) {
+        if (child_style.participates && child->lifecycle() != RetainedLifecycle::exiting) {
             if (child_style.kind == LayoutKind::portal) {
                 portal_children.push_back(child.get());
             } else if (!child_style.anchor_target.empty()) {
@@ -149,63 +145,64 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
             }
         }
     }
-    measured.children.reserve(
-        retained_children.size() + anchor_children.size() + portal_children.size()
-    );
+    measured.children.reserve(retained_children.size() + anchor_children.size() +
+                              portal_children.size());
 
     if (measured.style.kind == LayoutKind::row || measured.style.kind == LayoutKind::column) {
         const bool horizontal = measured.style.kind == LayoutKind::row;
-        const double maximum_main = horizontal
-                                        ? available_content_width
-                                        : available_content_height;
+        const double maximum_main = horizontal ? available_content_width : available_content_height;
         const double minimum_main = horizontal ? framed.min_width : framed.min_height;
-        const double available_main = std::isfinite(maximum_main)
-                                          ? maximum_main
-                                          : minimum_main > 0.0 ? minimum_main : infinity;
+        const double available_main = std::isfinite(maximum_main) ? maximum_main
+                                      : minimum_main > 0.0        ? minimum_main
+                                                                  : infinity;
         const double gap = horizontal ? measured.style.gap.x : measured.style.gap.y;
-        const double total_gap = gap * static_cast<double>(retained_children.empty() ? 0U : retained_children.size() - 1U);
+        const double total_gap =
+            gap *
+            static_cast<double>(retained_children.empty() ? 0U : retained_children.size() - 1U);
         double used = total_gap;
         double total_weight = 0.0;
         std::vector<MeasuredNodePtr> staged(retained_children.size());
         for (std::size_t index = 0U; index < retained_children.size(); ++index) {
             const LayoutStyle child_style = resolved_style(*retained_children[index]);
             const LayoutSize& main_size = horizontal ? child_style.width : child_style.height;
-            if (main_size.kind == LayoutSize::Kind::fill &&
-                std::isfinite(available_main) &&
+            if (main_size.kind == LayoutSize::Kind::fill && std::isfinite(available_main) &&
                 (!measured.style.wrap || main_size.value == 0.0)) {
                 total_weight += std::max(0.0, main_size.value);
                 continue;
             }
             Constraints child_constraints = content_constraints;
-            if (horizontal) child_constraints.max_width = main_size.kind == LayoutSize::Kind::percent ? available_main : infinity;
-            else child_constraints.max_height = main_size.kind == LayoutSize::Kind::percent ? available_main : infinity;
-            staged[index] = measure(*retained_children[index], child_constraints, environment, operations);
-            used += horizontal
-                ? staged[index]->measured_size.width
-                : staged[index]->measured_size.height;
+            if (horizontal)
+                child_constraints.max_width =
+                    main_size.kind == LayoutSize::Kind::percent ? available_main : infinity;
+            else
+                child_constraints.max_height =
+                    main_size.kind == LayoutSize::Kind::percent ? available_main : infinity;
+            staged[index] =
+                measure(*retained_children[index], child_constraints, environment, operations);
+            used += horizontal ? staged[index]->measured_size.width
+                               : staged[index]->measured_size.height;
         }
-        const double remaining = std::isfinite(available_main) ? std::max(0.0, available_main - used) : 0.0;
+        const double remaining =
+            std::isfinite(available_main) ? std::max(0.0, available_main - used) : 0.0;
         for (std::size_t index = 0U; index < retained_children.size(); ++index) {
             if (staged[index] == nullptr) {
                 const LayoutStyle child_style = resolved_style(*retained_children[index]);
                 const LayoutSize& main_size = horizontal ? child_style.width : child_style.height;
                 const double weight = std::max(0.0, main_size.value);
-                const double allocated = total_weight > 0.0
-                                             ? remaining * weight / total_weight
-                                             : 0.0;
+                const double allocated =
+                    total_weight > 0.0 ? remaining * weight / total_weight : 0.0;
                 Constraints child_constraints = content_constraints;
                 if (horizontal) {
-                    child_constraints.min_width = child_style.max_width.has_value()
-                                                      ? 0.0
-                                                      : allocated;
+                    child_constraints.min_width =
+                        child_style.max_width.has_value() ? 0.0 : allocated;
                     child_constraints.max_width = allocated;
                 } else {
-                    child_constraints.min_height = child_style.max_height.has_value()
-                                                       ? 0.0
-                                                       : allocated;
+                    child_constraints.min_height =
+                        child_style.max_height.has_value() ? 0.0 : allocated;
                     child_constraints.max_height = allocated;
                 }
-                staged[index] = measure(*retained_children[index], child_constraints, environment, operations);
+                staged[index] =
+                    measure(*retained_children[index], child_constraints, environment, operations);
             }
             measured.children.push_back(std::move(staged[index]));
         }
@@ -216,51 +213,46 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
                 natural_sizes.push_back(child->measured_size);
             }
             const LinearLayoutResolution natural_lines = resolve_linear_layout(
-                natural_sizes, horizontal, true, available_main, measured.style.gap
-            );
+                natural_sizes, horizontal, true, available_main, measured.style.gap);
             for (const LayoutLine& line : natural_lines.lines) {
                 double line_fill_weight = 0.0;
                 for (const std::size_t child_index : line.children) {
-                    const LayoutSize& main_size = horizontal
-                                                      ? measured.children[child_index]->style.width
-                                                      : measured.children[child_index]->style.height;
+                    const LayoutSize& main_size =
+                        horizontal ? measured.children[child_index]->style.width
+                                   : measured.children[child_index]->style.height;
                     if (main_size.kind == LayoutSize::Kind::fill) {
                         line_fill_weight += std::max(0.0, main_size.value);
                     }
                 }
-                if (line_fill_weight <= 0.0) continue;
+                if (line_fill_weight <= 0.0)
+                    continue;
                 const double line_remaining = std::max(0.0, available_main - line.main_size);
                 for (const std::size_t child_index : line.children) {
-                    const LayoutSize& main_size = horizontal
-                                                      ? measured.children[child_index]->style.width
-                                                      : measured.children[child_index]->style.height;
-                    if (main_size.kind != LayoutSize::Kind::fill) continue;
-                    const double natural_main = horizontal
-                                                    ? measured.children[child_index]->measured_size.width
-                                                    : measured.children[child_index]->measured_size.height;
+                    const LayoutSize& main_size =
+                        horizontal ? measured.children[child_index]->style.width
+                                   : measured.children[child_index]->style.height;
+                    if (main_size.kind != LayoutSize::Kind::fill)
+                        continue;
+                    const double natural_main =
+                        horizontal ? measured.children[child_index]->measured_size.width
+                                   : measured.children[child_index]->measured_size.height;
                     const double weight = std::max(0.0, main_size.value);
-                    const double allocated = natural_main +
-                                             line_remaining * weight / line_fill_weight;
-                    const LayoutStyle& child_style =
-                        measured.children[child_index]->style;
+                    const double allocated =
+                        natural_main + line_remaining * weight / line_fill_weight;
+                    const LayoutStyle& child_style = measured.children[child_index]->style;
                     Constraints child_constraints = content_constraints;
                     if (horizontal) {
-                        child_constraints.min_width = child_style.max_width.has_value()
-                                                          ? 0.0
-                                                          : allocated;
+                        child_constraints.min_width =
+                            child_style.max_width.has_value() ? 0.0 : allocated;
                         child_constraints.max_width = allocated;
                     } else {
-                        child_constraints.min_height = child_style.max_height.has_value()
-                                                           ? 0.0
-                                                           : allocated;
+                        child_constraints.min_height =
+                            child_style.max_height.has_value() ? 0.0 : allocated;
                         child_constraints.max_height = allocated;
                     }
-                    measured.children[child_index] = measure(
-                        *retained_children[child_index],
-                        child_constraints,
-                        environment,
-                        operations
-                    );
+                    measured.children[child_index] =
+                        measure(*retained_children[child_index], child_constraints, environment,
+                                operations);
                 }
             }
         }
@@ -269,19 +261,13 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
         for (const MeasuredNodePtr& child : measured.children) {
             child_sizes.push_back(child->measured_size);
         }
-        measured.linear = resolve_linear_layout(
-            child_sizes,
-            horizontal,
-            measured.style.wrap,
-            available_main,
-            measured.style.gap
-        );
+        measured.linear = resolve_linear_layout(child_sizes, horizontal, measured.style.wrap,
+                                                available_main, measured.style.gap);
     } else if (measured.style.kind == LayoutKind::grid) {
         for (const RetainedNode* child : retained_children) {
             Constraints child_constraints = content_constraints;
-            measured.children.push_back(measure(
-                *child, child_constraints, environment, operations
-            ));
+            measured.children.push_back(
+                measure(*child, child_constraints, environment, operations));
         }
         const auto grid_metrics = [](const std::vector<MeasuredNodePtr>& children) {
             std::vector<GridItemMetrics> result;
@@ -299,70 +285,51 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
             }
             return result;
         };
-        GridLayoutResolution grid = resolve_grid_layout(
-            measured.style, grid_metrics(measured.children)
-        );
-        const std::vector<double> columns = resolve_tracks(
-            grid.columns, available_content_width, measured.style.gap.x
-        );
-        const std::vector<double> rows = resolve_tracks(
-            grid.rows, available_content_height, measured.style.gap.y
-        );
+        GridLayoutResolution grid =
+            resolve_grid_layout(measured.style, grid_metrics(measured.children));
+        const std::vector<double> columns =
+            resolve_tracks(grid.columns, available_content_width, measured.style.gap.x);
+        const std::vector<double> rows =
+            resolve_tracks(grid.rows, available_content_height, measured.style.gap.y);
         std::vector<MeasuredNodePtr> constrained_children;
         constrained_children.reserve(retained_children.size());
         for (std::size_t index = 0U; index < retained_children.size(); ++index) {
-            const auto placement = std::ranges::find(
-                grid.placements, index, &GridPlacement::child_index
-            );
+            const auto placement =
+                std::ranges::find(grid.placements, index, &GridPlacement::child_index);
             if (placement == grid.placements.end()) {
                 constrained_children.push_back(std::move(measured.children[index]));
                 continue;
             }
-            const double cell_width = track_extent(
-                columns, placement->column, placement->column_span, measured.style.gap.x
-            );
-            const double cell_height = track_extent(
-                rows, placement->row, placement->row_span, measured.style.gap.y
-            );
+            const double cell_width = track_extent(columns, placement->column,
+                                                   placement->column_span, measured.style.gap.x);
+            const double cell_height =
+                track_extent(rows, placement->row, placement->row_span, measured.style.gap.y);
             const bool definite_height = grid_span_is_definite(
-                grid.rows,
-                placement->row,
-                placement->row_span,
-                available_content_height
-            );
+                grid.rows, placement->row, placement->row_span, available_content_height);
             const LayoutStyle& child_style = measured.children[index]->style;
-            const LayoutAlign horizontal_alignment = child_style.justify_self.value_or(
-                LayoutAlign::stretch
-            );
-            const LayoutAlign vertical_alignment = child_style.align_self.value_or(
-                LayoutAlign::stretch
-            );
+            const LayoutAlign horizontal_alignment =
+                child_style.justify_self.value_or(LayoutAlign::stretch);
+            const LayoutAlign vertical_alignment =
+                child_style.align_self.value_or(LayoutAlign::stretch);
             Constraints child_constraints = content_constraints;
-            child_constraints.min_width = horizontal_alignment == LayoutAlign::stretch &&
-                                                   !child_style.max_width.has_value()
-                                              ? cell_width
-                                              : 0.0;
+            child_constraints.min_width =
+                horizontal_alignment == LayoutAlign::stretch && !child_style.max_width.has_value()
+                    ? cell_width
+                    : 0.0;
             child_constraints.max_width = cell_width;
             child_constraints.min_height = definite_height &&
                                                    vertical_alignment == LayoutAlign::stretch &&
                                                    !child_style.max_height.has_value()
                                                ? cell_height
                                                : 0.0;
-            child_constraints.max_height = definite_height
-                                               ? cell_height
-                                               : available_content_height;
-            constrained_children.push_back(measure(
-                *retained_children[index], child_constraints, environment, operations
-            ));
+            child_constraints.max_height = definite_height ? cell_height : available_content_height;
+            constrained_children.push_back(
+                measure(*retained_children[index], child_constraints, environment, operations));
         }
         measured.children = std::move(constrained_children);
         grid = resolve_grid_layout(measured.style, grid_metrics(measured.children));
-        grid.intrinsic_size = resolved_grid_size(
-            grid,
-            available_content_width,
-            available_content_height,
-            measured.style.gap
-        );
+        grid.intrinsic_size = resolved_grid_size(grid, available_content_width,
+                                                 available_content_height, measured.style.gap);
         measured.grid = std::move(grid);
     } else {
         for (const auto& child : retained_children) {
@@ -379,55 +346,48 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
                     std::isfinite(available_content_height)) {
                     child_constraints.min_height = available_content_height;
                 }
-                if (measured.style.scroll_horizontal) child_constraints.max_width = infinity;
-                if (measured.style.scroll_vertical) child_constraints.max_height = infinity;
+                if (measured.style.scroll_horizontal)
+                    child_constraints.max_width = infinity;
+                if (measured.style.scroll_vertical)
+                    child_constraints.max_height = infinity;
             }
-            measured.children.push_back(measure(*child, child_constraints, environment, operations));
+            measured.children.push_back(
+                measure(*child, child_constraints, environment, operations));
         }
     }
     measured.flow_child_count = measured.children.size();
     for (const RetainedNode* anchored : anchor_children) {
-        measured.children.push_back(measure(
-            *anchored,
-            content_constraints,
-            environment,
-            operations
-        ));
+        measured.children.push_back(
+            measure(*anchored, content_constraints, environment, operations));
     }
     for (const RetainedNode* portal : portal_children) {
-        measured.children.push_back(measure(
-            *portal,
-            Constraints{
-                0.0,
-                environment.viewport.width,
-                0.0,
-                environment.viewport.height,
-            },
-            environment,
-            operations
-        ));
+        measured.children.push_back(measure(*portal,
+                                            Constraints{
+                                                0.0,
+                                                environment.viewport.width,
+                                                0.0,
+                                                environment.viewport.height,
+                                            },
+                                            environment, operations));
     }
-    measured.subtree_pins_horizontal = measured.style.pin_horizontal ||
+    measured.subtree_pins_horizontal =
+        measured.style.pin_horizontal ||
         std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
             return child->subtree_pins_horizontal;
         });
-    measured.subtree_pins_vertical = measured.style.pin_vertical ||
+    measured.subtree_pins_vertical =
+        measured.style.pin_vertical ||
         std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
             return child->subtree_pins_vertical;
         });
-    measured.subtree_portals = measured.style.kind == LayoutKind::portal ||
-        !measured.style.anchor_target.empty() ||
-        std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
-            return child->subtree_portals;
-        });
+    measured.subtree_portals =
+        measured.style.kind == LayoutKind::portal || !measured.style.anchor_target.empty() ||
+        std::ranges::any_of(measured.children,
+                            [](const MeasuredNodePtr& child) { return child->subtree_portals; });
 
-    const auto intrinsic_children = [
-        &measured,
-        available_content_width,
-        available_content_height
-    ](const bool attached_only) {
-        if (measured.style.kind == LayoutKind::row ||
-            measured.style.kind == LayoutKind::column) {
+    const auto intrinsic_children = [&measured, available_content_width,
+                                     available_content_height](const bool attached_only) {
+        if (measured.style.kind == LayoutKind::row || measured.style.kind == LayoutKind::column) {
             if (!attached_only && measured.linear.has_value()) {
                 return measured.linear->intrinsic_size;
             }
@@ -435,20 +395,17 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
             child_sizes.reserve(measured.flow_child_count);
             for (std::size_t index = 0U; index < measured.flow_child_count; ++index) {
                 const MeasuredNodePtr& child = measured.children[index];
-                if (attached_only &&
-                    child->node->lifecycle() == RetainedLifecycle::exiting) {
+                if (attached_only && child->node->lifecycle() == RetainedLifecycle::exiting) {
                     continue;
                 }
                 child_sizes.push_back(child->measured_size);
             }
             const bool horizontal = measured.style.kind == LayoutKind::row;
-            return resolve_linear_layout(
-                child_sizes,
-                horizontal,
-                measured.style.wrap,
-                horizontal ? available_content_width : available_content_height,
-                measured.style.gap
-            ).intrinsic_size;
+            return resolve_linear_layout(child_sizes, horizontal, measured.style.wrap,
+                                         horizontal ? available_content_width
+                                                    : available_content_height,
+                                         measured.style.gap)
+                .intrinsic_size;
         }
         if (measured.style.kind == LayoutKind::grid && measured.grid.has_value()) {
             return measured.grid->intrinsic_size;
@@ -457,7 +414,8 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
         std::size_t count = 0U;
         for (std::size_t index = 0U; index < measured.flow_child_count; ++index) {
             const MeasuredNodePtr& child = measured.children[index];
-            if (attached_only && child->node->lifecycle() == RetainedLifecycle::exiting) continue;
+            if (attached_only && child->node->lifecycle() == RetainedLifecycle::exiting)
+                continue;
             ++count;
             if (measured.style.kind == LayoutKind::scroll) {
                 result.width = std::max(result.width, child->measured_size.width);
@@ -478,7 +436,8 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
     Size own_intrinsic = intrinsic_measure_(node, content_constraints);
     if (measured.style.intrinsic_size.has_value()) {
         own_intrinsic.width = std::max(own_intrinsic.width, measured.style.intrinsic_size->width);
-        own_intrinsic.height = std::max(own_intrinsic.height, measured.style.intrinsic_size->height);
+        own_intrinsic.height =
+            std::max(own_intrinsic.height, measured.style.intrinsic_size->height);
     }
     Size intrinsic{
         std::max(child_intrinsic.width, own_intrinsic.width),
@@ -502,7 +461,8 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
         if (!unsupported.empty()) {
             std::string joined;
             for (const std::string& axis : unsupported) {
-                if (!joined.empty()) joined += ", ";
+                if (!joined.empty())
+                    joined += ", ";
                 joined += axis;
             }
             const std::string fingerprint = std::to_string(node.identity()) + ":" + joined;
@@ -530,36 +490,27 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
                                                   measured.style.kind == LayoutKind::panel ||
                                                   measured.style.kind == LayoutKind::overlay ||
                                                   measured.style.kind == LayoutKind::portal;
-            if (filters_exiting_children && std::ranges::any_of(
-                    measured.children,
-                    [](const MeasuredNodePtr& child) {
-                        return child->node->lifecycle() == RetainedLifecycle::exiting;
-                    }
-                )) {
+            if (filters_exiting_children &&
+                std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
+                    return child->node->lifecycle() == RetainedLifecycle::exiting;
+                })) {
                 const Size target_children = intrinsic_children(true);
-                target = resolve_content_box(
-                    measured.style,
-                    Size{
-                        std::max(target_children.width, own_intrinsic.width),
-                        std::max(target_children.height, own_intrinsic.height),
-                    },
-                    constraints
-                );
+                target =
+                    resolve_content_box(measured.style,
+                                        Size{
+                                            std::max(target_children.width, own_intrinsic.width),
+                                            std::max(target_children.height, own_intrinsic.height),
+                                        },
+                                        constraints);
             }
             if (const std::optional<DisclosureMotionSpec> disclosure = disclosure_motion(node);
                 disclosure.has_value() && !disclosure->expanded) {
-                target.height = std::max(
-                    0.0,
-                    disclosure->collapsed_extent - frame_edges.vertical()
-                );
+                target.height =
+                    std::max(0.0, disclosure->collapsed_extent - frame_edges.vertical());
             }
             const ContentSizeMotionSample sample = content_size_transitions_.retarget(
-                node.identity(),
-                target,
-                environment.frame_time_nanos,
-                *motion,
-                theme_motion_reduced(node.description(), environment.reduced_motion)
-            );
+                node.identity(), target, environment.frame_time_nanos, *motion,
+                theme_motion_reduced(node.description(), environment.reduced_motion));
             measured.content_size = sample.size;
             measured.content_motion_clip = sample.clip;
             measured.content_motion_progress = sample.progress;
@@ -576,26 +527,21 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
     });
     const bool structurally_changed =
         dirty.contains(DirtyReason::structure) ||
-        std::ranges::any_of(
-            measured.children,
-            [this](const MeasuredNodePtr& child) {
-                return structural_measurements_.contains(child->node->identity());
-            }
-        );
-    if (structurally_changed) structural_measurements_.insert(node.identity());
+        std::ranges::any_of(measured.children, [this](const MeasuredNodePtr& child) {
+            return structural_measurements_.contains(child->node->identity());
+        });
+    if (structurally_changed)
+        structural_measurements_.insert(node.identity());
     MeasuredNodePtr result = std::make_shared<const MeasuredNode>(std::move(measured));
     MeasuredNodePtr propagated = result;
-    const bool comparable = cached != measurement_cache_.end() &&
-        cached->second.constraints == constraints &&
+    const bool comparable =
+        cached != measurement_cache_.end() && cached->second.constraints == constraints &&
         cached->second.environment_generation == environment.generation &&
-        cached->second.scale == environment.scale &&
-        cached->second.measured != nullptr;
-    if (!structurally_changed && comparable &&
-        cached->second.measured->style == result->style &&
+        cached->second.scale == environment.scale && cached->second.measured != nullptr;
+    if (!structurally_changed && comparable && cached->second.measured->style == result->style &&
         cached->second.measured->measured_size == result->measured_size) {
-        propagated = cached->second.propagated != nullptr
-            ? cached->second.propagated
-            : cached->second.measured;
+        propagated = cached->second.propagated != nullptr ? cached->second.propagated
+                                                          : cached->second.measured;
         if (measured_model_equal(*cached->second.measured, *result)) {
             result = cached->second.measured;
         } else {
@@ -603,13 +549,13 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(
         }
     }
     measurement_cache_.insert_or_assign(node.identity(), MeasurementCacheEntry{
-        constraints,
-        node.revision(),
-        environment.generation,
-        environment.scale,
-        result,
-        propagated,
-    });
+                                                             constraints,
+                                                             node.revision(),
+                                                             environment.generation,
+                                                             environment.scale,
+                                                             result,
+                                                             propagated,
+                                                         });
     measurement_pass_.insert(node.identity());
     return propagated;
 }

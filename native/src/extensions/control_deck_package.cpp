@@ -19,6 +19,19 @@ constexpr auto picker_saturation = retained<number>("picker.saturation", 0.72, I
 constexpr auto picker_value = retained<number>("picker.value", 0.92, Invalidation::paint);
 constexpr auto picker_alpha = retained<number>("picker.alpha", 0.82, Invalidation::paint);
 constexpr auto picker_active = retained<number>("picker.active", 0.0, Invalidation::input);
+constexpr auto picker_compact = parameter<boolean>("compact", false);
+constexpr auto picker_color = parameter<color>("value");
+constexpr auto picker_change = parameter<action>("onChange");
+constexpr std::string_view swatch_key = "deck.color.swatch.preview";
+
+struct SwatchPreview final {
+    Color color{};
+    std::uint32_t active = 0U;
+};
+
+constexpr auto swatch_color = parameter<color>("value");
+constexpr auto swatch_preview = retained<structured<SwatchPreview>>(
+    "swatch.preview", SwatchPreview{rgba(72U, 144U, 235U), 0U}, Invalidation::paint);
 
 constexpr std::size_t inertia_trail_capacity = 48U;
 constexpr std::int64_t inertia_trail_lifetime_nanos = 420'000'000;
@@ -109,6 +122,12 @@ struct Rgb final {
     double green = 0.0;
     double blue = 0.0;
 };
+struct PickerChannels final {
+    double hue = 0.0;
+    double saturation = 0.0;
+    double value = 0.0;
+    double alpha = 1.0;
+};
 
 struct PickerGeometry final {
     Rect plane{};
@@ -159,22 +178,63 @@ enum class Region : int { none = 0, plane = 1, hue = 2, alpha = 3 };
     const Rgb rgb = hsv(hue, saturation, value);
     return rgba(channel(rgb.red), channel(rgb.green), channel(rgb.blue), channel(alpha));
 }
+[[nodiscard]] PickerChannels channels(const Color color) noexcept {
+    const double red = static_cast<double>(color.red) / 255.0;
+    const double green = static_cast<double>(color.green) / 255.0;
+    const double blue = static_cast<double>(color.blue) / 255.0;
+    const double maximum = std::max({red, green, blue});
+    const double minimum = std::min({red, green, blue});
+    const double delta = maximum - minimum;
+    double hue = 0.0;
+    if (delta > 0.0) {
+        if (maximum == red) {
+            hue = std::fmod((green - blue) / delta, 6.0) / 6.0;
+        } else if (maximum == green) {
+            hue = ((blue - red) / delta + 2.0) / 6.0;
+        } else {
+            hue = ((red - green) / delta + 4.0) / 6.0;
+        }
+    }
+    return PickerChannels{
+        wrap_unit(hue),
+        maximum > 0.0 ? delta / maximum : 0.0,
+        maximum,
+        static_cast<double>(color.alpha) / 255.0,
+    };
+}
+
+void synchronize_controlled_value(Input& input) {
+    const std::optional<Color> controlled = input.get(picker_color);
+    if (!controlled.has_value())
+        return;
+    const PickerChannels value = channels(*controlled);
+    input.set(picker_hue, value.hue);
+    input.set(picker_saturation, value.saturation);
+    input.set(picker_value, value.value);
+    input.set(picker_alpha, value.alpha);
+}
 
 [[nodiscard]] PickerGeometry geometry(const Rect bounds) noexcept {
-    constexpr double margin = 18.0;
-    constexpr double label_height = 24.0;
-    constexpr double inspector_width = 126.0;
-    constexpr double gap = 18.0;
-    constexpr double rail_height = 16.0;
+    const bool compact = bounds.width < 480.0 || bounds.height < 300.0;
+    const double margin = compact ? 14.0 : 18.0;
+    const double label_height = compact ? 20.0 : 24.0;
+    const double inspector_width = compact ? 92.0 : 126.0;
+    const double gap = compact ? 12.0 : 18.0;
+    const double rail_height = compact ? 14.0 : 16.0;
+    const double footer_height = compact ? 94.0 : 126.0;
+    const double minimum_plane_width = compact ? 150.0 : 190.0;
+    const double minimum_plane_height = compact ? 104.0 : 120.0;
+    const double maximum_plane_height = compact ? 152.0 : 194.0;
     const double content_width = std::max(1.0, bounds.width - margin * 2.0);
-    const double plane_width = std::max(190.0, content_width - inspector_width - gap);
-    const double plane_height = std::clamp(bounds.height - 126.0, 120.0, 194.0);
+    const double plane_width = std::max(minimum_plane_width, content_width - inspector_width - gap);
+    const double plane_height =
+        std::clamp(bounds.height - footer_height, minimum_plane_height, maximum_plane_height);
     const double x = bounds.x + margin;
     const double y = bounds.y + margin + label_height;
     return PickerGeometry{
         Rect{x, y, plane_width, plane_height},
-        Rect{x, y + plane_height + 20.0, plane_width, rail_height},
-        Rect{x, y + plane_height + 54.0, plane_width, rail_height},
+        Rect{x, y + plane_height + (compact ? 15.0 : 20.0), plane_width, rail_height},
+        Rect{x, y + plane_height + (compact ? 43.0 : 54.0), plane_width, rail_height},
         Rect{x + plane_width + gap, y, inspector_width, inspector_width},
     };
 }
@@ -294,6 +354,21 @@ constexpr std::array<std::uint32_t, 6U> quad_indices{0U, 1U, 2U, 0U, 2U, 3U};
         MeshVertex{0.0, 1.0, 0.0, 0.0, 1.0, transparent},
     };
 }
+void update_swatch(Input& input, const bool active) {
+    const Color color =
+        color_at(wrap_unit(input.get(picker_hue)), unit(input.get(picker_saturation)),
+                 unit(input.get(picker_value)), unit(input.get(picker_alpha)));
+    static_cast<void>(
+        input.set_target(swatch_key, swatch_preview, SwatchPreview{color, active ? 1U : 0U}));
+}
+
+void swatch_present(Present& present) {
+    const SwatchPreview preview = present.get(swatch_preview);
+    const Color color = preview.active != 0U
+                            ? preview.color
+                            : present.get(swatch_color).value_or(rgba(72U, 144U, 235U));
+    present.rounded_rect(present.bounds(), 7.0, color, stroke(1.0, rgba(239U, 247U, 255U, 88U)));
+}
 
 void update_at(Input& input, const Region region, const double x, const double y) {
     const PickerGeometry value = geometry(input.bounds());
@@ -305,6 +380,7 @@ void update_at(Input& input, const Region region, const double x, const double y
     } else if (region == Region::alpha) {
         input.set(picker_alpha, unit((x - value.alpha.x) / value.alpha.width));
     }
+    update_swatch(input, true);
 }
 
 void emit_commit(Input& input) {
@@ -319,6 +395,7 @@ void emit_commit(Input& input) {
         R"({{"red":{},"green":{},"blue":{},"alpha":{},"hue":{:.6g},"saturation":{:.6g},"value":{:.6g}}})",
         color.red, color.green, color.blue, color.alpha, hue * 360.0, saturation, value);
     static_cast<void>(input.invalidate(Invalidation::semantics));
+    static_cast<void>(input.emit(picker_change, "color-changed", color));
     static_cast<void>(input.emit("control-deck.color.commit", json, "color-committed", json));
 }
 
@@ -329,6 +406,7 @@ bool picker_pointer(Input& input, const Pointer& pointer) {
         const Region region = region_at(geometry(input.bounds()), pointer.x, pointer.y);
         if (region == Region::none)
             return false;
+        synchronize_controlled_value(input);
         input.set(picker_active, static_cast<double>(region));
         static_cast<void>(input.claim_gesture());
         update_at(input, region, pointer.x, pointer.y);
@@ -345,16 +423,23 @@ bool picker_pointer(Input& input, const Pointer& pointer) {
     }
     if (pointer.kind == Pointer::Kind::release) {
         update_at(input, active, pointer.x, pointer.y);
-        input.set(picker_active, 0.0);
         emit_commit(input);
+        update_swatch(input, false);
+        input.set(picker_active, 0.0);
         return true;
     }
     input.set(picker_active, 0.0);
+    update_swatch(input, false);
     static_cast<void>(input.cancel_gesture());
     return true;
 }
 
 bool picker_key(Input& input, const Key& key) {
+    if (key.name != "left" && key.name != "right" && key.name != "up" && key.name != "down" &&
+        key.name != "pageup" && key.name != "pagedown") {
+        return false;
+    }
+    synchronize_controlled_value(input);
     const double step = key.shift ? 0.05 : 0.01;
     bool changed = false;
     if (key.name == "left" || key.name == "right") {
@@ -367,11 +452,9 @@ bool picker_key(Input& input, const Key& key) {
     } else if (key.name == "up" || key.name == "down") {
         const double direction = key.name == "up" ? 1.0 : -1.0;
         changed = input.set(picker_value, unit(input.get(picker_value) + direction * step));
-    } else if (key.name == "pageup" || key.name == "pagedown") {
+    } else {
         const double direction = key.name == "pageup" ? 1.0 : -1.0;
         changed = input.set(picker_alpha, unit(input.get(picker_alpha) + direction * step));
-    } else {
-        return false;
     }
     if (changed)
         emit_commit(input);
@@ -379,10 +462,18 @@ bool picker_key(Input& input, const Key& key) {
 }
 
 void picker_semantics(Semantics& semantics) {
-    const double hue = wrap_unit(semantics.get(picker_hue));
-    const double saturation = unit(semantics.get(picker_saturation));
-    const double value = unit(semantics.get(picker_value));
-    const double alpha = unit(semantics.get(picker_alpha));
+    double hue = wrap_unit(semantics.get(picker_hue));
+    double saturation = unit(semantics.get(picker_saturation));
+    double value = unit(semantics.get(picker_value));
+    double alpha = unit(semantics.get(picker_alpha));
+    if (const std::optional<Color> controlled = semantics.get(picker_color);
+        controlled.has_value() && semantics.get(picker_active) == 0.0) {
+        const PickerChannels controlled_channels = channels(*controlled);
+        hue = controlled_channels.hue;
+        saturation = controlled_channels.saturation;
+        value = controlled_channels.value;
+        alpha = controlled_channels.alpha;
+    }
     const Color color = color_at(hue, saturation, value, alpha);
     std::array<char, 96U> description{};
     semantics.name("Workspace accent color");
@@ -397,14 +488,24 @@ void picker_semantics(Semantics& semantics) {
 void picker_present(Present& present) {
     const Rect bounds = present.bounds();
     const PickerGeometry layout = geometry(bounds);
-    const double hue = wrap_unit(present.get(picker_hue));
-    const double saturation = unit(present.get(picker_saturation));
-    const double value = unit(present.get(picker_value));
-    const double alpha = unit(present.get(picker_alpha));
+    double hue = wrap_unit(present.get(picker_hue));
+    double saturation = unit(present.get(picker_saturation));
+    double value = unit(present.get(picker_value));
+    double alpha = unit(present.get(picker_alpha));
+    if (const std::optional<Color> controlled = present.get(picker_color);
+        controlled.has_value() && present.get(picker_active) == 0.0) {
+        const PickerChannels controlled_channels = channels(*controlled);
+        hue = controlled_channels.hue;
+        saturation = controlled_channels.saturation;
+        value = controlled_channels.value;
+        alpha = controlled_channels.alpha;
+    }
     const Color opaque = color_at(hue, saturation, value);
     const Color selected = color_at(hue, saturation, value, alpha);
 
-    present.rounded_rect(bounds, 9.0, chrome, stroke(1.0, line));
+    if (!present.get(picker_compact)) {
+        present.rounded_rect(bounds, 9.0, chrome, stroke(1.0, line));
+    }
     present.text("SATURATION / VALUE",
                  Rect{layout.plane.x, bounds.y + 8.0, layout.plane.width, 24.0}, label,
                  TextAlignment::start, TextAlignment::center);
@@ -451,10 +552,12 @@ void picker_present(Present& present) {
                  Rect{layout.preview.x, layout.preview.y + layout.preview.height + 28.0,
                       layout.preview.width, 20.0},
                  label, TextAlignment::start, TextAlignment::center);
-    present.text(
-        "Arrows adjust · Ctrl adjusts saturation",
-        Rect{layout.plane.x, layout.alpha.y + layout.alpha.height + 8.0, layout.plane.width, 24.0},
-        label, TextAlignment::start, TextAlignment::center);
+    if (!present.get(picker_compact)) {
+        present.text("Arrows adjust · Ctrl adjusts saturation",
+                     Rect{layout.plane.x, layout.alpha.y + layout.alpha.height + 8.0,
+                          layout.plane.width, 24.0},
+                     label, TextAlignment::start, TextAlignment::center);
+    }
 
     if (present.focus_visible())
         present.border(bounds, 9.0, stroke(2.0, focus));
@@ -1981,10 +2084,19 @@ void curve_present(Present& present) {
 }
 
 [[nodiscard]] std::unique_ptr<Package> control_deck_package() {
+    auto swatch = widget("DeckColorSwatch")
+                      .no_children()
+                      .intrinsic_size(54.0, 30.0)
+                      .parameter(swatch_color)
+                      .retained(swatch_preview)
+                      .present(&swatch_present);
     auto picker = widget("DeckColorPicker")
                       .no_children()
                       .focusable()
                       .intrinsic_size(560.0, 330.0)
+                      .parameter(picker_compact)
+                      .parameter(picker_color)
+                      .parameter(picker_change)
                       .retained(picker_hue)
                       .retained(picker_saturation)
                       .retained(picker_value)
@@ -2087,6 +2199,7 @@ void curve_present(Present& present) {
                      .present(&curve_present);
 
     auto created = package("strata.control-deck.v1");
+    created->widget(std::move(swatch));
     created->widget(std::move(picker));
     created->widget(std::move(gradient));
     created->widget(std::move(inertia));

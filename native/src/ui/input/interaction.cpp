@@ -18,8 +18,8 @@
 #include "ui/input/detail.hpp"
 #include "ui/motion.hpp"
 #include "ui/status.hpp"
-#include "ui/widget/input.hpp"
 #include "ui/widget/choice_model.hpp"
+#include "ui/widget/input.hpp"
 #include "ui/widget/registry.hpp"
 
 namespace strata::ui {
@@ -29,22 +29,19 @@ namespace {
 void append(InputOperationResult& destination, InputOperationResult source) {
     destination.injected_events += source.injected_events;
     destination.processed_events += source.processed_events;
-    destination.events.insert(
-        destination.events.end(),
-        std::make_move_iterator(source.events.begin()),
-        std::make_move_iterator(source.events.end())
-    );
-    destination.action_outcomes.insert(
-        destination.action_outcomes.end(),
-        std::make_move_iterator(source.action_outcomes.begin()),
-        std::make_move_iterator(source.action_outcomes.end())
-    );
+    destination.events.insert(destination.events.end(),
+                              std::make_move_iterator(source.events.begin()),
+                              std::make_move_iterator(source.events.end()));
+    destination.action_outcomes.insert(destination.action_outcomes.end(),
+                                       std::make_move_iterator(source.action_outcomes.begin()),
+                                       std::make_move_iterator(source.action_outcomes.end()));
 }
 
 } // namespace
 
 RetainedNode* InputRouter::active_modal() const {
-    if (tree_ == nullptr) return nullptr;
+    if (tree_ == nullptr)
+        return nullptr;
     if (const std::vector<RetainedNode*>* palettes = tree_->find_type("CommandPalette");
         palettes != nullptr) {
         for (auto iterator = palettes->rbegin(); iterator != palettes->rend(); ++iterator) {
@@ -61,69 +58,71 @@ RetainedNode* InputRouter::active_modal() const {
         }
     }
     const std::vector<RetainedNode*>* modals = tree_->find_type("Modal");
-    if (modals == nullptr) return nullptr;
+    if (modals == nullptr)
+        return nullptr;
     for (auto iterator = modals->rbegin(); iterator != modals->rend(); ++iterator) {
         const runtime::Value* open = scalar_property(**iterator, "open");
-        if (open != nullptr && open->boolean() != nullptr && *open->boolean()) return *iterator;
+        if (open != nullptr && open->boolean() != nullptr && *open->boolean())
+            return *iterator;
     }
     return nullptr;
 }
 
-bool InputRouter::descendant_of(
-    const RetainedNode& node,
-    const RetainedNode& ancestor
-) noexcept {
+bool InputRouter::descendant_of(const RetainedNode& node, const RetainedNode& ancestor) noexcept {
     for (const RetainedNode* current = &node; current != nullptr; current = current->parent()) {
-        if (current == &ancestor) return true;
+        if (current == &ancestor)
+            return true;
     }
     return false;
 }
 
-const DescriptionBehavior* InputRouter::behavior(
-    const RetainedNode& node,
-    const std::string_view id
-) noexcept {
-    const auto found = std::ranges::find(node.description().behaviors, id, &DescriptionBehavior::id);
+const DescriptionBehavior* InputRouter::behavior(const RetainedNode& node,
+                                                 const std::string_view id) noexcept {
+    const auto found =
+        std::ranges::find(node.description().behaviors, id, &DescriptionBehavior::id);
     return found != node.description().behaviors.end() && found->enabled ? &*found : nullptr;
 }
 
-void InputRouter::dismiss_transient_popups(
-    const RetainedNode* const target,
-    InputOperationResult& result,
-    const bool include_modal,
-    const bool restore_modal_focus
-) {
-    if (tree_ == nullptr || tree_->root() == nullptr ||
-        dismissing_transient_popups_) {
+void InputRouter::dismiss_transient_popups(const RetainedNode* const target,
+                                           InputOperationResult& result, const bool include_modal,
+                                           const bool restore_modal_focus) {
+    if (tree_ == nullptr || tree_->root() == nullptr || dismissing_transient_popups_) {
         return;
     }
     dismissing_transient_popups_ = true;
     bool modal_dismissed = false;
-    const auto visit = [this, target, include_modal, &result, &modal_dismissed](
-                           auto&& self,
-                           RetainedNode& node
-                       ) -> void {
+    const auto visit = [this, target, include_modal, &result,
+                        &modal_dismissed](auto&& self, RetainedNode& node) -> void {
         if (node.description().type == "MenuBar" &&
             (target == nullptr || !descendant_of(*target, node))) {
             const runtime::Value* category = node.retained_value("$menuCategory");
-            if (category != nullptr && category->string() != nullptr && !category->string()->empty()) {
+            if (category != nullptr && category->string() != nullptr &&
+                !category->string()->empty()) {
                 const bool changed = tree_->set_retained_value(
-                    node.identity(), "$menuCategory", runtime::Value{}, DirtyReason::properties
-                );
+                    node.identity(), "$menuCategory", runtime::Value{}, DirtyReason::properties);
                 if (changed && description_invalidator_) {
                     description_invalidator_(nullptr, {});
                 }
             }
         }
+        bool target_within_popup = target != nullptr && descendant_of(*target, node);
+        if (!target_within_popup && target != nullptr && node.description().type == "Popup") {
+            const std::string& anchor_key = layout_style(node.description()).anchor_target;
+            const RetainedNode* const anchor =
+                anchor_key.empty() ? nullptr : tree_->find_key(anchor_key);
+            target_within_popup = anchor != nullptr && descendant_of(*target, *anchor);
+        }
         const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
         if (lifecycle != nullptr && !lifecycle->input.popup_retained.empty() &&
             (include_modal || node.description().type != "CommandPalette") &&
-            (target == nullptr || !descendant_of(*target, node))) {
+            !target_within_popup) {
             const WidgetInputPhase& input = lifecycle->input;
             const auto value = [&node](const std::string& name) -> const runtime::Value* {
-                if (name.empty()) return nullptr;
+                if (name.empty())
+                    return nullptr;
                 const auto found = node.description().properties.find(name);
-                return found != node.description().properties.end() ? found->second.value() : nullptr;
+                return found != node.description().properties.end() ? found->second.value()
+                                                                    : nullptr;
             };
             const runtime::Value* open = value(input.popup_controlled);
             if (open == nullptr || open->boolean() == nullptr) {
@@ -133,33 +132,27 @@ void InputRouter::dismiss_transient_popups(
                 open = value(input.popup_initial);
             }
             if (open != nullptr && open->boolean() != nullptr && *open->boolean()) {
-                bool changed = tree_->set_retained_value(
-                    node.identity(),
-                    input.popup_retained,
-                    runtime::Value(false),
-                    DirtyReason::properties
-                );
+                bool changed =
+                    tree_->set_retained_value(node.identity(), input.popup_retained,
+                                              runtime::Value(false), DirtyReason::properties);
                 if (node.description().type == "Select") {
-                    if (const std::optional<EffectiveChoice> selected =
-                            effective_choice(node);
+                    if (const std::optional<EffectiveChoice> selected = effective_choice(node);
                         selected.has_value()) {
                         changed = tree_->set_retained_value(
-                            node.identity(),
-                            "$choiceIndex",
-                            runtime::Value(static_cast<double>(selected->index)),
-                            DirtyReason::properties
-                        ) || changed;
+                                      node.identity(), "$choiceIndex",
+                                      runtime::Value(static_cast<double>(selected->index)),
+                                      DirtyReason::properties) ||
+                                  changed;
                     }
                 }
                 if (changed && description_invalidator_) {
                     description_invalidator_(nullptr, {});
                 }
-                modal_dismissed = modal_dismissed ||
-                    (changed && node.description().type == "CommandPalette");
-                const std::shared_ptr<const runtime::ActionValue> action = activation_action(
-                    node,
-                    input.popup_dismiss_action_property
-                );
+                modal_dismissed =
+                    modal_dismissed || (changed && node.description().type == "CommandPalette");
+                restore_popup_focus(node, result);
+                const std::shared_ptr<const runtime::ActionValue> action =
+                    activation_action(node, input.popup_dismiss_action_property);
                 JsonValue event = object({
                     {"action", action != nullptr ? canonical_action(*action, node) : JsonValue{}},
                     {"source", source(node)},
@@ -168,17 +161,21 @@ void InputRouter::dismiss_transient_popups(
                 emit(std::move(event), action, node, runtime::Value{}, result);
             }
         }
-        for (const auto& child : node.children()) self(self, *child);
+        for (const auto& child : node.children())
+            self(self, *child);
     };
     visit(visit, *tree_->root());
-    if (modal_dismissed && restore_modal_focus) sync_modal_focus(result);
+    if (modal_dismissed && restore_modal_focus)
+        sync_modal_focus(result);
     dismissing_transient_popups_ = false;
 }
 
 InputOperationResult InputRouter::click(const std::string_view key) {
-    if (tree_ == nullptr || layout_ == nullptr) throw std::logic_error("input requires a completed surface frame");
+    if (tree_ == nullptr || layout_ == nullptr)
+        throw std::logic_error("input requires a completed surface frame");
     RetainedNode* target = tree_->find_key(key);
-    if (target == nullptr) throw std::invalid_argument("input target key is not retained");
+    if (target == nullptr)
+        throw std::invalid_argument("input target key is not retained");
     const Point center = injection_point(key);
     InputOperationResult result;
     append(result, pointer(PointerInputEvent{center, PointerEventType::press, 0, 0}));
@@ -187,21 +184,19 @@ InputOperationResult InputRouter::click(const std::string_view key) {
     return result;
 }
 
-void InputRouter::activate(
-    RetainedNode& requested_target,
-    InputOperationResult& result,
-    const PointerInputEvent* const pointer,
-    RetainedNode* const pointer_target,
-    const std::size_t click_count,
-    std::optional<WidgetSubtarget> subtarget
-) {
+void InputRouter::activate(RetainedNode& requested_target, InputOperationResult& result,
+                           const PointerInputEvent* const pointer,
+                           RetainedNode* const pointer_target, const std::size_t click_count,
+                           std::optional<WidgetSubtarget> subtarget) {
     RetainedNode* target = &requested_target;
-    if (!node_input_enabled(*target)) return;
+    if (!node_input_enabled(*target))
+        return;
     if (RetainedNode* modal = active_modal(); modal != nullptr) {
         const bool detached_above_modal = subtarget.has_value() && subtarget->detached &&
-            subtarget->owner_identity == target->identity() &&
-            subtarget->z_index > detached_overlay_z_index(*modal);
-        const RetainedNode* focused = focused_.has_value() ? tree_->find_identity(*focused_) : nullptr;
+                                          subtarget->owner_identity == target->identity() &&
+                                          subtarget->z_index > detached_overlay_z_index(*modal);
+        const RetainedNode* focused =
+            focused_.has_value() ? tree_->find_identity(*focused_) : nullptr;
         if (focused == nullptr || !descendant_of(*focused, *modal)) {
             focus(*modal, "programmatic", result);
         }
@@ -213,29 +208,24 @@ void InputRouter::activate(
     dismiss_transient_popups(target, result);
     hover_route(target);
     RetainedNode* const focus_target = pointer != nullptr && pointer_target != nullptr
-        ? pointer_focusable_ancestor(pointer_target)
-        : focusable_ancestor(target);
+                                           ? pointer_focusable_ancestor(pointer_target)
+                                           : focusable_ancestor(target);
     if (focus_target != nullptr) {
         focus(*focus_target, "pointer", result);
     }
     for (RetainedNode* current = target; current != nullptr; current = current->parent()) {
         // Keyboard activation belongs to the focused control. Ancestors that intentionally own a
         // descendant key (such as Form/Enter) do so through their key lifecycle instead.
-        if (pointer == nullptr && current != target) break;
+        if (pointer == nullptr && current != target)
+            break;
         const WidgetLifecycle* lifecycle = widgets_.find(current->description().type);
-        if (lifecycle == nullptr || lifecycle->input.click == nullptr) continue;
-        WidgetInputScope scope(
-            *this,
-            *current,
-            result,
-            {},
-            pointer != nullptr ? pointer->modifiers : KeyModifiers{},
-            pointer,
-            pointer_target,
-            click_count,
-            subtarget
-        );
-        if (lifecycle->input.click(scope)) break;
+        if (lifecycle == nullptr || lifecycle->input.click == nullptr)
+            continue;
+        WidgetInputScope scope(*this, *current, result, {},
+                               pointer != nullptr ? pointer->modifiers : KeyModifiers{}, pointer,
+                               pointer_target, click_count, subtarget);
+        if (lifecycle->input.click(scope))
+            break;
     }
 }
 

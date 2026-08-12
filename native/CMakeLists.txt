@@ -1278,6 +1278,15 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_gradient.cmake
             )
             add_test(
+                NAME strata.headless.control_deck_color_popup
+                COMMAND ${CMAKE_COMMAND}
+                    -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>
+                    -DSTRATA_RESOURCES=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
+                    -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/control-deck-color-popup.json
+                    -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-control-deck-color-popup
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_color_popup.cmake
+            )
+            add_test(
                 NAME strata.headless.control_deck_motion
                 COMMAND ${CMAKE_COMMAND}
                     -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>

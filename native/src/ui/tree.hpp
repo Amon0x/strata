@@ -268,7 +268,7 @@ class RetainedNode final {
     [[nodiscard]] const runtime::StateScopeSet& warm_realization_state_scopes() const noexcept;
     [[nodiscard]] DirtyGenerationSnapshot dirty_generations() const noexcept;
     [[nodiscard]] const runtime::Value* retained_value(std::string_view name) const noexcept;
-    [[nodiscard]] bool set_retained_value(std::string name, runtime::Value value);
+    [[nodiscard]] bool set_retained_value(std::string_view name, runtime::Value value);
     [[nodiscard]] std::span<const std::byte> retained_bytes(std::string_view name) const noexcept;
     [[nodiscard]] bool set_retained_bytes(std::string name, std::span<const std::byte> value);
     void add_cleanup(Cleanup cleanup);
@@ -381,7 +381,7 @@ class RetainedTree final {
     /** Stable-identity scheduler input; contains only nodes with unconsumed dirty reasons. */
     [[nodiscard]] std::vector<RetainedNode*> dirty_nodes() const;
     [[nodiscard]] bool mark(std::uint64_t identity, DirtyReason reason);
-    [[nodiscard]] bool set_retained_value(std::uint64_t identity, std::string name,
+    [[nodiscard]] bool set_retained_value(std::uint64_t identity, std::string_view name,
                                           runtime::Value value,
                                           DirtyReason reason = DirtyReason::properties);
     [[nodiscard]] bool set_retained_bytes(std::uint64_t identity, std::string name,
@@ -391,10 +391,10 @@ class RetainedTree final {
     [[nodiscard]] bool set_presentation_value(std::uint64_t identity, std::string name,
                                               runtime::Value value);
     /** Updates retained state consumed by the widget content paint callback only. */
-    [[nodiscard]] bool set_paint_value(std::uint64_t identity, std::string name,
+    [[nodiscard]] bool set_paint_value(std::uint64_t identity, std::string_view name,
                                        runtime::Value value);
     /** Retained input/session state with no downstream frame work. */
-    bool set_input_value(std::uint64_t identity, std::string name, runtime::Value value);
+    bool set_input_value(std::uint64_t identity, std::string_view name, runtime::Value value);
     bool set_input_bytes(std::uint64_t identity, std::string name,
                          std::span<const std::byte> value);
     /** Updates retained geometry state that requires arrangement but cannot affect measurement. */

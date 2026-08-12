@@ -301,6 +301,63 @@ marker batch replace per-object render commands. Point capture, lasso selection,
 right-button pan, keyboard editing, cancellation, committed actions, and semantic children all retain
 global point identity across viewport changes.
 
+### Milestone D — declarative anchored popup surfaces
+
+An ordinary `.strata` component must be able to open an authored popup beside any stable keyed
+anchor without replacing the row, trigger, popup chrome, or popup contents with a bespoke native
+widget. The popup is absolutely positioned in the root application-surface plane: it may overlap
+unrelated rows, cards, columns, and panels and is never constrained by the anchor's layout box or
+scroll viewport. The anchor supplies only the preferred origin and relationship. The author chooses
+the preferred side and alignment; the framework owns detached layout, root-viewport collision,
+overlay ordering, focus, input routing, Escape handling, and outside dismissal. Popup contents remain
+ordinary authored children and may use the same styles, materials, and effects as in-flow content.
+
+The public authoring contract must support:
+
+- an ordinary button, swatch, or other focusable trigger;
+- controlled open state with a dismissal action and focus restoration to the opener;
+- `TOP`, `RIGHT`, `BOTTOM`, and `LEFT` placement with `START`, `CENTER`, and `END` alignment;
+- authored gap and cross-axis offset, opposite-side flipping, root-viewport shifting, and size
+  constraining;
+- a retained popup subtree rendered and hit-tested outside its anchor's clipping ancestry;
+- normal interactive descendants, accessibility traversal, pointer capture, nested overlays, and
+  optic-glass/effect styling; and
+- no application-specific or color-picker behavior in the popup runtime.
+
+The runtime implementation reuses the existing retained tree, root-targeted portal layout, renderer,
+hit tester, focus router, dirty scheduler, and packet cache. Spatially the popup is a floating
+root-space canvas island; operationally it remains a retained authored subtree. It must not introduce
+an immediate-mode overlay engine, native child window, or manually projected extension-only
+substitute for authored children. Popup placement is cached retained layout state and is reconsidered
+only when the popup opens or its anchor, root viewport, scale, or intrinsic size changes.
+
+The demanding proof is a compact ordinary Control Deck color setting row. Its authored swatch opens
+an authored optic-glass card adjacent to the row, with automatic flip and shift near root-viewport
+edges. The existing public-only `DeckColorPicker` becomes a retained native leaf inside that card; it
+owns only saturation/value, hue, alpha, keyboard, semantic, and commit behavior. The row and popup
+chrome remain ordinary `.strata` composition.
+
+During continuous picker manipulation:
+
+- the popup subtree is not created, destroyed, reconciled, measured, or rearranged;
+- popup placement and surrounding page layout remain unchanged;
+- hue, saturation, value, alpha, and gesture ownership stay in widget-local retained state;
+- input-only gesture writes schedule no presentation work and color writes invalidate picker paint
+  only;
+- queued pointer bursts collapse to the latest useful state and at most one successor frame;
+- optional live application feedback is frame-coalesced, while release emits exactly one commit;
+- the hot input path performs no heap allocation or JSON reconstruction; and
+- ordinary page content and popup optic-glass resources are not rebuilt merely because a picker
+  cursor moved.
+
+Acceptance requires a repository Control Deck demo and headless coverage, not an external
+application. The proof opens from a normal authored row, exercises preferred right-side placement,
+automatic opposite-side flip and root-viewport shift, pointer interaction in every picker region,
+capture outside the popup, keyboard adjustment, inside-click shielding, Escape/outside dismissal,
+focus restoration, and absence of stale hit geometry after close. Profiling evidence must show no
+reconciliation, layout, text shaping, or semantics work on ordinary drag moves and quiescent idle
+frames after release.
+
 ### Deferred platform work
 
 - Custom layout measurement and arrangement remain deferred until a proof cannot use ordinary Strata

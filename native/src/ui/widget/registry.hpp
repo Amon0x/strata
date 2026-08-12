@@ -193,6 +193,8 @@ struct WidgetFramePhase final {
 struct WidgetLifecycle final {
     std::string type;
     WidgetParticipationHook participates = nullptr;
+    /** Paint fields extension widgets may update across stable keyed peers. */
+    std::vector<std::string> extension_paint_fields;
     WidgetDescribePhase describe;
     WidgetInputPhase input;
     WidgetSemanticsPhase semantics;

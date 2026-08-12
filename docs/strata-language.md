@@ -248,10 +248,11 @@ Missing targets and cyclic chains produce layout diagnostics instead of order-de
 
 ### Anchored portals
 
-A portal is measured against the root viewport, excluded from its parent's row/column/grid flow,
-and rendered as a detached root. `anchorTarget` names a stable widget key (or `"parent"`/`"root"`).
-`anchorPoint: { x, y }` supplies an absolute logical point instead and is used by pointer-positioned
-context menus.
+A portal is absolutely positioned in the root application-surface plane, measured against the root
+viewport, excluded from its parent's row/column/grid flow, and rendered as a detached root. It may
+overlap unrelated content and is not constrained by an ancestor scroll viewport. `anchorTarget`
+names a stable widget key (or `"parent"`/`"root"`). `anchorPoint: { x, y }` supplies an absolute
+logical point instead and is used by pointer-positioned context menus.
 Placement is backend-independent:
 
 ```strata
@@ -264,6 +265,7 @@ Panel(
     anchorSide: "BOTTOM",
     anchorAlign: "END",
     anchorGap: 6,
+    anchorCrossOffset: 0,
     anchorFlip: true,
     anchorShift: true,
     matchAnchorWidth: true
@@ -273,10 +275,12 @@ Panel(
 }
 ```
 
-Sides are `TOP`, `BOTTOM`, `LEFT`, and `RIGHT`; alignment is `START`, `CENTER`, or `END`. Flip
-changes the main-axis side when the preferred side cannot fit and the opposite side has more room.
-Shift clamps the cross-axis result to the root viewport. Anchored portals participate normally in
-retained rendering, hit testing, focus, semantics, clipping, motion, and nested portal placement.
+Sides are `TOP`, `BOTTOM`, `LEFT`, and `RIGHT`; alignment is `START`, `CENTER`, or `END`.
+`anchorAlign` aligns along the cross axis and `anchorCrossOffset` applies a signed logical offset
+after alignment. Flip changes the main-axis side when the preferred side cannot fit and the opposite
+side has more room. Shift clamps the final result to the root viewport. Anchored portals participate
+normally in retained rendering, hit testing, focus, semantics, clipping, motion, and nested portal
+placement.
 
 ### Exterior shadows
 

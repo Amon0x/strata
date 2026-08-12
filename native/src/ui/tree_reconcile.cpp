@@ -1,5 +1,5 @@
-#include "ui/tree.hpp"
 #include "ui/text.hpp"
+#include "ui/tree.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -15,55 +15,81 @@ struct SiblingKey final {
     std::string type;
     std::string key;
     [[nodiscard]] friend bool operator<(const SiblingKey& left, const SiblingKey& right) noexcept {
-        if (left.type != right.type) return left.type < right.type;
+        if (left.type != right.type)
+            return left.type < right.type;
         return left.key < right.key;
     }
 };
 
-[[nodiscard]] bool behaviors_equal(
-    const std::vector<DescriptionBehavior>& left,
-    const std::vector<DescriptionBehavior>& right
-) {
-    if (left.size() != right.size()) return false;
+[[nodiscard]] bool behaviors_equal(const std::vector<DescriptionBehavior>& left,
+                                   const std::vector<DescriptionBehavior>& right) {
+    if (left.size() != right.size())
+        return false;
     for (std::size_t index = 0U; index < left.size(); ++index) {
         if (left[index].id != right[index].id || left[index].enabled != right[index].enabled ||
             left[index].options != right[index].options ||
             !expression_value_equal(
-                left[index].action != nullptr
-                    ? runtime::ExpressionValue(left[index].action)
-                    : runtime::ExpressionValue(runtime::Value{}),
-                right[index].action != nullptr
-                    ? runtime::ExpressionValue(right[index].action)
-                    : runtime::ExpressionValue(runtime::Value{})
-            )) {
+                left[index].action != nullptr ? runtime::ExpressionValue(left[index].action)
+                                              : runtime::ExpressionValue(runtime::Value{}),
+                right[index].action != nullptr ? runtime::ExpressionValue(right[index].action)
+                                               : runtime::ExpressionValue(runtime::Value{}))) {
             return false;
         }
     }
     return true;
 }
 
-[[nodiscard]] bool layout_projection_equal(
-    const runtime::ExpressionValue* current,
-    const runtime::ExpressionValue* next
-) noexcept {
+[[nodiscard]] bool layout_projection_equal(const runtime::ExpressionValue* current,
+                                           const runtime::ExpressionValue* next) noexcept {
     const runtime::Value* current_value = current != nullptr ? current->value() : nullptr;
     const runtime::Value* next_value = next != nullptr ? next->value() : nullptr;
     static constexpr std::array<std::string_view, 40U> fields{
-        "kind", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
-        "aspectRatio", "intrinsicSize", "padding", "margin", "gap", "placement", "alignItems",
-        "justifyContent", "alignContent", "alignSelf", "justifySelf", "wrap", "clip",
-        "gridColumn", "gridRow", "columnSpan", "rowSpan", "zIndex", "scrollHorizontal",
-        "scrollVertical", "viewportInsets", "viewportInsetsFromInsideBorder",
-        "contentPadding", "scrollbarGutter",
-        "virtualItemExtent", "virtualItemCount", "virtualAxis", "virtualOverscan",
-        "virtualItemKeys", "virtualItemMembers", "virtualItemExtents",
-        "virtualMeasureItemExtents", "$themeAnimationSet",
+        "kind",
+        "width",
+        "height",
+        "minWidth",
+        "minHeight",
+        "maxWidth",
+        "maxHeight",
+        "aspectRatio",
+        "intrinsicSize",
+        "padding",
+        "margin",
+        "gap",
+        "placement",
+        "alignItems",
+        "justifyContent",
+        "alignContent",
+        "alignSelf",
+        "justifySelf",
+        "wrap",
+        "clip",
+        "gridColumn",
+        "gridRow",
+        "columnSpan",
+        "rowSpan",
+        "zIndex",
+        "scrollHorizontal",
+        "scrollVertical",
+        "viewportInsets",
+        "viewportInsetsFromInsideBorder",
+        "contentPadding",
+        "scrollbarGutter",
+        "virtualItemExtent",
+        "virtualItemCount",
+        "virtualAxis",
+        "virtualOverscan",
+        "virtualItemKeys",
+        "virtualItemMembers",
+        "virtualItemExtents",
+        "virtualMeasureItemExtents",
+        "$themeAnimationSet",
     };
     for (const std::string_view field : fields) {
-        const runtime::Value* left = current_value != nullptr ? current_value->field(field) : nullptr;
+        const runtime::Value* left =
+            current_value != nullptr ? current_value->field(field) : nullptr;
         const runtime::Value* right = next_value != nullptr ? next_value->field(field) : nullptr;
-        if ((left == nullptr) != (right == nullptr) ||
-            (left != nullptr && *left != *right)) {
+        if ((left == nullptr) != (right == nullptr) || (left != nullptr && *left != *right)) {
             return false;
         }
     }
@@ -75,50 +101,55 @@ struct SiblingKey final {
              "anchorSide",
              "anchorAlign",
              "anchorGap",
+             "anchorCrossOffset",
              "anchorFlip",
              "anchorShift",
              "matchAnchorWidth",
          }) {
-        const runtime::Value* left = current_value != nullptr ? current_value->field(field) : nullptr;
+        const runtime::Value* left =
+            current_value != nullptr ? current_value->field(field) : nullptr;
         const runtime::Value* right = next_value != nullptr ? next_value->field(field) : nullptr;
-        if ((left == nullptr) != (right == nullptr) ||
-            (left != nullptr && *left != *right)) {
+        if ((left == nullptr) != (right == nullptr) || (left != nullptr && *left != *right)) {
             return false;
         }
     }
     return true;
 }
 
-[[nodiscard]] DirtyReason property_reason(
-    const std::string_view name,
-    const runtime::ExpressionValue* current,
-    const runtime::ExpressionValue* next
-) noexcept {
+[[nodiscard]] DirtyReason property_reason(const std::string_view name,
+                                          const runtime::ExpressionValue* current,
+                                          const runtime::ExpressionValue* next) noexcept {
     if (text_layout_field(name)) {
         return DirtyReason::text;
     }
     if (name == "$layout") {
-        if (!layout_projection_equal(current, next)) return DirtyReason::layout;
-        return text_layout_projection_equal(
-            current != nullptr ? current->value() : nullptr,
-            next != nullptr ? next->value() : nullptr
-        ) ? DirtyReason::properties : DirtyReason::text;
+        if (!layout_projection_equal(current, next))
+            return DirtyReason::layout;
+        return text_layout_projection_equal(current != nullptr ? current->value() : nullptr,
+                                            next != nullptr ? next->value() : nullptr)
+                   ? DirtyReason::properties
+                   : DirtyReason::text;
     }
-    if (name == "textStyle") return DirtyReason::text;
+    if (name == "textStyle")
+        return DirtyReason::text;
     if (name == "style") {
-        return text_layout_projection_equal(
-            current != nullptr ? current->value() : nullptr,
-            next != nullptr ? next->value() : nullptr
-        ) ? DirtyReason::style : DirtyReason::text;
+        return text_layout_projection_equal(current != nullptr ? current->value() : nullptr,
+                                            next != nullptr ? next->value() : nullptr)
+                   ? DirtyReason::style
+                   : DirtyReason::text;
     }
+    if (name == "$layoutParticipates")
+        return DirtyReason::structure;
     if (name == "layout" || name == "width" || name == "height" || name == "padding" ||
         name == "margin" || name == "gap" || name == "columns" || name == "rows" ||
         name == "scrollOffset" || name == "scrollPin" || name == "movement" ||
         name == "placement") {
         return DirtyReason::layout;
     }
-    if (name == "variant") return DirtyReason::style;
-    if (name == "semantics") return DirtyReason::semantics;
+    if (name == "variant")
+        return DirtyReason::style;
+    if (name == "semantics")
+        return DirtyReason::semantics;
     return DirtyReason::properties;
 }
 
@@ -128,28 +159,21 @@ struct SiblingKey final {
            reason == DirtyReason::scale;
 }
 
-[[nodiscard]] std::string child_path(
-    const std::string_view parent,
-    const std::size_t index
-) {
-    return parent == "/"
-               ? "/" + std::to_string(index)
-               : std::string(parent) + "/" + std::to_string(index);
+[[nodiscard]] std::string child_path(const std::string_view parent, const std::size_t index) {
+    return parent == "/" ? "/" + std::to_string(index)
+                         : std::string(parent) + "/" + std::to_string(index);
 }
 
 } // namespace
 
-ReconcileStats RetainedTree::reconcile(
-    std::shared_ptr<const DescriptionNode> root,
-    const ExitRetention& exit_retention
-) {
-    if (root == nullptr) throw std::invalid_argument("retained reconciliation requires a root description");
+ReconcileStats RetainedTree::reconcile(std::shared_ptr<const DescriptionNode> root,
+                                       const ExitRetention& exit_retention) {
+    if (root == nullptr)
+        throw std::invalid_argument("retained reconciliation requires a root description");
     ReconcileStats stats;
     bool layout_invalidated = false;
-    root_ = reconcile_node(
-        std::move(root_), std::move(root), nullptr, 0U, "/", stats,
-        layout_invalidated, exit_retention
-    );
+    root_ = reconcile_node(std::move(root_), std::move(root), nullptr, 0U, "/", stats,
+                           layout_invalidated, exit_retention);
     if (stats.changed()) {
         if (generation_ == std::numeric_limits<std::uint64_t>::max()) {
             throw std::overflow_error("retained tree generation exhausted");
@@ -157,28 +181,23 @@ ReconcileStats RetainedTree::reconcile(
         ++generation_;
         invalidate_description_snapshot();
     }
-    if (layout_invalidated) invalidate_layout();
+    if (layout_invalidated)
+        invalidate_layout();
     stats.generation = generation_;
-    if (stats.changed()) rebuild_indexes();
+    if (stats.changed())
+        rebuild_indexes();
     return stats;
 }
 
 std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
-    std::unique_ptr<RetainedNode> existing,
-    std::shared_ptr<const DescriptionNode> description,
-    RetainedNode* const parent,
-    const std::size_t source_index,
-    std::string structural_path,
-    ReconcileStats& stats,
-    bool& layout_invalidated,
-    const ExitRetention& exit_retention
-) {
+    std::unique_ptr<RetainedNode> existing, std::shared_ptr<const DescriptionNode> description,
+    RetainedNode* const parent, const std::size_t source_index, std::string structural_path,
+    ReconcileStats& stats, bool& layout_invalidated, const ExitRetention& exit_retention) {
     const bool compatible = existing != nullptr &&
                             existing->description_->type == description->type &&
                             existing->description_->key == description->key;
     if (compatible && existing->description_ == description && existing->parent_ == parent &&
-        existing->source_index_ == source_index &&
-        existing->structural_path_ == structural_path &&
+        existing->source_index_ == source_index && existing->structural_path_ == structural_path &&
         existing->subtree_all_attached_) {
         stats.reused += existing->subtree_node_count_;
         stats.materialized += existing->subtree_materialized_child_count_;
@@ -189,8 +208,7 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
     if (!compatible) {
         detach(std::move(existing), &stats);
         existing = std::unique_ptr<RetainedNode>(new RetainedNode(
-            next_identity(), description, parent, source_index, std::move(structural_path)
-        ));
+            next_identity(), description, parent, source_index, std::move(structural_path)));
         hydrate_persistence(*existing);
         ++stats.created;
         bump_dirty_generation(DirtyReason::structure);
@@ -230,8 +248,7 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
             node_updated = true;
         }
         const bool sequence_changed =
-            (previous.virtual_sequence == nullptr) !=
-                (description->virtual_sequence == nullptr) ||
+            (previous.virtual_sequence == nullptr) != (description->virtual_sequence == nullptr) ||
             (previous.virtual_sequence != nullptr &&
              !previous.virtual_sequence->same_generation(*description->virtual_sequence));
         const bool virtual_metadata_changed =
@@ -254,10 +271,7 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
             if (current == previous.properties.end() ||
                 !expression_value_equal(current->second, next)) {
                 const DirtyReason reason = property_reason(
-                    name,
-                    current != previous.properties.end() ? &current->second : nullptr,
-                    &next
-                );
+                    name, current != previous.properties.end() ? &current->second : nullptr, &next);
                 existing->mark_dirty(reason);
                 bump_dirty_generation(reason);
                 node_layout_updated = node_layout_updated || affects_layout(reason);
@@ -317,7 +331,8 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
             }
             layout_invalidated = true;
         }
-        if (compatible && node_updated) ++stats.updated;
+        if (compatible && node_updated)
+            ++stats.updated;
         existing->refresh_subtree_metadata();
         return existing;
     }
@@ -326,9 +341,8 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
     MaterializationRange range{0U, child_count};
     if (description->materialization.has_value()) {
         range.start = std::min(description->materialization->start, child_count);
-        range.end_exclusive = std::clamp(
-            description->materialization->end_exclusive, range.start, child_count
-        );
+        range.end_exclusive =
+            std::clamp(description->materialization->end_exclusive, range.start, child_count);
     }
 
     std::vector<std::uint64_t> previous_order;
@@ -340,9 +354,8 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
         const std::uint64_t identity = child->identity_;
         previous_order.push_back(identity);
         if (child->description_->key.has_value()) {
-            keyed.emplace(
-                SiblingKey{child->description_->type, *child->description_->key}, identity
-            );
+            keyed.emplace(SiblingKey{child->description_->type, *child->description_->key},
+                          identity);
         } else {
             positional.emplace(child->source_index_, identity);
         }
@@ -358,9 +371,8 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
         if (child_description->key.has_value()) {
             const SiblingKey key{child_description->type, *child_description->key};
             if (!next_keys.insert(*child_description->key).second) {
-                throw std::invalid_argument(
-                    "description siblings contain duplicate key '" + *child_description->key + "'"
-                );
+                throw std::invalid_argument("description siblings contain duplicate key '" +
+                                            *child_description->key + "'");
             }
             if (const auto found = keyed.find(key); found != keyed.end()) {
                 matched_identity = found->second;
@@ -381,28 +393,22 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
             available.erase(found);
         }
         bool child_layout_invalidated = false;
-        existing->children_.push_back(reconcile_node(
-            std::move(child_existing),
-            std::move(child_description),
-            existing.get(),
-            index,
-            child_path(existing->structural_path_, index),
-            stats,
-            child_layout_invalidated,
-            exit_retention
-        ));
+        existing->children_.push_back(
+            reconcile_node(std::move(child_existing), std::move(child_description), existing.get(),
+                           index, child_path(existing->structural_path_, index), stats,
+                           child_layout_invalidated, exit_retention));
         node_layout_updated = node_layout_updated || child_layout_invalidated;
     }
 
     bool removed_children = false;
     for (const std::uint64_t identity : previous_order) {
         const auto found = available.find(identity);
-        if (found == available.end()) continue;
+        if (found == available.end())
+            continue;
         std::unique_ptr<RetainedNode> removed = std::move(found->second);
         available.erase(found);
         const bool already_exiting = removed->lifecycle_ == RetainedLifecycle::exiting;
-        const bool retain = already_exiting ||
-                            (exit_retention && exit_retention(*removed));
+        const bool retain = already_exiting || (exit_retention && exit_retention(*removed));
         if (!retain) {
             removed_children = true;
             detach(std::move(removed), &stats);
@@ -415,18 +421,15 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
             bump_dirty_generation(DirtyReason::animation);
         }
         const std::size_t retained_index = existing->children_.size();
-        rebase_subtree(
-            *removed,
-            existing.get(),
-            retained_index,
-            child_path(existing->structural_path_, retained_index)
-        );
+        rebase_subtree(*removed, existing.get(), retained_index,
+                       child_path(existing->structural_path_, retained_index));
         existing->children_.push_back(std::move(removed));
     }
 
     std::vector<std::uint64_t> next_order;
     next_order.reserve(existing->children_.size());
-    for (const auto& child : existing->children_) next_order.push_back(child->identity_);
+    for (const auto& child : existing->children_)
+        next_order.push_back(child->identity_);
     if (removed_children || (compatible && previous_order != next_order)) {
         existing->mark_dirty(DirtyReason::structure);
         bump_dirty_generation(DirtyReason::structure);
@@ -442,21 +445,17 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
         }
         layout_invalidated = true;
     }
-    if (compatible && node_updated) ++stats.updated;
+    if (compatible && node_updated)
+        ++stats.updated;
     existing->refresh_subtree_metadata();
     return existing;
 }
 
 ReconcileStats RetainedTree::realize_children(
-    const std::uint64_t parent_identity,
-    std::shared_ptr<const DescriptionChildren> provider,
-    std::shared_ptr<const Theme> projected_theme,
-    std::optional<std::string> projected_theme_scope,
-    const std::uint64_t theme_generation,
-    MaterializationRange range,
-    std::vector<RealizedDescriptionChild> children,
-    const ExitRetention& exit_retention
-) {
+    const std::uint64_t parent_identity, std::shared_ptr<const DescriptionChildren> provider,
+    std::shared_ptr<const Theme> projected_theme, std::optional<std::string> projected_theme_scope,
+    const std::uint64_t theme_generation, MaterializationRange range,
+    std::vector<RealizedDescriptionChild> children, const ExitRetention& exit_retention) {
     if (provider == nullptr) {
         throw std::invalid_argument("virtual realization requires a description provider");
     }
@@ -477,28 +476,25 @@ ReconcileStats RetainedTree::realize_children(
         if (children[offset].source_index != range.start + offset ||
             children[offset].description == nullptr) {
             throw std::invalid_argument(
-                "virtual realization rows must be non-null and ordered by source index"
-            );
+                "virtual realization rows must be non-null and ordered by source index");
         }
     }
     std::set<std::string, std::less<>> desired_keys;
     for (const RealizedDescriptionChild& child : children) {
-        if (!child.description->key.has_value()) continue;
+        if (!child.description->key.has_value())
+            continue;
         if (!desired_keys.insert(*child.description->key).second) {
-            throw std::invalid_argument(
-                "virtual collection contains duplicate key '" +
-                *child.description->key + "'"
-            );
+            throw std::invalid_argument("virtual collection contains duplicate key '" +
+                                        *child.description->key + "'");
         }
     }
 
     ReconcileStats stats;
     bool layout_invalidated = false;
-    const bool same_generation =
-        parent->realization_provider_ == provider &&
-        parent->realization_theme_ == projected_theme &&
-        parent->realization_theme_scope_ == projected_theme_scope &&
-        parent->realization_theme_generation_ == theme_generation;
+    const bool same_generation = parent->realization_provider_ == provider &&
+                                 parent->realization_theme_ == projected_theme &&
+                                 parent->realization_theme_scope_ == projected_theme_scope &&
+                                 parent->realization_theme_generation_ == theme_generation;
     if (!same_generation) {
         parent->realization_cache_.clear();
         parent->realization_cache_order_.clear();
@@ -514,9 +510,8 @@ ReconcileStats RetainedTree::realize_children(
         const std::uint64_t identity = child->identity_;
         previous_order.push_back(identity);
         if (child->description_->key.has_value()) {
-            keyed.emplace(
-                SiblingKey{child->description_->type, *child->description_->key}, identity
-            );
+            keyed.emplace(SiblingKey{child->description_->type, *child->description_->key},
+                          identity);
         } else {
             positional.emplace(child->source_index_, identity);
         }
@@ -555,36 +550,27 @@ ReconcileStats RetainedTree::realize_children(
         }
         bool child_layout_invalidated = false;
         parent->children_.push_back(reconcile_node(
-            std::move(existing),
-            std::move(realized.description),
-            parent,
-            realized.source_index,
-            child_path(parent->structural_path_, realized.source_index),
-            stats,
-            child_layout_invalidated,
-            exit_retention
-        ));
+            std::move(existing), std::move(realized.description), parent, realized.source_index,
+            child_path(parent->structural_path_, realized.source_index), stats,
+            child_layout_invalidated, exit_retention));
         layout_invalidated = layout_invalidated || child_layout_invalidated;
     }
 
     bool removed_children = false;
     for (const std::uint64_t identity : previous_order) {
         const auto found = available.find(identity);
-        if (found == available.end()) continue;
+        if (found == available.end())
+            continue;
         std::unique_ptr<RetainedNode> removed = std::move(found->second);
         available.erase(found);
         if (same_generation && removed->lifecycle_ == RetainedLifecycle::attached) {
             const std::size_t cached_index = removed->source_index_;
-            parent->realization_cache_.insert_or_assign(
-                cached_index,
-                removed->description_
-            );
+            parent->realization_cache_.insert_or_assign(cached_index, removed->description_);
             std::erase(parent->realization_cache_order_, cached_index);
             parent->realization_cache_order_.push_back(cached_index);
         }
         const bool already_exiting = removed->lifecycle_ == RetainedLifecycle::exiting;
-        const bool retain = already_exiting ||
-                            (exit_retention && exit_retention(*removed));
+        const bool retain = already_exiting || (exit_retention && exit_retention(*removed));
         if (!retain) {
             removed_children = true;
             detach(std::move(removed), &stats);
@@ -598,12 +584,8 @@ ReconcileStats RetainedTree::realize_children(
         }
         // An exiting virtual child retains its source coordinate so layout/motion can keep
         // interpreting it in the collection's extent space.
-        rebase_subtree(
-            *removed,
-            parent,
-            removed->source_index_,
-            child_path(parent->structural_path_, removed->source_index_)
-        );
+        rebase_subtree(*removed, parent, removed->source_index_,
+                       child_path(parent->structural_path_, removed->source_index_));
         parent->children_.push_back(std::move(removed));
     }
 
@@ -613,11 +595,8 @@ ReconcileStats RetainedTree::realize_children(
     parent->realization_theme_generation_ = theme_generation;
     parent->realized_range_ = range;
     const std::size_t window = range.end_exclusive - range.start;
-    const std::size_t cache_capacity = std::clamp(
-        window > 64U ? std::size_t{256U} : window * 4U,
-        std::size_t{32U},
-        std::size_t{256U}
-    );
+    const std::size_t cache_capacity = std::clamp(window > 64U ? std::size_t{256U} : window * 4U,
+                                                  std::size_t{32U}, std::size_t{256U});
     while (parent->realization_cache_order_.size() > cache_capacity) {
         const std::size_t expired = parent->realization_cache_order_.front();
         parent->realization_cache_order_.pop_front();
@@ -626,7 +605,8 @@ ReconcileStats RetainedTree::realize_children(
     parent->warm_realization_state_scopes_.clear();
     for (const auto& [index, description] : parent->realization_cache_) {
         static_cast<void>(index);
-        if (description->materialization_result == nullptr) continue;
+        if (description->materialization_result == nullptr)
+            continue;
         const runtime::StateScopeSet& scopes =
             description->materialization_result->owned_state_scopes;
         parent->warm_realization_state_scopes_.insert(scopes.begin(), scopes.end());
@@ -634,7 +614,8 @@ ReconcileStats RetainedTree::realize_children(
 
     std::vector<std::uint64_t> next_order;
     next_order.reserve(parent->children_.size());
-    for (const auto& child : parent->children_) next_order.push_back(child->identity_);
+    for (const auto& child : parent->children_)
+        next_order.push_back(child->identity_);
     const bool structure_changed = removed_children || previous_order != next_order;
     if (structure_changed) {
         static_cast<void>(mark(parent_identity, DirtyReason::structure));
@@ -659,51 +640,41 @@ ReconcileStats RetainedTree::realize_children(
     return stats;
 }
 
-void RetainedTree::mark_subtree_lifecycle(
-    RetainedNode& node,
-    const RetainedLifecycle lifecycle
-) noexcept {
+void RetainedTree::mark_subtree_lifecycle(RetainedNode& node,
+                                          const RetainedLifecycle lifecycle) noexcept {
     node.lifecycle_ = lifecycle;
-    for (auto& child : node.children_) mark_subtree_lifecycle(*child, lifecycle);
+    for (auto& child : node.children_)
+        mark_subtree_lifecycle(*child, lifecycle);
     node.refresh_subtree_metadata();
 }
 
-void RetainedTree::rebase_subtree(
-    RetainedNode& node,
-    RetainedNode* const parent,
-    const std::size_t source_index,
-    std::string structural_path
-) {
+void RetainedTree::rebase_subtree(RetainedNode& node, RetainedNode* const parent,
+                                  const std::size_t source_index, std::string structural_path) {
     node.parent_ = parent;
     node.source_index_ = source_index;
     node.structural_path_ = std::move(structural_path);
     for (std::size_t index = 0U; index < node.children_.size(); ++index) {
-        rebase_subtree(
-            *node.children_[index],
-            &node,
-            index,
-            child_path(node.structural_path_, index)
-        );
+        rebase_subtree(*node.children_[index], &node, index,
+                       child_path(node.structural_path_, index));
     }
 }
 
 std::size_t RetainedTree::prune_exiting(const ExitCompletion& exit_completion) {
-    if (!exit_completion || root_ == nullptr) return 0U;
+    if (!exit_completion || root_ == nullptr)
+        return 0U;
     std::size_t detached = 0U;
     const auto prune = [&](auto&& self, RetainedNode& parent) -> void {
         // An EXITING child is one retained lifecycle boundary. Do not prune eligible
         // descendants first: doing so can erase the only exit attachment that justified
         // retaining the ancestor and strand a hollow EXITING subtree forever.
         for (auto& child : parent.children_) {
-            if (child->lifecycle_ != RetainedLifecycle::exiting) self(self, *child);
+            if (child->lifecycle_ != RetainedLifecycle::exiting)
+                self(self, *child);
         }
         const bool changed = std::ranges::any_of(
-            parent.children_,
-            [&exit_completion](const std::unique_ptr<RetainedNode>& child) {
-                return child->lifecycle_ == RetainedLifecycle::exiting &&
-                       exit_completion(*child);
-            }
-        );
+            parent.children_, [&exit_completion](const std::unique_ptr<RetainedNode>& child) {
+                return child->lifecycle_ == RetainedLifecycle::exiting && exit_completion(*child);
+            });
         if (changed) {
             std::vector<std::unique_ptr<RetainedNode>> retained;
             retained.reserve(parent.children_.size());
@@ -726,7 +697,8 @@ std::size_t RetainedTree::prune_exiting(const ExitCompletion& exit_completion) {
         parent.refresh_subtree_metadata();
     };
     prune(prune, *root_);
-    if (detached == 0U) return 0U;
+    if (detached == 0U)
+        return 0U;
     if (generation_ == std::numeric_limits<std::uint64_t>::max()) {
         throw std::overflow_error("retained tree generation exhausted");
     }

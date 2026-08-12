@@ -388,9 +388,9 @@ const runtime::StateScopeSet& RetainedNode::warm_realization_state_scopes() cons
 
 DirtyGenerationSnapshot RetainedNode::dirty_generations() const noexcept {
     return DirtyGenerationSnapshot{
-        dirty_generations_[0U], dirty_generations_[1U], dirty_generations_[2U],
-        dirty_generations_[3U], dirty_generations_[4U], dirty_generations_[5U],
-        dirty_generations_[6U], dirty_generations_[7U], dirty_generations_[8U],
+        dirty_generations_[0U], dirty_generations_[1U],  dirty_generations_[2U],
+        dirty_generations_[3U], dirty_generations_[4U],  dirty_generations_[5U],
+        dirty_generations_[6U], dirty_generations_[7U],  dirty_generations_[8U],
         dirty_generations_[9U], dirty_generations_[10U],
     };
 }
@@ -400,12 +400,16 @@ const runtime::Value* RetainedNode::retained_value(const std::string_view name) 
     return found != retained_values_.end() ? &found->second : nullptr;
 }
 
-bool RetainedNode::set_retained_value(std::string name, runtime::Value value) {
+bool RetainedNode::set_retained_value(const std::string_view name, runtime::Value value) {
     validate_text(name, "retained value name");
     const auto found = retained_values_.find(name);
-    if (found != retained_values_.end() && found->second == value)
-        return false;
-    retained_values_.insert_or_assign(std::move(name), std::move(value));
+    if (found != retained_values_.end()) {
+        if (found->second == value)
+            return false;
+        found->second = std::move(value);
+        return true;
+    }
+    retained_values_.emplace(std::string(name), std::move(value));
     return true;
 }
 
@@ -555,9 +559,9 @@ std::uint64_t RetainedTree::dirty_generation(const DirtyReason reason) const noe
 
 DirtyGenerationSnapshot RetainedTree::dirty_generations() const noexcept {
     return DirtyGenerationSnapshot{
-        dirty_generations_[0U], dirty_generations_[1U], dirty_generations_[2U],
-        dirty_generations_[3U], dirty_generations_[4U], dirty_generations_[5U],
-        dirty_generations_[6U], dirty_generations_[7U], dirty_generations_[8U],
+        dirty_generations_[0U], dirty_generations_[1U],  dirty_generations_[2U],
+        dirty_generations_[3U], dirty_generations_[4U],  dirty_generations_[5U],
+        dirty_generations_[6U], dirty_generations_[7U],  dirty_generations_[8U],
         dirty_generations_[9U], dirty_generations_[10U],
     };
 }
@@ -617,12 +621,12 @@ bool RetainedTree::mark(const std::uint64_t identity, const DirtyReason reason) 
     return !was_dirty;
 }
 
-bool RetainedTree::set_retained_value(const std::uint64_t identity, std::string name,
+bool RetainedTree::set_retained_value(const std::uint64_t identity, const std::string_view name,
                                       runtime::Value value, const DirtyReason reason) {
     RetainedNode* node = find_identity(identity);
-    if (node == nullptr || !node->set_retained_value(name, value))
+    if (node == nullptr || !node->set_retained_value(name, std::move(value)))
         return false;
-    persist_retained_value(*node, name, value);
+    persist_retained_value(*node, name, *node->retained_value(name));
     invalidate_description_snapshot();
     static_cast<void>(mark(identity, reason));
     return true;
@@ -660,10 +664,10 @@ bool RetainedTree::set_presentation_value(const std::uint64_t identity, std::str
     return true;
 }
 
-bool RetainedTree::set_paint_value(const std::uint64_t identity, std::string name,
+bool RetainedTree::set_paint_value(const std::uint64_t identity, const std::string_view name,
                                    runtime::Value value) {
     RetainedNode* node = find_identity(identity);
-    if (node == nullptr || !node->set_retained_value(std::move(name), std::move(value))) {
+    if (node == nullptr || !node->set_retained_value(name, std::move(value))) {
         return false;
     }
     invalidate_description_snapshot();
@@ -671,10 +675,10 @@ bool RetainedTree::set_paint_value(const std::uint64_t identity, std::string nam
     return true;
 }
 
-bool RetainedTree::set_input_value(const std::uint64_t identity, std::string name,
+bool RetainedTree::set_input_value(const std::uint64_t identity, const std::string_view name,
                                    runtime::Value value) {
     RetainedNode* node = find_identity(identity);
-    if (node == nullptr || !node->set_retained_value(std::move(name), std::move(value))) {
+    if (node == nullptr || !node->set_retained_value(name, std::move(value))) {
         return false;
     }
     invalidate_description_snapshot();

@@ -2218,11 +2218,17 @@ void test_anchored_portal_is_out_of_flow_and_flips() {
                                  {"height", runtime::Value(20.0)},
                                  {"width", runtime::Value(100.0)},
                              })));
-    const auto popup = node("Panel", "popup", {},
+    const auto popup_child = node("Panel", "popup.child", {},
+                                  layout_properties(object({
+                                      {"height", runtime::Value(10.0)},
+                                      {"width", runtime::Value(10.0)},
+                                  })));
+    const auto popup = node("Panel", "popup", {popup_child},
                             layout_properties(object({
                                 {"anchorAlign", runtime::Value("END")},
                                 {"anchorFlip", runtime::Value(true)},
                                 {"anchorGap", runtime::Value(5.0)},
+                                {"anchorCrossOffset", runtime::Value(3.0)},
                                 {"anchorShift", runtime::Value(true)},
                                 {"anchorSide", runtime::Value("BOTTOM")},
                                 {"anchorTarget", runtime::Value("anchor")},
@@ -2269,7 +2275,8 @@ void test_anchored_portal_is_out_of_flow_and_flips() {
     check(anchor_record != nullptr && popup_record != nullptr,
           "anchored portal fixture did not arrange both records");
     check_near(anchor_record->bounds.y, 80.0, "portal participated in its parent's column flow");
-    check_near(popup_record->bounds.x, 0.0, "matched portal width did not preserve END alignment");
+    check_near(popup_record->bounds.x, 3.0,
+               "portal did not apply its authored cross-axis offset after END alignment");
     check_near(popup_record->bounds.width, 100.0,
                "portal did not match its anchor width before arrangement");
     check_near(popup_record->bounds.y, 35.0,
@@ -2281,6 +2288,26 @@ void test_anchored_portal_is_out_of_flow_and_flips() {
                "point-anchored portal did not shift inside the viewport");
     check_near(point_record->bounds.y, 70.0,
                "point-anchored portal did not flip above its pointer anchor");
+    const std::uint64_t popup_child_identity = tree.find_key("popup.child")->identity();
+    const auto popup_without_child = node("Panel", "popup", {}, popup->properties);
+    const auto root_without_popup_child =
+        node("Panel", "root", {popup_without_child, point_popup, anchor}, root->properties);
+    static_cast<void>(tree.reconcile(root_without_popup_child));
+    const LayoutResult& updated = layout.layout(tree, environment);
+    check(updated.find(tree.find_key("popup")->identity()) != nullptr &&
+              updated.find(popup_child_identity) == nullptr,
+          "fixed-size portal retained a removed child's measured node");
+    DescriptionNode::Properties hidden_popup_properties = popup_without_child->properties;
+    hidden_popup_properties.insert_or_assign("$layoutParticipates",
+                                             runtime::ExpressionValue(runtime::Value(false)));
+    const auto hidden_popup = node("Panel", "popup", {}, std::move(hidden_popup_properties));
+    const auto root_with_hidden_popup =
+        node("Panel", "root", {hidden_popup, point_popup, anchor}, root->properties);
+    static_cast<void>(tree.reconcile(root_with_hidden_popup));
+    const LayoutResult& hidden = layout.layout(tree, environment);
+    const LayoutRecord* hidden_popup_record = hidden.find(tree.find_key("popup")->identity());
+    check(hidden_popup_record != nullptr && hidden_popup_record->bounds.empty(),
+          "layout participation change retained the portal's previous bounds");
 }
 
 void test_virtualization_cache_queries_only_observed_keys() {

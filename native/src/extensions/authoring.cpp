@@ -423,6 +423,18 @@ bool Input::emit(const std::string_view action_id, const std::string_view payloa
                                                 view(event_kind), view(event_value_json))
                .status == STRATA_STATUS_OK;
 }
+bool Input::emit(const Parameter<action>& field, const std::string_view event_kind,
+                 const std::string_view event_value_json) noexcept {
+    return strata_widget_input_emit_property_action_json(context_, view(field.name),
+                                                         view(event_kind), view(event_value_json))
+               .status == STRATA_STATUS_OK;
+}
+bool Input::emit(const Parameter<action>& field, const std::string_view event_kind,
+                 const Color value) noexcept {
+    return strata_widget_input_emit_property_color_event(context_, view(field.name),
+                                                         view(event_kind), value)
+               .status == STRATA_STATUS_OK;
+}
 
 bool Input::emit_event(const std::string_view event_kind,
                        const std::string_view event_value_json) noexcept {

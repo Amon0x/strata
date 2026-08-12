@@ -390,6 +390,55 @@ style StatusDot { kind: "PANEL"; width: 8; height: 8; radius: 4; background: #55
 style StatusTitle { font: "strata:fonts/default-medium"; pixelSize: 13; color: #CCD3D7FF; }
 style StatusMeta { pixelSize: 11; color: #747F87FF; }
 
+style ColorSettingRow extends Clear {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 70;
+  alignItems: "CENTER";
+  gap: 18;
+}
+style ColorSwatchButton {
+  kind: "PANEL";
+  width: 62;
+  height: 38;
+  padding: 4;
+  radius: 11;
+  background: #0D1217E8;
+  border: { width: 1, color: #D8E2E83D };
+  focusRing: { width: 2, color: #B9D3E284 };
+}
+style ColorPickerPopup {
+  kind: "COLUMN";
+  width: 430;
+  height: 286;
+  padding: 10;
+  radius: 15;
+  background: null;
+  border: null;
+  anchorSide: "RIGHT";
+  anchorAlign: "CENTER";
+  anchorGap: 12;
+  anchorFlip: true;
+  anchorShift: true;
+  effect: effect(
+    "deck:optic-glass",
+    backdropSource: "CURRENT",
+    blurRadius: 14,
+    downsample: 2,
+    refraction: 1.0,
+    tint: #53616B38,
+    saturation: 0.76,
+    highlight: 0.56,
+    noise: 0.08,
+    transparency: 0.72,
+    thickness: 1.0,
+    metallic: 0.82,
+    edgeContrast: 1.04,
+    contrast: 0.88,
+    luminosity: 1.0
+  );
+}
+
 style ProfileGrid extends Clear { kind: "GRID"; width: { weight: 1 }; height: "content"; gap: 10; }
 style ProfileCard {
   kind: "COLUMN";
@@ -714,6 +763,49 @@ component ChoiceSetting(
   }
 }
 
+component ColorSetting(color: color, open: boolean, toggle: action, dismiss: action, change: action) {
+  Panel(style: ColorSettingRow) {
+    Panel(style: ChoiceCopy) {
+      Text(text: "Workspace accent", style: ChoiceLabel)
+      Text(text: "Opens an authored root-space popup", style: ChoiceDescription)
+    }
+    Panel(
+      key: "deck.color.swatch",
+      style: ColorSwatchButton,
+      behaviors: [
+        { id: "strata.focusable" },
+        { id: "strata.hoverable" },
+        { id: "strata.activate", action: toggle }
+      ],
+      semantics: { role: "BUTTON", label: "Edit workspace accent color" }
+    ) {
+      DeckColorSwatch(
+        key: "deck.color.swatch.preview",
+        value: color,
+        layout: { width: { weight: 1 }, height: { weight: 1 } }
+      )
+    }
+    if open {
+      Popup(
+        key: "deck.color.popup",
+        open: true,
+        onDismiss: dismiss,
+        style: ColorPickerPopup,
+        layout: { anchorTarget: "deck.color.swatch" },
+        semantics: { label: "Workspace accent color picker" }
+      ) {
+        DeckColorPicker(
+          key: "deck.color.picker",
+          value: color,
+          compact: true,
+          onChange: change,
+          layout: { width: { weight: 1 }, height: { weight: 1 } }
+        )
+      }
+    }
+  }
+}
+
 component DeckCheckboxPresentation(
   key: key,
   label: string,
@@ -967,19 +1059,27 @@ component ProfilesPage() {
 }
 
 component ColorPage() {
+  state pickerOpen = false;
+  state accent = #4890EBFF;
+
   Panel(style: SettingsStack) {
     SectionTitle(label: "WORKSPACE ACCENT")
-    DeckColorPicker(
-      key: "deck.color.picker",
-      layout: { width: { weight: 1 }, height: 330 }
-    )
+    Panel(style: SettingsCard) {
+      ColorSetting(
+        color: accent,
+        open: pickerOpen,
+        toggle: action("state.toggle", name: "pickerOpen"),
+        dismiss: action("state.set", name: "pickerOpen", value: false),
+        change: action("state.setFromEvent", name: "accent")
+      )
+    }
     Panel(style: StatusCard) {
       Panel(style: StatusDot)
       Panel(style: ChoiceCopy) {
-        Text(text: "Native paint path", style: StatusTitle)
-        Text(text: "Drag feedback stays local · value commits on release", style: StatusMeta)
+        Text(text: "Authored popup · native picker leaf", style: StatusTitle)
+        Text(text: "Root-space placement · local drag paint · one release commit", style: StatusMeta)
       }
-      Text(text: "FRAME-BOUND", style: DeckScope)
+      Text(text: "RETAINED", style: DeckScope)
     }
   }
 }

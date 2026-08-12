@@ -646,11 +646,12 @@ void test_external_package_and_schema_projection() {
           "duplicate schema package declarations were accepted");
 
     strata::host::SelectedExtensions control = strata::host::select_extensions(declared);
-    check(control.widgets.size() == 4U && control.widget_inputs.size() == 4U &&
+    check(control.widgets.size() == 5U && control.widget_inputs.size() == 4U &&
               control.behaviors.empty(),
           "the Control Deck package did not project widget pointer input separately");
     const std::string control_schema = control.packages.front().schema_json();
-    check(control_schema.find(R"("name":"DeckColorPicker")") != std::string::npos &&
+    check(control_schema.find(R"("name":"DeckColorSwatch")") != std::string::npos &&
+              control_schema.find(R"("name":"DeckColorPicker")") != std::string::npos &&
               control_schema.find(R"("name":"DeckGradientEditor")") != std::string::npos &&
               control_schema.find(R"("name":"DeckInertialScrubber")") != std::string::npos &&
               control_schema.find(R"("name":"DeckCurveEditor")") != std::string::npos &&
