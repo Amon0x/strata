@@ -118,6 +118,9 @@ struct HarnessCounters final {
     std::uint64_t drag_semantics = 0U;
     std::uint64_t hit_bounds = 0U;
     std::uint64_t behavior_events = 0U;
+    std::uint64_t behavior_scroll_events = 0U;
+    std::uint64_t behavior_key_events = 0U;
+    std::uint64_t behavior_focus_events = 0U;
     std::uint64_t widget_pointer_events = 0U;
     std::uint64_t widget_scroll_events = 0U;
     std::uint64_t commit_events = 0U;
@@ -139,6 +142,9 @@ struct HarnessCounters final {
     bool scroll_local_position = false;
     bool measured_text = false;
     bool behavior_emit_accepted = false;
+    bool behavior_scroll_routed = false;
+    bool behavior_key_routed = false;
+    bool behavior_focus_routed = false;
     bool pointer_focus_hidden = false;
     bool keyboard_focus_visible = false;
     bool pointer_claimed = false;
@@ -453,6 +459,26 @@ bool harness_pointer(BehaviorInput& input, const Pointer& pointer) {
     return false;
 }
 
+bool harness_behavior_scroll(BehaviorInput&, const Scroll& scroll) {
+    ++counters.behavior_scroll_events;
+    counters.behavior_scroll_routed = scroll.phase != Pointer::Phase::target &&
+                                      scroll.local_x == 8.0 && scroll.local_y == 48.0 &&
+                                      scroll.delta_y == 2.0;
+    return false;
+}
+
+bool harness_behavior_key(BehaviorInput&, const Key& key) {
+    ++counters.behavior_key_events;
+    counters.behavior_key_routed = key.name == "Right";
+    return false;
+}
+bool harness_behavior_focus(BehaviorInput&, const Focus& focus) {
+    ++counters.behavior_focus_events;
+    counters.behavior_focus_routed = focus.kind == Focus::Kind::gained &&
+                                     focus.phase != Pointer::Phase::target && !focus.on_target;
+    return false;
+}
+
 [[nodiscard]] std::unique_ptr<Package> harness_package() {
     auto harness = widget("HarnessWidget")
                        .parameter(harness_step)
@@ -504,7 +530,11 @@ bool harness_pointer(BehaviorInput& input, const Pointer& pointer) {
                      .present(&frame_present);
 
     auto observer = behavior("harness.observe")
+                        .focusable()
                         .on_pointer(&harness_pointer)
+                        .on_scroll(&harness_behavior_scroll)
+                        .on_key(&harness_behavior_key)
+                        .on_focus(&harness_behavior_focus)
                         .emits(ActionContract{
                             "harness.observed",
                             "Harness behavior observation",
@@ -862,6 +892,8 @@ screen Main {
               counters.presentation_context_visible && counters.semantics_parameter_visible,
           "property presence or display scale was not exposed consistently to extension hooks");
     check(counters.behavior_events != 0U, "the behavior pointer hook did not run");
+    check(counters.behavior_focus_events != 0U && counters.behavior_focus_routed,
+          "the behavior focus hook lost its routed phase or transition");
     check(counters.hit_bounds != 0U, "the inspection hook did not narrow pointer hit testing");
     check(actions.calls != 0U && counters.behavior_emit_accepted,
           "package-declared actions did not dispatch through the runtime registry");
@@ -883,6 +915,8 @@ screen Main {
           "the key hook did not receive the focused key press");
     check(counters.keyboard_focus_visible,
           "keyboard input did not expose focus-visible state to the extension presenter");
+    check(counters.behavior_key_events != 0U && counters.behavior_key_routed,
+          "the behavior key hook did not observe the routed committed key press");
     strata_input_event focus_drag[2]{};
     focus_drag[0].struct_size = sizeof(strata_input_event);
     focus_drag[0].version = STRATA_INPUT_EVENT_VERSION_2;
@@ -926,6 +960,8 @@ screen Main {
     check(counters.widget_scroll_events == 1U && counters.scroll_local_position &&
               counters.input_state_round_tripped,
           "the extension scroll lifecycle lost target geometry or retained input state");
+    check(counters.behavior_scroll_events != 0U && counters.behavior_scroll_routed,
+          "the behavior scroll hook lost routed phase, local geometry, or delta");
     check(counters.drag_presentations == scroll_presentation_baseline &&
               counters.drag_semantics == scroll_semantics_baseline,
           "input-only retained state escaped into presentation or semantic work");
@@ -1182,6 +1218,14 @@ screen Main {
                   STRATA_STATUS_OK &&
               strata_surface_frame(surface, 15'000, &frame_info).status == STRATA_STATUS_OK,
           "a version-2 extension bundle prefix was rejected after scroll-table growth");
+    strata_surface_release(surface);
+    legacy_extensions.struct_size = STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_3_SIZE;
+    surface_config.id = view("harness.version-3-surface");
+    surface = nullptr;
+    check(strata_runtime_create_surface(runtime, &surface_config, &surface).status ==
+                  STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 16'000, &frame_info).status == STRATA_STATUS_OK,
+          "a version-3 extension bundle prefix was rejected after behavior-input growth");
     strata_surface_release(surface);
     strata_action_registration_release(activation_registration);
     strata_action_registration_release(observation_registration);

@@ -6,7 +6,7 @@
 
 ### `Banner`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -40,11 +40,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `activation` | `action` | unspecified | Emitted when the optional banner action is activated. |
+
+Retained state entries: 1 · Binding shorthands: 0
 
 ### `Breadcrumbs`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -75,11 +79,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 0 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `selection` | `onSelect` | unspecified | Carries the selected breadcrumb id. |
+
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `Button`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -113,11 +121,15 @@ Children: `false`
 | `command` | string | false | true | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 0 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `activation` | `onClick` | unspecified | Emitted after pointer or keyboard activation. |
+
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `Checkbox`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -154,11 +166,15 @@ Children: `false`
 | `bind` | any | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `checked change` | `onChange` | unspecified | Carries the newly requested checked value. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `ChipInput`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -194,11 +210,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `values change` | `onChange` | unspecified | Carries the complete token list. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `ComboBox`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -239,11 +259,16 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 2 · Retained state entries: 2 · Binding shorthands: 2
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `query change` | `onQuery` | unspecified | Carries the edited search query. |
+| `selection change` | `onChange` | unspecified | Carries the id of the chosen filtered option. |
+
+Retained state entries: 2 · Binding shorthands: 2
 
 ### `Command`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -285,11 +310,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 0 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `command invocation` | `action` | unspecified | Dispatched when any command surface invokes this command. |
+
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `CommandPalette`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -324,11 +353,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `picker selection` | `onSelect` | unspecified | Carries the id chosen from a custom quick-picker item source. |
+
+Retained state entries: 1 · Binding shorthands: 0
 
 ### `ContextMenu`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -364,11 +397,15 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `item selection` | `onSelect` | unspecified | Carries the selected context-menu item id. |
+
+Retained state entries: 1 · Binding shorthands: 0
 
 ### `Draw`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -398,11 +435,11 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `Field`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -447,11 +484,11 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 1 · Binding shorthands: 0
+Retained state entries: 1 · Binding shorthands: 0
 
 ### `Form`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -485,11 +522,15 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 0 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `accepted submit` | `onSubmit` | unspecified | Emitted only after enabled fields pass the configured validation policy. |
+
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `Grid`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -520,11 +561,11 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `IconButton`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -560,11 +601,15 @@ Children: `false`
 | `command` | string | false | true | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 0 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `activation` | `onClick` | unspecified | Emitted after pointer or keyboard activation. |
+
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `Image`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -596,11 +641,11 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `ItemGrid`
 
-Children: `false`
+Children: `false` · Capabilities: effective-scroll
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -637,17 +682,25 @@ Children: `false`
 | `onSelect` | action | false | false | — |
 | `onActivate` | action | false | false | — |
 | `onContext` | action | false | false | — |
+| `onScroll` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 3 · Retained state entries: 2 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `selection change` | `onSelect` | unspecified | Carries the complete stable-key selection from click, keyboard, or marquee. |
+| `item activation` | `onActivate` | unspecified | Carries the activated item key. |
+| `context request` | `onContext` | unspecified | Carries the item key and pointer position when available. |
+| `scroll` | `onScroll` | post-mutation | Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll. |
+
+Retained state entries: 2 · Binding shorthands: 1
 
 ### `List`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -679,11 +732,15 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `selection change` | `onSelect` | unspecified | Carries the key of the selected child. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `Menu`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -722,11 +779,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `item selection` | `onSelect` | unspecified | Carries the selected menu item id. |
+
+Retained state entries: 1 · Binding shorthands: 0
 
 ### `MenuBar`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -758,11 +819,11 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 1 · Binding shorthands: 0
+Retained state entries: 1 · Binding shorthands: 0
 
 ### `Modal`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -795,11 +856,15 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 0 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `dismissal request` | `onDismiss` | unspecified | Emitted when escape or the scrim requests closing a dismissible modal. |
+
+Retained state entries: 0 · Binding shorthands: 1
 
 ### `NumberField`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -837,11 +902,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 2 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `value change` | `onChange` | unspecified | Carries the constrained numeric value after commit or stepping. |
+
+Retained state entries: 2 · Binding shorthands: 1
 
 ### `Panel`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -871,11 +940,51 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 1 · Binding shorthands: 0
+Retained state entries: 1 · Binding shorthands: 0
+
+### `Popup`
+
+Children: `true` · Capabilities: —
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `key` | key | false | false | — |
+| `open` | boolean | false | true | — |
+| `defaultOpen` | boolean | false | false | — |
+| `layout` | layout | false | false | — |
+| `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
+| `style` | style | false | false | — |
+| `visualStyle` | style | false | false | — |
+| `effect` | effect | false | false | — |
+| `material` | material | false | false | — |
+| `transition` | animation | false | false | — |
+| `enter` | animation | false | false | — |
+| `exit` | animation | false | false | — |
+| `move` | animation | false | false | — |
+| `motions` | list of one of (map of any, map of any, map of any) | false | false | — |
+| `animateChanges` | map of any | false | true | — |
+| `animateContentSize` | map of any | false | true | — |
+| `disclosure` | map of any | false | true | — |
+| `contentKey` | key | false | false | — |
+| `contentTransition` | animation | false | false | — |
+| `contentTransitionMode` | one of (OUT_IN, TOGETHER) | false | false | — |
+| `stagger` | duration | false | false | — |
+| `semantics` | map of any | false | false | — |
+| `onDismiss` | action | false | false | — |
+| `textStyle` | style | false | false | — |
+| `textVisualStyle` | style | false | false | — |
+| `animation` | animation | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `dismiss request` | `onDismiss` | unspecified | Emitted for Escape and pointer activation outside the popup. |
+
+Retained state entries: 1 · Binding shorthands: 0
 
 ### `Progress`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -909,11 +1018,11 @@ Children: `false`
 | `textVisualStyle` | style | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `RadioGroup`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -948,11 +1057,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `selection change` | `onChange` | unspecified | Carries the id of the newly selected radio option. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `Repeater`
 
-Children: `true`
+Children: `true` · Capabilities: effective-scroll
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -963,6 +1076,7 @@ Children: `true`
 | `viewportInsets` | one of (number, map of any) | false | false | — |
 | `contentPadding` | one of (number, map of any) | false | false | — |
 | `scrollbarGutter` | number | false | false | — |
+| `onScroll` | action | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -987,11 +1101,15 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 2 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `scroll` | `onScroll` | post-mutation | Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll. |
+
+Retained state entries: 2 · Binding shorthands: 0
 
 ### `RichText`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1028,11 +1146,11 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `Scroll`
 
-Children: `true`
+Children: `true` · Capabilities: effective-scroll
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1043,6 +1161,7 @@ Children: `true`
 | `viewportInsets` | one of (number, map of any) | false | false | — |
 | `contentPadding` | one of (number, map of any) | false | false | — |
 | `scrollbarGutter` | number | false | false | — |
+| `onScroll` | action | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -1067,11 +1186,15 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 1 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `scroll` | `onScroll` | post-mutation | Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll. |
+
+Retained state entries: 1 · Binding shorthands: 0
 
 ### `Section`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1108,11 +1231,15 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `expanded change` | `onChange` | unspecified | Carries the requested expanded state. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `Select`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1155,11 +1282,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 2 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `selection change` | `onChange` | unspecified | Carries the id of the chosen option. |
+
+Retained state entries: 2 · Binding shorthands: 1
 
 ### `Slider`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1200,11 +1331,15 @@ Children: `false`
 | `bind` | any | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `value change` | `onChange` | unspecified | Carries the clamped and quantized value requested by the user. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `Slot`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1235,11 +1370,11 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `SplitPane`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1276,11 +1411,15 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `ratio change` | `onChange` | unspecified | Carries the clamped divider ratio requested by drag or keyboard input. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `StatusBar`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1310,11 +1449,11 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `Table`
 
-Children: `false`
+Children: `false` · Capabilities: effective-scroll
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1366,6 +1505,7 @@ Children: `false`
 | `onSort` | action | false | false | — |
 | `onColumnResize` | action | false | false | — |
 | `onColumnReorder` | action | false | false | — |
+| `onScroll` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
@@ -1375,11 +1515,21 @@ Children: `false`
 | `errorText` | string | false | false | — |
 | `emptyText` | string | false | false | — |
 
-Events: 6 · Retained state entries: 5 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `selection change` | `onSelect` | unspecified | Carries the complete stable-key row selection. |
+| `row activation` | `onActivate` | unspecified | Carries the activated row key. |
+| `row context request` | `onContext` | unspecified | Carries the row key and pointer position when available. |
+| `sort request` | `onSort` | unspecified | Carries a controlled column id and direction cycle; rows remain host ordered. |
+| `column width change` | `onColumnResize` | unspecified | Carries a column id and requested width. |
+| `column reorder` | `onColumnReorder` | unspecified | Carries a column id and target display index. |
+| `scroll` | `onScroll` | post-mutation | Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll. |
+
+Retained state entries: 5 · Binding shorthands: 1
 
 ### `Tabs`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1413,11 +1563,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `selection change` | `onChange` | unspecified | Carries the id of the newly selected tab. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `Text`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1454,11 +1608,11 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `TextArea`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1504,11 +1658,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `text change` | `onChange` | unspecified | Carries the accepted text after filtering and length constraints. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `TextBox`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1555,11 +1713,15 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `text change` | `onChange` | unspecified | Carries the accepted text after filtering and length constraints. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `ThemeScope`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1589,11 +1751,11 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `ToastRegion`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1627,11 +1789,11 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `Toggle`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1668,11 +1830,15 @@ Children: `false`
 | `bind` | any | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 1 · Retained state entries: 1 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `checked change` | `onChange` | unspecified | Carries the newly requested checked value. |
+
+Retained state entries: 1 · Binding shorthands: 1
 
 ### `Toolbar`
 
-Children: `false`
+Children: `false` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1704,11 +1870,11 @@ Children: `false`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 1 · Binding shorthands: 0
+Retained state entries: 1 · Binding shorthands: 0
 
 ### `Tooltip`
 
-Children: `true`
+Children: `true` · Capabilities: —
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1742,11 +1908,11 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 0 · Binding shorthands: 0
+Retained state entries: 0 · Binding shorthands: 0
 
 ### `TreeView`
 
-Children: `false`
+Children: `false` · Capabilities: effective-scroll
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1789,6 +1955,7 @@ Children: `false`
 | `onExpand` | action | false | false | — |
 | `onLoadChildren` | action | false | false | — |
 | `onDrop` | action | false | false | — |
+| `onScroll` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
@@ -1798,11 +1965,21 @@ Children: `false`
 | `errorText` | string | false | false | — |
 | `emptyText` | string | false | false | — |
 
-Events: 6 · Retained state entries: 3 · Binding shorthands: 1
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `selection change` | `onSelect` | unspecified | Carries the complete stable-key selection, anchor, and active key. |
+| `item activation` | `onActivate` | unspecified | Carries the activated stable item key. |
+| `context request` | `onContext` | unspecified | Carries the item key and pointer position when available. |
+| `expansion change` | `onExpand` | unspecified | Carries the requested expansion state and complete expanded-key set. |
+| `lazy children request` | `onLoadChildren` | unspecified | Carries the first expanded lazy node key. |
+| `tree drop` | `onDrop` | unspecified | Carries dragged keys, target key, and before/on/after position. |
+| `scroll` | `onScroll` | post-mutation | Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll. |
+
+Retained state entries: 3 · Binding shorthands: 1
 
 ### `VirtualList`
 
-Children: `true`
+Children: `true` · Capabilities: effective-scroll
 
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
@@ -1819,6 +1996,7 @@ Children: `true`
 | `viewportInsets` | one of (number, map of any) | false | false | — |
 | `contentPadding` | one of (number, map of any) | false | false | — |
 | `scrollbarGutter` | number | false | false | — |
+| `onScroll` | action | false | false | — |
 | `layout` | layout | false | false | — |
 | `variant` | one of (compact, danger, default, primary, rail, secondary, subtle) | false | false | — |
 | `style` | style | false | false | — |
@@ -1843,7 +2021,11 @@ Children: `true`
 | `animation` | animation | false | false | — |
 | `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
-Events: 0 · Retained state entries: 1 · Binding shorthands: 0
+| Event | Callback | Phase | Contract |
+|---|---|---|---|
+| `scroll` | `onScroll` | post-mutation | Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll. |
+
+Retained state entries: 1 · Binding shorthands: 0
 
 ## Behaviors
 
@@ -2334,6 +2516,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 |---|---|
 | `activeOverlay` | color |
 | `anchorAlign` | one of (CENTER, END, START) |
+| `anchorCrossOffset` | number |
 | `anchorFlip` | boolean |
 | `anchorGap` | number |
 | `anchorPoint` | map of number |
@@ -2429,6 +2612,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | Name | Type |
 |---|---|
 | `anchorAlign` | one of (CENTER, END, START) |
+| `anchorCrossOffset` | number |
 | `anchorFlip` | boolean |
 | `anchorGap` | number |
 | `anchorPoint` | map of number |

@@ -107,6 +107,7 @@ struct DeclaredWidgetEvent final {
     std::string name;
     std::string callback_parameter;
     std::string description;
+    std::string phase;
 };
 
 struct DeclaredRetainedState final {
@@ -121,6 +122,7 @@ struct DeclaredWidget final {
     std::vector<std::string> parameter_order;
     std::vector<DeclaredWidgetBinding> bindings;
     std::vector<DeclaredWidgetEvent> events;
+    std::vector<std::string> capabilities;
     std::vector<DeclaredRetainedState> retained_state;
     bool allows_children = false;
 };

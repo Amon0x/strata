@@ -293,7 +293,8 @@ void validate_catalog(const BuiltinCatalog& catalog) {
             validate_type(parameter.type, type_ids);
         }
         validate_type(helper.return_type, type_ids);
-        if (helper.vararg_type != nullptr) validate_type(helper.vararg_type, type_ids);
+        if (helper.vararg_type != nullptr)
+            validate_type(helper.vararg_type, type_ids);
     }
     for (const DeclaredBehavior& behavior : catalog.behaviors) {
         validate_type(behavior.options, type_ids);
@@ -309,8 +310,7 @@ void validate_catalog(const BuiltinCatalog& catalog) {
         for (const DeclaredProperty& parameter : effect.parameters) {
             validate_type(parameter.type, type_ids);
         }
-        if (effect.input != "BACKDROP" && effect.input != "CONTENT" &&
-            effect.input != "SHAPE") {
+        if (effect.input != "BACKDROP" && effect.input != "CONTENT" && effect.input != "SHAPE") {
             throw std::logic_error("built-in effect has an unsupported input");
         }
         for (const DeclaredEffect::Pass& pass : effect.passes) {
@@ -319,13 +319,11 @@ void validate_catalog(const BuiltinCatalog& catalog) {
             }
             const auto has_parameter = [&effect](const std::optional<std::string>& name) {
                 return !name.has_value() ||
-                    std::ranges::contains(effect.parameters, *name, &DeclaredProperty::name);
+                       std::ranges::contains(effect.parameters, *name, &DeclaredProperty::name);
             };
             if (!has_parameter(pass.radius_parameter) ||
                 !has_parameter(pass.downsample_parameter)) {
-                throw std::logic_error(
-                    "built-in effect pass references an undeclared parameter"
-                );
+                throw std::logic_error("built-in effect pass references an undeclared parameter");
             }
         }
     }
@@ -446,11 +444,14 @@ data::JsonValue export_builtin_registry(const BuiltinCatalog& catalog) {
         }
         std::vector<JsonValue> events;
         for (const DeclaredWidgetEvent& event : widget.events) {
-            events.push_back(object({
+            JsonValue::Object fields{
                 {"callbackParameter", JsonValue(event.callback_parameter)},
                 {"description", JsonValue(event.description)},
                 {"name", JsonValue(event.name)},
-            }));
+            };
+            if (!event.phase.empty())
+                fields.emplace_back("phase", JsonValue(event.phase));
+            events.emplace_back(std::move(fields));
         }
         std::vector<JsonValue> retained;
         for (const DeclaredRetainedState& state : widget.retained_state) {
@@ -462,6 +463,7 @@ data::JsonValue export_builtin_registry(const BuiltinCatalog& catalog) {
         widgets.push_back(object({
             {"allowsChildren", JsonValue(widget.allows_children)},
             {"bindings", array(std::move(bindings))},
+            {"capabilities", strings(widget.capabilities)},
             {"events", array(std::move(events))},
             {"name", JsonValue(widget.name)},
             {"parameters", array(std::move(parameters))},
@@ -538,14 +540,10 @@ data::JsonValue export_builtin_registry(const BuiltinCatalog& catalog) {
                 {"radius", JsonValue(pass.radius)},
             };
             if (pass.downsample_parameter.has_value()) {
-                encoded.emplace_back(
-                    "downsampleParameter", JsonValue(*pass.downsample_parameter)
-                );
+                encoded.emplace_back("downsampleParameter", JsonValue(*pass.downsample_parameter));
             }
             if (pass.radius_parameter.has_value()) {
-                encoded.emplace_back(
-                    "radiusParameter", JsonValue(*pass.radius_parameter)
-                );
+                encoded.emplace_back("radiusParameter", JsonValue(*pass.radius_parameter));
             }
             passes.emplace_back(std::move(encoded));
         }

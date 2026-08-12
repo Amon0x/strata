@@ -182,6 +182,27 @@ channels. Boolean/numeric/color retargeting interrupts from the displayed value.
 disclosure motion use the same retained layout/focus/input system. Reduced-motion surfaces resolve
 to the same final tree without a parallel behavior implementation.
 
+### Scroll observation
+
+Every built-in scroll viewport—`Scroll`, `Repeater`, `VirtualList`, `ItemGrid`, `Table`, and
+`TreeView`—accepts `onScroll`. It emits after the retained offset changes and has been clamped:
+
+```strata
+Scroll(
+  key: "results.viewport",
+  vertical: true,
+  onScroll: action("viewport.changed")
+) {
+  Results()
+}
+```
+
+The event value is `{ x, y }`; the structured event also exposes the same value as `offset`.
+Wheel/trackpad input, scrollbar drags, focus reveal, animated scrolling, and programmatic scrolling
+use this one post-mutation path. An unchanged or already-clamped offset emits nothing. The callback
+is an observer of effective state, not raw input: use a native extension behavior only when the
+mechanic needs capture/target/bubble wheel deltas before default scrolling.
+
 ### Typography rasterization
 
 Text uses the bundled Regular face and size-specific, TrueType-hinted grayscale masks by default at

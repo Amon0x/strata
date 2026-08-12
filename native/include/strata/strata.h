@@ -1486,11 +1486,66 @@ typedef struct strata_behavior_pointer_event {
     double y;
     uint32_t target;
     uint32_t reserved;
+    /* Optional suffix; absent from version-1 events. */
+    double local_x;
+    double local_y;
+    double delta_x;
+    double delta_y;
+    int64_t timestamp_nanoseconds;
 } strata_behavior_pointer_event;
 
 typedef strata_extension_input_result (*strata_behavior_pointer_fn)(
     void* user_data, strata_behavior_input_context* context,
     const strata_behavior_pointer_event* event);
+
+/** Wheel/trackpad event delivered to an attached behavior through routed input phases. */
+typedef struct strata_behavior_scroll_event {
+    size_t struct_size;
+    strata_behavior_event_phase phase;
+    uint32_t modifiers;
+    double x;
+    double y;
+    double local_x;
+    double local_y;
+    double delta_x;
+    double delta_y;
+    uint32_t target;
+    uint32_t reserved;
+} strata_behavior_scroll_event;
+
+typedef strata_extension_input_result (*strata_behavior_scroll_fn)(
+    void* user_data, strata_behavior_input_context* context,
+    const strata_behavior_scroll_event* event);
+
+/** Committed key or focus transition delivered to an attached behavior. */
+typedef struct strata_behavior_key_event {
+    size_t struct_size;
+    strata_behavior_event_phase phase;
+    uint32_t modifiers;
+    strata_string_view key;
+    uint32_t target;
+    uint32_t reserved;
+} strata_behavior_key_event;
+
+typedef strata_extension_input_result (*strata_behavior_key_fn)(
+    void* user_data, strata_behavior_input_context* context,
+    const strata_behavior_key_event* event);
+
+typedef uint32_t strata_behavior_focus_kind;
+#define STRATA_BEHAVIOR_FOCUS_GAINED UINT32_C(0)
+#define STRATA_BEHAVIOR_FOCUS_LOST UINT32_C(1)
+
+typedef struct strata_behavior_focus_event {
+    size_t struct_size;
+    strata_behavior_focus_kind kind;
+    strata_behavior_event_phase phase;
+    uint32_t target;
+    uint32_t reserved;
+} strata_behavior_focus_event;
+
+typedef strata_extension_input_result (*strata_behavior_focus_fn)(
+    void* user_data, strata_behavior_input_context* context,
+    const strata_behavior_focus_event* event);
 
 #define STRATA_BEHAVIOR_EXTENSION_FOCUSABLE (UINT64_C(1) << 0)
 #define STRATA_BEHAVIOR_EXTENSION_ACCEPTS_POINTER (UINT64_C(1) << 1)
@@ -1502,6 +1557,18 @@ typedef struct strata_behavior_extension {
     void* user_data;
     strata_behavior_pointer_fn pointer;
 } strata_behavior_extension;
+#define STRATA_BEHAVIOR_EXTENSION_VERSION_1_SIZE                                                   \
+    offsetof(strata_behavior_extension, pointer) + sizeof(strata_behavior_pointer_fn)
+
+/** Optional routed behavior input kept separate so version-1 descriptor strides stay stable. */
+typedef struct strata_behavior_input_extension {
+    size_t struct_size;
+    strata_string_view id;
+    void* user_data;
+    strata_behavior_scroll_fn scroll;
+    strata_behavior_key_fn key;
+    strata_behavior_focus_fn focus;
+} strata_behavior_input_extension;
 
 /** Widget-local pointer event. Surface coordinates remain available while capture leaves bounds. */
 typedef struct strata_widget_pointer_event {
@@ -1574,12 +1641,16 @@ typedef struct strata_surface_extension_bundle {
     size_t widget_input_count;
     const strata_widget_scroll_extension* widget_scrolls;
     size_t widget_scroll_count;
+    const strata_behavior_input_extension* behavior_inputs;
+    size_t behavior_input_count;
 } strata_surface_extension_bundle;
 
 #define STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE                                             \
     offsetof(strata_surface_extension_bundle, widget_inputs)
 #define STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE                                             \
     offsetof(strata_surface_extension_bundle, widget_scrolls)
+#define STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_3_SIZE                                             \
+    offsetof(strata_surface_extension_bundle, behavior_inputs)
 
 typedef struct strata_surface_config {
     size_t struct_size;

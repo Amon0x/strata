@@ -381,20 +381,25 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
         return result;
     const bool has_widget_inputs =
         bundle->struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE;
-    const bool has_widget_scrolls = bundle->struct_size >= sizeof(strata_surface_extension_bundle);
+    const bool has_widget_scrolls =
+        bundle->struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_3_SIZE;
+    const bool has_behavior_inputs = bundle->struct_size >= sizeof(strata_surface_extension_bundle);
     if (bundle->struct_size < STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE ||
         (bundle->widgets == nullptr && bundle->widget_count != 0U) ||
         (bundle->behaviors == nullptr && bundle->behavior_count != 0U) ||
         (has_widget_inputs && bundle->widget_inputs == nullptr &&
          bundle->widget_input_count != 0U) ||
         (has_widget_scrolls && bundle->widget_scrolls == nullptr &&
-         bundle->widget_scroll_count != 0U)) {
+         bundle->widget_scroll_count != 0U) ||
+        (has_behavior_inputs && bundle->behavior_inputs == nullptr &&
+         bundle->behavior_input_count != 0U)) {
         throw std::invalid_argument("surface extension bundle is incomplete");
     }
     constexpr std::size_t maximum_extensions = 256U;
     if (bundle->widget_count > maximum_extensions || bundle->behavior_count > maximum_extensions ||
         (has_widget_inputs && bundle->widget_input_count > maximum_extensions) ||
-        (has_widget_scrolls && bundle->widget_scroll_count > maximum_extensions)) {
+        (has_widget_scrolls && bundle->widget_scroll_count > maximum_extensions) ||
+        (has_behavior_inputs && bundle->behavior_input_count > maximum_extensions)) {
         throw std::invalid_argument("surface extension bundle exceeds its bounded lifecycle count");
     }
     std::map<std::string, strata_widget_input_extension, std::less<>> widget_inputs;
@@ -424,6 +429,20 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
             if (!widget_scrolls.emplace(std::move(type), descriptor).second) {
                 throw std::invalid_argument(
                     "widget scroll extension declares one widget type twice");
+            }
+        }
+    }
+    std::map<std::string, strata_behavior_input_extension, std::less<>> behavior_inputs;
+    if (has_behavior_inputs) {
+        for (std::size_t index = 0U; index < bundle->behavior_input_count; ++index) {
+            const strata_behavior_input_extension descriptor = bundle->behavior_inputs[index];
+            if (descriptor.struct_size < sizeof(strata_behavior_input_extension)) {
+                throw std::invalid_argument("behavior input extension descriptor is incomplete");
+            }
+            std::string id = checked_string(descriptor.id, false, "behavior input extension id");
+            if (!behavior_inputs.emplace(std::move(id), descriptor).second) {
+                throw std::invalid_argument(
+                    "behavior input extension declares one behavior id twice");
             }
         }
     }
@@ -676,7 +695,7 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
     }
     for (std::size_t index = 0U; index < bundle->behavior_count; ++index) {
         const strata_behavior_extension descriptor = bundle->behaviors[index];
-        if (descriptor.struct_size < sizeof(strata_behavior_extension)) {
+        if (descriptor.struct_size < STRATA_BEHAVIOR_EXTENSION_VERSION_1_SIZE) {
             throw std::invalid_argument("behavior extension descriptor is incomplete");
         }
         const std::string id = checked_string(descriptor.id, false, "behavior extension id");
@@ -696,6 +715,9 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
         if (descriptor.pointer != nullptr) {
             lifecycle.input.pointer = [descriptor](strata::ui::BehaviorInputScope& scope) {
                 const strata::ui::PointerInputEvent& input = scope.event();
+                const strata::ui::LayoutRecord* const layout = scope.layout();
+                const strata::ui::Rect bounds =
+                    layout != nullptr ? layout->bounds : strata::ui::Rect{};
                 const strata_behavior_pointer_event event{
                     sizeof(strata_behavior_pointer_event),
                     event_kind(input.type),
@@ -707,13 +729,99 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
                     input.position.y,
                     scope.target() ? 1U : 0U,
                     0U,
+                    input.position.x - bounds.x,
+                    input.position.y - bounds.y,
+                    input.delta.x,
+                    input.delta.y,
+                    input.timestamp_nanos > 0 ? input.timestamp_nanos : 0,
                 };
                 strata_behavior_input_context context{&scope};
                 return descriptor.pointer(descriptor.user_data, &context, &event) ==
                        STRATA_EXTENSION_INPUT_CONSUMED;
             };
         }
+        if (const auto input = behavior_inputs.find(id); input != behavior_inputs.end()) {
+            const strata_behavior_input_extension input_descriptor = input->second;
+            if (input_descriptor.scroll != nullptr) {
+                lifecycle.input.event = [input_descriptor](strata::ui::BehaviorInputScope& scope) {
+                    const strata::ui::InputDispatchContext* const dispatch = scope.dispatch();
+                    const strata::ui::ScrollInputEvent* const input =
+                        dispatch != nullptr ? dispatch->scroll() : nullptr;
+                    if (input == nullptr)
+                        return false;
+                    const strata::ui::LayoutRecord* const layout = scope.layout();
+                    const strata::ui::Rect bounds =
+                        layout != nullptr ? layout->bounds : strata::ui::Rect{};
+                    const strata_behavior_scroll_event event{
+                        sizeof(strata_behavior_scroll_event),
+                        event_phase(scope.phase()),
+                        modifiers(input->modifiers),
+                        input->position.x,
+                        input->position.y,
+                        input->position.x - bounds.x,
+                        input->position.y - bounds.y,
+                        input->delta_x,
+                        input->delta_y,
+                        scope.target() ? 1U : 0U,
+                        0U,
+                    };
+                    strata_behavior_input_context context{&scope};
+                    return input_descriptor.scroll(input_descriptor.user_data, &context, &event) ==
+                           STRATA_EXTENSION_INPUT_CONSUMED;
+                };
+            }
+            if (input_descriptor.key != nullptr) {
+                lifecycle.input.key = [input_descriptor](strata::ui::BehaviorInputScope& scope) {
+                    const std::string_view key = scope.key();
+                    const strata_behavior_key_event event{
+                        sizeof(strata_behavior_key_event),
+                        event_phase(scope.phase()),
+                        modifiers(scope.modifiers()),
+                        strata_string_view{key.data(), key.size()},
+                        scope.target() ? 1U : 0U,
+                        0U,
+                    };
+                    strata_behavior_input_context context{&scope};
+                    return input_descriptor.key(input_descriptor.user_data, &context, &event) ==
+                           STRATA_EXTENSION_INPUT_CONSUMED;
+                };
+            }
+            if (input_descriptor.focus != nullptr) {
+                const auto focus_hook = [input_descriptor](strata::ui::BehaviorInputScope& scope) {
+                    const strata::ui::InputDispatchContext* const dispatch = scope.dispatch();
+                    if (dispatch == nullptr ||
+                        (dispatch->kind() != strata::ui::InputEventKind::focus &&
+                         dispatch->kind() != strata::ui::InputEventKind::blur)) {
+                        return false;
+                    }
+                    const strata_behavior_focus_event event{
+                        sizeof(strata_behavior_focus_event),
+                        dispatch->kind() == strata::ui::InputEventKind::blur
+                            ? STRATA_BEHAVIOR_FOCUS_LOST
+                            : STRATA_BEHAVIOR_FOCUS_GAINED,
+                        event_phase(scope.phase()),
+                        scope.target() ? 1U : 0U,
+                        0U,
+                    };
+                    strata_behavior_input_context context{&scope};
+                    return input_descriptor.focus(input_descriptor.user_data, &context, &event) ==
+                           STRATA_EXTENSION_INPUT_CONSUMED;
+                };
+                const strata::ui::BehaviorInputHook scroll_hook = lifecycle.input.event;
+                lifecycle.input.event = [scroll_hook,
+                                         focus_hook](strata::ui::BehaviorInputScope& scope) {
+                    if (scroll_hook != nullptr && scroll_hook(scope))
+                        return true;
+                    return focus_hook(scope);
+                };
+            }
+            behavior_inputs.erase(input);
+        }
         result.behaviors.register_lifecycle(std::move(lifecycle));
+    }
+    if (!behavior_inputs.empty()) {
+        throw std::invalid_argument("behavior input extension names unknown behavior id '" +
+                                    behavior_inputs.begin()->first + "'");
     }
     return result;
 }

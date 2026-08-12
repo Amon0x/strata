@@ -31,7 +31,8 @@ namespace {
     }
     std::string result(value.data == nullptr ? "" : value.data, value.size);
     if (!core::valid_utf8(result)) {
-        throw std::runtime_error("external extension returned invalid UTF-8 in " + std::string(label));
+        throw std::runtime_error("external extension returned invalid UTF-8 in " +
+                                 std::string(label));
     }
     return result;
 }
@@ -40,13 +41,12 @@ void require_package_id(const std::string_view id) {
     if (id.empty() || id.front() == '.' || id.contains("..") ||
         !std::ranges::all_of(id, [](const char character) {
             return (character >= 'A' && character <= 'Z') ||
-                (character >= 'a' && character <= 'z') ||
-                (character >= '0' && character <= '9') || character == '.' ||
-                character == '-' || character == '_';
+                   (character >= 'a' && character <= 'z') ||
+                   (character >= '0' && character <= '9') || character == '.' || character == '-' ||
+                   character == '_';
         })) {
         throw std::invalid_argument(
-            "native extension package ids may contain only letters, digits, '.', '-', and '_'"
-        );
+            "native extension package ids may contain only letters, digits, '.', '-', and '_'");
     }
 }
 
@@ -64,12 +64,10 @@ void require_package_id(const std::string_view id) {
 #if defined(_WIN32)
     std::wstring buffer(512U, L'\0');
     while (true) {
-        const DWORD length = GetModuleFileNameW(
-            nullptr,
-            buffer.data(),
-            static_cast<DWORD>(buffer.size())
-        );
-        if (length == 0U) return {};
+        const DWORD length =
+            GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0U)
+            return {};
         if (length < buffer.size() - 1U) {
             buffer.resize(length);
             return std::filesystem::path(buffer).parent_path();
@@ -87,13 +85,15 @@ void append_environment_paths(std::vector<std::filesystem::path>& paths) {
 #if defined(_WIN32)
     char* buffer = nullptr;
     std::size_t length = 0U;
-    if (_dupenv_s(&buffer, &length, "STRATA_EXTENSION_PATH") != 0 || buffer == nullptr) return;
+    if (_dupenv_s(&buffer, &length, "STRATA_EXTENSION_PATH") != 0 || buffer == nullptr)
+        return;
     const std::string environment(buffer, length == 0U ? 0U : length - 1U);
     std::free(buffer);
     constexpr char separator = ';';
 #else
     const char* const value = std::getenv("STRATA_EXTENSION_PATH");
-    if (value == nullptr) return;
+    if (value == nullptr)
+        return;
     const std::string environment(value);
     constexpr char separator = ':';
 #endif
@@ -101,15 +101,16 @@ void append_environment_paths(std::vector<std::filesystem::path>& paths) {
     while (!remaining.empty()) {
         const std::size_t split = remaining.find(separator);
         const std::string_view value = remaining.substr(0U, split);
-        if (!value.empty()) paths.emplace_back(value);
-        if (split == std::string_view::npos) break;
+        if (!value.empty())
+            paths.emplace_back(value);
+        if (split == std::string_view::npos)
+            break;
         remaining.remove_prefix(split + 1U);
     }
 }
 
-[[nodiscard]] std::vector<std::filesystem::path> search_paths(
-    const std::vector<std::filesystem::path>& explicit_paths
-) {
+[[nodiscard]] std::vector<std::filesystem::path>
+search_paths(const std::vector<std::filesystem::path>& explicit_paths) {
     std::vector<std::filesystem::path> result = explicit_paths;
     append_environment_paths(result);
     const std::filesystem::path executable = executable_directory();
@@ -124,15 +125,14 @@ void append_environment_paths(std::vector<std::filesystem::path>& paths) {
         std::error_code error;
         const std::filesystem::path value = std::filesystem::weakly_canonical(candidate, error);
         const std::filesystem::path key = error ? candidate.lexically_normal() : value;
-        if (seen.insert(key).second) normalized.push_back(key);
+        if (seen.insert(key).second)
+            normalized.push_back(key);
     }
     return normalized;
 }
 
-[[nodiscard]] std::filesystem::path resolve_library(
-    const std::string_view id,
-    const std::vector<std::filesystem::path>& directories
-) {
+[[nodiscard]] std::filesystem::path
+resolve_library(const std::string_view id, const std::vector<std::filesystem::path>& directories) {
     const std::string name = library_name(id);
     std::string searched;
     for (const std::filesystem::path& directory : search_paths(directories)) {
@@ -141,58 +141,51 @@ void append_environment_paths(std::vector<std::filesystem::path>& paths) {
         if (std::filesystem::is_regular_file(candidate, error) && !error) {
             return std::filesystem::canonical(candidate, error);
         }
-        if (!searched.empty()) searched += ", ";
+        if (!searched.empty())
+            searched += ", ";
         searched += directory.generic_string();
     }
     throw std::runtime_error(
         "could not find external extension package '" + std::string(id) + "' as " + name +
-        "; searched: " + (searched.empty() ? std::string("no directories") : searched)
-    );
+        "; searched: " + (searched.empty() ? std::string("no directories") : searched));
 }
 
 [[nodiscard]] void* open_library(const std::filesystem::path& path) {
 #if defined(_WIN32)
     HMODULE library = LoadLibraryW(path.c_str());
     if (library == nullptr) {
-        throw std::runtime_error(std::format(
-            "could not load external extension '{}' (Win32 error {})",
-            path.generic_string(),
-            GetLastError()
-        ));
+        throw std::runtime_error(
+            std::format("could not load external extension '{}' (Win32 error {})",
+                        path.generic_string(), GetLastError()));
     }
     return library;
 #else
     void* const library = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (library == nullptr) {
         const char* const detail = dlerror();
-        throw std::runtime_error(
-            "could not load external extension '" + path.generic_string() + "': " +
-            (detail == nullptr ? std::string("unknown dynamic-loader error") : std::string(detail))
-        );
+        throw std::runtime_error("could not load external extension '" + path.generic_string() +
+                                 "': " +
+                                 (detail == nullptr ? std::string("unknown dynamic-loader error")
+                                                    : std::string(detail)));
     }
     return library;
 #endif
 }
 
-[[nodiscard]] strata_extension_plugin_entry entry_point(
-    void* const library,
-    const std::filesystem::path& path
-) {
+[[nodiscard]] strata_extension_plugin_entry entry_point(void* const library,
+                                                        const std::filesystem::path& path) {
     strata_extension_plugin_entry entry = nullptr;
 #if defined(_WIN32)
     entry = reinterpret_cast<strata_extension_plugin_entry>(
-        GetProcAddress(static_cast<HMODULE>(library), STRATA_EXTENSION_PLUGIN_ENTRY_NAME)
-    );
+        GetProcAddress(static_cast<HMODULE>(library), STRATA_EXTENSION_PLUGIN_ENTRY_NAME));
 #else
     void* const symbol = dlsym(library, STRATA_EXTENSION_PLUGIN_ENTRY_NAME);
     static_assert(sizeof(entry) == sizeof(symbol));
     std::memcpy(&entry, &symbol, sizeof(entry));
 #endif
     if (entry == nullptr) {
-        throw std::runtime_error(
-            "external extension '" + path.generic_string() + "' does not export " +
-            STRATA_EXTENSION_PLUGIN_ENTRY_NAME
-        );
+        throw std::runtime_error("external extension '" + path.generic_string() +
+                                 "' does not export " + STRATA_EXTENSION_PLUGIN_ENTRY_NAME);
     }
     return entry;
 }
@@ -205,7 +198,8 @@ LoadedExtension::LoadedExtension(LoadedExtension&& other) noexcept
       bundle_(std::exchange(other.bundle_, nullptr)) {}
 
 LoadedExtension& LoadedExtension::operator=(LoadedExtension&& other) noexcept {
-    if (this == &other) return *this;
+    if (this == &other)
+        return *this;
     close();
     library_ = std::exchange(other.library_, nullptr);
     path_ = std::move(other.path_);
@@ -215,10 +209,13 @@ LoadedExtension& LoadedExtension::operator=(LoadedExtension&& other) noexcept {
     return *this;
 }
 
-LoadedExtension::~LoadedExtension() { close(); }
+LoadedExtension::~LoadedExtension() {
+    close();
+}
 
 void LoadedExtension::close() noexcept {
-    if (library_ == nullptr) return;
+    if (library_ == nullptr)
+        return;
 #if defined(_WIN32)
     static_cast<void>(FreeLibrary(static_cast<HMODULE>(library_)));
 #else
@@ -228,10 +225,8 @@ void LoadedExtension::close() noexcept {
     bundle_ = nullptr;
 }
 
-LoadedExtension load_extension(
-    const std::string_view expected_id,
-    const std::vector<std::filesystem::path>& search_directories
-) {
+LoadedExtension load_extension(const std::string_view expected_id,
+                               const std::vector<std::filesystem::path>& search_directories) {
     require_package_id(expected_id);
     LoadedExtension result;
     result.path_ = resolve_library(expected_id, search_directories);
@@ -241,10 +236,9 @@ LoadedExtension load_extension(
     plugin.struct_size = sizeof(plugin);
     const strata_status status = query(STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT, &plugin);
     if (status != STRATA_STATUS_OK) {
-        throw std::runtime_error(
-            "external extension '" + result.path_.generic_string() +
-            "' rejected its package query with status " + std::to_string(status)
-        );
+        throw std::runtime_error("external extension '" + result.path_.generic_string() +
+                                 "' rejected its package query with status " +
+                                 std::to_string(status));
     }
     if (plugin.struct_size < sizeof(strata_extension_plugin) ||
         plugin.plugin_abi_version != STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT ||
@@ -256,21 +250,21 @@ LoadedExtension load_extension(
         (plugin.extensions->struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE &&
          plugin.extensions->widget_input_count != 0U &&
          plugin.extensions->widget_inputs == nullptr) ||
-        (plugin.extensions->struct_size >= sizeof(strata_surface_extension_bundle) &&
+        (plugin.extensions->struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_3_SIZE &&
          plugin.extensions->widget_scroll_count != 0U &&
-         plugin.extensions->widget_scrolls == nullptr)) {
-        throw std::runtime_error(
-            "external extension '" + result.path_.generic_string() +
-            "' returned an incompatible package descriptor"
-        );
+         plugin.extensions->widget_scrolls == nullptr) ||
+        (plugin.extensions->struct_size >= sizeof(strata_surface_extension_bundle) &&
+         plugin.extensions->behavior_input_count != 0U &&
+         plugin.extensions->behavior_inputs == nullptr)) {
+        throw std::runtime_error("external extension '" + result.path_.generic_string() +
+                                 "' returned an incompatible package descriptor");
     }
     result.id_ = copied(plugin.package_id, "package id");
     result.schema_json_ = copied(plugin.schema_json, "schema document");
     if (result.id_ != expected_id) {
-        throw std::runtime_error(
-            "external extension '" + result.path_.generic_string() + "' exports package '" +
-            result.id_ + "', expected '" + std::string(expected_id) + "'"
-        );
+        throw std::runtime_error("external extension '" + result.path_.generic_string() +
+                                 "' exports package '" + result.id_ + "', expected '" +
+                                 std::string(expected_id) + "'");
     }
     if (result.schema_json_.empty()) {
         throw std::runtime_error("external extension package '" + result.id_ + "' has no schema");
@@ -279,9 +273,8 @@ LoadedExtension load_extension(
     const data::JsonValue* const schema_package = schema.find("package");
     if (schema_package == nullptr || schema_package->string() == nullptr ||
         *schema_package->string() != result.id_) {
-        throw std::runtime_error(
-            "external extension package '" + result.id_ + "' schema has a mismatched package id"
-        );
+        throw std::runtime_error("external extension package '" + result.id_ +
+                                 "' schema has a mismatched package id");
     }
     result.bundle_ = plugin.extensions;
     return result;
@@ -289,7 +282,7 @@ LoadedExtension load_extension(
 
 const strata_surface_extension_bundle* SelectedExtensions::pointer() noexcept {
     if (widgets.empty() && widget_inputs.empty() && widget_scrolls.empty() &&
-        behaviors.empty()) {
+        behavior_inputs.empty() && behaviors.empty()) {
         return nullptr;
     }
     bundle = strata_surface_extension_bundle{
@@ -302,6 +295,8 @@ const strata_surface_extension_bundle* SelectedExtensions::pointer() noexcept {
         widget_inputs.size(),
         widget_scrolls.empty() ? nullptr : widget_scrolls.data(),
         widget_scrolls.size(),
+        behavior_inputs.empty() ? nullptr : behavior_inputs.data(),
+        behavior_inputs.size(),
     };
     return &bundle;
 }
@@ -309,14 +304,17 @@ const strata_surface_extension_bundle* SelectedExtensions::pointer() noexcept {
 std::vector<std::string> SelectedExtensions::schemas() const {
     std::vector<std::string> documents;
     documents.reserve(packages.size());
-    for (const LoadedExtension& package : packages) documents.push_back(package.schema_json());
+    for (const LoadedExtension& package : packages)
+        documents.push_back(package.schema_json());
     return documents;
 }
 std::vector<std::string> declared_extension_packages(const std::string_view schemas_json) {
-    if (schemas_json.empty()) return {};
+    if (schemas_json.empty())
+        return {};
     const data::JsonValue schemas = data::parse_json(schemas_json);
     const data::JsonValue* const packages = schemas.find("extensionPackages");
-    if (packages == nullptr) return {};
+    if (packages == nullptr)
+        return {};
     if (packages->array() == nullptr) {
         throw std::runtime_error("extensionPackages must be an array of package ids");
     }
@@ -336,11 +334,8 @@ std::vector<std::string> declared_extension_packages(const std::string_view sche
     return result;
 }
 
-
-SelectedExtensions select_extensions(
-    const std::vector<std::string>& package_ids,
-    const std::vector<std::filesystem::path>& search_directories
-) {
+SelectedExtensions select_extensions(const std::vector<std::string>& package_ids,
+                                     const std::vector<std::filesystem::path>& search_directories) {
     SelectedExtensions result;
     result.packages.reserve(package_ids.size());
     std::set<std::string, std::less<>> seen;
@@ -351,34 +346,27 @@ SelectedExtensions select_extensions(
         result.packages.push_back(load_extension(id, search_directories));
         const strata_surface_extension_bundle& package = result.packages.back().bundle();
         if (package.widget_count != 0U) {
-            result.widgets.insert(
-                result.widgets.end(),
-                package.widgets,
-                package.widgets + package.widget_count
-            );
+            result.widgets.insert(result.widgets.end(), package.widgets,
+                                  package.widgets + package.widget_count);
         }
         if (package.struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE &&
             package.widget_input_count != 0U) {
-            result.widget_inputs.insert(
-                result.widget_inputs.end(),
-                package.widget_inputs,
-                package.widget_inputs + package.widget_input_count
-            );
+            result.widget_inputs.insert(result.widget_inputs.end(), package.widget_inputs,
+                                        package.widget_inputs + package.widget_input_count);
+        }
+        if (package.struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_3_SIZE &&
+            package.widget_scroll_count != 0U) {
+            result.widget_scrolls.insert(result.widget_scrolls.end(), package.widget_scrolls,
+                                         package.widget_scrolls + package.widget_scroll_count);
         }
         if (package.struct_size >= sizeof(strata_surface_extension_bundle) &&
-            package.widget_scroll_count != 0U) {
-            result.widget_scrolls.insert(
-                result.widget_scrolls.end(),
-                package.widget_scrolls,
-                package.widget_scrolls + package.widget_scroll_count
-            );
+            package.behavior_input_count != 0U) {
+            result.behavior_inputs.insert(result.behavior_inputs.end(), package.behavior_inputs,
+                                          package.behavior_inputs + package.behavior_input_count);
         }
         if (package.behavior_count != 0U) {
-            result.behaviors.insert(
-                result.behaviors.end(),
-                package.behaviors,
-                package.behaviors + package.behavior_count
-            );
+            result.behaviors.insert(result.behaviors.end(), package.behaviors,
+                                    package.behaviors + package.behavior_count);
         }
     }
     return result;

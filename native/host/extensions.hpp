@@ -12,7 +12,7 @@ namespace strata::host {
 
 /** One queried external package and the native library that owns all of its borrowed pointers. */
 class LoadedExtension final {
-public:
+  public:
     LoadedExtension() = default;
     LoadedExtension(const LoadedExtension&) = delete;
     LoadedExtension& operator=(const LoadedExtension&) = delete;
@@ -20,18 +20,20 @@ public:
     LoadedExtension& operator=(LoadedExtension&& other) noexcept;
     ~LoadedExtension();
 
-    [[nodiscard]] const std::string& id() const noexcept { return id_; }
-    [[nodiscard]] const std::string& schema_json() const noexcept { return schema_json_; }
+    [[nodiscard]] const std::string& id() const noexcept {
+        return id_;
+    }
+    [[nodiscard]] const std::string& schema_json() const noexcept {
+        return schema_json_;
+    }
     [[nodiscard]] const strata_surface_extension_bundle& bundle() const noexcept {
         return *bundle_;
     }
 
-private:
+  private:
     friend struct SelectedExtensions;
-    friend LoadedExtension load_extension(
-        std::string_view,
-        const std::vector<std::filesystem::path>&
-    );
+    friend LoadedExtension load_extension(std::string_view,
+                                          const std::vector<std::filesystem::path>&);
 
     void close() noexcept;
 
@@ -48,6 +50,7 @@ struct SelectedExtensions final {
     std::vector<strata_widget_extension> widgets;
     std::vector<strata_widget_input_extension> widget_inputs;
     std::vector<strata_widget_scroll_extension> widget_scrolls;
+    std::vector<strata_behavior_input_extension> behavior_inputs;
     std::vector<strata_behavior_extension> behaviors;
     strata_surface_extension_bundle bundle{};
 
@@ -56,14 +59,11 @@ struct SelectedExtensions final {
 };
 
 /** Reads the single extension package declaration from an application schema document. */
-[[nodiscard]] std::vector<std::string> declared_extension_packages(
-    std::string_view schemas_json
-);
+[[nodiscard]] std::vector<std::string> declared_extension_packages(std::string_view schemas_json);
 
 /** Loads each selected package from a shared library and merges its runtime descriptor bundle. */
-[[nodiscard]] SelectedExtensions select_extensions(
-    const std::vector<std::string>& package_ids,
-    const std::vector<std::filesystem::path>& search_directories = {}
-);
+[[nodiscard]] SelectedExtensions
+select_extensions(const std::vector<std::string>& package_ids,
+                  const std::vector<std::filesystem::path>& search_directories = {});
 
 } // namespace strata::host

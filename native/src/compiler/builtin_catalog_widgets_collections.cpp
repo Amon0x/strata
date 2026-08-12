@@ -3,6 +3,18 @@
 namespace strata::compiler {
 
 void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
+    const DeclaredParameter on_scroll{
+        .name = "onScroll",
+        .type = declared_type_reference("t36"),
+    };
+    const DeclaredWidgetEvent effective_scroll_event{
+        .name = "scroll",
+        .callback_parameter = "onScroll",
+        .description =
+            "Emitted once for each effective clamped scroll-offset change from wheel, drag, "
+            "animation, focus reveal, or programmatic scroll.",
+        .phase = "post-mutation",
+    };
     catalog.widgets.insert(
         catalog.widgets.end(),
         {
@@ -30,6 +42,7 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                      DeclaredParameter{.name = "onActivate",
                                        .type = declared_type_reference("t36")},
                      DeclaredParameter{.name = "onContext", .type = declared_type_reference("t36")},
+                     on_scroll,
                      DeclaredParameter{.name = "bind", .type = declared_type_reference("t7")}},
                 .parameter_order = {"entries",
                                     "key",
@@ -64,6 +77,7 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                                     "onSelect",
                                     "onActivate",
                                     "onContext",
+                                    "onScroll",
                                     "bind",
                                     "textStyle",
                                     "textVisualStyle",
@@ -84,7 +98,9 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                                .name = "context request",
                                .callback_parameter = "onContext",
                                .description =
-                                   "Carries the item key and pointer position when available."}},
+                                   "Carries the item key and pointer position when available."},
+                           effective_scroll_event},
+                .capabilities = {"effective-scroll"},
                 .retained_state =
                     {DeclaredRetainedState{.name = "selection",
                                            .description =
@@ -106,7 +122,8 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                      DeclaredParameter{.name = "contentPadding",
                                        .type = declared_type_reference("t61")},
                      DeclaredParameter{.name = "scrollbarGutter",
-                                       .type = declared_type_reference("t3")}},
+                                       .type = declared_type_reference("t3")},
+                     on_scroll},
                 .parameter_order = {"estimatedItemExtent",
                                     "key",
                                     "axis",
@@ -114,6 +131,7 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                                     "viewportInsets",
                                     "contentPadding",
                                     "scrollbarGutter",
+                                    "onScroll",
                                     "layout",
                                     "variant",
                                     "style",
@@ -138,7 +156,8 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                                     "animation",
                                     "behaviors"},
                 .bindings = {},
-                .events = {},
+                .events = {effective_scroll_event},
+                .capabilities = {"effective-scroll"},
                 .retained_state =
                     {DeclaredRetainedState{
                          .name = "scrollOffset",
@@ -158,7 +177,8 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                      DeclaredParameter{.name = "contentPadding",
                                        .type = declared_type_reference("t61")},
                      DeclaredParameter{.name = "scrollbarGutter",
-                                       .type = declared_type_reference("t3")}},
+                                       .type = declared_type_reference("t3")},
+                     on_scroll},
                 .parameter_order = {"key",
                                     "horizontal",
                                     "vertical",
@@ -166,6 +186,7 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                                     "viewportInsets",
                                     "contentPadding",
                                     "scrollbarGutter",
+                                    "onScroll",
                                     "layout",
                                     "variant",
                                     "style",
@@ -190,10 +211,10 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                                     "animation",
                                     "behaviors"},
                 .bindings = {},
-                .events = {},
+                .events = {effective_scroll_event},
+                .capabilities = {"effective-scroll"},
                 .retained_state = {DeclaredRetainedState{
-                    .name = "scrollOffset",
-                    .description = "Horizontal and vertical viewport offset."}},
+                    .name = "scrollOffset", .description = "Current clamped viewport offset."}},
                 .allows_children = true},
             DeclaredWidget{
                 .name = "Table",
@@ -264,6 +285,7 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                      DeclaredParameter{.name = "onColumnReorder",
                                        .type = declared_type_reference("t36")},
                      DeclaredParameter{.name = "bind", .type = declared_type_reference("t7")},
+                     on_scroll,
                      DeclaredParameter{.name = "loadingText",
                                        .type = declared_type_reference("t0")},
                      DeclaredParameter{.name = "errorText", .type = declared_type_reference("t0")},
@@ -316,6 +338,7 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                                     "onSort",
                                     "onColumnResize",
                                     "onColumnReorder",
+                                    "onScroll",
                                     "bind",
                                     "textStyle",
                                     "textVisualStyle",
@@ -350,7 +373,9 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                      DeclaredWidgetEvent{.name = "column reorder",
                                          .callback_parameter = "onColumnReorder",
                                          .description =
-                                             "Carries a column id and target display index."}},
+                                             "Carries a column id and target display index."},
+                     effective_scroll_event},
+                .capabilities = {"effective-scroll"},
                 .retained_state =
                     {DeclaredRetainedState{.name = "selection",
                                            .description = "Uncontrolled row selection, anchor, "
@@ -411,6 +436,7 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                      DeclaredParameter{.name = "onLoadChildren",
                                        .type = declared_type_reference("t36")},
                      DeclaredParameter{.name = "onDrop", .type = declared_type_reference("t36")},
+                     on_scroll,
                      DeclaredParameter{.name = "bind", .type = declared_type_reference("t7")},
                      DeclaredParameter{.name = "loadingText",
                                        .type = declared_type_reference("t0")},
@@ -456,6 +482,7 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                      "onExpand",
                      "onLoadChildren",
                      "onDrop",
+                     "onScroll",
                      "bind",
                      "textStyle",
                      "textVisualStyle",
@@ -493,7 +520,9 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                          .name = "tree drop",
                          .callback_parameter = "onDrop",
                          .description =
-                             "Carries dragged keys, target key, and before/on/after position."}},
+                             "Carries dragged keys, target key, and before/on/after position."},
+                     effective_scroll_event},
+                .capabilities = {"effective-scroll"},
                 .retained_state =
                     {DeclaredRetainedState{.name = "selection",
                                            .description =
@@ -526,7 +555,8 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                      DeclaredParameter{.name = "contentPadding",
                                        .type = declared_type_reference("t61")},
                      DeclaredParameter{.name = "scrollbarGutter",
-                                       .type = declared_type_reference("t3")}},
+                                       .type = declared_type_reference("t3")},
+                     on_scroll},
                 .parameter_order = {"itemCount",
                                     "itemExtent",
                                     "items",
@@ -540,6 +570,7 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                                     "viewportInsets",
                                     "contentPadding",
                                     "scrollbarGutter",
+                                    "onScroll",
                                     "layout",
                                     "variant",
                                     "style",
@@ -564,7 +595,8 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                                     "animation",
                                     "behaviors"},
                 .bindings = {},
-                .events = {},
+                .events = {effective_scroll_event},
+                .capabilities = {"effective-scroll"},
                 .retained_state = {DeclaredRetainedState{
                     .name = "scrollOffset",
                     .description =

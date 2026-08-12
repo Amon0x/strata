@@ -2412,6 +2412,11 @@
       "type": "one of (CENTER, END, START)"
     },
     {
+      "name": "anchorCrossOffset",
+      "nullable": false,
+      "type": "number"
+    },
+    {
       "name": "anchorFlip",
       "nullable": false,
       "type": "boolean"
@@ -2588,6 +2593,11 @@
       "name": "anchorAlign",
       "nullable": false,
       "type": "one of (CENTER, END, START)"
+    },
+    {
+      "name": "anchorCrossOffset",
+      "nullable": false,
+      "type": "number"
     },
     {
       "name": "anchorFlip",
@@ -3040,6 +3050,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "action",
@@ -3308,6 +3319,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onSelect",
@@ -3542,6 +3554,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onClick",
@@ -3806,6 +3819,7 @@
           "valueParameter": "checked"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -4099,6 +4113,7 @@
           "valueParameter": "values"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -4389,6 +4404,7 @@
           "valueParameter": "selectedId"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onQuery",
@@ -4717,6 +4733,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "action",
@@ -5039,6 +5056,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onSelect",
@@ -5310,6 +5328,7 @@
     {
       "allowsChildren": true,
       "bindings": [],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onSelect",
@@ -5589,6 +5608,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "Draw",
       "parameters": [
@@ -5809,6 +5829,7 @@
     {
       "allowsChildren": true,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "Field",
       "parameters": [
@@ -6154,6 +6175,7 @@
     {
       "allowsChildren": true,
       "bindings": [],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onSubmit",
@@ -6412,6 +6434,7 @@
     {
       "allowsChildren": true,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "Grid",
       "parameters": [
@@ -6640,6 +6663,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onClick",
@@ -6914,6 +6938,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "Image",
       "parameters": [
@@ -7156,6 +7181,9 @@
           "valueParameter": "selectedKeys"
         }
       ],
+      "capabilities": [
+        "effective-scroll"
+      ],
       "events": [
         {
           "callbackParameter": "onSelect",
@@ -7171,6 +7199,12 @@
           "callbackParameter": "onContext",
           "description": "Carries the item key and pointer position when available.",
           "name": "context request"
+        },
+        {
+          "callbackParameter": "onScroll",
+          "description": "Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll.",
+          "name": "scroll",
+          "phase": "post-mutation"
         }
       ],
       "name": "ItemGrid",
@@ -7457,6 +7491,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "onScroll",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "bind",
           "nullable": false,
           "required": false,
@@ -7515,6 +7557,7 @@
           "valueParameter": "selectedKey"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onSelect",
@@ -7762,6 +7805,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onSelect",
@@ -8065,6 +8109,7 @@
     {
       "allowsChildren": true,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "MenuBar",
       "parameters": [
@@ -8312,6 +8357,7 @@
           "valueParameter": "open"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onDismiss",
@@ -8568,6 +8614,7 @@
           "valueParameter": "value"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -8870,6 +8917,7 @@
     {
       "allowsChildren": true,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "Panel",
       "parameters": [
@@ -9093,8 +9141,257 @@
       ]
     },
     {
+      "allowsChildren": true,
+      "bindings": [],
+      "capabilities": [],
+      "events": [
+        {
+          "callbackParameter": "onDismiss",
+          "description": "Emitted for Escape and pointer activation outside the popup.",
+          "name": "dismiss request"
+        }
+      ],
+      "name": "Popup",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "key",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "open",
+          "nullable": true,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "defaultOpen",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "layout",
+          "nullable": false,
+          "required": false,
+          "type": "layout"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "compact",
+            "danger",
+            "default",
+            "primary",
+            "rail",
+            "secondary",
+            "subtle"
+          ],
+          "name": "variant",
+          "nullable": false,
+          "required": false,
+          "type": "one of (compact, danger, default, primary, rail, secondary, subtle)"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "style",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "visualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "effect",
+          "nullable": false,
+          "required": false,
+          "type": "effect"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "material",
+          "nullable": false,
+          "required": false,
+          "type": "material"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "transition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "enter",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "exit",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "move",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "motions",
+          "nullable": false,
+          "required": false,
+          "type": "list of one of (map of any, map of any, map of any)"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateChanges",
+          "nullable": true,
+          "required": false,
+          "type": "map of any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animateContentSize",
+          "nullable": true,
+          "required": false,
+          "type": "map of any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "disclosure",
+          "nullable": true,
+          "required": false,
+          "type": "map of any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentKey",
+          "nullable": false,
+          "required": false,
+          "type": "key"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "contentTransition",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [
+            "OUT_IN",
+            "TOGETHER"
+          ],
+          "name": "contentTransitionMode",
+          "nullable": false,
+          "required": false,
+          "type": "one of (OUT_IN, TOGETHER)"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "stagger",
+          "nullable": false,
+          "required": false,
+          "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "semantics",
+          "nullable": false,
+          "required": false,
+          "type": "map of any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onDismiss",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "textVisualStyle",
+          "nullable": false,
+          "required": false,
+          "type": "style"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "animation",
+          "nullable": false,
+          "required": false,
+          "type": "animation"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "behaviors",
+          "nullable": false,
+          "required": false,
+          "type": "list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any)"
+        }
+      ],
+      "retainedState": [
+        {
+          "description": "Uncontrolled open state initialized by `defaultOpen`.",
+          "name": "open"
+        }
+      ]
+    },
+    {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "Progress",
       "parameters": [
@@ -9353,6 +9650,7 @@
           "valueParameter": "selectedId"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -9624,7 +9922,17 @@
     {
       "allowsChildren": true,
       "bindings": [],
-      "events": [],
+      "capabilities": [
+        "effective-scroll"
+      ],
+      "events": [
+        {
+          "callbackParameter": "onScroll",
+          "description": "Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll.",
+          "name": "scroll",
+          "phase": "post-mutation"
+        }
+      ],
       "name": "Repeater",
       "parameters": [
         {
@@ -9685,6 +9993,14 @@
           "nullable": false,
           "required": false,
           "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onScroll",
+          "nullable": false,
+          "required": false,
+          "type": "action"
         },
         {
           "aliases": [],
@@ -9896,6 +10212,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "RichText",
       "parameters": [
@@ -10185,7 +10502,17 @@
     {
       "allowsChildren": true,
       "bindings": [],
-      "events": [],
+      "capabilities": [
+        "effective-scroll"
+      ],
+      "events": [
+        {
+          "callbackParameter": "onScroll",
+          "description": "Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll.",
+          "name": "scroll",
+          "phase": "post-mutation"
+        }
+      ],
       "name": "Scroll",
       "parameters": [
         {
@@ -10243,6 +10570,14 @@
           "nullable": false,
           "required": false,
           "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onScroll",
+          "nullable": false,
+          "required": false,
+          "type": "action"
         },
         {
           "aliases": [],
@@ -10442,7 +10777,7 @@
       ],
       "retainedState": [
         {
-          "description": "Horizontal and vertical viewport offset.",
+          "description": "Current clamped viewport offset.",
           "name": "scrollOffset"
         }
       ]
@@ -10456,6 +10791,7 @@
           "valueParameter": "expanded"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -10749,6 +11085,7 @@
           "valueParameter": "selectedId"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -11094,6 +11431,7 @@
           "valueParameter": "value"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -11416,6 +11754,7 @@
     {
       "allowsChildren": true,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "Slot",
       "parameters": [
@@ -11650,6 +11989,7 @@
           "valueParameter": "ratio"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -11940,6 +12280,7 @@
     {
       "allowsChildren": true,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "StatusBar",
       "parameters": [
@@ -12166,6 +12507,9 @@
           "valueParameter": "selectedKeys"
         }
       ],
+      "capabilities": [
+        "effective-scroll"
+      ],
       "events": [
         {
           "callbackParameter": "onSelect",
@@ -12196,6 +12540,12 @@
           "callbackParameter": "onColumnReorder",
           "description": "Carries a column id and target display index.",
           "name": "column reorder"
+        },
+        {
+          "callbackParameter": "onScroll",
+          "description": "Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll.",
+          "name": "scroll",
+          "phase": "post-mutation"
         }
       ],
       "name": "Table",
@@ -12613,6 +12963,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "onScroll",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "bind",
           "nullable": false,
           "required": false,
@@ -12707,6 +13065,7 @@
           "valueParameter": "selectedId"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -12970,6 +13329,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "Text",
       "parameters": [
@@ -13265,6 +13625,7 @@
           "valueParameter": "text"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -13657,6 +14018,7 @@
           "valueParameter": "text"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -14051,6 +14413,7 @@
     {
       "allowsChildren": true,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "ThemeScope",
       "parameters": [
@@ -14271,6 +14634,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "ToastRegion",
       "parameters": [
@@ -14529,6 +14893,7 @@
           "valueParameter": "checked"
         }
       ],
+      "capabilities": [],
       "events": [
         {
           "callbackParameter": "onChange",
@@ -14816,6 +15181,7 @@
     {
       "allowsChildren": false,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "Toolbar",
       "parameters": [
@@ -15057,6 +15423,7 @@
     {
       "allowsChildren": true,
       "bindings": [],
+      "capabilities": [],
       "events": [],
       "name": "Tooltip",
       "parameters": [
@@ -15315,6 +15682,9 @@
           "valueParameter": "selectedKeys"
         }
       ],
+      "capabilities": [
+        "effective-scroll"
+      ],
       "events": [
         {
           "callbackParameter": "onSelect",
@@ -15345,6 +15715,12 @@
           "callbackParameter": "onDrop",
           "description": "Carries dragged keys, target key, and before/on/after position.",
           "name": "tree drop"
+        },
+        {
+          "callbackParameter": "onScroll",
+          "description": "Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll.",
+          "name": "scroll",
+          "phase": "post-mutation"
         }
       ],
       "name": "TreeView",
@@ -15679,6 +16055,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "onScroll",
+          "nullable": false,
+          "required": false,
+          "type": "action"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "bind",
           "nullable": false,
           "required": false,
@@ -15759,7 +16143,17 @@
     {
       "allowsChildren": true,
       "bindings": [],
-      "events": [],
+      "capabilities": [
+        "effective-scroll"
+      ],
+      "events": [
+        {
+          "callbackParameter": "onScroll",
+          "description": "Emitted once for each effective clamped scroll-offset change from wheel, drag, animation, focus reveal, or programmatic scroll.",
+          "name": "scroll",
+          "phase": "post-mutation"
+        }
+      ],
       "name": "VirtualList",
       "parameters": [
         {
@@ -15868,6 +16262,14 @@
           "nullable": false,
           "required": false,
           "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "onScroll",
+          "nullable": false,
+          "required": false,
+          "type": "action"
         },
         {
           "aliases": [],

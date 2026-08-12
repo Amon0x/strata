@@ -1076,10 +1076,10 @@ InputDispatchState InputRouter::route_event(
                 attachment.enabled ? behaviors_.find(attachment.id) : nullptr;
             if (lifecycle == nullptr || lifecycle->input.disabled)
                 continue;
-            const bool has_typed_hook =
-                pointer != nullptr ? lifecycle->input.pointer != nullptr
-                                   : key != nullptr && key->type != KeyEventType::release &&
-                                         lifecycle->input.key != nullptr;
+            const bool has_typed_hook = pointer != nullptr ? lifecycle->input.pointer != nullptr
+                                        : key != nullptr && key->type != KeyEventType::release
+                                            ? lifecycle->input.key != nullptr
+                                            : false;
             if (lifecycle->input.event == nullptr && !has_typed_hook)
                 continue;
             BehaviorInputScope scope(context, attachment, result);

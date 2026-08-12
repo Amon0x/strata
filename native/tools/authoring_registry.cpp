@@ -15,25 +15,31 @@ using data::JsonValue;
 
 [[nodiscard]] const JsonValue& required(const JsonValue& value, const std::string_view field) {
     const JsonValue* child = value.find(field);
-    if (child == nullptr) throw std::runtime_error("registry is missing field '" + std::string(field) + "'");
+    if (child == nullptr)
+        throw std::runtime_error("registry is missing field '" + std::string(field) + "'");
     return *child;
 }
 
-[[nodiscard]] const std::string& string_field(const JsonValue& value, const std::string_view field) {
+[[nodiscard]] const std::string& string_field(const JsonValue& value,
+                                              const std::string_view field) {
     const std::string* text = required(value, field).string();
-    if (text == nullptr) throw std::runtime_error("registry field must be a string");
+    if (text == nullptr)
+        throw std::runtime_error("registry field must be a string");
     return *text;
 }
 
-[[nodiscard]] const JsonValue::Array& array_field(const JsonValue& value, const std::string_view field) {
+[[nodiscard]] const JsonValue::Array& array_field(const JsonValue& value,
+                                                  const std::string_view field) {
     const JsonValue::Array* values = required(value, field).array();
-    if (values == nullptr) throw std::runtime_error("registry field must be an array");
+    if (values == nullptr)
+        throw std::runtime_error("registry field must be an array");
     return *values;
 }
 
 [[nodiscard]] bool bool_field(const JsonValue& value, const std::string_view field) {
     const bool* result = required(value, field).boolean();
-    if (result == nullptr) throw std::runtime_error("registry field must be a boolean");
+    if (result == nullptr)
+        throw std::runtime_error("registry field must be a boolean");
     return *result;
 }
 
@@ -46,7 +52,7 @@ using data::JsonValue;
 }
 
 class TypeResolver final {
-public:
+  public:
     explicit TypeResolver(const JsonValue& registry) {
         for (const JsonValue& type : array_field(registry, "types")) {
             types_.emplace(string_field(type, "id"), &required(type, "definition"));
@@ -55,20 +61,27 @@ public:
 
     [[nodiscard]] const JsonValue& resolve(const JsonValue& type) const {
         const JsonValue* reference = type.find("ref");
-        if (reference == nullptr) return type;
-        if (reference->string() == nullptr) throw std::runtime_error("registry type reference is invalid");
+        if (reference == nullptr)
+            return type;
+        if (reference->string() == nullptr)
+            throw std::runtime_error("registry type reference is invalid");
         const auto found = types_.find(*reference->string());
-        if (found == types_.end()) throw std::runtime_error("registry type reference is unresolved");
+        if (found == types_.end())
+            throw std::runtime_error("registry type reference is unresolved");
         return *found->second;
     }
 
     [[nodiscard]] std::string label(const JsonValue& raw) const {
         const JsonValue& type = resolve(raw);
         const std::string& kind = string_field(type, "kind");
-        if (kind == "enum") return "one of (" + join_strings(array_field(type, "values")) + ')';
-        if (kind == "list") return "list of " + label(required(type, "element"));
-        if (kind == "map") return "map of " + label(required(type, "value"));
-        if (kind == "collection") return "collection of " + label(required(type, "item"));
+        if (kind == "enum")
+            return "one of (" + join_strings(array_field(type, "values")) + ')';
+        if (kind == "list")
+            return "list of " + label(required(type, "element"));
+        if (kind == "map")
+            return "map of " + label(required(type, "value"));
+        if (kind == "collection")
+            return "collection of " + label(required(type, "item"));
         if (kind == "componentTemplate") {
             const JsonValue* parameters = type.find("parameters");
             if (parameters == nullptr || parameters->array() == nullptr ||
@@ -82,8 +95,7 @@ public:
                     string_field(parameter, "name") + ": " +
                     component_parameter_label(required(parameter, "type"));
                 const JsonValue* nullable = parameter.find("nullable");
-                if (nullable != nullptr && nullable->boolean() != nullptr &&
-                    *nullable->boolean()) {
+                if (nullable != nullptr && nullable->boolean() != nullptr && *nullable->boolean()) {
                     parameter_label += "?";
                 }
                 labels.push_back(std::move(parameter_label));
@@ -92,7 +104,8 @@ public:
         }
         if (kind == "union") {
             std::vector<std::string> labels;
-            for (const JsonValue& option : array_field(type, "options")) labels.push_back(label(option));
+            for (const JsonValue& option : array_field(type, "options"))
+                labels.push_back(label(option));
             return "one of (" + join(labels) + ')';
         }
         const JsonValue* named = type.find("label");
@@ -102,25 +115,24 @@ public:
     [[nodiscard]] std::vector<std::string> enum_values(const JsonValue& raw) const {
         const JsonValue& type = resolve(raw);
         const JsonValue* kind = type.find("kind");
-        if (kind == nullptr || kind->string() == nullptr || *kind->string() != "enum") return {};
+        if (kind == nullptr || kind->string() == nullptr || *kind->string() != "enum")
+            return {};
         std::vector<std::string> result;
         for (const JsonValue& value : array_field(type, "values")) {
-            if (value.string() == nullptr) throw std::runtime_error("registry enum value is invalid");
+            if (value.string() == nullptr)
+                throw std::runtime_error("registry enum value is invalid");
             result.push_back(*value.string());
         }
         return result;
     }
 
-private:
-    [[nodiscard]] std::string component_parameter_label(
-        const JsonValue& raw
-    ) const {
+  private:
+    [[nodiscard]] std::string component_parameter_label(const JsonValue& raw) const {
         const JsonValue& type = resolve(raw);
         const JsonValue* kind = type.find("kind");
         const JsonValue* named = type.find("label");
-        if (kind != nullptr && kind->string() != nullptr &&
-            *kind->string() == "map" && named != nullptr &&
-            named->string() != nullptr) {
+        if (kind != nullptr && kind->string() != nullptr && *kind->string() == "map" &&
+            named != nullptr && named->string() != nullptr) {
             return *named->string();
         }
         return label(raw);
@@ -129,7 +141,8 @@ private:
     [[nodiscard]] static std::string join(const std::vector<std::string>& values) {
         std::string result;
         for (const std::string& value : values) {
-            if (!result.empty()) result.append(", ");
+            if (!result.empty())
+                result.append(", ");
             result.append(value);
         }
         return result;
@@ -138,7 +151,8 @@ private:
     [[nodiscard]] static std::string join_strings(const JsonValue::Array& values) {
         std::vector<std::string> strings;
         for (const JsonValue& value : values) {
-            if (value.string() == nullptr) throw std::runtime_error("registry string list is invalid");
+            if (value.string() == nullptr)
+                throw std::runtime_error("registry string list is invalid");
             strings.push_back(*value.string());
         }
         return join(strings);
@@ -159,18 +173,17 @@ private:
 [[nodiscard]] std::string string_list(const JsonValue& owner, const std::string_view field) {
     std::string result;
     for (const JsonValue& value : array_field(owner, field)) {
-        if (value.string() == nullptr) throw std::runtime_error("registry string list is invalid");
-        if (!result.empty()) result.append(", ");
+        if (value.string() == nullptr)
+            throw std::runtime_error("registry string list is invalid");
+        if (!result.empty())
+            result.append(", ");
         result.append(*value.string());
     }
     return result.empty() ? "—" : result;
 }
 
-void append_parameters(
-    std::ostringstream& output,
-    const JsonValue::Array& parameters,
-    const TypeResolver& types
-) {
+void append_parameters(std::ostringstream& output, const JsonValue::Array& parameters,
+                       const TypeResolver& types) {
     output << "| Name | Type | Required | Nullable | Aliases |\n"
               "|---|---|---:|---:|---|\n";
     for (const JsonValue& parameter : parameters) {
@@ -186,14 +199,13 @@ void append_parameters(
 [[nodiscard]] std::vector<JsonValue> strings_json(const std::vector<std::string>& values) {
     std::vector<JsonValue> result;
     result.reserve(values.size());
-    for (const std::string& value : values) result.emplace_back(value);
+    for (const std::string& value : values)
+        result.emplace_back(value);
     return result;
 }
 
-[[nodiscard]] JsonValue completion_parameter(
-    const JsonValue& parameter,
-    const TypeResolver& types
-) {
+[[nodiscard]] JsonValue completion_parameter(const JsonValue& parameter,
+                                             const TypeResolver& types) {
     return object({
         {"aliases", required(parameter, "aliases")},
         {"enumValues", array(strings_json(types.enum_values(required(parameter, "type"))))},
@@ -204,26 +216,23 @@ void append_parameters(
     });
 }
 
-[[nodiscard]] std::vector<JsonValue> completion_parameters(
-    const JsonValue::Array& parameters,
-    const TypeResolver& types
-) {
+[[nodiscard]] std::vector<JsonValue> completion_parameters(const JsonValue::Array& parameters,
+                                                           const TypeResolver& types) {
     std::vector<JsonValue> result;
     result.reserve(parameters.size());
-    for (const JsonValue& parameter : parameters) result.push_back(completion_parameter(parameter, types));
+    for (const JsonValue& parameter : parameters)
+        result.push_back(completion_parameter(parameter, types));
     return result;
 }
 
-[[nodiscard]] JsonValue named_types(
-    const JsonValue& registry,
-    const std::string_view field,
-    const TypeResolver& types
-) {
+[[nodiscard]] JsonValue named_types(const JsonValue& registry, const std::string_view field,
+                                    const TypeResolver& types) {
     std::vector<JsonValue> result;
     for (const JsonValue& value : array_field(registry, field)) {
         result.push_back(object({
             {"name", required(value, "name")},
-            {"nullable", value.find("nullable") == nullptr ? JsonValue(false) : required(value, "nullable")},
+            {"nullable",
+             value.find("nullable") == nullptr ? JsonValue(false) : required(value, "nullable")},
             {"type", JsonValue(types.label(required(value, "type")))},
         }));
     }
@@ -236,21 +245,37 @@ std::string render_reference(const JsonValue& registry) {
     const TypeResolver types(registry);
     std::ostringstream output;
     output << "# `.strata` generated reference\n\n"
-              "> Generated by the native authoring tool from Strata's built-in catalog. Do not edit by hand.\n\n"
+              "> Generated by the native authoring tool from Strata's built-in catalog. Do not "
+              "edit by hand.\n\n"
               "## Widgets\n\n";
     for (const JsonValue& widget : array_field(registry, "widgets")) {
         output << "### `" << string_field(widget, "name") << "`\n\n"
-               << "Children: `" << (bool_field(widget, "allowsChildren") ? "true" : "false") << "`\n\n";
+               << "Children: `" << (bool_field(widget, "allowsChildren") ? "true" : "false")
+               << "` · Capabilities: " << markdown(string_list(widget, "capabilities")) << "\n\n";
         append_parameters(output, array_field(widget, "parameters"), types);
-        output << "Events: " << array_field(widget, "events").size()
-               << " · Retained state entries: " << array_field(widget, "retainedState").size()
+        const JsonValue::Array& events = array_field(widget, "events");
+        if (!events.empty()) {
+            output << "| Event | Callback | Phase | Contract |\n"
+                      "|---|---|---|---|\n";
+            for (const JsonValue& event : events) {
+                const JsonValue* phase = event.find("phase");
+                output << "| `" << string_field(event, "name") << "` | `"
+                       << string_field(event, "callbackParameter") << "` | "
+                       << (phase != nullptr && phase->string() != nullptr
+                               ? markdown(*phase->string())
+                               : "unspecified")
+                       << " | " << markdown(string_field(event, "description")) << " |\n";
+            }
+            output << '\n';
+        }
+        output << "Retained state entries: " << array_field(widget, "retainedState").size()
                << " · Binding shorthands: " << array_field(widget, "bindings").size() << "\n\n";
     }
 
     output << "## Behaviors\n\n";
     for (const JsonValue& behavior : array_field(registry, "behaviors")) {
-        output << "- `" << string_field(behavior, "id") << "`: "
-               << markdown(types.label(required(behavior, "options"))) << '\n';
+        output << "- `" << string_field(behavior, "id")
+               << "`: " << markdown(types.label(required(behavior, "options"))) << '\n';
     }
     output << "\n## Declarative actions\n\n";
     for (const JsonValue& action : array_field(registry, "actions")) {
@@ -298,6 +323,7 @@ std::string render_completions(const JsonValue& registry) {
     std::vector<JsonValue> widgets;
     for (const JsonValue& widget : array_field(registry, "widgets")) {
         widgets.push_back(object({
+            {"capabilities", required(widget, "capabilities")},
             {"allowsChildren", required(widget, "allowsChildren")},
             {"bindings", required(widget, "bindings")},
             {"events", required(widget, "events")},

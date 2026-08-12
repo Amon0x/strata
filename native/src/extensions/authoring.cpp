@@ -331,9 +331,94 @@ behavior_pointer_trampoline(void* const user_data, strata_behavior_input_context
     pointer.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
     pointer.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
     pointer.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
+    if (event->struct_size >= sizeof(strata_behavior_pointer_event)) {
+        pointer.local_x = event->local_x;
+        pointer.local_y = event->local_y;
+        pointer.delta_x = event->delta_x;
+        pointer.delta_y = event->delta_y;
+        pointer.timestamp_nanoseconds = event->timestamp_nanoseconds;
+        pointer.has_local_position = true;
+    }
     BehaviorInput input(context);
     return hooks->pointer(input, pointer) ? STRATA_EXTENSION_INPUT_CONSUMED
                                           : STRATA_EXTENSION_INPUT_IGNORED;
+}
+strata_extension_input_result
+behavior_scroll_trampoline(void* const user_data, strata_behavior_input_context* const context,
+                           const strata_behavior_scroll_event* const event) {
+    const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
+    if (event == nullptr)
+        return STRATA_EXTENSION_INPUT_IGNORED;
+    Scroll scroll;
+    switch (event->phase) {
+    case STRATA_BEHAVIOR_EVENT_CAPTURE:
+        scroll.phase = Pointer::Phase::capture;
+        break;
+    case STRATA_BEHAVIOR_EVENT_BUBBLE:
+        scroll.phase = Pointer::Phase::bubble;
+        break;
+    default:
+        scroll.phase = Pointer::Phase::target;
+        break;
+    }
+    scroll.x = event->x;
+    scroll.y = event->y;
+    scroll.local_x = event->local_x;
+    scroll.local_y = event->local_y;
+    scroll.delta_x = event->delta_x;
+    scroll.delta_y = event->delta_y;
+    scroll.on_target = event->target != 0U;
+    scroll.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
+    scroll.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
+    scroll.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
+    scroll.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
+    BehaviorInput input(context);
+    return hooks->scroll(input, scroll) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                        : STRATA_EXTENSION_INPUT_IGNORED;
+}
+
+strata_extension_input_result
+behavior_key_trampoline(void* const user_data, strata_behavior_input_context* const context,
+                        const strata_behavior_key_event* const event) {
+    const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
+    if (event == nullptr)
+        return STRATA_EXTENSION_INPUT_IGNORED;
+    const Key key{
+        std::string_view(event->key.data, event->key.size),
+        (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U,
+        (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U,
+        (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U,
+        (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U,
+    };
+    BehaviorInput input(context);
+    return hooks->key(input, key) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                  : STRATA_EXTENSION_INPUT_IGNORED;
+}
+
+strata_extension_input_result
+behavior_focus_trampoline(void* const user_data, strata_behavior_input_context* const context,
+                          const strata_behavior_focus_event* const event) {
+    const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
+    if (event == nullptr)
+        return STRATA_EXTENSION_INPUT_IGNORED;
+    Focus focus;
+    focus.kind =
+        event->kind == STRATA_BEHAVIOR_FOCUS_LOST ? Focus::Kind::lost : Focus::Kind::gained;
+    switch (event->phase) {
+    case STRATA_BEHAVIOR_EVENT_CAPTURE:
+        focus.phase = Pointer::Phase::capture;
+        break;
+    case STRATA_BEHAVIOR_EVENT_BUBBLE:
+        focus.phase = Pointer::Phase::bubble;
+        break;
+    default:
+        focus.phase = Pointer::Phase::target;
+        break;
+    }
+    focus.on_target = event->target != 0U;
+    BehaviorInput input(context);
+    return hooks->focus(input, focus) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                      : STRATA_EXTENSION_INPUT_IGNORED;
 }
 
 } // namespace
@@ -999,8 +1084,23 @@ Behavior& Behavior::focusable() {
     return *this;
 }
 
-Behavior& Behavior::on_pointer(const PointerHook hook) {
+Behavior& Behavior::on_pointer(const BehaviorPointerHook hook) {
     hooks_.pointer = hook;
+    return *this;
+}
+
+Behavior& Behavior::on_scroll(const BehaviorScrollHook hook) {
+    hooks_.scroll = hook;
+    return *this;
+}
+
+Behavior& Behavior::on_key(const BehaviorKeyHook hook) {
+    hooks_.key = hook;
+    return *this;
+}
+
+Behavior& Behavior::on_focus(const BehaviorFocusHook hook) {
+    hooks_.focus = hook;
     return *this;
 }
 
@@ -1024,6 +1124,19 @@ strata_behavior_extension Behavior::descriptor() {
         flags,
         &hooks_,
         hooks_.pointer != nullptr ? &behavior_pointer_trampoline : nullptr,
+    };
+}
+
+std::optional<strata_behavior_input_extension> Behavior::input_descriptor() {
+    if (hooks_.scroll == nullptr && hooks_.key == nullptr && hooks_.focus == nullptr)
+        return std::nullopt;
+    return strata_behavior_input_extension{
+        sizeof(strata_behavior_input_extension),
+        view(id_),
+        &hooks_,
+        hooks_.scroll != nullptr ? &behavior_scroll_trampoline : nullptr,
+        hooks_.key != nullptr ? &behavior_key_trampoline : nullptr,
+        hooks_.focus != nullptr ? &behavior_focus_trampoline : nullptr,
     };
 }
 
@@ -1080,8 +1193,14 @@ void Package::finalize() {
         }
     }
     behavior_descriptors_.reserve(behaviors_.size());
-    for (Behavior& definition : behaviors_)
+    behavior_input_descriptors_.reserve(behaviors_.size());
+    for (Behavior& definition : behaviors_) {
         behavior_descriptors_.push_back(definition.descriptor());
+        if (std::optional<strata_behavior_input_extension> input = definition.input_descriptor();
+            input.has_value()) {
+            behavior_input_descriptors_.push_back(*input);
+        }
+    }
     bundle_ = strata_surface_extension_bundle{
         sizeof(strata_surface_extension_bundle),
         widget_descriptors_.empty() ? nullptr : widget_descriptors_.data(),
@@ -1092,6 +1211,8 @@ void Package::finalize() {
         widget_input_descriptors_.size(),
         widget_scroll_descriptors_.empty() ? nullptr : widget_scroll_descriptors_.data(),
         widget_scroll_descriptors_.size(),
+        behavior_input_descriptors_.empty() ? nullptr : behavior_input_descriptors_.data(),
+        behavior_input_descriptors_.size(),
     };
     finalized_ = true;
 }

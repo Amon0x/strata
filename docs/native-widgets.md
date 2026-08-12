@@ -151,6 +151,35 @@ Fixed-size structured updates reuse destination storage, invalidate only its pai
 not dispatch actions or reconcile descriptions. Use an ordinary action for committed application
 state.
 
+## Ambient behaviors
+
+Use a behavior when one reusable interaction should attach to ordinary authored widgets without
+replacing their presentation or layout:
+
+```cpp
+bool observe_scroll(BehaviorInput& input, const Scroll& scroll) {
+    if (scroll.phase != Pointer::Phase::bubble) return false;
+    return input.emit("example.viewport.changed", {}, "viewport-scrolled");
+}
+
+auto observer = behavior("example.viewport-observer")
+    .focusable()
+    .on_pointer(&observe_pointer)
+    .on_scroll(&observe_scroll)
+    .on_key(&observe_key)
+    .on_focus(&observe_focus);
+```
+
+Pointer, scroll, committed-key, and focus callbacks share capture/target/bubble routing with built-in
+controls. Pointer and scroll coordinates are relative to the attached node as well as the Surface;
+pointer callbacks also receive movement deltas and the host timestamp. Returning `true` consumes the
+event and stops its route. Return `false` for observation. `focusable()` makes an otherwise passive
+attachment participate in focus navigation; a focus callback alone does not.
+
+`BehaviorInput::emit` dispatches only package-declared action contracts. Behavior descriptors keep
+the original pointer ABI stride; scroll, key, and focus hooks live in a versioned companion table so
+an older descriptor prefix remains loadable.
+
 ## Compound controls
 
 Use fixed-capacity `structured<T>` retained state for a bounded collection that moves frequently:
@@ -348,7 +377,7 @@ these capabilities:
 | inspection | hit-bounds narrowing and stable widget-owned subtargets with overlap precedence, logical indices, and semantic mapping |
 | present | content, overlay, detached overlay, motion/status participation, typed colors, borrowed structured values, computed/direct styles, bounds, scale, and state |
 | render | solid and rounded rects, borders, text, images, atlas regions, nine-patch, custom mesh with typed material state, blur, shadow, scoped clip, and text measurement |
-| behaviors | ambient pointer events across capture/target/bubble and emitted actions |
+| behaviors | ambient pointer, scroll, committed-key, and focus events across capture/target/bubble; optional focus participation; emitted package actions |
 
 Not public, by decision rather than omission: custom layout measurement and arrangement, custom
 frame simulation, text editing, and command surfaces. The first two have no internal hook either —

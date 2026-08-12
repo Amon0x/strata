@@ -374,6 +374,13 @@ struct Scroll final {
     bool alt = false;
     bool super = false;
 };
+struct Focus final {
+    enum class Kind { gained, lost };
+
+    Kind kind = Kind::gained;
+    Pointer::Phase phase = Pointer::Phase::target;
+    bool on_target = false;
+};
 
 struct Size final {
     double width = 0.0;
@@ -812,7 +819,10 @@ using SubtargetsHook = void (*)(Subtargets&);
 using PresentHook = void (*)(Present&);
 using SemanticsHook = void (*)(Semantics&);
 using HitBoundsHook = Rect (*)(Inspect&);
-using PointerHook = bool (*)(BehaviorInput&, const Pointer&);
+using BehaviorPointerHook = bool (*)(BehaviorInput&, const Pointer&);
+using BehaviorScrollHook = bool (*)(BehaviorInput&, const Scroll&);
+using BehaviorKeyHook = bool (*)(BehaviorInput&, const Key&);
+using BehaviorFocusHook = bool (*)(BehaviorInput&, const Focus&);
 
 namespace detail {
 
@@ -831,7 +841,10 @@ struct WidgetHooks final {
 };
 
 struct BehaviorHooks final {
-    PointerHook pointer = nullptr;
+    BehaviorPointerHook pointer = nullptr;
+    BehaviorScrollHook scroll = nullptr;
+    BehaviorKeyHook key = nullptr;
+    BehaviorFocusHook focus = nullptr;
 };
 
 } // namespace detail
@@ -975,7 +988,10 @@ class Behavior final {
     explicit Behavior(std::string id);
 
     Behavior& focusable();
-    Behavior& on_pointer(PointerHook hook);
+    Behavior& on_pointer(BehaviorPointerHook hook);
+    Behavior& on_scroll(BehaviorScrollHook hook);
+    Behavior& on_key(BehaviorKeyHook hook);
+    Behavior& on_focus(BehaviorFocusHook hook);
     Behavior& emits(ActionContract contract);
 
     [[nodiscard]] const std::string& id() const noexcept {
@@ -989,6 +1005,7 @@ class Behavior final {
     friend class Package;
 
     [[nodiscard]] strata_behavior_extension descriptor();
+    [[nodiscard]] std::optional<strata_behavior_input_extension> input_descriptor();
 
     std::string id_;
     std::vector<ActionContract> actions_;
@@ -1029,6 +1046,7 @@ class Package final {
     std::vector<strata_widget_input_extension> widget_input_descriptors_;
     std::vector<strata_widget_scroll_extension> widget_scroll_descriptors_;
     std::vector<strata_behavior_extension> behavior_descriptors_;
+    std::vector<strata_behavior_input_extension> behavior_input_descriptors_;
     strata_surface_extension_bundle bundle_{};
     bool finalized_ = false;
 };
