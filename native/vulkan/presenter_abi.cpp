@@ -279,4 +279,39 @@ strata_vulkan_presenter_release_target(strata_vulkan_presenter* const presenter)
     });
 }
 
+strata_adapter_result strata_vulkan_presenter_prepare(
+    strata_vulkan_presenter* presenter, VkFormat format, size_t* out_created) {
+    if (out_created) *out_created = 0;
+    return guarded([&] {
+        if (!presenter || !out_created)
+            throw std::invalid_argument("Vulkan preparation arguments are incomplete");
+        *out_created = presenter->value->prepare(format);
+    });
+}
+strata_adapter_result strata_vulkan_presenter_load_pipeline_cache(
+    strata_vulkan_presenter* presenter, strata_string_view path, uint32_t* out_loaded) {
+    if (out_loaded) *out_loaded = 0;
+    return guarded([&] {
+        if (!presenter || !out_loaded)
+            throw std::invalid_argument("Vulkan cache arguments are incomplete");
+        const auto text = view(path);
+        if (text.empty() || text.find('\0') != std::string_view::npos)
+            throw std::invalid_argument("Vulkan cache path is invalid");
+        const auto utf8 = std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size());
+        *out_loaded = presenter->value->load_pipeline_cache(std::filesystem::path(utf8));
+    });
+}
+strata_adapter_result strata_vulkan_presenter_save_pipeline_cache(
+    strata_vulkan_presenter* presenter, strata_string_view path, uint32_t* out_saved) {
+    if (out_saved) *out_saved = 0;
+    return guarded([&] {
+        if (!presenter || !out_saved)
+            throw std::invalid_argument("Vulkan cache arguments are incomplete");
+        const auto text = view(path);
+        if (text.empty() || text.find('\0') != std::string_view::npos)
+            throw std::invalid_argument("Vulkan cache path is invalid");
+        const auto utf8 = std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size());
+        *out_saved = presenter->value->save_pipeline_cache(std::filesystem::path(utf8));
+    });
+}
 } // extern "C"

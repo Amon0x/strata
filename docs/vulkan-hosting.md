@@ -113,3 +113,59 @@ render through Vulkan with no shader fallbacks or validation messages. Captures 
 The Linux host remains windowless: PNG captures use real GPU rendering and readback, while native
 Linux window/input/clipboard/IME adapters are separate host responsibilities. Kitten integration
 is deliberately a subsequent change.
+
+## Loading-time preparation and persistent cache
+
+After declaring shaders (or calling `Presenter::synchronize_programs`), use:
+
+```cpp
+(void)presenter.load_pipeline_cache(cache_path);
+presenter.prepare(target_format);
+(void)presenter.save_pipeline_cache(cache_path);
+```
+
+`prepare` also synchronizes a presenter's declarations on its first call. It creates all six
+mesh blend variants for built-in and declared materials, blur/composite pipelines, and declared
+effect shader pipelines. It returns how many pipelines were added. Repeat after a shader reload
+or target format change; already prepared variants are reused. Preparation does not frame a
+Surface or upload geometry/textures: those still need an optional hidden warmup frame if the
+host requires those costs to occur during loading too. No device or target is retained by the cache.
+
+The C API provides `strata_vulkan_presenter_prepare`, `_load_pipeline_cache`, and
+`_save_pipeline_cache`; filenames are UTF-8. C++ also exposes `pipeline_count()` for diagnostics.
+Cache files have a versioned envelope, length limit (64 MiB), and checksum. Vulkan's header must
+match vendor, device, and pipeline cache UUID before any payload reaches the driver. Missing,
+truncated, corrupted, or stale files return false and leave the live cache intact. Shader source
+changes naturally produce distinct driver cache keys. Cache files are disposable local data;
+never accept downloaded/untrusted driver cache payloads.
+
+The host chooses the cache location and when to save, normally after preparation and clean
+shutdown. Save writes an adjacent `.tmp` and renames it over the destination, returning false on
+filesystem failure; keep the previous cache if replacement fails. Serialize accesses to the same
+path (use a per-process path if running multiple hosts). This does not eliminate every source of
+first-frame cost or change the renderer's synchronous queue/fence contract.
+
+### Reproducible preparation benchmark
+
+With Vulkan tests enabled, `strata_vulkan_preparation_benchmark MODE CACHE_PATH` renders a
+1280×800 target with an authored material, blur, and authored effect. Modes are `lazy`, `prepare`,
+and `cache` (load then prepare). Each invocation measures its first render, then 120 warmup and
+600 retained frames. Wall times include CPU recording, submission, and fence completion, but no
+pixel readback/PNG or Vulkan validation. It reports newly created first-render pipelines.
+
+Five sequential invocations per mode on RTX 4070 SUPER / NVIDIA 610.57.04, Linux, 2026-09-05:
+
+| Median across runs (ms) | Lazy | Prepare | Load cache + prepare |
+|---|---:|---:|---:|
+| Preparation | 0.000 | 4.964 | 0.947 |
+| First render | 5.031 | 2.227 | 2.215 |
+| First-render new pipelines | 4 | 0 | 0 |
+| Steady mean | 0.181 | 0.187 | 0.195 |
+| Steady p95 | 0.272 | 0.279 | 0.332 |
+
+Preparation moved pipeline creation out of the first render (~56% lower first-render time in
+this workload); the persistent cache reduced preparation by ~81%. Steady-state differences are
+small desktop/GPU scheduling variation, not evidence of a throughput improvement. These are
+warm-driver-cache, non-isolated desktop measurements, not cold-driver or Minecraft benchmarks.
+Raw runs: `docs/benchmarks/vulkan-preparation-nvidia.json`.
+The approach follows the [Khronos pipeline cache guide](https://docs.vulkan.org/guide/latest/pipeline_cache.html).

@@ -316,6 +316,19 @@ bool Presenter::attached(const std::string_view layer_id) const noexcept {
     return impl_->layers.contains(layer_id);
 }
 
+std::size_t Presenter::prepare(VkFormat format) {
+    if (!impl_->programs_synchronized)
+        impl_->synchronize_programs();
+    return impl_->renderer.prepare(format);
+}
+bool Presenter::load_pipeline_cache(const std::filesystem::path& path) {
+    return impl_->renderer.load_pipeline_cache(path);
+}
+bool Presenter::save_pipeline_cache(const std::filesystem::path& path) const {
+    return impl_->renderer.save_pipeline_cache(path);
+}
+std::size_t Presenter::pipeline_count() const noexcept { return impl_->renderer.pipeline_count(); }
+
 void Presenter::release_target() { impl_->renderer.release_target(); }
 
 } // namespace strata::vulkan

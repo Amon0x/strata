@@ -109,6 +109,15 @@ STRATA_VULKAN_API strata_adapter_result strata_vulkan_presenter_attached(
 STRATA_VULKAN_API strata_adapter_result
 strata_vulkan_presenter_release_target(strata_vulkan_presenter* presenter);
 
+/** Loading-time preparation. out_created reports new live pipelines. */
+STRATA_VULKAN_API strata_adapter_result strata_vulkan_presenter_prepare(
+    strata_vulkan_presenter* presenter, VkFormat format, size_t* out_created);
+/** UTF-8 cache path. A missing/stale/corrupt file is OK with out_loaded=0. */
+STRATA_VULKAN_API strata_adapter_result strata_vulkan_presenter_load_pipeline_cache(
+    strata_vulkan_presenter* presenter, strata_string_view path, uint32_t* out_loaded);
+STRATA_VULKAN_API strata_adapter_result strata_vulkan_presenter_save_pipeline_cache(
+    strata_vulkan_presenter* presenter, strata_string_view path, uint32_t* out_saved);
+
 #ifdef __cplusplus
 }
 #endif

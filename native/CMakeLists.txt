@@ -603,6 +603,7 @@ if(STRATA_BUILD_VULKAN)
     find_package(Vulkan 1.1 REQUIRED)
     include(cmake/StrataShaderc.cmake)
     add_library(strata_vulkan STATIC
+        vulkan/preparation.cpp
         vulkan/renderer.cpp
         vulkan/device.cpp
         vulkan/textures.cpp
@@ -1569,6 +1570,9 @@ if(STRATA_CLANG_FORMAT)
 endif()
 
 if(STRATA_BUILD_TESTS AND STRATA_BUILD_VULKAN AND STRATA_TEST_VULKAN)
+    add_executable(strata_vulkan_preparation_benchmark benchmarks/vulkan_preparation.cpp)
+    target_link_libraries(strata_vulkan_preparation_benchmark PRIVATE strata_vulkan_offscreen)
+    strata_target_defaults(strata_vulkan_preparation_benchmark)
     add_executable(strata_vulkan_tests tests/vulkan_tests.cpp)
     target_link_libraries(strata_vulkan_tests PRIVATE strata_vulkan_offscreen)
     strata_target_defaults(strata_vulkan_tests)

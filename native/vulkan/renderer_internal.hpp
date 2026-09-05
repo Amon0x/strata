@@ -72,6 +72,7 @@ struct Renderer::Impl {
     VkCommandPool commands{};
     VkCommandBuffer command{};
     VkFence fence{};
+    VkPipelineCache pipeline_cache{};
     VkDescriptorSetLayout descriptors{};
     VkPipelineLayout layout{};
     VkSampler nearest{}, linear{};

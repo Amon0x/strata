@@ -8,6 +8,8 @@ Renderer::Impl::~Impl() {
         (void)key;
         vkDestroyPipeline(device.device, pipeline, nullptr);
     }
+    if (pipeline_cache)
+        vkDestroyPipelineCache(device.device, pipeline_cache, nullptr);
     for (auto& [key, pass] : render_passes) {
         (void)key;
         vkDestroyRenderPass(device.device, pass, nullptr);
@@ -33,6 +35,9 @@ void Renderer::Impl::clear_framebuffers() {
     framebuffers.clear();
 }
 void Renderer::Impl::initialize() {
+    VkPipelineCacheCreateInfo cache_info{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+    check(vkCreatePipelineCache(device.device, &cache_info, nullptr, &pipeline_cache),
+          "create pipeline cache");
     VkCommandPoolCreateInfo ci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     ci.queueFamilyIndex = device.queue_family;
     ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;

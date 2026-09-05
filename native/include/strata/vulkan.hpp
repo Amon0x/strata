@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <filesystem>
 #include <memory>
 #include <strata/strata.h>
 #include <string>
@@ -88,6 +89,19 @@ class Renderer final {
     void consume_resources(const host::RenderPacket& packet);
     void release_layer(std::string_view layer_id) noexcept;
     void release_target();
+    /** Prepare all currently declared blend/effect variants for this target format at load time.
+     * Repeating preparation is cheap; call again after program reload or format changes.
+     * Returns the number of newly created pipelines. Does not allocate surface resources.
+     */
+    std::size_t prepare(VkFormat format);
+    /** Optional, checksummed, device/driver-specific disk cache. Missing, stale or damaged
+     * files return false. Save replaces the file atomically; filesystem failures return false.
+     * Serialize access, including file access, with other renderer calls.
+     */
+    [[nodiscard]] bool load_pipeline_cache(const std::filesystem::path& path);
+    [[nodiscard]] bool save_pipeline_cache(const std::filesystem::path& path) const;
+    [[nodiscard]] std::size_t pipeline_count() const noexcept;
+
 
   private:
     struct Impl;
@@ -118,6 +132,19 @@ class Presenter final {
     void discard(std::string_view layer_id) noexcept;
     [[nodiscard]] bool attached(std::string_view layer_id) const noexcept;
     void release_target();
+    /** Prepare all currently declared blend/effect variants for this target format at load time.
+     * Repeating preparation is cheap; call again after program reload or format changes.
+     * Returns the number of newly created pipelines. Does not allocate surface resources.
+     */
+    std::size_t prepare(VkFormat format);
+    /** Optional, checksummed, device/driver-specific disk cache. Missing, stale or damaged
+     * files return false. Save replaces the file atomically; filesystem failures return false.
+     * Serialize access, including file access, with other renderer calls.
+     */
+    [[nodiscard]] bool load_pipeline_cache(const std::filesystem::path& path);
+    [[nodiscard]] bool save_pipeline_cache(const std::filesystem::path& path) const;
+    [[nodiscard]] std::size_t pipeline_count() const noexcept;
+
 
   private:
     struct Impl;

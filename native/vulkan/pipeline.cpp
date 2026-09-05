@@ -133,7 +133,7 @@ VkPipeline Renderer::Impl::pipeline(const std::string& program, const std::strin
     pi.layout = layout;
     pi.renderPass = render_pass(format);
     VkPipeline result{};
-    check(vkCreateGraphicsPipelines(device.device, VK_NULL_HANDLE, 1, &pi, nullptr, &result),
+    check(vkCreateGraphicsPipelines(device.device, pipeline_cache, 1, &pi, nullptr, &result),
           "create graphics pipeline");
     pipelines.emplace(std::move(key), result);
     return result;
