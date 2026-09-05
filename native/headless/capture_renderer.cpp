@@ -7,6 +7,9 @@
 
 #include "image_codec.hpp"
 #include "software_renderer.hpp"
+#if defined(STRATA_HAS_VULKAN)
+#include "vulkan_renderer.hpp"
+#endif
 #if defined(_WIN32)
 #include "d3d11_renderer.hpp"
 #endif
@@ -14,6 +17,13 @@
 namespace strata::headless {
 
 std::unique_ptr<CaptureRenderer> create_capture_renderer(const std::string_view backend) {
+    if (backend == "vulkan") {
+#if defined(STRATA_HAS_VULKAN)
+        return std::make_unique<VulkanRenderer>();
+#else
+        throw std::invalid_argument("this build does not include the Vulkan backend");
+#endif
+    }
     if (backend == "reference") {
         return std::make_unique<SoftwareRenderer>(platform_image_codec());
     }

@@ -357,8 +357,8 @@ public:
         for (const GeometryPatch& patch : vertex_patches) {
             GeometryPatch undo{patch.offset, {}};
             undo.bytes.assign(
-                working_.vertices.begin() + patch.offset,
-                working_.vertices.begin() + patch.offset + patch.bytes.size()
+                working_.vertices.data() + patch.offset,
+                working_.vertices.data() + patch.offset + patch.bytes.size()
             );
             undo_vertices_.push_back(std::move(undo));
             std::memcpy(

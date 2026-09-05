@@ -420,7 +420,7 @@ struct ApplicationHost::Impl final {
             renderer->declare_material(material.id, read_text(resource_path(material.source)));
         }
         const std::string_view effect_backend =
-            renderer->backend() == "d3d11" ? "hlsl" : "reference";
+            renderer->backend() == "reference" ? "reference" : "hlsl";
         for (const strata::EffectPassDeclaration& pass :
              runtime->effect_pass_declarations(effect_backend)) {
             renderer->declare_effect_pass(

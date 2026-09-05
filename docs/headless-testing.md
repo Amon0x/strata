@@ -10,7 +10,8 @@ Each capture contains both views needed by automated testing:
 - `<name>.json` is the canonical Surface frame snapshot: retained inspection, semantics, state,
   focus/layers, events, action outcomes, diagnostics, render commands, and operation counters.
 - `<name>.png` is produced by the selected render backend. The portable CPU reference backend runs
-  on Linux and Windows. Windows can instead use a windowless D3D11/WARP target sharing the desktop
+  on Linux and Windows. Vulkan builds can use a real GPU without a window. Windows can also use
+  a windowless D3D11/WARP target sharing the desktop
   texture store, glyph atlases, text, clipping, blending, blur, and authored-HLSL
   material/backdrop/content-effect pipelines.
 - `result.json` summarizes the selected backend, every frame, captured host action/effect, async
@@ -239,6 +240,11 @@ software device renders into an RGBA texture, using the shared production D3D11 
 host reads that texture back for PNG encoding. Application HLSL is loaded from its ordinary material
 declarations and compiled exactly as it is for desktop. The deterministic scenario clock is also
 passed to authored material time.
+
+Set `surface.backend` to `vulkan` for GPU rendering on Linux or Vulkan-enabled Windows builds.
+It compiles existing HLSL to SPIR-V and supports materials, textures, blur, and nested effects.
+Enable `STRATA_VULKAN_VALIDATION=1` for core and synchronization checks.
+See [Vulkan hosting](vulkan-hosting.md) for dependencies and device selection.
 
 Set `surface.backend` to `reference` for portable packet/geometry tests. That backend is the explicit
 CPU implementation of built-in unified materials. Because arbitrary HLSL has no portable CPU

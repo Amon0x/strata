@@ -87,8 +87,9 @@ warnings, and installed-package acceptance. ASan uses a separate build with
 `strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v10
 boundary as other hosts, but supplies a deterministic clock, scripted input/services, and canonical
 frame capture. On Windows it can use offscreen D3D11/WARP through the desktop host's shared
-production texture, blur, and HLSL material pipeline. Linux builds only the CPU reference backend;
-no Linux window or GPU backend is provided. The replay and JSON-lines protocols are documented in
+production texture, blur, and HLSL material pipeline. Linux supports both the CPU reference backend and Vulkan GPU captures with authored HLSL.
+The public Vulkan presenter targets host-owned images; Linux window/input hosting is separate.
+See [Vulkan hosting](../docs/vulkan-hosting.md) for dependencies, ownership, shaders, and testing. The replay and JSON-lines protocols are documented in
 [`docs/headless-testing.md`](../docs/headless-testing.md).
 
 ## Installed package
@@ -109,7 +110,7 @@ headers, a generated JSON catalog projection, runtime assets, tools, and samples
 `Strata::extensions` is static authoring support linked into independently loaded package
 libraries; the installed `strata_add_extension_package` CMake helper creates, names, records, and
 optionally installs them. Windows also exports `Strata::d3d11`, `Strata::win32`, and
-`Strata::desktop`.
+`Strata::desktop`. Vulkan builds also export `Strata::vulkan` and its C/C++ presenter APIs.
 `Strata::d3d11` includes both low-level packet submission and a Surface presenter;
 `Strata::win32` translates messages for hosts that retain window-loop ownership.
 `Strata_RESOURCES` names the installed `share` directory so consumers do not reconstruct package paths;

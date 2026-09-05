@@ -179,11 +179,10 @@ void test_state_store_and_typed_mutations() {
     check(!state.write(count_address, count_slot, Value(2.0)),
           "equal state update invalidated the surface");
     check(state.generation() == 1U && invalidations == 1U, "state invalidation count changed");
-    check(!state.migrate_declarations({StateDeclarationSchema{
-              count_address.scope,
-              count_address.name,
-              "dsl.unknown",
-          }}) &&
+    const std::vector<StateDeclarationSchema> unknown_declarations{
+        StateDeclarationSchema{count_address.scope, count_address.name, "dsl.unknown"},
+    };
+    check(!state.migrate_declarations(unknown_declarations) &&
               state.find(count_address) != nullptr,
           "dynamically inferred state was discarded by declaration migration");
 
@@ -773,10 +772,10 @@ void test_transactional_activation_and_last_good_reload(const std::filesystem::p
     const auto show_contract = bundle->action_registry().contract("overlay.show");
     const Action show(show_contract,
                       Value(std::vector<std::pair<std::string, Value>>{{"name", Value("Main")}}));
+    const std::vector<LayerSnapshot> expected_layers{{"overlay:Main", LayerRole::overlay}};
     check(application.dispatch(ActionEvent{"activate", std::nullopt, Value{}}, show).status ==
                   ActionDispatchStatus::handled &&
-              application.layers().snapshot() ==
-                  std::vector<LayerSnapshot>{{"overlay:Main", LayerRole::overlay}},
+              application.layers().snapshot() == expected_layers,
           "framework overlay action did not use the active declarative registry");
     const auto last_good = application.active_unit();
 

@@ -22,8 +22,9 @@ The native framework supports two platform profiles:
   presents Surfaces into targets owned by an existing graphics application. `Strata::win32`
   optionally translates an existing window's messages into portable Surface input.
 - **Linux x64:** the platform-neutral framework, C/C++ host APIs, extensions, compiler/authoring
-  tools, public packet-v10 decoder, and CPU reference headless host. Strata does not ship a Linux GUI
-  backend; consumers can implement Vulkan/OpenGL submission on top of `Strata::render_host`.
+  tools, public packet-v10 decoder, CPU reference renderer, and Vulkan GPU renderer with HLSL
+  materials and effects. `Strata::vulkan` presents into host-owned targets; the headless host captures
+  real GPU output. Linux window/input integration remains the embedding host's responsibility.
 
 ## Build and test
 
@@ -53,6 +54,9 @@ Requirements:
 - CMake 3.25 or newer
 - GCC 13 or newer with C++23 support
 - Ninja
+- libpng, Vulkan headers/loader and a GPU driver, shaderc, and Khronos validation layers
+
+See [Vulkan hosting](docs/vulkan-hosting.md) for package names and CPU-only build options.
 
 ```sh
 cmake --workflow --preset linux-x64
@@ -130,8 +134,8 @@ Win32 window/input example is [`native/samples/desktop_app.cpp`](native/samples/
 
 `strata_headless` runs complete applications with a deterministic clock and ordinary input routing.
 It emits canonical state/semantics/inspection JSON and renders packet-v10 geometry to PNG. Linux uses
-the portable CPU reference backend; Windows also tests the shared production D3D11/WARP texture,
-blur, and authored-HLSL material pipeline.
+both the CPU reference backend and Vulkan with authored HLSL shaders; Windows tests the shared
+D3D11/WARP pipeline. GPU scenarios cover textures, blur, and nested effects.
 
 The host supports replayable scenarios and a persistent newline-delimited JSON inspect/control loop
 for exploratory tooling. See [Headless application testing](docs/headless-testing.md).
@@ -157,6 +161,7 @@ compiler.
 
 - [PNG and SVG images](docs/svg.md)
 - [C/C++ embedding and custom renderer guide](docs/embedding.md)
+- [Rendering into a host-owned Vulkan target](docs/vulkan-hosting.md)
 - [Rendering into a host-owned D3D11 target](docs/d3d11-hosting.md)
 - [Forwarding an existing Win32 message loop](docs/win32-input.md)
 - [Win32 desktop hosting and SDK consumption](docs/desktop-hosting.md)

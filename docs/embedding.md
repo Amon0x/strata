@@ -109,9 +109,12 @@ renderer, resource/clipboard services, input translation boundary, and teardown 
 installed `desktop_app.cpp` sample is a complete window loop. See
 [Win32 desktop hosting](desktop-hosting.md).
 
-Linux deliberately has no bundled GUI backend. A Vulkan, OpenGL, or other renderer links
-`Strata::render_host` and includes `<strata/render_packet.hpp>` instead of duplicating packet-v10
-parsing:
+For Vulkan, link `Strata::vulkan` and use its C or C++ presenter to render into host-owned targets
+with the existing HLSL materials and effects. See [Vulkan hosting](vulkan-hosting.md) for queue and
+image ownership, synchronous submission, and Surface release ordering.
+
+Custom renderers can instead link `Strata::render_host` and include `<strata/render_packet.hpp>`
+to consume packet-v10 without duplicating parsing:
 
 ```cpp
 strata::host::RenderPacketDecoder decoder;

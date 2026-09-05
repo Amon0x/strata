@@ -1,5 +1,14 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+if(NOT WIN32 OR @STRATA_BUILD_VULKAN@)
+    find_dependency(PNG)
+endif()
+if(@STRATA_BUILD_VULKAN@)
+    find_dependency(Vulkan 1.1)
+    include("${CMAKE_CURRENT_LIST_DIR}/StrataShaderc.cmake")
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/StrataTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/StrataModule.cmake")
 

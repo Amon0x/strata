@@ -66,7 +66,7 @@ void check(const bool condition, const std::string& message) {
 }
 
 [[nodiscard]] const strata::host::BrowserElement& element(const strata::host::BrowserModel& model,
-                                                          const std::string& path) {
+                                                          const std::string_view path) {
     for (const strata::host::BrowserElement& candidate : model.elements()) {
         if (candidate.path == path)
             return candidate;

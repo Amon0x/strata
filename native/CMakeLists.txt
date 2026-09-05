@@ -20,6 +20,9 @@ include(CTest)
 include(FetchContent)
 include(cmake/StrataModule.cmake)
 
+option(STRATA_BUILD_VULKAN "Build the Vulkan packet renderer and HLSL compiler" OFF)
+option(STRATA_TEST_VULKAN "Run GPU tests requiring a Vulkan driver and validation layers" OFF)
+
 option(STRATA_BUILD_TESTS "Build native unit and ABI tests" ON)
 option(STRATA_BUILD_TOOLS "Build native command-line tools" ON)
 option(STRATA_BUILD_AUTHORING "Build only the schema authoring tool for source embeddings" OFF)
@@ -143,6 +146,8 @@ function(strata_target_defaults target)
                 -Wpedantic
                 -Wconversion
                 -Wsign-conversion
+                # Partial aggregate initialization intentionally uses member defaults.
+                $<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-field-initializers>
                 $<$<BOOL:${STRATA_WARNINGS_AS_ERRORS}>:-Werror>
         )
         if(STRATA_ENABLE_ASAN)
@@ -585,6 +590,42 @@ strata_add_extension_package(
 strata_target_defaults(strata_control_deck_extension)
 
 
+if(NOT WIN32 OR STRATA_BUILD_VULKAN)
+    find_package(PNG REQUIRED)
+    add_library(strata_png STATIC gpu/png.cpp)
+    target_link_libraries(strata_png PUBLIC PNG::PNG)
+    target_include_directories(strata_png PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    set_target_properties(strata_png PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    strata_target_defaults(strata_png)
+endif()
+
+if(STRATA_BUILD_VULKAN)
+    find_package(Vulkan 1.1 REQUIRED)
+    include(cmake/StrataShaderc.cmake)
+    add_library(strata_vulkan STATIC
+        vulkan/renderer.cpp
+        vulkan/device.cpp
+        vulkan/textures.cpp
+        vulkan/pipeline.cpp
+        vulkan/effects.cpp
+        vulkan/shader.cpp
+        vulkan/presenter.cpp
+        vulkan/presenter_abi.cpp)
+    add_library(Strata::vulkan ALIAS strata_vulkan)
+    target_include_directories(strata_vulkan PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(strata_vulkan PUBLIC Vulkan::Vulkan Strata::render_host Strata::host
+        PRIVATE strata_png StrataShaderc::shaderc)
+    set_target_properties(strata_vulkan PROPERTIES EXPORT_NAME vulkan POSITION_INDEPENDENT_CODE ON)
+    target_compile_features(strata_vulkan PUBLIC cxx_std_23)
+    strata_target_defaults(strata_vulkan)
+    add_library(strata_vulkan_offscreen STATIC vulkan/offscreen.cpp)
+    target_include_directories(strata_vulkan_offscreen PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
+    target_link_libraries(strata_vulkan_offscreen PUBLIC Strata::vulkan)
+    strata_target_defaults(strata_vulkan_offscreen)
+endif()
+
 if(WIN32)
     add_library(
         strata_d3d11
@@ -732,7 +773,7 @@ if(STRATA_BUILD_TOOLS)
     )
     strata_target_defaults(strata_compile)
 
-    set(strata_headless_platform_sources headless/unsupported_image_codec.cpp)
+    set(strata_headless_platform_sources headless/png_image_codec.cpp)
     if(WIN32)
         set(
             strata_headless_platform_sources
@@ -767,6 +808,13 @@ if(STRATA_BUILD_TOOLS)
     )
     if(WIN32)
         target_link_libraries(strata_headless_host PRIVATE strata_d3d11)
+    endif()
+    if(TARGET strata_png)
+        target_link_libraries(strata_headless_host PRIVATE strata_png)
+    endif()
+    if(STRATA_BUILD_VULKAN)
+        target_link_libraries(strata_headless_host PRIVATE strata_vulkan_offscreen)
+        target_compile_definitions(strata_headless_host PRIVATE STRATA_HAS_VULKAN)
     endif()
     strata_target_defaults(strata_headless_host)
 
@@ -1393,6 +1441,12 @@ install(
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
+if(TARGET strata_png)
+    install(TARGETS strata_png EXPORT StrataTargets ARCHIVE DESTINATION lib)
+endif()
+if(STRATA_BUILD_VULKAN)
+    install(TARGETS strata_vulkan EXPORT StrataTargets ARCHIVE DESTINATION lib)
+endif()
 if(WIN32)
     install(
         TARGETS strata_d3d11 strata_win32
@@ -1452,6 +1506,7 @@ install(
         samples/desktop_app.strata-app.json
         samples/adapter_c_smoke.c
         samples/d3d11_target_smoke.cpp
+        samples/vulkan_adapter_c_smoke.c
     DESTINATION share/strata/samples
 )
 install(
@@ -1475,6 +1530,7 @@ install(
         ${CMAKE_CURRENT_BINARY_DIR}/StrataConfig.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/StrataConfigVersion.cmake
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/StrataModule.cmake
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/StrataShaderc.cmake
     DESTINATION lib/cmake/Strata
 )
 
@@ -1487,6 +1543,10 @@ if(STRATA_CLANG_FORMAT)
         ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/desktop/*.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/desktop/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/vulkan/*.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/vulkan/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/gpu/*.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/gpu/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/d3d11/*.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/d3d11/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/headless/*.hpp
@@ -1506,4 +1566,36 @@ if(STRATA_CLANG_FORMAT)
         COMMENT "Checking native source formatting"
         VERBATIM
     )
+endif()
+
+if(STRATA_BUILD_TESTS AND STRATA_BUILD_VULKAN AND STRATA_TEST_VULKAN)
+    add_executable(strata_vulkan_tests tests/vulkan_tests.cpp)
+    target_link_libraries(strata_vulkan_tests PRIVATE strata_vulkan_offscreen)
+    strata_target_defaults(strata_vulkan_tests)
+    add_test(NAME strata.vulkan.pixels COMMAND strata_vulkan_tests)
+    set_tests_properties(strata.vulkan.pixels PROPERTIES LABELS "vulkan;gpu")
+endif()
+
+if(STRATA_BUILD_SAMPLES AND STRATA_BUILD_VULKAN)
+    add_executable(strata_vulkan_c_smoke samples/vulkan_adapter_c_smoke.c)
+    set_target_properties(strata_vulkan_c_smoke PROPERTIES C_STANDARD 17 C_STANDARD_REQUIRED YES)
+    target_link_libraries(strata_vulkan_c_smoke PRIVATE Strata::vulkan)
+    strata_target_defaults(strata_vulkan_c_smoke)
+    if(STRATA_BUILD_TESTS)
+        add_test(NAME strata.embed.vulkan_c COMMAND strata_vulkan_c_smoke)
+    endif()
+endif()
+
+if(STRATA_BUILD_TESTS AND STRATA_BUILD_TOOLS AND STRATA_BUILD_VULKAN AND STRATA_TEST_VULKAN)
+    foreach(scenario portable showcase effects control-deck-gradient control-deck-color-popup
+            control-deck-canvas effects-liquid-lab effects-refraction-grid)
+        add_test(NAME strata.vulkan.${scenario}
+            COMMAND ${CMAKE_COMMAND}
+                -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>
+                -DSTRATA_RESOURCES=${STRATA_RESOURCE_ROOT}
+                -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/${scenario}.json
+                -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/vulkan-${scenario}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_vulkan.cmake)
+        set_tests_properties(strata.vulkan.${scenario} PROPERTIES LABELS "vulkan;gpu" RUN_SERIAL TRUE)
+    endforeach()
 endif()
