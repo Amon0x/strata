@@ -1411,14 +1411,11 @@ component ExtendPage() {
           { id: "balanced", label: "Balanced" },
           { id: "quality", label: "High quality" }
         ],
-        triggerTemplate: GlassChoiceTrigger,
-        popupTemplate: GlassPopup,
-        itemTemplate: GlassChoiceItem,
         bind: basicQuality
       )
       Menu(
         key: "basic.actions",
-        label: "Glass actions",
+        label: "More actions",
         items: [
           { id: "refresh", label: "Refresh preview", shortcutHint: "Ctrl+R" },
           { id: "density", label: "Density", children: [
@@ -1428,17 +1425,13 @@ component ExtendPage() {
           { id: "separator", separator: true },
           { id: "inspect", label: "Inspect surface" }
         ],
-        triggerTemplate: GlassChoiceTrigger,
-        popupTemplate: GlassPopup,
-        itemTemplate: GlassChoiceItem,
         onSelect: action("demo.data.collection")
       )
       Tooltip(
         key: "basic.tooltip",
-        text: "This tooltip is an authored anchored portal with a backdrop shader.",
-        contentTemplate: GlassTooltip
+        text: "Native tooltip. Same sharp edges and quiet surfaces."
       ) {
-        Text(text: "Hover for authored glass", style: TelemetryText)
+        Text(text: "Hover for a hint", style: TelemetryText)
       }
       RadioGroup(
         key: "basic.mode",

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -56,10 +57,19 @@ struct CapturedFrame final {
     std::uint64_t packet_bytes = 0U;
 };
 
+/** Optional native services for an interactive preview. Callback owners must outlive the host. */
+struct ApplicationHostOptions final {
+    std::optional<strata_clipboard_adapter> clipboard;
+    std::optional<strata_ime_adapter> ime;
+    // Batch tests retain their complete trace. Live previews drain observations after each frame.
+    bool capture_frames = true;
+};
+
 /** One complete public-ABI application/Surface host with deterministic in-memory services. */
 class ApplicationHost final {
   public:
-    ApplicationHost(const Scenario& scenario, std::filesystem::path resource_root);
+    ApplicationHost(const Scenario& scenario, std::filesystem::path resource_root,
+                    ApplicationHostOptions options = {});
     ~ApplicationHost();
 
     ApplicationHost(const ApplicationHost&) = delete;
@@ -70,6 +80,10 @@ class ApplicationHost final {
     void publish(const SnapshotConfig& snapshot);
     void resize(double width, double height, double scale, std::int64_t time_nanoseconds);
     void close();
+    void cancel_interactions();
+    void clear_observations();
+    /** Materialize inspection on demand when capture_frames is disabled. */
+    [[nodiscard]] std::string inspect() const;
 
     [[nodiscard]] bool has_frame() const noexcept;
     [[nodiscard]] std::string_view render_backend() const noexcept;

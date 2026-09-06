@@ -7,7 +7,7 @@
 
 namespace strata::ui {
 
-enum class WidgetChevronDirection { right, down };
+enum class WidgetChevronDirection { right, down, up };
 
 /** Framework-owned normalized chevron geometry; built-ins never depend on a font or host texture. */
 [[nodiscard]] inline PathShape widget_chevron(
@@ -20,6 +20,10 @@ enum class WidgetChevronDirection { right, down };
         path.move_to(Point{0.12, 0.32});
         path.line_to(Point{0.5, 0.68});
         path.line_to(Point{0.88, 0.32});
+    } else if (direction == WidgetChevronDirection::up) {
+        path.move_to(Point{0.12, 0.68});
+        path.line_to(Point{0.5, 0.32});
+        path.line_to(Point{0.88, 0.68});
     } else {
         path.move_to(Point{0.32, 0.12});
         path.line_to(Point{0.68, 0.5});

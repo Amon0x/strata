@@ -51,6 +51,7 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/install/linux-x64",
         "STRATA_BUILD_DESKTOP": "OFF",
+        "STRATA_BUILD_PREVIEW": "ON",
         "STRATA_BUILD_VULKAN": "ON",
         "STRATA_TEST_VULKAN": "ON"
       },

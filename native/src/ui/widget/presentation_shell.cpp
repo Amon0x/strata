@@ -397,25 +397,13 @@ void command_palette_overlay(WidgetRenderScope& scope) {
         query != nullptr ? std::string_view(*query) : std::string_view{}
     );
     scope.solid_rect(scope.root_bounds(), scope.visual().scrim);
-    scope.shadow(
-        projection.bounds,
-        CornerRadii::all(8.0),
-        RenderColor{0U, 0U, 0U, 135U},
-        14.0,
-        2.0
-    );
-    scope.rounded_rect(
-        projection.bounds,
-        scope.visual().background.value_or(RenderColor{28U, 32U, 40U, 252U}),
-        scope.visual().border,
-        8.0
-    );
-    scope.rounded_rect(
-        projection.input_bounds,
-        RenderColor{15U, 19U, 26U, 235U},
-        RenderBorder{1.0, RenderColor{91U, 141U, 239U, 175U}, true},
-        5.0
-    );
+    scope.shadow(projection.bounds, CornerRadii::all(scope.visual().radius),
+                 RenderColor{0U, 0U, 0U, 135U}, 14.0, 2.0);
+    scope.rounded_rect(projection.bounds,
+                       scope.visual().background.value_or(RenderColor{28U, 32U, 40U, 252U}),
+                       scope.visual().border, scope.visual().radius);
+    scope.rounded_rect(projection.input_bounds, scope.visual().track, scope.visual().border,
+                       scope.visual().radius);
     // The scrim owns dismissal hit testing, not hover chrome. Painting the widget's generic
     // hover overlay across the root washes over the detached palette whenever the pointer leaves
     // the panel; the dedicated scrim above already provides the intended modal dimming.
@@ -446,13 +434,9 @@ void command_palette_overlay(WidgetRenderScope& scope) {
         const Rect row = projection.row_bounds(local);
         const std::string identity = "$palette/" + entry.id;
         if (index == projection.active_index) {
-            scope.rounded_rect(
-                Rect{row.x + 2.0, row.y + 1.0, std::max(0.0, row.width - 4.0),
-                     std::max(0.0, row.height - 2.0)},
-                RenderColor{91U, 141U, 239U, 82U},
-                std::nullopt,
-                4.0
-            );
+            scope.rounded_rect(Rect{row.x + 2.0, row.y + 1.0, std::max(0.0, row.width - 4.0),
+                                    std::max(0.0, row.height - 2.0)},
+                               scope.visual().selection, std::nullopt, scope.visual().radius);
         }
         scope.interaction(row, identity);
         if (scope.text_engine() == nullptr) continue;
@@ -548,19 +532,10 @@ void toast_region_overlay(WidgetRenderScope& scope) {
     );
     for (const ToastCardModel& card : projection.cards) {
         const RenderColor accent = toast_accent(card.notification.request.severity);
-        scope.shadow(
-            card.bounds,
-            CornerRadii::all(6.0),
-            RenderColor{0U, 0U, 0U, 105U},
-            9.0,
-            1.0
-        );
-        scope.rounded_rect(
-            card.bounds,
-            RenderColor{27U, 31U, 39U, 248U},
-            RenderBorder{1.0, accent, true},
-            6.0
-        );
+        scope.shadow(card.bounds, CornerRadii::all(scope.visual().radius),
+                     RenderColor{0U, 0U, 0U, 105U}, 9.0, 1.0);
+        scope.rounded_rect(card.bounds, scope.visual().background.value_or(scope.visual().track),
+                           scope.visual().border, scope.visual().radius);
         scope.solid_rect(Rect{card.bounds.x, card.bounds.y, 4.0, card.bounds.height}, accent);
         const std::string prefix = "$toast/" + std::to_string(card.notification.id);
         scope.interaction(card.bounds, prefix);

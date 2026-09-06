@@ -1524,11 +1524,13 @@ ThemedWidgetStyle Theme::semantic_style(const std::string_view component_type,
                                                         : tokens_.surface);
         visual.border = std::optional<ThemeBorder>(ThemeBorder{
             1.0,
-            tokens_.muted_foreground,
+            runtime::ColorValue{tokens_.muted_foreground.red, tokens_.muted_foreground.green,
+                                tokens_.muted_foreground.blue, 64U},
             true,
         });
     }
-    visual.foreground = text_foreground;
+    const bool filled_action = !text_only && (variant == "primary" || variant == "danger");
+    visual.foreground = filled_action ? tokens_.surface : text_foreground;
     visual.radius = variant == "compact" ? tokens_.radius * 0.75 : tokens_.radius;
     visual.hover_overlay =
         std::optional<runtime::ColorValue>(runtime::ColorValue{255U, 255U, 255U, 18U});
@@ -1538,13 +1540,17 @@ ThemedWidgetStyle Theme::semantic_style(const std::string_view component_type,
     visual.track = std::optional<runtime::ColorValue>(tokens_.surface_raised);
     visual.fill = std::optional<runtime::ColorValue>(accent);
     visual.thumb = std::optional<runtime::ColorValue>(tokens_.foreground);
-    visual.selection = std::optional<runtime::ColorValue>(accent);
+    runtime::ColorValue selection = accent;
+    selection.alpha = 48U;
+    visual.selection = selection;
+    visual.track_radius = tokens_.radius;
+    visual.thumb_radius = tokens_.radius;
     visual.scrim = std::optional<runtime::ColorValue>(runtime::ColorValue{0U, 0U, 0U, 150U});
 
     ThemeWidgetTextVisualStyle text_visual;
-    text_visual.color = text_foreground;
+    text_visual.color = visual.foreground;
     text_visual.hint_color = tokens_.muted_foreground;
-    text_visual.selection_color = accent;
+    text_visual.selection_color = selection;
     text_visual.caret_color = tokens_.foreground;
     ThemeTextLayoutStyle text_layout;
     // Ordinary Text/RichText is body copy and defaults to Regular. Controls retain the Medium

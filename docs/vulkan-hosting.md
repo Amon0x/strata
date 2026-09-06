@@ -12,7 +12,7 @@ CMake, Ninja, libpng development files, Vulkan headers/loader, shaderc developme
 ICD for the GPU, and Khronos validation layers. On Arch Linux:
 
 ```sh
-sudo pacman -S --needed gcc cmake ninja libpng vulkan-headers vulkan-icd-loader shaderc vulkan-validation-layers
+sudo pacman -S --needed gcc cmake ninja libpng vulkan-headers vulkan-icd-loader shaderc vulkan-validation-layers sdl2-compat
 cmake --preset linux-x64
 cmake --build --preset linux-x64 --parallel 8
 ctest --preset linux-x64 --output-on-failure
@@ -22,6 +22,9 @@ ctest --preset linux-x64 --output-on-failure
 `-DSTRATA_BUILD_VULKAN=OFF` builds the portable CPU lane without Vulkan or shaderc. Linux PNG
 support remains available in both lanes. Windows keeps D3D11 as its default; Vulkan can be enabled
 with `STRATA_BUILD_VULKAN=ON` and the Vulkan SDK's shaderc plus libpng available to CMake.
+
+The preset also builds the [SDL interactive preview](linux-preview.md). Set
+`-DSTRATA_BUILD_PREVIEW=OFF` to build without SDL.
 
 ## Ownership and submission
 

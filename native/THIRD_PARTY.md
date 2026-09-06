@@ -47,3 +47,10 @@ When `STRATA_ENABLE_TRACY=ON`, CMake fetches Tracy revision
 `05cceee0df3b8d7c6fa87e9638af311dbabc63cb`. Tracy is not enabled in ordinary builds and its source
 or profiler executables are not vendored in this repository. Tracy is distributed under the
 3-clause BSD license.
+
+## SDL 2
+
+The optional interactive preview dynamically links the system SDL 2 library (2.0.22 or newer).
+SDL supplies window/input/clipboard integration and presentation of captured frames; the portable
+core does not depend on it. SDL is distributed under the zlib license. No SDL source or binary is
+vendored in this repository.

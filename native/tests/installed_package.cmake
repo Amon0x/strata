@@ -19,6 +19,23 @@ if(NOT install_status EQUAL 0)
     message(FATAL_ERROR
         "SDK installation failed (${install_status})\n${install_output}\n${install_error}")
 endif()
+if(STRATA_EXPECT_PREVIEW)
+    set(installed_preview "${STRATA_INSTALL_PREFIX}/bin/strata_preview")
+    if(WIN32)
+        string(APPEND installed_preview ".exe")
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env "SDL_VIDEODRIVER=dummy"
+            "${installed_preview}" --smoke --backend reference
+        WORKING_DIRECTORY "${STRATA_INSTALL_PREFIX}"
+        RESULT_VARIABLE preview_status
+        OUTPUT_VARIABLE preview_output
+        ERROR_VARIABLE preview_error
+    )
+    if(NOT preview_status EQUAL 0 OR NOT preview_output MATCHES "STRATA_PREVIEW_READY")
+        message(FATAL_ERROR "installed preview failed (${preview_status})\n${preview_output}\n${preview_error}")
+    endif()
+endif()
 if(STRATA_EXPECT_VSCODE_EXTENSION)
     if(NOT EXISTS "${STRATA_INSTALL_PREFIX}/share/strata/registry-v1.json")
         message(FATAL_ERROR "SDK installation omitted the generated registry projection")

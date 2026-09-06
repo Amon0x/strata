@@ -61,13 +61,13 @@ void checkbox_content(WidgetRenderScope& scope) {
         size,
         size,
     };
-    scope.rounded_rect(box, scope.visual().track, scope.visual().border);
+    scope.rounded_rect(box, checked ? scope.visual().fill : scope.visual().track,
+                       scope.visual().border);
     if (checked) {
         const double mark = size * 0.25;
-        scope.rounded_rect(
+        scope.shape(
             Rect{box.x + mark, box.y + mark, box.width - mark * 2.0, box.height - mark * 2.0},
-            scope.visual().fill
-        );
+            widget_checkmark(scope.visual().track.representative()));
     }
     scope.interaction(scope.layout().bounds);
     scope.focus(box);
@@ -102,14 +102,12 @@ void toggle_content(WidgetRenderScope& scope) {
         track_height,
     };
     const std::optional<double> animated_position = scope.visual().indicator_position;
-    scope.rounded_rect(
-        track,
-        animated_position.has_value()
-            ? scope.visual().track
-            : checked ? scope.visual().fill : scope.visual().track,
-        scope.visual().border,
-        scope.visual().track_radius.value_or(track_height * 0.5)
-    );
+    scope.rounded_rect(track,
+                       animated_position.has_value() ? scope.visual().track
+                       : checked                     ? scope.visual().fill
+                                                     : scope.visual().track,
+                       scope.visual().border,
+                       scope.visual().track_radius.value_or(scope.visual().radius));
     constexpr double thumb_inset = 2.0;
     const double thumb_size = std::min(
         scope.visual().thumb_size.value_or(16.0),
@@ -118,16 +116,13 @@ void toggle_content(WidgetRenderScope& scope) {
     const double travel = std::max(0.0, track.width - thumb_size - thumb_inset * 2.0);
     scope.rounded_rect(
         Rect{
-            track.x + thumb_inset + travel *
-                animated_position.value_or(checked ? 1.0 : 0.0),
+            track.x + thumb_inset + travel * animated_position.value_or(checked ? 1.0 : 0.0),
             track.y + (track.height - thumb_size) * 0.5,
             thumb_size,
             thumb_size,
         },
-        scope.visual().thumb,
-        std::nullopt,
-        scope.visual().thumb_radius.value_or(thumb_size * 0.5)
-    );
+        scope.visual().thumb, std::nullopt,
+        scope.visual().thumb_radius.value_or(scope.visual().radius));
     scope.interaction(scope.layout().bounds);
     scope.focus(track);
     const std::optional<std::string_view> value = scope.node_text();
@@ -149,8 +144,8 @@ void rail_slider_content(
     const double percent
 ) {
     const Rect bounds = scope.layout().bounds;
-    const double thickness = scope.visual().track_height.value_or(8.0);
-    const double inset = scope.visual().indicator_inset.value_or(8.0);
+    const double thickness = scope.visual().track_height.value_or(2.0);
+    const double inset = scope.visual().indicator_inset.value_or(7.0);
     const Rect track{
         bounds.x + inset,
         bounds.y + (bounds.height - thickness) * 0.5,
@@ -158,7 +153,7 @@ void rail_slider_content(
         thickness,
     };
     const double center_x = track.x + track.width * percent;
-    const double track_gap = scope.visual().track_gap.value_or(8.0);
+    const double track_gap = scope.visual().track_gap.value_or(3.0);
     const double gap = scope.active()
         ? scope.visual().active_track_gap.value_or(track_gap)
         : track_gap;
@@ -168,39 +163,19 @@ void rail_slider_content(
         std::max(0.0, center_x - gap - track.x),
         track.height,
     };
-    scope.rounded_rect(
-        active,
-        scope.visual().fill,
-        std::nullopt,
-        scope.visual().track_radius.value_or(2.0)
-    );
+    scope.rounded_rect(active, scope.visual().fill, std::nullopt,
+                       scope.visual().track_radius.value_or(scope.visual().radius));
     const Rect inactive{
         std::min(track.right(), center_x + gap),
         track.y,
         std::max(0.0, track.right() - center_x - gap),
         track.height,
     };
-    scope.rounded_rect(
-        inactive,
-        scope.visual().track,
-        std::nullopt,
-        scope.visual().track_radius.value_or(2.0)
-    );
-    const double dot = inactive.empty() ? 0.0 : std::min(3.0, inactive.height);
-    scope.rounded_rect(
-        Rect{
-            std::max(inactive.x, inactive.right() - dot - 4.0),
-            inactive.y + (inactive.height - dot) * 0.5,
-            dot,
-            dot,
-        },
-        RenderColor{33U, 26U, 54U, 192U},
-        std::nullopt,
-        dot * 0.5
-    );
+    scope.rounded_rect(inactive, scope.visual().track, std::nullopt,
+                       scope.visual().track_radius.value_or(scope.visual().radius));
     const bool hot = scope.hovered() || scope.focus_visible();
     const double authored_thumb_width = scope.visual().thumb_width.value_or(3.0);
-    const double authored_thumb_height = scope.visual().thumb_height.value_or(24.0);
+    const double authored_thumb_height = scope.visual().thumb_height.value_or(18.0);
     const double thumb_width = scope.active()
         ? scope.visual().active_thumb_width.value_or(authored_thumb_width)
         : authored_thumb_width;
@@ -213,18 +188,8 @@ void rail_slider_content(
         thumb_width,
         thumb_height,
     };
-    scope.shadow(
-        thumb,
-        CornerRadii::all(thumb_width * 0.5),
-        RenderColor{5U, 2U, 11U, 104U},
-        3.0
-    );
-    scope.rounded_rect(
-        thumb,
-        scope.visual().thumb,
-        std::nullopt,
-        scope.visual().thumb_radius.value_or(999.0)
-    );
+    scope.rounded_rect(thumb, scope.visual().thumb, std::nullopt,
+                       scope.visual().thumb_radius.value_or(scope.visual().radius));
 
     if (scope.boolean("showValue", false) &&
         (hot || scope.active()) &&
@@ -240,18 +205,8 @@ void rail_slider_content(
             label_width,
             label_height,
         };
-        scope.shadow(
-            label_bounds,
-            CornerRadii::all(4.0),
-            RenderColor{4U, 2U, 8U, 114U},
-            5.0
-        );
-        scope.rounded_rect(
-            label_bounds,
-            RenderColor{16U, 12U, 27U, 239U},
-            std::nullopt,
-            4.0
-        );
+        scope.rounded_rect(label_bounds, scope.visual().background.value_or(scope.visual().track),
+                           scope.visual().border, scope.visual().radius);
         scope.text(
             label,
             Point{
@@ -282,7 +237,7 @@ void slider_content(WidgetRenderScope& scope) {
         rail_slider_content(scope, value, percent);
         return;
     }
-    const double thickness = scope.visual().track_height.value_or(4.0);
+    const double thickness = scope.visual().track_height.value_or(2.0);
     const double inset = scope.visual().indicator_inset.value_or(7.0);
     const Rect track = vertical
                            ? Rect{
@@ -299,12 +254,8 @@ void slider_content(WidgetRenderScope& scope) {
                                  std::max(0.0, scope.layout().bounds.width - inset * 2.0),
                                  thickness,
                              };
-    scope.rounded_rect(
-        track,
-        scope.visual().track,
-        std::nullopt,
-        scope.visual().track_radius.value_or(thickness * 0.5)
-    );
+    scope.rounded_rect(track, scope.visual().track, std::nullopt,
+                       scope.visual().track_radius.value_or(scope.visual().radius));
     const Rect fill = vertical
                           ? Rect{
                                 track.x,
@@ -314,14 +265,12 @@ void slider_content(WidgetRenderScope& scope) {
                             }
                           : Rect{track.x, track.y, track.width * percent, track.height};
     if (!fill.empty()) {
-        scope.rounded_rect(
-            fill,
-            scope.visual().fill,
-            std::nullopt,
-            std::min(fill.width, fill.height) * 0.5
-        );
+        scope.rounded_rect(fill, scope.visual().fill, std::nullopt,
+                           scope.visual().track_radius.value_or(scope.visual().radius));
     }
-    const double thumb_size = scope.visual().thumb_size.value_or(14.0);
+    const double thumb_size = scope.visual().thumb_size.value_or(18.0);
+    const double thumb_width = scope.visual().thumb_width.value_or(3.0);
+    const double thumb_height = scope.visual().thumb_height.value_or(thumb_size);
     const Point center = vertical
                              ? Point{
                                    track.x + track.width * 0.5,
@@ -332,18 +281,14 @@ void slider_content(WidgetRenderScope& scope) {
                                    track.y + track.height * 0.5,
                                };
     const Rect thumb{
-        center.x - thumb_size * 0.5,
-        center.y - thumb_size * 0.5,
-        thumb_size,
-        thumb_size,
+        center.x - (vertical ? thumb_height : thumb_width) * 0.5,
+        center.y - (vertical ? thumb_width : thumb_height) * 0.5,
+        vertical ? thumb_height : thumb_width,
+        vertical ? thumb_width : thumb_height,
     };
-    scope.rounded_rect(
-        thumb,
-        scope.visual().thumb,
-        RenderBorder{1.0, RenderColor{0U, 0U, 0U, 90U}, true},
-        scope.visual().thumb_radius.value_or(thumb_size * 0.5)
-    );
-    scope.interaction(scope.layout().bounds);
+    scope.rounded_rect(thumb, scope.visual().thumb, std::nullopt,
+                       scope.visual().thumb_radius.value_or(scope.visual().radius));
+    scope.interaction(thumb);
     scope.focus(thumb);
 }
 
@@ -530,12 +475,11 @@ void tabs_content(WidgetRenderScope& scope) {
             scope.rounded_rect(
                 Rect{
                     bounds.x + inset,
-                    bounds.y + inset,
+                    bounds.bottom() - 2.0,
                     std::max(0.0, bounds.width - inset * 2.0),
-                    std::max(0.0, bounds.height - inset * 2.0),
+                    2.0,
                 },
-                scope.visual().fill
-            );
+                scope.visual().fill);
         }
         if (id != nullptr) scope.interaction(bounds, *id);
 
@@ -583,26 +527,23 @@ void select_content(WidgetRenderScope& scope) {
         cap_width,
         scope.layout().bounds.height,
     };
-    scope.rounded_rect(
-        Rect{cap.x + 1.0, cap.y + 1.0, cap.width - 2.0, cap.height - 2.0},
-        scope.visual().fill,
-        std::nullopt,
-        0.0
-    );
+    scope.interaction(scope.layout().bounds, "$control");
+    scope.push_clip(Rect{scope.layout().bounds.x + 12.0, scope.layout().bounds.y,
+                         std::max(0.0, scope.layout().bounds.width - cap_width - 16.0),
+                         scope.layout().bounds.height});
     const std::string* label = widget_string_value(selected_option->field("label"));
     if (label != nullptr && scope.text_engine() != nullptr) {
         const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), *label);
-        scope.text(
-            *label,
-            Point{
-                scope.layout().bounds.x + 5.0,
-                scope.layout().bounds.y +
-                    (scope.layout().bounds.height - shaped.metrics.height) * 0.5,
-            },
-            scope.visual().foreground
-        );
+        scope.text(*label,
+                   Point{
+                       scope.layout().bounds.x + 12.0,
+                       scope.layout().bounds.y +
+                           (scope.layout().bounds.height - shaped.metrics.height) * 0.5,
+                   },
+                   scope.visual().foreground);
     }
-    const double icon_size = std::min(cap.width, cap.height) * 0.45;
+    scope.pop_clip();
+    const double icon_size = std::min(12.0, std::min(cap.width, cap.height));
     scope.shape(
         Rect{
             cap.x + (cap.width - icon_size) * 0.5,
@@ -610,9 +551,10 @@ void select_content(WidgetRenderScope& scope) {
             icon_size,
             icon_size,
         },
-        widget_chevron(WidgetChevronDirection::down, scope.visual().foreground)
-    );
-    scope.interaction(scope.layout().bounds, "$control");
+        widget_chevron(scope.effective_boolean("expanded", "$expanded", "defaultExpanded", false)
+                           ? WidgetChevronDirection::up
+                           : WidgetChevronDirection::down,
+                       scope.visual().foreground));
     scope.focus(scope.layout().bounds);
 }
 
@@ -635,6 +577,8 @@ void select_overlay(WidgetRenderScope& scope) {
         popup = Rect{left, top, right - left, bottom - top};
     }
     if (!authored_popup) {
+        scope.shadow(popup, CornerRadii::all(scope.visual().radius), RenderColor{0U, 0U, 0U, 90U},
+                     12.0, 1.0);
         scope.rounded_rect(
             popup,
             scope.visual().background.value_or(RenderColor{34U, 38U, 46U, 245U}),
@@ -642,15 +586,29 @@ void select_overlay(WidgetRenderScope& scope) {
         );
     }
     if (authored_items) return;
+    const auto selected = effective_choice(scope.node());
+    const runtime::Value* cursor_value = scope.retained("$choiceIndex");
+    const double cursor = cursor_value != nullptr && cursor_value->number() != nullptr
+                              ? *cursor_value->number()
+                              : -1.0;
     for (const WidgetSubtarget& row : rows) {
+        if (row.enabled && static_cast<double>(row.index) == cursor)
+            scope.solid_rect(row.bounds, scope.visual().selection);
+        if (selected.has_value() && row.index == selected->index) {
+            scope.shape(Rect{row.bounds.right() - 23.0,
+                             row.bounds.y + (row.bounds.height - 10.0) * 0.5, 10.0, 10.0},
+                        widget_checkmark(scope.visual().foreground));
+        }
         scope.interaction(row.bounds, row.id);
         if (scope.text_engine() == nullptr || row.label.empty()) continue;
         const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), row.label);
-        scope.text(
-            row.label,
-            Point{row.bounds.x + 7.0, row.bounds.y + (row.bounds.height - shaped.metrics.height) * 0.5},
-            row.enabled ? scope.visual().foreground : RenderColor{160U, 168U, 178U, 180U}
-        );
+        scope.push_clip(Rect{row.bounds.x + 12.0, row.bounds.y,
+                             std::max(0.0, row.bounds.width - 42.0), row.bounds.height});
+        scope.text(row.label,
+                   Point{row.bounds.x + 12.0,
+                         row.bounds.y + (row.bounds.height - shaped.metrics.height) * 0.5},
+                   row.enabled ? scope.visual().foreground : scope.visual().text_hint);
+        scope.pop_clip();
     }
 }
 
@@ -674,15 +632,12 @@ void radio_foreground(WidgetRenderScope& scope) {
             12.0,
             12.0,
         };
-        scope.border(ring, RenderBorder{1.0, scope.visual().track.representative(), true}, 6.0);
+        scope.border(ring, RenderBorder{1.0, scope.visual().text_hint, true},
+                     scope.visual().radius);
         const std::string* id = widget_string_value(option.field("id"));
         if (id != nullptr && selected.has_value() && index == selected->index) {
-            scope.rounded_rect(
-                Rect{ring.x + 3.0, ring.y + 3.0, 6.0, 6.0},
-                scope.visual().fill,
-                std::nullopt,
-                3.0
-            );
+            scope.rounded_rect(Rect{ring.x + 3.0, ring.y + 3.0, 6.0, 6.0}, scope.visual().fill,
+                               std::nullopt, scope.visual().radius);
         }
         const std::string* label = widget_string_value(option.field("label"));
         if (scope.text_engine() != nullptr && label != nullptr) {

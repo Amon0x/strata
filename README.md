@@ -24,7 +24,8 @@ The native framework supports two platform profiles:
 - **Linux x64:** the platform-neutral framework, C/C++ host APIs, extensions, compiler/authoring
   tools, public packet-v10 decoder, CPU reference renderer, and Vulkan GPU renderer with HLSL
   materials and effects. `Strata::vulkan` presents into host-owned targets; the headless host captures
-  real GPU output. Linux window/input integration remains the embedding host's responsibility.
+  real GPU output. `strata_preview` adds an interactive SDL window with native input and clipboard
+  for testing generic applications on Wayland and X11.
 
 ## Build and test
 
@@ -54,6 +55,7 @@ Requirements:
 - CMake 3.25 or newer
 - GCC 13 or newer with C++23 support
 - Ninja
+- SDL 2.0.22 or newer development files for the interactive preview
 - libpng, Vulkan headers/loader and a GPU driver, shaderc, and Khronos validation layers
 
 See [Vulkan hosting](docs/vulkan-hosting.md) for package names and CPU-only build options.
@@ -103,6 +105,18 @@ Windows additionally exports `Strata::d3d11`, `Strata::win32`, and `Strata::desk
 [Win32 input adaptation](docs/win32-input.md) for existing window procedures, and
 [Win32 desktop hosting](docs/desktop-hosting.md) for DLL/resource deployment and the installed
 desktop consumer.
+
+## Interactive Linux preview
+
+After building the Linux preset, open the primitives gallery:
+
+```sh
+build/cmake/linux-x64/native/strata_preview
+```
+
+Pass a generic `.strata-app.json` manifest to preview your own application. F5 reloads source and
+resources; `--backend reference` selects CPU rendering. See [Linux preview](docs/linux-preview.md)
+for dependencies, input, captures, and the preview renderer's performance scope.
 
 ## Native desktop
 

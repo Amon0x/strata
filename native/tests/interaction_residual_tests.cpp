@@ -1065,6 +1065,14 @@ void test_slider_pointer_matches_rendered_track(InputFixture& fixture) {
     }));
     check(std::abs(value() - 75.0) <= 0.0001,
           "dragging an actively pressed Slider did not update its value");
+    static_cast<void>(fixture.input_.key("home"));
+    check(value() == 0.0, "Slider Home did not reach its minimum");
+    static_cast<void>(fixture.input_.key("end"));
+    check(value() == 100.0, "Slider End did not reach its maximum");
+    static_cast<void>(fixture.input_.key("pagedown"));
+    check(value() == 90.0, "Slider Page Down did not move by ten steps");
+    static_cast<void>(fixture.input_.key("pageup"));
+    check(value() == 100.0, "Slider Page Up did not clamp at the maximum");
 }
 
 void test_choice_semantics(InputFixture& fixture) {

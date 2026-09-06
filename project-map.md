@@ -28,6 +28,7 @@
 - `native/win32` — optional Win32 message-to-Surface input translation with C/C++ handles for
   embedding hosts.
 - `native/desktop` — Win32 input/services, swap-chain ownership, and multi-window executable.
+- `native/preview` — SDL interactive test window, native clipboard/IME, and input translation.
 - `native/headless` — persistent semantic browser/control sessions, deterministic replay, offscreen
   D3D11/WARP capture, optional CPU reference rendering, and PNG output.
 - `native/tools` — compiler and authoring command-line tools.

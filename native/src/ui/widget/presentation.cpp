@@ -57,7 +57,7 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
     return RenderBorder{
         value_number(value->field("width"), fallback.has_value() ? fallback->width : 1.0),
         widget_color(value->field("color"),
-                     fallback.has_value() ? fallback->color : RenderColor{160U, 168U, 178U, 220U}),
+                     fallback.has_value() ? fallback->color : RenderColor{143U, 150U, 161U, 255U}),
         value_boolean(value->field("inside"), true),
     };
 }
@@ -65,18 +65,21 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
 [[nodiscard]] WidgetVisualStyle resolve_visual(const WidgetRenderScope& scope,
                                                const WidgetVisualProfile profile) {
     const std::string variant = scope.string("variant", "default");
-    const RenderColor accent = variant == "danger" ? RenderColor{224U, 74U, 74U, 255U}
-                                                   : RenderColor{91U, 141U, 239U, 255U};
+    const RenderColor accent = variant == "danger" ? RenderColor{225U, 115U, 115U, 255U}
+                                                   : RenderColor{151U, 181U, 211U, 255U};
 
     WidgetVisualStyle result;
     result.fill = accent;
     result.selection = accent;
+    result.selection.alpha = 48U;
+    if (!profile.text_variant_foreground && (variant == "primary" || variant == "danger"))
+        result.foreground = RenderColor{24U, 26U, 30U, 255U};
     if (profile.text_variant_foreground && variant == "primary")
         result.foreground = accent;
     else if (profile.text_variant_foreground && variant == "danger") {
-        result.foreground = RenderColor{224U, 74U, 74U, 255U};
+        result.foreground = RenderColor{225U, 115U, 115U, 255U};
     } else if (profile.text_variant_foreground && variant == "subtle") {
-        result.foreground = RenderColor{160U, 168U, 178U, 220U};
+        result.foreground = RenderColor{143U, 150U, 161U, 255U};
     }
     if (profile.transparent_chrome || variant == "subtle") {
         result.background.reset();
@@ -84,34 +87,10 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
     } else {
         result.background = variant == "primary" || variant == "danger" ? accent
                             : variant == "secondary" || profile.raised_chrome
-                                ? RenderColor{24U, 24U, 42U, 240U}
-                                : RenderColor{34U, 38U, 46U, 220U};
-        result.border = RenderBorder{1.0, RenderColor{160U, 168U, 178U, 220U}, true};
+                                ? RenderColor{30U, 33U, 38U, 255U}
+                                : RenderColor{24U, 26U, 30U, 255U};
+        result.border = RenderBorder{1.0, RenderColor{143U, 150U, 161U, 64U}, true};
     }
-    const runtime::Value* authored_style = scope.property("$layout");
-    const bool has_authored_visuals =
-        authored_style != nullptr &&
-        std::ranges::any_of(
-            std::array{
-                "background",    "foreground",     "color",      "border",          "radius",
-                "hoverOverlay",  "activeOverlay",  "focusRing",  "disabledOpacity", "opacity",
-                "translateX",    "translateY",     "scale",      "scaleX",          "scaleY",
-                "track",         "fill",           "thumb",      "selection",       "scrim",
-                "indicatorSize", "indicatorInset", "trackWidth", "trackHeight",     "trackRadius",
-                "thumbSize",     "thumbRadius",    "hintColor",  "selectionColor",  "caretColor",
-            },
-            [authored_style](const std::string_view name) {
-                return authored_style->field(name) != nullptr;
-            });
-    if (has_authored_visuals) {
-        result.border = RenderBorder{1.0, RenderColor{92U, 102U, 118U, 180U}, true};
-        result.track = RenderColor{18U, 22U, 28U, 220U};
-        result.thumb = RenderColor{242U, 245U, 249U, 255U};
-        result.selection = RenderColor{91U, 141U, 239U, 150U};
-    }
-    if (variant == "compact")
-        result.radius = 3.0;
-
     if (const runtime::Value* value = scope.style("background"); value != nullptr) {
         result.background = paint_from_value(value);
     }
@@ -298,9 +277,8 @@ void command_tooltip_overlay(WidgetRenderScope& scope) {
         y = anchor.bottom() + 4.0;
     y = std::clamp(y, viewport.y, std::max(viewport.y, viewport.bottom() - height));
     const Rect popup{x, y, width, height};
-    scope.rounded_rect(popup, RenderColor{20U, 24U, 32U, 248U},
-                       RenderBorder{1.0, RenderColor{90U, 102U, 120U, 220U}, true}, 4.0);
-    scope.text(text, Point{popup.x + 8.0, popup.y + 5.0}, RenderColor{236U, 240U, 244U, 255U});
+    scope.rounded_rect(popup, scope.visual().track, scope.visual().border, scope.visual().radius);
+    scope.text(text, Point{popup.x + 8.0, popup.y + 5.0}, scope.visual().foreground);
 }
 
 WidgetRenderScope::WidgetRenderScope(const RetainedNode& node, const LayoutRecord& layout,
@@ -386,7 +364,7 @@ double WidgetRenderScope::motion_progress(const std::string_view id,
 }
 double WidgetRenderScope::alpha() const noexcept {
     if (!apply_presentation_opacity_)
-        return 1.0;
+        return enabled_ ? 1.0 : visual_.disabled_opacity;
     const MotionComputedValues* computed = motion_values();
     const double presentation_opacity =
         computed != nullptr ? computed->number(MotionProperty::opacity).value_or(visual_.opacity)
@@ -760,10 +738,12 @@ void WidgetRenderScope::focus(const Rect bounds) {
         bounds.width + outset * 2.0,
         bounds.height + outset * 2.0,
     };
-    border(expanded, ring, visual_.radius + outset);
+    border(expanded, ring, visual_.radius > 0.0 ? visual_.radius + outset : 0.0);
 }
 
 void WidgetRenderScope::interaction(const Rect bounds, const std::string_view subtarget) {
+    if (!enabled())
+        return;
     const bool hovered_value = subtarget.empty()
                                    ? input_.hovered(node_.identity())
                                    : input_.subtarget_hovered(node_.identity(), subtarget);

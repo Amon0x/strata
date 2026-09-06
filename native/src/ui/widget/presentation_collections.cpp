@@ -80,12 +80,8 @@ void scrollbars(WidgetRenderScope& scope) {
             scope.layout(), style, axis
         );
         if (!geometry.has_value()) continue;
-        scope.rounded_rect(
-            geometry->thumb_bounds,
-            scope.visual().thumb,
-            std::nullopt,
-            2.0
-        );
+        scope.rounded_rect(geometry->thumb_bounds, scope.visual().thumb, std::nullopt,
+                           scope.visual().radius);
     }
 }
 
@@ -166,14 +162,11 @@ void table_foreground(WidgetRenderScope& scope) {
                 : RenderColor{86U, 102U, 126U, 120U}
         );
     }
-    scope.solid_rect(
-        Rect{viewport.x, viewport.y, viewport.width, header_height},
-        RenderColor{24U, 30U, 40U, 252U}
-    );
+    scope.solid_rect(Rect{viewport.x, viewport.y, viewport.width, header_height},
+                     scope.visual().track);
     scope.solid_rect(
         Rect{viewport.x, viewport.y + header_height - 1.0, viewport.width, 1.0},
-        RenderColor{96U, 112U, 136U, 180U}
-    );
+        scope.visual().border.value_or(RenderBorder{1.0, scope.visual().text_hint, true}).color);
     if (scope.property("columns") != nullptr && scope.text_engine() != nullptr) {
         const collection::TableGeometry geometry = collection::table_geometry(
             collection::resolve_table_columns(
@@ -195,20 +188,15 @@ void table_foreground(WidgetRenderScope& scope) {
                                const collection::TableTrack& track
                            ) {
             if (track.column.pinned) {
-                scope.solid_rect(
-                    Rect{track.start, viewport.y, track.column.width, header_height},
-                    RenderColor{28U, 36U, 48U, 255U}
-                );
+                scope.solid_rect(Rect{track.start, viewport.y, track.column.width, header_height},
+                                 scope.visual().track);
             }
             std::string header = track.column.header;
             if (sort_column != nullptr && *sort_column == track.column.id && sort_direction != nullptr) {
                 header += *sort_direction == "ASCENDING" ? "  ↑" : "  ↓";
             }
-            scope.text(
-                header,
-                Point{track.start + 8.0, viewport.y + 8.0},
-                RenderColor{225U, 232U, 242U, 255U}
-            );
+            scope.text(header, Point{track.start + 8.0, viewport.y + 8.0},
+                       scope.visual().foreground);
             scope.solid_rect(
                 Rect{track.end() - 1.0, viewport.y + 5.0, 1.0, header_height - 10.0},
                 RenderColor{92U, 107U, 130U, 140U}
@@ -304,12 +292,9 @@ void item_grid_overlay(WidgetRenderScope& scope) {
             std::abs(start->x - current->x),
             std::abs(start->y - current->y),
         };
-        scope.rounded_rect(
-            bounds,
-            RenderColor{70U, 137U, 230U, 50U},
-            RenderBorder{1.0, RenderColor{104U, 169U, 255U, 220U}, true},
-            2.0
-        );
+        scope.rounded_rect(bounds, RenderColor{70U, 137U, 230U, 50U},
+                           RenderBorder{1.0, RenderColor{104U, 169U, 255U, 220U}, true},
+                           scope.visual().radius);
     }
     scope.pop_clip();
 }

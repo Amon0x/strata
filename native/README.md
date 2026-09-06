@@ -84,6 +84,9 @@ single-configuration tree. Both enable tools, samples, tests, strict
 warnings, and installed-package acceptance. ASan uses a separate build with
 `-DSTRATA_ENABLE_ASAN=ON`; MSVC does not claim UBSan support.
 
+`strata_preview` provides the Linux interactive testing window; see
+[Linux preview](../docs/linux-preview.md) for SDL dependencies and usage.
+
 `strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v10
 boundary as other hosts, but supplies a deterministic clock, scripted input/services, and canonical
 frame capture. On Windows it can use offscreen D3D11/WARP through the desktop host's shared

@@ -297,10 +297,18 @@ bool choice_key(WidgetInputScope& scope) {
 }
 
 bool slider_key(WidgetInputScope& scope) {
+    const std::string_view key = scope.key();
     double direction = 0.0;
-    if (scope.key() == "right" || scope.key() == "up") direction = 1.0;
-    else if (scope.key() == "left" || scope.key() == "down") direction = -1.0;
-    else return false;
+    if (key == "right" || key == "up")
+        direction = 1.0;
+    else if (key == "left" || key == "down")
+        direction = -1.0;
+    else if (key == "pageup")
+        direction = 10.0;
+    else if (key == "pagedown")
+        direction = -10.0;
+    else if (key != "home" && key != "end")
+        return false;
 
     const double minimum = scope.number("min", 0.0);
     const double maximum = scope.number("max", 1.0);
@@ -308,14 +316,18 @@ bool slider_key(WidgetInputScope& scope) {
     const double current = scope.effective_number(
         "value", "$value", "defaultValue", minimum
     );
-    const double raw = current + direction * step;
+    const double increment = step > 0.0 ? step : (maximum - minimum) / 100.0;
+    const double raw = current + direction * increment;
     const double snapped = step > 0.0
                                ? minimum + std::round((raw - minimum) / step) * step
                                : raw;
-    const double next = std::clamp(snapped, minimum, maximum);
+    const double next = key == "home"  ? minimum
+                        : key == "end" ? maximum
+                                       : std::clamp(snapped, minimum, maximum);
     scope.set_event_count(1U);
     if (next == current) return true;
-    scope.set_retained("$value", runtime::Value(next), DirtyReason::properties);
+    if (scope.property("value") == nullptr)
+        scope.set_retained("$value", runtime::Value(next), DirtyReason::properties);
     scope.number_changed("onChange", next);
     return true;
 }

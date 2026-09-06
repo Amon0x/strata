@@ -28,6 +28,7 @@ option(STRATA_BUILD_TOOLS "Build native command-line tools" ON)
 option(STRATA_BUILD_AUTHORING "Build only the schema authoring tool for source embeddings" OFF)
 option(STRATA_BUILD_SAMPLES "Build C and C++ embedding smoke applications" ON)
 option(STRATA_BUILD_DESKTOP "Build the native Win32 fidelity host" ON)
+option(STRATA_BUILD_PREVIEW "Build the SDL interactive application preview" OFF)
 option(STRATA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(STRATA_ENABLE_ASAN "Enable AddressSanitizer where supported" OFF)
 option(STRATA_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer where supported" OFF)
@@ -824,6 +825,39 @@ if(STRATA_BUILD_TOOLS)
     strata_target_defaults(strata_headless)
 endif()
 
+if(STRATA_BUILD_PREVIEW)
+    if(NOT STRATA_BUILD_TOOLS)
+        message(FATAL_ERROR "STRATA_BUILD_PREVIEW requires STRATA_BUILD_TOOLS")
+    endif()
+    find_package(SDL2 2.0.22 REQUIRED CONFIG)
+    add_library(strata_preview_input STATIC preview/input.cpp preview/services.cpp)
+    target_link_libraries(strata_preview_input PUBLIC SDL2::SDL2 Strata::c)
+    target_include_directories(strata_preview_input PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/preview)
+    strata_target_defaults(strata_preview_input)
+    add_executable(strata_preview preview/main.cpp desktop/launch_manifest.cpp)
+    target_link_libraries(strata_preview PRIVATE strata_preview_input strata_headless_host)
+    target_include_directories(strata_preview PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(strata_preview PRIVATE STRATA_PREVIEW_RESOURCES="${STRATA_RESOURCE_ROOT}")
+    if(STRATA_BUILD_VULKAN)
+        target_compile_definitions(strata_preview PRIVATE STRATA_HAS_VULKAN)
+    endif()
+    strata_target_defaults(strata_preview)
+    if(UNIX AND NOT APPLE)
+        set_target_properties(strata_preview PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
+    endif()
+    install(TARGETS strata_preview RUNTIME DESTINATION bin)
+    if(STRATA_BUILD_TESTS)
+        add_executable(strata_preview_tests tests/preview_tests.cpp)
+        target_link_libraries(strata_preview_tests PRIVATE strata_preview_input strata_headless_host)
+        target_include_directories(strata_preview_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        strata_target_defaults(strata_preview_tests)
+        add_test(NAME strata.preview.input COMMAND strata_preview_tests "${STRATA_RESOURCE_ROOT}")
+        set_tests_properties(strata.preview.input PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+        add_test(NAME strata.preview.smoke COMMAND strata_preview --smoke --backend reference)
+        set_tests_properties(strata.preview.smoke PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+    endif()
+endif()
+
 if(STRATA_BUILD_SAMPLES)
     add_executable(strata_c_smoke samples/c_smoke.c)
     target_link_libraries(strata_c_smoke PRIVATE Strata::c)
@@ -870,6 +904,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         strata_desktop
         desktop/host.cpp
         desktop/launch.cpp
+        desktop/launch_manifest.cpp
         desktop/main.cpp
         desktop/performance.cpp
         desktop/preview.cpp
@@ -1430,6 +1465,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             -DSTRATA_CONFIG=$<CONFIG>
             -DSTRATA_CTEST_COMMAND=${CMAKE_CTEST_COMMAND}
             -DSTRATA_EXPECT_VSCODE_EXTENSION=${STRATA_BUILD_TOOLS}
+            -DSTRATA_EXPECT_PREVIEW=${STRATA_BUILD_PREVIEW}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/installed_package.cmake
     )
     set_tests_properties(strata.install.consumer PROPERTIES RUN_SERIAL TRUE)
@@ -1544,6 +1580,8 @@ if(STRATA_CLANG_FORMAT)
         ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/desktop/*.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/desktop/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/preview/*.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/preview/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/vulkan/*.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/vulkan/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/gpu/*.hpp

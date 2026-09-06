@@ -220,7 +220,8 @@ void menu_overlay(WidgetRenderScope& scope) {
         if (item.separator) {
             scope.solid_rect(Rect{bounds.x + 8.0, bounds.y + bounds.height * 0.5,
                                   std::max(0.0, bounds.width - 16.0), 1.0},
-                             RenderColor{92U, 102U, 118U, 150U});
+                             scope.visual().border.value_or(
+                                 RenderBorder{1.0, scope.visual().text_hint, true}).color);
             continue;
         }
         const bool selected =
@@ -230,7 +231,7 @@ void menu_overlay(WidgetRenderScope& scope) {
             scope.rounded_rect(Rect{bounds.x + 3.0, bounds.y + 2.0,
                                     std::max(0.0, bounds.width - 6.0),
                                     std::max(0.0, bounds.height - 4.0)},
-                               RenderColor{91U, 141U, 239U, 62U});
+                               scope.visual().selection);
         }
         scope.interaction(bounds, identity);
         const RenderColor foreground =

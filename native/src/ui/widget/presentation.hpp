@@ -24,25 +24,25 @@ enum class WidgetTextAlignment { start, center, end };
 
 struct WidgetVisualStyle final {
     std::optional<Paint> background;
-    RenderColor foreground{236U, 240U, 244U, 255U};
+    RenderColor foreground{232U, 235U, 239U, 255U};
     std::optional<RenderBorder> border;
-    double radius = 4.0;
+    double radius = 0.0;
     std::optional<RenderColor> hover_overlay{RenderColor{255U, 255U, 255U, 18U}};
     std::optional<RenderColor> active_overlay{RenderColor{0U, 0U, 0U, 32U}};
     std::optional<RenderBorder> focus_ring{RenderBorder{
         2.0,
-        RenderColor{112U, 170U, 250U, 255U},
+        RenderColor{151U, 181U, 211U, 255U},
         true,
     }};
     double disabled_opacity = 0.45;
     double opacity = 1.0;
-    Paint track{RenderColor{24U, 24U, 42U, 240U}};
-    Paint fill{RenderColor{91U, 141U, 239U, 255U}};
-    RenderColor thumb{236U, 240U, 244U, 255U};
-    RenderColor selection{91U, 141U, 239U, 255U};
-    RenderColor text_hint{160U, 168U, 178U, 220U};
+    Paint track{RenderColor{30U, 33U, 38U, 255U}};
+    Paint fill{RenderColor{151U, 181U, 211U, 255U}};
+    RenderColor thumb{232U, 235U, 239U, 255U};
+    RenderColor selection{151U, 181U, 211U, 48U};
+    RenderColor text_hint{143U, 150U, 161U, 255U};
     RenderColor text_selection{72U, 119U, 218U, 96U};
-    RenderColor caret{236U, 240U, 244U, 255U};
+    RenderColor caret{232U, 235U, 239U, 255U};
     Paint scrim{RenderColor{0U, 0U, 0U, 150U}};
     std::optional<double> indicator_size;
     std::optional<double> indicator_inset;

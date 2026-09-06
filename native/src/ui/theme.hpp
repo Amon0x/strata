@@ -25,15 +25,15 @@ inline constexpr std::string_view default_widget_variant = "default";
 inline constexpr std::string_view default_motion_timing_name = "standard";
 
 struct ThemeTokens final {
-    runtime::ColorValue surface{34U, 38U, 46U, 220U};
-    runtime::ColorValue surface_raised{24U, 24U, 42U, 240U};
-    runtime::ColorValue foreground{236U, 240U, 244U, 255U};
-    runtime::ColorValue muted_foreground{160U, 168U, 178U, 220U};
-    runtime::ColorValue accent{91U, 141U, 239U, 255U};
-    runtime::ColorValue danger{224U, 74U, 74U, 255U};
-    runtime::ColorValue focus{112U, 170U, 250U, 255U};
+    runtime::ColorValue surface{24U, 26U, 30U, 255U};
+    runtime::ColorValue surface_raised{30U, 33U, 38U, 255U};
+    runtime::ColorValue foreground{232U, 235U, 239U, 255U};
+    runtime::ColorValue muted_foreground{143U, 150U, 161U, 255U};
+    runtime::ColorValue accent{151U, 181U, 211U, 255U};
+    runtime::ColorValue danger{225U, 115U, 115U, 255U};
+    runtime::ColorValue focus{151U, 181U, 211U, 255U};
     double spacing_unit = 4.0;
-    double radius = 4.0;
+    double radius = 0.0;
     double density = 1.0;
 
     void validate() const;

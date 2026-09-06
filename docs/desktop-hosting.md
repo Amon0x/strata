@@ -1,5 +1,7 @@
 # Win32 desktop hosting
 
+For interactive application testing on Linux, use the [SDL preview](linux-preview.md).
+
 Strata ships two desktop entry points:
 
 - `Strata::desktop` is the reusable C++23 Win32/D3D11 host library for an application that owns its

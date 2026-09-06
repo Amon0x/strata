@@ -84,8 +84,9 @@ struct ApplicationHost::Impl final {
     using Registration =
         std::unique_ptr<strata_action_registration, decltype(&strata_action_registration_release)>;
 
-    Impl(const Scenario& scenario, std::filesystem::path resource_root)
-        : scenario(scenario), resource_root(std::move(resource_root)),
+    Impl(const Scenario& scenario, std::filesystem::path resource_root,
+         ApplicationHostOptions options)
+        : scenario(scenario), resource_root(std::move(resource_root)), options(std::move(options)),
           renderer(create_capture_renderer(scenario.render_backend)) {
         try {
             initialize();
@@ -369,17 +370,21 @@ struct ApplicationHost::Impl final {
             &Impl::clipboard_read,
             &Impl::clipboard_write,
         };
-        strata::require_ok(
-            strata_runtime_set_clipboard_adapter(runtime->native_handle(), &clipboard_adapter),
-            "headless clipboard adapter installation");
+        strata::require_ok(strata_runtime_set_clipboard_adapter(runtime->native_handle(),
+                                                                options.clipboard.has_value()
+                                                                    ? &*options.clipboard
+                                                                    : &clipboard_adapter),
+                           "headless clipboard adapter installation");
         const strata_ime_adapter ime{
             sizeof(strata_ime_adapter),
             this,
             &Impl::ime_active,
             &Impl::ime_rect,
         };
-        strata::require_ok(strata_runtime_set_ime_adapter(runtime->native_handle(), &ime),
-                           "headless IME adapter installation");
+        strata::require_ok(
+            strata_runtime_set_ime_adapter(runtime->native_handle(),
+                                           options.ime.has_value() ? &*options.ime : &ime),
+            "headless IME adapter installation");
         const strata_effect_adapter effect_adapter{
             sizeof(strata_effect_adapter),
             this,
@@ -539,9 +544,11 @@ struct ApplicationHost::Impl final {
         const std::vector<std::uint8_t> encoded = surface->render_packet();
         const host::RenderPacket& packet = decoder.decode(encoded);
         renderer->render(packet, time_nanoseconds);
+        frame_available = true;
+        if (!options.capture_frames)
+            return;
         last_frame_json = surface->frame_json();
         last_frame_document = data::parse_json(last_frame_json);
-        frame_available = true;
         frames.push_back(CapturedFrame{
             info.frame_index,
             info.frame_time_nanoseconds,
@@ -597,6 +604,7 @@ struct ApplicationHost::Impl final {
 
     const Scenario& scenario;
     std::filesystem::path resource_root;
+    ApplicationHostOptions options;
     std::unique_ptr<strata::Runtime> runtime;
     std::vector<Registration> registrations;
     host::SelectedExtensions extensions;
@@ -624,10 +632,28 @@ struct ApplicationHost::Impl final {
     bool frame_available = false;
 };
 
-ApplicationHost::ApplicationHost(const Scenario& scenario, std::filesystem::path resource_root)
-    : impl_(std::make_unique<Impl>(scenario, std::move(resource_root))) {}
+ApplicationHost::ApplicationHost(const Scenario& scenario, std::filesystem::path resource_root,
+                                 ApplicationHostOptions options)
+    : impl_(std::make_unique<Impl>(scenario, std::move(resource_root), std::move(options))) {}
 
 ApplicationHost::~ApplicationHost() = default;
+
+void ApplicationHost::cancel_interactions() {
+    strata::require_ok(strata_surface_cancel_interactions(impl_->surface->native_handle()),
+                       "preview focus cancellation");
+}
+
+void ApplicationHost::clear_observations() {
+    impl_->diagnostics.clear();
+    impl_->actions.clear();
+    impl_->effects.clear();
+    impl_->async_requests.clear();
+    impl_->frames.clear();
+}
+
+std::string ApplicationHost::inspect() const {
+    return impl_->surface->frame_json();
+}
 
 void ApplicationHost::frame(const std::int64_t time_nanoseconds) {
     impl_->frame(time_nanoseconds);

@@ -74,13 +74,13 @@ properties(std::optional<std::string> theme,
 void test_defaults_and_validation() {
     using namespace strata;
     ui::ThemeTokens tokens;
-    check(tokens.surface == runtime::ColorValue{34U, 38U, 46U, 220U},
+    check(tokens.surface == runtime::ColorValue{24U, 26U, 30U, 255U},
           "default surface token changed");
-    check(tokens.surface_raised == runtime::ColorValue{24U, 24U, 42U, 240U},
+    check(tokens.surface_raised == runtime::ColorValue{30U, 33U, 38U, 255U},
           "default raised token changed");
-    check(tokens.foreground == runtime::ColorValue{236U, 240U, 244U, 255U},
+    check(tokens.foreground == runtime::ColorValue{232U, 235U, 239U, 255U},
           "default foreground token changed");
-    check(tokens.spacing_unit == 4.0 && tokens.radius == 4.0 && tokens.density == 1.0,
+    check(tokens.spacing_unit == 4.0 && tokens.radius == 0.0 && tokens.density == 1.0,
           "default numeric tokens changed");
     bool rejected = false;
     try {
@@ -102,7 +102,7 @@ void test_defaults_and_validation() {
               *raised.visual->background == default_theme.tokens().surface_raised,
           "raised widget semantic background changed");
     const ui::ThemedWidgetStyle compact = default_theme.style("Button", "compact");
-    check(compact.visual->radius == 3.0 && compact.text_layout->pixel_size == 10.8 &&
+    check(compact.visual->radius == 0.0 && compact.text_layout->pixel_size == 10.8 &&
               compact.text_layout->primary_font == "strata:fonts/default-medium",
           "compact control typography or theme semantics changed");
 }

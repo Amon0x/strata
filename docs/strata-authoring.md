@@ -305,3 +305,16 @@ Use the `windows-x64` preset on Windows. The ordinary CTest gate runs the equiva
 `strata_check_authoring` check and fails if reference, diagnostic, completion, grammar, generated
 C++ host-contract, generated registry projection, or lexical artifacts are stale. External projects invoke the installed
 `Strata_AUTHORING` tool directly for their own application schema.
+
+## Primitive defaults
+
+The default theme uses opaque neutral-dark surfaces, square corners, restrained borders, and a
+muted blue accent. Buttons and fields share chrome; tabs use an underline; sliders use a thin track
+and bar thumb; checkboxes use a checkmark. Menus and selects retain hover, active-choice, selection,
+and keyboard-focus feedback. Disabled controls remain dimmed in cached frames. Focus outlines have
+a two-pixel gap and stay square when the control's radius is zero.
+
+Run `strata_preview` on Linux to explore the bundled primitives gallery, or pass
+`assets/strata/samples/primitives.strata-app.json` to the Windows desktop runner. See
+[Linux preview](linux-preview.md). Authored themes, radii, visual styles, and presentation templates
+can override the defaults; the gallery intentionally uses the framework controls directly.

@@ -41,5 +41,10 @@ else()
     set(Strata_DESKTOP_RUNNER "")
 endif()
 
+if(EXISTS "${PACKAGE_PREFIX_DIR}/bin/strata_preview${CMAKE_EXECUTABLE_SUFFIX}")
+    set(Strata_PREVIEW_RUNNER "${PACKAGE_PREFIX_DIR}/bin/strata_preview${CMAKE_EXECUTABLE_SUFFIX}")
+else()
+    set(Strata_PREVIEW_RUNNER "")
+endif()
 
 check_required_components(Strata)

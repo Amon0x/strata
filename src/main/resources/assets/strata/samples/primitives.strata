@@ -1,0 +1,121 @@
+// A live catalog of framework defaults. Controls intentionally carry no local visual skin.
+style Canvas {
+  kind: "COLUMN"; width: { weight: 1 }; height: { weight: 1 };
+  padding: 32; gap: 24; background: #101215; border: null;
+}
+style Clear { background: null; border: null; }
+style Stack extends Clear { kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 16; }
+style Row extends Clear { kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 12; alignItems: "CENTER"; }
+style Columns extends Row { gap: 32; alignItems: "START"; }
+style Card { kind: "COLUMN"; width: { weight: 1 }; height: "content"; padding: 24; gap: 18; }
+style Eyebrow { pixelSize: 11; color: theme.mutedForeground; }
+style Title { pixelSize: 32; font: "strata:fonts/default-medium"; }
+style Body { pixelSize: 13; color: theme.mutedForeground; }
+style Full { width: { weight: 1 }; }
+style Rule { width: { weight: 1 }; height: 1; background: #FFFFFF12; border: null; }
+
+overlay Primitives {
+  state clicks = 0;
+  state level = 64;
+  state exposure = 35;
+  state quality = "balanced";
+  state mode = "automatic";
+  state tab = "general";
+  state name = "Untitled project";
+  state notes = "A quieter interface.\nRoom for the work.";
+
+  root Panel(key: "primitives.root", style: Canvas) {
+    Panel(style: Stack, layout: { gap: 8 }) {
+      Text(text: "STRATA / DESIGN SYSTEM", style: Eyebrow)
+      Text(text: "The essentials.", style: Title)
+      Text(text: "Sharp edges. Quiet surfaces. Every state considered.", style: Body)
+    }
+    Panel(style: Rule)
+    Panel(style: Clear, layout: { kind: "SCROLL", width: { weight: 1 }, height: { weight: 1 } }) {
+      Panel(style: Stack) {
+        Panel(style: Columns) {
+          Panel(style: Stack) {
+            Panel(style: Card) {
+              Text(text: "01 / ACTIONS", style: Eyebrow)
+              Panel(style: Row) {
+                Button(key: "gallery.primary", label: "Create project", variant: "primary", onClick: action("state.adjust", name: "clicks", amount: 1))
+                Button(label: "Secondary")
+                Button(label: "Quiet", variant: "subtle")
+              }
+              Panel(style: Row) {
+                Button(label: "Delete", variant: "danger")
+                Button(label: "Unavailable", enabled: false)
+                Tooltip(text: "Tooltips use the same square surfaces.") { Button(label: "Hover for a hint", variant: "subtle") }
+              }
+              Text(text: format("{0} projects created", clicks), style: Body)
+            }
+            Panel(style: Card) {
+              Text(text: "02 / INPUT", style: Eyebrow)
+              Text(text: "Project name", style: Body)
+              TextBox(style: Full, key: "gallery.name", bind: name, hint: "Enter a name")
+              TextArea(style: Full, key: "gallery.notes", bind: notes, layout: { height: 78 })
+              Panel(style: Row) {
+                NumberField(key: "gallery.number", defaultValue: 8, min: 0, max: 64, step: 1, layout: { width: 120 })
+                Text(text: "Concurrent tasks", style: Body)
+              }
+              TextBox(style: Full, text: "", hint: "Read only state", enabled: false)
+            }
+            Panel(style: Card) {
+              Text(text: "03 / BOOLEAN", style: Eyebrow)
+              Checkbox(key: "gallery.checkbox", label: "Include source files", defaultChecked: true)
+              Checkbox(label: "Generate a preview")
+              Checkbox(label: "Managed by your organization", enabled: false, defaultChecked: true)
+              Toggle(key: "gallery.toggle", label: "Live updates", defaultChecked: true)
+              Toggle(label: "Background sync")
+            }
+          }
+          Panel(style: Stack) {
+            Panel(style: Card) {
+              Text(text: "04 / RANGE", style: Eyebrow)
+              Panel(style: Row) { Text(text: "Output level"); Text(text: format("{0}%", level), style: Body) }
+              Slider(style: Full, key: "gallery.slider", min: 0, max: 100, step: 1, bind: level)
+              Text(text: "Exposure / rail", style: Body)
+              Slider(style: Full, key: "gallery.rail", variant: "rail", min: 0, max: 100, step: 1, bind: exposure, showValue: true, valueSuffix: "%")
+              Slider(style: Full, key: "gallery.disabled-slider", defaultValue: 0.45, enabled: false)
+              Progress(style: Full, value: level / 100, layout: { height: 3 })
+            }
+            Panel(style: Card) {
+              Text(text: "05 / CHOICE", style: Eyebrow)
+              Select(style: Full, key: "gallery.select", bind: quality, options: [
+                { id: "draft", label: "Draft" },
+                { id: "balanced", label: "Balanced" },
+                { id: "maximum", label: "Maximum quality" },
+                { id: "unavailable", label: "Studio / unavailable", enabled: false }
+              ])
+              RadioGroup(key: "gallery.radio", bind: mode, options: [
+                { id: "automatic", label: "Automatic" },
+                { id: "manual", label: "Manual" },
+                { id: "locked", label: "Managed", enabled: false }
+              ])
+              Menu(key: "gallery.menu", label: "More actions", items: [
+                { id: "duplicate", label: "Duplicate", shortcutHint: "Ctrl+D" },
+                { id: "export", label: "Export", children: [
+                  { id: "png", label: "PNG image" }, { id: "svg", label: "SVG document" }
+                ] },
+                { id: "separator", separator: true },
+                { id: "archive", label: "Archive", enabled: false }
+              ])
+              Text(text: format("{0} / {1}", quality, mode), style: Body)
+            }
+            Panel(style: Card) {
+              Text(text: "06 / NAVIGATION", style: Eyebrow)
+              Tabs(key: "gallery.tabs", bind: tab, tabs: [
+                { id: "general", label: "General" }, { id: "output", label: "Output" }, { id: "advanced", label: "Advanced" }
+              ])
+              Text(text: format("Selected: {0}", tab), style: Body)
+              Section(key: "gallery.section", label: "Details", defaultExpanded: true) {
+                Text(text: "Tab to focus. Arrow keys to adjust. Escape to dismiss.", style: Body, wrapMode: "WORD")
+              }
+            }
+          }
+        }
+        Text(text: "NATIVE PRIMITIVES  /  POINTER + KEYBOARD  /  DARK", style: Eyebrow)
+      }
+    }
+  }
+}
