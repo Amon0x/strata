@@ -15,6 +15,14 @@ cmake --build --preset linux-x64 --parallel
 build/cmake/linux-x64/native/strata_preview
 ```
 
+The preview defaults to a 60 FPS limit. Disable the frame delay and SDL renderer VSync with:
+
+```sh
+build/cmake/linux-x64/native/strata_preview --uncapped
+```
+
+Actual throughput still depends on rendering, GPU readback, and the window compositor.
+
 The Linux preset enables `STRATA_BUILD_PREVIEW`. With no arguments the preview opens
 `assets/strata/samples/primitives.strata-app.json`, including buttons, editors, checkboxes,
 toggles, sliders, progress, selects, radio groups, menus, tabs, tooltips, and disclosure sections.
@@ -75,7 +83,8 @@ in-memory services remain the default for replay tests. Live preview skips per-f
 and drains observation history, so leaving a window open does not accumulate frame traces.
 
 This is an interactive testing host. Vulkan renders into the existing offscreen target, and SDL
-presents the captured RGBA frame through a streaming texture at up to 60 Hz. GPU readback and upload
+presents the captured RGBA frame through a streaming texture, capped at 60 Hz by default (or uncapped
+with `--uncapped`). GPU readback and upload
 make it unsuitable for production performance measurements. A production Linux embedding can use
 [Strata::vulkan](vulkan-hosting.md) with its own swapchain to avoid those transfers. CPU reference
 rendering has the same material/effect limitations as headless reference captures.

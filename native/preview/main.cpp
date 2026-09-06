@@ -63,6 +63,7 @@ int main(const int argc, char** argv) {
         std::filesystem::path manifest_path, resource_override, screenshot;
         std::string backend;
         bool smoke = false;
+        bool uncapped = false;
         for (int i = 1; i < argc; ++i) {
             const std::string_view arg(argv[i]);
             const auto next = [&]() -> std::string {
@@ -73,7 +74,7 @@ int main(const int argc, char** argv) {
             if (arg == "--help") {
                 std::cout << "usage: strata_preview [app.strata-app.json] [--resources directory]\n"
                              "                      [--backend vulkan|reference] [--smoke] "
-                             "[--screenshot file.png]\n"
+                             "[--screenshot file.png] [--uncapped]\n"
                              "With no manifest, opens the bundled primitives gallery. F5 reloads "
                              "the application.\n";
                 return 0;
@@ -86,6 +87,8 @@ int main(const int argc, char** argv) {
                 screenshot = next();
             else if (arg == "--smoke")
                 smoke = true;
+            else if (arg == "--uncapped")
+                uncapped = true;
             else if (!arg.starts_with('-') && manifest_path.empty())
                 manifest_path = arg;
             else
@@ -125,6 +128,8 @@ int main(const int argc, char** argv) {
             &SDL_DestroyWindow);
         check_sdl(window != nullptr, "create preview window");
         SDL_SetWindowMinimumSize(window.get(), 480, 360);
+        if (uncapped)
+            SDL_SetHintWithPriority(SDL_HINT_RENDER_VSYNC, "0", SDL_HINT_OVERRIDE);
         std::unique_ptr<SDL_Renderer, decltype(&SDL_DestroyRenderer)> renderer(
             SDL_CreateRenderer(window.get(), -1, SDL_RENDERER_ACCELERATED), &SDL_DestroyRenderer);
         if (!renderer)
@@ -246,9 +251,11 @@ int main(const int argc, char** argv) {
                 std::cout << "STRATA_PREVIEW_READY " << backend << '\n';
                 break;
             }
-            const auto remaining = 16'666'667 - (now() - frame_start);
-            if (remaining > 0)
-                SDL_Delay(static_cast<Uint32>(remaining / 1'000'000));
+            if (!uncapped) {
+                const auto remaining = 16'666'667 - (now() - frame_start);
+                if (remaining > 0)
+                    SDL_Delay(static_cast<Uint32>(remaining / 1'000'000));
+            }
         }
         app->close();
         return 0;
