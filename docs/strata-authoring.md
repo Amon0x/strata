@@ -176,6 +176,9 @@ restarts `showDelay`; pressing hides the tooltip and suppresses disclosure while
 keyboard focus alone does not open one. Leaving the anchor/popup bridge applies `hideDelay`;
 `hideDelay: 0ms` removes stale help immediately when moving between controls. A controlled
 `visible` value remains authoritative.
+Releasing over the anchor starts a new idle delay at the release timestamp. Authored content
+appears and disappears on otherwise settled surfaces without a host snapshot, resize, or
+unrelated click; disclosure changes notify the existing retained-description observers.
 
 The application therefore owns rows, icons, badges, padding, borders, effects, and motion. Native
 code still owns open state, outside dismissal, focus, pointer routing, keyboard navigation,

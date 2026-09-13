@@ -177,6 +177,105 @@ void test_notification_queue() {
     check(expiring.find(paused) == nullptr, "resumed notification did not expire");
 }
 
+void test_authored_tooltip_hover(const std::shared_ptr<const runtime::ApplicationBundle>& bundle,
+                                 const std::filesystem::path& resource_root) {
+    constexpr std::string_view source = R"(
+style Anchor { width: 80; height: 30; background: null; border: null; hoverOverlay: #5196D8FF; }
+component Hint(key: key, text: string) {
+  Panel(key: key, layout: { width: "content", height: "content" }) {
+    Text(key: text, text: text)
+  }
+}
+component Anchor(key: key, hint: string) {
+  Tooltip(text: hint, showDelay: 450ms, hideDelay: 0ms, contentTemplate: Hint,
+    layout: { width: 80, height: 30 }) {
+    Panel(key: key, style: Anchor, behaviors: [{id:"strata.focusable"}, {id:"strata.hoverable"}])
+  }
+}
+component Main() {
+  Panel(layout: { kind: "ROW", width: 300, height: 80, gap: 20 }) {
+    Anchor(key: "first", hint: "First help")
+    Anchor(key: "second", hint: "Second help")
+  }
+}
+overlay Main { root Main() }
+)";
+    runtime::ApplicationContext application("tooltip-hover", bundle);
+    const auto activation = application.compile_and_activate(
+        compiler::ModuleSource{"tooltip-hover.strata", std::string(source)}, no_imports(), 0U);
+    if (!activation.activated()) {
+        std::string message = "tooltip hover fixture did not activate";
+        for (const auto& diagnostic : activation.diagnostics)
+            message += " [" + diagnostic.code + ": " + diagnostic.message + "]";
+        throw std::runtime_error(message);
+    }
+    ui::Surface surface("tooltip-hover", application, runtime::LayerRole::overlay, "Main",
+                        environment(), ui::TextEngine::load_default_fonts(resource_root));
+    const auto frame = [&](const std::int64_t milliseconds) {
+        static_cast<void>(surface.frame(milliseconds * 1'000'000));
+    };
+    const auto pointer = [&](const ui::Point point, const ui::PointerEventType type,
+                             const std::int64_t milliseconds) {
+        static_cast<void>(
+            surface.input().enqueue_pointer(ui::PointerInputEvent{point, type, 0, 0}));
+        frame(milliseconds);
+    };
+    const auto help = [&](const std::string_view text) {
+        return surface.tree().find_key(text) != nullptr;
+    };
+    frame(0);
+    const auto center = [&](const std::string_view key) {
+        const auto* node = surface.tree().find_key(key);
+        check(node != nullptr, "tooltip anchor is missing");
+        const auto* record = surface.layout().find(node->identity());
+        check(record != nullptr, "tooltip anchor has no layout");
+        return ui::Point{record->bounds.x + record->bounds.width / 2,
+                         record->bounds.y + record->bounds.height / 2};
+    };
+    const ui::Point first = center("first");
+    const ui::Point second = center("second");
+    pointer(first, ui::PointerEventType::move, 10);
+    check(std::ranges::any_of(surface.render_commands().commands(),
+                              [](const ui::RenderCommand& command) {
+                                  const auto* rectangle =
+                                      std::get_if<ui::RoundedRectRenderCommand>(&command);
+                                  return rectangle != nullptr &&
+                                         rectangle->fill ==
+                                             ui::Paint(ui::RenderColor{81, 150, 216, 255});
+                              }),
+          "ordinary hover did not paint the authored button highlight");
+    for (std::int64_t time = 20; time < 460; time += 10) {
+        frame(time);
+        check(!help("First help"), "authored tooltip appeared before idle hover matured");
+    }
+    frame(460);
+    check(help("First help"),
+          "idle hover did not materialize authored tooltip without a host rebuild");
+    pointer(second, ui::PointerEventType::move, 470);
+    check(!help("First help") && !help("Second help"),
+          "hover exit left the previous authored tooltip visible");
+    frame(920);
+    check(!help("First help") && help("Second help"),
+          "tooltip disclosure did not transfer to the hovered anchor");
+    pointer(second, ui::PointerEventType::press, 930);
+    frame(1500);
+    check(!help("Second help"), "press did not remove the authored tooltip while held");
+    pointer(second, ui::PointerEventType::release, 1510);
+    frame(1960);
+    check(help("Second help"), "release did not restart idle disclosure at the event timestamp");
+    pointer({700, 500}, ui::PointerEventType::move, 1970);
+    frame(2100);
+    check(!help("First help") && !help("Second help"),
+          "pointer focus kept an abandoned tooltip visible");
+    pointer(first, ui::PointerEventType::move, 2110);
+    frame(2450);
+    pointer({first.x + 1, first.y}, ui::PointerEventType::move, 2500);
+    frame(2600);
+    check(!help("First help"), "movement inside an anchor did not restart idle disclosure");
+    frame(2950);
+    check(help("First help"), "tooltip failed to appear after renewed idle hover");
+}
+
 void test_surface_shell_lifecycle(
     const std::shared_ptr<const runtime::ApplicationBundle>& bundle,
     const std::filesystem::path& resource_root
@@ -976,6 +1075,7 @@ int strata_test_shell_lifecycle(const int argument_count, const char* const* con
         const std::filesystem::path resource_root(arguments[1]);
         const auto bundle = load_bundle();
         test_notification_queue();
+        test_authored_tooltip_hover(bundle, resource_root);
         test_surface_shell_lifecycle(bundle, resource_root);
         std::cout << "strata_shell_lifecycle_tests: OK\n";
         return 0;

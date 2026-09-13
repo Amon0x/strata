@@ -184,9 +184,11 @@ void InputRouter::restart_hover_disclosures(const bool hide) {
     bool changed = false;
     const auto set = [this, &changed](const std::uint64_t identity, const std::string_view name,
                                       runtime::Value value) {
-        changed = tree_->set_retained_value(identity, std::string(name), std::move(value),
-                                            DirtyReason::input) ||
-                  changed;
+        if (!tree_->set_retained_value(identity, name, std::move(value), DirtyReason::input))
+            return;
+        changed = true;
+        if (name == tooltip_shown_state && description_invalidator_)
+            description_invalidator_(tree_->find_identity(identity), name);
     };
     for (const std::uint64_t identity : hovered_) {
         if (hide || !matured_command_tooltips_.contains(identity)) {
@@ -245,17 +247,22 @@ void InputRouter::update_tooltip_disclosures() {
     if (tooltips == nullptr)
         return;
     bool changed = false;
-    const auto set = [this, &changed](RetainedNode& node, std::string name, runtime::Value value) {
-        changed = tree_->set_retained_value(node.identity(), std::move(name), std::move(value),
-                                            DirtyReason::input) ||
-                  changed;
+    const auto set = [this, &changed](RetainedNode& node, const std::string_view name,
+                                      runtime::Value value) {
+        if (!tree_->set_retained_value(node.identity(), name, std::move(value), DirtyReason::input))
+            return;
+        changed = true;
+        // Authored popup content observes this value during description expansion. Native
+        // tooltip paint and private timer bookkeeping only need a frame, not a tree rebuild.
+        if (name == tooltip_shown_state && description_invalidator_)
+            description_invalidator_(&node, name);
     };
     for (RetainedNode* node : *tooltips) {
         if (node == nullptr)
             continue;
         if (tooltip_controlled_visible(*node).has_value()) {
-            set(*node, std::string(tooltip_pending_state), runtime::Value{});
-            set(*node, std::string(tooltip_deadline_state), runtime::Value{});
+            set(*node, tooltip_pending_state, runtime::Value{});
+            set(*node, tooltip_deadline_state, runtime::Value{});
             continue;
         }
         const bool desired = tooltip_engaged(*node);
@@ -264,10 +271,10 @@ void InputRouter::update_tooltip_disclosures() {
         std::optional<std::int64_t> deadline = retained_deadline(*node);
         if (desired == shown) {
             if (pending.has_value()) {
-                set(*node, std::string(tooltip_pending_state), runtime::Value{});
+                set(*node, tooltip_pending_state, runtime::Value{});
             }
             if (deadline.has_value()) {
-                set(*node, std::string(tooltip_deadline_state), runtime::Value{});
+                set(*node, tooltip_deadline_state, runtime::Value{});
             }
             continue;
         }
@@ -277,16 +284,16 @@ void InputRouter::update_tooltip_disclosures() {
             const std::int64_t maximum = std::numeric_limits<std::int64_t>::max();
             const std::int64_t next_deadline =
                 frame_time_nanos_ > maximum - delay ? maximum : frame_time_nanos_ + delay;
-            set(*node, std::string(tooltip_pending_state), runtime::Value(desired));
-            set(*node, std::string(tooltip_deadline_state),
+            set(*node, tooltip_pending_state, runtime::Value(desired));
+            set(*node, tooltip_deadline_state,
                 runtime::Value(runtime::DurationValue{next_deadline}));
             pending = desired;
             deadline = next_deadline;
         }
         if (pending == desired && deadline.has_value() && frame_time_nanos_ >= *deadline) {
-            set(*node, std::string(tooltip_shown_state), runtime::Value(desired));
-            set(*node, std::string(tooltip_pending_state), runtime::Value{});
-            set(*node, std::string(tooltip_deadline_state), runtime::Value{});
+            set(*node, tooltip_shown_state, runtime::Value(desired));
+            set(*node, tooltip_pending_state, runtime::Value{});
+            set(*node, tooltip_deadline_state, runtime::Value{});
         }
     }
     if (changed && frame_invalidator_)

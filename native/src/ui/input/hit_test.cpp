@@ -1329,6 +1329,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
             static_cast<void>(tree_->mark(*active_, DirtyReason::input));
         active_.reset();
         active_subtarget_.reset();
+        update_tooltip_disclosures();
     };
 
     if (event.type == PointerEventType::press) {
