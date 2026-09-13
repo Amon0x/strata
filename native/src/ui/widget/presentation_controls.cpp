@@ -6,30 +6,27 @@
 
 #include "ui/input.hpp"
 #include "ui/motion.hpp"
-#include "ui/text_geometry.hpp"
 #include "ui/text.hpp"
-#include "ui/widget/editor_geometry.hpp"
+#include "ui/text_geometry.hpp"
 #include "ui/widget/choice_model.hpp"
+#include "ui/widget/editor_geometry.hpp"
 #include "ui/widget/icon_geometry.hpp"
 
 namespace strata::ui {
 namespace {
 
 void icon_button_content(WidgetRenderScope& scope) {
-    if (scope.property("presentationTemplate") != nullptr) return;
+    if (scope.property("presentationTemplate") != nullptr)
+        return;
     if (scope.visual().background.has_value()) {
-        scope.rounded_rect(
-            scope.layout().bounds,
-            *scope.visual().background,
-            scope.visual().border
-        );
+        scope.rounded_rect(scope.layout().bounds, *scope.visual().background,
+                           scope.visual().border);
     }
     const std::string* texture = widget_image_value(scope.property("icon"));
-    if (texture == nullptr) return;
-    const double size = std::max(
-        0.0,
-        std::min(scope.layout().bounds.width, scope.layout().bounds.height) * 0.55
-    );
+    if (texture == nullptr)
+        return;
+    const double size =
+        std::max(0.0, std::min(scope.layout().bounds.width, scope.layout().bounds.height) * 0.55);
     scope.image(
         Rect{
             scope.layout().bounds.x + (scope.layout().bounds.width - size) * 0.5,
@@ -37,24 +34,18 @@ void icon_button_content(WidgetRenderScope& scope) {
             size,
             size,
         },
-        *texture,
-        scope.visual().foreground,
-        widget_texture_region(scope.property("source"))
-    );
+        *texture, scope.visual().foreground, widget_texture_region(scope.property("source")));
     scope.interaction(scope.layout().bounds);
     scope.focus(scope.layout().bounds);
 }
 
 void checkbox_content(WidgetRenderScope& scope) {
-    if (scope.property("presentationTemplate") != nullptr) return;
-    const bool checked = scope.effective_boolean(
-        "checked", "$checked", "defaultChecked", false
-    );
+    if (scope.property("presentationTemplate") != nullptr)
+        return;
+    const bool checked = scope.effective_boolean("checked", "$checked", "defaultChecked", false);
     const double inset = scope.visual().indicator_inset.value_or(4.0);
-    const double size = std::min(
-        scope.visual().indicator_size.value_or(16.0),
-        scope.layout().bounds.height
-    );
+    const double size =
+        std::min(scope.visual().indicator_size.value_or(16.0), scope.layout().bounds.height);
     const Rect box{
         scope.layout().bounds.x + inset,
         scope.layout().bounds.y + (scope.layout().bounds.height - size) * 0.5,
@@ -72,7 +63,8 @@ void checkbox_content(WidgetRenderScope& scope) {
     scope.interaction(scope.layout().bounds);
     scope.focus(box);
     const std::optional<std::string_view> value = scope.node_text();
-    if (!value.has_value() || scope.text_engine() == nullptr) return;
+    if (!value.has_value() || scope.text_engine() == nullptr)
+        return;
     const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), *value);
     scope.text(
         *value,
@@ -80,21 +72,17 @@ void checkbox_content(WidgetRenderScope& scope) {
             scope.layout().content_bounds.x,
             scope.layout().bounds.y + (scope.layout().bounds.height - shaped.metrics.height) * 0.5,
         },
-        scope.visual().foreground
-    );
+        scope.visual().foreground);
 }
 
 void toggle_content(WidgetRenderScope& scope) {
-    if (scope.property("presentationTemplate") != nullptr) return;
-    const bool checked = scope.effective_boolean(
-        "checked", "$checked", "defaultChecked", false
-    );
-    const double track_width = std::min(
-        scope.visual().track_width.value_or(40.0), scope.layout().bounds.width
-    );
-    const double track_height = std::min(
-        scope.visual().track_height.value_or(20.0), scope.layout().bounds.height
-    );
+    if (scope.property("presentationTemplate") != nullptr)
+        return;
+    const bool checked = scope.effective_boolean("checked", "$checked", "defaultChecked", false);
+    const double track_width =
+        std::min(scope.visual().track_width.value_or(40.0), scope.layout().bounds.width);
+    const double track_height =
+        std::min(scope.visual().track_height.value_or(20.0), scope.layout().bounds.height);
     const Rect track{
         scope.layout().bounds.x + scope.visual().indicator_inset.value_or(4.0),
         scope.layout().bounds.y + (scope.layout().bounds.height - track_height) * 0.5,
@@ -109,10 +97,8 @@ void toggle_content(WidgetRenderScope& scope) {
                        scope.visual().border,
                        scope.visual().track_radius.value_or(scope.visual().radius));
     constexpr double thumb_inset = 2.0;
-    const double thumb_size = std::min(
-        scope.visual().thumb_size.value_or(16.0),
-        std::max(0.0, track.height - thumb_inset * 2.0)
-    );
+    const double thumb_size = std::min(scope.visual().thumb_size.value_or(16.0),
+                                       std::max(0.0, track.height - thumb_inset * 2.0));
     const double travel = std::max(0.0, track.width - thumb_size - thumb_inset * 2.0);
     scope.rounded_rect(
         Rect{
@@ -123,10 +109,11 @@ void toggle_content(WidgetRenderScope& scope) {
         },
         scope.visual().thumb, std::nullopt,
         scope.visual().thumb_radius.value_or(scope.visual().radius));
-    scope.interaction(scope.layout().bounds);
+    scope.interaction(track);
     scope.focus(track);
     const std::optional<std::string_view> value = scope.node_text();
-    if (!value.has_value() || scope.text_engine() == nullptr) return;
+    if (!value.has_value() || scope.text_engine() == nullptr)
+        return;
     const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), *value);
     scope.text(
         *value,
@@ -134,15 +121,10 @@ void toggle_content(WidgetRenderScope& scope) {
             scope.layout().content_bounds.x,
             scope.layout().bounds.y + (scope.layout().bounds.height - shaped.metrics.height) * 0.5,
         },
-        scope.visual().foreground
-    );
+        scope.visual().foreground);
 }
 
-void rail_slider_content(
-    WidgetRenderScope& scope,
-    const double value,
-    const double percent
-) {
+void rail_slider_content(WidgetRenderScope& scope, const double value, const double percent) {
     const Rect bounds = scope.layout().bounds;
     const double thickness = scope.visual().track_height.value_or(2.0);
     const double inset = scope.visual().indicator_inset.value_or(7.0);
@@ -154,9 +136,8 @@ void rail_slider_content(
     };
     const double center_x = track.x + track.width * percent;
     const double track_gap = scope.visual().track_gap.value_or(3.0);
-    const double gap = scope.active()
-        ? scope.visual().active_track_gap.value_or(track_gap)
-        : track_gap;
+    const double gap =
+        scope.active() ? scope.visual().active_track_gap.value_or(track_gap) : track_gap;
     const Rect active{
         track.x,
         track.y,
@@ -176,12 +157,12 @@ void rail_slider_content(
     const bool hot = scope.hovered() || scope.focus_visible();
     const double authored_thumb_width = scope.visual().thumb_width.value_or(3.0);
     const double authored_thumb_height = scope.visual().thumb_height.value_or(18.0);
-    const double thumb_width = scope.active()
-        ? scope.visual().active_thumb_width.value_or(authored_thumb_width)
-        : authored_thumb_width;
-    const double thumb_height = scope.active()
-        ? scope.visual().active_thumb_height.value_or(authored_thumb_height)
-        : authored_thumb_height;
+    const double thumb_width =
+        scope.active() ? scope.visual().active_thumb_width.value_or(authored_thumb_width)
+                       : authored_thumb_width;
+    const double thumb_height =
+        scope.active() ? scope.visual().active_thumb_height.value_or(authored_thumb_height)
+                       : authored_thumb_height;
     const Rect thumb{
         center_x - thumb_width * 0.5,
         track.y + track.height * 0.5 - thumb_height * 0.5,
@@ -191,8 +172,7 @@ void rail_slider_content(
     scope.rounded_rect(thumb, scope.visual().thumb, std::nullopt,
                        scope.visual().thumb_radius.value_or(scope.visual().radius));
 
-    if (scope.boolean("showValue", false) &&
-        (hot || scope.active()) &&
+    if (scope.boolean("showValue", false) && (hot || scope.active()) &&
         scope.text_engine() != nullptr) {
         std::string label = widget_number_text(value);
         label += scope.string("valueSuffix");
@@ -207,31 +187,25 @@ void rail_slider_content(
         };
         scope.rounded_rect(label_bounds, scope.visual().background.value_or(scope.visual().track),
                            scope.visual().border, scope.visual().radius);
-        scope.text(
-            label,
-            Point{
-                label_bounds.x,
-                label_bounds.y + (label_height - shaped.metrics.height) * 0.5,
-            },
-            scope.visual().foreground,
-            label_width,
-            WidgetTextAlignment::center
-        );
+        scope.text(label,
+                   Point{
+                       label_bounds.x,
+                       label_bounds.y + (label_height - shaped.metrics.height) * 0.5,
+                   },
+                   scope.visual().foreground, label_width, WidgetTextAlignment::center);
     }
     scope.focus(thumb);
     scope.interaction(bounds);
 }
 
 void slider_content(WidgetRenderScope& scope) {
-    if (scope.property("presentationTemplate") != nullptr) return;
+    if (scope.property("presentationTemplate") != nullptr)
+        return;
     const double minimum = scope.number("min", 0.0);
     const double maximum = scope.number("max", 1.0);
-    const double value = scope.effective_number(
-        "value", "$value", "defaultValue", minimum
-    );
-    const double percent = maximum > minimum
-                               ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0)
-                               : 0.0;
+    const double value = scope.effective_number("value", "$value", "defaultValue", minimum);
+    const double percent =
+        maximum > minimum ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0) : 0.0;
     const bool vertical = scope.string("axis") == "VERTICAL";
     if (scope.string("variant") == "rail" && !vertical) {
         rail_slider_content(scope, value, percent);
@@ -296,11 +270,8 @@ enum class TextInputMode { single_line, multi_line, number };
 
 void text_input_content(WidgetRenderScope& scope, const TextInputMode mode) {
     if (scope.visual().background.has_value()) {
-        scope.rounded_rect(
-            scope.layout().bounds,
-            *scope.visual().background,
-            scope.visual().border
-        );
+        scope.rounded_rect(scope.layout().bounds, *scope.visual().background,
+                           scope.visual().border);
     } else if (scope.visual().border.has_value()) {
         scope.border(scope.layout().bounds, *scope.visual().border);
     }
@@ -322,13 +293,13 @@ void text_input_content(WidgetRenderScope& scope, const TextInputMode mode) {
             value.insert(std::min(editor->caret, value.size()), *editor->preedit);
         }
     } else if (mode == TextInputMode::number) {
-        value = widget_number_text(scope.effective_number(
-            "value", "$value", "defaultValue", 0.0
-        ));
+        value = widget_number_text(scope.effective_number("value", "$value", "defaultValue", 0.0));
     } else {
         const runtime::Value* current = scope.property("text");
-        if (widget_string_value(current) == nullptr) current = scope.retained("$text");
-        if (const std::string* text = widget_string_value(current); text != nullptr) value = *text;
+        if (widget_string_value(current) == nullptr)
+            current = scope.retained("$text");
+        if (const std::string* text = widget_string_value(current); text != nullptr)
+            value = *text;
     }
     RenderColor color = scope.visual().foreground;
     if (value.empty()) {
@@ -337,49 +308,46 @@ void text_input_content(WidgetRenderScope& scope, const TextInputMode mode) {
     }
     const std::vector<WidgetSubtarget> subtargets =
         scope.input().subtargets(scope.node().identity());
-    const std::optional<Rect> viewport = editable_text_viewport(
-        scope.node(), scope.layout(), subtargets
-    );
-    if (!viewport.has_value() || viewport->empty()) return;
+    const std::optional<Rect> viewport =
+        editable_text_viewport(scope.node(), scope.layout(), subtargets);
+    if (!viewport.has_value() || viewport->empty())
+        return;
     scope.push_clip(*viewport);
     if (!value.empty() && scope.text_engine() != nullptr) {
         const TextLayout text_layout = scope.text_engine()->layout(scope.node(), value);
-        const Point origin = text_input_origin(
-            *viewport, text_layout, mode == TextInputMode::multi_line
-        );
+        const Point origin =
+            text_input_origin(*viewport, text_layout, mode == TextInputMode::multi_line);
         if (editor.has_value() && editor->selection_start != editor->selection_end) {
-            const std::size_t start = utf16_offset_for_utf8_byte(editor->text, editor->selection_start);
+            const std::size_t start =
+                utf16_offset_for_utf8_byte(editor->text, editor->selection_start);
             const std::size_t end = utf16_offset_for_utf8_byte(editor->text, editor->selection_end);
-            for (const Rect rect : text_layout_selection_rects(
-                     text_layout, origin, start, end
-                 )) {
+            for (const Rect rect : text_layout_selection_rects(text_layout, origin, start, end)) {
                 scope.solid_rect(rect, scope.visual().selection);
             }
         }
         std::optional<std::pair<std::size_t, std::size_t>> composition_range;
         if (editor.has_value() && editor->preedit.has_value() && !editor->preedit->empty()) {
-            const std::size_t composition_start = utf16_offset_for_utf8_byte(editor->text, editor->caret);
-            const std::size_t composition_end = composition_start +
+            const std::size_t composition_start =
+                utf16_offset_for_utf8_byte(editor->text, editor->caret);
+            const std::size_t composition_end =
+                composition_start +
                 utf16_offset_for_utf8_byte(*editor->preedit, editor->preedit->size());
             composition_range = std::pair(composition_start, composition_end);
-            const std::size_t selection_start = composition_start + utf16_offset_for_utf8_byte(
-                *editor->preedit, editor->preedit_selection_start
-            );
-            const std::size_t selection_end = composition_start + utf16_offset_for_utf8_byte(
-                *editor->preedit, editor->preedit_selection_end
-            );
-            for (const Rect rect : text_layout_selection_rects(
-                     text_layout, origin, selection_start, selection_end
-                 )) {
+            const std::size_t selection_start =
+                composition_start +
+                utf16_offset_for_utf8_byte(*editor->preedit, editor->preedit_selection_start);
+            const std::size_t selection_end =
+                composition_start +
+                utf16_offset_for_utf8_byte(*editor->preedit, editor->preedit_selection_end);
+            for (const Rect rect :
+                 text_layout_selection_rects(text_layout, origin, selection_start, selection_end)) {
                 scope.solid_rect(rect, RenderColor{255U, 255U, 255U, 72U});
             }
         }
         scope.text(value, origin, color);
         if (composition_range.has_value()) {
             for (Rect rect : text_layout_selection_rects(
-                     text_layout, origin,
-                     composition_range->first, composition_range->second
-                 )) {
+                     text_layout, origin, composition_range->first, composition_range->second)) {
                 rect.y += rect.height - 1.0;
                 rect.height = 1.0;
                 scope.solid_rect(rect, RenderColor{255U, 255U, 255U, 160U});
@@ -388,8 +356,7 @@ void text_input_content(WidgetRenderScope& scope, const TextInputMode mode) {
         if (editor.has_value() && scope.input().focused(scope.node().identity())) {
             scope.solid_rect(
                 text_layout_caret_rect(text_layout, origin, editor->text, editor->caret),
-                scope.visual().caret
-            );
+                scope.visual().caret);
         }
     }
     scope.pop_clip();
@@ -408,34 +375,30 @@ void number_text_content(WidgetRenderScope& scope) {
 }
 
 void progress_content(WidgetRenderScope& scope) {
-    if (scope.property("presentationTemplate") != nullptr) return;
-    scope.rounded_rect(
-        scope.layout().bounds,
-        scope.visual().track,
-        scope.visual().border
-    );
+    if (scope.property("presentationTemplate") != nullptr)
+        return;
+    scope.rounded_rect(scope.layout().bounds, scope.visual().track, scope.visual().border);
     std::optional<Rect> fill;
     if (scope.boolean("indeterminate", false)) {
         const MotionComputedValues* computed = scope.motion_values();
         const double fallback = computed != nullptr ? computed->progress : 0.0;
-        const double progress = scope.motion_progress(
-            "strata.progress.indeterminate", fallback
-        );
+        const double progress = scope.motion_progress("strata.progress.indeterminate", fallback);
         const double segment_width = scope.layout().bounds.width * 0.3;
-        fill = Rect{
-            scope.layout().bounds.x +
-                (scope.layout().bounds.width + segment_width) * progress - segment_width,
-            scope.layout().bounds.y,
-            std::min(segment_width, scope.layout().bounds.width),
-            scope.layout().bounds.height,
-        }.intersection(scope.layout().bounds);
+        fill =
+            Rect{
+                scope.layout().bounds.x + (scope.layout().bounds.width + segment_width) * progress -
+                    segment_width,
+                scope.layout().bounds.y,
+                std::min(segment_width, scope.layout().bounds.width),
+                scope.layout().bounds.height,
+            }
+                .intersection(scope.layout().bounds);
     } else {
         const double minimum = scope.number("min", 0.0);
         const double maximum = scope.number("max", 1.0);
         const double value = scope.number("value", minimum);
-        const double fraction = maximum > minimum
-                                    ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0)
-                                    : 0.0;
+        const double fraction =
+            maximum > minimum ? std::clamp((value - minimum) / (maximum - minimum), 0.0, 1.0) : 0.0;
         fill = Rect{
             scope.layout().bounds.x,
             scope.layout().bounds.y,
@@ -443,24 +406,22 @@ void progress_content(WidgetRenderScope& scope) {
             scope.layout().bounds.height,
         };
     }
-    if (fill.has_value() && !fill->empty()) scope.rounded_rect(*fill, scope.visual().fill);
+    if (fill.has_value() && !fill->empty())
+        scope.rounded_rect(*fill, scope.visual().fill);
 }
 
 void tabs_content(WidgetRenderScope& scope) {
     const runtime::ValueList* tabs = scope.list("tabs");
-    if (tabs == nullptr || tabs->values.empty()) return;
+    if (tabs == nullptr || tabs->values.empty())
+        return;
 
     const std::optional<EffectiveChoice> selected = effective_choice(scope.node());
 
     if (scope.visual().background.has_value()) {
-        scope.rounded_rect(
-            scope.layout().bounds,
-            *scope.visual().background,
-            scope.visual().border
-        );
+        scope.rounded_rect(scope.layout().bounds, *scope.visual().background,
+                           scope.visual().border);
     }
-    const double tab_width = scope.layout().bounds.width /
-                             static_cast<double>(tabs->values.size());
+    const double tab_width = scope.layout().bounds.width / static_cast<double>(tabs->values.size());
     for (std::size_t index = 0U; index < tabs->values.size(); ++index) {
         const runtime::Value& tab = tabs->values[index];
         const Rect bounds{
@@ -481,21 +442,19 @@ void tabs_content(WidgetRenderScope& scope) {
                 },
                 scope.visual().fill);
         }
-        if (id != nullptr) scope.interaction(bounds, *id);
+        if (id != nullptr)
+            scope.interaction(bounds, *id);
 
         const std::string* label = widget_string_value(tab.field("label"));
-        if (label == nullptr || scope.text_engine() == nullptr) continue;
+        if (label == nullptr || scope.text_engine() == nullptr)
+            continue;
         const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), *label);
-        scope.text(
-            *label,
-            Point{
-                bounds.x,
-                bounds.y + (bounds.height - shaped.metrics.height) * 0.5,
-            },
-            scope.visual().foreground,
-            bounds.width,
-            WidgetTextAlignment::center
-        );
+        scope.text(*label,
+                   Point{
+                       bounds.x,
+                       bounds.y + (bounds.height - shaped.metrics.height) * 0.5,
+                   },
+                   scope.visual().foreground, bounds.width, WidgetTextAlignment::center);
     }
     scope.focus(scope.layout().bounds);
 }
@@ -506,21 +465,19 @@ void select_content(WidgetRenderScope& scope) {
         return;
     }
     const runtime::ValueList* options = scope.list("options");
-    if (options == nullptr || options->values.empty()) return;
+    if (options == nullptr || options->values.empty())
+        return;
     const std::optional<EffectiveChoice> selected = effective_choice(scope.node());
-    if (!selected.has_value()) return;
+    if (!selected.has_value())
+        return;
     const runtime::Value* selected_option = &options->values[selected->index];
     if (scope.visual().background.has_value()) {
-        scope.rounded_rect(
-            scope.layout().bounds,
-            *scope.visual().background,
-            scope.visual().border
-        );
+        scope.rounded_rect(scope.layout().bounds, *scope.visual().background,
+                           scope.visual().border);
     }
-    const double cap_width = std::min(
-        scope.visual().indicator_size.value_or(scope.layout().bounds.height),
-        scope.layout().bounds.width
-    );
+    const double cap_width =
+        std::min(scope.visual().indicator_size.value_or(scope.layout().bounds.height),
+                 scope.layout().bounds.width);
     const Rect cap{
         scope.layout().bounds.right() - cap_width,
         scope.layout().bounds.y,
@@ -561,13 +518,16 @@ void select_content(WidgetRenderScope& scope) {
 void select_overlay(WidgetRenderScope& scope) {
     const bool authored_popup = scope.property("popupTemplate") != nullptr;
     const bool authored_items = scope.property("itemTemplate") != nullptr;
-    if (authored_popup && authored_items) return;
+    if (authored_popup && authored_items)
+        return;
     const std::vector<WidgetSubtarget> targets = scope.input().subtargets(scope.node().identity());
     std::vector<WidgetSubtarget> rows;
     for (const WidgetSubtarget& target : targets) {
-        if (target.detached && target.kind == WidgetSubtargetKind::choice) rows.push_back(target);
+        if (target.detached && target.kind == WidgetSubtargetKind::choice)
+            rows.push_back(target);
     }
-    if (rows.empty()) return;
+    if (rows.empty())
+        return;
     Rect popup = rows.front().bounds;
     for (const WidgetSubtarget& row : rows) {
         const double left = std::min(popup.x, row.bounds.x);
@@ -579,13 +539,12 @@ void select_overlay(WidgetRenderScope& scope) {
     if (!authored_popup) {
         scope.shadow(popup, CornerRadii::all(scope.visual().radius), RenderColor{0U, 0U, 0U, 90U},
                      12.0, 1.0);
-        scope.rounded_rect(
-            popup,
-            scope.visual().background.value_or(RenderColor{34U, 38U, 46U, 245U}),
-            scope.visual().border
-        );
+        scope.rounded_rect(popup,
+                           scope.visual().background.value_or(RenderColor{34U, 38U, 46U, 245U}),
+                           scope.visual().border);
     }
-    if (authored_items) return;
+    if (authored_items)
+        return;
     const auto selected = effective_choice(scope.node());
     const runtime::Value* cursor_value = scope.retained("$choiceIndex");
     const double cursor = cursor_value != nullptr && cursor_value->number() != nullptr
@@ -600,7 +559,8 @@ void select_overlay(WidgetRenderScope& scope) {
                         widget_checkmark(scope.visual().foreground));
         }
         scope.interaction(row.bounds, row.id);
-        if (scope.text_engine() == nullptr || row.label.empty()) continue;
+        if (scope.text_engine() == nullptr || row.label.empty())
+            continue;
         const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), row.label);
         scope.push_clip(Rect{row.bounds.x + 12.0, row.bounds.y,
                              std::max(0.0, row.bounds.width - 42.0), row.bounds.height});
@@ -614,16 +574,16 @@ void select_overlay(WidgetRenderScope& scope) {
 
 void radio_foreground(WidgetRenderScope& scope) {
     const runtime::ValueList* options = scope.list("options");
-    if (options == nullptr) return;
+    if (options == nullptr)
+        return;
     const bool group_enabled = scope.boolean("enabled", true);
     const std::optional<EffectiveChoice> selected = effective_choice(scope.node());
     for (std::size_t index = 0U;
-         index < options->values.size() && index < scope.node().children().size();
-         ++index) {
-        const LayoutRecord* child = scope.layout_result().find(
-            scope.node().children()[index]->identity()
-        );
-        if (child == nullptr) continue;
+         index < options->values.size() && index < scope.node().children().size(); ++index) {
+        const LayoutRecord* child =
+            scope.layout_result().find(scope.node().children()[index]->identity());
+        if (child == nullptr)
+            continue;
         const runtime::Value& option = options->values[index];
         const bool enabled = group_enabled && choice_option_enabled(option);
         const Rect ring{
@@ -642,30 +602,23 @@ void radio_foreground(WidgetRenderScope& scope) {
         const std::string* label = widget_string_value(option.field("label"));
         if (scope.text_engine() != nullptr && label != nullptr) {
             const font::ShapedText shaped = scope.text_engine()->shape(scope.node(), *label);
-            scope.text(
-                *label,
-                Point{
-                    child->bounds.x + 28.0,
-                    child->bounds.y + (child->bounds.height - shaped.metrics.height) * 0.5,
-                },
-                enabled ? scope.visual().foreground : RenderColor{160U, 168U, 178U, 220U}
-            );
+            scope.text(*label,
+                       Point{
+                           child->bounds.x + 28.0,
+                           child->bounds.y + (child->bounds.height - shaped.metrics.height) * 0.5,
+                       },
+                       enabled ? scope.visual().foreground : RenderColor{160U, 168U, 178U, 220U});
         }
-        if (id != nullptr) scope.interaction(child->bounds, *id);
+        if (id != nullptr)
+            scope.interaction(child->bounds, *id);
     }
     scope.focus(scope.layout().bounds);
 }
 
-void add(
-    WidgetRegistry& registry,
-    std::string type,
-    const WidgetPresentHook content,
-    const WidgetPresentHook foreground = nullptr,
-    const WidgetPresentHook overlay = nullptr,
-    const bool detached_overlay = false,
-    const WidgetVisualProfile visual = {},
-    const bool depends_on_motion_progress = false
-) {
+void add(WidgetRegistry& registry, std::string type, const WidgetPresentHook content,
+         const WidgetPresentHook foreground = nullptr, const WidgetPresentHook overlay = nullptr,
+         const bool detached_overlay = false, const WidgetVisualProfile visual = {},
+         const bool depends_on_motion_progress = false) {
     WidgetPresentPhase phase{content, foreground, overlay, nullptr, detached_overlay};
     phase.visual = visual;
     phase.depends_on_motion_progress = depends_on_motion_progress;

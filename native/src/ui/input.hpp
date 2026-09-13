@@ -407,6 +407,7 @@ class InputRouter final {
     [[nodiscard]] bool tooltip_engaged(const RetainedNode& node) const noexcept;
     [[nodiscard]] bool tooltip_disclosures_need_frame() const noexcept;
     void update_tooltip_disclosures();
+    void restart_hover_disclosures(bool hide);
     void synchronize_authored_presentations();
     [[nodiscard]] bool focusable(const RetainedNode& node) const noexcept;
     [[nodiscard]] bool tabbable(const RetainedNode& node) const noexcept;
@@ -697,6 +698,7 @@ class InputRouter final {
     std::optional<std::string> focus_containment_key_;
     std::optional<std::uint64_t> focus_before_containment_;
     std::set<std::uint64_t> hovered_;
+    std::optional<Point> hover_position_;
     std::map<std::uint64_t, std::int64_t> hover_started_nanos_;
     std::set<std::uint64_t> matured_command_tooltips_;
     std::optional<std::uint64_t> active_;

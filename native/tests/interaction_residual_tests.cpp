@@ -290,6 +290,11 @@ void test_primary_pointer_focus_default(InputFixture& fixture) {
     const ui::RetainedNode* control = fixture.tree_.find_key("focus.control");
     check(control != nullptr && !fixture.input_.focus_visible(control->identity()),
           "pointer focus incorrectly retained a keyboard focus indicator");
+    static_cast<void>(fixture.input_.key("alt", ui::KeyModifiers{.alt = true}));
+    static_cast<void>(fixture.input_.key("tab", ui::KeyModifiers{.alt = true}));
+    check(fixture.input_.focused_key() == "focus.control" &&
+              !fixture.input_.focus_visible(control->identity()),
+          "Alt-Tab changed focus or exposed a keyboard navigation indicator");
     static_cast<void>(fixture.input_.key("tab"));
     check(fixture.input_.focused_key().has_value() &&
               *fixture.input_.focused_key() == "focus.control" &&
@@ -568,6 +573,7 @@ void test_static_text_state_partition(InputFixture& fixture) {
 
     ui::DescriptionNode::Properties ordinary = sized(240.0, 28.0);
     ordinary.emplace("text", runtime::ExpressionValue(runtime::Value("ordinary title")));
+    ordinary.emplace("selectable", runtime::ExpressionValue(runtime::Value(true)));
     ui::DescriptionNode::Properties opted_out = sized(240.0, 28.0);
     opted_out.emplace("text", runtime::ExpressionValue(runtime::Value("decorative title")));
     opted_out.emplace("selectable", runtime::ExpressionValue(runtime::Value(false)));
@@ -624,10 +630,6 @@ void test_static_text_state_partition(InputFixture& fixture) {
     };
     select_ordinary(11);
     const ui::RetainedNode* ordinary_node = fixture.tree_.find_key("static.ordinary");
-    check(ordinary_node != nullptr && fixture.input_.focused_key().has_value() &&
-              *fixture.input_.focused_key() == "static.ordinary" &&
-              fixture.input_.static_text_selection_snapshot(ordinary_node->identity()).has_value(),
-          "absent selectable stopped preserving the frozen selectable=true default");
     static_cast<void>(fixture.input_.text("must not mutate"));
     static_cast<void>(fixture.input_.ime_preedit("composition", 0U, 3U));
     const std::optional<ui::StaticTextSelectionSnapshot> ordinary_selection =
@@ -694,6 +696,7 @@ void test_wrapped_static_text_navigation(InputFixture& fixture) {
     const auto adopt = [&fixture, content, key] {
         ui::DescriptionNode::Properties text = sized(72.0, 180.0);
         text.emplace("text", runtime::ExpressionValue(runtime::Value(std::string(content))));
+        text.emplace("selectable", runtime::ExpressionValue(runtime::Value(true)));
         text.emplace("wrapWidth", runtime::ExpressionValue(runtime::Value(72.0)));
         text.emplace("wrapMode", runtime::ExpressionValue(runtime::Value("WORD")));
         fixture.adopt(node("Panel", "static.wrap-root",
@@ -895,9 +898,11 @@ void test_wrapped_editor_pointer_navigation(InputFixture& fixture) {
 void test_static_text_container_owner_transition(InputFixture& fixture) {
     ui::DescriptionNode::Properties first = sized(160.0, 30.0);
     first.emplace("text", runtime::ExpressionValue(runtime::Value("alpha")));
+    first.emplace("selectable", runtime::ExpressionValue(runtime::Value(true)));
     first.emplace("selectionContainer", runtime::ExpressionValue(runtime::Value("document")));
     ui::DescriptionNode::Properties second = sized(160.0, 30.0);
     second.emplace("text", runtime::ExpressionValue(runtime::Value("omega")));
+    second.emplace("selectable", runtime::ExpressionValue(runtime::Value(true)));
     second.emplace("selectionContainer", runtime::ExpressionValue(runtime::Value("document")));
     fixture.adopt(node("Panel", "owner.root",
                        {
@@ -1224,8 +1229,6 @@ void test_choice_semantics(InputFixture& fixture) {
 }
 
 void test_tooltip_disclosure(InputFixture& fixture) {
-    static_assert(ui::tooltip_default_show_delay_nanos == 400'000'000);
-    static_assert(ui::tooltip_default_hide_delay_nanos == 80'000'000);
     ui::DescriptionNode::Properties tooltip = sized(180.0, 36.0);
     tooltip.emplace("text", runtime::ExpressionValue(runtime::Value("Delayed help")));
     tooltip.emplace("showDelay",
@@ -1293,8 +1296,37 @@ void test_tooltip_disclosure(InputFixture& fixture) {
     static_cast<void>(fixture.pointer({
         ui::PointerInputEvent{outside, ui::PointerEventType::move, 0, 0},
     }));
-    check(ui::tooltip_disclosure_visible(*owner) && !fixture.input_.requires_frame_advance(),
-          "Tooltip did not preserve disclosure while focus remained inside its anchor");
+    fixture.input_.publish_frame_time(350'000'000);
+    check(!ui::tooltip_disclosure_visible(*owner) && !fixture.input_.requires_frame_advance(),
+          "Pointer focus kept an old tooltip visible after leaving its anchor");
+
+    fixture.input_.publish_frame_time(400'000'000);
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{anchor, ui::PointerEventType::move, 0, 0},
+    }));
+    fixture.input_.publish_frame_time(450'000'000);
+    const ui::Point shifted{anchor.x + 8.0, anchor.y};
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{shifted, ui::PointerEventType::move, 0, 0},
+    }));
+    fixture.input_.publish_frame_time(549'000'000);
+    check(!ui::tooltip_disclosure_visible(*owner),
+          "Moving inside an anchor did not restart the idle-hover deadline");
+    fixture.input_.publish_frame_time(550'000'000);
+    check(ui::tooltip_disclosure_visible(*owner),
+          "Stationary hover did not reveal the tooltip after its restarted deadline");
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{shifted, ui::PointerEventType::press, 8, 0},
+    }));
+    fixture.input_.publish_frame_time(800'000'000);
+    check(!ui::tooltip_disclosure_visible(*owner),
+          "A pressed control disclosed an idle-hover tooltip");
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{outside, ui::PointerEventType::release, 8, 0},
+    }));
+    fixture.input_.publish_frame_time(1'000'000'000);
+    check(!ui::tooltip_disclosure_visible(*owner) && !fixture.input_.hovered(owner->identity()),
+          "Release outside the anchor restored stale press-origin hover");
 }
 
 void test_manipulation_slop(InputFixture& fixture) {
@@ -1403,6 +1435,7 @@ void test_passive_descendant_activation(InputFixture& fixture) {
     };
     ui::DescriptionNode::Properties text = sized(180.0, 28.0);
     text.emplace("text", runtime::ExpressionValue(runtime::Value("Passive label")));
+    text.emplace("selectable", runtime::ExpressionValue(runtime::Value(true)));
     fixture.adopt(node("Panel", "passive.card",
                        {
                            node("Text", "passive.label", {}, std::move(text)),
@@ -1528,6 +1561,103 @@ void test_passive_descendant_activation(InputFixture& fixture) {
                                            *type->string() == "activated";
                                 }) == 1,
           "explicit descendant activation dispatched through both capture and passive bubble");
+}
+
+void test_release_target_activation(InputFixture& fixture) {
+    const auto button = [&fixture](std::string key, const bool authored) {
+        ui::DescriptionNode::Properties label = sized(140.0, 24.0);
+        label.emplace("text", runtime::ExpressionValue(runtime::Value("ordinary button label")));
+        auto properties = sized(180.0, 36.0);
+        if (!authored)
+            properties.emplace("onClick",
+                               runtime::ExpressionValue(fixture.notification_action(key)));
+        return node(
+            authored ? "Panel" : "Button", key,
+            {node("Text", key + ".label", {}, std::move(label))}, std::move(properties),
+            authored
+                ? std::vector<ui::DescriptionBehavior>{{"strata.activate", true, runtime::Value{},
+                                                        fixture.notification_action(key)}}
+                : std::vector<ui::DescriptionBehavior>{});
+    };
+    fixture.adopt(node("Panel", "release.root",
+                       {button("release.native", false), button("release.authored", true)},
+                       sized(300.0, 150.0, "COLUMN")));
+    const auto drag_click = [&fixture](const ui::Point from, const ui::Point to) {
+        static_cast<void>(fixture.pointer({
+            ui::PointerInputEvent{from, ui::PointerEventType::press, 71, 0},
+            ui::PointerInputEvent{to, ui::PointerEventType::move, 71, 0},
+            ui::PointerInputEvent{to, ui::PointerEventType::release, 71, 0},
+        }));
+    };
+    const std::size_t before = fixture.notifications_.size();
+    const ui::Point native = center(fixture.bounds("release.native.label").bounds);
+    const ui::Point authored = center(fixture.bounds("release.authored.label").bounds);
+    drag_click(native, {native.x + 35.0, native.y});
+    drag_click(authored, {authored.x + 35.0, authored.y});
+    check(fixture.notifications_.size() == before + 2U,
+          "Movement within a stock/authored button cancelled its click");
+    for (const std::string_view key : {"release.native.label", "release.authored.label"}) {
+        check(
+            !fixture.input_.static_text_selection_snapshot(fixture.tree_.find_key(key)->identity()),
+            "An ordinary label intercepted a button drag as text selection");
+    }
+    drag_click(native, authored);
+    drag_click(authored, {290.0, 140.0});
+    check(fixture.notifications_.size() == before + 2U,
+          "Releasing over another control or background activated the pressed button");
+}
+
+void test_select_inside_modal(InputFixture& fixture) {
+    auto select = sized(140.0, 32.0);
+    select.emplace(
+        "options",
+        runtime::ExpressionValue(runtime::Value(std::vector<runtime::Value>{
+            object({{"id", runtime::Value("toggle")}, {"label", runtime::Value("Toggle")}}),
+            object({{"id", runtime::Value("start")}, {"label", runtime::Value("Start")}}),
+        })));
+    auto modal = sized(640.0, 480.0);
+    modal.insert_or_assign("$layout", runtime::ExpressionValue(object({
+                                          {"width", runtime::Value(640.0)},
+                                          {"height", runtime::Value(480.0)},
+                                          {"zIndex", runtime::Value(10'000.0)},
+                                      })));
+    modal.emplace("open", runtime::ExpressionValue(runtime::Value(true)));
+    modal.emplace("onDismiss",
+                  runtime::ExpressionValue(fixture.notification_action("dismiss modal")));
+    fixture.adopt(
+        node("Modal", "choice.modal",
+             {node("Panel", "choice.dialog",
+                   {node("Select", "choice.select", {}, std::move(select))}, sized(320.0, 180.0))},
+             std::move(modal)));
+    const ui::Point trigger = center(fixture.bounds("choice.select").bounds);
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{trigger, ui::PointerEventType::press, 72, 0},
+        ui::PointerInputEvent{{trigger.x + 12.0, trigger.y}, ui::PointerEventType::move, 72, 0},
+        ui::PointerInputEvent{{trigger.x + 12.0, trigger.y}, ui::PointerEventType::release, 72, 0},
+    }));
+    const ui::RetainedNode* select_node = fixture.tree_.find_key("choice.select");
+    const auto choices = fixture.input_.subtargets(select_node->identity());
+    const auto option = std::ranges::find_if(choices, [](const ui::WidgetSubtarget& target) {
+        return target.kind == ui::WidgetSubtargetKind::choice && target.value.string() != nullptr &&
+               *target.value.string() == "start";
+    });
+    check(option != choices.end(), "The modal backdrop swallowed its Select trigger");
+    const ui::Point item = center(option->bounds);
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{item, ui::PointerEventType::press, 73, 0},
+        ui::PointerInputEvent{item, ui::PointerEventType::release, 73, 0},
+    }));
+    const auto selected = ui::effective_choice(*select_node);
+    check(selected.has_value() && selected->id == "start",
+          "A detached choice inside the modal could not be selected");
+    const std::size_t before = fixture.notifications_.size();
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{{500.0, 300.0}, ui::PointerEventType::press, 74, 0},
+        ui::PointerInputEvent{{530.0, 310.0}, ui::PointerEventType::move, 74, 0},
+        ui::PointerInputEvent{{530.0, 310.0}, ui::PointerEventType::release, 74, 0},
+    }));
+    check(fixture.notifications_.size() == before + 1U,
+          "Movement within the backdrop cancelled modal dismissal");
 }
 
 void test_banner_semantics(InputFixture& fixture) {
@@ -1704,6 +1834,8 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_tooltip_disclosure(fixture);
         test_manipulation_slop(fixture);
         test_passive_descendant_activation(fixture);
+        test_release_target_activation(fixture);
+        test_select_inside_modal(fixture);
         test_banner_semantics(fixture);
         std::cout << "strata_interaction_residual_tests: OK\n";
         return 0;

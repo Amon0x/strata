@@ -434,10 +434,8 @@ bool InputRouter::static_text_selectable(const RetainedNode& node) const noexcep
     if (selectable != nullptr && selectable->boolean() != nullptr) {
         return *selectable->boolean();
     }
-    // Frozen Kotlin factories and DSL lowering both default selectable to true. The portable
-    // registry keeps the property optional (and non-null when supplied), so absence retains that
-    // frozen default; selectionContainer only bounds reading order and never overrides false.
-    return true;
+    // Labels are inert unless selection is explicitly requested. Editors own separate selection.
+    return false;
 }
 
 RetainedNode* InputRouter::selectable_static_text_owner(RetainedNode* hit) const noexcept {
@@ -984,6 +982,9 @@ InputRouter::hit_subtarget(const Point position, const RetainedNode* const ordin
         for (auto candidate = projected.rbegin(); candidate != projected.rend(); ++candidate) {
             if (candidate->detached || !contains(candidate->bounds, position))
                 continue;
+            // A modal backdrop cannot outrank a control inside that modal, regardless of zIndex.
+            if (candidate->kind == WidgetSubtargetKind::scrim && ordinary_target != current)
+                continue;
             if (!best.has_value() || candidate->z_index > best->z_index) {
                 best = *candidate;
             }
@@ -1248,6 +1249,12 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
     result.processed_events = 1U;
     if (tree_ == nullptr || layout_ == nullptr)
         return result;
+    if (event.type == PointerEventType::press ||
+        (event.type == PointerEventType::move &&
+         (!hover_position_.has_value() || *hover_position_ != event.position))) {
+        restart_hover_disclosures(event.type == PointerEventType::press);
+    }
+    hover_position_ = event.position;
     // A press changes modality even when it lands on the already-focused control or is consumed.
     // Motion alone must not erase a keyboard user's location indicator.
     if (event.type == PointerEventType::press)
@@ -1346,6 +1353,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
                     routed_subtarget_.has_value() ? routed_subtarget_->id : std::string{},
             });
         active_ = target->identity();
+        update_tooltip_disclosures();
         active_subtarget_ =
             routed_subtarget_.has_value()
                 ? std::optional(std::pair(routed_subtarget_->owner_identity, routed_subtarget_->id))
@@ -1448,18 +1456,17 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
             : std::nullopt;
     const bool click_suppressed =
         pressed != pressed_pointer_targets_.end() &&
-        (pressed->second.moved_beyond_slop || pressed->second.long_press_emitted ||
+        ((pressed->second.moved_beyond_slop && dispatch_target != nullptr &&
+          (static_text_selectable(*dispatch_target) ||
+           editors_.contains(dispatch_target->identity()))) ||
+         pressed->second.long_press_emitted ||
          pressed->second.gesture != GestureClaimState::unclaimed);
     const bool subtarget_matches =
         pressed == pressed_pointer_targets_.end() ||
         pressed->second.subtarget_id ==
             (routed_subtarget_.has_value() ? routed_subtarget_->id : std::string{});
     finish_capture();
-    if (pressed_identity.has_value()) {
-        hover_route(tree_->find_identity(*pressed_identity));
-    } else {
-        hover_route(hover_target);
-    }
+    hover_route(hover_target);
     if (!click_suppressed && subtarget_matches && target != nullptr &&
         pressed_identity == target->identity()) {
         const std::uint64_t click_identity =

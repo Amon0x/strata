@@ -175,11 +175,50 @@ bool InputRouter::command_tooltip_candidate(const std::uint64_t identity) const 
 }
 
 bool InputRouter::tooltip_engaged(const RetainedNode& node) const noexcept {
-    if (hovered_.contains(node.identity()))
-        return true;
-    const RetainedNode* focused =
-        focused_.has_value() && tree_ != nullptr ? tree_->find_identity(*focused_) : nullptr;
-    return focused != nullptr && descendant_of(*focused, node);
+    return hovered_.contains(node.identity()) && pressed_pointer_targets_.empty();
+}
+
+void InputRouter::restart_hover_disclosures(const bool hide) {
+    if (tree_ == nullptr)
+        return;
+    bool changed = false;
+    const auto set = [this, &changed](const std::uint64_t identity, const std::string_view name,
+                                      runtime::Value value) {
+        changed = tree_->set_retained_value(identity, std::string(name), std::move(value),
+                                            DirtyReason::input) ||
+                  changed;
+    };
+    for (const std::uint64_t identity : hovered_) {
+        if (hide || !matured_command_tooltips_.contains(identity)) {
+            hover_started_nanos_.insert_or_assign(identity, frame_time_nanos_);
+        }
+        if (hide && matured_command_tooltips_.erase(identity) != 0U)
+            static_cast<void>(tree_->mark(identity, DirtyReason::input));
+        RetainedNode* node = tree_->find_identity(identity);
+        if (node == nullptr || node->description().type != "Tooltip" ||
+            tooltip_controlled_visible(*node).has_value() ||
+            (!hide && retained_boolean(*node, tooltip_shown_state, false))) {
+            continue;
+        }
+        if (hide) {
+            if (retained_boolean(*node, tooltip_shown_state, false))
+                set(identity, tooltip_shown_state, runtime::Value(false));
+            if (retained_optional_boolean(*node, tooltip_pending_state).has_value())
+                set(identity, tooltip_pending_state, runtime::Value{});
+            if (retained_deadline(*node).has_value())
+                set(identity, tooltip_deadline_state, runtime::Value{});
+        } else if (pressed_pointer_targets_.empty()) {
+            const std::int64_t delay = tooltip_show_delay_nanos(*node);
+            const std::int64_t maximum = std::numeric_limits<std::int64_t>::max();
+            const std::int64_t deadline =
+                frame_time_nanos_ > maximum - delay ? maximum : frame_time_nanos_ + delay;
+            if (retained_optional_boolean(*node, tooltip_pending_state) != true)
+                set(identity, tooltip_pending_state, runtime::Value(true));
+            set(identity, tooltip_deadline_state, runtime::Value(runtime::DurationValue{deadline}));
+        }
+    }
+    if (changed && frame_invalidator_)
+        frame_invalidator_();
 }
 
 bool InputRouter::tooltip_disclosures_need_frame() const noexcept {

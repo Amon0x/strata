@@ -110,6 +110,22 @@ The editor keeps focus, selection, caret, IME, undo, semantics, and input routin
 its native background, border, focus ring, and interaction overlays. This is preferable to encoding
 presentation suppression through nullable paint fields.
 
+Static `Text` and `RichText` are non-selectable by default. Opt reading surfaces into selection with
+`selectable: true`; `selectionContainer` groups opted-in text without making labels selectable.
+Editable fields retain their normal caret, selection, clipboard, and IME behavior. RichText links
+remain interactive independently of text selection.
+
+`strata.hoverable` uses the resolved `hoverOverlay` and radius, without adding a separate border or
+hardcoded surface. Set `hoverOverlay: null` to suppress its decoration. Toggle/Switch hover and
+press feedback stays on the track, not the surrounding label/hit rectangle.
+
+Pointer activation is based on the original control and the release target, not distance moved.
+Movement inside a button (including passive label children) remains a click; release over another
+control or outside cancels it. Claimed drag gestures, text-selection drags, long presses, and
+pointer cancellation still suppress clicks. Modal backdrops follow the same release policy, while
+controls inside a modal retain their own hit targets. Tab/Shift-Tab traverse focus; Alt-Tab and
+other modified Tab chords do not invoke default focus traversal or treat OS switching as navigation.
+
 ### Anchored overlays and authored controls
 
 `PORTAL` layout is absolutely positioned in the root application-surface plane, outside parent flow
@@ -155,6 +171,11 @@ state, separator status, nesting level, shortcut, and child disclosure. Template
 visual presentation owned by the parent control: nested focusable or clickable widgets do not
 create competing interaction targets. `ComboBox` forwards the same templates to its choice popup.
 `Tooltip.contentTemplate` authors its detached content.
+Uncontrolled tooltips disclose only after idle pointer hover. Moving within an unshown anchor
+restarts `showDelay`; pressing hides the tooltip and suppresses disclosure while held. Pointer or
+keyboard focus alone does not open one. Leaving the anchor/popup bridge applies `hideDelay`;
+`hideDelay: 0ms` removes stale help immediately when moving between controls. A controlled
+`visible` value remains authoritative.
 
 The application therefore owns rows, icons, badges, padding, borders, effects, and motion. Native
 code still owns open state, outside dismissal, focus, pointer routing, keyboard navigation,
