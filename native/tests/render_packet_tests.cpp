@@ -61,7 +61,8 @@ std::vector<std::size_t> batch_kind_offsets(const std::vector<std::uint8_t>& byt
     const std::uint32_t batch_count = u32(bytes, 16U);
     const std::uint32_t vertex_bytes = u32(bytes, 40U);
     const std::uint32_t index_count = u32(bytes, 44U);
-    std::size_t offset = 56U;
+    const std::uint32_t group_count = u32(bytes, 56U);
+    std::size_t offset = 60U + static_cast<std::size_t>(group_count) * 44U;
     for (std::uint32_t index = 0U; index < resource_count; ++index) {
         offset += sizeof(std::uint32_t);
         const std::uint32_t record_size = u32(bytes, offset);
@@ -102,7 +103,7 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
     const std::vector<std::uint8_t> encoded = encode(commands, resources);
     check(encoded.size() > 12U &&
               encoded[8U] == static_cast<std::uint8_t>(STRATA_RENDER_PACKET_VERSION_CURRENT),
-          "effect packet did not use render protocol v10");
+          "effect packet did not use render protocol v11");
     const host::RenderPacket packet = decoder.decode(encoded);
     check(packet.batches.size() == 4U, "effect packet changed its ordered batch count");
     const auto* backdrop = std::get_if<host::EffectBatch>(&packet.batches[0U]);
@@ -226,7 +227,7 @@ void test_invalid_effect_refresh_rate_is_rejected(const std::filesystem::path& r
     check(offsets.size() == 1U, "refresh-rate fixture changed its batch shape");
     const std::size_t effect_record = offsets.front() + 2U * sizeof(std::uint32_t);
     const std::size_t effect_id_length_offset =
-        effect_record + 2U * sizeof(std::uint32_t) +
+        effect_record + 3U * sizeof(std::uint32_t) +
         4U * sizeof(std::uint32_t) + 8U * sizeof(double);
     const std::size_t opacity_offset =
         effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
@@ -256,7 +257,7 @@ void test_invalid_effect_backdrop_source_is_rejected(const std::filesystem::path
     check(offsets.size() == 1U, "backdrop-source fixture changed its batch shape");
     const std::size_t effect_record = offsets.front() + 2U * sizeof(std::uint32_t);
     const std::size_t effect_id_length_offset =
-        effect_record + 2U * sizeof(std::uint32_t) +
+        effect_record + 3U * sizeof(std::uint32_t) +
         4U * sizeof(std::uint32_t) + 8U * sizeof(double);
     const std::size_t opacity_offset =
         effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
@@ -290,7 +291,7 @@ void test_content_effect_backdrop_source_is_rejected(const std::filesystem::path
     check(offsets.size() == 2U, "content-source fixture changed its batch shape");
     const std::size_t effect_record = offsets.front() + 2U * sizeof(std::uint32_t);
     const std::size_t effect_id_length_offset =
-        effect_record + 2U * sizeof(std::uint32_t) +
+        effect_record + 3U * sizeof(std::uint32_t) +
         4U * sizeof(std::uint32_t) + 8U * sizeof(double);
     const std::size_t opacity_offset =
         effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
@@ -345,7 +346,7 @@ void test_repeated_epoch_still_validates_batches(const std::filesystem::path& re
     check(offsets.size() == 2U, "repeated-epoch fixture changed its batch shape");
     const std::size_t effect_record = offsets.front() + 2U * sizeof(std::uint32_t);
     const std::size_t effect_id_length_offset =
-        effect_record + 2U * sizeof(std::uint32_t) +
+        effect_record + 3U * sizeof(std::uint32_t) +
         4U * sizeof(std::uint32_t) + 8U * sizeof(double);
     const std::size_t opacity_offset =
         effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);

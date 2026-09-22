@@ -25,6 +25,13 @@ class RetainedNode;
     const Rect& bounds
 ) noexcept;
 
+/**
+ * True while running motion drives this node's opacity, translation or scale. Such a node renders
+ * as a presentation group, so each animation frame updates one group entry instead of its geometry.
+ */
+[[nodiscard]] bool motion_presentation_group(const RetainedNode& node,
+                                             const MotionRuntime& motion) noexcept;
+
 /** Effective local opacity shared by rendering and presentation-aware input hit testing. */
 [[nodiscard]] double local_presentation_opacity(
     const RetainedNode& node,

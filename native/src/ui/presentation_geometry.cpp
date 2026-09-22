@@ -35,6 +35,22 @@ std::optional<double> visual_number(
                : std::nullopt;
 }
 
+bool motion_presentation_group(const RetainedNode& node, const MotionRuntime& motion) noexcept {
+    const MotionComputedValues* computed = motion.computed_values(node.identity());
+    // Only while the motion runs: a settled node bakes its final presentation back into its
+    // commands, so it keeps visibility culling and costs nothing per frame.
+    if (computed == nullptr || !motion.running(node.identity()))
+        return false;
+    for (const MotionProperty property :
+         {MotionProperty::opacity, MotionProperty::scale, MotionProperty::scale_x,
+          MotionProperty::scale_y, MotionProperty::x, MotionProperty::y,
+          MotionProperty::translate_x, MotionProperty::translate_y}) {
+        if (computed->number(property).has_value())
+            return true;
+    }
+    return false;
+}
+
 MotionTransform local_presentation_transform(
     const RetainedNode& node,
     const MotionRuntime& motion,

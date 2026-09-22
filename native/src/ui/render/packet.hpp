@@ -56,10 +56,9 @@ class TextEngine;
 namespace strata::ui {
 
 /**
- * Packet v10: retained geometry epochs, incremental geometry patches, rate-limited effects,
- * explicit current/surface backdrop sources, ordered application effect programs, and rounded
- * descendant masks. The
- * logical v3 encoder remains available only to command-stream inspection tooling.
+ * Packet v11: retained geometry epochs, incremental geometry patches, GPU presentation groups,
+ * rate-limited effects, explicit current/surface backdrop sources, ordered application effect
+ * programs, and rounded descendant masks. The logical v3 encoder remains available only to command-stream inspection tooling.
  */
 class HostRenderPacketCache final {
   public:
@@ -69,7 +68,7 @@ class HostRenderPacketCache final {
     HostRenderPacketCache(HostRenderPacketCache&&) = delete;
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
-    /** A null TextEngine selects the packet-v10 non-text path; text runs are then rejected. */
+    /** A null TextEngine selects the packet-v11 non-text path; text runs are then rejected. */
     [[nodiscard]] const std::vector<std::uint8_t>&
     encode(const RenderCommandBuffer& commands, std::uint64_t frame_index,
            std::span<const resource::EncodedTextureResource> texture_resources,
@@ -112,6 +111,8 @@ class HostRenderPacketCache final {
     std::vector<std::uint8_t> reuse_packet_;
     std::vector<std::uint8_t> resource_packet_;
     const std::vector<std::uint8_t>* current_packet_ = &geometry_packet_;
+    // World-composed presentation groups of the latest frame; every packet carries them.
+    std::vector<RenderGroup> groups_;
     HostRenderPacketTelemetry telemetry_;
     std::size_t planned_draws_ = 0U;
     std::size_t skipped_draws_ = 0U;

@@ -231,6 +231,7 @@ void RenderCommandBuffer::clear() noexcept {
         commands_->clear();
     else
         commands_.reset();
+    groups_.reset();
 }
 
 const std::vector<RenderCommand>& RenderCommandBuffer::commands() const noexcept {
@@ -240,6 +241,16 @@ const std::vector<RenderCommand>& RenderCommandBuffer::commands() const noexcept
 
 std::size_t RenderCommandBuffer::size() const noexcept {
     return commands_ != nullptr ? commands_->size() : 0U;
+}
+
+void RenderCommandBuffer::set_groups(std::vector<RenderGroup> groups) {
+    groups_ = groups.empty() ? nullptr
+                             : std::make_shared<const std::vector<RenderGroup>>(std::move(groups));
+}
+
+const std::vector<RenderGroup>& RenderCommandBuffer::groups() const noexcept {
+    static const std::vector<RenderGroup> empty;
+    return groups_ != nullptr ? *groups_ : empty;
 }
 
 JsonValue render_command_json(const RenderCommand& command) {
@@ -437,9 +448,14 @@ JsonValue render_command_json(const RenderCommand& command) {
             } else if constexpr (std::is_same_v<Type, OpacityPushRenderCommand>) {
                 return object(
                     {{"kind", JsonValue("opacity_push")}, {"opacity", JsonValue(value.opacity)}});
-            } else {
-                static_assert(std::is_same_v<Type, OpacityPopRenderCommand>);
+            } else if constexpr (std::is_same_v<Type, OpacityPopRenderCommand>) {
                 return object({{"kind", JsonValue("opacity_pop")}});
+            } else if constexpr (std::is_same_v<Type, GroupPushRenderCommand>) {
+                return object({{"kind", JsonValue("group_push")},
+                               {"group", JsonValue(static_cast<std::int64_t>(value.group))}});
+            } else {
+                static_assert(std::is_same_v<Type, GroupPopRenderCommand>);
+                return object({{"kind", JsonValue("group_pop")}});
             }
         },
         command);

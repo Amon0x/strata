@@ -310,6 +310,32 @@ struct OpacityPopRenderCommand final {
     [[nodiscard]] friend bool operator==(OpacityPopRenderCommand,
                                          OpacityPopRenderCommand) = default;
 };
+/**
+ * A presentation group: everything in scope is encoded in layout space and placed by the group's
+ * per-frame transform and opacity (RenderCommandBuffer::groups), applied on the GPU. Animating a
+ * group therefore changes only its table entry, never the scoped commands or their geometry.
+ */
+struct GroupPushRenderCommand final {
+    std::uint32_t group = 0U;
+    [[nodiscard]] friend bool operator==(GroupPushRenderCommand,
+                                         GroupPushRenderCommand) = default;
+};
+struct GroupPopRenderCommand final {
+    [[nodiscard]] friend bool operator==(GroupPopRenderCommand, GroupPopRenderCommand) = default;
+};
+/** Stable 1-based group indices; zero means "no group" (identity). */
+inline constexpr std::uint32_t maximum_render_groups = 511U;
+/** A group's axis-aligned transform and opacity relative to its parent group. */
+struct RenderGroup final {
+    std::uint32_t index = 0U;
+    std::uint32_t parent = 0U;
+    double scale_x = 1.0;
+    double scale_y = 1.0;
+    double translate_x = 0.0;
+    double translate_y = 0.0;
+    double opacity = 1.0;
+    [[nodiscard]] friend bool operator==(const RenderGroup&, const RenderGroup&) = default;
+};
 
 using RenderCommand =
     std::variant<SolidRectRenderCommand, RoundedRectRenderCommand, BorderRenderCommand,
@@ -318,7 +344,8 @@ using RenderCommand =
                  ShadowRenderCommand, BackdropEffectRenderCommand, ContentEffectPushRenderCommand,
                  ContentEffectPopRenderCommand, ClipPushRenderCommand, ClipPopRenderCommand,
                  TransformPushRenderCommand, TransformPopRenderCommand, MaterialPushRenderCommand,
-                 MaterialPopRenderCommand, OpacityPushRenderCommand, OpacityPopRenderCommand>;
+                 MaterialPopRenderCommand, OpacityPushRenderCommand, OpacityPopRenderCommand,
+                 GroupPushRenderCommand, GroupPopRenderCommand>;
 
 /** Returns a backend-independent command with every opacity-bearing payload multiplied. */
 [[nodiscard]] RenderCommand render_command_with_opacity(RenderCommand command, double opacity);
@@ -330,6 +357,9 @@ class RenderCommandBuffer final {
     void clear() noexcept;
     [[nodiscard]] const std::vector<RenderCommand>& commands() const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;
+    /** This frame's presentation groups, ordered by index. Not part of command equality. */
+    void set_groups(std::vector<RenderGroup> groups);
+    [[nodiscard]] const std::vector<RenderGroup>& groups() const noexcept;
 
   private:
     /**
@@ -339,6 +369,7 @@ class RenderCommandBuffer final {
      */
     std::shared_ptr<std::vector<RenderCommand>> commands_ =
         std::make_shared<std::vector<RenderCommand>>();
+    std::shared_ptr<const std::vector<RenderGroup>> groups_;
 };
 
 struct RenderOperationCounters final {

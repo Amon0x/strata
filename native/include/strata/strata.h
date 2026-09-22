@@ -1735,22 +1735,29 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Packet v10 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * Packet v11 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
  * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
  * [u32 kind, u32 payload byte count, payload]:
  *
  *   bytes[8] "STRATARP", u32 version, u32 resource count, u32 batch count,
  *   u64 frame index, u64 geometry epoch, u32 flags, u32 vertex byte count, u32 index count,
- *   u32 planned draw count, u32 skipped draw count, resource records, vertex bytes,
- *   little-endian u32 indices, submission batch records.
+ *   u32 planned draw count, u32 skipped draw count, u32 group count, group records, resource
+ *   records, vertex bytes, little-endian u32 indices, submission batch records.
  *
  * A vertex is 88 bytes: f32 x/y/z/u/v, u8 red/green/blue/alpha, then sixteen f32 material values.
+ * z is the vertex's presentation group index (0 = none). Each group record is u32 index (1..511)
+ * followed by f64 scale x/y, translate x/y and opacity: the group's complete presentation over
+ * logical layout space, applied to its vertices as position * scale + translate (the translation
+ * rounded to whole framebuffer pixels), with material opacity (float 15) multiplied by the group
+ * opacity. Every packet carries the frame's complete
+ * table, including packets that retain their geometry epoch; absent indices are the identity.
  * Every batch payload begins with source order, a u32 framebuffer scissor, and a u32 rounded-clip
  * count. Each rounded clip contains f64 x/y/width/height, four f64 corner radii, and a six-f64
  * inverse affine transform from presented logical pixels into that clip's local space. Draw
  * payloads continue with material/blend strings, optional texture id, and
- * base-vertex/first-index/index-count. Blur payloads continue with f64 x/y/width/height/radius and
- * u32 downsample. Backdrop/content-begin effect payloads continue with f64 x/y/width/height; four
+ * base-vertex/first-index/index-count. Blur payloads continue with u32 group index, f64
+ * x/y/width/height/radius and u32 downsample. Backdrop/content-begin effect payloads continue with
+ * u32 group index; f64 x/y/width/height; four
  * f64 corner radii; the
  * effect-id string; f64 opacity; f64 maximum refresh rate (zero = unbounded); u32 backdrop source
  * (0 = current framebuffer, 1 = framebuffer before this Surface); a u32 packed-parameter count;
@@ -1773,7 +1780,7 @@ typedef struct strata_surface_frame_info {
  *
  * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
  * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
- * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v10 records.
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v11 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
@@ -1785,7 +1792,8 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_8 UINT32_C(8)
 #define STRATA_RENDER_PACKET_VERSION_9 UINT32_C(9)
 #define STRATA_RENDER_PACKET_VERSION_10 UINT32_C(10)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_10
+#define STRATA_RENDER_PACKET_VERSION_11 UINT32_C(11)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_11
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)

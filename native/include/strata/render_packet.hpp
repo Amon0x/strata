@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -28,6 +29,9 @@ inline constexpr std::uint32_t resource_encoded_image = 3U;
 inline constexpr std::uint32_t packet_flag_geometry_payload = 1U;
 inline constexpr std::uint32_t packet_flag_geometry_patches = 2U;
 inline constexpr double default_effect_refresh_rate = 240.0;
+
+/** Highest presentation group index. A vertex's z selects its group; zero is the identity. */
+inline constexpr std::uint32_t maximum_presentation_group = 511U;
 
 inline constexpr std::uint32_t texture_format_r8 = 0U;
 inline constexpr std::uint32_t texture_format_rgba8 = 1U;
@@ -80,6 +84,22 @@ struct DrawBatch final {
     [[nodiscard]] friend bool operator==(const DrawBatch&, const DrawBatch&) = default;
 };
 
+/**
+ * A presentation group's complete transform and opacity over logical layout space for the current
+ * frame. Vertices in the group are placed at position * scale + translate, with the translation
+ * rounded to whole framebuffer pixels, and their material opacity is multiplied by `opacity`.
+ */
+struct PresentationGroup final {
+    double scale_x = 1.0;
+    double scale_y = 1.0;
+    double translate_x = 0.0;
+    double translate_y = 0.0;
+    double opacity = 1.0;
+    [[nodiscard]] friend bool operator==(const PresentationGroup&,
+                                         const PresentationGroup&) = default;
+};
+
+/** Region bounds are already presented through `group` for the decoded frame. */
 struct BlurBatch final {
     std::uint32_t source_order = 0U;
     Scissor scissor;
@@ -90,6 +110,7 @@ struct BlurBatch final {
     double radius = 0.0;
     std::uint32_t downsample = 1U;
     std::vector<RoundedClip> rounded_clips;
+    std::uint32_t group = 0U;
     [[nodiscard]] friend bool operator==(const BlurBatch&, const BlurBatch&) = default;
 };
 
@@ -103,6 +124,7 @@ enum class EffectBackdropSource : std::uint32_t {
     surface = 1U,
 };
 
+/** Bounds, radii and opacity are already presented through `group` for the decoded frame. */
 struct EffectBatch final {
     EffectBatchKind kind = EffectBatchKind::backdrop;
     EffectBackdropSource backdrop_source = EffectBackdropSource::current;
@@ -120,6 +142,7 @@ struct EffectBatch final {
     std::array<double, 16U> parameters{};
     std::uint32_t parameter_count = 0U;
     std::vector<RoundedClip> rounded_clips;
+    std::uint32_t group = 0U;
     [[nodiscard]] friend bool operator==(const EffectBatch&, const EffectBatch&) = default;
 };
 
@@ -164,6 +187,12 @@ struct RenderPacket final {
     std::vector<GeometryPatch> index_patches;
     bool geometry_dirty_all = false;
     std::vector<GeometryDirtyRegion> geometry_dirty_regions;
+    /**
+     * Presentation groups indexed by vertex group, through the highest index in use (empty when
+     * none; entry zero and absent indices are the identity). A changed table marks
+     * geometry_dirty_all, since grouped content moves without a geometry change.
+     */
+    std::vector<PresentationGroup> groups;
 };
 
 /**
@@ -178,6 +207,10 @@ class RenderPacketDecoder final {
 
   private:
     std::optional<RenderPacket> retained_;
+    /** Group-local copies of grouped blur/effect batches, re-presented when the table changes. */
+    std::vector<std::pair<std::size_t, SubmissionBatch>> grouped_batches_;
+    /** Layout-space left/top/right/bottom of each group's retained vertices, by group index. */
+    std::vector<std::array<double, 4U>> group_extents_;
 };
 
 struct SurfacePacketFrame final {

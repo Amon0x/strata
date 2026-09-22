@@ -27,6 +27,7 @@
 #include "blur_pass.hpp"
 #include "clip_mask.hpp"
 #include "effect_pass.hpp"
+#include "gpu/groups.hpp"
 #include "shaders.hpp"
 #include "texture_store.hpp"
 #include <strata/render_packet.hpp>
@@ -181,6 +182,10 @@ struct RenderContext::Impl final {
         constant_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         require_hresult(device->CreateBuffer(&constant_desc, nullptr, &viewport_buffer),
                         "D3D11 viewport constant buffer creation");
+        constant_desc.ByteWidth = sizeof(uploaded_groups.values);
+        const D3D11_SUBRESOURCE_DATA identity_groups{uploaded_groups.values.data(), 0U, 0U};
+        require_hresult(device->CreateBuffer(&constant_desc, &identity_groups, &group_buffer),
+                        "D3D11 presentation group constant buffer creation");
 
         D3D11_RASTERIZER_DESC rasterizer_desc{};
         rasterizer_desc.FillMode = D3D11_FILL_SOLID;
@@ -554,7 +559,9 @@ struct RenderContext::Impl final {
         );
         context->VSSetShader(vertex_shader.Get(), nullptr, 0U);
         ID3D11Buffer* const constants = viewport_buffer.Get();
+        ID3D11Buffer* const groups = group_buffer.Get();
         context->VSSetConstantBuffers(0U, 1U, &constants);
+        context->VSSetConstantBuffers(2U, 1U, &groups);
         context->PSSetConstantBuffers(0U, 1U, &constants);
         context->PSSetShader(pixel_shader.Get(), nullptr, 0U);
     }
@@ -629,6 +636,18 @@ struct RenderContext::Impl final {
                 retained.active = next;
             }
             retained.epoch = packet.geometry_epoch;
+        }
+        // Layers share one group buffer; rewrite it only when this layer's table differs.
+        if (packet.groups != uploaded_group_table) {
+            uploaded_groups.assign(packet.groups);
+            D3D11_MAPPED_SUBRESOURCE mapped{};
+            require_hresult(
+                context->Map(group_buffer.Get(), 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped),
+                "D3D11 presentation group mapping");
+            std::memcpy(mapped.pData, uploaded_groups.values.data(),
+                        sizeof(uploaded_groups.values));
+            context->Unmap(group_buffer.Get(), 0U);
+            uploaded_group_table = packet.groups;
         }
         effects->begin_layer(
             id,
@@ -743,6 +762,9 @@ struct RenderContext::Impl final {
     ComPtr<ID3D11InputLayout> input_layout;
     ComPtr<ID3D11RasterizerState> rasterizer;
     ComPtr<ID3D11Buffer> viewport_buffer;
+    ComPtr<ID3D11Buffer> group_buffer;
+    gpu::PresentationGroupConstants uploaded_groups;
+    std::vector<host::PresentationGroup> uploaded_group_table;
     std::uint32_t width = 0U;
     std::uint32_t height = 0U;
     double logical_width = 0.0;

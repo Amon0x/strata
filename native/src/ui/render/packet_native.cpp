@@ -159,6 +159,7 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
         output.integer(batch.first_index);
         output.integer(batch.index_count);
     } else if (batch.kind == SubmissionBatchKind::blur) {
+        output.integer(batch.group);
         output.rect(batch.effect_bounds);
         output.number(batch.effect_radius);
         output.integer(batch.effect_downsample);
@@ -166,6 +167,7 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
         if (!batch.effect.has_value()) {
             throw std::logic_error("render effect batch is missing effect state");
         }
+        output.integer(batch.group);
         output.rect(batch.effect_bounds);
         output.number(batch.effect_radii.top_left);
         output.number(batch.effect_radii.top_right);
@@ -199,6 +201,52 @@ void record(Writer& output, const std::uint32_t kind, const std::span<const std:
     return static_cast<std::uint32_t>(value);
 }
 
+/**
+ * Composes the engine's parent-relative group table (ordered by index) into the world table that
+ * backends apply: each entry is the group's full presentation over layout space. Returns whether
+ * the world table changed.
+ */
+bool compose_groups(const std::span<const RenderGroup> relative, std::vector<RenderGroup>& world) {
+    std::vector<RenderGroup> next(relative.begin(), relative.end());
+    for (std::size_t at = 0U; at < next.size(); ++at) {
+        if (next[at].index == 0U || next[at].index > maximum_render_groups ||
+            (at != 0U && next[at].index <= next[at - 1U].index)) {
+            throw std::logic_error("render group table is not a strictly ordered index set");
+        }
+    }
+    std::vector<std::uint8_t> state(next.size(), 0U);
+    const auto resolve = [&](const auto& self, const std::size_t at) -> const RenderGroup& {
+        if (state[at] == 2U)
+            return next[at];
+        if (state[at] == 1U)
+            throw std::logic_error("render group parents form a cycle");
+        state[at] = 1U;
+        if (const std::uint32_t parent_index = next[at].parent; parent_index != 0U) {
+            const auto found = std::ranges::lower_bound(next, parent_index, {}, &RenderGroup::index);
+            if (found == next.end() || found->index != parent_index)
+                throw std::logic_error("render group parent is missing from the group table");
+            const RenderGroup& parent =
+                self(self, static_cast<std::size_t>(found - next.begin()));
+            RenderGroup& group = next[at];
+            group.translate_x = parent.scale_x * group.translate_x + parent.translate_x;
+            group.translate_y = parent.scale_y * group.translate_y + parent.translate_y;
+            group.scale_x *= parent.scale_x;
+            group.scale_y *= parent.scale_y;
+            group.opacity *= parent.opacity;
+        }
+        state[at] = 2U;
+        return next[at];
+    };
+    for (std::size_t at = 0U; at < next.size(); ++at)
+        resolve(resolve, at);
+    for (RenderGroup& group : next)
+        group.parent = 0U;
+    if (next == world)
+        return false;
+    world.swap(next);
+    return true;
+}
+
 constexpr std::size_t frame_index_offset = 20U;
 constexpr std::uint32_t geometry_payload_flag = 1U;
 constexpr std::uint32_t geometry_patch_flag = 2U;
@@ -214,11 +262,11 @@ void write_frame_index(Bytes& packet, const std::uint64_t frame_index) {
 
 [[nodiscard]] Bytes
 encode_packet(const RenderSubmission& submission, const std::uint64_t frame_index,
-              const std::uint64_t geometry_epoch,
+              const std::uint64_t geometry_epoch, const std::span<const RenderGroup> groups,
               const std::span<const resource::EncodedTextureResource> texture_resources,
               const std::span<const font::AtlasOperation> resources,
               const bool include_geometry = true, const bool patch_geometry = false) {
-    std::size_t reserve = 56U;
+    std::size_t reserve = 60U + groups.size() * 44U;
     if (include_geometry && !patch_geometry) {
         reserve += submission.vertex_bytes.size() +
                    submission.indices.size() * sizeof(std::uint32_t) +
@@ -263,6 +311,15 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
                        : 0U);
     output.integer(checked_count(submission.planned_draws, "render planned draw count"));
     output.integer(checked_count(submission.skipped_draws, "render skipped draw count"));
+    output.integer(checked_count(groups.size(), "render group count"));
+    for (const RenderGroup& group : groups) {
+        output.integer(group.index);
+        output.number(group.scale_x);
+        output.number(group.scale_y);
+        output.number(group.translate_x);
+        output.number(group.translate_y);
+        output.number(group.opacity);
+    }
     // Resource operations preserve atlas order: releases precede creates that may reuse a
     // Surface-scoped host id.
     for (const font::AtlasOperation& operation : resources) {
@@ -379,6 +436,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     telemetry_.topology_change_item = submission.topology_change_item;
     telemetry_.previous_item_count = submission.previous_item_count;
     telemetry_.item_count = submission.item_count;
+    const bool groups_changed = compose_groups(commands.groups(), groups_);
     const bool geometry_changed =
         retrying_incomplete_frame || !submission_reused || geometry_packet_.empty();
     const bool patch_geometry = geometry_changed && !retrying_incomplete_frame &&
@@ -400,7 +458,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         encoded_geometry_epoch = geometry_epoch_ + 1U;
         const auto geometry_encode_started = std::chrono::steady_clock::now();
         std::vector<std::uint8_t> next_geometry = encode_packet(
-            submission, frame_index, encoded_geometry_epoch, {}, {}, true, patch_geometry);
+            submission, frame_index, encoded_geometry_epoch, groups_, {}, {}, true, patch_geometry);
         static_assert(noexcept(geometry_packet_.swap(next_geometry)));
         geometry_packet_.swap(next_geometry);
         telemetry_.geometry_packet_nanos =
@@ -419,9 +477,9 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
         if (geometry_changed) {
             current_packet_ = &geometry_packet_;
         } else {
-            if (reuse_packet_.empty()) {
-                reuse_packet_ =
-                    encode_packet(submission, frame_index, encoded_geometry_epoch, {}, {}, false);
+            if (reuse_packet_.empty() || groups_changed) {
+                reuse_packet_ = encode_packet(submission, frame_index, encoded_geometry_epoch,
+                                              groups_, {}, {}, false);
             } else {
                 write_frame_index(reuse_packet_, frame_index);
             }
@@ -432,8 +490,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                                                  ? std::chrono::steady_clock::now()
                                                  : std::chrono::steady_clock::time_point{};
         std::vector<std::uint8_t> next_resources =
-            encode_packet(submission, frame_index, encoded_geometry_epoch, texture_resources,
-                          resources, geometry_changed, patch_geometry);
+            encode_packet(submission, frame_index, encoded_geometry_epoch, groups_,
+                          texture_resources, resources, geometry_changed, patch_geometry);
         static_assert(noexcept(resource_packet_.swap(next_resources)));
         resource_packet_.swap(next_resources);
         current_packet_ = &resource_packet_;
@@ -472,8 +530,8 @@ bool HostRenderPacketCache::reuse(const std::uint64_t frame_index) {
         RenderSubmission retained_submission;
         retained_submission.planned_draws = planned_draws_;
         retained_submission.skipped_draws = skipped_draws_;
-        reuse_packet_ =
-            encode_packet(retained_submission, frame_index, geometry_epoch_, {}, {}, false);
+        reuse_packet_ = encode_packet(retained_submission, frame_index, geometry_epoch_, groups_,
+                                      {}, {}, false);
     } else {
         write_frame_index(reuse_packet_, frame_index);
     }
@@ -515,7 +573,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
     }
     const std::uint64_t next_geometry_epoch = geometry_epoch_ + 1U;
     std::vector<std::uint8_t> next_packet =
-        encode_packet(empty_submission, frame_index, next_geometry_epoch, {}, operations);
+        encode_packet(empty_submission, frame_index, next_geometry_epoch, {}, {}, operations);
 
     // std::vector::swap with the standard allocator is noexcept: install the complete packet and
     // make every remaining cache transition before irreversibly draining the atlas.
@@ -528,6 +586,7 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
     texture_descriptors_.clear();
     geometry_packet_.clear();
     reuse_packet_.clear();
+    groups_.clear();
     telemetry_ = {};
     planned_draws_ = 0U;
     skipped_draws_ = 0U;
@@ -542,6 +601,7 @@ void HostRenderPacketCache::clear() noexcept {
     geometry_packet_.clear();
     reuse_packet_.clear();
     resource_packet_.clear();
+    groups_.clear();
     current_packet_ = &geometry_packet_;
     telemetry_ = {};
     planned_draws_ = 0U;

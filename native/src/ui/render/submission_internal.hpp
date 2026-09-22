@@ -75,6 +75,8 @@ struct PreparedDraw final {
     SubmissionScissor scissor;
     std::vector<SubmissionRoundedClip> rounded_clips;
     bool texture_sampled = false;
+    /** Presentation group whose per-frame transform places this draw (vertex z); zero is none. */
+    std::uint32_t group = 0U;
     [[nodiscard]] friend bool operator==(const PreparedDraw&, const PreparedDraw&) = default;
 };
 

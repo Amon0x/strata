@@ -374,7 +374,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     const auto visit = [&](const auto& self, const RetainedNode& node, const bool render_portals,
                            const std::optional<Rect> inherited_render_clip,
                            const MotionTransform inherited_transform,
-                           const double inherited_opacity) -> void {
+                           const double inherited_opacity,
+                           const std::uint32_t inherited_group) -> void {
         const LayoutRecord* record = layout.find(node.identity());
         if (record == nullptr)
             return;
@@ -419,6 +420,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 retained.inherited_render_clip == inherited_render_clip &&
                 retained.inherited_transform == inherited_transform &&
                 retained.inherited_opacity == inherited_opacity &&
+                retained.inherited_group == inherited_group &&
                 retained.render_portals == render_portals;
             if (retained.subtree_commands.has_value() && subtree_generations_match &&
                 subtree_node_matches && subtree_presentation_matches && subtree_layout_matches &&
@@ -494,6 +496,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 retained.inherited_render_clip == inherited_render_clip &&
                 retained.inherited_transform == inherited_transform &&
                 retained.inherited_opacity == inherited_opacity &&
+                retained.inherited_group == inherited_group &&
                 retained.render_portals == render_portals &&
                 retained.subtree_translation == Point{}) {
                 found->second.visited = true;
@@ -506,7 +509,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                             "retained render composition referenced a detached child");
                     }
                     self(self, *child, render_portals, retained.child_render_clip,
-                         retained.effective_transform, retained.descendant_opacity);
+                         retained.effective_transform, retained.descendant_opacity,
+                         retained.child_group);
                 }
                 append_fragment(output, retained.suffix, counters);
                 if (retained.local_overlay_rendered)
@@ -535,10 +539,10 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         const MotionComputedValues* computed = motion.computed_values(node.identity());
         const MotionTransform transform =
             local_presentation_transform(node, motion, record->bounds);
-        const MotionTransform effective_transform =
+        MotionTransform effective_transform =
             concatenate_presentation_transform(inherited_transform, transform);
         const double local_opacity = local_presentation_opacity(node, &motion);
-        const double descendant_opacity = inherited_opacity * local_opacity;
+        double descendant_opacity = inherited_opacity * local_opacity;
         const std::optional<MaterialState> authored_material =
             material_state(style_value("material"));
         const std::optional<MaterialState> local_material =
@@ -559,6 +563,23 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         const bool isolates_descendants =
             local_content_effect.has_value() &&
             local_content_effect->input == EffectInput::content;
+        // A motion-driven node renders as a presentation group: its transform and opacity move
+        // into the group table (applied on the GPU), and everything it draws is emitted relative
+        // to it. Isolating effects and portals keep the baked path.
+        std::uint32_t group = 0U;
+        if (!isolates_content && !isolates_descendants && record->kind != LayoutKind::portal &&
+            motion_presentation_group(node, motion)) {
+            group = implementation_->acquire_group(node.identity());
+        }
+        if (group != 0U) {
+            implementation_->groups.insert_or_assign(
+                node.identity(),
+                RenderGroup{group, inherited_group, effective_transform.scale_x,
+                            effective_transform.scale_y, effective_transform.translate_x,
+                            effective_transform.translate_y, descendant_opacity});
+            effective_transform = MotionTransform{};
+            descendant_opacity = 1.0;
+        }
         std::optional<EffectState> rendered_effect = local_effect;
         if (rendered_effect.has_value()) {
             rendered_effect->opacity *= descendant_opacity;
@@ -570,10 +591,11 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         const double body_descendant_opacity = isolates_content ? 1.0 : descendant_opacity;
         const double child_descendant_opacity =
             isolates_descendants ? 1.0 : body_descendant_opacity;
-        const double presentation_inherited_opacity =
-            isolates_content || isolates_descendants
-                ? (local_opacity > 0.0 ? 1.0 / local_opacity : 1.0)
-                : inherited_opacity;
+        // Foreground and overlays are built opacity-free, like the body fragment, and drawn in
+        // an opacity scope: a fade never rebuilds them, and a group applies it on the GPU.
+        // Isolated content is composited with the effect's opacity instead.
+        const double foreground_opacity =
+            isolates_content || isolates_descendants ? 1.0 : descendant_opacity;
         std::optional<Rect> scope_clip_rect = inherited_render_clip;
         if (!record->local_clip.has_value()) {
             scope_clip_rect = intersect_clip(scope_clip_rect, record->clip);
@@ -630,15 +652,22 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             ++counters.fragments_reused;
         }
         const std::size_t composition_prefix_begin = output.size();
+        if (group != 0U) {
+            output.append(GroupPushRenderCommand{group});
+            ++counters.commands_emitted;
+        }
         const bool scope_clip_changed =
             scope_clip_rect.has_value() && scope_clip_rect != inherited_render_clip;
         if (scope_clip_changed) {
+            // Clips stay in layout space: cancel the transforms the planner applies at this
+            // point, which inside a group start from the group's own (identity) space.
             output.append(ClipPushRenderCommand{
-                inverse_presentation_bounds(*scope_clip_rect, inherited_transform),
+                inverse_presentation_bounds(*scope_clip_rect,
+                                            group != 0U ? MotionTransform{} : inherited_transform),
             });
             ++counters.commands_emitted;
         }
-        if (!transform.identity()) {
+        if (group == 0U && !transform.identity()) {
             output.append(TransformPushRenderCommand{
                 transform.scale_x,
                 0.0,
@@ -792,7 +821,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         }
         for (const RetainedNode* child : ordered_children) {
             self(self, *child, render_portals, child_render_clip, effective_transform,
-                 child_descendant_opacity);
+                 child_descendant_opacity, group != 0U ? group : inherited_group);
         }
         std::vector<std::uint64_t> ordered_child_layout_generations;
         std::vector<std::uint64_t> ordered_child_identities;
@@ -832,8 +861,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             retained_presentation->external_generation == external_generation &&
             retained_presentation->focused == focused &&
             retained_presentation->focus_visible == focus_visible &&
-            retained_presentation->hovered == hovered && retained_presentation->active == active &&
-            retained_presentation->inherited_opacity == presentation_inherited_opacity;
+            retained_presentation->hovered == hovered && retained_presentation->active == active;
         const bool retained_presentation_layout_matches =
             retained_presentation_state_matches &&
             Impl::matches(retained_presentation->layout, node, *record, layout);
@@ -844,23 +872,21 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         if (!retained_presentation_layout_matches && !presentation_translation.has_value()) {
             std::vector<RenderCommand> presentation;
             append_widget_foreground(widgets, node, *record, layout, input, commands, text,
-                                     svg_images, &motion, presentation_inherited_opacity,
-                                     presentation);
+                                     svg_images, &motion, 1.0, presentation, false);
             bool local_overlay_rendered = false;
             if (lifecycle != nullptr && lifecycle->present.overlay != nullptr &&
                 !lifecycle->present.detached_overlay) {
                 const std::size_t before = presentation.size();
                 std::vector<RenderCommand> overlay =
                     build_widget_overlay(widgets, node, *record, layout, input, commands, text,
-                                         svg_images, &motion, presentation_inherited_opacity);
+                                         svg_images, &motion, 1.0, false);
                 presentation.insert(presentation.end(), std::make_move_iterator(overlay.begin()),
                                     std::make_move_iterator(overlay.end()));
                 local_overlay_rendered = presentation.size() != before;
             }
             const std::size_t before_behavior = presentation.size();
             append_behavior_overlays(behaviors, node, *record, layout, input, commands, text,
-                                     svg_images, &motion, presentation_inherited_opacity, false,
-                                     presentation);
+                                     svg_images, &motion, 1.0, false, presentation, false);
             local_overlay_rendered =
                 local_overlay_rendered || presentation.size() != before_behavior;
             cached_fragment.presentation = Impl::CachedFragment::PresentationPlan{
@@ -873,7 +899,6 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 focus_visible,
                 hovered,
                 active,
-                presentation_inherited_opacity,
                 Impl::snapshot(node, *record, layout),
                 std::move(presentation),
                 local_overlay_rendered,
@@ -891,7 +916,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             });
             ++counters.commands_emitted;
         }
-        append_fragment(output, presentation.commands, counters);
+        append_fragment(output, presentation.commands, counters, foreground_opacity);
         if (presentation_translation.has_value()) {
             output.append(TransformPopRenderCommand{});
             ++counters.commands_emitted;
@@ -907,12 +932,16 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             output.append(ContentEffectPopRenderCommand{});
             ++counters.commands_emitted;
         }
-        if (!transform.identity()) {
+        if (group == 0U && !transform.identity()) {
             output.append(TransformPopRenderCommand{});
             ++counters.commands_emitted;
         }
         if (scope_clip_changed) {
             output.append(ClipPopRenderCommand{});
+            ++counters.commands_emitted;
+        }
+        if (group != 0U) {
+            output.append(GroupPopRenderCommand{});
             ++counters.commands_emitted;
         }
         const std::size_t composition_suffix_end = output.size();
@@ -956,6 +985,9 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             !record->virtual_axis.has_value() && !record->virtual_item_extents.has_value() &&
             !record->visible_range.has_value();
         composition.subtree_contains_clip = scope_clip_changed || descendant_local_clip.has_value();
+        composition.inherited_group = inherited_group;
+        composition.child_group = group != 0U ? group : inherited_group;
+        composition.subtree_contains_group = group != 0U;
         for (const std::uint64_t child_identity : composition.ordered_children) {
             const auto child_fragment = implementation_->fragments.find(child_identity);
             if (child_fragment == implementation_->fragments.end() ||
@@ -969,11 +1001,18 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             composition.subtree_contains_clip =
                 composition.subtree_contains_clip ||
                 child_fragment->second.composition->subtree_contains_clip;
+            composition.subtree_contains_group =
+                composition.subtree_contains_group ||
+                child_fragment->second.composition->subtree_contains_group;
             composition.subtree_node_count +=
                 child_fragment->second.composition->subtree_node_count;
             composition.subtree_overlay_count +=
                 child_fragment->second.composition->subtree_overlay_count;
         }
+        // A translated retained stream cannot move group geometry: groups restart the planner's
+        // transform stack and their table entries would not see the translation.
+        if (composition.subtree_contains_group)
+            composition.subtree_translation_safe = false;
         constexpr std::size_t maximum_retained_subtree_commands = 256U;
         if (composition_suffix_end - composition_prefix_begin <=
             maximum_retained_subtree_commands) {
@@ -982,20 +1021,62 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         }
     };
     if (tree.root() != nullptr) {
-        visit(visit, *tree.root(), false, std::nullopt, MotionTransform{}, 1.0);
+        visit(visit, *tree.root(), false, std::nullopt, MotionTransform{}, 1.0, 0U);
     }
     // Portals remain retained content. Detached overlays occupy the final shared z-plane.
     for (const RetainedNode* portal : portals) {
-        visit(visit, *portal, true, std::nullopt, MotionTransform{}, 1.0);
+        visit(visit, *portal, true, std::nullopt, MotionTransform{}, 1.0, 0U);
         ++counters.portals_rendered;
     }
     implementation_->retain_base(tree, layout, input, generations, output);
     append_detached_overlays(overlays);
+    implementation_->publish_groups(output);
     counters.commands_emitted = output.size();
     return counters;
 }
 
+std::uint32_t RenderEngine::Impl::acquire_group(const std::uint64_t identity) {
+    if (const auto found = groups.find(identity); found != groups.end())
+        return found->second.index;
+    if (!free_group_indices.empty()) {
+        const std::uint32_t index = free_group_indices.back();
+        free_group_indices.pop_back();
+        return index;
+    }
+    return next_group_index <= maximum_render_groups ? next_group_index++ : 0U;
+}
+
+void RenderEngine::Impl::publish_groups(RenderCommandBuffer& output) {
+    if (groups.empty()) {
+        output.set_groups({});
+        return;
+    }
+    std::vector<bool> referenced(maximum_render_groups + 1U, false);
+    for (const RenderCommand& command : output.commands()) {
+        if (const auto* push = std::get_if<GroupPushRenderCommand>(&command);
+            push != nullptr && push->group <= maximum_render_groups) {
+            referenced[push->group] = true;
+        }
+    }
+    std::vector<RenderGroup> table;
+    table.reserve(groups.size());
+    for (auto entry = groups.begin(); entry != groups.end();) {
+        if (!referenced[entry->second.index]) {
+            free_group_indices.push_back(entry->second.index);
+            entry = groups.erase(entry);
+            continue;
+        }
+        table.push_back(entry->second);
+        ++entry;
+    }
+    std::ranges::sort(table, {}, &RenderGroup::index);
+    output.set_groups(std::move(table));
+}
+
 void RenderEngine::clear() {
+    implementation_->groups.clear();
+    implementation_->free_group_indices.clear();
+    implementation_->next_group_index = 1U;
     implementation_->fragments.clear();
     implementation_->retained_base_commands.clear();
     implementation_->retained_base_generations.reset();

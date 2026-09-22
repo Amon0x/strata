@@ -94,6 +94,11 @@ struct RenderEngine::Impl final {
             Point subtree_translation{};
             bool subtree_translation_safe = false;
             bool subtree_contains_clip = false;
+            /** Innermost enclosing presentation group when this plan was composed. */
+            std::uint32_t inherited_group = 0U;
+            /** The group this node's children inherit: its own when it is a group. */
+            std::uint32_t child_group = 0U;
+            bool subtree_contains_group = false;
         };
 
         /**
@@ -112,7 +117,6 @@ struct RenderEngine::Impl final {
             bool focus_visible = false;
             bool hovered = false;
             bool active = false;
-            double inherited_opacity = 1.0;
             LayoutSnapshot layout;
             std::vector<RenderCommand> commands;
             bool local_overlay_rendered = false;
@@ -135,6 +139,14 @@ struct RenderEngine::Impl final {
     };
 
     std::unordered_map<std::uint64_t, CachedFragment> fragments;
+    /** Presentation groups by node identity; indices stay stable while a group persists. */
+    std::unordered_map<std::uint64_t, RenderGroup> groups;
+    std::vector<std::uint32_t> free_group_indices;
+    std::uint32_t next_group_index = 1U;
+    /** Returns this node's stable group index, or zero when the group table is full. */
+    std::uint32_t acquire_group(std::uint64_t identity);
+    /** Drops groups no longer referenced by the frame and attaches the table to its commands. */
+    void publish_groups(RenderCommandBuffer& output);
     std::uint64_t fragment_tree_generation = 0U;
     RenderCommandBuffer retained_base_commands;
     std::optional<RenderGenerationToken> retained_base_generations;
@@ -160,13 +172,15 @@ struct RenderEngine::Impl final {
                retained.paint == current.paint;
     }
 
+    // Fragments are built without presentation opacity or transform (the traversal applies both),
+    // so those channels never invalidate a fragment.
     [[nodiscard]] static CachedFragment::MotionSnapshot
     fragment_motion_snapshot(const MotionComputedValues* computed) {
         CachedFragment::MotionSnapshot result;
         if (computed == nullptr)
             return result;
         for (const auto& [property, value] : computed->values) {
-            if (property >= MotionProperty::x && property <= MotionProperty::scale_y)
+            if (property >= MotionProperty::opacity && property <= MotionProperty::scale_y)
                 continue;
             result.values.emplace_back(property, value);
         }

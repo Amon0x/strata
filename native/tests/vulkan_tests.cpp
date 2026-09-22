@@ -112,6 +112,15 @@ void run() {
         image = render(packet);
         near(pixel(image, 32, 0, 0), {0, 0, 0, 0}, "rounded clip corner");
         near(pixel(image, 32, 16, 16), {255, 0, 0, 255}, "rounded clip center");
+        // Vertex z selects a presentation group, which the vertex stage places and fades.
+        packet = quad();
+        for (std::size_t i = 0; i < 4; ++i)
+            put(packet, i, 8, 1);
+        packet.groups = {host::PresentationGroup{}, host::PresentationGroup{0.5, 0.5, 16, 0, 0.5}};
+        image = render(packet);
+        near(pixel(image, 32, 8, 8), {0, 0, 0, 0}, "presentation group moved its draw");
+        near(pixel(image, 32, 24, 24), {0, 0, 0, 0}, "presentation group scaled its draw");
+        near(pixel(image, 32, 24, 8), {128, 0, 0, 128}, "presentation group placement and opacity");
         packet = quad({255, 255, 255, 255});
         packet.resources.push_back({host::resource_create,
                                     "test.texture",

@@ -192,7 +192,8 @@ void append_behavior_overlays(const BehaviorRegistry& registry, const RetainedNo
                               const InputRouter& input, const CommandIndex& commands,
                               const TextEngine* text, const resource::SvgImageRegistry* svg_images,
                               const MotionRuntime* motion, const double inherited_opacity,
-                              const bool detached, std::vector<RenderCommand>& output) {
+                              const bool detached, std::vector<RenderCommand>& output,
+                              const bool apply_presentation_opacity) {
     for (const DescriptionBehavior& attachment : node.description().behaviors) {
         if (!attachment.enabled)
             continue;
@@ -203,7 +204,8 @@ void append_behavior_overlays(const BehaviorRegistry& registry, const RetainedNo
             continue;
         }
         WidgetRenderScope scope(node, layout, layout_result, input, commands, text, svg_images,
-                                motion, inherited_opacity, WidgetVisualProfile{}, output);
+                                motion, inherited_opacity, WidgetVisualProfile{}, output,
+                                apply_presentation_opacity);
         lifecycle->present.overlay(attachment, scope);
     }
 }

@@ -12,6 +12,19 @@ cbuffer FrameData : register(b0) {
     float3 frameReserved;
 };
 
+/**
+ * Presentation groups: `transform` is scale.xy then translate.xy over logical layout space and
+ * `opacity.x` multiplies material opacity. Entry zero (and every unused entry) is the identity.
+ */
+struct PresentationGroup {
+    float4 transform;
+    float4 opacity;
+};
+
+cbuffer PresentationGroups : register(b2) {
+    PresentationGroup presentationGroups[512];
+};
+
 struct VertexInput {
     float3 position : POSITION;
     float2 uv : TEXCOORD0;
@@ -34,10 +47,16 @@ struct PixelInput {
 
 PixelInput main(VertexInput input) {
     PixelInput output;
+    // Position z carries the vertex's presentation group; nothing draws with depth.
+    PresentationGroup group = presentationGroups[min((uint)(input.position.z + 0.5), 511u)];
+    // Whole device pixels keep pixel-snapped glyphs and hairlines crisp while a group moves.
+    float2 devicePixels = framebufferSize / max(logicalSize, 1.0);
+    float2 translation = round(group.transform.zw * devicePixels) / devicePixels;
+    float2 position = input.position.xy * group.transform.xy + translation;
     output.position = float4(
-        input.position.x * 2.0 / logicalSize.x - 1.0,
-        1.0 - input.position.y * 2.0 / logicalSize.y,
-        saturate(input.position.z),
+        position.x * 2.0 / logicalSize.x - 1.0,
+        1.0 - position.y * 2.0 / logicalSize.y,
+        0.0,
         1.0
     );
     output.uv = input.uv;
@@ -45,7 +64,7 @@ PixelInput main(VertexInput input) {
     output.drawData0 = input.drawData0;
     output.drawData1 = input.drawData1;
     output.drawData2 = input.drawData2;
-    output.drawData3 = input.drawData3;
+    output.drawData3 = float4(input.drawData3.xyz, input.drawData3.w * group.opacity.x);
     return output;
 }
 )hlsl";

@@ -537,4 +537,8 @@ std::size_t MotionRuntime::active_count() const noexcept {
     return implementation_->active_nodes.size();
 }
 
+bool MotionRuntime::running(const std::uint64_t identity) const noexcept {
+    return implementation_->active_nodes.contains(identity);
+}
+
 } // namespace strata::ui

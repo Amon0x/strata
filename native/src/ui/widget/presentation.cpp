@@ -783,7 +783,7 @@ build_widget_overlay(const WidgetRegistry& registry, const RetainedNode& node,
                      const LayoutRecord& layout, const LayoutResult& layout_result,
                      const InputRouter& input, const CommandIndex& commands, const TextEngine* text,
                      const resource::SvgImageRegistry* svg_images, const MotionRuntime* motion,
-                     const double inherited_opacity) {
+                     const double inherited_opacity, const bool apply_presentation_opacity) {
     std::vector<RenderCommand> output;
     const WidgetLifecycle* lifecycle = registry.find(node.description().type);
     if (lifecycle == nullptr || !participates(*lifecycle, node) ||
@@ -791,7 +791,8 @@ build_widget_overlay(const WidgetRegistry& registry, const RetainedNode& node,
         return output;
     }
     WidgetRenderScope scope(node, layout, layout_result, input, commands, text, svg_images, motion,
-                            inherited_opacity, lifecycle->present.visual, output);
+                            inherited_opacity, lifecycle->present.visual, output,
+                            apply_presentation_opacity);
     lifecycle->present.overlay(scope);
     return output;
 }
@@ -801,14 +802,16 @@ void append_widget_foreground(const WidgetRegistry& registry, const RetainedNode
                               const InputRouter& input, const CommandIndex& commands,
                               const TextEngine* text, const resource::SvgImageRegistry* svg_images,
                               const MotionRuntime* motion, const double inherited_opacity,
-                              std::vector<RenderCommand>& output) {
+                              std::vector<RenderCommand>& output,
+                              const bool apply_presentation_opacity) {
     const WidgetLifecycle* lifecycle = registry.find(node.description().type);
     if (lifecycle == nullptr || !participates(*lifecycle, node) ||
         lifecycle->present.foreground == nullptr) {
         return;
     }
     WidgetRenderScope scope(node, layout, layout_result, input, commands, text, svg_images, motion,
-                            inherited_opacity, lifecycle->present.visual, output);
+                            inherited_opacity, lifecycle->present.visual, output,
+                            apply_presentation_opacity);
     lifecycle->present.foreground(scope);
 }
 

@@ -98,14 +98,12 @@ void Renderer::Impl::initialize() {
         check(vkCreateFence(device.device, &fi, nullptr, &slot.fence), "create fence");
         slot.arena = std::make_unique<UploadArena>(device);
     }
-    std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
-    for (std::uint32_t i = 0; i < 5; ++i) {
+    std::array<VkDescriptorSetLayoutBinding, descriptor_bindings> bindings{};
+    for (std::uint32_t i = 0; i < descriptor_bindings; ++i) {
         bindings[i].binding = i;
         bindings[i].descriptorCount = 1;
         bindings[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        bindings[i].descriptorType = i < 2   ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-                                     : i < 4 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                                             : VK_DESCRIPTOR_TYPE_SAMPLER;
+        bindings[i].descriptorType = descriptor_type(i);
     }
     VkDescriptorSetLayoutCreateInfo di{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     di.bindingCount = static_cast<std::uint32_t>(bindings.size());
@@ -132,6 +130,11 @@ void Renderer::Impl::initialize() {
                 std::string(gpu::rounded_clip_hlsl) + std::string(gpu::blur_shaders::pixel));
     add_program("composite",
                 std::string(gpu::rounded_clip_hlsl) + std::string(gpu::composite_pixel));
+    identity_groups = std::make_unique<Buffer>(device, sizeof(gpu::PresentationGroupConstants),
+                                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    const gpu::PresentationGroupConstants identity;
+    std::memcpy(identity_groups->mapped, identity.values.data(), sizeof(identity.values));
+    groups = Slice{identity_groups->buffer, 0, sizeof(identity.values)};
     white = std::make_unique<Image>(device, 1, 1, VK_FORMAT_R8G8B8A8_UNORM);
     begin();
     clear(*white, {1, 1, 1, 1});

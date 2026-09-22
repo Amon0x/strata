@@ -2,6 +2,7 @@
 
 #include "gpu/blur_shaders.hpp"
 #include "gpu/clip.hpp"
+#include "gpu/groups.hpp"
 #include "gpu/effect_shaders.hpp"
 #include "gpu/png.hpp"
 #include "gpu/shaders.hpp"
@@ -61,6 +62,13 @@ inline gpu::RoundedClipConstants clip_constants(std::span<const host::RoundedCli
         }
     }
     return data;
+}
+/** Descriptor set: frame, rounded-clip and presentation-group buffers; two images; a sampler. */
+inline constexpr std::uint32_t descriptor_bindings = 6;
+inline constexpr VkDescriptorType descriptor_type(std::uint32_t binding) noexcept {
+    return binding < 3   ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+           : binding < 5 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+                         : VK_DESCRIPTOR_TYPE_SAMPLER;
 }
 inline Target target_of(Image& image) {
     return {image.image, image.view, image.format, image.width, image.height, image.layout};
@@ -147,6 +155,10 @@ struct Renderer::Impl {
     std::uint64_t active_epoch = 0;
     std::uint64_t effect_index = 0;
     std::unique_ptr<Image> white;
+    /** Presentation groups bound for the current layer; the identity table when it has none. */
+    std::unique_ptr<Buffer> identity_groups;
+    gpu::PresentationGroupConstants packed_groups;
+    Slice groups{};
     std::vector<std::unique_ptr<Image>> scratch;
     std::size_t scratch_index = 0;
     std::vector<std::uint32_t> vertex, fullscreen;

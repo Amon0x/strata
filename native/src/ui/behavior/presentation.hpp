@@ -38,7 +38,8 @@ void append_behavior_overlays(
     const MotionRuntime* motion,
     double inherited_opacity,
     bool detached,
-    std::vector<RenderCommand>& output
+    std::vector<RenderCommand>& output,
+    bool apply_presentation_opacity = true
 );
 
 } // namespace strata::ui

@@ -496,7 +496,7 @@ composition, and clips work to the intersection of the effect bounds and inherit
 The D3D11 desktop and headless hosts execute the full pass program. The reference software backend
 executes declared blur passes, ignores authored shader stages, and then applies the same rounded
 mask, opacity, and backdrop/content composition. This approximation is intentionally deterministic
-rather than a claim of shader fidelity. Packet v10 carries ordered backdrop/content batches,
+rather than a claim of shader fidelity. Packet v11 carries ordered backdrop/content batches,
 current/surface backdrop selection, active rounded-clip geometry, effect refresh-rate policy, and a
 bounded sixteen-float parameter block.
 The public decoder rejects malformed clip/effect state, caps nested `CONTENT` effects at four

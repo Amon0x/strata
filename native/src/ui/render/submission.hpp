@@ -69,6 +69,8 @@ struct SubmissionBatch final {
     CornerRadii effect_radii;
     std::optional<EffectState> effect;
     std::vector<SubmissionRoundedClip> rounded_clips;
+    /** Presentation group placing effect bounds; draw batches carry groups per vertex instead. */
+    std::uint32_t group = 0U;
     [[nodiscard]] friend bool operator==(const SubmissionBatch&, const SubmissionBatch&) = default;
 };
 

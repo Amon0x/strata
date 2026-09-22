@@ -158,7 +158,7 @@ VkDescriptorSet Renderer::Impl::descriptor_set(Slice constants,
     VkDescriptorSet set{};
     for (;;) {
         if (pool_index == pools.size()) {
-            const VkDescriptorPoolSize sizes[]{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2048},
+            const VkDescriptorPoolSize sizes[]{{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3072},
                                                {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2048},
                                                {VK_DESCRIPTOR_TYPE_SAMPLER, 1024}};
             VkDescriptorPoolCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -184,26 +184,25 @@ VkDescriptorSet Renderer::Impl::descriptor_set(Slice constants,
     }
     const auto clip = arena->upload(&clips, sizeof(clips));
     VkDescriptorBufferInfo buffers[]{{constants.buffer, constants.offset, constants.size},
-                                     {clip.buffer, clip.offset, clip.size}};
+                                     {clip.buffer, clip.offset, clip.size},
+                                     {groups.buffer, groups.offset, groups.size}};
     VkDescriptorImageInfo images[]{{VK_NULL_HANDLE, source.view, source.layout},
                                    {VK_NULL_HANDLE, backdrop.view, backdrop.layout},
                                    {source.filter == VK_FILTER_NEAREST ? nearest : linear,
                                     VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED}};
-    VkWriteDescriptorSet writes[5]{};
-    for (std::uint32_t i = 0; i < 5; ++i) {
+    VkWriteDescriptorSet writes[descriptor_bindings]{};
+    for (std::uint32_t i = 0; i < descriptor_bindings; ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet = set;
         writes[i].dstBinding = i;
         writes[i].descriptorCount = 1;
-        writes[i].descriptorType = i < 2   ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-                                   : i < 4 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                                           : VK_DESCRIPTOR_TYPE_SAMPLER;
-        if (i < 2)
+        writes[i].descriptorType = descriptor_type(i);
+        if (i < 3)
             writes[i].pBufferInfo = &buffers[i];
         else
-            writes[i].pImageInfo = &images[i - 2];
+            writes[i].pImageInfo = &images[i - 3];
     }
-    vkUpdateDescriptorSets(device.device, 5, writes, 0, nullptr);
+    vkUpdateDescriptorSets(device.device, descriptor_bindings, writes, 0, nullptr);
     return set;
 }
 

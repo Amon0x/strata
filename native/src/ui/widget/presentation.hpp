@@ -160,14 +160,15 @@ build_widget_overlay(const WidgetRegistry& registry, const RetainedNode& node,
                      const LayoutRecord& layout, const LayoutResult& layout_result,
                      const InputRouter& input, const CommandIndex& commands, const TextEngine* text,
                      const resource::SvgImageRegistry* svg_images, const MotionRuntime* motion,
-                     double inherited_opacity);
+                     double inherited_opacity, bool apply_presentation_opacity = true);
 
 void append_widget_foreground(const WidgetRegistry& registry, const RetainedNode& node,
                               const LayoutRecord& layout, const LayoutResult& layout_result,
                               const InputRouter& input, const CommandIndex& commands,
                               const TextEngine* text, const resource::SvgImageRegistry* svg_images,
                               const MotionRuntime* motion, double inherited_opacity,
-                              std::vector<RenderCommand>& output);
+                              std::vector<RenderCommand>& output,
+                              bool apply_presentation_opacity = true);
 
 [[nodiscard]] std::optional<Rect>
 widget_descendant_clip(const WidgetRegistry& registry, const RetainedNode& node,

@@ -356,8 +356,19 @@ void align_text_cache(
     std::vector<Transform> transform_stack;
     Rect clip{0.0, 0.0, context.logical_width, context.logical_height};
     Transform transform;
+    // Grouped text moves on the GPU; its screen position is unknown here, so never cull it.
+    std::size_t group_depth = 0U;
     for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
         const RenderCommand& source = commands.commands()[index];
+        if (std::holds_alternative<GroupPushRenderCommand>(source)) {
+            ++group_depth;
+            continue;
+        }
+        if (std::holds_alternative<GroupPopRenderCommand>(source)) {
+            if (group_depth == 0U) throw std::logic_error("render group stack underflow");
+            --group_depth;
+            continue;
+        }
         if (const auto* clip_push = std::get_if<ClipPushRenderCommand>(&source);
             clip_push != nullptr) {
             clip_stack.push_back(clip);
@@ -386,7 +397,7 @@ void align_text_cache(
             transform_stack.pop_back();
         } else if (const auto* text = std::get_if<TextRunRenderCommand>(&source);
                    text != nullptr) {
-            result[index] = !text->cull_bounds.has_value() ||
+            result[index] = group_depth != 0U || !text->cull_bounds.has_value() ||
                 !intersect(clip, transform.bounds(*text->cull_bounds)).empty();
         }
     }
@@ -405,6 +416,7 @@ void append_draw(
     const std::vector<SubmissionRoundedClip>& rounded_clips,
     const std::optional<MaterialState>& material_override,
     const double opacity,
+    const std::uint32_t group,
     const SubmissionContext& context,
     std::size_t& skipped_draws
 ) {
@@ -413,7 +425,8 @@ void append_draw(
     const Rect visible = intersect(clip, transformed_bounds);
     const SubmissionScissor resolved_scissor = scissor(clip, context);
     const bool retained_empty = local_bounds.empty();
-    if ((!retained_empty &&
+    // A grouped draw moves on the GPU, so only its (layout-space) clip can cull it here.
+    if ((!retained_empty && group == 0U &&
          (transformed_bounds.empty() || visible.empty())) ||
         resolved_scissor.width == 0U || resolved_scissor.height == 0U) {
         ++skipped_draws;
@@ -434,6 +447,7 @@ void append_draw(
         resolved_scissor,
         rounded_clips,
         false,
+        group,
     });
 }
 
@@ -686,6 +700,14 @@ std::vector<PlannedItem> plan(
     Transform transform;
     std::optional<MaterialState> material_override;
     double opacity = 1.0;
+    // A group restarts transform and opacity: its content is encoded relative to the group.
+    struct GroupScope {
+        Transform transform;
+        double opacity = 1.0;
+        std::uint32_t group = 0U;
+    };
+    std::vector<GroupScope> group_stack;
+    std::uint32_t group = 0U;
     std::size_t content_effect_depth = 0U;
     std::vector<std::size_t> content_clip_baselines;
     const auto scoped_effect = [&opacity](EffectState effect) {
@@ -791,9 +813,20 @@ std::vector<PlannedItem> plan(
                 if (opacity_stack.empty()) throw std::logic_error("render opacity stack underflow");
                 opacity = opacity_stack.back();
                 opacity_stack.pop_back();
+            } else if constexpr (std::is_same_v<Type, GroupPushRenderCommand>) {
+                group_stack.push_back(GroupScope{transform, opacity, group});
+                transform = Transform{};
+                opacity = 1.0;
+                group = value.group;
+            } else if constexpr (std::is_same_v<Type, GroupPopRenderCommand>) {
+                if (group_stack.empty()) throw std::logic_error("render group stack underflow");
+                transform = group_stack.back().transform;
+                opacity = group_stack.back().opacity;
+                group = group_stack.back().group;
+                group_stack.pop_back();
             } else if constexpr (std::is_same_v<Type, BlurRegionRenderCommand>) {
                 const Rect visible = intersect(clip, transform.bounds(value.bounds));
-                if (visible.empty()) {
+                if (group == 0U && visible.empty()) {
                     ++skipped_draws;
                     return;
                 }
@@ -813,9 +846,10 @@ std::vector<PlannedItem> plan(
                     std::nullopt,
                     batch_rounded_clips(),
                 });
+                std::get<SubmissionBatch>(output.back().value).group = group;
             } else if constexpr (std::is_same_v<Type, BackdropEffectRenderCommand>) {
                 const Rect visible = intersect(clip, transform.bounds(value.bounds));
-                if (visible.empty()) {
+                if (group == 0U && visible.empty()) {
                     ++skipped_draws;
                     return;
                 }
@@ -836,6 +870,7 @@ std::vector<PlannedItem> plan(
                     },
                     .effect = scoped_effect(value.effect),
                     .rounded_clips = batch_rounded_clips(),
+                    .group = group,
                 });
             } else if constexpr (std::is_same_v<Type, ContentEffectPushRenderCommand>) {
                 if (content_effect_depth == maximum_content_effect_depth) {
@@ -863,6 +898,7 @@ std::vector<PlannedItem> plan(
                     },
                     .effect = scoped_effect(value.effect),
                     .rounded_clips = composite_clips,
+                    .group = group,
                 });
                 content_clip_baselines.push_back(active_rounded_clips.size());
             } else if constexpr (std::is_same_v<Type, ContentEffectPopRenderCommand>) {
@@ -876,6 +912,7 @@ std::vector<PlannedItem> plan(
                     .scissor = scissor(clip, context),
                     .source_order = source_order,
                     .rounded_clips = batch_rounded_clips(),
+                    .group = group,
                 });
             } else if constexpr (std::is_same_v<Type, TextRunRenderCommand>) {
                 if (!visible_text[index]) {
@@ -883,8 +920,8 @@ std::vector<PlannedItem> plan(
                     return;
                 }
                 const PreparedTextCacheEntry& retained = *cache.text[index];
-                const std::vector<PreparedTextPtr>& groups = retained.groups;
-                if (groups.empty()) {
+                const std::vector<PreparedTextPtr>& runs = retained.groups;
+                if (runs.empty()) {
                     ++skipped_draws;
                     return;
                 }
@@ -896,24 +933,25 @@ std::vector<PlannedItem> plan(
                     1.0,
                     value.origin.y - retained.source.origin.y,
                 });
-                for (const PreparedTextPtr& group : groups) {
+                for (const PreparedTextPtr& run : runs) {
                     append_draw(
-                        output, PreparedCommand{group}, source_order, positioned,
-                        clip, batch_rounded_clips(), material_override, opacity, context,
+                        output, PreparedCommand{run}, source_order, positioned,
+                        clip, batch_rounded_clips(), material_override, opacity, group, context,
                         skipped_draws
                     );
                 }
             } else {
                 append_draw(
                     output, PreparedCommand{value}, source_order, transform, clip,
-                    batch_rounded_clips(), material_override, opacity, context, skipped_draws
+                    batch_rounded_clips(), material_override, opacity, group, context,
+                    skipped_draws
                 );
             }
         }, source);
     }
     if (!clip_stack.empty() || !rounded_clip_stack.empty() || !active_rounded_clips.empty() ||
         !transform_stack.empty() || !material_stack.empty() || !opacity_stack.empty() ||
-        content_effect_depth != 0U ||
+        !group_stack.empty() || content_effect_depth != 0U ||
         !content_clip_baselines.empty()) {
         throw std::logic_error("render command state stacks are unbalanced");
     }

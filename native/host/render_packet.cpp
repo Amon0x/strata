@@ -250,15 +250,90 @@ void validate_geometry(const RenderPacket& packet) {
     return result;
 }
 
+[[nodiscard]] PresentationGroup group_of(const std::vector<PresentationGroup>& groups,
+                                         const std::uint32_t index) noexcept {
+    return index < groups.size() ? groups[index] : PresentationGroup{};
+}
+
+[[nodiscard]] std::uint32_t vertex_group(const std::uint8_t* const vertex) noexcept {
+    float z = 0.0F;
+    std::memcpy(&z, vertex + 2U * sizeof(float), sizeof(z));
+    // Matches the vertex stage's min((uint)(z + 0.5), 511).
+    return std::isfinite(z) && z > 0.0F
+               ? static_cast<std::uint32_t>(
+                     std::min(z + 0.5F, static_cast<float>(maximum_presentation_group)))
+               : 0U;
+}
+
+using GroupExtents = std::vector<std::array<double, 4U>>;
+
+/** Layout-space bounds of every group's vertices; empty when the table has no groups. */
+[[nodiscard]] GroupExtents group_extents(const std::span<const std::uint8_t> vertices,
+                                         const std::vector<PresentationGroup>& groups) {
+    GroupExtents result;
+    if (groups.empty())
+        return result;
+    constexpr double infinity = std::numeric_limits<double>::infinity();
+    result.assign(groups.size(), {infinity, infinity, -infinity, -infinity});
+    for (std::size_t offset = 0U; offset + 88U <= vertices.size(); offset += 88U) {
+        const std::uint8_t* const vertex = vertices.data() + offset;
+        const std::uint32_t group = vertex_group(vertex);
+        if (group == 0U || group >= result.size())
+            continue;
+        float x = 0.0F;
+        float y = 0.0F;
+        std::memcpy(&x, vertex, sizeof(x));
+        std::memcpy(&y, vertex + sizeof(x), sizeof(y));
+        std::array<double, 4U>& extent = result[group];
+        extent[0U] = std::min(extent[0U], static_cast<double>(x));
+        extent[1U] = std::min(extent[1U], static_cast<double>(y));
+        extent[2U] = std::max(extent[2U], static_cast<double>(x));
+        extent[3U] = std::max(extent[3U], static_cast<double>(y));
+    }
+    return result;
+}
+
+/** Where a changed group's content was and now is: the only area its table change touches. */
+void append_group_regions(const std::vector<PresentationGroup>& previous,
+                          const std::vector<PresentationGroup>& current,
+                          const GroupExtents& extents,
+                          std::vector<GeometryDirtyRegion>& output) {
+    const std::size_t count = std::min(extents.size(), std::max(previous.size(), current.size()));
+    for (std::uint32_t index = 1U; index < count; ++index) {
+        const PresentationGroup before = group_of(previous, index);
+        const PresentationGroup after = group_of(current, index);
+        const std::array<double, 4U>& extent = extents[index];
+        if (before == after || !(extent[0U] <= extent[2U] && extent[1U] <= extent[3U]))
+            continue;
+        for (const PresentationGroup& group : {before, after}) {
+            const double left = group.translate_x + group.scale_x * extent[0U];
+            const double right = group.translate_x + group.scale_x * extent[2U];
+            const double top = group.translate_y + group.scale_y * extent[1U];
+            const double bottom = group.translate_y + group.scale_y * extent[3U];
+            // One logical pixel of slack covers the backends' device-pixel translation snap.
+            output.push_back(GeometryDirtyRegion{
+                std::min(left, right) - 1.0,
+                std::min(top, bottom) - 1.0,
+                std::abs(right - left) + 2.0,
+                std::abs(bottom - top) + 2.0,
+            });
+        }
+    }
+}
+
+/** Presented bounds of a vertex patch: old vertices under the old table, new under the new. */
 [[nodiscard]] GeometryDirtyRegion dirty_region(
     const std::span<const std::uint8_t> previous,
-    const GeometryPatch& patch
+    const GeometryPatch& patch,
+    const std::vector<PresentationGroup>& previous_groups,
+    const std::vector<PresentationGroup>& groups
 ) {
     double minimum_x = std::numeric_limits<double>::infinity();
     double minimum_y = std::numeric_limits<double>::infinity();
     double maximum_x = -std::numeric_limits<double>::infinity();
     double maximum_y = -std::numeric_limits<double>::infinity();
-    const auto include = [&](const std::uint8_t* const bytes) {
+    const auto include = [&](const std::uint8_t* const bytes,
+                             const std::vector<PresentationGroup>& table) {
         float x = 0.0F;
         float y = 0.0F;
         std::memcpy(&x, bytes, sizeof(x));
@@ -266,14 +341,17 @@ void validate_geometry(const RenderPacket& packet) {
         if (!std::isfinite(x) || !std::isfinite(y)) {
             throw std::invalid_argument("render vertex patch contains a non-finite position");
         }
-        minimum_x = std::min(minimum_x, static_cast<double>(x));
-        minimum_y = std::min(minimum_y, static_cast<double>(y));
-        maximum_x = std::max(maximum_x, static_cast<double>(x));
-        maximum_y = std::max(maximum_y, static_cast<double>(y));
+        const PresentationGroup group = group_of(table, vertex_group(bytes));
+        const double presented_x = group.translate_x + group.scale_x * x;
+        const double presented_y = group.translate_y + group.scale_y * y;
+        minimum_x = std::min(minimum_x, presented_x);
+        minimum_y = std::min(minimum_y, presented_y);
+        maximum_x = std::max(maximum_x, presented_x);
+        maximum_y = std::max(maximum_y, presented_y);
     };
     for (std::size_t offset = 0U; offset < patch.bytes.size(); offset += 88U) {
-        include(previous.data() + patch.offset + offset);
-        include(patch.bytes.data() + offset);
+        include(previous.data() + patch.offset + offset, previous_groups);
+        include(patch.bytes.data() + offset, groups);
     }
     return GeometryDirtyRegion{
         minimum_x,
@@ -281,6 +359,71 @@ void validate_geometry(const RenderPacket& packet) {
         std::max(0.0, maximum_x - minimum_x),
         std::max(0.0, maximum_y - minimum_y),
     };
+}
+
+[[nodiscard]] std::vector<PresentationGroup> presentation_groups(Reader& input) {
+    const std::uint32_t count = input.count();
+    if (count > maximum_presentation_group) {
+        throw std::invalid_argument("render group table exceeds the maximum group index");
+    }
+    std::vector<PresentationGroup> result;
+    std::uint32_t previous = 0U;
+    for (std::uint32_t record = 0U; record < count; ++record) {
+        const std::uint32_t index = input.u32();
+        if (index <= previous || index > maximum_presentation_group) {
+            throw std::invalid_argument("render group indices must ascend within 1..511");
+        }
+        PresentationGroup group;
+        group.scale_x = input.number();
+        group.scale_y = input.number();
+        group.translate_x = input.number();
+        group.translate_y = input.number();
+        group.opacity = input.number();
+        if (!std::isfinite(group.scale_x) || !std::isfinite(group.scale_y) ||
+            !std::isfinite(group.translate_x) || !std::isfinite(group.translate_y) ||
+            !std::isfinite(group.opacity) || group.opacity < 0.0 || group.opacity > 1.0) {
+            throw std::invalid_argument("render group is outside the portable domain");
+        }
+        result.resize(index + 1U);
+        result[index] = group;
+        previous = index;
+    }
+    return result;
+}
+
+[[nodiscard]] std::uint32_t group_index(Reader& input) {
+    const std::uint32_t index = input.u32();
+    if (index > maximum_presentation_group)
+        throw std::invalid_argument("render batch group index exceeds the maximum group index");
+    return index;
+}
+
+/** Writes the presented bounds of a group-local blur/effect batch into `target` (same kind). */
+void present(const SubmissionBatch& local, const std::vector<PresentationGroup>& groups,
+             SubmissionBatch& target) noexcept {
+    const auto place = [](const PresentationGroup& group, const double x, const double y,
+                          const double width, const double height, auto& output) {
+        const double left = group.translate_x + group.scale_x * x;
+        const double right = group.translate_x + group.scale_x * (x + width);
+        const double top = group.translate_y + group.scale_y * y;
+        const double bottom = group.translate_y + group.scale_y * (y + height);
+        output.x = std::min(left, right);
+        output.y = std::min(top, bottom);
+        output.width = std::abs(right - left);
+        output.height = std::abs(bottom - top);
+    };
+    if (const auto* blur = std::get_if<BlurBatch>(&local); blur != nullptr) {
+        place(group_of(groups, blur->group), blur->x, blur->y, blur->width, blur->height,
+              std::get<BlurBatch>(target));
+    } else if (const auto* effect = std::get_if<EffectBatch>(&local); effect != nullptr) {
+        const PresentationGroup group = group_of(groups, effect->group);
+        EffectBatch& output = std::get<EffectBatch>(target);
+        place(group, effect->x, effect->y, effect->width, effect->height, output);
+        const double radius_scale = std::min(std::abs(group.scale_x), std::abs(group.scale_y));
+        for (std::size_t corner = 0U; corner < output.radii.size(); ++corner)
+            output.radii[corner] = effect->radii[corner] * radius_scale;
+        output.opacity = effect->opacity * group.opacity;
+    }
 }
 
 [[nodiscard]] bool batches_changed(
@@ -417,7 +560,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
         input.u32() != STRATA_RENDER_PACKET_VERSION_CURRENT) {
-        throw std::invalid_argument("render packet decoder requires protocol v10");
+        throw std::invalid_argument("render packet decoder requires protocol v11");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();
@@ -437,6 +580,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     if (vertex_bytes % 88U != 0U || index_count > std::numeric_limits<std::uint32_t>::max() / 4U) {
         throw std::invalid_argument("render packet geometry counts are invalid");
     }
+    std::vector<PresentationGroup> groups = presentation_groups(input);
 
     std::vector<ResourceOperation> resources;
     resources.reserve(resource_count);
@@ -456,6 +600,10 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             throw std::invalid_argument(
                 "retained render packet references an unavailable geometry epoch");
         }
+        const bool groups_changed = groups != retained_->groups;
+        std::vector<GeometryDirtyRegion> group_regions;
+        if (groups_changed)
+            append_group_regions(retained_->groups, groups, group_extents_, group_regions);
         retained_->frame_index = frame_index;
         retained_->planned_draw_count = planned_draw_count;
         retained_->skipped_draw_count = skipped_draw_count;
@@ -464,7 +612,12 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         retained_->vertex_patches.clear();
         retained_->index_patches.clear();
         retained_->geometry_dirty_all = false;
-        retained_->geometry_dirty_regions.clear();
+        retained_->geometry_dirty_regions.swap(group_regions);
+        if (groups_changed) {
+            for (const auto& [position, local] : grouped_batches_)
+                present(local, groups, retained_->batches[position]);
+            retained_->groups = std::move(groups);
+        }
         return *retained_;
     }
 
@@ -509,7 +662,8 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         );
         result.geometry_dirty_regions.reserve(result.vertex_patches.size());
         for (const GeometryPatch& patch : result.vertex_patches) {
-            result.geometry_dirty_regions.push_back(dirty_region(result.vertices, patch));
+            result.geometry_dirty_regions.push_back(
+                dirty_region(result.vertices, patch, result.groups, groups));
         }
         result.geometry_dirty_all = !result.index_patches.empty();
         patch_transaction->apply(result.vertex_patches, result.index_patches);
@@ -552,6 +706,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             blur.source_order = source_order;
             blur.scissor = clip;
             blur.rounded_clips = std::move(rounded);
+            blur.group = group_index(batch);
             blur.x = batch.number();
             blur.y = batch.number();
             blur.width = batch.number();
@@ -570,6 +725,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             effect.source_order = source_order;
             effect.scissor = clip;
             effect.rounded_clips = std::move(rounded);
+            effect.group = group_index(batch);
             effect.x = batch.number();
             effect.y = batch.number();
             effect.width = batch.number();
@@ -619,6 +775,16 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         batch.exhausted("render batch");
     }
     input.exhausted("render packet");
+    std::vector<std::pair<std::size_t, SubmissionBatch>> grouped;
+    for (std::size_t position = 0U; position < result.batches.size(); ++position) {
+        const SubmissionBatch& batch = result.batches[position];
+        const BlurBatch* blur = std::get_if<BlurBatch>(&batch);
+        const EffectBatch* effect = std::get_if<EffectBatch>(&batch);
+        if ((blur != nullptr && blur->group != 0U) || (effect != nullptr && effect->group != 0U))
+            grouped.emplace_back(position, batch);
+    }
+    for (const auto& [position, local] : grouped)
+        present(local, groups, result.batches[position]);
     std::size_t effect_depth = 0U;
     for (const SubmissionBatch& batch : result.batches) {
         if (const EffectBatch* effect = std::get_if<EffectBatch>(&batch);
@@ -646,6 +812,9 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         result.geometry_dirty_all = true;
         result.geometry_dirty_regions.clear();
     }
+    GroupExtents extents = group_extents(result.vertices, groups);
+    if (!result.geometry_dirty_all && groups != result.groups)
+        append_group_regions(result.groups, groups, extents, result.geometry_dirty_regions);
     validate_geometry(result);
     if (retained_geometry) {
         if (result.vertices != retained_->vertices || result.indices != retained_->indices) {
@@ -656,13 +825,18 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             throw std::invalid_argument("retained render geometry epoch changed its batch shape");
         }
     }
+    result.groups = std::move(groups);
     retained_ = std::move(result);
     if (patch_transaction.has_value()) patch_transaction->commit();
+    grouped_batches_.swap(grouped);
+    group_extents_.swap(extents);
     return *retained_;
 }
 
 void RenderPacketDecoder::reset() noexcept {
     retained_.reset();
+    grouped_batches_.clear();
+    group_extents_.clear();
 }
 
 } // namespace strata::host

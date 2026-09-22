@@ -185,6 +185,14 @@ void parameter_data(
     return values;
 }
 
+/**
+ * No backend uses depth, so position z carries the draw's presentation group index for the vertex
+ * stage (zero: none). Custom-mesh z therefore has no presentation meaning.
+ */
+[[nodiscard]] double group_depth(const PreparedDraw& draw) noexcept {
+    return static_cast<double>(draw.group);
+}
+
 void vertex(
     RenderSubmission& output,
     const Transform& transform,
@@ -231,10 +239,10 @@ void quad(
     }
     const std::uint32_t global_base = static_cast<std::uint32_t>(global_base_size);
     const std::uint32_t local_base = global_base - batch_base_vertex;
-    vertex(output, draw.transform, bounds.x, bounds.y, 0.0, color, uv.u, uv.v, data);
-    vertex(output, draw.transform, bounds.x, bounds.bottom(), 0.0, color, uv.u, uv.v + uv.height, data);
-    vertex(output, draw.transform, bounds.right(), bounds.bottom(), 0.0, color, uv.u + uv.width, uv.v + uv.height, data);
-    vertex(output, draw.transform, bounds.right(), bounds.y, 0.0, color, uv.u + uv.width, uv.v, data);
+    vertex(output, draw.transform, bounds.x, bounds.y, group_depth(draw), color, uv.u, uv.v, data);
+    vertex(output, draw.transform, bounds.x, bounds.bottom(), group_depth(draw), color, uv.u, uv.v + uv.height, data);
+    vertex(output, draw.transform, bounds.right(), bounds.bottom(), group_depth(draw), color, uv.u + uv.width, uv.v + uv.height, data);
+    vertex(output, draw.transform, bounds.right(), bounds.y, group_depth(draw), color, uv.u + uv.width, uv.v, data);
     output.indices.insert(output.indices.end(), {
         local_base, local_base + 1U, local_base + 2U,
         local_base + 2U, local_base + 3U, local_base,
@@ -403,7 +411,7 @@ void custom_mesh_geometry(
             draw.transform,
             command.bounds.x + value.x * command.bounds.width,
             command.bounds.y + value.y * command.bounds.height,
-            value.z,
+            group_depth(draw),
             value.color,
             value.u,
             value.v,
@@ -442,7 +450,7 @@ void paint_mesh_geometry(
             draw.transform,
             bounds.x + value.normalized.x * bounds.width,
             bounds.y + value.normalized.y * bounds.height,
-            0.0,
+            group_depth(draw),
             value.color,
             value.normalized.x,
             value.normalized.y,
@@ -542,6 +550,7 @@ void geometry(
     const SubmissionContext& context
 ) {
     if (retained.command != current.command || retained.local_bounds != current.local_bounds ||
+        retained.group != current.group ||
         !same_material_but_opacity(retained.material, current.material) ||
         retained.transform.m00 != current.transform.m00 ||
         retained.transform.m01 != current.transform.m01 ||

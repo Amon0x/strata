@@ -81,15 +81,25 @@ struct PixelRect final {
     return result;
 }
 
+/** Mirrors the vertex stage: z selects the vertex's presentation group (zero is the identity). */
 [[nodiscard]] Vertex read_vertex(const std::span<const std::uint8_t> bytes, const std::size_t index,
-                                 const float scale_x, const float scale_y) {
+                                 const float scale_x, const float scale_y,
+                                 const std::vector<host::PresentationGroup>& groups) {
     if (index >= bytes.size() / vertex_size) {
         throw std::invalid_argument("render packet vertex index is out of range");
     }
     const std::size_t base = index * vertex_size;
+    const auto group_index = static_cast<std::size_t>(
+        std::clamp(std::floor(read_float(bytes, base + 8U) + 0.5F), 0.0F,
+                   static_cast<float>(host::maximum_presentation_group)));
+    const host::PresentationGroup group =
+        group_index < groups.size() ? groups[group_index] : host::PresentationGroup{};
+    // Group translation lands on whole device pixels, as in the vertex stage.
     Vertex result;
-    result.x = read_float(bytes, base) * scale_x;
-    result.y = read_float(bytes, base + 4U) * scale_y;
+    result.x = static_cast<float>(read_float(bytes, base) * group.scale_x * scale_x +
+                                  std::round(group.translate_x * scale_x));
+    result.y = static_cast<float>(read_float(bytes, base + 4U) * group.scale_y * scale_y +
+                                  std::round(group.translate_y * scale_y));
     result.u = read_float(bytes, base + 12U);
     result.v = read_float(bytes, base + 16U);
     result.color = Color{
@@ -101,6 +111,7 @@ struct PixelRect final {
     for (std::size_t value = 0U; value < result.data.size(); ++value) {
         result.data[value] = read_float(bytes, base + 24U + value * sizeof(float));
     }
+    result.data[15U] *= static_cast<float>(group.opacity);
     return result;
 }
 
@@ -484,9 +495,9 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
             static_cast<std::size_t>(batch.base_vertex) + packet.indices[index + 1U];
         const std::size_t ic =
             static_cast<std::size_t>(batch.base_vertex) + packet.indices[index + 2U];
-        Vertex a = read_vertex(packet.vertices, ia, scale_x, scale_y);
-        Vertex b = read_vertex(packet.vertices, ib, scale_x, scale_y);
-        Vertex c = read_vertex(packet.vertices, ic, scale_x, scale_y);
+        Vertex a = read_vertex(packet.vertices, ia, scale_x, scale_y, packet.groups);
+        Vertex b = read_vertex(packet.vertices, ib, scale_x, scale_y, packet.groups);
+        Vertex c = read_vertex(packet.vertices, ic, scale_x, scale_y, packet.groups);
         float area = cross(b.x - a.x, b.y - a.y, c.x - a.x, c.y - a.y);
         if (area == 0.0F)
             continue;
@@ -978,7 +989,9 @@ void SoftwareRenderer::render(const host::RenderPacket& packet,
         throw std::logic_error("headless renderer must be sized before rendering");
     }
     consume_resources(packet);
-    if (!has_cached_effect_epoch_ || cached_effect_epoch_ != packet.geometry_epoch) {
+    // A changed group table (geometry_dirty_all) moves content beneath cached effects too.
+    if (!has_cached_effect_epoch_ || cached_effect_epoch_ != packet.geometry_epoch ||
+        packet.geometry_dirty_all) {
         cached_effects_.clear();
         cached_effect_epoch_ = packet.geometry_epoch;
         has_cached_effect_epoch_ = true;

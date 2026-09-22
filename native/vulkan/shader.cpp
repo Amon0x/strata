@@ -13,8 +13,9 @@ std::vector<std::uint32_t> compile_hlsl(std::string_view source, bool vertex,
     options.SetHlslOffsets(true);
     options.SetAutoMapLocations(true);
     options.SetBindingBase(shaderc_uniform_kind_buffer, 0);
-    options.SetBindingBase(shaderc_uniform_kind_texture, 2);
-    options.SetBindingBase(shaderc_uniform_kind_sampler, 4);
+    // b0 frame, b1 rounded clips, b2 presentation groups; t0/t1; s0.
+    options.SetBindingBase(shaderc_uniform_kind_texture, 3);
+    options.SetBindingBase(shaderc_uniform_kind_sampler, 5);
     options.SetInvertY(vertex);
     options.SetOptimizationLevel(shaderc_optimization_level_performance);
     const auto result = compiler.CompileGlslToSpv(

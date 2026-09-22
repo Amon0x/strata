@@ -135,6 +135,8 @@ public:
         std::uint64_t identity
     ) const noexcept;
     [[nodiscard]] std::size_t active_count() const noexcept;
+    /** True while any of the node's players is still running (its computed values may change). */
+    [[nodiscard]] bool running(std::uint64_t identity) const noexcept;
     void clear() noexcept;
 
 private:

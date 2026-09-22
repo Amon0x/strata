@@ -41,7 +41,7 @@ rather than exposing implementation classes.
 
 ## Surface and packet lifetime
 
-`strata_surface_frame` updates a Surface and prepares packet v10. A bytes sink borrows the packet only
+`strata_surface_frame` updates a Surface and prepares packet v11. A bytes sink borrows the packet only
 for its callback. Resource create/upload/release operations are one-shot; settled frames use compact
 packets that reference the latest full geometry epoch. Consume every framed packet in order with one
 stateful decoder per Surface/backend stream. Reading canonical frame JSON is optional and lazily
@@ -87,7 +87,7 @@ warnings, and installed-package acceptance. ASan uses a separate build with
 `strata_preview` provides the Linux interactive testing window; see
 [Linux preview](../docs/linux-preview.md) for SDL dependencies and usage.
 
-`strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v10
+`strata_headless` is the non-windowed application host. It drives the same C ABI and packet-v11
 boundary as other hosts, but supplies a deterministic clock, scripted input/services, and canonical
 frame capture. On Windows it can use offscreen D3D11/WARP through the desktop host's shared
 production texture, blur, and HLSL material pipeline. Linux supports both the CPU reference backend and Vulkan GPU captures with authored HLSL.
@@ -120,7 +120,7 @@ optionally installs them. Windows also exports `Strata::d3d11`, `Strata::win32`,
 `Strata_DESKTOP_RUNNER` exists only when the desktop runner was installed.
 
 The installed sample project configures against only the install prefix. Its portable C and C++
-programs configure an application, activate `.strata`, create/frame a Surface, decode packet v10,
+programs configure an application, activate `.strata`, create/frame a Surface, decode packet v11,
 inspect allocator telemetry, and release every handle. The public C++
 facade is split into focused owned-value headers (`diagnostic.hpp`, `input.hpp`, `adapters.hpp`,
 `profiler.hpp`, and `config.hpp`) aggregated by `strata.hpp`; custom hosts do not need to keep

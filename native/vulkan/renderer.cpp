@@ -25,8 +25,10 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
     active_epoch = packet.geometry_epoch;
     effect_index = 0;
     begin();
-    if (packet.full_geometry_payload || !packet.vertex_patches.empty() ||
-        !packet.index_patches.empty() || !packet.resources.empty())
+    // A changed group table moves content without changing geometry (geometry_dirty_all).
+    if (packet.full_geometry_payload || packet.geometry_dirty_all ||
+        !packet.vertex_patches.empty() || !packet.index_patches.empty() ||
+        !packet.resources.empty())
         drop_effects(active_layer);
     try {
         resources(packet);
@@ -49,6 +51,12 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
             {static_cast<float>(target.width), static_cast<float>(target.height)},
             static_cast<float>(seconds)};
         const auto constants = arena->upload(&frame, sizeof(frame));
+        if (packet.groups.empty()) {
+            groups = Slice{identity_groups->buffer, 0, sizeof(packed_groups.values)};
+        } else {
+            packed_groups.assign(packet.groups);
+            groups = arena->upload(packed_groups.values.data(), sizeof(packed_groups.values));
+        }
         Image* surface_backdrop = nullptr;
         for (const auto& batch : packet.batches) {
             if (const auto* e = std::get_if<host::EffectBatch>(&batch);

@@ -269,6 +269,10 @@ void command_payload(Bytes& output, const RenderCommand& command) {
             number(output, value.m12);
         } else if constexpr (std::is_same_v<Command, MaterialPushRenderCommand>) {
             material(output, value.material);
+        } else if constexpr (std::is_same_v<Command, OpacityPushRenderCommand>) {
+            number(output, value.opacity);
+        } else if constexpr (std::is_same_v<Command, GroupPushRenderCommand>) {
+            integer(output, value.group);
         }
     }, command);
 }

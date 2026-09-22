@@ -1225,8 +1225,9 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
     check(packet_u32(release_packet, release_offset) == 0U &&
               packet_u32(release_packet, release_offset) == 0U &&
               packet_u32(release_packet, release_offset) == 0U &&
+              packet_u32(release_packet, release_offset) == 0U &&
               packet_u32(release_packet, release_offset) == 0U,
-          "surface teardown packet retained render geometry or draw accounting");
+          "surface teardown packet retained render geometry, draw accounting or groups");
     std::vector<std::string> released_textures;
     for (std::size_t index = 0U; index < 2U; ++index) {
         check(packet_u32(release_packet, release_offset) == 2U,
@@ -5174,6 +5175,110 @@ overlay Staggered {
           "repositioning a settled item restarted its staggered entry");
 }
 
+void test_presentation_group_animation() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("presentation-groups", bundle);
+    const std::string source = R"(
+animation Rise {
+  from { opacity: 0, translateY: 14 }
+  to { opacity: 1, translateY: 0 }
+  duration: 100ms;
+  easing: "linear";
+  fillMode: "BOTH";
+}
+style Card { background: #3050A0FF; border: { width: 1, color: #E9A06A45 }; }
+style Chip { width: 20; height: 10; background: #F0C040FF; border: null; }
+overlay Grouped {
+  root Panel(key: "group.root", layout: { kind: "COLUMN", width: 200, height: 120 }) {
+    Panel(key: "group.card", style: Card, enter: Rise,
+      layout: { kind: "COLUMN", width: 100, height: 60 }) {
+      Panel(key: "group.chip", style: Chip)
+    }
+  }
+}
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"groups.strata", source}, no_imports, 0U)
+              .activated(),
+          "presentation group fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 200;
+    environment.framebuffer_height = 120;
+    environment.logical_width = 200.0;
+    environment.logical_height = 120.0;
+    ui::Surface surface("presentation-groups", application, runtime::LayerRole::overlay,
+                        "Grouped", environment);
+    const auto group_pushes = [](const ui::RenderCommandBuffer& commands) {
+        return std::ranges::count_if(commands.commands(), [](const ui::RenderCommand& command) {
+            return std::holds_alternative<ui::GroupPushRenderCommand>(command);
+        });
+    };
+    // Foreground passes (borders) are opacity-free like the body; the group or an opacity scope
+    // applies the fade, so the authored colour survives the whole animation.
+    const auto border_alpha = [](const ui::RenderCommandBuffer& commands) {
+        for (const ui::RenderCommand& command : commands.commands()) {
+            if (const auto* border = std::get_if<ui::BorderRenderCommand>(&command))
+                return static_cast<int>(border->border.color.alpha);
+        }
+        return -1;
+    };
+    font::GlyphAtlas atlas("presentation-groups");
+    ui::HostRenderPacketCache packet_cache;
+    host::RenderPacketDecoder decoder;
+    const auto encode = [&](const std::uint64_t frame) -> const host::RenderPacket& {
+        return decoder.decode(packet_cache.encode(surface.render_commands(), frame, {}, atlas,
+                                                  static_cast<const ui::TextEngine*>(nullptr),
+                                                  1.0, 200, 120, 200.0, 120.0));
+    };
+
+    static_cast<void>(surface.frame(1'000'000));
+    static_cast<void>(surface.frame(26'000'000));
+    const ui::RenderCommandBuffer quarter = surface.render_commands();
+    check(group_pushes(quarter) == 1 && quarter.groups().size() == 1U &&
+              quarter.groups().front().parent == 0U,
+          "an entering node did not render as one presentation group");
+    check(border_alpha(quarter) == 0x45, "a grouped foreground baked the group's opacity");
+    static_cast<void>(encode(1U));
+
+    static_cast<void>(surface.frame(51'000'000));
+    const ui::RenderCommandBuffer& half = surface.render_commands();
+    check(half.commands() == quarter.commands(),
+          "animating a presentation group changed its command stream");
+    check(half.groups().size() == 1U && std::abs(half.groups().front().translate_y - 7.0) < 0.01 &&
+              std::abs(half.groups().front().opacity - 0.5) < 0.01,
+          "the group entry did not carry the animated translation and opacity");
+    const host::RenderPacket& moved = encode(2U);
+    const std::uint32_t index = half.groups().front().index;
+    check(packet_cache.telemetry().geometry_reused && !moved.full_geometry_payload &&
+              moved.vertex_patches.empty(),
+          "animating a presentation group re-encoded geometry");
+    check(index < moved.groups.size() &&
+              std::abs(moved.groups[index].translate_y - 7.0) < 0.01 &&
+              std::abs(moved.groups[index].opacity - 0.5) < 0.01 &&
+              !moved.geometry_dirty_all && moved.geometry_dirty_regions.size() == 2U,
+          "the decoded packet did not present the group or bound its dirty area");
+    bool grouped_vertices = false;
+    for (std::size_t offset = 0U; offset + 88U <= moved.vertices.size(); offset += 88U) {
+        float z = 0.0F;
+        std::memcpy(&z, moved.vertices.data() + offset + 8U, sizeof(z));
+        grouped_vertices = grouped_vertices || z == static_cast<float>(index);
+    }
+    check(grouped_vertices, "grouped draws did not carry their group index in vertex z");
+
+    static_cast<void>(surface.frame(500'000'000));
+    static_cast<void>(surface.frame(516'000'000));
+    check(group_pushes(surface.render_commands()) == 0 && surface.render_commands().groups().empty(),
+          "a settled animation kept its presentation group");
+    check(border_alpha(surface.render_commands()) == 0x45,
+          "a settled node kept a foreground built during its fade");
+    check(encode(3U).groups.empty(), "a settled surface still published presentation groups");
+}
+
 void test_content_transition_item_fills_definite_container() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -6514,6 +6619,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_vector_shape_tessellation();
         test_svg_image_projection_and_compound_fill();
         test_render_submission_opacity_scope_reuse();
+        test_presentation_group_animation();
         if (argument_count >= 3 && std::string_view(arguments[2]).size() != 0U) {
             test_bundled_font_metrics(arguments[1]);
             test_bundled_texture_descriptor(arguments[1]);
