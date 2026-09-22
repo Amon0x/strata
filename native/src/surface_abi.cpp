@@ -780,6 +780,24 @@ strata_result strata_surface_cancel_interactions(strata_surface* const surface) 
     }
 }
 
+strata_result strata_surface_reveal(strata_surface* const surface) {
+    if (surface == nullptr)
+        return invalid_argument();
+    if (surface->release_packet_prepared)
+        return terminal_surface_failure(*surface);
+    try {
+        surface->core.reveal();
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (const std::bad_alloc&) {
+        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
+                               "Surface reveal exhausted memory.");
+    } catch (...) {
+        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR,
+                               "STRATA.ABI.UNCAUGHT_EXCEPTION",
+                               "Surface reveal failed inside the C ABI exception boundary.");
+    }
+}
+
 strata_result strata_surface_dispatch_action_json(strata_surface* const surface,
                                                   const strata_action_dispatch_config* const config,
                                                   strata_action_dispatch_info* const out_info) {

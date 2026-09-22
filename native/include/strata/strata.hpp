@@ -1651,6 +1651,9 @@ class Surface final {
         require(strata_surface_cancel_interactions(value_), "surface interaction cancellation");
     }
 
+    /** Replays retained entry motion from the next frame when a hidden Surface is shown again. */
+    void reveal() { require(strata_surface_reveal(value_), "surface reveal"); }
+
     [[nodiscard]] ActionDispatchInfo dispatch(const ActionDispatch& action) {
         const strata_action_dispatch_config config = detail::action_dispatch(action);
         strata_action_dispatch_info info{};

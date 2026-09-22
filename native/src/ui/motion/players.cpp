@@ -61,11 +61,16 @@ namespace {
 [[nodiscard]] TimelineSample evaluate(
     const CompiledMotion& animation,
     const std::int64_t elapsed_nanos,
-    const MotionDirection direction
+    const MotionDirection direction,
+    const std::int64_t extra_delay_nanos = 0
 ) {
     const std::int64_t elapsed = std::max<std::int64_t>(0, elapsed_nanos);
-    const bool delayed = elapsed < animation.timing.delay_nanos;
-    const std::int64_t active_elapsed = delayed ? 0 : elapsed - animation.timing.delay_nanos;
+    const std::int64_t maximum = std::numeric_limits<std::int64_t>::max();
+    const std::int64_t delay = animation.timing.delay_nanos > maximum - extra_delay_nanos
+                                   ? maximum
+                                   : animation.timing.delay_nanos + extra_delay_nanos;
+    const bool delayed = elapsed < delay;
+    const std::int64_t active_elapsed = delayed ? 0 : elapsed - delay;
     const bool forever = animation.timing.repeat.kind == MotionRepeatKind::forever;
     const std::uint32_t iterations = animation.timing.repeat.kind == MotionRepeatKind::count
                                          ? std::max(1U, animation.timing.repeat.iterations)
@@ -158,7 +163,8 @@ TimelineSample TimelinePlayer::advance(
     const bool active,
     const MotionDirection active_direction,
     const std::int64_t now_nanos,
-    const bool reduced_motion
+    const bool reduced_motion,
+    const std::int64_t start_delay_nanos
 ) {
     if (now_nanos < 0) throw std::invalid_argument("motion clock must be non-negative");
     if (reduced_motion) return snap(animation, active, active_direction, now_nanos);
@@ -194,10 +200,14 @@ TimelineSample TimelinePlayer::advance(
         started_at_nanos_ = start_for_direction(
             animation, now_nanos, direction_, start_progress, preserve
         );
+        // Only a start from rest waits for its stagger; reversals continue from their progress.
+        start_delay_nanos_ = preserve ? 0 : std::max<std::int64_t>(0, start_delay_nanos);
         running_ = true;
     }
     initialized_ = true;
-    TimelineSample result = evaluate(animation, now_nanos - *started_at_nanos_, direction_);
+    TimelineSample result = evaluate(
+        animation, now_nanos - *started_at_nanos_, direction_, start_delay_nanos_
+    );
     raw_progress_ = result.raw_progress;
     running_ = result.running;
     return result;
@@ -216,6 +226,7 @@ TimelineSample TimelinePlayer::snap(
     direction_ = active ? active_direction : opposite(active_direction);
     const std::int64_t elapsed = terminal_elapsed(animation);
     started_at_nanos_ = now_nanos - elapsed;
+    start_delay_nanos_ = 0;
     continuation_pending_ = false;
     TimelineSample result = evaluate(animation, elapsed, direction_);
     raw_progress_ = result.raw_progress;

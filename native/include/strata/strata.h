@@ -2068,6 +2068,11 @@ STRATA_API strata_result strata_surface_enqueue_input(strata_surface* surface,
                                                       size_t event_count,
                                                       strata_surface_input_batch_info* out_info);
 STRATA_API strata_result strata_surface_cancel_interactions(strata_surface* surface);
+/* Replays entry motion (`enter` and `transition` insertion timelines, with authored delay and
+ * stagger) for the retained tree from the next frame, as if it had just been inserted. For hosts
+ * that stop presenting a Surface and later show it again; nothing is rebuilt, so state, focus,
+ * scroll, and layout are preserved. Looping, interaction, and target channels are unaffected. */
+STRATA_API strata_result strata_surface_reveal(strata_surface* surface);
 STRATA_API strata_result strata_surface_dispatch_action_json(
     strata_surface* surface, const strata_action_dispatch_config* config,
     strata_action_dispatch_info* out_info);

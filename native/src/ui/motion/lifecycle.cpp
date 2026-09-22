@@ -104,6 +104,18 @@ bool MotionRuntime::exit_finished(const RetainedNode& node) {
     return saw_exit && finished;
 }
 
+std::size_t MotionRuntime::replay_entrances() {
+    std::size_t replayed = 0U;
+    for (auto& [identity, state] : implementation_->nodes) {
+        // A missing player is recreated by the next evaluation at that frame's timestamp.
+        if (state.trigger_players.erase(MotionTrigger::enter) == 0U)
+            continue;
+        implementation_->active_nodes.insert(identity);
+        ++replayed;
+    }
+    return replayed;
+}
+
 void MotionRuntime::clear() noexcept {
     implementation_->catalog.clear();
     implementation_->unit.reset();

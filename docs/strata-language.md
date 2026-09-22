@@ -625,10 +625,19 @@ reference. `transition` plays one timeline forward on insertion and backward on 
 continuously from its current position when visibility changes mid-flight. Use separate `enter` and
 `exit` timelines only for deliberately asymmetric motion; mixing either with `transition` is a
 compile error. Exit motion retains disappearing nodes until its finite timeline completes;
-keyed `move` uses layout deltas, and `stagger` adds a bounded per-loop delay. Layer push/pop/replace
-and modal transitions use the named animation timing. Existing focus/state restoration is unchanged
+keyed `move` uses layout deltas. `stagger` delays an item's entry (`enter`, or the entry half of
+`transition`) by its emitted position in the enclosing `for` loop: filtered-out items leave no gap
+and positions past 16 enter together. The offset is latched when an entry starts, so later
+reordering never restarts it; exits are not staggered. Layer push/pop/replace and modal transitions
+use the named animation timing. Existing focus/state restoration is unchanged
 across transitions. Reduced-motion policy is supplied through `env.reducedMotion` and snaps these
 presentation transitions to their final state.
+
+A host that stops presenting a retained Surface and later shows it again (a toggled overlay, a
+game menu) calls `Surface::reveal()` (`strata_surface_reveal`). Entry motion, including authored
+delay and stagger, replays from the next frame as if the tree had just been inserted. Nothing is
+rebuilt: state, focus, scroll and layout are kept, and looping, interaction and target channels
+continue undisturbed.
 
 `motions` separates activation from reusable presentation timing. Each attachment has a stable
 literal `id`, one named animation, and exactly one activation source: a Boolean `target` expression

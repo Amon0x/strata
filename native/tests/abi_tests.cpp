@@ -1070,6 +1070,10 @@ screen Main {
               strata_surface_read_frame_json(surface, &frame_sink).status == STRATA_STATUS_OK &&
               frame_json.find("\"reason\": \"invalid_target\"") != std::string::npos,
           "Surface interaction cancellation did not publish focus/capture lifecycle output");
+    check(strata_surface_reveal(nullptr).status == STRATA_STATUS_INVALID_ARGUMENT &&
+              strata_surface_reveal(surface).status == STRATA_STATUS_OK &&
+              strata_surface_frame(surface, 12'000, &frame_info).status == STRATA_STATUS_OK,
+          "Surface reveal was not accepted through the C ABI");
 
     strata_surface_environment resized = surface_environment;
     resized.generation = 2U;

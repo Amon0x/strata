@@ -15,6 +15,8 @@ struct TriggerBinding final {
     MotionDirection active_direction = MotionDirection::forward;
     std::optional<MotionTrigger> continuity_from;
     bool cancel_on_detach = true;
+    /** Entry stagger for a loop item: `stagger` times its emitted position, bounded. */
+    std::int64_t start_delay_nanos = 0;
 };
 
 struct TimelineBinding final {

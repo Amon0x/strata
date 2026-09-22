@@ -264,7 +264,8 @@ MotionFrameCounters MotionRuntime::evaluate(
                     active,
                     binding.active_direction,
                     frame_time_nanos,
-                    node_reduced_motion
+                    node_reduced_motion,
+                    binding.start_delay_nanos
                 );
                 const bool completed_move = binding.trigger == MotionTrigger::move && active &&
                                             !sample.running;

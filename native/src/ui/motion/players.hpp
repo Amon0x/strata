@@ -18,12 +18,17 @@ struct TimelineSample final {
 
 class TimelinePlayer final {
 public:
+    /**
+     * `start_delay_nanos` extends the authored delay when the timeline starts from rest (entry
+     * stagger). It is latched at that start, so later changes never restart a running timeline.
+     */
     [[nodiscard]] TimelineSample advance(
         const CompiledMotion& animation,
         bool active,
         MotionDirection active_direction,
         std::int64_t now_nanos,
-        bool reduced_motion
+        bool reduced_motion,
+        std::int64_t start_delay_nanos = 0
     );
     [[nodiscard]] TimelineSample snap(
         const CompiledMotion& animation,
@@ -40,6 +45,7 @@ public:
 private:
     const CompiledMotion* animation_ = nullptr;
     std::optional<std::int64_t> started_at_nanos_;
+    std::int64_t start_delay_nanos_ = 0;
     bool initialized_ = false;
     bool active_ = false;
     bool running_ = false;

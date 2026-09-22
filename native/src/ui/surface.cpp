@@ -1487,6 +1487,11 @@ void Surface::cancel_interactions() {
     invalidate_frame();
 }
 
+void Surface::reveal() {
+    if (motion_.replay_entrances() != 0U)
+        invalidate_frame();
+}
+
 runtime::ActionDispatchOutcome
 Surface::dispatch_action(std::string action_id, runtime::Value payload, std::string event_kind,
                          std::optional<std::string> source_key, runtime::Value event_value,

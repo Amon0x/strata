@@ -4985,6 +4985,97 @@ overlay Collections {
           "surface cancellation did not preserve committed selection and clear marquee preview");
 }
 
+void test_entry_stagger_and_surface_reveal() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("entry-stagger-reveal", bundle);
+    const std::string source = R"(
+animation StaggerEnter {
+  from { opacity: 0 }
+  to { opacity: 1 }
+  duration: 100ms;
+  easing: "linear";
+  fillMode: "BOTH";
+}
+overlay Staggered {
+  root Panel(key: "stagger.root", layout: { kind: "COLUMN", width: 120, height: 80 }) {
+    for item in ["a", "skip", "c"] where item != "skip" && (item != "a" || env.width > 200) {
+      Panel(key: format("stagger.{0}", item), enter: StaggerEnter, stagger: 20ms,
+        layout: { width: 120, height: 20 })
+    }
+  }
+}
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"stagger.strata", source}, no_imports, 0U)
+              .activated(),
+          "entry stagger fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 180;
+    environment.logical_width = 320.0;
+    environment.logical_height = 180.0;
+    ui::Surface surface("entry-stagger", application, runtime::LayerRole::overlay, "Staggered",
+                        environment);
+    const auto entry = [&surface](const std::string_view key) -> const ui::MotionInspectionChannel* {
+        const ui::RetainedNode* node = surface.tree().find_key(key);
+        const auto* channels =
+            node != nullptr ? surface.motion().inspection_channels(node->identity()) : nullptr;
+        if (channels == nullptr)
+            return nullptr;
+        const auto found = std::ranges::find(*channels, std::string_view("strata.trigger.enter"),
+                                             &ui::MotionInspectionChannel::id);
+        return found != channels->end() ? &*found : nullptr;
+    };
+    const auto settled = [&entry](const std::string_view key) {
+        const ui::MotionInspectionChannel* channel = entry(key);
+        return channel != nullptr && !channel->running && channel->progress == 1.0;
+    };
+
+    static_cast<void>(surface.frame(1'000'000));
+    check(entry("stagger.a") != nullptr && entry("stagger.c") != nullptr &&
+              entry("stagger.a")->progress == 0.0 && entry("stagger.c")->progress == 0.0,
+          "staggered loop items did not start their entry together at insertion");
+    static_cast<void>(surface.frame(51'000'000));
+    check_near(entry("stagger.a")->progress, 0.5, "the first loop item was delayed by stagger");
+    check_near(entry("stagger.c")->progress, 0.3,
+               "stagger did not delay the second emitted item (filtered items leave no gap)");
+    static_cast<void>(surface.frame(500'000'000));
+    check(settled("stagger.a") && settled("stagger.c"), "staggered entry did not settle");
+
+    const ui::RetainedNode* retained = surface.tree().find_key("stagger.c");
+    const std::uint64_t identity = retained != nullptr ? retained->identity() : 0U;
+    surface.reveal();
+    static_cast<void>(surface.frame(2'000'000'000));
+    check(entry("stagger.a") != nullptr && entry("stagger.a")->running &&
+              entry("stagger.a")->progress == 0.0 && entry("stagger.c")->running &&
+              entry("stagger.c")->progress == 0.0,
+          "reveal did not restart retained entry motion at the next frame");
+    static_cast<void>(surface.frame(2'050'000'000));
+    check_near(entry("stagger.a")->progress, 0.5, "revealed entry did not advance from the reveal");
+    check_near(entry("stagger.c")->progress, 0.3, "reveal did not reapply the loop stagger");
+    check(surface.tree().find_key("stagger.c") != nullptr &&
+              surface.tree().find_key("stagger.c")->identity() == identity,
+          "reveal rebuilt retained nodes instead of replaying their motion");
+    static_cast<void>(surface.frame(3'000'000'000));
+    check(settled("stagger.a") && settled("stagger.c"), "revealed entry did not settle");
+
+    // A settled item that moves to another position keeps its presentation: stagger is latched
+    // when an entry starts, so repositioning never restarts it.
+    environment = surface.environment();
+    environment.logical_width = 150.0;
+    environment.framebuffer_width = 150;
+    ++environment.generation;
+    check(surface.adopt_environment(environment), "narrow environment was not adopted");
+    static_cast<void>(surface.frame(3'100'000'000));
+    check(surface.tree().find_key("stagger.a") == nullptr && settled("stagger.c"),
+          "repositioning a settled item restarted its staggered entry");
+}
+
 void test_motion_timing_and_indeterminate_progress() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -6288,6 +6379,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_native_nine_patch_geometry(arguments[1]);
             test_native_custom_mesh_geometry(arguments[1]);
             test_motion_timing_and_indeterminate_progress();
+            test_entry_stagger_and_surface_reveal();
             test_component_slot_projection();
             test_component_cache_tracks_exact_retained_dependencies();
             test_parameterized_component_state_retains_its_evaluated_initializer();

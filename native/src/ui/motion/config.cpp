@@ -136,6 +136,26 @@ void bind_trigger(
     return std::nullopt;
 }
 
+// Items past this position enter together, so long collections still settle promptly.
+constexpr double stagger_position_limit = 16.0;
+
+[[nodiscard]] std::int64_t entry_stagger_nanos(const RetainedNode& node) noexcept {
+    const runtime::Value* step = node_style(node, "stagger");
+    const runtime::Value* position = node_property(node, "$loopPosition");
+    if (step == nullptr || step->duration() == nullptr || position == nullptr ||
+        position->number() == nullptr || !std::isfinite(*position->number())) {
+        return 0;
+    }
+    const std::int64_t nanos = step->duration()->nanoseconds;
+    const auto index = static_cast<std::int64_t>(
+        std::clamp(std::floor(*position->number()), 0.0, stagger_position_limit)
+    );
+    if (nanos <= 0 || index == 0) return 0;
+    return nanos > std::numeric_limits<std::int64_t>::max() / index
+               ? std::numeric_limits<std::int64_t>::max()
+               : nanos * index;
+}
+
 } // namespace
 
 const runtime::Value* node_property(
@@ -282,6 +302,8 @@ NodeMotionConfig node_motion_config(const RetainedNode& node, MotionCatalog& cat
     authored_trigger("focusVisible", MotionTrigger::focus_visible);
     authored_trigger("checked", MotionTrigger::checked);
     authored_trigger("animate", MotionTrigger::animate);
+    if (const auto entry = triggers.find(MotionTrigger::enter); entry != triggers.end())
+        entry->second.start_delay_nanos = entry_stagger_nanos(node);
     result.triggers.reserve(triggers.size());
     for (const auto& [trigger, binding] : triggers) {
         static_cast<void>(trigger);

@@ -88,6 +88,12 @@ public:
     [[nodiscard]] bool should_retain_for_exit(const RetainedNode& node);
     /** True after every exit attachment in an EXITING subtree reached its terminal sample. */
     [[nodiscard]] bool exit_finished(const RetainedNode& node);
+    /**
+     * Restarts every retained ENTER player (`enter`, and the entry half of `transition`) from the
+     * next temporal frame, as on insertion. Authored delay and loop stagger apply again; other
+     * channels, computed layout and retained state are untouched. Returns the replayed nodes.
+     */
+    std::size_t replay_entrances();
     [[nodiscard]] std::vector<MotionMoveOrigin> capture_move_origins(
         const RetainedTree& tree,
         const LayoutResult& layout

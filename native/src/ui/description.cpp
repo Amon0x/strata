@@ -1005,6 +1005,8 @@ std::vector<std::shared_ptr<const DescriptionNode>> DescriptionBuilder::build_bl
             }
             if (values == nullptr) continue;
             std::map<std::string, std::size_t, std::less<>> repeated_segments;
+            // Emitted order, so filtered-out items leave no gap in an entry stagger.
+            std::size_t position = 0U;
             for (std::size_t index = 0U; index < values->values.size(); ++index) {
                 Scope item_scope = scope;
                 const std::string item_name(string_field(statement, "itemName"));
@@ -1030,11 +1032,22 @@ std::vector<std::shared_ptr<const DescriptionNode>> DescriptionBuilder::build_bl
                 item_scope.expressions.component_path = item_scope.instance_path;
                 bind_scope_state(item_scope);
                 auto iteration = build_block(required(statement, "block"), std::move(item_scope));
-                if (!iteration.empty()) {
-                    auto anchored = std::make_shared<DescriptionNode>(*iteration.front());
-                    anchored->materialization_key = lazy_item_key(values->values[index], index);
-                    iteration.front() = std::move(anchored);
+                for (std::size_t item = 0U; item < iteration.size(); ++item) {
+                    const bool anchor = item == 0U;
+                    const bool staggered = iteration[item]->properties.contains("stagger");
+                    if (!anchor && !staggered) continue;
+                    auto annotated = std::make_shared<DescriptionNode>(*iteration[item]);
+                    if (anchor)
+                        annotated->materialization_key = lazy_item_key(values->values[index], index);
+                    if (staggered) {
+                        annotated->properties.insert_or_assign(
+                            "$loopPosition",
+                            runtime::ExpressionValue(runtime::Value(static_cast<double>(position)))
+                        );
+                    }
+                    iteration[item] = std::move(annotated);
                 }
+                if (!iteration.empty()) ++position;
                 nodes.insert(nodes.end(), iteration.begin(), iteration.end());
             }
             continue;

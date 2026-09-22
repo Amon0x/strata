@@ -239,6 +239,11 @@ class Surface final {
     void invalidate() noexcept;
     /** Releases all surface-owned interaction state; lifecycle output is published next frame. */
     void cancel_interactions();
+    /**
+     * Replays entry motion for the retained tree from the next frame, for hosts that show a hidden
+     * surface again. Nothing is rebuilt: state, focus, scroll, and layout are preserved.
+     */
+    void reveal();
     /** Injects an action as a surface event and publishes its event/outcome on the next frame. */
     [[nodiscard]] runtime::ActionDispatchOutcome
     dispatch_action(std::string action_id, runtime::Value payload, std::string event_kind,
