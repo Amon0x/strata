@@ -404,6 +404,7 @@ void append_draw(
     const Rect clip,
     const std::vector<SubmissionRoundedClip>& rounded_clips,
     const std::optional<MaterialState>& material_override,
+    const double opacity,
     const SubmissionContext& context,
     std::size_t& skipped_draws
 ) {
@@ -420,6 +421,8 @@ void append_draw(
     }
     if (retained_empty) ++skipped_draws;
     MaterialState material = merged_material(command, material_override);
+    // Scope opacity reaches the per-vertex material opacity, not the command's colours.
+    material.opacity *= opacity;
     std::optional<std::string> texture = command_texture(command, context);
     output.emplace_back(PreparedDraw{
         source_order,
@@ -678,11 +681,17 @@ std::vector<PlannedItem> plan(
     std::vector<SubmissionRoundedClip> active_rounded_clips;
     std::vector<Transform> transform_stack;
     std::vector<std::optional<MaterialState>> material_stack;
+    std::vector<double> opacity_stack;
     Rect clip{0.0, 0.0, context.logical_width, context.logical_height};
     Transform transform;
     std::optional<MaterialState> material_override;
+    double opacity = 1.0;
     std::size_t content_effect_depth = 0U;
     std::vector<std::size_t> content_clip_baselines;
+    const auto scoped_effect = [&opacity](EffectState effect) {
+        effect.opacity *= opacity;
+        return effect;
+    };
     const auto batch_rounded_clips = [&]() {
         const std::size_t begin =
             content_clip_baselines.empty() ? 0U : content_clip_baselines.back();
@@ -775,6 +784,13 @@ std::vector<PlannedItem> plan(
                 if (material_stack.empty()) throw std::logic_error("render material stack underflow");
                 material_override = material_stack.back();
                 material_stack.pop_back();
+            } else if constexpr (std::is_same_v<Type, OpacityPushRenderCommand>) {
+                opacity_stack.push_back(opacity);
+                opacity *= std::clamp(value.opacity, 0.0, 1.0);
+            } else if constexpr (std::is_same_v<Type, OpacityPopRenderCommand>) {
+                if (opacity_stack.empty()) throw std::logic_error("render opacity stack underflow");
+                opacity = opacity_stack.back();
+                opacity_stack.pop_back();
             } else if constexpr (std::is_same_v<Type, BlurRegionRenderCommand>) {
                 const Rect visible = intersect(clip, transform.bounds(value.bounds));
                 if (visible.empty()) {
@@ -818,7 +834,7 @@ std::vector<PlannedItem> plan(
                         value.radii.bottom_right * scale,
                         value.radii.bottom_left * scale,
                     },
-                    .effect = value.effect,
+                    .effect = scoped_effect(value.effect),
                     .rounded_clips = batch_rounded_clips(),
                 });
             } else if constexpr (std::is_same_v<Type, ContentEffectPushRenderCommand>) {
@@ -845,7 +861,7 @@ std::vector<PlannedItem> plan(
                         value.radii.bottom_right * scale,
                         value.radii.bottom_left * scale,
                     },
-                    .effect = value.effect,
+                    .effect = scoped_effect(value.effect),
                     .rounded_clips = composite_clips,
                 });
                 content_clip_baselines.push_back(active_rounded_clips.size());
@@ -883,19 +899,21 @@ std::vector<PlannedItem> plan(
                 for (const PreparedTextPtr& group : groups) {
                     append_draw(
                         output, PreparedCommand{group}, source_order, positioned,
-                        clip, batch_rounded_clips(), material_override, context, skipped_draws
+                        clip, batch_rounded_clips(), material_override, opacity, context,
+                        skipped_draws
                     );
                 }
             } else {
                 append_draw(
                     output, PreparedCommand{value}, source_order, transform, clip,
-                    batch_rounded_clips(), material_override, context, skipped_draws
+                    batch_rounded_clips(), material_override, opacity, context, skipped_draws
                 );
             }
         }, source);
     }
     if (!clip_stack.empty() || !rounded_clip_stack.empty() || !active_rounded_clips.empty() ||
-        !transform_stack.empty() || !material_stack.empty() || content_effect_depth != 0U ||
+        !transform_stack.empty() || !material_stack.empty() || !opacity_stack.empty() ||
+        content_effect_depth != 0U ||
         !content_clip_baselines.empty()) {
         throw std::logic_error("render command state stacks are unbalanced");
     }

@@ -33,13 +33,22 @@ Strata creates no swapchain, changes no window state, and performs no presentati
 must remain valid until the presenter is destroyed. Calls are owner-thread serialized, including
 all other access to the borrowed queue.
 
-The initial implementation submits its own command buffer and waits for its own fence before
-returning. Submit the host's preceding work first, then call Strata outside any host render pass,
-then submit subsequent host work. Queue ordering plus explicit image barriers order these accesses.
-The host must arrange semaphore dependencies and queue-family ownership transfers when another
-queue produces or consumes the target. Do not hold back an earlier host submission that the Strata
-call depends on. This is a synchronous embedding API, not an API for recording into an unsubmitted
-Minecraft command buffer; step-two integration must choose a compatible submission boundary.
+Each render submits its own command buffer and returns without waiting for it. The renderer keeps
+three frames in flight: a frame's command buffer, upload arena, descriptor pools, framebuffers,
+retired resources and per-layer geometry copy are reused only after that frame's own fence has
+signalled, so recording normally never blocks on the GPU. Submit the host's preceding work first,
+then call Strata outside any host render pass, then submit subsequent host work. Queue ordering plus
+explicit image barriers order these accesses. The host must arrange semaphore dependencies and
+queue-family ownership transfers when another queue produces or consumes the target. Do not hold
+back an earlier host submission that the Strata call depends on.
+
+Because work may still be executing when a call returns, the host keeps the target image and view
+alive until its own later submission has completed (a host that defers destruction by frame, as
+most engines do, already satisfies this). `release_target()` waits for all Strata frames before
+freeing target-sized intermediates; destruction of the renderer or presenter waits for every frame.
+Resources Strata replaces while frames are in flight are retired with the newest frame that may
+read them and destroyed only after its fence. This is not an API for recording into a host command
+buffer.
 
 Targets must be single-sampled 2D color images with color-attachment, transfer-source, and
 transfer-destination usage. Supported formats are RGBA8 UNORM, BGRA8 UNORM, and RGBA16F. Supply the
@@ -93,8 +102,10 @@ within their declared refresh interval when geometry, resources, parameters, lay
 remain compatible. Clock rollback and shader reload invalidate reuse. Intermediate images and
 upload/descriptor storage are reused across frames. Effects currently invalidate conservatively
 for any geometry/resource change, and scratch images cover the full target (with blur downsampling).
-The synchronous queue boundary and broad image barriers favor correct integration; no latency or
-throughput parity with the mature D3D11 renderer is claimed.
+Consecutive draws into one target share a render pass and framebuffer; a new pass orders itself
+after earlier writes through its attachment barrier, and textures already in a shader-readable
+layout are sampled without another barrier. Broad image barriers remain at every layout change; no
+latency or throughput parity with the mature D3D11 renderer is claimed.
 
 ## Rendering checks
 
@@ -146,14 +157,15 @@ The host chooses the cache location and when to save, normally after preparation
 shutdown. Save writes an adjacent `.tmp` and renames it over the destination, returning false on
 filesystem failure; keep the previous cache if replacement fails. Serialize accesses to the same
 path (use a per-process path if running multiple hosts). This does not eliminate every source of
-first-frame cost or change the renderer's synchronous queue/fence contract.
+first-frame cost or change the renderer's queue/fence contract.
 
 ### Reproducible preparation benchmark
 
 With Vulkan tests enabled, `strata_vulkan_preparation_benchmark MODE CACHE_PATH` renders a
 1280×800 target with an authored material, blur, and authored effect. Modes are `lazy`, `prepare`,
 and `cache` (load then prepare). Each invocation measures its first render, then 120 warmup and
-600 retained frames. Wall times include CPU recording, submission, and fence completion, but no
+600 retained frames, waiting for the queue after each. Wall times include CPU recording,
+submission, and GPU completion, but no
 pixel readback/PNG or Vulkan validation. It reports newly created first-render pipelines.
 
 Five sequential invocations per mode on RTX 4070 SUPER / NVIDIA 610.57.04, Linux, 2026-09-05:

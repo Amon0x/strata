@@ -142,9 +142,19 @@ VkPipeline Renderer::Impl::pipeline(const std::string& program, const std::strin
 VkDescriptorSet Renderer::Impl::descriptor_set(Slice constants,
                                                const gpu::RoundedClipConstants& clips,
                                                Image& source, Image& backdrop) {
-    transition(command, source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    // An image already shader-readable has had no write since the barrier that made it so;
+    // read-after-read needs no barrier, which keeps resident textures inside an open pass.
+    const auto readable = [this](Image& image) {
+        if (image.layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+            return;
+        end_pass();
+        transition(command, image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    };
+    readable(source);
     if (&backdrop != &source)
-        transition(command, backdrop, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        readable(backdrop);
+    auto& pools = frame().pools;
+    auto& pool_index = frame().pool_index;
     VkDescriptorSet set{};
     for (;;) {
         if (pool_index == pools.size()) {
@@ -172,7 +182,7 @@ VkDescriptorSet Renderer::Impl::descriptor_set(Slice constants,
         check(result, "allocate descriptor set");
         break;
     }
-    const auto clip = arena.upload(&clips, sizeof(clips));
+    const auto clip = arena->upload(&clips, sizeof(clips));
     VkDescriptorBufferInfo buffers[]{{constants.buffer, constants.offset, constants.size},
                                      {clip.buffer, clip.offset, clip.size}};
     VkDescriptorImageInfo images[]{{VK_NULL_HANDLE, source.view, source.layout},
@@ -209,22 +219,31 @@ void Renderer::Impl::draw(Target& target, const std::string& program, const std:
         return;
     const auto selected = pipeline(program, blend, target.format, batch == nullptr);
     const auto set = descriptor_set(constants, clips, source, backdrop);
-    barrier(target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    VkFramebufferCreateInfo fi{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-    fi.renderPass = render_pass(target.format);
-    fi.attachmentCount = 1;
-    fi.pAttachments = &target.view;
-    fi.width = target.width;
-    fi.height = target.height;
-    fi.layers = 1;
-    VkFramebuffer fb{};
-    check(vkCreateFramebuffer(device.device, &fi, nullptr, &fb), "create framebuffer");
-    framebuffers.push_back(fb);
-    VkRenderPassBeginInfo ri{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    ri.renderPass = fi.renderPass;
-    ri.framebuffer = fb;
-    ri.renderArea.extent = {target.width, target.height};
-    vkCmdBeginRenderPass(command, &ri, VK_SUBPASS_CONTENTS_INLINE);
+    if (!open_pass || open_pass->image != target.image || open_pass->view != target.view ||
+        open_pass->width != target.width || open_pass->height != target.height ||
+        open_pass->format != target.format) {
+        // Consecutive draws into one target share a pass; a new pass orders itself after the
+        // previous writes through the attachment barrier.
+        end_pass();
+        barrier(target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        VkFramebufferCreateInfo fi{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        fi.renderPass = render_pass(target.format);
+        fi.attachmentCount = 1;
+        fi.pAttachments = &target.view;
+        fi.width = target.width;
+        fi.height = target.height;
+        fi.layers = 1;
+        VkFramebuffer fb{};
+        check(vkCreateFramebuffer(device.device, &fi, nullptr, &fb), "create framebuffer");
+        frame().framebuffers.push_back(fb);
+        VkRenderPassBeginInfo ri{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        ri.renderPass = fi.renderPass;
+        ri.framebuffer = fb;
+        ri.renderArea.extent = {target.width, target.height};
+        vkCmdBeginRenderPass(command, &ri, VK_SUBPASS_CONTENTS_INLINE);
+        open_pass =
+            OpenPass{target.image, target.view, target.width, target.height, target.format, fb};
+    }
     VkViewport viewport{0, 0, static_cast<float>(target.width), static_cast<float>(target.height),
                         0, 1};
     VkRect2D rectangle{{static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)},
@@ -241,7 +260,6 @@ void Renderer::Impl::draw(Target& target, const std::string& program, const std:
                          static_cast<std::int32_t>(batch->base_vertex), 0);
     } else
         vkCmdDraw(command, 3, 1, 0, 0);
-    vkCmdEndRenderPass(command);
 }
 
 } // namespace strata::vulkan

@@ -1,6 +1,7 @@
 #include "renderer_internal.hpp"
 namespace strata::vulkan {
 void Renderer::Impl::clear(Image& image, std::array<float, 4> color) {
+    end_pass();
     transition(command, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     VkClearColorValue value{};
     std::copy(color.begin(), color.end(), value.float32);
@@ -13,13 +14,14 @@ Image& Renderer::Impl::temporary(std::uint32_t width, std::uint32_t height, VkFo
     auto& image = scratch[scratch_index++];
     if (!image || image->width != width || image->height != height || image->format != format) {
         if (image)
-            retired.push_back(std::move(image));
+            retire(std::move(image));
         image = std::make_unique<Image>(device, width, height, format);
     }
     return *image;
 }
 
 void Renderer::Impl::barrier(Target& target, VkImageLayout next) {
+    end_pass();
     transition(command, target.image, target.layout, next);
     target.layout = next;
 }
@@ -38,11 +40,12 @@ Image& Renderer::Impl::capture(Target& source) {
 }
 
 void Renderer::Impl::resources(const host::RenderPacket& packet) {
+    end_pass();
     for (const auto& operation : packet.resources) {
         const auto& id = operation.texture;
         if (operation.kind == host::resource_release) {
             if (auto it = textures.find(id); it != textures.end()) {
-                retired.push_back(std::move(it->second));
+                retire(std::move(it->second));
                 textures.erase(it);
             }
             continue;
@@ -56,7 +59,7 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
             image->filter = operation.sampling == host::texture_sampling_nearest ? VK_FILTER_NEAREST
                                                                                  : VK_FILTER_LINEAR;
             if (auto it = textures.find(id); it != textures.end())
-                retired.push_back(std::move(it->second));
+                retire(std::move(it->second));
             textures[id] = std::move(image);
             clear(*textures.at(id));
         }
@@ -81,7 +84,7 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
             operation.height > image.height - operation.y ||
             bytes.size() != static_cast<std::size_t>(operation.width) * operation.height * channels)
             throw std::invalid_argument("invalid Vulkan texture upload range");
-        const auto slice = arena.upload(bytes.data(), bytes.size());
+        const auto slice = arena->upload(bytes.data(), bytes.size());
         transition(command, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
         VkBufferImageCopy copy{};
         copy.bufferOffset = slice.offset;
@@ -95,40 +98,54 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
 
 std::pair<Slice, Slice> Renderer::Impl::upload_geometry(const host::RenderPacket& packet) {
     auto& layer = geometry[active_layer];
-    const auto vertex_size = std::max<std::size_t>(16, packet.vertices.size());
-    const auto index_size = std::max<std::size_t>(16, packet.indices.size() * 4);
-    bool full = packet.full_geometry_payload || layer.epoch != packet.geometry_epoch;
-    if (!layer.vertices || layer.vertices->size < vertex_size) {
-        layer.vertices =
-            std::make_unique<Buffer>(device, vertex_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-        full = true;
-    }
-    if (!layer.indices || layer.indices->size < index_size) {
-        layer.indices =
-            std::make_unique<Buffer>(device, index_size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-        full = true;
-    }
-    if (full) {
-        if (!packet.vertices.empty())
-            std::memcpy(layer.vertices->mapped, packet.vertices.data(), packet.vertices.size());
-        if (!packet.indices.empty())
-            std::memcpy(layer.indices->mapped, packet.indices.data(), packet.indices.size() * 4);
-    } else {
-        const auto patch = [](Buffer& buffer, const auto& patches) {
+    const auto* index_bytes = reinterpret_cast<const std::uint8_t*>(packet.indices.data());
+    const std::size_t index_byte_count = packet.indices.size() * 4;
+    if (!layer.seen || packet.full_geometry_payload || layer.epoch != packet.geometry_epoch ||
+        packet.vertices.size() > layer.vertices.size() || index_byte_count > layer.indices.size()) {
+        layer.vertices.assign(packet.vertices.begin(), packet.vertices.end());
+        layer.indices.assign(index_bytes, index_bytes + index_byte_count);
+        ++layer.generation;
+        layer.seen = true;
+    } else if (!packet.vertex_patches.empty() || !packet.index_patches.empty()) {
+        const auto patch = [](std::vector<std::uint8_t>& bytes, const auto& patches) {
             for (const auto& update : patches) {
-                if (update.offset > buffer.size ||
-                    update.bytes.size() > buffer.size - update.offset)
+                if (update.offset > bytes.size() ||
+                    update.bytes.size() > bytes.size() - update.offset)
                     throw std::invalid_argument("Vulkan geometry patch is out of range");
-                if (!update.bytes.empty())
-                    std::memcpy(static_cast<char*>(buffer.mapped) + update.offset,
-                                update.bytes.data(), update.bytes.size());
+                std::copy(update.bytes.begin(), update.bytes.end(),
+                          bytes.begin() + static_cast<std::ptrdiff_t>(update.offset));
             }
         };
-        patch(*layer.vertices, packet.vertex_patches);
-        patch(*layer.indices, packet.index_patches);
+        patch(layer.vertices, packet.vertex_patches);
+        patch(layer.indices, packet.index_patches);
+        ++layer.generation;
     }
     layer.epoch = packet.geometry_epoch;
-    return {{layer.vertices->buffer, 0, vertex_size}, {layer.indices->buffer, 0, index_size}};
+    const auto vertex_size = std::max<std::size_t>(16, layer.vertices.size());
+    const auto index_size = std::max<std::size_t>(16, layer.indices.size());
+    auto& slot = layer.slots[frame_index];
+    bool stale = slot.generation != layer.generation;
+    if (!slot.vertices || slot.vertices->size < vertex_size) {
+        retire(std::move(slot.vertices));
+        slot.vertices =
+            std::make_unique<Buffer>(device, vertex_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        stale = true;
+    }
+    if (!slot.indices || slot.indices->size < index_size) {
+        retire(std::move(slot.indices));
+        slot.indices =
+            std::make_unique<Buffer>(device, index_size, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+        stale = true;
+    }
+    if (stale) {
+        // This slot's previous frame has completed (begin waited for it), so the host may write.
+        if (!layer.vertices.empty())
+            std::memcpy(slot.vertices->mapped, layer.vertices.data(), layer.vertices.size());
+        if (!layer.indices.empty())
+            std::memcpy(slot.indices->mapped, layer.indices.data(), layer.indices.size());
+        slot.generation = layer.generation;
+    }
+    return {{slot.vertices->buffer, 0, vertex_size}, {slot.indices->buffer, 0, index_size}};
 }
 
 } // namespace strata::vulkan

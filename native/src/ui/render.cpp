@@ -149,15 +149,16 @@ struct StyleShadow final {
 
 void append_fragment(RenderCommandBuffer& output, const std::vector<RenderCommand>& fragment,
                      RenderOperationCounters& counters, const double opacity = 1.0) {
-    if (opacity == 1.0) {
+    if (opacity == 1.0 || fragment.empty()) {
         output.append(fragment);
         counters.commands_emitted += fragment.size();
         return;
     }
-    for (const RenderCommand& command : fragment) {
-        output.append(render_command_with_opacity(command, opacity));
-    }
-    counters.commands_emitted += fragment.size();
+    // A scope rather than rewritten payloads: a fading fragment emits identical draws each frame.
+    output.append(OpacityPushRenderCommand{opacity});
+    output.append(fragment);
+    output.append(OpacityPopRenderCommand{});
+    counters.commands_emitted += fragment.size() + 2U;
 }
 
 [[nodiscard]] std::optional<Rect> intersect_clip(const std::optional<Rect> first,

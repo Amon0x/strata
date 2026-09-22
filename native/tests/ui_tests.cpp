@@ -1030,6 +1030,50 @@ void test_render_submission_translation_reuse(const std::filesystem::path& resou
     check_translation_reused_geometry(reused, rebuilt);
 }
 
+void test_render_submission_opacity_scope_reuse() {
+    using namespace strata;
+    // A fade changes only the scope opacity: draws keep their colours, cached geometry is reused,
+    // and the per-vertex material opacity (draw-data float 15) carries the product of scopes.
+    ui::PathShape ring;
+    ring.path = ui::Path::ellipse(ui::Point{0.5, 0.5}, 0.38, 0.38);
+    ring.stroke = ui::Paint(runtime::ColorValue{233U, 160U, 106U, 255U});
+    ring.stroke_style =
+        ui::StrokeStyle{1.35, ui::PathCap::round, ui::PathJoin::round, 4.0, {}, 0.0};
+    const auto commands = [&ring](const double outer, const double inner) {
+        ui::RenderCommandBuffer result;
+        result.append(ui::OpacityPushRenderCommand{outer});
+        result.append(ui::SolidRectRenderCommand{
+            ui::Rect{1.0, 2.0, 40.0, 20.0},
+            ui::RenderColor{10U, 20U, 30U, 255U},
+        });
+        result.append(ui::OpacityPushRenderCommand{inner});
+        result.append(ui::PathRenderCommand{ui::Rect{50.0, 4.0, 16.0, 16.0}, ring});
+        result.append(ui::OpacityPopRenderCommand{});
+        result.append(ui::OpacityPopRenderCommand{});
+        return result;
+    };
+    const ui::RenderSubmissionEnvironment environment{2.0, 800, 600, 400.0, 300.0};
+    font::GlyphAtlas atlas("submission-opacity-reuse-test");
+    ui::RenderSubmissionCache retained;
+    static_cast<void>(retained.resolve(commands(1.0, 1.0), atlas, nullptr, environment));
+    const ui::RenderSubmission& reused =
+        retained.resolve(commands(0.5, 0.5), atlas, nullptr, environment);
+    ui::RenderSubmissionCache fresh;
+    const ui::RenderSubmission& rebuilt =
+        fresh.resolve(commands(0.5, 0.5), atlas, nullptr, environment);
+    check_translation_reused_geometry(reused, rebuilt);
+    const std::size_t vertices = reused.used_vertex_bytes / 88U;
+    check(vertices > 4U, "opacity fixture lost its geometry");
+    const auto opacity = [&reused](const std::size_t vertex) {
+        float value = 0.0F;
+        std::memcpy(&value, reused.vertex_bytes.data() + vertex * 88U + 24U + 15U * 4U,
+                    sizeof(value));
+        return value;
+    };
+    check(opacity(0U) == 0.5F && opacity(vertices - 1U) == 0.25F,
+          "nested opacity scopes did not reach the per-vertex material opacity");
+}
+
 void test_render_submission_structural_alignment(const std::filesystem::path& resource_root) {
     using namespace strata;
     const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
@@ -6469,6 +6513,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_gradient_paint_authoring_and_tessellation();
         test_vector_shape_tessellation();
         test_svg_image_projection_and_compound_fill();
+        test_render_submission_opacity_scope_reuse();
         if (argument_count >= 3 && std::string_view(arguments[2]).size() != 0U) {
             test_bundled_font_metrics(arguments[1]);
             test_bundled_texture_descriptor(arguments[1]);

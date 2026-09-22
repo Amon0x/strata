@@ -1,9 +1,16 @@
 #include "renderer_internal.hpp"
 namespace strata::vulkan {
 Renderer::Impl::~Impl() {
-    if (fence)
-        vkWaitForFences(device.device, 1, &fence, VK_TRUE, UINT64_MAX);
-    clear_framebuffers();
+    wait_idle();
+    for (auto& slot : frames) {
+        release_frame(slot);
+        for (auto pool : slot.pools)
+            vkDestroyDescriptorPool(device.device, pool, nullptr);
+        if (slot.commands)
+            vkDestroyCommandPool(device.device, slot.commands, nullptr);
+        if (slot.fence)
+            vkDestroyFence(device.device, slot.fence, nullptr);
+    }
     for (auto& [key, pipeline] : pipelines) {
         (void)key;
         vkDestroyPipeline(device.device, pipeline, nullptr);
@@ -14,8 +21,6 @@ Renderer::Impl::~Impl() {
         (void)key;
         vkDestroyRenderPass(device.device, pass, nullptr);
     }
-    for (auto pool : pools)
-        vkDestroyDescriptorPool(device.device, pool, nullptr);
     if (linear)
         vkDestroySampler(device.device, linear, nullptr);
     if (nearest)
@@ -24,32 +29,75 @@ Renderer::Impl::~Impl() {
         vkDestroyPipelineLayout(device.device, layout, nullptr);
     if (descriptors)
         vkDestroyDescriptorSetLayout(device.device, descriptors, nullptr);
-    if (commands)
-        vkDestroyCommandPool(device.device, commands, nullptr);
-    if (fence)
-        vkDestroyFence(device.device, fence, nullptr);
 }
-void Renderer::Impl::clear_framebuffers() {
-    for (auto fb : framebuffers)
-        vkDestroyFramebuffer(device.device, fb, nullptr);
-    framebuffers.clear();
+void Renderer::Impl::release_frame(Frame& slot) {
+    for (auto framebuffer : slot.framebuffers)
+        vkDestroyFramebuffer(device.device, framebuffer, nullptr);
+    slot.framebuffers.clear();
+    slot.retired_images.clear();
+    slot.retired_buffers.clear();
+}
+void Renderer::Impl::wait_idle() {
+    for (auto& slot : frames) {
+        if (slot.pending && slot.fence)
+            vkWaitForFences(device.device, 1, &slot.fence, VK_TRUE, UINT64_MAX);
+        slot.pending = false;
+        release_frame(slot);
+    }
+}
+void Renderer::Impl::retire(std::unique_ptr<Image> image) {
+    if (!image)
+        return;
+    // The frame being recorded, or else the newest submitted one, is the last possible reader;
+    // its fence signals only after every earlier frame has completed.
+    if (recording)
+        frame().retired_images.push_back(std::move(image));
+    else if (last_submitted && frames[*last_submitted].pending)
+        frames[*last_submitted].retired_images.push_back(std::move(image));
+}
+void Renderer::Impl::retire(std::unique_ptr<Buffer> buffer) {
+    if (!buffer)
+        return;
+    if (recording)
+        frame().retired_buffers.push_back(std::move(buffer));
+    else if (last_submitted && frames[*last_submitted].pending)
+        frames[*last_submitted].retired_buffers.push_back(std::move(buffer));
+}
+void Renderer::Impl::drop_effects(const std::optional<std::string_view> layer) {
+    for (auto entry = cached_effects.begin(); entry != cached_effects.end();) {
+        if (layer && entry->first.first != *layer) {
+            ++entry;
+            continue;
+        }
+        retire(std::move(entry->second.output));
+        entry = cached_effects.erase(entry);
+    }
+}
+void Renderer::Impl::end_pass() {
+    if (!open_pass)
+        return;
+    vkCmdEndRenderPass(command);
+    open_pass.reset();
 }
 void Renderer::Impl::initialize() {
     VkPipelineCacheCreateInfo cache_info{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     check(vkCreatePipelineCache(device.device, &cache_info, nullptr, &pipeline_cache),
           "create pipeline cache");
-    VkCommandPoolCreateInfo ci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    ci.queueFamilyIndex = device.queue_family;
-    ci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    check(vkCreateCommandPool(device.device, &ci, nullptr, &commands), "create command pool");
-    VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    ai.commandPool = commands;
-    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    ai.commandBufferCount = 1;
-    check(vkAllocateCommandBuffers(device.device, &ai, &command), "allocate command buffer");
-    VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    check(vkCreateFence(device.device, &fi, nullptr, &fence), "create fence");
+    for (auto& slot : frames) {
+        VkCommandPoolCreateInfo ci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        ci.queueFamilyIndex = device.queue_family;
+        check(vkCreateCommandPool(device.device, &ci, nullptr, &slot.commands),
+              "create command pool");
+        VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        ai.commandPool = slot.commands;
+        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ai.commandBufferCount = 1;
+        check(vkAllocateCommandBuffers(device.device, &ai, &slot.command),
+              "allocate command buffer");
+        VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        check(vkCreateFence(device.device, &fi, nullptr, &slot.fence), "create fence");
+        slot.arena = std::make_unique<UploadArena>(device);
+    }
     std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
     for (std::uint32_t i = 0; i < 5; ++i) {
         bindings[i].binding = i;
@@ -126,34 +174,42 @@ void Renderer::Impl::prune_programs() {
 void Renderer::Impl::begin() {
     if (poisoned)
         throw std::logic_error("Vulkan renderer must be recreated after a failed submission");
-    check(vkWaitForFences(device.device, 1, &fence, VK_TRUE, UINT64_MAX), "wait render fence");
-    clear_framebuffers();
-    retired.clear();
-    for (auto pool : pools)
+    Frame& slot = frame();
+    if (slot.pending) {
+        check(vkWaitForFences(device.device, 1, &slot.fence, VK_TRUE, UINT64_MAX),
+              "wait render fence");
+        slot.pending = false;
+    }
+    release_frame(slot);
+    for (auto pool : slot.pools)
         check(vkResetDescriptorPool(device.device, pool, 0), "reset descriptor pool");
-    check(vkResetCommandPool(device.device, commands, 0), "reset command pool");
-    arena.reset();
-    pool_index = 0;
+    check(vkResetCommandPool(device.device, slot.commands, 0), "reset command pool");
+    slot.arena->reset();
+    slot.pool_index = 0;
+    arena = slot.arena.get();
+    command = slot.command;
     scratch_index = 0;
+    open_pass.reset();
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     check(vkBeginCommandBuffer(command, &bi), "begin command buffer");
+    recording = true;
 }
 void Renderer::Impl::finish() {
+    end_pass();
+    Frame& slot = frame();
     check(vkEndCommandBuffer(command), "end command buffer");
-    check(vkResetFences(device.device, 1, &fence), "reset fence");
+    check(vkResetFences(device.device, 1, &slot.fence), "reset fence");
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &command;
-    const VkResult result = vkQueueSubmit(device.queue, 1, &submit, fence);
-    if (result != VK_SUCCESS) {
-        // An unsubmitted fence cannot be waited on during destruction.
-        vkDestroyFence(device.device, fence, nullptr);
-        fence = VK_NULL_HANDLE;
+    const VkResult result = vkQueueSubmit(device.queue, 1, &submit, slot.fence);
+    recording = false;
+    if (result != VK_SUCCESS)
         check(result, "submit renderer");
-    }
-    check(vkWaitForFences(device.device, 1, &fence, VK_TRUE, UINT64_MAX), "complete render");
-    clear_framebuffers();
-    retired.clear();
+    // No CPU wait: queue order and the recorded barriers order this work against the host's.
+    slot.pending = true;
+    last_submitted = frame_index;
+    frame_index = (frame_index + 1U) % frames_in_flight;
 }
 } // namespace strata::vulkan

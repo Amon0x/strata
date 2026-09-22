@@ -18,13 +18,14 @@ Image& Renderer::Impl::blur(Image& source, double radius, std::uint32_t downsamp
     data.texel[1] = 1.0F / static_cast<float>(h);
     data.direction[0] = 1;
     auto target = target_of(ping);
-    draw(target, "blur", "opaque", arena.upload(&data, sizeof(data)), {}, source, source,
+    draw(target, "blur", "opaque", arena->upload(&data, sizeof(data)), {}, source, source,
          {0, 0, w, h});
     ping.layout = target.layout;
     data.direction[0] = 0;
     data.direction[1] = 1;
     target = target_of(pong);
-    draw(target, "blur", "opaque", arena.upload(&data, sizeof(data)), {}, ping, ping, {0, 0, w, h});
+    draw(target, "blur", "opaque", arena->upload(&data, sizeof(data)), {}, ping, ping,
+         {0, 0, w, h});
     pong.layout = target.layout;
     telemetry.blur_passes += 2;
     return pong;
@@ -83,7 +84,7 @@ void Renderer::Impl::effect(Target& destination, Image& source, Image& backdrop,
         seconds >= cached.time && seconds - cached.time < 1.0 / batch.refresh_rate;
     if (reusable) {
         draw(destination, "composite", "premultiplied_alpha",
-             arena.upload(&constants, sizeof(constants)),
+             arena->upload(&constants, sizeof(constants)),
              clip_constants(batch.rounded_clips, gpu::RoundedClipMode::premultiplied_alpha),
              *cached.output, *cached.output, bounds(batch, destination));
         return;
@@ -113,7 +114,7 @@ void Renderer::Impl::effect(Target& destination, Image& source, Image& backdrop,
             auto& next = temporary(destination.width, destination.height, destination.format);
             clear(next);
             auto target = target_of(next);
-            draw(target, pass.program, "opaque", arena.upload(&constants, sizeof(constants)), {},
+            draw(target, pass.program, "opaque", arena->upload(&constants, sizeof(constants)), {},
                  *current, backdrop, {0, 0, target.width, target.height});
             next.layout = target.layout;
             current = &next;
@@ -121,16 +122,17 @@ void Renderer::Impl::effect(Target& destination, Image& source, Image& backdrop,
         }
     }
     draw(destination, "composite", "premultiplied_alpha",
-         arena.upload(&constants, sizeof(constants)),
+         arena->upload(&constants, sizeof(constants)),
          clip_constants(batch.rounded_clips, gpu::RoundedClipMode::premultiplied_alpha), *current,
          *current, bounds(batch, destination));
     ++telemetry.effect_passes;
     if (batch.refresh_rate > 0) {
         // Cache only completed effect output; the host target itself is never retained.
+        end_pass();
         if (!cached.output || cached.output->width != current->width ||
             cached.output->height != current->height || cached.output->format != current->format) {
             if (cached.output)
-                retired.push_back(std::move(cached.output));
+                retire(std::move(cached.output));
             cached.output =
                 std::make_unique<Image>(device, current->width, current->height, current->format);
         }

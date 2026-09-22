@@ -432,9 +432,14 @@ JsonValue render_command_json(const RenderCommand& command) {
             } else if constexpr (std::is_same_v<Type, MaterialPushRenderCommand>) {
                 return object(
                     {{"kind", JsonValue("material_push")}, {"material", material(value.material)}});
-            } else {
-                static_assert(std::is_same_v<Type, MaterialPopRenderCommand>);
+            } else if constexpr (std::is_same_v<Type, MaterialPopRenderCommand>) {
                 return object({{"kind", JsonValue("material_pop")}});
+            } else if constexpr (std::is_same_v<Type, OpacityPushRenderCommand>) {
+                return object(
+                    {{"kind", JsonValue("opacity_push")}, {"opacity", JsonValue(value.opacity)}});
+            } else {
+                static_assert(std::is_same_v<Type, OpacityPopRenderCommand>);
+                return object({{"kind", JsonValue("opacity_pop")}});
             }
         },
         command);

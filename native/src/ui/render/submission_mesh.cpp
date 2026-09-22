@@ -529,13 +529,21 @@ void geometry(
     };
 }
 
+/** Materials that differ only in opacity share geometry: opacity is one per-vertex float. */
+[[nodiscard]] bool same_material_but_opacity(MaterialState retained,
+                                             const MaterialState& current) noexcept {
+    retained.opacity = current.opacity;
+    return retained == current;
+}
+
 [[nodiscard]] std::optional<Point> translation_from_cached_geometry(
     const PreparedDraw& retained,
     const PreparedDraw& current,
     const SubmissionContext& context
 ) {
     if (retained.command != current.command || retained.local_bounds != current.local_bounds ||
-        retained.material != current.material || retained.transform.m00 != current.transform.m00 ||
+        !same_material_but_opacity(retained.material, current.material) ||
+        retained.transform.m00 != current.transform.m00 ||
         retained.transform.m01 != current.transform.m01 ||
         retained.transform.m10 != current.transform.m10 ||
         retained.transform.m11 != current.transform.m11) {
@@ -661,6 +669,14 @@ void geometry(
         );
     }
     return false;
+}
+
+/** Rewrites the per-vertex material opacity (draw-data float 15) of reused geometry. */
+void set_vertex_opacity(std::vector<std::uint8_t>& vertices, const double opacity) {
+    constexpr std::size_t opacity_offset = 24U + 15U * sizeof(float);
+    const auto value = static_cast<float>(opacity);
+    for (std::size_t offset = 0U; offset < vertices.size(); offset += vertex_bytes)
+        std::memcpy(vertices.data() + offset + opacity_offset, &value, sizeof(value));
 }
 
 void translate_vertex_positions(
@@ -835,8 +851,10 @@ void encode(
             }
             if (translated.has_value()) {
                 EncodedDrawCacheEntry updated = *retained;
-                updated.source = draw;
                 translate_vertex_positions(updated.vertex_bytes, 0U, *translated);
+                if (updated.source.material.opacity != draw.material.opacity)
+                    set_vertex_opacity(updated.vertex_bytes, draw.material.opacity);
+                updated.source = draw;
                 geometry_updates[item_index] = std::move(updated);
             } else {
                 RenderSubmission fragment;

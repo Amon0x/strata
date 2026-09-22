@@ -84,6 +84,8 @@ int main(int argc, char** argv) {
             auto begin = Clock::now();
             (void)renderer.render("benchmark", packet, context.target(32, 32),
                                   {vulkan::TargetLoadAction::clear, {}, frame / 240.0});
+            // Rendering no longer waits for itself; measure through GPU completion as before.
+            vkQueueWaitIdle(context.device.queue);
             context.image->layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
             return milliseconds(begin);
         };

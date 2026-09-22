@@ -27,8 +27,7 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
     begin();
     if (packet.full_geometry_payload || !packet.vertex_patches.empty() ||
         !packet.index_patches.empty() || !packet.resources.empty())
-        std::erase_if(cached_effects,
-                      [&](const auto& entry) { return entry.first.first == active_layer; });
+        drop_effects(active_layer);
     try {
         resources(packet);
         Target target{output.image,
@@ -49,7 +48,7 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
             {static_cast<float>(logical_width), static_cast<float>(logical_height)},
             {static_cast<float>(target.width), static_cast<float>(target.height)},
             static_cast<float>(seconds)};
-        const auto constants = arena.upload(&frame, sizeof(frame));
+        const auto constants = arena->upload(&frame, sizeof(frame));
         Image* surface_backdrop = nullptr;
         for (const auto& batch : packet.batches) {
             if (const auto* e = std::get_if<host::EffectBatch>(&batch);
@@ -125,7 +124,7 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                 region.width = blur_batch->width;
                 region.height = blur_batch->height;
                 region.scissor = blur_batch->scissor;
-                draw(target, "blur", "opaque", arena.upload(&data, sizeof(data)),
+                draw(target, "blur", "opaque", arena->upload(&data, sizeof(data)),
                      clip_constants(blur_batch->rounded_clips,
                                     gpu::RoundedClipMode::premultiplied_alpha),
                      blurred, original, bounds(region, target));
@@ -195,7 +194,7 @@ void Renderer::declare_material(std::string_view id, std::string_view source) {
                      std::string(gpu::shaders::material_entry));
     impl_->materials[std::string(id)] = program;
     impl_->prune_programs();
-    impl_->cached_effects.clear();
+    impl_->drop_effects();
 }
 void Renderer::declare_effect_pass(std::string_view id, std::uint32_t index, std::uint32_t kind,
                                    double radius, std::uint32_t downsample,
@@ -213,7 +212,7 @@ void Renderer::declare_effect_pass(std::string_view id, std::uint32_t index, std
         impl_->add_program(program, std::string(gpu::effect_prelude) + std::string(source) +
                                         std::string(gpu::effect_entry));
     }
-    impl_->cached_effects.clear();
+    impl_->drop_effects();
     impl_->effects[std::string(id)].insert_or_assign(
         index,
         Impl::Pass{kind, radius, downsample, radius_parameter, downsample_parameter, program});
@@ -229,7 +228,7 @@ RenderLayerTelemetry Renderer::render(std::string_view layer, const host::Render
 void Renderer::consume_resources(const host::RenderPacket& packet) {
     impl_->begin();
     if (!packet.resources.empty())
-        impl_->cached_effects.clear();
+        impl_->drop_effects();
     try {
         impl_->resources(packet);
         impl_->finish();
@@ -239,13 +238,18 @@ void Renderer::consume_resources(const host::RenderPacket& packet) {
     }
 }
 void Renderer::release_layer(std::string_view layer) noexcept {
-    if (auto found = impl_->geometry.find(layer); found != impl_->geometry.end())
+    if (auto found = impl_->geometry.find(layer); found != impl_->geometry.end()) {
+        for (auto& slot : found->second.slots) {
+            impl_->retire(std::move(slot.vertices));
+            impl_->retire(std::move(slot.indices));
+        }
         impl_->geometry.erase(found);
-    std::erase_if(impl_->cached_effects,
-                  [&](const auto& entry) { return entry.first.first == layer; });
+    }
+    impl_->drop_effects(layer);
 }
 void Renderer::release_target() {
-    impl_->clear_framebuffers();
+    // Target-sized scratch and cached output may still be read by frames in flight.
+    impl_->wait_idle();
     impl_->scratch.clear();
     impl_->cached_effects.clear();
 }

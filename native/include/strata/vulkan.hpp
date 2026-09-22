@@ -33,6 +33,8 @@ enum class TargetLoadAction { preserve, clear };
 /** Single-sampled, color/transfer-src/transfer-dst image owned by the host.
  * The host must submit earlier writes before render(), and use final_layout afterwards.
  * Image ownership must already belong to Device::queue_family; no ownership transfer is implied.
+ * render() does not wait for completion: keep the image and view alive until a later host
+ * submission on the same queue has completed.
  */
 struct RenderTarget final {
     VkImage image = VK_NULL_HANDLE;
@@ -65,9 +67,10 @@ struct PresenterOptions final {
 };
 
 /** GPU packet renderer. Owns no instance, device, window, or swapchain.
- * Submits to the borrowed graphics queue and waits for its own fence before returning.
- * This synchronous boundary makes target/resource destruction safe after a call; it is not a
- * command-buffer recording API. Calls must occur outside the host's active render pass.
+ * Submits to the borrowed graphics queue without waiting; up to three frames are in flight, and a
+ * frame's resources are reused only after its own fence. release_target() and destruction wait
+ * for all frames. It is not a command-buffer recording API. Calls must occur outside the host's
+ * active render pass.
  */
 class Renderer final {
   public:

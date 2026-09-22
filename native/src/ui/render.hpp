@@ -297,6 +297,19 @@ struct MaterialPopRenderCommand final {
     [[nodiscard]] friend bool operator==(MaterialPopRenderCommand,
                                          MaterialPopRenderCommand) = default;
 };
+/**
+ * Multiplies the opacity of everything drawn in its scope. The scoped commands keep their own
+ * colours, so a fade leaves their prepared geometry reusable and only the opacity changes.
+ */
+struct OpacityPushRenderCommand final {
+    double opacity = 1.0;
+    [[nodiscard]] friend bool operator==(const OpacityPushRenderCommand&,
+                                         const OpacityPushRenderCommand&) = default;
+};
+struct OpacityPopRenderCommand final {
+    [[nodiscard]] friend bool operator==(OpacityPopRenderCommand,
+                                         OpacityPopRenderCommand) = default;
+};
 
 using RenderCommand =
     std::variant<SolidRectRenderCommand, RoundedRectRenderCommand, BorderRenderCommand,
@@ -305,7 +318,7 @@ using RenderCommand =
                  ShadowRenderCommand, BackdropEffectRenderCommand, ContentEffectPushRenderCommand,
                  ContentEffectPopRenderCommand, ClipPushRenderCommand, ClipPopRenderCommand,
                  TransformPushRenderCommand, TransformPopRenderCommand, MaterialPushRenderCommand,
-                 MaterialPopRenderCommand>;
+                 MaterialPopRenderCommand, OpacityPushRenderCommand, OpacityPopRenderCommand>;
 
 /** Returns a backend-independent command with every opacity-bearing payload multiplied. */
 [[nodiscard]] RenderCommand render_command_with_opacity(RenderCommand command, double opacity);

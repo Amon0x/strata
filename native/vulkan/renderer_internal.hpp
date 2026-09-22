@@ -9,6 +9,7 @@
 #include "shader.hpp"
 #include <cmath>
 #include <map>
+#include <optional>
 #include <span>
 #include <strata/render_packet.hpp>
 #include <strata/vulkan.hpp>
@@ -67,17 +68,44 @@ inline Target target_of(Image& image) {
 } // namespace detail
 
 struct Renderer::Impl {
+    /**
+     * Recording never waits for the frame just submitted: each frame owns its command buffer,
+     * fence, upload arena, descriptor pools, framebuffers and retirements, and a slot is reused
+     * only after its own fence (three frames earlier) has signalled.
+     */
+    static constexpr std::size_t frames_in_flight = 3U;
+    struct Frame {
+        VkCommandPool commands{};
+        VkCommandBuffer command{};
+        VkFence fence{};
+        std::unique_ptr<UploadArena> arena;
+        std::vector<VkDescriptorPool> pools;
+        std::size_t pool_index = 0;
+        std::vector<VkFramebuffer> framebuffers;
+        std::vector<std::unique_ptr<Image>> retired_images;
+        std::vector<std::unique_ptr<Buffer>> retired_buffers;
+        bool pending = false;
+    };
+    /** Draws into one target share a render pass until another operation needs the target. */
+    struct OpenPass {
+        VkImage image = VK_NULL_HANDLE;
+        VkImageView view = VK_NULL_HANDLE;
+        std::uint32_t width = 0, height = 0;
+        VkFormat format = VK_FORMAT_UNDEFINED;
+        VkFramebuffer framebuffer = VK_NULL_HANDLE;
+    };
     Device device;
-    UploadArena arena;
-    VkCommandPool commands{};
+    std::array<Frame, frames_in_flight> frames;
+    std::size_t frame_index = 0;
+    std::optional<std::size_t> last_submitted;
+    bool recording = false;
+    std::optional<OpenPass> open_pass;
+    UploadArena* arena = nullptr;
     VkCommandBuffer command{};
-    VkFence fence{};
     VkPipelineCache pipeline_cache{};
     VkDescriptorSetLayout descriptors{};
     VkPipelineLayout layout{};
     VkSampler nearest{}, linear{};
-    std::vector<VkDescriptorPool> pools;
-    std::size_t pool_index = 0;
     std::map<VkFormat, VkRenderPass> render_passes;
     std::map<std::tuple<std::string, std::string, VkFormat, bool>, VkPipeline> pipelines;
     std::map<std::string, std::vector<std::uint32_t>, std::less<>> programs;
@@ -91,9 +119,19 @@ struct Renderer::Impl {
     };
     std::map<std::string, std::map<std::uint32_t, Pass>, std::less<>> effects;
     std::map<std::string, std::unique_ptr<Image>, std::less<>> textures;
-    struct Geometry {
+    /** Host-written geometry: one copy per frame slot, refreshed when the layer's content moves. */
+    struct SlotGeometry {
         std::unique_ptr<Buffer> vertices, indices;
+        std::uint64_t generation = 0;
+    };
+    /** The layer's current geometry, patched on the CPU exactly as a single GPU buffer would be. */
+    struct Geometry {
+        std::array<SlotGeometry, frames_in_flight> slots;
+        std::vector<std::uint8_t> vertices;
+        std::vector<std::uint8_t> indices;
+        std::uint64_t generation = 0;
         std::uint64_t epoch = 0;
+        bool seen = false;
     };
     std::map<std::string, Geometry, std::less<>> geometry;
     struct CachedEffect {
@@ -109,17 +147,26 @@ struct Renderer::Impl {
     std::uint64_t active_epoch = 0;
     std::uint64_t effect_index = 0;
     std::unique_ptr<Image> white;
-    std::vector<std::unique_ptr<Image>> scratch, retired;
-    std::vector<VkFramebuffer> framebuffers;
+    std::vector<std::unique_ptr<Image>> scratch;
     std::size_t scratch_index = 0;
     std::vector<std::uint32_t> vertex, fullscreen;
     bool poisoned = false;
     double logical_width{}, logical_height{}, seconds{};
     RenderLayerTelemetry telemetry;
 
-    explicit Impl(Device d) : device(d), arena(d) {}
+    explicit Impl(Device d) : device(d) {}
     ~Impl();
-    void clear_framebuffers();
+    Frame& frame() noexcept {
+        return frames[frame_index];
+    }
+    /** Destroys a GPU object only after every frame that may still read it has completed. */
+    void retire(std::unique_ptr<Image> image);
+    void retire(std::unique_ptr<Buffer> buffer);
+    void wait_idle();
+    void release_frame(Frame& frame);
+    /** Drops cached effect output for one layer, or for every layer when none is named. */
+    void drop_effects(std::optional<std::string_view> layer = std::nullopt);
+    void end_pass();
     void initialize();
     void add_program(const std::string& name, const std::string& source);
     void prune_programs();
