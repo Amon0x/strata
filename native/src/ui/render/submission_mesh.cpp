@@ -167,6 +167,8 @@ void parameter_data(
             radii_data(values, command.radii);
             values[8] = static_cast<float>(draw.local_bounds.width);
             values[9] = static_cast<float>(draw.local_bounds.height);
+            values[10] = static_cast<float>(command.offset.x);
+            values[11] = static_cast<float>(command.offset.y);
         } else if constexpr (std::is_same_v<Type, PreparedTextPtr>) {
             if (command != nullptr) {
                 values[0] = static_cast<float>(command->atlas_pixel_range);

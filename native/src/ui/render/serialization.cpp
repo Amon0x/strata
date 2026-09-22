@@ -388,6 +388,7 @@ JsonValue render_command_json(const RenderCommand& command) {
                                           {"bounds", rectangle(value.bounds)},
                                           {"color", JsonValue(color_string(value.color))},
                                           {"radii", radii(value.radii)},
+                                          {"offset", point(value.offset)},
                                           {"radius", JsonValue(value.radius)},
                                           {"spread", JsonValue(value.spread)},
                                       });

@@ -598,7 +598,15 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                             shape_height * 0.5F,
                             radii
                         );
-                        const float outside = smoothstep(-1.0F, 1.0F, distance);
+                        // Only the source silhouette, `offset` behind the shadow, stays uncovered.
+                        const float source_distance = rounded_box_sdf(
+                            shadow_x + data[10U],
+                            shadow_y + data[11U],
+                            shape_width * 0.5F,
+                            shape_height * 0.5F,
+                            radii
+                        );
+                        const float outside = smoothstep(-1.0F, 1.0F, source_distance);
                         const float falloff = 1.0F - smoothstep(
                             0.0F,
                             radius,

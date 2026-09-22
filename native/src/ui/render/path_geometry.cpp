@@ -38,6 +38,10 @@ struct Vector final {
     return Point{point.x + offset.x, point.y + offset.y};
 }
 
+[[nodiscard]] Vector operator+(const Vector left, const Vector right) noexcept {
+    return Vector{left.x + right.x, left.y + right.y};
+}
+
 [[nodiscard]] Vector operator*(const Vector value, const double factor) noexcept {
     return Vector{value.x * factor, value.y * factor};
 }
@@ -356,11 +360,37 @@ void fill_compound_path(MeshBuilder& mesh, const std::vector<PathContour>& sourc
         double x = 0.0;
         int winding_delta = 0;
     };
+    // Band boundaries come from every vertex and intersection in the shape, but a filled span
+    // usually keeps the same two bounding edges across many consecutive bands. Edges are straight,
+    // so each such run is emitted as one exact trapezoid rather than a sliver per band.
+    struct OpenSpan final {
+        std::size_t left = 0U;
+        std::size_t right = 0U;
+        double top = 0.0;
+        double bottom = 0.0;
+        bool continued = false;
+    };
+    const auto emit_span = [&mesh, &edges](const OpenSpan& span) {
+        const FillEdge& left = edges[span.left];
+        const FillEdge& right = edges[span.right];
+        const Point top_left{left.x_at(span.top), span.top};
+        const Point top_right{right.x_at(span.top), span.top};
+        const Point bottom_left{left.x_at(span.bottom), span.bottom};
+        const Point bottom_right{right.x_at(span.bottom), span.bottom};
+        if (std::abs(top_right.x - top_left.x) > geometry_epsilon ||
+            std::abs(bottom_right.x - bottom_left.x) > geometry_epsilon) {
+            mesh.shaded_triangle(top_left, top_right, bottom_right);
+            mesh.shaded_triangle(top_left, bottom_right, bottom_left);
+        }
+    };
+    std::vector<OpenSpan> open_spans;
+    std::vector<OpenSpan> next_spans;
     for (std::size_t band = 0U; band + 1U < y_levels.size(); ++band) {
         const double top = y_levels[band];
         const double bottom = y_levels[band + 1U];
         if (bottom - top <= geometry_epsilon)
             continue;
+        next_spans.clear();
         const double middle = top + (bottom - top) * 0.5;
         std::vector<Crossing> crossings;
         crossings.reserve(edges.size());
@@ -399,21 +429,30 @@ void fill_compound_path(MeshBuilder& mesh, const std::vector<PathContour>& sourc
             if (!before && after) {
                 left_edge = crossings[group_begin].edge;
             } else if (before && !after && left_edge.has_value()) {
-                const FillEdge& left = edges[*left_edge];
-                const FillEdge& right = edges[crossings[group_begin].edge];
-                const Point top_left{left.x_at(top), top};
-                const Point top_right{right.x_at(top), top};
-                const Point bottom_left{left.x_at(bottom), bottom};
-                const Point bottom_right{right.x_at(bottom), bottom};
-                if (std::abs(top_right.x - top_left.x) > geometry_epsilon ||
-                    std::abs(bottom_right.x - bottom_left.x) > geometry_epsilon) {
-                    mesh.shaded_triangle(top_left, top_right, bottom_right);
-                    mesh.shaded_triangle(top_left, bottom_right, bottom_left);
+                const std::size_t right_edge = crossings[group_begin].edge;
+                const auto previous = std::ranges::find_if(
+                    open_spans, [&left_edge, right_edge](const OpenSpan& span) {
+                        return !span.continued && span.left == *left_edge &&
+                               span.right == right_edge;
+                    });
+                if (previous != open_spans.end()) {
+                    // Skipped degenerate bands are thinner than epsilon, so the run is unbroken.
+                    previous->continued = true;
+                    next_spans.push_back(OpenSpan{*left_edge, right_edge, previous->top, bottom});
+                } else {
+                    next_spans.push_back(OpenSpan{*left_edge, right_edge, top, bottom});
                 }
                 left_edge.reset();
             }
         }
+        for (const OpenSpan& span : open_spans) {
+            if (!span.continued)
+                emit_span(span);
+        }
+        open_spans.swap(next_spans);
     }
+    for (const OpenSpan& span : open_spans)
+        emit_span(span);
 
     if (feather <= 0.0)
         return;
@@ -441,6 +480,280 @@ void fill_compound_path(MeshBuilder& mesh, const std::vector<PathContour>& sourc
         }
     }
 }
+
+/**
+ * A single closed convex contour needs no band sweep: a fan covers it exactly and one fringe ring
+ * carries its coverage ramp. Small icon dots, triangles and bars take this path.
+ */
+[[nodiscard]] bool fill_convex(MeshBuilder& mesh, const std::vector<PathContour>& contours,
+                               const Size size, const double feather) {
+    if (contours.size() != 1U || contours.front().points.size() < 3U)
+        return false;
+    std::vector<Point> points;
+    for (const Point point : scaled(contours.front().points, size)) {
+        if (points.empty() || length(point - points.back()) > geometry_epsilon)
+            points.push_back(point);
+    }
+    while (points.size() > 3U && length(points.back() - points.front()) <= geometry_epsilon)
+        points.pop_back();
+    const std::size_t count = points.size();
+    if (count < 3U)
+        return false;
+    double orientation = 0.0;
+    double turning = 0.0;
+    for (std::size_t index = 0U; index < count; ++index) {
+        const Vector in = points[index] - points[(index + count - 1U) % count];
+        const Vector out = points[(index + 1U) % count] - points[index];
+        const double turn = cross(in, out);
+        turning += std::atan2(turn, dot(in, out));
+        if (std::abs(turn) <= geometry_epsilon)
+            continue;
+        if (orientation != 0.0 && (turn > 0.0) != (orientation > 0.0))
+            return false;
+        orientation = turn;
+    }
+    // Same-direction turns that wind more than once (a pentagram) self-intersect.
+    if (orientation == 0.0 || std::abs(std::abs(turning) - 2.0 * std::numbers::pi) > 0.5)
+        return false;
+    Point center{};
+    for (const Point point : points) {
+        center.x += point.x / static_cast<double>(count);
+        center.y += point.y / static_cast<double>(count);
+    }
+    for (std::size_t index = 0U; index < count; ++index)
+        mesh.shaded_triangle(center, points[index], points[(index + 1U) % count]);
+    if (feather <= 0.0)
+        return true;
+    // Outward is the edge's perpendicular on the side away from the interior.
+    const double outward_sign = orientation > 0.0 ? -1.0 : 1.0;
+    std::vector<std::uint32_t> rim(count);
+    std::vector<std::uint32_t> fringe(count);
+    for (std::size_t index = 0U; index < count; ++index) {
+        const std::optional<Vector> in =
+            normalized(points[index] - points[(index + count - 1U) % count]);
+        const std::optional<Vector> out =
+            normalized(points[(index + 1U) % count] - points[index]);
+        if (!in.has_value() || !out.has_value())
+            return true;
+        const Vector normal_in = perpendicular(*in) * outward_sign;
+        const Vector normal_out = perpendicular(*out) * outward_sign;
+        const std::optional<Vector> bisector = normalized(normal_in + normal_out);
+        const Vector offset = bisector.has_value()
+                                  ? *bisector * (feather / std::max(dot(*bisector, normal_in), 0.5))
+                                  : normal_out * feather;
+        rim[index] = mesh.vertex(points[index]);
+        fringe[index] = mesh.vertex(points[index] + offset, 0.0);
+    }
+    for (std::size_t index = 0U; index < count; ++index) {
+        const std::size_t next = (index + 1U) % count;
+        mesh.triangle(rim[index], fringe[index], fringe[next]);
+        mesh.triangle(rim[index], fringe[next], rim[next]);
+    }
+    return true;
+}
+
+/** Largest turn a strip rib absorbs with a mitred offset; sharper corners get the authored join. */
+constexpr double smooth_turn_cosine = 0.9;
+
+[[nodiscard]] bool opaque(const Paint& paint) noexcept {
+    if (const runtime::ColorValue* color = paint.color(); color != nullptr)
+        return color->alpha == 255U;
+    const Gradient* gradient = paint.gradient();
+    return gradient != nullptr &&
+           std::ranges::all_of(gradient->stops,
+                               [](const GradientStop& stop) { return stop.color.alpha == 255U; });
+}
+
+[[nodiscard]] Vector rotated(const Vector value, const double angle) noexcept {
+    const double sine = std::sin(angle);
+    const double cosine = std::cos(angle);
+    return Vector{value.x * cosine - value.y * sine, value.x * sine + value.y * cosine};
+}
+
+/**
+ * Direct stroke tessellation for opaque paints: one shared strip per run with a coverage fringe on
+ * both sides, and join/cap geometry only where the outline needs it. Where pieces overlap (inner
+ * corners, joins) the same opaque paint lands on itself, which is invisible, so no union is
+ * computed. Translucent paints keep the exact union path, where overlap would darken.
+ */
+class OpaqueStroker final {
+  public:
+    OpaqueStroker(MeshBuilder& mesh, const StrokeStyle& style, const double feather,
+                  const double tolerance) noexcept
+        : mesh_(mesh), style_(style), feather_(feather),
+          half_(std::max(style.width, feather) * 0.5),
+          // Round geometry is segmented to the same flattening tolerance as curves.
+          round_step_(std::clamp(2.0 * std::acos(std::clamp(1.0 - tolerance / half_, -1.0, 1.0)),
+                                 std::numbers::pi / 16.0, std::numbers::pi / 2.0)) {}
+
+    void polyline(const std::vector<Point>& source) {
+        std::vector<Point> points;
+        points.reserve(source.size());
+        for (const Point point : source) {
+            if (points.empty() || length(point - points.back()) > geometry_epsilon)
+                points.push_back(point);
+        }
+        if (points.size() < 2U)
+            return;
+        const bool closed = points.size() > 2U &&
+                            length(points.back() - points.front()) <= geometry_epsilon * 1.0e3;
+        if (closed)
+            points.pop_back();
+        const std::size_t count = points.size();
+        const std::size_t segments = closed ? count : count - 1U;
+        std::vector<Vector> directions(segments);
+        for (std::size_t segment = 0U; segment < segments; ++segment) {
+            const std::optional<Vector> direction =
+                normalized(points[(segment + 1U) % count] - points[segment]);
+            if (!direction.has_value())
+                return;
+            directions[segment] = *direction;
+        }
+        std::vector<Rib> entry(count);
+        std::vector<Rib> exit(count);
+        for (std::size_t index = 0U; index < count; ++index) {
+            const Point point = points[index];
+            const bool has_in = closed || index > 0U;
+            const bool has_out = closed || index + 1U < count;
+            if (has_in && has_out) {
+                const Vector in = directions[(index + segments - 1U) % segments];
+                const Vector out = directions[index % segments];
+                if (dot(in, out) >= smooth_turn_cosine) {
+                    const std::optional<Vector> bisector =
+                        normalized(perpendicular(in) + perpendicular(out));
+                    const double stretch = bisector.has_value()
+                                               ? 1.0 / std::max(dot(*bisector, perpendicular(in)),
+                                                                0.5)
+                                               : 1.0;
+                    entry[index] = exit[index] =
+                        rib(point, bisector.value_or(perpendicular(in)) * stretch);
+                } else {
+                    entry[index] = rib(point, perpendicular(in));
+                    exit[index] = rib(point, perpendicular(out));
+                    join(point, in, out);
+                }
+            } else if (has_out) {
+                exit[index] = cap(point, directions.front(), true);
+            } else {
+                entry[index] = cap(point, directions.back(), false);
+            }
+        }
+        for (std::size_t segment = 0U; segment < segments; ++segment)
+            band(exit[segment], entry[(segment + 1U) % count]);
+    }
+
+  private:
+    struct Rib final {
+        std::uint32_t left = 0U;
+        std::uint32_t right = 0U;
+        std::uint32_t left_fringe = 0U;
+        std::uint32_t right_fringe = 0U;
+    };
+
+    /** `side` is the unit perpendicular, stretched by the miter factor at a smooth corner. */
+    [[nodiscard]] Rib rib(const Point center, const Vector side) {
+        const double fringe = (half_ + feather_) / half_;
+        return Rib{
+            mesh_.vertex(center + side * half_),
+            mesh_.vertex(center + side * -half_),
+            mesh_.vertex(center + side * (half_ * fringe), 0.0),
+            mesh_.vertex(center + side * (-half_ * fringe), 0.0),
+        };
+    }
+
+    void band(const Rib& from, const Rib& to) {
+        mesh_.triangle(from.left, from.right, to.right);
+        mesh_.triangle(from.left, to.right, to.left);
+        mesh_.triangle(from.left_fringe, from.left, to.left);
+        mesh_.triangle(from.left_fringe, to.left, to.left_fringe);
+        mesh_.triangle(from.right, from.right_fringe, to.right_fringe);
+        mesh_.triangle(from.right, to.right_fringe, to.right);
+    }
+
+    /** Opaque fan of `radius` around `center` with its fringe, from `from` through `sweep`. */
+    void fan(const Point center, const Vector from, const double sweep) {
+        const auto steps = static_cast<std::size_t>(
+            std::clamp(std::ceil(std::abs(sweep) / round_step_), 1.0,
+                       static_cast<double>(maximum_round_segments)));
+        const std::uint32_t hub = mesh_.vertex(center);
+        std::uint32_t edge = mesh_.vertex(center + from * half_);
+        std::uint32_t fringe = mesh_.vertex(center + from * (half_ + feather_), 0.0);
+        for (std::size_t step = 1U; step <= steps; ++step) {
+            const Vector next =
+                rotated(from, sweep * static_cast<double>(step) / static_cast<double>(steps));
+            const std::uint32_t next_edge = mesh_.vertex(center + next * half_);
+            const std::uint32_t next_fringe = mesh_.vertex(center + next * (half_ + feather_), 0.0);
+            mesh_.triangle(hub, edge, next_edge);
+            mesh_.triangle(edge, fringe, next_fringe);
+            mesh_.triangle(edge, next_fringe, next_edge);
+            edge = next_edge;
+            fringe = next_fringe;
+        }
+    }
+
+    /** The outer wedge of a sharp corner; the inner side is covered by the overlapping bands. */
+    void join(const Point point, const Vector in, const Vector out) {
+        const double side_sign = cross(in, out) > 0.0 ? -1.0 : 1.0;
+        const Vector first = perpendicular(in) * side_sign;
+        const Vector second = perpendicular(out) * side_sign;
+        if (style_.join == PathJoin::round) {
+            fan(point, first, std::atan2(cross(first, second), dot(first, second)));
+            return;
+        }
+        const Point near = point + first * half_;
+        const Point far = point + second * half_;
+        const std::optional<Vector> bisector = normalized(first + second);
+        if (style_.join == PathJoin::miter && bisector.has_value()) {
+            const double cosine = dot(*bisector, first);
+            if (cosine > geometry_epsilon && 1.0 / cosine <= style_.miter_limit) {
+                const Point tip = point + *bisector * (half_ / cosine);
+                const std::uint32_t center = mesh_.vertex(point);
+                const std::uint32_t tip_vertex = mesh_.vertex(tip);
+                mesh_.triangle(center, mesh_.vertex(near), tip_vertex);
+                mesh_.triangle(center, tip_vertex, mesh_.vertex(far));
+                edge_fringe(point, near, tip);
+                edge_fringe(point, tip, far);
+                return;
+            }
+        }
+        mesh_.triangle(mesh_.vertex(point), mesh_.vertex(near), mesh_.vertex(far));
+        edge_fringe(point, near, far);
+    }
+
+    /** Coverage ramp along one outer edge of a join, facing away from the corner point. */
+    void edge_fringe(const Point corner, const Point from, const Point to) {
+        const std::optional<Vector> direction = normalized(to - from);
+        if (!direction.has_value())
+            return;
+        Vector outward = perpendicular(*direction);
+        const Point middle{(from.x + to.x) * 0.5, (from.y + to.y) * 0.5};
+        if (dot(outward, middle - corner) < 0.0)
+            outward = outward * -1.0;
+        mesh_.feather_quad(from, to, outward * feather_);
+    }
+
+    /** End rib of an open run; `start` caps against the run's first direction. */
+    [[nodiscard]] Rib cap(Point point, const Vector direction, const bool start) {
+        const Vector outward = start ? direction * -1.0 : direction;
+        if (style_.cap == PathCap::square)
+            point = point + outward * half_;
+        const Rib end = rib(point, perpendicular(direction));
+        if (style_.cap == PathCap::round) {
+            fan(point, perpendicular(outward), -std::numbers::pi);
+        } else {
+            const Point left = point + perpendicular(direction) * half_;
+            const Point right = point + perpendicular(direction) * -half_;
+            mesh_.feather_quad(left, right, outward * feather_);
+        }
+        return end;
+    }
+
+    MeshBuilder& mesh_;
+    const StrokeStyle& style_;
+    double feather_;
+    double half_;
+    double round_step_;
+};
 
 [[nodiscard]] std::vector<std::vector<Point>> dashed(const std::vector<Point>& polyline,
                                                      const bool closed, const StrokeStyle& style) {
@@ -664,13 +977,30 @@ PaintMesh tessellate_shape(const PathShape& shape, const Size shape_size,
     PaintMesh result;
     if (shape.fill.has_value()) {
         MeshBuilder mesh(size, PaintSampler(*shape.fill, size));
-        fill_compound_path(mesh, contours, size, shape.fill_rule, feather);
+        if (!fill_convex(mesh, contours, size, feather))
+            fill_compound_path(mesh, contours, size, shape.fill_rule, feather);
         result = mesh.take();
     }
     if (!shape.stroke.has_value())
         return result;
     MeshBuilder mesh(size, PaintSampler(*shape.stroke, size));
     const StrokeStyle style = shape.stroke_style.value_or(StrokeStyle{});
+    if (opaque(*shape.stroke)) {
+        OpaqueStroker stroker(mesh, style, feather, 0.25 / scale);
+        for (const PathContour& contour : contours) {
+            for (const std::vector<Point>& polyline :
+                 dashed(scaled(contour.points, size), contour.closed, style)) {
+                stroker.polyline(polyline);
+            }
+        }
+        PaintMesh stroke = mesh.take();
+        const auto base = static_cast<std::uint32_t>(result.vertices.size());
+        result.vertices.insert(result.vertices.end(), stroke.vertices.begin(),
+                               stroke.vertices.end());
+        for (const std::uint32_t index : stroke.indices)
+            result.indices.push_back(base + index);
+        return result;
+    }
     std::vector<PathContour> stroke_regions;
     for (const PathContour& contour : contours) {
         for (const std::vector<Point>& polyline :

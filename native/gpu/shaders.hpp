@@ -156,7 +156,9 @@ float4 strataShade(PixelInput input) {
         float4 radii = max(input.drawData1, 0.0);
         float2 p = (input.uv - 0.5) * quadSize;
         float distance = roundedBoxSdf(p, shapeSize * 0.5, radii);
-        float outside = smoothstep(-1.0, 1.0, distance);
+        // Only the source's own silhouette stays uncovered; it sits `offset` behind the shadow.
+        float source = roundedBoxSdf(p + input.drawData2.zw, shapeSize * 0.5, radii);
+        float outside = smoothstep(-1.0, 1.0, source);
         float falloff = 1.0 - smoothstep(
             0.0,
             blurRadius,

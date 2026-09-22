@@ -255,6 +255,8 @@ void command_payload(Bytes& output, const RenderCommand& command) {
             color(output, value.color);
             number(output, value.radius);
             number(output, value.spread);
+            number(output, value.offset.x);
+            number(output, value.offset.y);
         } else if constexpr (std::is_same_v<Command, ClipPushRenderCommand>) {
             rect(output, value.rect);
             radii(output, value.radii);

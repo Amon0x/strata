@@ -40,20 +40,25 @@ constexpr double contour_epsilon = 1e-9;
     const Size scale,
     const double tolerance
 ) {
-    double length = 0.0;
-    for (std::size_t index = 1U; index < control.size(); ++index) {
-        const Point from{control[index - 1U].x * scale.width, control[index - 1U].y * scale.height};
-        const Point to{control[index].x * scale.width, control[index].y * scale.height};
-        if (!finite(from) || !finite(to)) {
+    // Wang's formula: the fewest uniform parameter steps that keep a degree-d Bezier within
+    // `tolerance` of its chords, from the largest second difference of the scaled control polygon.
+    double second_difference = 0.0;
+    std::array<Point, 4U> scaled{};
+    for (std::size_t index = 0U; index < control.size(); ++index) {
+        scaled[index] = Point{control[index].x * scale.width, control[index].y * scale.height};
+        if (!finite(scaled[index])) {
             throw std::invalid_argument("path scale produces non-finite curve coordinates");
         }
-        const double segment_length = std::hypot(to.x - from.x, to.y - from.y);
-        if (!std::isfinite(segment_length) || !std::isfinite(length + segment_length)) {
-            throw std::invalid_argument("path curve length exceeds the finite geometry range");
-        }
-        length += segment_length;
     }
-    const double steps = std::ceil(std::sqrt(length / std::max(tolerance, 0.01)) * 2.0);
+    for (std::size_t index = 0U; index + 2U < control.size(); ++index) {
+        const double x = scaled[index].x - 2.0 * scaled[index + 1U].x + scaled[index + 2U].x;
+        const double y = scaled[index].y - 2.0 * scaled[index + 1U].y + scaled[index + 2U].y;
+        second_difference = std::max(second_difference, std::hypot(x, y));
+    }
+    const auto degree = static_cast<double>(control.size() - 1U);
+    const double steps = std::ceil(std::sqrt(
+        degree * (degree - 1.0) / 8.0 * second_difference / std::max(tolerance, 0.01)
+    ));
     if (!std::isfinite(steps)) {
         throw std::invalid_argument("path curve subdivision count is non-finite");
     }

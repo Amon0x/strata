@@ -935,8 +935,28 @@ void test_shadow_submission_extends_beyond_the_source_shape() {
         return result;
     };
     check(draw_data(0U) == 40.0F && draw_data(1U) == 20.0F && draw_data(8U) == 64.0F &&
-              draw_data(9U) == 44.0F,
+              draw_data(9U) == 44.0F && draw_data(10U) == 0.0F && draw_data(11U) == 0.0F,
           "shadow submission lost its independent source and expanded dimensions");
+
+    // An offset shadow carries its source offset, so shading uncovers only the source silhouette
+    // and darkens the part of the shifted shape that extends past it.
+    ui::RenderCommandBuffer offset_commands;
+    offset_commands.append(ui::ShadowRenderCommand{
+        ui::Rect{100.0, 72.0, 40.0, 20.0},
+        ui::CornerRadii::all(8.0),
+        ui::RenderColor{0U, 0U, 0U, 96U},
+        10.0,
+        0.0,
+        ui::Point{0.0, 22.0},
+    });
+    const ui::RenderSubmission offset_submission =
+        ui::build_render_submission(offset_commands, atlas, nullptr, 1.0, 640, 480, 640.0, 480.0);
+    float offset_x = 1.0F;
+    float offset_y = 0.0F;
+    std::memcpy(&offset_x, offset_submission.vertex_bytes.data() + draw_data_offset + 10U * 4U, 4U);
+    std::memcpy(&offset_y, offset_submission.vertex_bytes.data() + draw_data_offset + 11U * 4U, 4U);
+    check(offset_x == 0.0F && offset_y == 22.0F,
+          "an offset shadow did not carry its source offset to shading");
 }
 
 void check_translation_reused_geometry(const strata::ui::RenderSubmission& actual,
@@ -1352,6 +1372,40 @@ void test_vector_shape_tessellation() {
         painted_area(ui::tessellate_shape(dashed, ui::Size{120.0, 120.0}, 2.0));
     check(dashed_area > 0.0 && dashed_area < solid_area * 0.75,
           "a dashed stroke must paint less of its outline than a solid one");
+
+    // An icon-sized round-joined ring. Overlapping segment/join pieces resolve into trapezoid runs,
+    // so geometry follows the outline instead of every band boundary the pieces create, and the
+    // painted area is still the stroke's own annulus.
+    ui::PathShape ring;
+    ring.path = ui::Path::ellipse(ui::Point{0.5, 0.5}, 0.38, 0.38);
+    ring.stroke = ui::Paint(runtime::ColorValue{233U, 160U, 106U, 255U});
+    ring.stroke_style =
+        ui::StrokeStyle{1.35, ui::PathCap::round, ui::PathJoin::round, 4.0, {}, 0.0};
+    const ui::PaintMesh ring_mesh = ui::tessellate_shape(ring, ui::Size{16.0, 16.0}, 2.0);
+    check(ring_mesh.vertices.size() < 160U,
+          "an icon-sized stroked ring produced " + std::to_string(ring_mesh.vertices.size()) +
+              " vertices");
+    const double ring_radius = 0.38 * 16.0;
+    const double annulus = 3.14159265358979 * 2.0 * ring_radius * 1.35 / (16.0 * 16.0);
+    check(std::abs(painted_area(ring_mesh) - annulus) < annulus * 0.03,
+          "merged stroke fill changed the painted area of a ring");
+    ui::PathShape dot;
+    dot.path = ui::Path::ellipse(ui::Point{0.5, 0.5}, 0.3, 0.3);
+    dot.fill = ui::Paint(runtime::ColorValue{233U, 160U, 106U, 255U});
+    const ui::PaintMesh dot_mesh = ui::tessellate_shape(dot, ui::Size{16.0, 16.0}, 2.0);
+    check(dot_mesh.vertices.size() < 120U,
+          "a convex icon dot produced " + std::to_string(dot_mesh.vertices.size()) + " vertices");
+    const double disc = 3.14159265358979 * 0.3 * 0.3;
+    check(std::abs(painted_area(dot_mesh) - disc) < disc * 0.03,
+          "the convex fill fast path changed a disc's painted area");
+    ui::PathShape star;
+    star.path = ui::Path::parse("M .5 .05 L .78 .9 L .05 .35 L .95 .35 L .22 .9 Z");
+    star.fill = dot.fill;
+    star.fill_rule = ui::PathFillRule::evenodd;
+    const double star_area =
+        painted_area(ui::tessellate_shape(star, ui::Size{100.0, 100.0}, 1.0));
+    check(std::abs(star_area - 0.1753) < 0.01,
+          "a self-intersecting even-odd star must keep its hollow centre");
 
     ui::RenderCommandBuffer commands;
     commands.append(ui::PathRenderCommand{ui::Rect{4.0, 8.0, 120.0, 120.0}, stroked});
@@ -5076,6 +5130,51 @@ overlay Staggered {
           "repositioning a settled item restarted its staggered entry");
 }
 
+void test_content_transition_item_fills_definite_container() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("content-transition-fill", bundle);
+    const std::string source = R"(
+animation Swap {
+  from { opacity: 0 }
+  to { opacity: 1 }
+  duration: 100ms;
+}
+overlay Paged {
+  root Panel(key: "page.shell", layout: { kind: "COLUMN", width: 200, height: 160 }) {
+    Panel(key: "page.header", layout: { width: { weight: 1 }, height: 40 })
+    Panel(key: "page.host", contentKey: "first", contentTransition: Swap,
+      layout: { kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 } }) {
+      Panel(key: "page.body", layout: { width: { weight: 1 }, height: { weight: 1 } })
+    }
+  }
+}
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"paged.strata", source}, no_imports, 0U)
+              .activated(),
+          "content transition fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 180;
+    environment.logical_width = 320.0;
+    environment.logical_height = 180.0;
+    ui::Surface surface("content-transition-fill", application, runtime::LayerRole::overlay,
+                        "Paged", environment);
+    static_cast<void>(surface.frame(1'000'000));
+    static_cast<void>(surface.frame(500'000'000));
+    const ui::RetainedNode* body = surface.tree().find_key("page.body");
+    const ui::LayoutRecord* record =
+        body != nullptr ? surface.layout().find(body->identity()) : nullptr;
+    check(record != nullptr, "content transition body lost its layout record");
+    check_near(record->bounds.height, 120.0,
+               "a fill child of a definite contentKey container did not fill it");
+}
+
 void test_motion_timing_and_indeterminate_progress() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -6380,6 +6479,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_native_custom_mesh_geometry(arguments[1]);
             test_motion_timing_and_indeterminate_progress();
             test_entry_stagger_and_surface_reveal();
+            test_content_transition_item_fills_definite_container();
             test_component_slot_projection();
             test_component_cache_tracks_exact_retained_dependencies();
             test_parameterized_component_state_retains_its_evaluated_initializer();

@@ -234,11 +234,14 @@ struct BlurRegionRenderCommand final {
                                          const BlurRegionRenderCommand&) = default;
 };
 struct ShadowRenderCommand final {
+    /** The shadow's silhouette: the source bounds moved by `offset`. */
     Rect bounds;
     CornerRadii radii;
     RenderColor color;
     double radius = 0.0;
     double spread = 0.0;
+    /** Where the shadow sits relative to its source, whose own silhouette stays uncovered. */
+    Point offset{};
     [[nodiscard]] friend bool operator==(const ShadowRenderCommand&,
                                          const ShadowRenderCommand&) = default;
 };

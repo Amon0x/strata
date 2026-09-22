@@ -662,6 +662,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 shadow.color,
                 shadow.radius,
                 shadow.spread,
+                Point{shadow.offset_x, shadow.offset_y},
             });
             ++counters.commands_emitted;
         }

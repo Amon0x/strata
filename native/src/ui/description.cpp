@@ -1757,7 +1757,22 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
                     {"weight", runtime::Value(1.0)},
                 })
             );
-            item_layout_fields.emplace_back("height", runtime::Value("content"));
+            // A definite container height (fixed, fill or fraction) belongs to layout: the
+            // coordinator and item fill it so fill descendants resolve against it, and no
+            // content-size motion runs on that axis. Only a content-sized container follows the
+            // incoming item's measured height.
+            const runtime::Value* container_height =
+                source_layout != nullptr ? source_layout->field("height") : nullptr;
+            const bool definite_height = container_height != nullptr &&
+                                         (container_height->number() != nullptr ||
+                                          container_height->object() != nullptr);
+            const auto fill_height = [] {
+                return runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{
+                    {"weight", runtime::Value(1.0)},
+                });
+            };
+            item_layout_fields.emplace_back(
+                "height", definite_height ? fill_height() : runtime::Value("content"));
             DescriptionNode::Properties item_properties;
             item_properties.emplace(
                 "$layout",
@@ -1793,7 +1808,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
                 runtime::ExpressionValue(runtime::Value(
                     std::vector<std::pair<std::string, runtime::Value>>{
                         {"clip", runtime::Value(true)},
-                        {"height", runtime::Value("content")},
+                        {"height", definite_height ? fill_height() : runtime::Value("content")},
                         {"kind", runtime::Value("STACK")},
                         {"width", runtime::Value(
                             std::vector<std::pair<std::string, runtime::Value>>{
@@ -1808,7 +1823,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
                 runtime::ExpressionValue(runtime::Value(
                     std::vector<std::pair<std::string, runtime::Value>>{
                         {"clip", runtime::Value(true)},
-                        {"height", runtime::Value(true)},
+                        {"height", runtime::Value(!definite_height)},
                         {"width", runtime::Value(false)},
                     }
                 ))
