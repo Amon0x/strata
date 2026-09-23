@@ -102,6 +102,15 @@ void structured_values_round_trip() {
           "typed host array changed shape during round-trip");
 }
 
+void large_host_documents_parse() {
+    using strata::host::Value;
+    // Frame snapshots of large surfaces exceed 16 MiB of canonical, indented JSON.
+    std::string json = "{\"value\":";
+    json.append(17U * 1024U * 1024U, ' ');
+    json += "7}";
+    check(Value::parse(json).require("value") == Value(7), "host could not parse a large document");
+}
+
 void drag_events_are_typed_once() {
     using namespace strata::host;
     const ActionEvent action{
@@ -479,6 +488,7 @@ int strata_test_host() {
     try {
         generated_contracts_round_trip();
         structured_values_round_trip();
+        large_host_documents_parse();
         drag_events_are_typed_once();
         list_reorder_uses_stable_neighbors();
         action_bindings_decode_at_the_boundary();

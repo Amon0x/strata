@@ -146,7 +146,12 @@ Value Value::object(const std::initializer_list<std::pair<std::string, Value>> f
 }
 
 Value Value::parse(const std::string_view json) {
-    return from_json_value(data::parse_json(json));
+    // The host parses documents it already holds, including this library's own canonical frame
+    // snapshots, which outgrow the runtime's untrusted-input byte budget on large surfaces. Depth,
+    // value-count and string limits still bound the structure.
+    data::JsonLimits limits;
+    limits.maximum_input_bytes = std::max(limits.maximum_input_bytes, json.size());
+    return from_json_value(data::parse_json(json, limits));
 }
 
 const Value::Storage& Value::storage() const noexcept {
