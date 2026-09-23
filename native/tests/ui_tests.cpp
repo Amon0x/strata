@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -4149,6 +4150,41 @@ overlay EditorScroll {
               right <= viewport.right() + 0.5 &&
               right >= viewport.right() - ui::editable_text_caret_allowance - 2.0,
           "scrolled editor did not draw its text at the scrolled caret position");
+
+    // A single-node inspection is exactly that node's record in the full snapshot, and records carry
+    // only their own semantic entry (the full semantic tree is published once, at the top level).
+    const data::JsonValue full = ui::inspect_surface(surface);
+    const auto find = [](const auto& self, const data::JsonValue& node,
+                         const std::string_view key) -> const data::JsonValue* {
+        const data::JsonValue* found = node.find("key");
+        if (found != nullptr && found->string() != nullptr && *found->string() == key)
+            return &node;
+        const data::JsonValue* children = node.find("children");
+        if (children != nullptr && children->array() != nullptr)
+            for (const data::JsonValue& child : *children->array())
+                if (const data::JsonValue* match = self(self, child, key); match != nullptr)
+                    return match;
+        return nullptr;
+    };
+    const data::JsonValue* expected = find(find, *full.find("root"), "editor.root");
+    check(expected != nullptr &&
+              ui::inspect_node(surface, "editor.root", std::numeric_limits<std::size_t>::max()) ==
+                  *expected &&
+              ui::inspect_node(surface, "editor.absent", 0U) == data::JsonValue{},
+          "inspect_node differed from the full inspection record");
+    const auto nested_semantics = [](const auto& self, const data::JsonValue& node) -> bool {
+        const data::JsonValue* semantics = node.find("semantics");
+        if (semantics != nullptr && semantics->find("children") != nullptr)
+            return true;
+        const data::JsonValue* children = node.find("children");
+        if (children != nullptr && children->array() != nullptr)
+            for (const data::JsonValue& child : *children->array())
+                if (self(self, child))
+                    return true;
+        return false;
+    };
+    check(!nested_semantics(nested_semantics, *full.find("root")),
+          "inspection records still embed their semantic subtrees");
 }
 
 void test_surface_contextual_environment(const std::filesystem::path& resource_root) {

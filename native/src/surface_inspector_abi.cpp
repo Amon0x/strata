@@ -1,6 +1,8 @@
 #include <strata/strata.h>
 
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <string>
 
 #include "abi_internal.hpp"
@@ -101,6 +103,38 @@ strata_result strata_surface_read_inspector_selection_json(
         return strata::core::result(STRATA_STATUS_OK);
     } catch (...) {
         return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.CALLBACK_FAILED", "Inspector selection delivery failed inside the C ABI boundary.");
+    }
+}
+
+strata_result strata_surface_read_inspection_node_json(
+    const strata_surface* const surface,
+    const strata_string_view key,
+    const uint32_t depth,
+    const strata_value_json_sink* const sink
+) {
+    if (surface == nullptr) return strata::abi_detail::invalid_argument();
+    if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr ||
+        !strata::abi_detail::valid_view(key, false)) {
+        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_INSPECTION_NODE", "Reading an inspection node requires a complete key and JSON sink.");
+    }
+    if (!surface->frame_snapshot_available) {
+        return surface_failure(*surface, STRATA_STATUS_NOT_FOUND, "STRATA.SURFACE.FRAME_UNAVAILABLE", "Frame the surface before reading an inspection node.");
+    }
+    try {
+        const std::string value = strata::abi_detail::copied_string(key);
+        if (!strata::core::valid_utf8(value)) throw std::invalid_argument("inspection key is not valid UTF-8");
+        const std::size_t levels = depth == std::numeric_limits<uint32_t>::max()
+            ? std::numeric_limits<std::size_t>::max()
+            : static_cast<std::size_t>(depth);
+        const std::string json = strata::data::encode_json_line(
+            strata::ui::inspect_node(surface->core, value, levels)
+        );
+        sink->emit(sink->user_data, strata_string_view{json.data(), json.size()});
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (const std::invalid_argument& error) {
+        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.INSPECT.INVALID_TARGET", error.what());
+    } catch (...) {
+        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.CALLBACK_FAILED", "Inspection node delivery failed inside the C ABI boundary.");
     }
 }
 

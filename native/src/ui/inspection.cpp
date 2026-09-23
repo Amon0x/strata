@@ -6,6 +6,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -419,17 +420,38 @@ action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
     return type;
 }
 
+/**
+ * The node's own semantic entry. The semantics tree nests every descendant inside its ancestors, so
+ * embedding it whole in each inspection record repeats a subtree per level; the complete tree is
+ * published once as the frame's top-level `semantics`.
+ */
+[[nodiscard]] JsonValue own_semantics(const JsonValue* semantics) {
+    if (semantics == nullptr || semantics->object() == nullptr)
+        return JsonValue{};
+    JsonValue::Object fields;
+    fields.reserve(semantics->object()->size());
+    for (const JsonValue::ObjectEntry& field : *semantics->object()) {
+        if (field.first != "children")
+            fields.push_back(field);
+    }
+    return JsonValue(std::move(fields));
+}
+
+/** `depth` limits nested children; std::numeric_limits<std::size_t>::max() inspects the subtree. */
 [[nodiscard]] JsonValue node_inspection(const Surface& surface, const RetainedNode& node,
-                                        const MotionTransform inherited_transform) {
+                                        const MotionTransform inherited_transform,
+                                        const std::size_t depth) {
     const LayoutRecord* layout = surface.layout().find(node.identity());
     if (layout == nullptr)
         throw std::logic_error("retained inspection node has no layout record");
     const MotionTransform effective_transform = concatenate_presentation_transform(
         inherited_transform, local_presentation_transform(node, surface.motion(), layout->bounds));
     std::vector<JsonValue> children;
-    children.reserve(node.children().size());
-    for (const auto& child : node.children()) {
-        children.push_back(node_inspection(surface, *child, effective_transform));
+    if (depth > 0U) {
+        children.reserve(node.children().size());
+        for (const auto& child : node.children()) {
+            children.push_back(node_inspection(surface, *child, effective_transform, depth - 1U));
+        }
     }
     DirtySet descendant_dirty;
     collect_descendant_dirty(node, descendant_dirty);
@@ -466,9 +488,7 @@ action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
          node.description().key.has_value() ? JsonValue(*node.description().key) : JsonValue{}},
         {"layoutKind", JsonValue(std::string(layout_kind_name(layout->kind)))},
         {"motionChannels", motion_channels(surface, node, *layout)},
-        {"semantics", surface.semantics().find(node.identity()) != nullptr
-                          ? *surface.semantics().find(node.identity())
-                          : JsonValue{}},
+        {"semantics", own_semantics(surface.semantics().find(node.identity()))},
         {"sourcePath", node.description().source_path.empty()
                            ? JsonValue{}
                            : JsonValue(node.description().source_path)},
@@ -559,7 +579,9 @@ JsonValue inspect_surface(const Surface& surface) {
          })},
         {"pendingNavigationTargets", array(std::move(pending_navigation))},
         {"root",
-         root != nullptr ? node_inspection(surface, *root, MotionTransform{}) : JsonValue{}},
+         root != nullptr ? node_inspection(surface, *root, MotionTransform{},
+                                                     std::numeric_limits<std::size_t>::max())
+                                   : JsonValue{}},
         {"selectedKey", selected != nullptr && selected->description().key.has_value()
                             ? JsonValue(*selected->description().key)
                             : JsonValue{}},
@@ -622,6 +644,25 @@ JsonValue inspect_state(runtime::ApplicationContext& application) {
         }));
     }
     return array(std::move(entries));
+}
+
+JsonValue inspect_node(const Surface& surface, const std::string_view key, const std::size_t depth) {
+    const RetainedNode* node = surface.tree().find_key(key);
+    if (node == nullptr || surface.layout().find(node->identity()) == nullptr)
+        return JsonValue{};
+    // Presentation transforms compose from the root, so bounds match the full inspection exactly.
+    std::vector<const RetainedNode*> ancestors;
+    for (const RetainedNode* current = node->parent(); current != nullptr; current = current->parent())
+        ancestors.push_back(current);
+    MotionTransform inherited;
+    for (auto ancestor = ancestors.rbegin(); ancestor != ancestors.rend(); ++ancestor) {
+        const LayoutRecord* layout = surface.layout().find((*ancestor)->identity());
+        if (layout == nullptr)
+            continue;
+        inherited = concatenate_presentation_transform(
+            inherited, local_presentation_transform(**ancestor, surface.motion(), layout->bounds));
+    }
+    return node_inspection(surface, *node, inherited, depth);
 }
 
 JsonValue inspect_selection(const Surface& surface) {

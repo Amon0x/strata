@@ -1070,7 +1070,7 @@ screen Main {
     frame_json.clear();
     const strata_result paint_snapshot = strata_surface_read_frame_json(surface, &frame_sink);
     check(paint_snapshot.status == STRATA_STATUS_OK &&
-              frame_json.find(R"("layoutWork": 0)") != std::string::npos,
+              frame_json.find(R"("layoutWork":0)") != std::string::npos,
           "a paint-cost extension frame escaped into layout work: status=" +
               std::to_string(paint_snapshot.status) + " frame=" + frame_json);
     check(strata_surface_frame(surface, 52'000'000, &frame_info).status == STRATA_STATUS_OK &&
@@ -1093,7 +1093,7 @@ screen Main {
           "a layout-cost extension frame did not run");
     frame_json.clear();
     check(strata_surface_read_frame_json(surface, &frame_sink).status == STRATA_STATUS_OK &&
-              frame_json.find(R"("layoutWork": 1)") != std::string::npos,
+              frame_json.find(R"("layoutWork":1)") != std::string::npos,
           "a layout-cost extension frame was incorrectly collapsed into paint work");
 
     environment.generation = 2U;

@@ -663,6 +663,16 @@ screen Main {
     };
     check(strata_surface_read_frame_json(surface, &frame_sink).status == STRATA_STATUS_NOT_FOUND,
           "unframed Surface exposed a stale output snapshot");
+    std::string node_json;
+    const strata_value_json_sink node_sink{
+        sizeof(strata_value_json_sink),
+        &node_json,
+        &capture_json,
+    };
+    check(strata_surface_read_inspection_node_json(surface, strata_string_view{"abi.button", 10U}, 0U,
+                                                   &node_sink)
+                  .status == STRATA_STATUS_NOT_FOUND,
+          "unframed Surface exposed a stale inspection node");
     strata_surface_frame_info frame_info{};
     frame_info.struct_size = sizeof(frame_info);
     check(strata_surface_frame(surface, 8'000, &frame_info).status == STRATA_STATUS_OK &&
@@ -972,7 +982,7 @@ screen Main {
               dynamic_snapshot_result.status == STRATA_STATUS_OK &&
               diagnostic_publish_result.status == STRATA_STATUS_OK &&
               dynamic_frame_json.find("abi.dynamic.unhandled") != std::string::npos &&
-              dynamic_frame_json.find("\"status\": \"unhandled\"") != std::string::npos &&
+              dynamic_frame_json.find("\"status\":\"unhandled\"") != std::string::npos &&
               diagnostics.last_code == "STRATA.UI.ACTION_UNHANDLED",
           "dynamic action did not cross the generic Surface event/diagnostic pipeline: dispatch=" +
               std::to_string(dynamic_result.status) + "/" + std::to_string(dynamic_info.status) +
@@ -1013,14 +1023,29 @@ screen Main {
           "Surface render output was not published as one versioned binary batch");
     check(strata_surface_read_frame_json(surface, &frame_sink).status == STRATA_STATUS_OK,
           "canonical Surface frame snapshot was not readable");
-    check(frame_json.find("\"protocol\": \"strata.surface-frame\"") != std::string::npos,
+    check(frame_json.find("\"protocol\":\"strata.surface-frame\"") != std::string::npos,
           "canonical Surface frame snapshot lost its protocol envelope: " + frame_json);
-    check(frame_json.find("\"key\": \"abi.button\"") != std::string::npos,
+    check(frame_json.find("\"key\":\"abi.button\"") != std::string::npos,
           "canonical Surface frame snapshot lost retained output: " + frame_json);
     check(frame_json.find("\"renderCommands\"") != std::string::npos,
           "canonical Surface frame snapshot lost render output: " + frame_json);
-    check(frame_json.find("\"kind\": \"text_run\"") != std::string::npos,
+    check(frame_json.find("\"kind\":\"text_run\"") != std::string::npos,
           "resource-backed portable text shaping did not reach the render command batch");
+    check(frame_json.find("\n") == frame_json.size() - 1U,
+          "canonical Surface frame snapshot was not compact: " + frame_json);
+    node_json.clear();
+    check(strata_surface_read_inspection_node_json(surface, strata_string_view{"abi.button", 10U}, 0U,
+                                                   &node_sink)
+                      .status == STRATA_STATUS_OK &&
+              node_json.starts_with("{") && node_json.find("\"key\":\"abi.button\"") != std::string::npos &&
+              node_json.find("\"children\":[]") != std::string::npos,
+          "C ABI inspection node lost its keyed record or ignored its depth: " + node_json);
+    node_json.clear();
+    check(strata_surface_read_inspection_node_json(surface, strata_string_view{"abi.absent", 10U}, 0U,
+                                                   &node_sink)
+                      .status == STRATA_STATUS_OK &&
+              node_json == "null\n",
+          "C ABI inspection node did not report a missing key as null: " + node_json);
     check(strata_runtime_set_resource_adapter(runtime, nullptr).status ==
                   STRATA_STATUS_INVALID_ARGUMENT &&
               strata_runtime_set_resource_adapter(runtime, &resource_adapter).status ==
@@ -1068,7 +1093,7 @@ screen Main {
               strata_surface_cancel_interactions(surface).status == STRATA_STATUS_OK &&
               strata_surface_frame(surface, 11'000, &frame_info).status == STRATA_STATUS_OK &&
               strata_surface_read_frame_json(surface, &frame_sink).status == STRATA_STATUS_OK &&
-              frame_json.find("\"reason\": \"invalid_target\"") != std::string::npos,
+              frame_json.find("\"reason\":\"invalid_target\"") != std::string::npos,
           "Surface interaction cancellation did not publish focus/capture lifecycle output");
     check(strata_surface_reveal(nullptr).status == STRATA_STATUS_INVALID_ARGUMENT &&
               strata_surface_reveal(surface).status == STRATA_STATUS_OK &&

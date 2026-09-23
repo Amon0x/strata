@@ -32,6 +32,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.ABI.INVALID_HOST_SNAPSHOT` | `native/src/abi_application.cpp` |
 | `STRATA.ABI.INVALID_IME_ADAPTER` | `native/src/abi_services.cpp` |
 | `STRATA.ABI.INVALID_INPUT_BATCH` | `native/src/surface_abi.cpp` |
+| `STRATA.ABI.INVALID_INSPECTION_NODE` | `native/src/surface_inspector_abi.cpp` |
 | `STRATA.ABI.INVALID_INSPECTOR_PICK` | `native/src/surface_inspector_abi.cpp` |
 | `STRATA.ABI.INVALID_INSPECTOR_SELECTION` | `native/src/surface_inspector_abi.cpp` |
 | `STRATA.ABI.INVALID_RESOURCE_ADAPTER` | `native/src/abi_services.cpp` |
@@ -271,7 +272,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.RUNTIME.LIVE_SURFACES` | `native/src/abi.cpp` |
 | `STRATA.SCROLL.ANIMATION_INVALID` | `native/src/surface_theme_abi.cpp` |
 | `STRATA.SOURCE_MAP.PATH_NOT_FOUND` | `native/src/abi_application.cpp` |
-| `STRATA.SURFACE.FRAME_UNAVAILABLE` | `native/src/surface_abi.cpp` |
+| `STRATA.SURFACE.FRAME_UNAVAILABLE` | `native/src/surface_abi.cpp`<br>`native/src/surface_inspector_abi.cpp` |
 | `STRATA.SURFACE.INVALID_CONFIGURATION` | `native/src/surface_abi.cpp` |
 | `STRATA.SURFACE.INVALID_ENVIRONMENT` | `native/src/surface_abi.cpp` |
 | `STRATA.SURFACE.INVALID_FRAME` | `native/src/surface_abi.cpp` |

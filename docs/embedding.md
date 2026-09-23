@@ -329,7 +329,13 @@ last full geometry epoch in the ordered stream; both forms can carry one-shot GP
 operations. Hosts must not redo layout, glyph generation, or batch planning.
 
 Canonical frame JSON is an optional inspection/conformance projection and is deliberately lazy. It
-is not required for normal rendering.
+is not required for normal rendering. It is compact (key-ordered, no insignificant whitespace, one
+trailing newline) and host-side `Value::parse` accepts it at any size. Each retained record carries
+only its own semantic entry; the complete semantic tree is the frame's top-level `semantics`.
+Tools that need a few nodes, such as tests locating a control, should read them with
+`strata_surface_read_inspection_node_json` (C++ `Surface::inspection_node_json(key, depth)`), which
+returns one keyed record in the same format, with children to the requested depth, without building
+the whole snapshot or changing inspector selection.
 
 Before destroying a Surface, prepare its terminal release packet, synchronously submit/consume it
 while the host texture owner is alive, explicitly acknowledge that consumption, and then release the

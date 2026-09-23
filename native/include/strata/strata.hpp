@@ -1811,6 +1811,23 @@ class Surface final {
         return std::move(capture.value);
     }
 
+    /** One keyed node's inspection record (compact JSON, `null` when absent); see the C function. */
+    [[nodiscard]] std::string inspection_node_json(const std::string_view key,
+                                                   const std::uint32_t depth = 0U) const {
+        detail::StringCapture capture;
+        const strata_value_json_sink sink{
+            sizeof(strata_value_json_sink),
+            &capture,
+            &detail::capture_string,
+        };
+        require(strata_surface_read_inspection_node_json(
+                    value_, strata_string_view{key.data(), key.size()}, depth, &sink),
+                "inspection node read");
+        if (capture.failed)
+            throw std::bad_alloc();
+        return std::move(capture.value);
+    }
+
     [[nodiscard]] bool register_theme(const strata_theme& theme) {
         std::uint32_t changed = 0U;
         require(strata_surface_register_theme(value_, &theme, &changed),

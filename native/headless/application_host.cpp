@@ -1,5 +1,6 @@
 #include "application_host.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -548,7 +549,10 @@ struct ApplicationHost::Impl final {
         if (!options.capture_frames)
             return;
         last_frame_json = surface->frame_json();
-        last_frame_document = data::parse_json(last_frame_json);
+        data::JsonLimits frame_limits; // the host's own frame: no untrusted-input byte budget
+        frame_limits.maximum_input_bytes =
+            std::max(frame_limits.maximum_input_bytes, last_frame_json.size());
+        last_frame_document = data::parse_json(last_frame_json, frame_limits);
         frames.push_back(CapturedFrame{
             info.frame_index,
             info.frame_time_nanoseconds,

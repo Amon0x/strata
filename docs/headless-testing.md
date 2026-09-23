@@ -8,7 +8,8 @@ caller-owned clock, and consume render packet v11.
 Each capture contains both views needed by automated testing:
 
 - `<name>.json` is the canonical Surface frame snapshot: retained inspection, semantics, state,
-  focus/layers, events, action outcomes, diagnostics, render commands, and operation counters.
+  focus/layers, events, action outcomes, diagnostics, render commands, and operation counters. The
+  file is indented for reading and diffing; the Surface API itself returns the same data compactly.
 - `<name>.png` is produced by the selected render backend. The portable CPU reference backend runs
   on Linux and Windows. Vulkan builds can use a real GPU without a window. Windows can also use
   a windowless D3D11/WARP target sharing the desktop

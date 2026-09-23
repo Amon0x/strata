@@ -14,6 +14,13 @@ namespace strata::ui {
 /** Canonical declaration-owned application state snapshot. */
 [[nodiscard]] data::JsonValue inspect_state(runtime::ApplicationContext& application);
 
+/**
+ * One keyed node's record from inspect_surface, without building or encoding the rest of the tree.
+ * `depth` bounds nested children (0 = none); a missing key yields null.
+ */
+[[nodiscard]] data::JsonValue inspect_node(const Surface& surface, std::string_view key,
+                                           std::size_t depth);
+
 /** Compact live selection projection for host tooling and extension-owned inspectors. */
 [[nodiscard]] data::JsonValue inspect_selection(const Surface& surface);
 

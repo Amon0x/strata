@@ -181,7 +181,8 @@ struct Session::Impl final {
                   host_.framebuffer_height(), host_.pixels());
         std::ofstream json(output_root_ / (std::string(name) + ".json"),
                            std::ios::binary | std::ios::trunc);
-        json << host_.frame_json();
+        // Captures are read by people and diffed as text: keep them indented and canonical.
+        json << data::encode_canonical_json(host_.frame_document());
         if (!json)
             throw std::runtime_error("could not write headless frame JSON");
     }

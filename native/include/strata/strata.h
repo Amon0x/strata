@@ -2091,7 +2091,9 @@ STRATA_API strata_result strata_surface_set_focus_containment(strata_surface* su
 STRATA_API strata_result strata_surface_frame(strata_surface* surface,
                                               int64_t frame_time_nanoseconds,
                                               strata_surface_frame_info* out_info);
-/* The canonical frame JSON is borrowed only for the duration of emit. */
+/* The canonical frame JSON (compact, key-ordered, one trailing newline) is borrowed only for the
+ * duration of emit. It is a complete, lazily built inspection snapshot; prefer
+ * strata_surface_read_inspection_node_json for individual nodes. */
 STRATA_API strata_result strata_surface_read_frame_json(const strata_surface* surface,
                                                         const strata_value_json_sink* sink);
 /* Surface aliases operate on the owning runtime's canonical shared diagnostic history. */
@@ -2119,6 +2121,13 @@ STRATA_API strata_result strata_surface_inspector_pick(strata_surface* surface, 
 STRATA_API strata_result strata_surface_inspector_clear(strata_surface* surface);
 STRATA_API strata_result strata_surface_read_inspector_selection_json(
     const strata_surface* surface, const strata_value_json_sink* sink);
+/* One keyed node's inspection record, in the frame JSON format, from the latest frame, without
+ * building the whole snapshot or changing inspector selection. depth bounds nested children
+ * (0 = none, UINT32_MAX = whole subtree). Emits compact JSON `null` when no laid-out node has key.
+ * The JSON is borrowed only for the duration of emit. */
+STRATA_API strata_result strata_surface_read_inspection_node_json(
+    const strata_surface* surface, strata_string_view key, uint32_t depth,
+    const strata_value_json_sink* sink);
 
 /* Extension callback capabilities. Context pointers are valid only for their callback invocation.
  */

@@ -989,7 +989,9 @@ strata_result strata_surface_read_frame_json(const strata_surface* const surface
     try {
         if (surface->frame_json.empty()) {
             const auto inspection_started = std::chrono::steady_clock::now();
-            surface->frame_json = strata::data::encode_canonical_json(
+            // Compact: a deep tree spends most of an indented document on whitespace. Hosts that
+            // show frames to people re-encode them canonically (see the headless capture writer).
+            surface->frame_json = strata::data::encode_json_line(
                 strata::ui::surface_frame_snapshot(surface->core, surface->core.last_frame()));
             const std::int64_t inspection_nanos =
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
