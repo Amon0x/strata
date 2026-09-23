@@ -127,6 +127,11 @@ class WidgetRenderScope final {
               WidgetTextAlignment horizontal_alignment = WidgetTextAlignment::start,
               double alignment_height = 0.0,
               WidgetTextAlignment vertical_alignment = WidgetTextAlignment::start);
+    /**
+     * Draws text already laid out by the caller, such as an editor whose layout options and scroll
+     * must match its selection, caret and hit testing. Nothing is re-laid out from the node.
+     */
+    void text(const TextLayout& layout, Point origin, RenderColor color);
     void node_text(Point origin, RenderColor color);
     void rich_text(Point origin, RenderColor fallback);
     void focus(Rect bounds);
@@ -134,6 +139,8 @@ class WidgetRenderScope final {
     void interaction(Rect bounds, std::string_view subtarget = {});
 
   private:
+    void draw_text_layout(const TextLayout& layout, Point text_origin, RenderColor color,
+                          double x_offset, double alignment_width);
     const RetainedNode& node_;
     const LayoutRecord& layout_;
     const LayoutResult& layout_result_;

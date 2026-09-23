@@ -8,6 +8,7 @@
 #include "ui/input.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
+#include "ui/widget/editor_geometry.hpp"
 #include "ui/widget/presentation.hpp"
 
 namespace strata::ui {
@@ -30,9 +31,13 @@ void present_editable_text(
         (presentation.placeholder_when_focused || !focused);
     if (placeholder) value = std::move(presentation.placeholder);
 
-    const TextLayout text_layout = scope.text_engine()->layout(scope.node(), value);
-    const Point origin = text_input_origin(
-        presentation.viewport, text_layout, presentation.multiline
+    const TextLayout text_layout = scope.text_engine()->layout(
+        scope.node(), value,
+        editable_text_layout_options(presentation.viewport, presentation.multiline)
+    );
+    const Point origin = editable_text_origin(
+        presentation.viewport, text_layout, presentation.multiline,
+        placeholder ? Point{} : scope.input().editor_scroll(scope.node().identity())
     );
     scope.push_clip(presentation.viewport);
     if (editor.has_value() && !placeholder &&
@@ -71,7 +76,7 @@ void present_editable_text(
     }
     if (!value.empty()) {
         scope.text(
-            value,
+            text_layout,
             origin,
             placeholder ? scope.visual().text_hint : scope.visual().foreground
         );

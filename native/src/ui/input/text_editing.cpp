@@ -17,6 +17,7 @@
 #include "ui/input/detail.hpp"
 #include "ui/status.hpp"
 #include "ui/text_geometry.hpp"
+#include "ui/widget/editor_geometry.hpp"
 #include "ui/widget/input.hpp"
 #include "ui/widget/registry.hpp"
 
@@ -284,13 +285,121 @@ void InputRouter::commit_editor(RetainedNode& node, InputOperationResult& result
     record_editor_mutation(node, mutation, result);
 }
 
+Point InputRouter::editor_scroll(const std::uint64_t identity) const noexcept {
+    const auto state = editor_scroll_.find(identity);
+    return state != editor_scroll_.end() ? state->second.offset : Point{};
+}
+
+std::optional<InputRouter::EditorView> InputRouter::editor_view(const RetainedNode& node,
+                                                                const std::string_view text) const {
+    if (layout_ == nullptr || !text_layout_resolver_)
+        return std::nullopt;
+    const LayoutRecord* record = layout_->find(node.identity());
+    if (record == nullptr)
+        return std::nullopt;
+    const std::vector<WidgetSubtarget> targets = subtargets(node.identity());
+    const std::optional<Rect> viewport = editable_text_viewport(node, *record, targets);
+    if (!viewport.has_value() || viewport->empty())
+        return std::nullopt;
+    const bool multiline = editable_text_multiline(widgets_, node);
+    return EditorView{
+        *viewport,
+        text_layout_resolver_(node, text, editable_text_layout_options(*viewport, multiline)),
+        multiline,
+    };
+}
+
+void InputRouter::update_editor_scroll() {
+    if (tree_ == nullptr || layout_ == nullptr)
+        return;
+    if (focused_.has_value() && editors_.contains(*focused_))
+        static_cast<void>(editor_scroll_.try_emplace(*focused_));
+    for (auto state = editor_scroll_.begin(); state != editor_scroll_.end();) {
+        RetainedNode* const node = tree_->find_identity(state->first);
+        const auto editor = editors_.find(state->first);
+        if (node == nullptr || editor == editors_.end()) {
+            state = editor_scroll_.erase(state);
+            continue;
+        }
+        // Reveal what is presented: an IME composition sits at the caret and moves it.
+        const EditorSnapshot snapshot = editor->second.snapshot();
+        std::string presented(snapshot.text);
+        std::size_t caret = snapshot.caret;
+        if (snapshot.composition.has_value() && !snapshot.composition->empty()) {
+            presented.insert(std::min(caret, presented.size()), *snapshot.composition);
+            caret += std::min(snapshot.composition_selection_end, snapshot.composition->size());
+        }
+        const std::optional<EditorView> view = editor_view(*node, presented);
+        if (!view.has_value()) {
+            ++state;
+            continue;
+        }
+        EditorScroll& scroll = state->second;
+        const bool focused = focused_ == state->first;
+        Point next;
+        if (focused) {
+            const std::size_t text_hash = std::hash<std::string_view>{}(presented);
+            const bool moved = caret != scroll.revealed_caret || text_hash != scroll.revealed_text ||
+                               view->viewport != scroll.revealed_viewport;
+            next = moved ? reveal_editable_caret(view->viewport, view->layout, view->multiline,
+                                                 presented, caret, scroll.offset)
+                         : clamp_editable_scroll(view->viewport, view->layout, view->multiline,
+                                                 scroll.offset);
+            scroll.revealed_caret = caret;
+            scroll.revealed_text = text_hash;
+            scroll.revealed_viewport = view->viewport;
+        } else {
+            // Unfocused single-line fields show their start; multi-line text keeps its position.
+            next = view->multiline ? clamp_editable_scroll(view->viewport, view->layout, true,
+                                                           scroll.offset)
+                                   : Point{};
+            scroll.revealed_caret = static_cast<std::size_t>(-1);
+        }
+        if (next != scroll.offset) {
+            scroll.offset = next;
+            static_cast<void>(tree_->mark(node->identity(), DirtyReason::editor));
+            if (frame_invalidator_)
+                frame_invalidator_();
+        }
+        if (!focused && next == Point{})
+            state = editor_scroll_.erase(state);
+        else
+            ++state;
+    }
+}
+
+bool InputRouter::scroll_editor(const RetainedNode& node, const ScrollInputEvent& event) {
+    const auto editor = editors_.find(node.identity());
+    if (editor == editors_.end() || tree_ == nullptr)
+        return false;
+    const std::optional<EditorView> view = editor_view(node, editor->second.text());
+    // An unfocused single-line field snaps back to its start, so the wheel belongs to its parent.
+    if (!view.has_value() || (!view->multiline && focused_ != node.identity()))
+        return false;
+    const Point current = editor_scroll(node.identity());
+    Point next{current.x - event.delta_x * input_config_.scroll_step,
+               view->multiline ? current.y - event.delta_y * input_config_.scroll_step : current.y};
+    next = clamp_editable_scroll(view->viewport, view->layout, view->multiline, next);
+    if (next == current)
+        return false;
+    editor_scroll_[node.identity()].offset = next;
+    static_cast<void>(tree_->mark(node.identity(), DirtyReason::editor));
+    if (frame_invalidator_)
+        frame_invalidator_();
+    return true;
+}
+
 std::optional<std::size_t> InputRouter::visual_text_navigation_offset(const RetainedNode& node,
                                                                       const std::string_view text,
                                                                       const std::size_t caret,
                                                                       const std::string_view key) {
     if (!text_layout_resolver_)
         return std::nullopt;
-    const TextLayout layout = text_layout_resolver_(node, text, TextLayoutOptions{});
+    std::optional<EditorView> view =
+        static_text_node(node) ? std::nullopt : editor_view(node, text);
+    const TextLayout layout = view.has_value()
+                                  ? std::move(view->layout)
+                                  : text_layout_resolver_(node, text, TextLayoutOptions{});
     if (layout.lines.empty())
         return std::nullopt;
     const std::size_t utf16_caret = utf16_offset_for_utf8_byte(text, caret);

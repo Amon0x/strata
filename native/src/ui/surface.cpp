@@ -454,11 +454,13 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
                  const Point position) -> std::optional<std::size_t> {
               if (text_engine_ == nullptr)
                   return std::nullopt;
-              const TextLayout text_layout = text_engine_->layout(node, text);
               const std::vector<WidgetSubtarget> targets = input_.subtargets(node.identity());
               const std::optional<Rect> viewport = editable_text_viewport(node, layout, targets);
               if (!viewport.has_value() || viewport->empty())
                   return std::nullopt;
+              const bool multiline = editable_text_multiline(widgets_, node);
+              const TextLayout text_layout = text_engine_->layout(
+                  node, text, editable_text_layout_options(*viewport, multiline));
               if (node.description().type == "ChipInput" ||
                   node.description().type == "CommandPalette") {
                   if (position.x < viewport->x || position.y < viewport->y ||
@@ -466,8 +468,8 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
                       return std::nullopt;
                   }
               }
-              const Point origin =
-                  text_input_origin(*viewport, text_layout, node.description().type == "TextArea");
+              const Point origin = editable_text_origin(*viewport, text_layout, multiline,
+                                                        input_.editor_scroll(node.identity()));
               const std::size_t utf16 = text_layout_hit_offset(
                   text_layout, Point{position.x - origin.x, position.y - origin.y});
               return utf8_byte_for_utf16_offset(text, utf16);
@@ -483,9 +485,11 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
               const std::optional<Rect> viewport = editable_text_viewport(node, layout, targets);
               if (!viewport.has_value() || viewport->empty())
                   return std::nullopt;
-              const TextLayout text_layout = text_engine_->layout(node, editor.text);
-              const Point origin =
-                  text_input_origin(*viewport, text_layout, node.description().type == "TextArea");
+              const bool multiline = editable_text_multiline(widgets_, node);
+              const TextLayout text_layout = text_engine_->layout(
+                  node, editor.text, editable_text_layout_options(*viewport, multiline));
+              const Point origin = editable_text_origin(*viewport, text_layout, multiline,
+                                                        input_.editor_scroll(node.identity()));
               Rect caret = text_layout_caret_rect(text_layout, origin, editor.text, editor.caret);
               MotionTransform transform;
               std::vector<const RetainedNode*> route;

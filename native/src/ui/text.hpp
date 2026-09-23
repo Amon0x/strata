@@ -122,6 +122,8 @@ struct TextLayoutOptions final {
     std::optional<std::string> overflow;
     std::optional<std::size_t> max_lines;
     std::optional<std::string> alignment;
+    /** Wrap width used only when neither the owner style nor wrap_width supplies one. */
+    std::optional<double> fallback_wrap_width;
 
     [[nodiscard]] friend auto operator<=>(const TextLayoutOptions&,
                                           const TextLayoutOptions&) = default;

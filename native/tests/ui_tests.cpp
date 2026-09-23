@@ -45,6 +45,7 @@
 #include "ui/surface.hpp"
 #include "ui/svg_image.hpp"
 #include "ui/text.hpp"
+#include "ui/widget/editor_geometry.hpp"
 #include "ui/tree.hpp"
 #include "ui/widget/input.hpp"
 #include "ui/widget/registry.hpp"
@@ -4079,6 +4080,77 @@ overlay LazyRepeater {
           "retained Repeater sequence cache outlived active-unit replacement reconciliation");
 }
 
+void test_editor_draws_its_scrolled_layout(const std::filesystem::path& resource_root) {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("editor-scroll", bundle);
+    const std::string source = R"(
+component EditorPanel() {
+  state line = "#minecraft:diamond_ores, #minecraft:iron_ores, minecraft:ancient_debris";
+  Panel(key: "editor.root") {
+    TextBox(key: "editor.line", bind: line, layout: { width: 120, height: 26 })
+  }
+}
+overlay EditorScroll {
+  root EditorPanel()
+}
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"editor-scroll.strata", source},
+                                    no_imports, 0U)
+              .activated(),
+          "editor scroll fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 120;
+    environment.logical_width = 320.0;
+    environment.logical_height = 120.0;
+    environment.reduced_motion = true;
+    ui::Surface surface("editor-scroll", application, runtime::LayerRole::overlay, "EditorScroll",
+                        environment,
+                        ui::TextEngine::load_control_font(
+                            resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf")));
+    static_cast<void>(surface.frame(1'000'000));
+    const ui::RetainedNode* editor = surface.tree().find_key("editor.line");
+    check(editor != nullptr, "editor scroll fixture lost its TextBox");
+    const ui::LayoutRecord* record = surface.layout().find(editor->identity());
+    check(record != nullptr, "editor scroll fixture has no layout");
+    const auto glyphs = [&surface] {
+        std::vector<std::pair<ui::Point, ui::LogicalGlyph>> found;
+        for (const ui::RenderCommand& command : surface.render_commands().commands()) {
+            const auto* run = std::get_if<ui::TextRunRenderCommand>(&command);
+            if (run == nullptr || run->glyphs.empty() || run->glyphs.front().code_point != '#')
+                continue;
+            for (const ui::LogicalGlyph& glyph : run->glyphs)
+                found.emplace_back(run->origin, glyph);
+        }
+        check(!found.empty(), "editor text was not drawn");
+        return found;
+    };
+    const auto one_line = [](const auto& drawn) {
+        return std::ranges::all_of(drawn, [&drawn](const auto& entry) {
+            return entry.second.baseline == drawn.front().second.baseline;
+        });
+    };
+    check(one_line(glyphs()), "single-line editor drew wrapped text");
+
+    static_cast<void>(surface.input().click("editor.line"));
+    static_cast<void>(surface.input().key("end"));
+    static_cast<void>(surface.frame(2'000'000));
+    const ui::Rect viewport = record->content_bounds;
+    const auto scrolled = glyphs();
+    const auto& [origin, last] = scrolled.back();
+    const double right = origin.x + last.x + last.advance;
+    check(surface.input().editor_scroll(editor->identity()).x > 0.0 && one_line(scrolled) &&
+              right <= viewport.right() + 0.5 &&
+              right >= viewport.right() - ui::editable_text_caret_allowance - 2.0,
+          "scrolled editor did not draw its text at the scrolled caret position");
+}
+
 void test_surface_contextual_environment(const std::filesystem::path& resource_root) {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -6635,6 +6707,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_component_cache_tracks_exact_retained_dependencies();
             test_parameterized_component_state_retains_its_evaluated_initializer();
             test_tuning_slider_pipeline_is_proportional(arguments[1]);
+            test_editor_draws_its_scrolled_layout(arguments[1]);
             test_phased_input_dispatch_and_gesture_claim();
             test_portable_description_and_declaration_state(arguments[1], arguments[2]);
             test_repeater_description_is_data_backed();

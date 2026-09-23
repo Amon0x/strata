@@ -302,7 +302,8 @@ void text_input_content(WidgetRenderScope& scope, const TextInputMode mode) {
             value = *text;
     }
     RenderColor color = scope.visual().foreground;
-    if (value.empty()) {
+    const bool hint = value.empty();
+    if (hint) {
         value = scope.string("hint");
         color = scope.visual().text_hint;
     }
@@ -314,9 +315,12 @@ void text_input_content(WidgetRenderScope& scope, const TextInputMode mode) {
         return;
     scope.push_clip(*viewport);
     if (!value.empty() && scope.text_engine() != nullptr) {
-        const TextLayout text_layout = scope.text_engine()->layout(scope.node(), value);
-        const Point origin =
-            text_input_origin(*viewport, text_layout, mode == TextInputMode::multi_line);
+        const bool multiline = mode == TextInputMode::multi_line;
+        const TextLayout text_layout = scope.text_engine()->layout(
+            scope.node(), value, editable_text_layout_options(*viewport, multiline));
+        const Point origin = editable_text_origin(
+            *viewport, text_layout, multiline,
+            hint ? Point{} : scope.input().editor_scroll(scope.node().identity()));
         if (editor.has_value() && editor->selection_start != editor->selection_end) {
             const std::size_t start =
                 utf16_offset_for_utf8_byte(editor->text, editor->selection_start);
@@ -344,7 +348,7 @@ void text_input_content(WidgetRenderScope& scope, const TextInputMode mode) {
                 scope.solid_rect(rect, RenderColor{255U, 255U, 255U, 72U});
             }
         }
-        scope.text(value, origin, color);
+        scope.text(text_layout, origin, color);
         if (composition_range.has_value()) {
             for (Rect rect : text_layout_selection_rects(
                      text_layout, origin, composition_range->first, composition_range->second)) {

@@ -393,21 +393,20 @@ void InputRouter::seed_pointer_text_navigation(const RetainedNode& node,
     const LayoutRecord* record = layout_ != nullptr ? layout_->find(node.identity()) : nullptr;
     if (record == nullptr || !text_layout_resolver_)
         return;
-    const TextLayout visual = text_layout_resolver_(node, text, TextLayoutOptions{});
+    Point origin{record->content_bounds.x, record->content_bounds.y};
+    std::optional<EditorView> view;
+    if (!static_text_node(node)) {
+        view = editor_view(node, text);
+        if (!view.has_value())
+            return;
+        origin = editable_text_origin(view->viewport, view->layout, view->multiline,
+                                      editor_scroll(node.identity()));
+    }
+    const TextLayout visual = view.has_value()
+                                  ? std::move(view->layout)
+                                  : text_layout_resolver_(node, text, TextLayoutOptions{});
     if (visual.lines.empty())
         return;
-
-    Point origin{record->content_bounds.x, record->content_bounds.y};
-    if (!static_text_node(node)) {
-        const std::vector<WidgetSubtarget> targets = subtargets(node.identity());
-        const std::optional<Rect> viewport = editable_text_viewport(node, *record, targets);
-        if (!viewport.has_value() || viewport->empty())
-            return;
-        const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
-        const bool multiline = lifecycle != nullptr &&
-                               lifecycle->input.text_edit_mode == WidgetTextEditMode::multi_line;
-        origin = text_input_origin(*viewport, visual, multiline);
-    }
 
     const Point logical = logical_pointer_position(node, position);
     const std::size_t pointer_line = text_layout_line_at_y(visual, logical.y - origin.y);

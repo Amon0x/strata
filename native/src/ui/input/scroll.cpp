@@ -247,6 +247,8 @@ InputOperationResult InputRouter::scroll(const ScrollInputEvent event) {
 
     for (RetainedNode* current = target; current != nullptr; current = current->parent()) {
         if (!input_enabled(*current, behaviors_)) continue;
+        // Overflowing editor text scrolls first; at its limit the wheel reaches the containers.
+        if (scroll_editor(*current, event)) return result;
         const LayoutRecord* layout = layout_->find(current->identity());
         const std::optional<Point> limits = scroll_limits(*current);
         if (layout == nullptr || !limits.has_value()) continue;

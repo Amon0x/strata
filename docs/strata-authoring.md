@@ -110,6 +110,13 @@ The editor keeps focus, selection, caret, IME, undo, semantics, and input routin
 its native background, border, focus ring, and interaction overlays. This is preferable to encoding
 presentation suppression through nullable paint fields.
 
+Editors scroll their text inside a fixed viewport instead of clipping it. `TextBox`, `NumberField`
+and the editors of `ChipInput` and `CommandPalette` keep text on one line and scroll horizontally to
+follow the caret, showing the start again when they lose focus. `TextArea` wraps at its viewport
+width (an authored `wrapWidth` still wins) and scrolls vertically to follow the caret; the mouse wheel
+scrolls overflowing text before reaching enclosing scroll containers. Drawing, pointer caret
+placement, keyboard line navigation and IME placement share the same scrolled geometry.
+
 Static `Text` and `RichText` are non-selectable by default. Opt reading surfaces into selection with
 `selectable: true`; `selectionContainer` groups opted-in text without making labels selectable.
 Editable fields retain their normal caret, selection, clipboard, and IME behavior. RichText links

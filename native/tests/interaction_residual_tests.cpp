@@ -27,6 +27,7 @@
 #include "ui/text_geometry.hpp"
 #include "ui/tree.hpp"
 #include "ui/widget/choice_model.hpp"
+#include "ui/widget/editor_geometry.hpp"
 #include "ui/widget/registry.hpp"
 #include "ui/widget/shell_model.hpp"
 #include "ui/widget/subtarget.hpp"
@@ -218,6 +219,14 @@ class InputFixture final {
             throw std::runtime_error("text-layout fixture node has no text");
         }
         return text_->layout(*retained, *value->string());
+    }
+
+    [[nodiscard]] ui::TextLayout text_layout(const std::string_view key, const std::string_view value,
+                                             const ui::TextLayoutOptions& options) const {
+        const ui::RetainedNode* retained = tree_.find_key(key);
+        if (retained == nullptr)
+            throw std::runtime_error("missing text-layout fixture node");
+        return text_->layout(*retained, value, options);
     }
 
     [[nodiscard]] bool focused(const std::string_view key) const {
@@ -893,6 +902,100 @@ void test_wrapped_editor_pointer_navigation(InputFixture& fixture) {
     check(ui::utf16_offset_for_utf8_byte(content, snapshot().caret) ==
               layout.lines[clicked_line].text_start_offset,
           "editor Home ignored the final wrapped drag placement line");
+}
+
+void test_editor_text_scroll(InputFixture& fixture) {
+    constexpr std::string_view line_key = "editor.scroll.line";
+    constexpr std::string_view area_key = "editor.scroll.area";
+    const std::string line_text =
+        "#minecraft:diamond_ores, #minecraft:iron_ores, #minecraft:gold_ores";
+    std::string area_text;
+    for (int index = 0; index < 12; ++index)
+        area_text += "line " + std::to_string(index) + " of a wrapped editor text\n";
+    ui::DescriptionNode::Properties line = sized(90.0, 24.0);
+    line.emplace("text", runtime::ExpressionValue(runtime::Value(line_text)));
+    ui::DescriptionNode::Properties area = sized(90.0, 48.0);
+    area.emplace("text", runtime::ExpressionValue(runtime::Value(area_text)));
+    const std::shared_ptr<const ui::DescriptionNode> description =
+        node("Panel", "editor.scroll.root",
+             {
+                 node("TextBox", std::string(line_key), {}, std::move(line)),
+                 node("TextArea", std::string(area_key), {}, std::move(area)),
+             },
+             sized(300.0, 200.0, "COLUMN"));
+    fixture.adopt(description);
+
+    const auto identity = [&fixture](const std::string_view key) {
+        const ui::RetainedNode* retained = fixture.tree_.find_key(key);
+        check(retained != nullptr, "scrolling editor fixture was not retained");
+        return retained->identity();
+    };
+    const auto scroll = [&fixture, &identity](const std::string_view key) {
+        return fixture.input_.editor_scroll(identity(key));
+    };
+    const auto caret_visible = [&fixture, &identity](const std::string_view key,
+                                                     const bool multiline) {
+        const ui::Rect viewport = fixture.bounds(key).content_bounds;
+        const std::optional<ui::TextEditorSnapshot> editor =
+            fixture.input_.editor_snapshot(identity(key));
+        check(editor.has_value(), "scrolling editor lost its editor state");
+        const ui::TextLayout layout = fixture.text_layout(
+            key, editor->text, ui::editable_text_layout_options(viewport, multiline));
+        const ui::Point origin = ui::editable_text_origin(
+            viewport, layout, multiline, fixture.input_.editor_scroll(identity(key)));
+        const ui::Rect caret =
+            ui::text_layout_caret_rect(layout, origin, editor->text, editor->caret);
+        return caret.x >= viewport.x - 0.5 && caret.right() <= viewport.right() + 0.5 &&
+               (!multiline ||
+                (caret.y >= viewport.y - 0.5 && caret.bottom() <= viewport.bottom() + 0.5));
+    };
+    const auto click = [&fixture](const std::string_view key, const std::int32_t pointer_id) {
+        const ui::Point point = center(fixture.bounds(key).bounds);
+        static_cast<void>(fixture.pointer({
+            ui::PointerInputEvent{point, ui::PointerEventType::press, pointer_id, 0},
+            ui::PointerInputEvent{point, ui::PointerEventType::release, pointer_id, 0},
+        }));
+    };
+
+    const ui::Rect line_viewport = fixture.bounds(line_key).content_bounds;
+    const ui::TextLayout single = fixture.text_layout(
+        line_key, line_text, ui::editable_text_layout_options(line_viewport, false));
+    check(single.lines.size() == 1U && single.shaped.metrics.width > line_viewport.width,
+          "single-line editor text wrapped or the fixture does not overflow");
+
+    click(line_key, 61);
+    check(fixture.focused(line_key), "single-line editor did not take focus");
+    static_cast<void>(fixture.input_.key("end"));
+    static_cast<void>(fixture.frame(description));
+    check(scroll(line_key).x > 0.0 && scroll(line_key).y == 0.0 && caret_visible(line_key, false),
+          "single-line editor did not scroll horizontally to its caret at End");
+    static_cast<void>(fixture.input_.key("home"));
+    static_cast<void>(fixture.frame(description));
+    check(scroll(line_key).x == 0.0 && caret_visible(line_key, false),
+          "single-line editor did not scroll back to its caret at Home");
+    static_cast<void>(fixture.input_.key("end"));
+    static_cast<void>(fixture.frame(description));
+    check(scroll(line_key).x > 0.0, "single-line editor lost its End scroll");
+
+    click(area_key, 62);
+    check(fixture.focused(area_key), "multi-line editor did not take focus");
+    static_cast<void>(fixture.frame(description));
+    check(scroll(line_key).x == 0.0, "unfocused single-line editor did not show its start");
+
+    static_cast<void>(fixture.input_.key("end", ui::KeyModifiers{false, true, false, false}));
+    static_cast<void>(fixture.frame(description));
+    const ui::Point bottom = scroll(area_key);
+    check(bottom.y > 0.0 && caret_visible(area_key, true),
+          "multi-line editor did not scroll vertically to its caret at Ctrl+End");
+
+    static_cast<void>(fixture.input_.enqueue_scroll(
+        ui::ScrollInputEvent{center(fixture.bounds(area_key).bounds), 0.0, 1.0}));
+    static_cast<void>(fixture.input_.process_queued());
+    const ui::Point wheeled = scroll(area_key);
+    check(wheeled.y < bottom.y, "wheel over overflowing multi-line text did not scroll it");
+    static_cast<void>(fixture.frame(description));
+    check(scroll(area_key).y == wheeled.y,
+          "multi-line editor snapped back to its unchanged caret after a wheel scroll");
 }
 
 void test_static_text_container_owner_transition(InputFixture& fixture) {
@@ -1827,6 +1930,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_static_text_state_partition(fixture);
         test_wrapped_static_text_navigation(fixture);
         test_wrapped_editor_pointer_navigation(fixture);
+        test_editor_text_scroll(fixture);
         test_static_text_container_owner_transition(fixture);
         test_nested_editor_does_not_activate_section(fixture);
         test_slider_pointer_matches_rendered_track(fixture);

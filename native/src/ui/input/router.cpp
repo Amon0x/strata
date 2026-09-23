@@ -734,6 +734,7 @@ InputOperationResult InputRouter::after_layout() {
         }
     }
     route_active_lifecycle_hooks(true, result);
+    update_editor_scroll();
     std::optional<runtime::HostServiceRect> ime_cursor;
     if (focused_.has_value() && ime_cursor_rect_resolver_) {
         RetainedNode* const node = tree_->find_identity(*focused_);

@@ -380,6 +380,13 @@ class InputRouter final {
     [[nodiscard]] const std::string* edited_text(std::uint64_t identity) const noexcept;
     [[nodiscard]] std::optional<TextEditorSnapshot>
     editor_snapshot(std::uint64_t identity) const noexcept;
+    /**
+     * How far an editable widget's text is scrolled inside its viewport; zero when it fits. The
+     * focused editor follows its caret, multi-line editors also follow the wheel, and single-line
+     * editors show their start while unfocused. Presentation, hit testing, caret navigation and
+     * IME placement all apply this same offset.
+     */
+    [[nodiscard]] Point editor_scroll(std::uint64_t identity) const noexcept;
     [[nodiscard]] std::optional<StaticTextSelectionSnapshot>
     static_text_selection_snapshot(std::uint64_t identity) const noexcept;
     [[nodiscard]] std::vector<std::string> pending_navigation_targets() const;
@@ -599,6 +606,16 @@ class InputRouter final {
     void synchronize_editor_text(RetainedNode& node, std::string_view value,
                                  bool move_caret_to_end);
     void commit_editor(RetainedNode& node, InputOperationResult& result);
+    struct EditorView final {
+        Rect viewport;
+        TextLayout layout;
+        bool multiline = false;
+    };
+    /** The laid-out text and viewport of an editable widget, as presentation computes them. */
+    [[nodiscard]] std::optional<EditorView> editor_view(const RetainedNode& node,
+                                                        std::string_view text) const;
+    void update_editor_scroll();
+    [[nodiscard]] bool scroll_editor(const RetainedNode& node, const ScrollInputEvent& event);
 
     [[nodiscard]] Point injection_point(std::string_view key) const;
     [[nodiscard]] bool enqueue_input(SurfaceInputEvent input);
@@ -729,6 +746,14 @@ class InputRouter final {
     std::optional<PendingFocus> pending_focus_;
     std::vector<PendingReveal> pending_reveals_;
     std::map<std::uint64_t, TextEditor> editors_;
+    struct EditorScroll final {
+        Point offset;
+        /** Caret, text and viewport at the last caret reveal; any change reveals the caret again. */
+        std::size_t revealed_caret = static_cast<std::size_t>(-1);
+        std::size_t revealed_text = 0U;
+        Rect revealed_viewport;
+    };
+    std::map<std::uint64_t, EditorScroll> editor_scroll_;
     struct StaticTextRange final {
         std::size_t anchor = 0U;
         std::size_t focus = 0U;

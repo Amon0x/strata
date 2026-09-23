@@ -596,7 +596,20 @@ void WidgetRenderScope::text(const std::string_view value, const Point origin, R
     } else if (vertical_alignment == WidgetTextAlignment::end) {
         y_offset = std::max(0.0, alignment_height - shaped.metrics.height);
     }
-    const Point text_origin{origin.x, origin.y + y_offset};
+    draw_text_layout(layout_value, Point{origin.x, origin.y + y_offset}, color, x_offset,
+                     alignment_width);
+}
+
+void WidgetRenderScope::text(const TextLayout& layout, const Point origin, const RenderColor color) {
+    if (text_ == nullptr)
+        return;
+    draw_text_layout(layout, origin, color, 0.0, 0.0);
+}
+
+void WidgetRenderScope::draw_text_layout(const TextLayout& layout_value, const Point text_origin,
+                                         RenderColor color, const double x_offset,
+                                         const double alignment_width) {
+    const font::ShapedText& shaped = layout_value.shaped;
     const bool clipped = layout_value.clipped && layout_value.wrap_width.has_value();
     const Rect text_cull_bounds{
         text_origin.x,

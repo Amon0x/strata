@@ -409,6 +409,11 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
         resolved_wrap = std::isfinite(requested) && requested > 0.0
                             ? std::optional<double>(requested)
                             : std::nullopt;
+    } else if (!resolved_wrap.has_value() && overrides != nullptr &&
+               overrides->fallback_wrap_width.has_value() &&
+               std::isfinite(*overrides->fallback_wrap_width) &&
+               *overrides->fallback_wrap_width > 0.0) {
+        resolved_wrap = *overrides->fallback_wrap_width;
     }
     CacheKey result{
         std::string(text),
