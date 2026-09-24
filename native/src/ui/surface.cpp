@@ -996,7 +996,10 @@ std::shared_ptr<const DescriptionNode> Surface::describe(DescriptionBuildResult&
         requests.push_back(LayerDescriptionRequest{layer.declaration_role, layer.name});
     }
     descriptions_.set_retained_tree(&tree_);
-    descriptions_.set_contextual_host_roots({{"env", surface_environment_binding(environment_)}});
+    runtime::Value binding = surface_environment_binding(environment_);
+    if (!environment_binding_.has_value() || *environment_binding_ != binding)
+        environment_binding_ = std::move(binding);
+    descriptions_.set_contextual_host_roots({{"env", *environment_binding_}});
     DescriptionLayersBuildResult built = descriptions_.build_layers(requests);
     for (std::size_t index = 0U; index < visible.size(); ++index) {
         state_scopes_by_layer_.insert_or_assign(visible[index].id, built.layer_state_scopes[index]);

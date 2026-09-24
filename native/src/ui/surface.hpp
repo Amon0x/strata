@@ -331,6 +331,9 @@ class Surface final {
     BehaviorRegistry behaviors_;
     WidgetRegistry widgets_;
     DescriptionBuilder descriptions_;
+    /** The last `env` binding: the same value while the environment is unchanged, so every cached
+     * component's comparison with it is a pointer comparison instead of a field-by-field one. */
+    std::optional<runtime::Value> environment_binding_;
     ThemeCatalog themes_;
     ThemeMaterializationCache theme_materialization_cache_;
     std::shared_ptr<const DescriptionNode> raw_description_;
