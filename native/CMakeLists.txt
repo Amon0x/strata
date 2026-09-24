@@ -84,6 +84,32 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(freetype)
 set_target_properties(freetype PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# The runtime allocates thousands of small objects a frame (descriptions, styles, layout and
+# render records); the Windows heap serves them slowly. strata_c serves its own C++ allocations
+# from mimalloc, linked statically: nothing allocated inside crosses the C ABI, and malloc/free are
+# left alone. On ELF a shared library's operator new would be bypassed or exported instead.
+# Sanitizer builds keep the C runtime's allocator, which they instrument.
+if(WIN32 AND NOT STRATA_ENABLE_ASAN AND NOT STRATA_ENABLE_UBSAN)
+    set(strata_mimalloc_default ON)
+else()
+    set(strata_mimalloc_default OFF)
+endif()
+option(STRATA_MIMALLOC "Serve strata_c's C++ allocations from mimalloc" ${strata_mimalloc_default})
+if(STRATA_MIMALLOC)
+    set(MI_OVERRIDE OFF CACHE BOOL "" FORCE)
+    set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(MI_BUILD_STATIC ON CACHE BOOL "" FORCE)
+    set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
+    set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        mimalloc
+        URL https://github.com/microsoft/mimalloc/archive/refs/tags/v3.5.3.tar.gz
+        URL_HASH SHA256=3b4a15153a59905995f7070296ed604bb5ccc00cabb8b93446931aff77224d47
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(mimalloc)
+endif()
+
 function(strata_target_defaults target)
     target_compile_features(${target} PRIVATE cxx_std_23)
     set_target_properties(
@@ -464,6 +490,10 @@ set(
 add_library(strata_c SHARED ${strata_c_sources})
 add_library(Strata::c ALIAS strata_c)
 target_link_libraries(strata_c PRIVATE Strata::core)
+if(STRATA_MIMALLOC)
+    target_sources(strata_c PRIVATE src/allocator.cpp)
+    target_link_libraries(strata_c PRIVATE mimalloc-static)
+endif()
 target_include_directories(
     strata_c
     PUBLIC
@@ -1521,6 +1551,7 @@ install(
         ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/META-INF/licenses/FreeType-FTL.txt
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/META-INF/licenses/Lucide-ISC.txt
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/META-INF/licenses/mimalloc-MIT.txt
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/META-INF/licenses/Roboto-OFL.txt
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources/assets/strata/fonts/LICENSE-JetBrainsMono.txt
     DESTINATION share/licenses/strata

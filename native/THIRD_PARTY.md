@@ -16,6 +16,21 @@ FreeType is distributed under the FreeType Project License. The unmodified licen
 `META-INF/licenses/FreeType-FTL.txt` and installed with the native package. Portions of this software
 are copyright © 2023 The FreeType Project (www.freetype.org). All rights reserved.
 
+## mimalloc 3.5.3
+
+On Windows, `strata_c` serves its own C++ allocations (`operator new` and `delete` for everything
+linked into it) from mimalloc, linked statically: the runtime allocates thousands of small objects a
+frame and the Windows heap serves them slowly. Nothing allocated inside the module crosses the C
+ABI, and `malloc`/`free` stay the C runtime's (`MI_OVERRIDE` is off). Sanitizer builds and other
+platforms keep the C runtime's allocator; `STRATA_MIMALLOC` switches it.
+
+CMake fetches the exact 3.5.3 release archive with a pinned SHA-256. Version updates require the full
+Windows build and test run and the HUD update benchmark.
+
+mimalloc is distributed under the MIT license. The unmodified license is packaged at
+`META-INF/licenses/mimalloc-MIT.txt` and installed with the native package. Copyright (c) 2018-2025
+Microsoft Corporation, Daan Leijen.
+
 ## Roboto 3.016
 
 Strata bundles the upstream hinted static Roboto Regular and Medium TrueType faces as its default UI
