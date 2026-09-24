@@ -2974,6 +2974,68 @@ void test_wrapped_linear_and_intrinsic_grid_layout() {
     check_near(grid_span->bounds.width, 120.0, "spanning grid cell extent changed");
 }
 
+// A same-size change stops at its frontier while the parents keep their layout. Parents must then
+// arrange the current model of everything above it, not a copy kept from an earlier frame: the root
+// never changes size, so its kept copy was the first layout the surface ever had.
+void test_measurement_frontier_arranges_current_ancestors() {
+    using namespace strata;
+    using namespace strata::ui;
+    const auto card = [](const double wide, const double inner) {
+        return node("Panel", "frontier.root",
+                    {
+                        node("Panel", "frontier.card",
+                             {
+                                 node("Spacer", "frontier.wide", {},
+                                      layout_properties(object({
+                                          {"height", runtime::Value(10.0)},
+                                          {"width", runtime::Value(wide)},
+                                      }))),
+                                 node("Panel", "frontier.box",
+                                      {
+                                          node("Spacer", "frontier.inner", {},
+                                               layout_properties(object({
+                                                   {"height", runtime::Value(10.0)},
+                                                   {"width", runtime::Value(inner)},
+                                               }))),
+                                      },
+                                      layout_properties(object({
+                                          {"height", runtime::Value(50.0)},
+                                          {"width", runtime::Value(100.0)},
+                                      }))),
+                             },
+                             layout_properties(object({
+                                 {"height", runtime::Value("content")},
+                                 {"kind", runtime::Value("COLUMN")},
+                                 {"width", runtime::Value("content")},
+                             }))),
+                    });
+    };
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(card(120.0, 10.0)));
+    LayoutEngine layout;
+    const LayoutEnvironment environment{
+        0U,    Rect{0.0, 0.0, 400.0, 200.0}, 1.0,
+        {},    PointSnapPolicy::nearest,     RectangleSnapPolicy::outward,
+        false,
+    };
+    const auto card_width = [&](const LayoutResult& result) {
+        return result.find(tree.find_key("frontier.card")->identity())->bounds.width;
+    };
+    check_near(card_width(layout.layout(tree, environment)), 120.0, "initial card width changed");
+    // Grows the card: the change reaches the fixed-size root.
+    static_cast<void>(tree.reconcile(card(150.0, 10.0)));
+    check_near(card_width(layout.layout(tree, environment)), 150.0, "card did not grow");
+    // Inside the fixed-size box: the change stops there, and the card keeps its current width.
+    for (const double inner : {20.0, 30.0, 20.0}) {
+        static_cast<void>(tree.reconcile(card(150.0, inner)));
+        const LayoutResult& result = layout.layout(tree, environment);
+        check_near(card_width(result), 150.0,
+                   "a same-size change arranged a stale copy of its ancestors");
+        check_near(result.find(tree.find_key("frontier.inner")->identity())->bounds.width, inner,
+                   "the frontier's own change was not arranged");
+    }
+}
+
 void test_content_size_motion_interrupts_and_settles() {
     using namespace strata;
     using namespace strata::ui;
@@ -6717,6 +6779,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_exiting_child_retains_placement_without_affecting_flow();
         test_nested_scroll_pin_uses_nearest_scroll_offset();
         test_wrapped_linear_and_intrinsic_grid_layout();
+        test_measurement_frontier_arranges_current_ancestors();
         test_content_size_motion_interrupts_and_settles();
         test_scroll_virtual_range_clipping_and_safe_insets();
         test_active_work_scheduler_and_detach_cleanup();

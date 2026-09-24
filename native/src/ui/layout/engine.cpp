@@ -273,6 +273,13 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
                                                                  : cached_root->second.measured;
         }
     }
+    // Every node that stopped as a frontier in this pass, including ones nested in another frontier.
+    std::vector<std::uint64_t> settled_frontiers;
+    settled_frontiers.reserve(measurement_frontier_.size());
+    for (const auto& [identity, frontier] : measurement_frontier_) {
+        static_cast<void>(frontier);
+        settled_frontiers.push_back(identity);
+    }
     if (!measurement_frontier_.empty()) {
         // A frontier deliberately propagates its old identity to stop parent layout work. Keep the
         // ancestors' canonical cached model current nevertheless, so a later resize/reflow cannot
@@ -372,6 +379,15 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
         }
         arrange(frontier, retained->second.bounds, retained->second.inherited_clip,
                 retained->second.pin_context, environment, next);
+    }
+    // The old identity only stops parent work within the pass that found the frontier. Once the
+    // current model is arranged, it is what parents see: otherwise a later pass (a fixed-size root's
+    // always does) arranges the ancestors from a copy kept since an earlier frame.
+    for (const std::uint64_t identity : settled_frontiers) {
+        if (auto cached = measurement_cache_.find(identity);
+            cached != measurement_cache_.end() && cached->second.measured != nullptr) {
+            cached->second.propagated = cached->second.measured;
+        }
     }
     while (!pending_anchors_.empty()) {
         std::optional<std::size_t> ready;
