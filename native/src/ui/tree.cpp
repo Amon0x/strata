@@ -967,4 +967,49 @@ bool expression_value_equal(const runtime::ExpressionValue& left,
     return true;
 }
 
+bool behaviors_equal(const std::vector<DescriptionBehavior>& left,
+                     const std::vector<DescriptionBehavior>& right) {
+    if (left.size() != right.size())
+        return false;
+    for (std::size_t index = 0U; index < left.size(); ++index) {
+        if (left[index].id != right[index].id || left[index].enabled != right[index].enabled ||
+            left[index].options != right[index].options ||
+            !expression_value_equal(
+                left[index].action != nullptr ? runtime::ExpressionValue(left[index].action)
+                                              : runtime::ExpressionValue(runtime::Value{}),
+                right[index].action != nullptr ? runtime::ExpressionValue(right[index].action)
+                                               : runtime::ExpressionValue(runtime::Value{}))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool description_content_equal(const DescriptionNode& left, const DescriptionNode& right) {
+    if (left.type != right.type || left.key != right.key ||
+        left.source_path != right.source_path || left.state_scope != right.state_scope ||
+        left.materialization_key != right.materialization_key ||
+        left.materialization != right.materialization ||
+        left.materialization_result != right.materialization_result ||
+        left.generated_source != right.generated_source ||
+        left.projected_theme != right.projected_theme ||
+        left.projected_theme_scope != right.projected_theme_scope ||
+        left.projected_theme_generation != right.projected_theme_generation ||
+        left.virtual_sequence != right.virtual_sequence ||
+        left.virtual_sequence_generation != right.virtual_sequence_generation ||
+        left.virtual_item_members != right.virtual_item_members ||
+        left.virtual_item_extents != right.virtual_item_extents ||
+        left.properties.size() != right.properties.size() ||
+        !behaviors_equal(left.behaviors, right.behaviors)) {
+        return false;
+    }
+    auto right_property = right.properties.begin();
+    for (const auto& [name, value] : left.properties) {
+        if (name != right_property->first || !expression_value_equal(value, right_property->second))
+            return false;
+        ++right_property;
+    }
+    return true;
+}
+
 } // namespace strata::ui

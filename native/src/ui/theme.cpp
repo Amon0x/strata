@@ -676,6 +676,35 @@ void report_unknown_timings(const Theme& theme, const DescriptionNode& node,
     }
 }
 
+[[nodiscard]] ThemeWidgetContribution
+widget_contribution(const Theme& theme, const std::string_view type, const std::string_view variant,
+                    const std::optional<std::string>& scope_namespace) {
+    const ResolvedThemeWidgetStyle themed = theme.resolved_style(type, variant);
+    const std::string motion_prefix = qualified_animation_prefix(
+        animation_owner_namespace(themed.owner_theme, scope_namespace), themed.key);
+    ThemeWidgetContribution result;
+    if (themed.style.visual.has_value())
+        add_visual(result.fields, *themed.style.visual);
+    if (themed.style.text_visual.has_value())
+        add_text_visual(result.fields, *themed.style.text_visual);
+    if (themed.style.text_layout.has_value())
+        add_text_layout(result.fields, *themed.style.text_layout);
+    if (themed.style.layout.has_value())
+        add_layout(result.fields, *themed.style.layout);
+    apply_motion(result.fields, themed.style.motion, motion_prefix);
+    // Description expansion has already installed widget layout defaults. A themed layout or
+    // text default wins over those framework defaults, while any authored style/layout remains
+    // authoritative exactly as it was written.
+    if (themed.style.layout.has_value())
+        add_layout(result.defaults, *themed.style.layout);
+    if (themed.style.text_layout.has_value())
+        add_text_layout(result.defaults, *themed.style.text_layout);
+    apply_motion(result.defaults, themed.style.motion, motion_prefix);
+    result.has_layout = themed.style.layout.has_value();
+    result.layout_participates = result.has_layout && themed.style.layout->participates;
+    return result;
+}
+
 [[nodiscard]] std::shared_ptr<const DescriptionNode>
 resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCatalog& catalog,
              const std::shared_ptr<const Theme>& inherited,
@@ -704,32 +733,54 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
             cached != nullptr) {
             return cached;
         }
+        // Only the children changed since the node was resolved: its resolved properties stand,
+        // and only the children are resolved (the unchanged ones from the cache).
+        if (const std::shared_ptr<const DescriptionNode> previous =
+                source->children_replaced_from.lock();
+            previous != nullptr && !source->materialization.has_value()) {
+            if (const std::shared_ptr<const DescriptionNode> prior =
+                    cache->find(previous, effective, scope_namespace, catalog.generation());
+                prior != nullptr) {
+                std::vector<std::shared_ptr<const DescriptionNode>> children;
+                children.reserve(source->children->size());
+                for (std::size_t index = 0U; index < source->children->size(); ++index) {
+                    children.push_back(resolve_node(source->children->at(index), catalog,
+                                                    effective, scope_namespace, themed_type,
+                                                    unknown_timing, stats, cache));
+                }
+                auto result = std::make_shared<DescriptionNode>(*prior);
+                result->generated_source = source;
+                result->children_replaced_from = prior;
+                result->children =
+                    std::make_shared<const EagerDescriptionChildren>(std::move(children));
+                cache->store(source, effective, scope_namespace, catalog.generation(), result);
+                return result;
+            }
+        }
     }
     ++stats.resolved_nodes;
 
     DescriptionNode::Properties properties = source->properties;
-    const bool style_node = themed_type(source->type);
-    const std::optional<ResolvedThemeWidgetStyle> themed =
-        style_node ? std::optional<ResolvedThemeWidgetStyle>(
-                         effective->resolved_style(source->type, node_variant(*source)))
-                   : std::nullopt;
-    const std::string motion_prefix =
-        themed.has_value()
-            ? qualified_animation_prefix(
-                  animation_owner_namespace(themed->owner_theme, scope_namespace), themed->key)
-            : std::string{};
-    ValueFields resolved;
-    if (themed.has_value()) {
-        if (themed->style.visual.has_value())
-            add_visual(resolved, *themed->style.visual);
-        if (themed->style.text_visual.has_value())
-            add_text_visual(resolved, *themed->style.text_visual);
-        if (themed->style.text_layout.has_value())
-            add_text_layout(resolved, *themed->style.text_layout);
-        if (themed->style.layout.has_value())
-            add_layout(resolved, *themed->style.layout);
-        apply_motion(resolved, themed->style.motion, motion_prefix);
+    const ThemeWidgetContribution* themed = nullptr;
+    std::optional<ThemeWidgetContribution> uncached;
+    if (themed_type(source->type)) {
+        std::string variant = node_variant(*source);
+        themed = cache != nullptr
+                     ? cache->widget_contribution(effective, source->type, variant, scope_namespace)
+                     : nullptr;
+        if (themed == nullptr) {
+            ThemeWidgetContribution contribution =
+                widget_contribution(*effective, source->type, variant, scope_namespace);
+            if (cache != nullptr) {
+                themed = &cache->store_widget_contribution(effective, source->type,
+                                                           std::move(variant), scope_namespace,
+                                                           std::move(contribution));
+            } else {
+                themed = &uncached.emplace(std::move(contribution));
+            }
+        }
     }
+    ValueFields resolved = themed != nullptr ? themed->fields : ValueFields{};
     const runtime::Value* authored = property(*source, "$layout");
     bool authored_color_field = false;
     bool authored_foreground_field = false;
@@ -788,16 +839,10 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
         }
     }
 
-    if (themed.has_value()) {
-        // Description expansion has already installed widget layout defaults. A themed layout or
-        // text default wins over those framework defaults, while any authored style/layout remains
-        // authoritative exactly as it was written.
+    if (themed != nullptr) {
         if (!has_authored_style_container(*source)) {
-            if (themed->style.layout.has_value())
-                add_layout(resolved, *themed->style.layout);
-            if (themed->style.text_layout.has_value())
-                add_text_layout(resolved, *themed->style.text_layout);
-            apply_motion(resolved, themed->style.motion, motion_prefix);
+            for (const auto& [name, value] : themed->defaults)
+                resolved.insert_or_assign(name, value);
         }
         for (const std::string_view motion_field : {
                  "animation",
@@ -824,20 +869,29 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
                 }
             }
         }
-        if (themed->style.layout.has_value() && !has_authored_style_container(*source)) {
+        if (themed->has_layout && !has_authored_style_container(*source)) {
             properties.insert_or_assign(
                 "$layoutParticipates",
-                runtime::ExpressionValue(runtime::Value(themed->style.layout->participates)));
+                runtime::ExpressionValue(runtime::Value(themed->layout_participates)));
         }
     }
-    if (themed.has_value() || has_authored_layout) {
+    if (themed != nullptr || has_authored_layout) {
         properties.insert_or_assign("$layout",
                                     runtime::ExpressionValue(object(std::move(resolved))));
     }
     properties.insert_or_assign("$themeName",
                                 runtime::ExpressionValue(runtime::Value(effective->name())));
-    properties.insert_or_assign(
-        "$motionPolicy", runtime::ExpressionValue(motion_policy_value(effective->motion_policy())));
+    if (cache != nullptr) {
+        const runtime::Value* shared = cache->motion_policy(effective);
+        if (shared == nullptr) {
+            cache->store_motion_policy(effective, motion_policy_value(effective->motion_policy()));
+            shared = cache->motion_policy(effective);
+        }
+        properties.insert_or_assign("$motionPolicy", runtime::ExpressionValue(*shared));
+    } else {
+        properties.insert_or_assign(
+            "$motionPolicy", runtime::ExpressionValue(motion_policy_value(effective->motion_policy())));
+    }
 
     const std::size_t child_count = source->children->size();
     MaterializationRange range{0U, child_count};
@@ -1779,6 +1833,20 @@ ThemeMaterializationCache::find(const std::shared_ptr<const DescriptionNode>& so
     return materialized;
 }
 
+const runtime::Value*
+ThemeMaterializationCache::motion_policy(const std::shared_ptr<const Theme>& theme) const {
+    const auto found = motion_policies_.find(theme.get());
+    return found != motion_policies_.end() && found->second.theme.lock() == theme ? &found->second.value
+                                                                               : nullptr;
+}
+
+void ThemeMaterializationCache::store_motion_policy(const std::shared_ptr<const Theme>& theme,
+                                                    runtime::Value value) {
+    // A theme that went away may have left its address to a new one: its entry is replaced.
+    std::erase_if(motion_policies_, [](const auto& entry) { return entry.second.theme.expired(); });
+    motion_policies_.insert_or_assign(theme.get(), MotionPolicyEntry{theme, std::move(value)});
+}
+
 void ThemeMaterializationCache::store(const std::shared_ptr<const DescriptionNode>& source,
                                       const std::shared_ptr<const Theme>& effective_theme,
                                       std::optional<std::string> scope_namespace,
@@ -1793,16 +1861,41 @@ void ThemeMaterializationCache::store(const std::shared_ptr<const DescriptionNod
                                             });
 }
 
+const ThemeWidgetContribution* ThemeMaterializationCache::widget_contribution(
+    const std::shared_ptr<const Theme>& theme, const std::string_view type,
+    const std::string_view variant, const std::optional<std::string>& scope_namespace) const {
+    const auto found = contributions_.find(ContributionKey{
+        theme.get(), std::string(type), std::string(variant), scope_namespace});
+    return found != contributions_.end() && found->second.theme.lock() == theme
+               ? &found->second.contribution
+               : nullptr;
+}
+
+const ThemeWidgetContribution& ThemeMaterializationCache::store_widget_contribution(
+    const std::shared_ptr<const Theme>& theme, std::string type, std::string variant,
+    std::optional<std::string> scope_namespace, ThemeWidgetContribution contribution) {
+    return contributions_
+        .insert_or_assign(
+            ContributionKey{theme.get(), std::move(type), std::move(variant),
+                            std::move(scope_namespace)},
+            ContributionEntry{theme, std::move(contribution)})
+        .first->second.contribution;
+}
+
 void ThemeMaterializationCache::purge(const std::uint64_t catalog_generation) {
     std::erase_if(entries_, [catalog_generation](const auto& value) {
         return value.second.catalog_generation != catalog_generation ||
                value.second.source.expired() || value.second.effective_theme.expired() ||
                value.second.materialized.expired();
     });
+    std::erase_if(contributions_,
+                  [](const auto& value) { return value.second.theme.expired(); });
 }
 
 void ThemeMaterializationCache::clear() noexcept {
     entries_.clear();
+    motion_policies_.clear();
+    contributions_.clear();
 }
 
 ThemeMaterializationResult

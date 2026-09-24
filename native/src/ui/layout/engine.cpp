@@ -613,7 +613,11 @@ bool LayoutEngine::arranged_in_current_pass(const RetainedNode& node) const noex
 }
 
 LayoutStyle LayoutEngine::resolved_style(const RetainedNode& node) const {
-    LayoutStyle style = layout_style(node.description());
+    // Parsed once per description change, not on every measure of the node (reconcile drops it).
+    if (node.layout_style_ == nullptr) {
+        node.layout_style_ = std::make_shared<const LayoutStyle>(layout_style(node.description()));
+    }
+    LayoutStyle style = *node.layout_style_;
     style.scroll_offset = resolved_scroll_offset(node, style.scroll_offset);
     if (const runtime::Value* retained = node.retained_value("strata.gesture.runtimeSize");
         retained != nullptr && retained->object() != nullptr) {

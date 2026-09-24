@@ -21,24 +21,6 @@ struct SiblingKey final {
     }
 };
 
-[[nodiscard]] bool behaviors_equal(const std::vector<DescriptionBehavior>& left,
-                                   const std::vector<DescriptionBehavior>& right) {
-    if (left.size() != right.size())
-        return false;
-    for (std::size_t index = 0U; index < left.size(); ++index) {
-        if (left[index].id != right[index].id || left[index].enabled != right[index].enabled ||
-            left[index].options != right[index].options ||
-            !expression_value_equal(
-                left[index].action != nullptr ? runtime::ExpressionValue(left[index].action)
-                                              : runtime::ExpressionValue(runtime::Value{}),
-                right[index].action != nullptr ? runtime::ExpressionValue(right[index].action)
-                                               : runtime::ExpressionValue(runtime::Value{}))) {
-            return false;
-        }
-    }
-    return true;
-}
-
 [[nodiscard]] bool layout_projection_equal(const runtime::ExpressionValue* current,
                                            const runtime::ExpressionValue* next) noexcept {
     const runtime::Value* current_value = current != nullptr ? current->value() : nullptr;
@@ -159,6 +141,13 @@ struct SiblingKey final {
            reason == DirtyReason::scale;
 }
 
+/** Whether a node is in the semantic index: it has semantics that are not null. */
+[[nodiscard]] bool has_semantics(const DescriptionNode& node) {
+    const auto semantics = node.properties.find("semantics");
+    return semantics != node.properties.end() && semantics->second.value() != nullptr &&
+           semantics->second.value()->kind() != runtime::ValueKind::null_value;
+}
+
 [[nodiscard]] std::string child_path(const std::string_view parent, const std::size_t index) {
     return parent == "/" ? "/" + std::to_string(index)
                          : std::string(parent) + "/" + std::to_string(index);
@@ -172,6 +161,8 @@ ReconcileStats RetainedTree::reconcile(std::shared_ptr<const DescriptionNode> ro
         throw std::invalid_argument("retained reconciliation requires a root description");
     ReconcileStats stats;
     bool layout_invalidated = false;
+    reconcile_indexes_changed_ = root_ == nullptr;
+    reconcile_dirty_.clear();
     root_ = reconcile_node(std::move(root_), std::move(root), nullptr, 0U, "/", stats,
                            layout_invalidated, exit_retention);
     if (stats.changed()) {
@@ -179,13 +170,23 @@ ReconcileStats RetainedTree::reconcile(std::shared_ptr<const DescriptionNode> ro
             throw std::overflow_error("retained tree generation exhausted");
         }
         ++generation_;
-        invalidate_description_snapshot();
+        // The snapshot holds identities, types, keys, paths, sequences and retained values: a
+        // change of property values alone leaves it as it was.
+        if (reconcile_indexes_changed_)
+            invalidate_description_snapshot();
     }
     if (layout_invalidated)
         invalidate_layout();
     stats.generation = generation_;
-    if (stats.changed())
-        rebuild_indexes();
+    if (stats.changed()) {
+        if (reconcile_indexes_changed_) {
+            rebuild_indexes();
+        } else {
+            for (const std::uint64_t identity : reconcile_dirty_)
+                dirty_index_.insert(identity);
+        }
+    }
+    reconcile_dirty_.clear();
     return stats;
 }
 
@@ -206,6 +207,7 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
     bool node_updated = false;
     bool node_layout_updated = false;
     if (!compatible) {
+        reconcile_indexes_changed_ = true;
         detach(std::move(existing), &stats);
         existing = std::unique_ptr<RetainedNode>(new RetainedNode(
             next_identity(), description, parent, source_index, std::move(structural_path)));
@@ -217,7 +219,10 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
         layout_invalidated = true;
     } else {
         ++stats.reused;
+        if (existing->parent_ != parent || existing->source_index_ != source_index)
+            reconcile_indexes_changed_ = true;
         if (existing->lifecycle_ == RetainedLifecycle::exiting) {
+            reconcile_indexes_changed_ = true;
             mark_subtree_lifecycle(*existing, RetainedLifecycle::attached);
             existing->mark_dirty(DirtyReason::animation);
             bump_dirty_generation(DirtyReason::animation);
@@ -227,81 +232,106 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
         existing->source_index_ = source_index;
         existing->structural_path_ = std::move(structural_path);
         const auto& previous = *existing->description_;
-        node_updated = node_updated || previous.source_path != description->source_path ||
-                       previous.state_scope != description->state_scope;
-        if (previous.source_path != description->source_path ||
-            previous.state_scope != description->state_scope) {
-            existing->mark_dirty(DirtyReason::properties);
-            bump_dirty_generation(DirtyReason::properties);
-        }
-        if (previous.materialization_key != description->materialization_key) {
-            existing->mark_dirty(DirtyReason::layout);
-            bump_dirty_generation(DirtyReason::layout);
-            node_layout_updated = true;
-            node_updated = true;
-        }
-        if (!behaviors_equal(previous.behaviors, description->behaviors)) {
-            existing->mark_dirty(DirtyReason::input);
-            existing->mark_dirty(DirtyReason::semantics);
-            bump_dirty_generation(DirtyReason::input);
-            bump_dirty_generation(DirtyReason::semantics);
-            node_updated = true;
-        }
-        const bool sequence_changed =
-            (previous.virtual_sequence == nullptr) != (description->virtual_sequence == nullptr) ||
-            (previous.virtual_sequence != nullptr &&
-             !previous.virtual_sequence->same_generation(*description->virtual_sequence));
-        const bool virtual_metadata_changed =
-            (previous.virtual_item_members == nullptr) !=
-                (description->virtual_item_members == nullptr) ||
-            (previous.virtual_item_members != nullptr &&
-             *previous.virtual_item_members != *description->virtual_item_members) ||
-            (previous.virtual_item_extents == nullptr) !=
-                (description->virtual_item_extents == nullptr) ||
-            (previous.virtual_item_extents != nullptr &&
-             *previous.virtual_item_extents != *description->virtual_item_extents);
-        if (sequence_changed || virtual_metadata_changed) {
-            existing->mark_dirty(DirtyReason::layout);
-            bump_dirty_generation(DirtyReason::layout);
-            node_layout_updated = true;
-            node_updated = true;
-        }
-        for (const auto& [name, next] : description->properties) {
-            const auto current = previous.properties.find(name);
-            if (current == previous.properties.end() ||
-                !expression_value_equal(current->second, next)) {
-                const DirtyReason reason = property_reason(
-                    name, current != previous.properties.end() ? &current->second : nullptr, &next);
-                existing->mark_dirty(reason);
-                bump_dirty_generation(reason);
-                node_layout_updated = node_layout_updated || affects_layout(reason);
+        // A copy of the retained description with only its children replaced carries the same
+        // properties, behaviors and metadata: only its placement and children can differ.
+        if (description->children_replaced_from.lock() == existing->description_) {
+            existing->description_ = description;
+        } else {
+            node_updated = node_updated || previous.source_path != description->source_path ||
+                           previous.state_scope != description->state_scope;
+            if (previous.source_path != description->source_path ||
+                previous.state_scope != description->state_scope) {
+                reconcile_indexes_changed_ = true;
+                existing->mark_dirty(DirtyReason::properties);
+                bump_dirty_generation(DirtyReason::properties);
+            }
+            if (previous.materialization.has_value() != description->materialization.has_value() ||
+                has_semantics(previous) != has_semantics(*description))
+                reconcile_indexes_changed_ = true;
+            if (previous.materialization_key != description->materialization_key) {
+                existing->mark_dirty(DirtyReason::layout);
+                bump_dirty_generation(DirtyReason::layout);
+                node_layout_updated = true;
                 node_updated = true;
             }
-        }
-        for (const auto& [name, current] : previous.properties) {
-            static_cast<void>(current);
-            if (!description->properties.contains(name)) {
-                const DirtyReason reason = property_reason(name, &current, nullptr);
-                existing->mark_dirty(reason);
-                bump_dirty_generation(reason);
-                node_layout_updated = node_layout_updated || affects_layout(reason);
+            if (!behaviors_equal(previous.behaviors, description->behaviors)) {
+                existing->mark_dirty(DirtyReason::input);
+                existing->mark_dirty(DirtyReason::semantics);
+                bump_dirty_generation(DirtyReason::input);
+                bump_dirty_generation(DirtyReason::semantics);
                 node_updated = true;
             }
-        }
-        const auto previous_persistence = previous.properties.find("persistenceKey");
-        const auto next_persistence = description->properties.find("persistenceKey");
-        const bool persistence_changed =
-            (previous_persistence == previous.properties.end()) !=
-                (next_persistence == description->properties.end()) ||
-            (previous_persistence != previous.properties.end() &&
-             next_persistence != description->properties.end() &&
-             !expression_value_equal(previous_persistence->second, next_persistence->second));
-        existing->description_ = description;
-        if (persistence_changed && persistence_fields_) {
-            for (const std::string& field : persistence_fields_(description->type)) {
-                existing->retained_values_.erase(field);
+            const bool sequence_changed =
+                (previous.virtual_sequence == nullptr) !=
+                    (description->virtual_sequence == nullptr) ||
+                (previous.virtual_sequence != nullptr &&
+                 !previous.virtual_sequence->same_generation(*description->virtual_sequence));
+            const bool virtual_metadata_changed =
+                (previous.virtual_item_members == nullptr) !=
+                    (description->virtual_item_members == nullptr) ||
+                (previous.virtual_item_members != nullptr &&
+                 *previous.virtual_item_members != *description->virtual_item_members) ||
+                (previous.virtual_item_extents == nullptr) !=
+                    (description->virtual_item_extents == nullptr) ||
+                (previous.virtual_item_extents != nullptr &&
+                 *previous.virtual_item_extents != *description->virtual_item_extents);
+            if (sequence_changed || virtual_metadata_changed) {
+                reconcile_indexes_changed_ = true;
+                existing->mark_dirty(DirtyReason::layout);
+                bump_dirty_generation(DirtyReason::layout);
+                node_layout_updated = true;
+                node_updated = true;
             }
-            hydrate_persistence(*existing);
+            for (const auto& [name, next] : description->properties) {
+                const auto current = previous.properties.find(name);
+                if (current == previous.properties.end() ||
+                    !expression_value_equal(current->second, next)) {
+                    const DirtyReason reason = property_reason(
+                        name, current != previous.properties.end() ? &current->second : nullptr,
+                        &next);
+                    existing->mark_dirty(reason);
+                    bump_dirty_generation(reason);
+                    node_layout_updated = node_layout_updated || affects_layout(reason);
+                    node_updated = true;
+                    existing->layout_style_.reset();
+                }
+            }
+            for (const auto& [name, current] : previous.properties) {
+                static_cast<void>(current);
+                if (!description->properties.contains(name)) {
+                    const DirtyReason reason = property_reason(name, &current, nullptr);
+                    existing->mark_dirty(reason);
+                    bump_dirty_generation(reason);
+                    node_layout_updated = node_layout_updated || affects_layout(reason);
+                    node_updated = true;
+                    existing->layout_style_.reset();
+                }
+            }
+            if (previous.virtual_sequence != description->virtual_sequence ||
+                previous.virtual_item_members != description->virtual_item_members ||
+                previous.virtual_item_extents != description->virtual_item_extents) {
+                existing->layout_style_.reset();
+            }
+            // The description snapshot carries the sequence itself, not only its generation.
+            if (previous.virtual_sequence != description->virtual_sequence ||
+                previous.virtual_sequence_generation != description->virtual_sequence_generation)
+                reconcile_indexes_changed_ = true;
+            const auto previous_persistence = previous.properties.find("persistenceKey");
+            const auto next_persistence = description->properties.find("persistenceKey");
+            const bool persistence_changed =
+                (previous_persistence == previous.properties.end()) !=
+                    (next_persistence == description->properties.end()) ||
+                (previous_persistence != previous.properties.end() &&
+                 next_persistence != description->properties.end() &&
+                 !expression_value_equal(previous_persistence->second, next_persistence->second));
+            existing->description_ = description;
+            if (persistence_changed && persistence_fields_) {
+                reconcile_indexes_changed_ = true;
+                for (const std::string& field : persistence_fields_(description->type)) {
+                    existing->retained_values_.erase(field);
+                }
+                hydrate_persistence(*existing);
+            }
         }
     }
 
@@ -333,6 +363,8 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
         }
         if (compatible && node_updated)
             ++stats.updated;
+        if (!existing->dirty_.empty())
+            reconcile_dirty_.push_back(existing->identity_);
         existing->refresh_subtree_metadata();
         return existing;
     }
@@ -409,6 +441,7 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
         available.erase(found);
         const bool already_exiting = removed->lifecycle_ == RetainedLifecycle::exiting;
         const bool retain = already_exiting || (exit_retention && exit_retention(*removed));
+        reconcile_indexes_changed_ = true;
         if (!retain) {
             removed_children = true;
             detach(std::move(removed), &stats);
@@ -431,6 +464,7 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
     for (const auto& child : existing->children_)
         next_order.push_back(child->identity_);
     if (removed_children || (compatible && previous_order != next_order)) {
+        reconcile_indexes_changed_ = true;
         existing->mark_dirty(DirtyReason::structure);
         bump_dirty_generation(DirtyReason::structure);
         node_layout_updated = true;
@@ -447,6 +481,8 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
     }
     if (compatible && node_updated)
         ++stats.updated;
+    if (!existing->dirty_.empty())
+        reconcile_dirty_.push_back(existing->identity_);
     existing->refresh_subtree_metadata();
     return existing;
 }

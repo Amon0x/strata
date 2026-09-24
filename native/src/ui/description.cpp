@@ -367,6 +367,79 @@ void collect_slot_names(
     return resolved;
 }
 
+/**
+ * The rebuild of a component or layer with every part equal to the previous build taken from it:
+ * the stages after description (theme, reconcile, layout) then find unchanged nodes by identity,
+ * and a node that differs only in its children is linked to its previous self. Applying it again
+ * to its own result returns that result.
+ */
+[[nodiscard]] std::shared_ptr<const DescriptionNode> share_unchanged(
+    const std::shared_ptr<const DescriptionNode>& previous,
+    const std::shared_ptr<const DescriptionNode>& next
+) {
+    if (previous == nullptr || next == nullptr || previous == next ||
+        previous->type != next->type || previous->key != next->key) {
+        return next;
+    }
+    // Generated providers own their rows; only eagerly built children are compared.
+    const auto* previous_children =
+        dynamic_cast<const EagerDescriptionChildren*>(previous->children.get());
+    const auto* next_children = dynamic_cast<const EagerDescriptionChildren*>(next->children.get());
+    if (previous_children == nullptr || next_children == nullptr) return next;
+
+    const std::size_t previous_count = previous_children->size();
+    const std::size_t count = next_children->size();
+    std::vector<std::shared_ptr<const DescriptionNode>> children;
+    children.reserve(count);
+    bool differs_from_next = false;
+    bool same_as_previous = count == previous_count;
+    std::map<std::pair<std::string_view, std::string_view>, std::size_t> previous_keyed;
+    for (std::size_t index = 0U; index < count; ++index) {
+        std::shared_ptr<const DescriptionNode> child = next_children->at(index);
+        std::shared_ptr<const DescriptionNode> counterpart =
+            index < previous_count ? previous_children->at(index) : nullptr;
+        if (child->key.has_value() &&
+            (counterpart == nullptr || counterpart->type != child->type ||
+             counterpart->key != child->key)) {
+            // A keyed child that moved is found by its key among the previous children.
+            if (previous_keyed.empty()) {
+                for (std::size_t other = 0U; other < previous_count; ++other) {
+                    const std::shared_ptr<const DescriptionNode> candidate =
+                        previous_children->at(other);
+                    if (candidate->key.has_value()) {
+                        previous_keyed.emplace(
+                            std::pair<std::string_view, std::string_view>(
+                                candidate->type, *candidate->key
+                            ),
+                            other
+                        );
+                    }
+                }
+            }
+            const auto found = previous_keyed.find({child->type, *child->key});
+            counterpart = found != previous_keyed.end() ? previous_children->at(found->second)
+                                                        : nullptr;
+        }
+        std::shared_ptr<const DescriptionNode> shared = share_unchanged(counterpart, child);
+        differs_from_next = differs_from_next || shared != child;
+        same_as_previous = same_as_previous && index < previous_count &&
+                           shared == previous_children->at(index);
+        children.push_back(std::move(shared));
+    }
+    if (!description_content_equal(*previous, *next)) {
+        if (!differs_from_next) return next;
+        auto result = std::make_shared<DescriptionNode>(*next);
+        result->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
+        return result;
+    }
+    if (same_as_previous) return previous;
+    if (!differs_from_next && next->children_replaced_from.lock() == previous) return next;
+    auto result = std::make_shared<DescriptionNode>(*previous);
+    result->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
+    result->children_replaced_from = previous;
+    return result;
+}
+
 } // namespace
 
 struct DescriptionBuilder::RepeaterIdentityEvaluationState final {
@@ -765,7 +838,6 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_layer(
     const std::string cache_key =
         std::string(role == runtime::LayerRole::screen ? "screen\n" : "overlay\n") +
         std::string(name);
-    std::shared_ptr<const DescriptionNode> patched_layer_root;
     if (auto cached = layer_cache_.find(cache_key);
         cached != layer_cache_.end() &&
         cached->second.role == role &&
@@ -813,10 +885,18 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_layer(
                 return cached->second.root;
             }
             if (direct_current) {
-                patched_layer_root = replace_component_subtrees(
+                std::shared_ptr<const DescriptionNode> patched = replace_component_subtrees(
                     cached->second.root,
                     replacements
                 );
+                if (patched != nullptr &&
+                    aggregate_component_effects(cached->second.effects)) {
+                    cached->second.host_invalidation_count =
+                        application_.host().invalidation_count();
+                    cached->second.root = patched;
+                    replay_component_effects(cached->second.effects);
+                    return patched;
+                }
             }
         }
     }
@@ -867,7 +947,9 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_layer(
         std::move(declaration_children)
     );
     ++described_nodes_;
-    if (patched_layer_root != nullptr) root = std::move(patched_layer_root);
+    if (const auto previous = layer_cache_.find(cache_key); previous != layer_cache_.end()) {
+        root = share_unchanged(previous->second.root, root);
+    }
     layer_cache_.insert_or_assign(cache_key, LayerCacheEntry{
         role,
         std::string(name),
@@ -1542,6 +1624,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
         );
         const std::string cache_key = type + "\n" + component_scope.instance_path;
         std::shared_ptr<const DescriptionNode> component_root;
+        std::shared_ptr<const DescriptionNode> previous_root;
         if (inputs.has_value()) {
             visited_component_cache_keys_.insert(cache_key);
             for (ComponentEffects* const component_effect : component_effect_stack_) {
@@ -1567,16 +1650,17 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
                 cached->second.last_used_epoch = component_cache_epoch_;
                 replay_component_effects(cached->second.effects);
                 component_root = cached->second.root;
+            } else if (cached != component_cache_.end()) {
+                previous_root = cached->second.root;
             }
         }
         if (component_root == nullptr) {
             ComponentEffects effects;
             const std::size_t diagnostics_before = diagnostics_.size();
             Scope rebuild_scope = component_scope;
-            component_root = build_component_body(
-                type,
-                std::move(component_scope),
-                effects
+            component_root = share_unchanged(
+                previous_root,
+                build_component_body(type, std::move(component_scope), effects)
             );
             if (inputs.has_value() && diagnostics_.size() == diagnostics_before) {
                 component_cache_.insert_or_assign(cache_key, ComponentCacheEntry{
@@ -2018,7 +2102,8 @@ void DescriptionBuilder::bind_state_scope(
     const std::string_view runtime_scope,
     const std::string_view state_name,
     const std::string_view declaration_scope,
-    const std::string_view address_scope
+    const std::string_view address_scope,
+    const bool replayed
 ) {
     const runtime::StateAddress binding_address{
         std::string(runtime_scope),
@@ -2031,6 +2116,12 @@ void DescriptionBuilder::bind_state_scope(
     for (ComponentEffects* const component : component_effect_stack_) {
         component->state_bindings.insert_or_assign(binding_address, effect);
     }
+    if (!replayed && !component_effect_stack_.empty()) {
+        component_effect_stack_.back()->local_state_bindings.insert_or_assign(
+            binding_address,
+            effect
+        );
+    }
     application_.bind_state_scope(
         binding_address.scope,
         binding_address.name,
@@ -2039,11 +2130,14 @@ void DescriptionBuilder::bind_state_scope(
     );
 }
 
-void DescriptionBuilder::own_state_scope(const std::string_view scope) {
+void DescriptionBuilder::own_state_scope(const std::string_view scope, const bool replayed) {
     current_layer_state_scopes_.insert(std::string(scope));
     application_.state().mark_owned_scope(std::string(scope));
     for (ComponentEffects* const component : component_effect_stack_) {
         component->owned_state_scopes.insert(std::string(scope));
+    }
+    if (!replayed && !component_effect_stack_.empty()) {
+        component_effect_stack_.back()->local_owned_state_scopes.insert(std::string(scope));
     }
 }
 
@@ -2118,6 +2212,9 @@ void DescriptionBuilder::capture_retained_snapshot() {
     for (ComponentEffects* const component : component_effect_stack_) {
         component->captures_retained_snapshot = true;
         component->retained_snapshot = retained_snapshot_;
+    }
+    if (!component_effect_stack_.empty()) {
+        component_effect_stack_.back()->local_captures_retained_snapshot = true;
     }
 }
 
@@ -2194,6 +2291,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::replace_component_sub
         result->children = std::make_shared<const EagerDescriptionChildren>(
             std::move(children)
         );
+        result->children_replaced_from = current;
         return result;
     };
     std::shared_ptr<const DescriptionNode> result = replace(replace, root);
@@ -2248,10 +2346,18 @@ DescriptionBuilder::refresh_component_cache_entry(const std::string& cache_key) 
     if (replacements.empty() && direct_current) {
         return ComponentRefreshResult::unchanged;
     }
-    const std::shared_ptr<const DescriptionNode> patched =
-        direct_current && !replacements.empty()
-            ? replace_component_subtrees(entry.root, replacements)
-            : nullptr;
+    // Only descendants changed: the body would describe the same nodes around them, so their new
+    // subtrees are patched in and the aggregate is recomputed from the descendants' entries.
+    if (direct_current) {
+        std::shared_ptr<const DescriptionNode> patched =
+            replace_component_subtrees(entry.root, replacements);
+        if (patched != nullptr && aggregate_component_effects(entry.effects)) {
+            entry.host_invalidation_count = application_.host().invalidation_count();
+            entry.last_used_epoch = component_cache_epoch_;
+            entry.root = std::move(patched);
+            return ComponentRefreshResult::changed;
+        }
+    }
 
     const std::size_t diagnostics_before = diagnostics_.size();
     ComponentEffects effects;
@@ -2267,7 +2373,7 @@ DescriptionBuilder::refresh_component_cache_entry(const std::string& cache_key) 
     entry.host_invalidation_count = application_.host().invalidation_count();
     entry.last_used_epoch = component_cache_epoch_;
     entry.effects = std::move(effects);
-    entry.root = patched != nullptr ? patched : std::move(rebuilt);
+    entry.root = share_unchanged(entry.root, rebuilt);
     return ComponentRefreshResult::changed;
 }
 
@@ -2278,15 +2384,45 @@ void DescriptionBuilder::replay_component_effects(const ComponentEffects& effect
             component->descendant_cache_keys.insert(cache_key);
         }
     }
-    for (const std::string& scope : effects.owned_state_scopes) own_state_scope(scope);
+    for (const std::string& scope : effects.owned_state_scopes) own_state_scope(scope, true);
     for (const auto& [binding_address, binding] : effects.state_bindings) {
         bind_state_scope(
             binding_address.scope,
             binding_address.name,
             binding.declaration_scope,
-            binding.address_scope
+            binding.address_scope,
+            true
         );
     }
+}
+
+bool DescriptionBuilder::aggregate_component_effects(ComponentEffects& effects) const {
+    effects.state_bindings = effects.local_state_bindings;
+    effects.owned_state_scopes = effects.local_owned_state_scopes;
+    effects.captures_retained_snapshot = effects.local_captures_retained_snapshot;
+    effects.descendant_cache_keys.clear();
+    for (const std::string& child_key : effects.direct_descendant_cache_keys) {
+        const auto child = component_cache_.find(child_key);
+        if (child == component_cache_.end()) return false;
+        const ComponentEffects& descendant = child->second.effects;
+        effects.descendant_cache_keys.insert(child_key);
+        effects.descendant_cache_keys.insert(
+            descendant.descendant_cache_keys.begin(),
+            descendant.descendant_cache_keys.end()
+        );
+        for (const auto& [address, binding] : descendant.state_bindings) {
+            effects.state_bindings.insert_or_assign(address, binding);
+        }
+        effects.owned_state_scopes.insert(
+            descendant.owned_state_scopes.begin(),
+            descendant.owned_state_scopes.end()
+        );
+        effects.captures_retained_snapshot =
+            effects.captures_retained_snapshot || descendant.captures_retained_snapshot;
+    }
+    effects.retained_snapshot =
+        effects.captures_retained_snapshot ? retained_snapshot_ : nullptr;
+    return true;
 }
 
 void DescriptionBuilder::absorb_uncached_component_effects(
@@ -2304,6 +2440,18 @@ void DescriptionBuilder::absorb_uncached_component_effects(
         effects.owned_state_scopes.begin(),
         effects.owned_state_scopes.end()
     );
+    // An uncached component has no entry to aggregate from later, so what it contributed itself
+    // becomes its parent's own contribution.
+    parent.local_state_bindings.insert(
+        effects.local_state_bindings.begin(),
+        effects.local_state_bindings.end()
+    );
+    parent.local_owned_state_scopes.insert(
+        effects.local_owned_state_scopes.begin(),
+        effects.local_owned_state_scopes.end()
+    );
+    parent.local_captures_retained_snapshot =
+        parent.local_captures_retained_snapshot || effects.local_captures_retained_snapshot;
     parent.direct_descendant_cache_keys.insert(
         effects.direct_descendant_cache_keys.begin(),
         effects.direct_descendant_cache_keys.end()

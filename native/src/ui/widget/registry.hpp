@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "runtime/expression.hpp"
@@ -235,8 +236,15 @@ class WidgetRegistry final {
                        WidgetRetainedDependencyObserver observe_retained = {}) const;
 
   private:
+    struct TypeHash final {
+        using is_transparent = void;
+        [[nodiscard]] std::size_t operator()(const std::string_view type) const noexcept {
+            return std::hash<std::string_view>{}(type);
+        }
+    };
     [[nodiscard]] WidgetLifecycle& lifecycle(std::string type);
-    std::map<std::string, WidgetLifecycle, std::less<>> lifecycles_;
+    /** Hashed: every retained node's presentation, input and command pass looks its type up. */
+    std::unordered_map<std::string, WidgetLifecycle, TypeHash, std::equal_to<>> lifecycles_;
 };
 
 void register_builtin_widget_presenters(WidgetRegistry& registry);

@@ -347,6 +347,16 @@ struct ThemeMaterializationResult final {
     ThemeMaterializationStats stats;
 };
 
+/** What a theme gives every node of one widget type and variant within one theme scope. */
+struct ThemeWidgetContribution final {
+    /** The themed visual, text and layout fields and motion, before the node's authored fields. */
+    std::map<std::string, runtime::Value, std::less<>> fields;
+    /** Laid again over the authored fields of a node without an authored style container. */
+    std::map<std::string, runtime::Value, std::less<>> defaults;
+    bool has_layout = false;
+    bool layout_participates = true;
+};
+
 /** Weak structural-sharing cache for repeated materialization of immutable description nodes. */
 class ThemeMaterializationCache final {
 public:
@@ -365,8 +375,39 @@ public:
     );
     void purge(std::uint64_t catalog_generation);
     void clear() noexcept;
+    /** The theme's motion policy as the value each materialized node carries: built once per
+     * theme and shared, so nodes do not rebuild it and comparisons of it are pointer checks. */
+    [[nodiscard]] const runtime::Value* motion_policy(const std::shared_ptr<const Theme>& theme) const;
+    void store_motion_policy(const std::shared_ptr<const Theme>& theme, runtime::Value value);
+    /** The contribution built once per theme, widget type, variant and scope, as nodes share it. */
+    [[nodiscard]] const ThemeWidgetContribution*
+    widget_contribution(const std::shared_ptr<const Theme>& theme, std::string_view type,
+                        std::string_view variant,
+                        const std::optional<std::string>& scope_namespace) const;
+    const ThemeWidgetContribution&
+    store_widget_contribution(const std::shared_ptr<const Theme>& theme, std::string type,
+                              std::string variant, std::optional<std::string> scope_namespace,
+                              ThemeWidgetContribution contribution);
 
 private:
+    struct ContributionKey final {
+        const Theme* theme = nullptr;
+        std::string type;
+        std::string variant;
+        std::optional<std::string> scope_namespace;
+        [[nodiscard]] friend auto operator<=>(const ContributionKey&,
+                                              const ContributionKey&) = default;
+    };
+    struct ContributionEntry final {
+        std::weak_ptr<const Theme> theme;
+        ThemeWidgetContribution contribution;
+    };
+    std::map<ContributionKey, ContributionEntry> contributions_;
+    struct MotionPolicyEntry final {
+        std::weak_ptr<const Theme> theme;
+        runtime::Value value;
+    };
+    std::map<const Theme*, MotionPolicyEntry> motion_policies_;
     struct Entry final {
         std::weak_ptr<const DescriptionNode> source;
         std::weak_ptr<const Theme> effective_theme;

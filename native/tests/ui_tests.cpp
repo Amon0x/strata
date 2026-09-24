@@ -47,6 +47,7 @@
 #include "ui/svg_image.hpp"
 #include "ui/text.hpp"
 #include "ui/widget/editor_geometry.hpp"
+#include "ui/theme.hpp"
 #include "ui/tree.hpp"
 #include "ui/widget/input.hpp"
 #include "ui/widget/registry.hpp"
@@ -6119,6 +6120,126 @@ overlay Other { root Text(key: "cache.other", text: "other") }
           "detaching one layer eagerly discarded reusable component descriptions");
 }
 
+void test_component_change_patches_ancestors_and_shares_unchanged_nodes() {
+    using namespace strata;
+    const data::JsonValue schemas = data::parse_json(R"({
+      "extensionPackages":[],
+      "widgets":{"registry":"component-patch","required":[],"definitions":[]},
+      "actions":{"registry":"component-patch","required":[],"definitions":[]},
+      "host":[
+        {"path":"clock","nullable":false,"type":{"kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[{"name":"value","type":{"kind":"string"},"required":true,"nullable":false}]}}
+      ]
+    })");
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
+    runtime::ApplicationContext application("component-patch", bundle);
+    const auto publish = [&](const std::uint64_t generation, const std::string_view value) {
+        static_cast<void>(application.host().adopt(bundle->host_snapshot(
+            "component-patch-clock", generation,
+            data::parse_json("{\"clock\":{\"value\":\"" + std::string(value) + "\"}}"))));
+    };
+    publish(1U, "1:00");
+    const std::string source = R"(
+component Counter() {
+  state count = 3;
+  Text(key: "share.count", text: format("{0}", count))
+}
+
+component ClockFace() {
+  Panel(key: "share.face") {
+    Text(key: "share.label", text: "Time")
+    Text(key: "share.value", text: clock.value)
+  }
+}
+
+component Root() {
+  Panel(key: "share.root") {
+    Text(key: "share.raw", text: "raw")
+    Counter()
+    ClockFace()
+  }
+}
+
+overlay Main { root Root() }
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"component-patch.strata", source},
+                                    no_imports, 0U)
+              .activated(),
+          "component patch fixture did not activate");
+    const auto find = [](const auto& self, const std::shared_ptr<const ui::DescriptionNode>& node,
+                         const std::string_view key) -> std::shared_ptr<const ui::DescriptionNode> {
+        if (node->key.has_value() && *node->key == key)
+            return node;
+        for (std::size_t index = 0U; index < node->children->size(); ++index) {
+            if (auto found = self(self, node->children->at(index), key); found != nullptr)
+                return found;
+        }
+        return nullptr;
+    };
+    const std::vector<ui::LayerDescriptionRequest> main{{runtime::LayerRole::overlay, "Main"}};
+    const auto themed = [](const std::string_view type) { return type != "$overlay"; };
+
+    ui::DescriptionBuilder builder(application);
+    ui::ThemeMaterializationCache theme_cache;
+    ui::ThemeCatalog catalog;
+    ui::RetainedTree tree;
+    const ui::DescriptionLayersBuildResult first = builder.build_layers(main);
+    check(first.diagnostics.empty() && !first.layer_state_scopes.at(0U).empty(),
+          "component patch fixture produced diagnostics or owned no state");
+    const ui::ThemeMaterializationResult first_themed =
+        ui::materialize_theme_tree(first.roots.at(0U), catalog, themed, {}, &theme_cache);
+    static_cast<void>(tree.reconcile(first_themed.root));
+
+    // Only ClockFace read the clock: its body is described again, and every ancestor is patched
+    // with its new subtree instead of being described again.
+    publish(2U, "1:01");
+    const ui::DescriptionLayersBuildResult second = builder.build_layers(main);
+    const std::shared_ptr<const ui::DescriptionNode>& before = first.roots.at(0U);
+    const std::shared_ptr<const ui::DescriptionNode>& after = second.roots.at(0U);
+    check(second.diagnostics.empty() && second.described_nodes == 3U,
+          "a host change described more than the component that read it");
+    check(second.layer_state_scopes.at(0U) == first.layer_state_scopes.at(0U),
+          "patching a component's ancestors lost the state scopes they own");
+    check(find(find, after, "share.raw") == find(find, before, "share.raw") &&
+              find(find, after, "share.count") == find(find, before, "share.count"),
+          "a host change rebuilt nodes outside the component that read it");
+    check(find(find, after, "share.label") == find(find, before, "share.label"),
+          "an unchanged node of a rebuilt component was not shared with its previous build");
+    const std::shared_ptr<const ui::DescriptionNode> value = find(find, after, "share.value");
+    check(value != nullptr && value != find(find, before, "share.value") &&
+              *value->properties.at("text").value()->string() == "1:01",
+          "the component that read the changed host value kept its old output");
+    for (const std::string_view key : {"share.face", "share.root"}) {
+        const std::shared_ptr<const ui::DescriptionNode> patched = find(find, after, key);
+        check(patched != nullptr && patched != find(find, before, key) &&
+                  patched->children_replaced_from.lock() == find(find, before, key),
+              "a node whose children alone changed was not linked to its previous self");
+    }
+
+    // The theme resolves only the changed text; the patched ancestors keep their resolved
+    // properties, and reconcile updates only the text.
+    const ui::ThemeMaterializationResult second_themed =
+        ui::materialize_theme_tree(after, catalog, themed, {}, &theme_cache);
+    check(second_themed.stats.resolved_nodes == 1U,
+          "patched ancestors were themed again instead of keeping their resolved properties");
+    const ui::ReconcileStats reconciled = tree.reconcile(second_themed.root);
+    check(reconciled.updated == 1U && tree.find_key("share.value") != nullptr &&
+              *tree.find_key("share.value")->description().properties.at("text").value()->string() ==
+                  "1:01",
+          "reconcile did not update exactly the changed text");
+
+    // Republishing the same value leaves the whole layer as it was.
+    publish(3U, "1:01");
+    const ui::DescriptionLayersBuildResult third = builder.build_layers(main);
+    check(third.roots.at(0U) == after && third.described_nodes == 0U &&
+              third.layer_state_scopes.at(0U) == first.layer_state_scopes.at(0U),
+          "an unchanged republish did not keep the patched layer");
+}
+
 void test_parameterized_component_state_retains_its_evaluated_initializer() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -6812,6 +6933,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_content_transition_item_fills_definite_container();
             test_component_slot_projection();
             test_component_cache_tracks_exact_retained_dependencies();
+            test_component_change_patches_ancestors_and_shares_unchanged_nodes();
             test_parameterized_component_state_retains_its_evaluated_initializer();
             test_tuning_slider_pipeline_is_proportional(arguments[1]);
             test_editor_draws_its_scrolled_layout(arguments[1]);

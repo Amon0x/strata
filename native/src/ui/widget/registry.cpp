@@ -6,6 +6,7 @@
 #include "ui/widget/presentation.hpp"
 #include "ui/widget/semantics.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -172,6 +173,7 @@ std::vector<std::string> WidgetRegistry::text_editable_types() const {
             result.push_back(type);
         }
     }
+    std::ranges::sort(result);
     return result;
 }
 

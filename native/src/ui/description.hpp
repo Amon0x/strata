@@ -129,6 +129,13 @@ private:
         std::vector<RetainedSequenceEffect> retained_sequences;
         bool captures_retained_snapshot = false;
         std::shared_ptr<const RetainedDescriptionSnapshot> retained_snapshot;
+        // The share of the aggregated fields above that this body contributed itself, apart from
+        // the cached components inside it. A component whose own body is still current then
+        // recomputes its aggregate from these and its direct descendants' entries instead of
+        // being rebuilt when only a descendant changed.
+        std::map<runtime::StateAddress, StateBindingEffect> local_state_bindings;
+        runtime::StateScopeSet local_owned_state_scopes;
+        bool local_captures_retained_snapshot = false;
     };
 
     struct ComponentCacheEntry final {
@@ -164,9 +171,10 @@ private:
         std::string_view runtime_scope,
         std::string_view state_name,
         std::string_view declaration_scope,
-        std::string_view address_scope
+        std::string_view address_scope,
+        bool replayed = false
     );
-    void own_state_scope(std::string_view scope);
+    void own_state_scope(std::string_view scope, bool replayed = false);
     void observe_state_value(const runtime::StateAddress& address, const runtime::Value& value);
     void observe_host_dependency(const runtime::ExpressionHostDependency& dependency);
     void observe_retained_value(
@@ -181,6 +189,7 @@ private:
     void capture_retained_snapshot();
     void replay_component_effects(const ComponentEffects& effects);
     void absorb_uncached_component_effects(const ComponentEffects& effects);
+    [[nodiscard]] bool aggregate_component_effects(ComponentEffects& effects) const;
     [[nodiscard]] std::shared_ptr<const DescriptionNode> build_component_body(
         std::string_view component,
         Scope scope,

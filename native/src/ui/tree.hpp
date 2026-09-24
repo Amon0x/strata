@@ -24,6 +24,8 @@ namespace strata::ui {
 
 struct DescriptionNode;
 class Theme;
+struct LayoutStyle;
+class LayoutEngine;
 
 using VirtualItemMembers = std::vector<std::vector<std::string>>;
 
@@ -140,6 +142,10 @@ struct DescriptionNode final {
     /** Immutable domain metadata shared directly with layout and input without Value reparsing. */
     std::shared_ptr<const VirtualItemMembers> virtual_item_members{};
     std::shared_ptr<const collection::VirtualItemExtents> virtual_item_extents{};
+    /** The node this one copies with only its children replaced (a component patch of the path to
+     * a changed descendant): what depends on the node alone, such as its resolved theme
+     * properties, is still that node's. */
+    std::weak_ptr<const DescriptionNode> children_replaced_from{};
 
     static std::shared_ptr<const DescriptionNode>
     create(std::string type, std::optional<std::string> key = std::nullopt,
@@ -275,6 +281,7 @@ class RetainedNode final {
 
   private:
     friend class RetainedTree;
+    friend class LayoutEngine;
     RetainedNode(std::uint64_t identity, std::shared_ptr<const DescriptionNode> description,
                  RetainedNode* parent, std::size_t source_index, std::string structural_path);
     void mark_dirty(DirtyReason reason);
@@ -282,6 +289,9 @@ class RetainedNode final {
 
     std::uint64_t identity_;
     std::shared_ptr<const DescriptionNode> description_;
+    /** The layout style parsed from the description, kept while reconcile finds everything layout
+     * reads from it (properties and virtual metadata) unchanged. */
+    mutable std::shared_ptr<const LayoutStyle> layout_style_;
     RetainedNode* parent_;
     std::vector<std::unique_ptr<RetainedNode>> children_;
     std::size_t source_index_;
@@ -439,6 +449,12 @@ class RetainedTree final {
     std::vector<RetainedNode*> semantic_index_;
     std::vector<RetainedNode*> virtual_index_;
     std::set<std::uint64_t> dirty_index_;
+    /** During a reconcile: whether anything the indexes or the description snapshot hold changed
+     * (a node created, removed, moved or retyped in scope, its semantics, materialization, virtual
+     * sequence or persisted values), and the nodes it left dirty. Otherwise only property values
+     * changed, and the indexes need just those nodes added to the dirty set. */
+    bool reconcile_indexes_changed_ = false;
+    std::vector<std::uint64_t> reconcile_dirty_;
     mutable std::shared_ptr<const RetainedDescriptionSnapshot> description_snapshot_;
     PersistenceFields persistence_fields_;
     PersistenceReader persistence_reader_;
@@ -450,5 +466,10 @@ class RetainedTree final {
 
 [[nodiscard]] bool expression_value_equal(const runtime::ExpressionValue& left,
                                           const runtime::ExpressionValue& right);
+[[nodiscard]] bool behaviors_equal(const std::vector<DescriptionBehavior>& left,
+                                   const std::vector<DescriptionBehavior>& right);
+/** Whether two descriptions agree in everything but their children. */
+[[nodiscard]] bool description_content_equal(const DescriptionNode& left,
+                                             const DescriptionNode& right);
 
 } // namespace strata::ui
