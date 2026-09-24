@@ -97,6 +97,11 @@ void test_defaults_and_validation() {
           "text semantic chrome is not transparent");
     check(text.text_layout.has_value() && text.text_layout->primary_font == "strata:fonts/default",
           "ordinary text no longer defaults to the Regular face");
+    // A Draw paints only its shapes: on a tinted parent a themed surface behind them shows as a box.
+    const ui::ThemedWidgetStyle drawing = default_theme.style("Draw");
+    check(drawing.visual.has_value() && !drawing.visual->background.has_value() &&
+              !drawing.visual->border.has_value(),
+          "a Draw gets theme chrome behind its shapes");
     const ui::ThemedWidgetStyle raised = default_theme.style("Tooltip");
     check(raised.visual.has_value() && raised.visual->background.has_value() &&
               *raised.visual->background == default_theme.tokens().surface_raised,

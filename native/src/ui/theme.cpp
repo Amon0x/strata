@@ -1504,6 +1504,8 @@ ThemedWidgetStyle Theme::semantic_style(const std::string_view component_type,
     const std::string variant(raw_variant.empty() ? default_widget_variant : raw_variant);
     const bool text_only = component_type == "Text" || component_type == "RichText";
     const bool structural = component_type == "Slot";
+    // A Draw paints the shapes it is given and nothing else: no theme surface or border behind them.
+    const bool authored_drawing = component_type == "Draw";
     const bool choice_group = component_type == "RadioGroup";
     const bool raised =
         component_type == "Modal" || component_type == "Select" || component_type == "Tooltip";
@@ -1514,7 +1516,7 @@ ThemedWidgetStyle Theme::semantic_style(const std::string_view component_type,
                                                     ? tokens_.muted_foreground
                                                     : tokens_.foreground;
     ThemeWidgetVisualStyle visual;
-    if (text_only || structural || choice_group || variant == "subtle") {
+    if (text_only || structural || choice_group || authored_drawing || variant == "subtle") {
         visual.background.reset();
         visual.border.reset();
     } else {
