@@ -42,6 +42,7 @@
 #include "ui/render/paint_geometry.hpp"
 #include "ui/render/path_geometry.hpp"
 #include "ui/render/submission.hpp"
+#include "ui/render/submission_internal.hpp"
 #include "ui/scheduler.hpp"
 #include "ui/surface.hpp"
 #include "ui/svg_image.hpp"
@@ -1031,6 +1032,127 @@ void test_render_submission_translation_reuse(const std::filesystem::path& resou
     ui::RenderSubmissionCache fresh;
     const ui::RenderSubmission& rebuilt = fresh.resolve(moved, atlas, *text_engine, environment);
     check_translation_reused_geometry(reused, rebuilt);
+}
+
+void test_render_submission_changed_draws_match_full_plan(
+    const std::filesystem::path& resource_root) {
+    using namespace strata;
+    const std::shared_ptr<const ui::TextEngine> text_engine = ui::TextEngine::load_control_font(
+        resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
+    const ui::TextEngine& text = *text_engine;
+    const auto run = [&text](const std::string_view characters) {
+        std::vector<ui::LogicalGlyph> glyphs;
+        double x = 0.0;
+        for (const char character : characters) {
+            glyphs.push_back(ui::LogicalGlyph{
+                "strata:fonts/default-medium", text.control_font().glyph_id(
+                    static_cast<std::uint32_t>(character)),
+                static_cast<std::uint32_t>(character), glyphs.size(), glyphs.size() + 1U, x,
+                9.0, 7.0,
+            });
+            x += 7.0;
+        }
+        return ui::LogicalGlyphRun(std::move(glyphs));
+    };
+    struct Frame final {
+        double bar_x = 10.0;
+        double clip_width = 200.0;
+        std::string clock = "1:00";
+        ui::RenderColor fill{40U, 90U, 160U, 255U};
+        double opacity = 1.0;
+        double label_y = 30.0;
+    };
+    // A HUD-like stream: a moved bar with a rounded clip, a clock, a fill that grows, a scoped
+    // fade, a grouped chip, and a label that can move out of its clip.
+    const auto commands = [&run](const Frame& frame) {
+        ui::RenderCommandBuffer result;
+        result.append(ui::TransformPushRenderCommand{1.0, 0.0, frame.bar_x, 0.0, 1.0, 20.0});
+        result.append(ui::ClipPushRenderCommand{
+            ui::Rect{0.0, 0.0, frame.clip_width, 60.0}, ui::CornerRadii::all(6.0)});
+        result.append(ui::SolidRectRenderCommand{
+            ui::Rect{0.0, 0.0, frame.clip_width * 0.5, 8.0}, frame.fill});
+        result.append(ui::TextRunRenderCommand{
+            ui::Point{4.0, 12.0}, ui::RenderColor{240U, 240U, 240U, 255U}, 12.0,
+            run(frame.clock)});
+        result.append(ui::OpacityPushRenderCommand{frame.opacity});
+        result.append(ui::BorderRenderCommand{
+            ui::Rect{2.0, 2.0, 60.0, 20.0},
+            ui::RenderBorder{1.0, ui::RenderColor{90U, 90U, 90U, 255U}, true},
+            ui::CornerRadii::all(3.0)});
+        result.append(ui::OpacityPopRenderCommand{});
+        result.append(ui::TextRunRenderCommand{
+            ui::Point{8.0, frame.label_y}, ui::RenderColor{200U, 200U, 200U, 255U}, 12.0,
+            run("Label"), ui::FontRasterization::grayscale,
+            ui::Rect{8.0, frame.label_y - 10.0, 40.0, 14.0}});
+        result.append(ui::ClipPopRenderCommand{});
+        result.append(ui::TransformPopRenderCommand{});
+        result.append(ui::GroupPushRenderCommand{7U});
+        result.append(ui::SolidRectRenderCommand{
+            ui::Rect{300.0, 20.0, 30.0, 12.0}, ui::RenderColor{10U, 200U, 10U, 255U}});
+        result.append(ui::GroupPopRenderCommand{});
+        return result;
+    };
+    std::vector<Frame> frames(1U);
+    const auto next = [&frames](auto change) {
+        Frame frame = frames.back();
+        change(frame);
+        frames.push_back(frame);
+    };
+    next([](Frame& frame) { frame.clock = "1:01"; });
+    next([](Frame& frame) { frame.clock = "1:02"; frame.bar_x = 14.5; });
+    next([](Frame& frame) { frame.clip_width = 180.0; });
+    next([](Frame& frame) { frame.fill = ui::RenderColor{200U, 90U, 40U, 255U}; });
+    next([](Frame& frame) { frame.opacity = 0.5; });
+    next([](Frame& frame) { frame.clock = "10:02:33"; });
+    next([](Frame& frame) { frame.label_y = 400.0; });
+    next([](Frame& frame) { frame.label_y = 30.0; frame.clock = "1:03"; });
+    next([](Frame& frame) { frame.bar_x = 3.0; frame.clip_width = 190.0; frame.opacity = 1.0; });
+
+    // One atlas: glyph placement and texture names are the atlas's, not the plan's.
+    font::GlyphAtlas atlas("submission-changed-draws");
+    ui::submission_detail::PreparationCache fast_cache;
+    ui::submission_detail::PreparationCache full_cache;
+    full_cache.changed_draw_updates = false;
+    ui::RenderSubmission fast;
+    ui::RenderSubmission full;
+    const auto same_patches = [](const std::vector<ui::SubmissionGeometryPatch>& left,
+                                 const std::vector<ui::SubmissionGeometryPatch>& right) {
+        return std::ranges::equal(left, right, [](const auto& a, const auto& b) {
+            return a.offset == b.offset && a.bytes == b.bytes;
+        });
+    };
+    for (std::size_t index = 0U; index < frames.size(); ++index) {
+        const ui::RenderCommandBuffer stream = commands(frames[index]);
+        ui::submission_detail::update_cached(stream, atlas, &text, 2.0, 1600, 1200, 800.0, 600.0,
+                                             {}, fast_cache, fast);
+        ui::submission_detail::update_cached(stream, atlas, &text, 2.0, 1600, 1200, 800.0, 600.0,
+                                             {}, full_cache, full);
+        check(fast.vertex_bytes == full.vertex_bytes && fast.indices == full.indices &&
+                  fast.used_vertex_bytes == full.used_vertex_bytes &&
+                  fast.used_indices == full.used_indices && fast.batches == full.batches &&
+                  fast.planned_draws == full.planned_draws &&
+                  fast.skipped_draws == full.skipped_draws &&
+                  fast.texture_batch_breaks == full.texture_batch_breaks &&
+                  fast.clip_batch_breaks == full.clip_batch_breaks &&
+                  fast.material_batch_breaks == full.material_batch_breaks &&
+                  fast.effect_batch_breaks == full.effect_batch_breaks &&
+                  fast.geometry_topology_reused == full.geometry_topology_reused &&
+                  fast.candidate_geometry_patch_bytes == full.candidate_geometry_patch_bytes &&
+                  fast.previous_full_geometry_bytes == full.previous_full_geometry_bytes &&
+                  fast.full_geometry_bytes == full.full_geometry_bytes &&
+                  fast.topology_change == full.topology_change &&
+                  fast.topology_change_item == full.topology_change_item &&
+                  fast.previous_item_count == full.previous_item_count &&
+                  fast.item_count == full.item_count &&
+                  fast.patch_from_previous == full.patch_from_previous &&
+                  same_patches(fast.vertex_patches, full.vertex_patches) &&
+                  same_patches(fast.index_patches, full.index_patches),
+              "updating only the changed draws made a different submission from a full plan "
+              "(frame " + std::to_string(index) + ")");
+    }
+    // Only the label leaving its clip and coming back change item counts and plan fully.
+    check(fast_cache.changed_draw_update_count == frames.size() - 3U,
+          "a stream changing a few draws or scopes was planned in full");
 }
 
 void test_render_submission_opacity_scope_reuse() {
@@ -6240,6 +6362,78 @@ overlay Main { root Root() }
           "an unchanged republish did not keep the patched layer");
 }
 
+void test_named_styles_follow_the_values_they_read() {
+    using namespace strata;
+    const data::JsonValue schemas = data::parse_json(R"({
+      "extensionPackages":[],
+      "widgets":{"registry":"style-reads","required":[],"definitions":[]},
+      "actions":{"registry":"style-reads","required":[],"definitions":[]},
+      "host":[
+        {"path":"space","nullable":false,"type":{"kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[{"name":"value","type":{"kind":"number"},"required":true,"nullable":false}]}}
+      ]
+    })");
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
+    runtime::ApplicationContext application("style-reads", bundle);
+    const auto publish = [&](const std::uint64_t generation, const double value) {
+        static_cast<void>(application.host().adopt(bundle->host_snapshot(
+            "style-reads-space", generation,
+            data::parse_json("{\"space\":{\"value\":" + std::to_string(value) + "}}"))));
+    };
+    publish(1U, 4.0);
+    const std::string source = R"(
+style Spaced { padding: space.value }
+style Fixed { padding: 3 }
+
+component Boxes() {
+  Panel(key: "styles.root") {
+    Panel(key: "styles.read", style: Spaced)
+    Panel(key: "styles.fixed", style: Fixed)
+  }
+}
+
+overlay Main { root Boxes() }
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"style-reads.strata", source},
+                                    no_imports, 0U)
+              .activated(),
+          "style dependency fixture did not activate");
+    const auto padding = [](const ui::DescriptionBuildResult& built, const std::string_view key) {
+        const auto find = [](const auto& self,
+                             const std::shared_ptr<const ui::DescriptionNode>& node,
+                             const std::string_view wanted) -> const ui::DescriptionNode* {
+            if (node->key.has_value() && *node->key == wanted)
+                return node.get();
+            for (std::size_t index = 0U; index < node->children->size(); ++index) {
+                const ui::DescriptionNode* found = self(self, node->children->at(index), wanted);
+                if (found != nullptr)
+                    return found;
+            }
+            return nullptr;
+        };
+        const ui::DescriptionNode* node = find(find, built.root, key);
+        const runtime::Value* layout =
+            node != nullptr ? node->properties.at("$layout").value() : nullptr;
+        const runtime::Value* value = layout != nullptr ? layout->field("padding") : nullptr;
+        return value != nullptr && value->number() != nullptr ? *value->number() : -1.0;
+    };
+    ui::DescriptionBuilder builder(application);
+    const ui::DescriptionBuildResult first = builder.build(runtime::LayerRole::overlay, "Main");
+    check(first.diagnostics.empty() && padding(first, "styles.read") == 4.0 &&
+              padding(first, "styles.fixed") == 3.0,
+          "named styles did not resolve their values");
+    // A style that reads a host value is resolved again when the value changes; one that reads
+    // nothing is kept for the unit.
+    publish(2U, 9.0);
+    const ui::DescriptionBuildResult second = builder.build(runtime::LayerRole::overlay, "Main");
+    check(padding(second, "styles.read") == 9.0 && padding(second, "styles.fixed") == 3.0,
+          "a named style kept a host value it read after the value changed");
+}
+
 void test_parameterized_component_state_retains_its_evaluated_initializer() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -6925,6 +7119,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_bundled_texture_descriptor(arguments[1]);
             test_render_submission_cache(arguments[1]);
             test_render_submission_translation_reuse(arguments[1]);
+            test_render_submission_changed_draws_match_full_plan(arguments[1]);
             test_render_submission_structural_alignment(arguments[1]);
             test_native_nine_patch_geometry(arguments[1]);
             test_native_custom_mesh_geometry(arguments[1]);
@@ -6934,6 +7129,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_component_slot_projection();
             test_component_cache_tracks_exact_retained_dependencies();
             test_component_change_patches_ancestors_and_shares_unchanged_nodes();
+            test_named_styles_follow_the_values_they_read();
             test_parameterized_component_state_retains_its_evaluated_initializer();
             test_tuning_slider_pipeline_is_proportional(arguments[1]);
             test_editor_draws_its_scrolled_layout(arguments[1]);

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -24,7 +25,7 @@ namespace strata::ui {
 
 struct DescriptionNode;
 class Theme;
-struct LayoutStyle;
+struct ParsedLayout;
 class LayoutEngine;
 
 using VirtualItemMembers = std::vector<std::vector<std::string>>;
@@ -115,8 +116,75 @@ struct DescriptionBehavior final {
     std::shared_ptr<const runtime::ActionValue> action;
 };
 
+/**
+ * A description's properties: sorted by name like the map it replaces, in one vector, so building,
+ * copying and dropping a node allocate once instead of once per property. Unlike a map, inserting
+ * or erasing invalidates iterators.
+ */
+class PropertyMap final {
+  public:
+    using key_type = std::string;
+    using mapped_type = runtime::ExpressionValue;
+    using value_type = std::pair<std::string, runtime::ExpressionValue>;
+    using iterator = std::vector<value_type>::iterator;
+    using const_iterator = std::vector<value_type>::const_iterator;
+
+    PropertyMap() = default;
+    PropertyMap(std::initializer_list<value_type> entries);
+
+    [[nodiscard]] iterator find(const std::string_view name) {
+        return entries_.begin() + static_cast<std::ptrdiff_t>(position(name));
+    }
+    [[nodiscard]] const_iterator find(const std::string_view name) const {
+        return entries_.begin() + static_cast<std::ptrdiff_t>(position(name));
+    }
+    [[nodiscard]] bool contains(std::string_view name) const;
+    [[nodiscard]] std::size_t count(std::string_view name) const;
+    [[nodiscard]] runtime::ExpressionValue& at(std::string_view name);
+    [[nodiscard]] const runtime::ExpressionValue& at(std::string_view name) const;
+    std::pair<iterator, bool> insert_or_assign(std::string_view name,
+                                               runtime::ExpressionValue value);
+    std::pair<iterator, bool> emplace(std::string_view name, runtime::ExpressionValue value);
+    std::pair<iterator, bool> try_emplace(std::string_view name, runtime::ExpressionValue value);
+    std::pair<iterator, bool> insert(value_type entry);
+    iterator erase(const_iterator position);
+    std::size_t erase(std::string_view name);
+    void clear() noexcept;
+    void reserve(std::size_t capacity);
+
+    [[nodiscard]] iterator begin() noexcept { return entries_.begin(); }
+    [[nodiscard]] iterator end() noexcept { return entries_.end(); }
+    [[nodiscard]] const_iterator begin() const noexcept { return entries_.begin(); }
+    [[nodiscard]] const_iterator end() const noexcept { return entries_.end(); }
+    [[nodiscard]] const_iterator cbegin() const noexcept { return entries_.cbegin(); }
+    [[nodiscard]] const_iterator cend() const noexcept { return entries_.cend(); }
+    [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
+    [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }
+
+  private:
+    /** The entry's index, or the size when there is none: one three-way comparison a step. */
+    [[nodiscard]] std::size_t position(const std::string_view name) const noexcept {
+        std::size_t low = 0U;
+        std::size_t high = entries_.size();
+        while (low < high) {
+            const std::size_t middle = low + (high - low) / 2U;
+            const int order = runtime::NameLess::compare(entries_[middle].first, name);
+            if (order == 0)
+                return middle;
+            if (order < 0)
+                low = middle + 1U;
+            else
+                high = middle;
+        }
+        return entries_.size();
+    }
+    [[nodiscard]] iterator lower_bound(std::string_view name);
+
+    std::vector<value_type> entries_;
+};
+
 struct DescriptionNode final {
-    using Properties = std::map<std::string, runtime::ExpressionValue, std::less<>>;
+    using Properties = PropertyMap;
 
     std::string type;
     std::optional<std::string> key;
@@ -243,6 +311,8 @@ class RetainedNode final {
     [[nodiscard]] const std::vector<std::unique_ptr<RetainedNode>>& children() const noexcept;
     [[nodiscard]] std::string_view structural_path() const noexcept;
     [[nodiscard]] std::size_t source_index() const noexcept;
+    /** Position in a preorder walk of the tree, current while its structure generation is. */
+    [[nodiscard]] std::size_t preorder() const noexcept;
     [[nodiscard]] std::uint64_t revision() const noexcept;
     [[nodiscard]] std::uint64_t arrangement_revision() const noexcept;
     [[nodiscard]] std::uint64_t render_generation() const noexcept;
@@ -289,9 +359,9 @@ class RetainedNode final {
 
     std::uint64_t identity_;
     std::shared_ptr<const DescriptionNode> description_;
-    /** The layout style parsed from the description, kept while reconcile finds everything layout
+    /** What layout parsed from the description, kept while reconcile finds everything layout
      * reads from it (properties and virtual metadata) unchanged. */
-    mutable std::shared_ptr<const LayoutStyle> layout_style_;
+    mutable std::shared_ptr<const ParsedLayout> parsed_layout_;
     RetainedNode* parent_;
     std::vector<std::unique_ptr<RetainedNode>> children_;
     std::size_t source_index_;
@@ -316,6 +386,7 @@ class RetainedNode final {
     std::map<std::size_t, std::shared_ptr<const DescriptionNode>> realization_cache_;
     std::deque<std::size_t> realization_cache_order_;
     runtime::StateScopeSet warm_realization_state_scopes_;
+    std::size_t preorder_ = 0U;
     std::size_t subtree_node_count_ = 1U;
     std::size_t subtree_materialized_child_count_ = 0U;
     bool subtree_all_attached_ = true;
@@ -381,7 +452,19 @@ class RetainedTree final {
     find_state_scope(std::string_view scope) const noexcept;
     [[nodiscard]] const std::vector<RetainedNode*>& semantic_nodes() const noexcept;
     [[nodiscard]] const std::vector<RetainedNode*>& virtual_nodes() const noexcept;
+    /** Nodes with behaviors attached, in preorder. */
+    [[nodiscard]] const std::vector<RetainedNode*>& behavior_nodes() const noexcept;
+    /** The nodes of the given types, in preorder. */
+    [[nodiscard]] std::vector<RetainedNode*> nodes_of_types(
+        std::span<const std::string_view> types) const;
     [[nodiscard]] std::uint64_t generation() const noexcept;
+    /**
+     * Changes whenever a node is added, removed or moved, or changes its identity, type, key,
+     * source path, state scope, lifecycle, semantics or behavior presence, virtual collection, or
+     * realized rows and their owned state. Work derived from the tree's shape alone (ownership,
+     * indexes of widget types) is current while it is.
+     */
+    [[nodiscard]] std::uint64_t structure_generation() const noexcept;
     [[nodiscard]] std::shared_ptr<const RetainedDescriptionSnapshot> description_snapshot() const;
     /** Monotonic epoch for changes that can affect measurement or arrangement. */
     [[nodiscard]] std::uint64_t layout_invalidation_generation() const noexcept;
@@ -448,6 +531,9 @@ class RetainedTree final {
     std::map<std::string, std::vector<RetainedNode*>, std::less<>> state_scope_index_;
     std::vector<RetainedNode*> semantic_index_;
     std::vector<RetainedNode*> virtual_index_;
+    std::vector<RetainedNode*> behavior_index_;
+    std::size_t indexed_nodes_ = 0U;
+    std::uint64_t structure_generation_ = 0U;
     std::set<std::uint64_t> dirty_index_;
     /** During a reconcile: whether anything the indexes or the description snapshot hold changed
      * (a node created, removed, moved or retyped in scope, its semantics, materialization, virtual
@@ -471,5 +557,14 @@ class RetainedTree final {
 /** Whether two descriptions agree in everything but their children. */
 [[nodiscard]] bool description_content_equal(const DescriptionNode& left,
                                              const DescriptionNode& right);
+/**
+ * A new build of a description with every part equal to the previous build taken from it, so
+ * later stages (theme, reconcile, layout) find unchanged nodes by identity; a node that differs
+ * only in its children is linked to its previous self. Applying it again to its own result
+ * returns that result.
+ */
+[[nodiscard]] std::shared_ptr<const DescriptionNode>
+share_unchanged_description(const std::shared_ptr<const DescriptionNode>& previous,
+                            const std::shared_ptr<const DescriptionNode>& next);
 
 } // namespace strata::ui

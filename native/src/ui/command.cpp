@@ -178,61 +178,67 @@ CommandIndex::CommandIndex(
 void CommandIndex::rebuild(const RetainedTree& tree) {
     const std::uint64_t undo_generation = application_ != nullptr
         ? application_->undo().generation() : 0U;
-    if (observed_tree_ == &tree && observed_tree_generation_ == tree.generation() &&
-        observed_undo_generation_ == undo_generation) {
+    if (observed_tree_ == &tree && observed_undo_generation_ == undo_generation &&
+        (observed_tree_generation_ == tree.generation() ||
+         (observed_structure_generation_ == tree.structure_generation() &&
+          std::ranges::all_of(observed_declarations_, [](const auto& declaration) {
+              return declaration.first->dirty_generations() == declaration.second;
+          })))) {
+        // Nothing a declaration reads changed: the same declarations with the same properties.
+        observed_tree_generation_ = tree.generation();
         return;
     }
     entries_.clear();
     declaration_order_.clear();
+    observed_declarations_.clear();
     observed_tree_ = &tree;
     observed_tree_generation_ = tree.generation();
+    observed_structure_generation_ = tree.structure_generation();
     observed_undo_generation_ = undo_generation;
     if (tree.root() == nullptr) return;
-    const auto visit = [this](auto&& self, const RetainedNode& node) -> void {
-        const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
-        if (lifecycle != nullptr && lifecycle->command.declaration) {
-            const std::string* id = text(property(node, "id"));
-            if (id != nullptr && !id->empty()) {
-                const std::string* label = text(property(node, "label"));
-                const runtime::Value* enabled_value = property(node, "enabled");
-                const bool enabled = enabled_value == nullptr || enabled_value->boolean() == nullptr ||
-                                     *enabled_value->boolean();
-                const ParsedShortcut chord = shortcut(property(node, "shortcut"));
-                CommandSnapshot command{
-                    *id,
-                    label != nullptr && !label->empty() ? *label : *id,
-                    text(property(node, "category")) != nullptr &&
-                            !text(property(node, "category"))->empty()
-                        ? *text(property(node, "category"))
-                        : std::string("Commands"),
-                    enabled,
-                    text(property(node, "scope")) != nullptr
-                        ? std::optional<std::string>(*text(property(node, "scope")))
-                        : std::nullopt,
-                    chord.key,
-                    chord.shift,
-                    chord.control,
-                    chord.alt,
-                    chord.super_key,
-                    boolean(property(node, "acceptsRepeat"), false),
-                    integer(property(node, "priority")),
-                    boolean(property(node, "allowedWhileModal"), false),
-                    boolean(property(node, "allowedWhileTextEditing"), false),
-                    action_property(node, "action"),
-                    optional_boolean(property(node, "checked")),
-                };
-                const auto [inserted, unique] = entries_.emplace(command.id, std::move(command));
-                if (!unique) {
-                    throw std::invalid_argument(
-                        "surface contains duplicate command id '" + *id + "'"
-                    );
-                }
-                declaration_order_.push_back(&inserted->second);
+    for (const RetainedNode* const declaration :
+         tree.nodes_of_types(widgets_.command_declaration_types())) {
+        const RetainedNode& node = *declaration;
+        observed_declarations_.emplace_back(&node, node.dirty_generations());
+        const std::string* id = text(property(node, "id"));
+        if (id != nullptr && !id->empty()) {
+            const std::string* label = text(property(node, "label"));
+            const runtime::Value* enabled_value = property(node, "enabled");
+            const bool enabled = enabled_value == nullptr || enabled_value->boolean() == nullptr ||
+                                 *enabled_value->boolean();
+            const ParsedShortcut chord = shortcut(property(node, "shortcut"));
+            CommandSnapshot command{
+                *id,
+                label != nullptr && !label->empty() ? *label : *id,
+                text(property(node, "category")) != nullptr &&
+                        !text(property(node, "category"))->empty()
+                    ? *text(property(node, "category"))
+                    : std::string("Commands"),
+                enabled,
+                text(property(node, "scope")) != nullptr
+                    ? std::optional<std::string>(*text(property(node, "scope")))
+                    : std::nullopt,
+                chord.key,
+                chord.shift,
+                chord.control,
+                chord.alt,
+                chord.super_key,
+                boolean(property(node, "acceptsRepeat"), false),
+                integer(property(node, "priority")),
+                boolean(property(node, "allowedWhileModal"), false),
+                boolean(property(node, "allowedWhileTextEditing"), false),
+                action_property(node, "action"),
+                optional_boolean(property(node, "checked")),
+            };
+            const auto [inserted, unique] = entries_.emplace(command.id, std::move(command));
+            if (!unique) {
+                throw std::invalid_argument(
+                    "surface contains duplicate command id '" + *id + "'"
+                );
             }
+            declaration_order_.push_back(&inserted->second);
         }
-        for (const auto& child : node.children()) self(self, *child);
-    };
-    visit(visit, *tree.root());
+    }
 
     if (application_ != nullptr) {
         const runtime::UndoStackStatus status = application_->undo().status(persistence_scope_);
@@ -425,7 +431,9 @@ void CommandIndex::clear() noexcept {
     execution_serial_ = 0U;
     observed_tree_ = nullptr;
     observed_tree_generation_ = 0U;
+    observed_structure_generation_ = 0U;
     observed_undo_generation_ = 0U;
+    observed_declarations_.clear();
 }
 
 } // namespace strata::ui

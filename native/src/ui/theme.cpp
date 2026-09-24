@@ -16,15 +16,70 @@
 namespace strata::ui {
 namespace {
 
-using ValueFields = std::map<std::string, runtime::Value, std::less<>>;
+/**
+ * An object's fields while it is assembled, kept sorted in one vector: a node's resolved style
+ * is a few dozen fields built per node, which a node-based map would allocate one by one.
+ */
+class ValueFields final {
+  public:
+    using value_type = std::pair<std::string, runtime::Value>;
+    using Storage = std::vector<value_type>;
+    using iterator = Storage::iterator;
+    using const_iterator = Storage::const_iterator;
+
+    ValueFields() = default;
+    /** Fields already sorted by name, as an object keeps them. */
+    explicit ValueFields(Storage fields) : fields_(std::move(fields)) {}
+    ValueFields(std::initializer_list<value_type> fields) : fields_(fields) {
+        std::ranges::sort(fields_, runtime::NameLess{}, name_of);
+    }
+
+    [[nodiscard]] iterator find(const std::string_view name) {
+        const iterator found = lower_bound(name);
+        return found != fields_.end() && found->first == name ? found : fields_.end();
+    }
+    std::pair<iterator, bool> insert_or_assign(const std::string_view name, runtime::Value value) {
+        const iterator found = lower_bound(name);
+        if (found != fields_.end() && found->first == name) {
+            found->second = std::move(value);
+            return {found, false};
+        }
+        return {fields_.emplace(found, std::string(name), std::move(value)), true};
+    }
+    std::pair<iterator, bool> emplace(const std::string_view name, runtime::Value value) {
+        const iterator found = lower_bound(name);
+        if (found != fields_.end() && found->first == name)
+            return {found, false};
+        return {fields_.emplace(found, std::string(name), std::move(value)), true};
+    }
+    iterator erase(const const_iterator position) { return fields_.erase(position); }
+    std::size_t erase(const std::string_view name) {
+        const iterator found = find(name);
+        if (found == fields_.end())
+            return 0U;
+        fields_.erase(found);
+        return 1U;
+    }
+    [[nodiscard]] iterator begin() noexcept { return fields_.begin(); }
+    [[nodiscard]] iterator end() noexcept { return fields_.end(); }
+    [[nodiscard]] const_iterator begin() const noexcept { return fields_.begin(); }
+    [[nodiscard]] const_iterator end() const noexcept { return fields_.end(); }
+    [[nodiscard]] std::size_t size() const noexcept { return fields_.size(); }
+    [[nodiscard]] Storage take() && { return std::move(fields_); }
+
+  private:
+    [[nodiscard]] static std::string_view name_of(const value_type& field) noexcept {
+        return field.first;
+    }
+    [[nodiscard]] iterator lower_bound(const std::string_view name) {
+        return std::ranges::lower_bound(fields_, name, runtime::NameLess{}, name_of);
+    }
+
+    Storage fields_;
+};
 
 [[nodiscard]] runtime::Value object(ValueFields fields) {
-    std::vector<std::pair<std::string, runtime::Value>> values;
-    values.reserve(fields.size());
-    for (auto& [name, value] : fields) {
-        values.emplace_back(std::move(name), std::move(value));
-    }
-    return runtime::Value(std::move(values));
+    return runtime::Value(std::move(fields).take());
 }
 
 [[nodiscard]] runtime::Value color(const runtime::ColorValue value) {
@@ -683,23 +738,27 @@ widget_contribution(const Theme& theme, const std::string_view type, const std::
     const std::string motion_prefix = qualified_animation_prefix(
         animation_owner_namespace(themed.owner_theme, scope_namespace), themed.key);
     ThemeWidgetContribution result;
+    ValueFields fields;
     if (themed.style.visual.has_value())
-        add_visual(result.fields, *themed.style.visual);
+        add_visual(fields, *themed.style.visual);
     if (themed.style.text_visual.has_value())
-        add_text_visual(result.fields, *themed.style.text_visual);
+        add_text_visual(fields, *themed.style.text_visual);
     if (themed.style.text_layout.has_value())
-        add_text_layout(result.fields, *themed.style.text_layout);
+        add_text_layout(fields, *themed.style.text_layout);
     if (themed.style.layout.has_value())
-        add_layout(result.fields, *themed.style.layout);
-    apply_motion(result.fields, themed.style.motion, motion_prefix);
+        add_layout(fields, *themed.style.layout);
+    apply_motion(fields, themed.style.motion, motion_prefix);
+    result.fields = std::move(fields).take();
     // Description expansion has already installed widget layout defaults. A themed layout or
     // text default wins over those framework defaults, while any authored style/layout remains
     // authoritative exactly as it was written.
+    ValueFields defaults;
     if (themed.style.layout.has_value())
-        add_layout(result.defaults, *themed.style.layout);
+        add_layout(defaults, *themed.style.layout);
     if (themed.style.text_layout.has_value())
-        add_text_layout(result.defaults, *themed.style.text_layout);
-    apply_motion(result.defaults, themed.style.motion, motion_prefix);
+        add_text_layout(defaults, *themed.style.text_layout);
+    apply_motion(defaults, themed.style.motion, motion_prefix);
+    result.defaults = std::move(defaults).take();
     result.has_layout = themed.style.layout.has_value();
     result.layout_participates = result.has_layout && themed.style.layout->participates;
     return result;
@@ -780,7 +839,7 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
             }
         }
     }
-    ValueFields resolved = themed != nullptr ? themed->fields : ValueFields{};
+    ValueFields resolved = themed != nullptr ? ValueFields(themed->fields) : ValueFields{};
     const runtime::Value* authored = property(*source, "$layout");
     bool authored_color_field = false;
     bool authored_foreground_field = false;
@@ -1883,6 +1942,11 @@ const ThemeWidgetContribution& ThemeMaterializationCache::store_widget_contribut
 }
 
 void ThemeMaterializationCache::purge(const std::uint64_t catalog_generation) {
+    // Lookups check an entry before using it, so expired ones only hold memory: they are swept
+    // when the catalog changes or the cache has doubled since the last sweep, not every frame.
+    if (catalog_generation == purged_generation_ && entries_.size() < purge_threshold_)
+        return;
+    purged_generation_ = catalog_generation;
     std::erase_if(entries_, [catalog_generation](const auto& value) {
         return value.second.catalog_generation != catalog_generation ||
                value.second.source.expired() || value.second.effective_theme.expired() ||
@@ -1890,9 +1954,11 @@ void ThemeMaterializationCache::purge(const std::uint64_t catalog_generation) {
     });
     std::erase_if(contributions_,
                   [](const auto& value) { return value.second.theme.expired(); });
+    purge_threshold_ = std::max<std::size_t>(64U, entries_.size() * 2U);
 }
 
 void ThemeMaterializationCache::clear() noexcept {
+    purge_threshold_ = 0U;
     entries_.clear();
     motion_policies_.clear();
     contributions_.clear();

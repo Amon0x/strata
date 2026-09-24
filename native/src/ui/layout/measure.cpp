@@ -134,7 +134,8 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
     anchor_children.reserve(node.children().size());
     portal_children.reserve(node.children().size());
     for (const auto& child : node.children()) {
-        const LayoutStyle child_style = resolved_style(*child);
+        // Participation, portals and anchors are never adjusted at runtime.
+        const LayoutStyle& child_style = parsed_layout(*child).style;
         if (child_style.participates && child->lifecycle() != RetainedLifecycle::exiting) {
             if (child_style.kind == LayoutKind::portal) {
                 portal_children.push_back(child.get());
@@ -163,7 +164,8 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         double total_weight = 0.0;
         std::vector<MeasuredNodePtr> staged(retained_children.size());
         for (std::size_t index = 0U; index < retained_children.size(); ++index) {
-            const LayoutStyle child_style = resolved_style(*retained_children[index]);
+            std::optional<LayoutStyle> adjusted;
+            const LayoutStyle& child_style = style_of(*retained_children[index], adjusted);
             const LayoutSize& main_size = horizontal ? child_style.width : child_style.height;
             if (main_size.kind == LayoutSize::Kind::fill && std::isfinite(available_main) &&
                 (!measured.style.wrap || main_size.value == 0.0)) {
@@ -186,7 +188,8 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
             std::isfinite(available_main) ? std::max(0.0, available_main - used) : 0.0;
         for (std::size_t index = 0U; index < retained_children.size(); ++index) {
             if (staged[index] == nullptr) {
-                const LayoutStyle child_style = resolved_style(*retained_children[index]);
+                std::optional<LayoutStyle> adjusted;
+                const LayoutStyle& child_style = style_of(*retained_children[index], adjusted);
                 const LayoutSize& main_size = horizontal ? child_style.width : child_style.height;
                 const double weight = std::max(0.0, main_size.value);
                 const double allocated =
@@ -335,7 +338,8 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         for (const auto& child : retained_children) {
             Constraints child_constraints = content_constraints;
             if (measured.style.kind == LayoutKind::scroll) {
-                const LayoutStyle child_style = resolved_style(*child);
+                std::optional<LayoutStyle> adjusted;
+                const LayoutStyle& child_style = style_of(*child, adjusted);
                 if (measured.style.scroll_horizontal &&
                     child_style.width.kind == LayoutSize::Kind::fill &&
                     std::isfinite(available_content_width)) {
@@ -444,7 +448,7 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         std::max(child_intrinsic.height, own_intrinsic.height),
     };
     measured.content_size = resolve_content_box(measured.style, intrinsic, constraints);
-    if (std::optional<ContentSizeMotionSpec> motion = content_size_motion(node.description());
+    if (std::optional<ContentSizeMotionSpec> motion = parsed_layout(node).content_motion;
         motion.has_value()) {
         measured.content_motion_target_size = measured.content_size;
         const bool intrinsic_width = measured.style.width.kind == LayoutSize::Kind::automatic ||

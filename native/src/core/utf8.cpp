@@ -62,6 +62,11 @@ namespace {
 bool valid_utf8(const std::string_view value) noexcept {
     std::size_t index = 0U;
     while (index < value.size()) {
+        // ASCII, the common case for names and keys, needs no decoding.
+        if (static_cast<std::uint8_t>(value[index]) <= 0x7FU) {
+            ++index;
+            continue;
+        }
         std::uint32_t code_point = 0U;
         if (!decode(value, index, code_point)) return false;
     }
@@ -72,6 +77,12 @@ Utf8Blankness utf8_blankness(const std::string_view value) noexcept {
     std::size_t index = 0U;
     bool blank = true;
     while (index < value.size()) {
+        const auto lead = static_cast<std::uint8_t>(value[index]);
+        if (lead <= 0x7FU) {
+            blank = blank && ((lead >= 0x09U && lead <= 0x0DU) || lead == 0x20U);
+            ++index;
+            continue;
+        }
         std::uint32_t code_point = 0U;
         if (!decode(value, index, code_point)) return Utf8Blankness::malformed;
         blank = blank && unicode_white_space(code_point);

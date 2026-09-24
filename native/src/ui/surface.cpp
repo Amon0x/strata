@@ -6,6 +6,7 @@
 #include <iterator>
 #include <limits>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -195,45 +196,38 @@ declaration_root(const std::shared_ptr<const DescriptionNode>& declaration) {
 [[nodiscard]] surface_detail::LazyRangeSignature lazy_range_signature(const RetainedTree& tree,
                                                                       const LayoutResult& layout) {
     surface_detail::LazyRangeSignature result;
-    if (tree.root() == nullptr)
-        return result;
-    const auto visit = [&result, &layout](const auto& self, const RetainedNode& node) -> void {
-        if (node.lifecycle() != RetainedLifecycle::attached)
-            return;
-        if (node.description().materialization.has_value()) {
-            const DescriptionNode& projected = node.description();
-            const std::shared_ptr<const DescriptionNode>& source = projected.generated_source;
-            const std::shared_ptr<const DescriptionChildren> provider =
-                source != nullptr ? source->children : projected.children;
-            const std::size_t child_count = provider->size();
-            MaterializationRange materialized =
-                node.realized_range().value_or(MaterializationRange{});
-            materialized.start = std::min(materialized.start, child_count);
-            materialized.end_exclusive =
-                std::clamp(materialized.end_exclusive, materialized.start, child_count);
-            MaterializationRange visible;
-            if (const LayoutRecord* record = layout.find(node.identity());
-                record != nullptr && record->visible_range.has_value()) {
-                visible = MaterializationRange{
-                    std::min(record->visible_range->start, child_count),
-                    std::min(record->visible_range->end_exclusive, child_count),
-                };
-                visible.end_exclusive = std::max(visible.start, visible.end_exclusive);
-            }
-            result.push_back(surface_detail::LazyRangeState{
-                std::string(node.structural_path()),
-                child_count,
-                materialized,
-                visible,
-                !node.realization_current(provider, projected.projected_theme,
-                                          projected.projected_theme_scope,
-                                          projected.projected_theme_generation, materialized),
-            });
+    // The tree indexes its attached lazy collections.
+    for (const RetainedNode* const lazy : tree.virtual_nodes()) {
+        const RetainedNode& node = *lazy;
+        const DescriptionNode& projected = node.description();
+        const std::shared_ptr<const DescriptionNode>& source = projected.generated_source;
+        const std::shared_ptr<const DescriptionChildren> provider =
+            source != nullptr ? source->children : projected.children;
+        const std::size_t child_count = provider->size();
+        MaterializationRange materialized =
+            node.realized_range().value_or(MaterializationRange{});
+        materialized.start = std::min(materialized.start, child_count);
+        materialized.end_exclusive =
+            std::clamp(materialized.end_exclusive, materialized.start, child_count);
+        MaterializationRange visible;
+        if (const LayoutRecord* record = layout.find(node.identity());
+            record != nullptr && record->visible_range.has_value()) {
+            visible = MaterializationRange{
+                std::min(record->visible_range->start, child_count),
+                std::min(record->visible_range->end_exclusive, child_count),
+            };
+            visible.end_exclusive = std::max(visible.start, visible.end_exclusive);
         }
-        for (const auto& child : node.children())
-            self(self, *child);
-    };
-    visit(visit, *tree.root());
+        result.push_back(surface_detail::LazyRangeState{
+            std::string(node.structural_path()),
+            child_count,
+            materialized,
+            visible,
+            !node.realization_current(provider, projected.projected_theme,
+                                      projected.projected_theme_scope,
+                                      projected.projected_theme_generation, materialized),
+        });
+    }
     std::sort(result.begin(), result.end());
     return result;
 }
@@ -1002,16 +996,25 @@ std::shared_ptr<const DescriptionNode> Surface::describe(DescriptionBuildResult&
     descriptions_.set_contextual_host_roots({{"env", *environment_binding_}});
     DescriptionLayersBuildResult built = descriptions_.build_layers(requests);
     for (std::size_t index = 0U; index < visible.size(); ++index) {
-        state_scopes_by_layer_.insert_or_assign(visible[index].id, built.layer_state_scopes[index]);
+        auto [entry, inserted] =
+            state_scopes_by_layer_.try_emplace(visible[index].id, built.layer_state_scopes[index]);
+        if (!inserted && entry->second != built.layer_state_scopes[index]) {
+            entry->second = std::move(built.layer_state_scopes[index]);
+            inserted = true;
+        }
+        if (inserted)
+            ++layer_scopes_generation_;
     }
     std::set<std::string> attached_layers;
     if (!application_.layers().root_replaced())
         attached_layers.insert("root:" + id_);
     for (const runtime::LayerSnapshot& layer : application_layers)
         attached_layers.insert(layer.id);
-    std::erase_if(state_scopes_by_layer_, [&attached_layers](const auto& entry) {
-        return !attached_layers.contains(entry.first);
-    });
+    if (std::erase_if(state_scopes_by_layer_, [&attached_layers](const auto& entry) {
+            return !attached_layers.contains(entry.first);
+        }) != 0U) {
+        ++layer_scopes_generation_;
+    }
     std::vector<std::shared_ptr<const DescriptionNode>> layers;
     layers.reserve(visible.size());
     for (std::size_t index = 0U; index < visible.size(); ++index) {
@@ -1057,7 +1060,8 @@ bool Surface::rebuild_tree(SurfaceFrame& frame, std::optional<std::string_view>&
     DescriptionBuildResult description;
     {
         auto build_profile = profiler_.section("build");
-        raw_description_ = describe(description);
+        // The layer wrappers are composed again every build; unchanged ones keep their identity.
+        raw_description_ = share_unchanged_description(raw_description_, describe(description));
     }
     std::shared_ptr<const DescriptionNode> materialized;
     {
@@ -1428,52 +1432,71 @@ void Surface::commit_lazy_materializations(SurfaceFrame& frame) {
     pending_lazy_materializations_.clear();
     materialization_publications_.purge_expired();
 
-    runtime::StateScopeSet attached_state_scopes;
-    for (const auto& [layer, scopes] : state_scopes_by_layer_) {
-        static_cast<void>(layer);
-        attached_state_scopes.insert(scopes.begin(), scopes.end());
+    // What the attached tree owns follows its shape and the layers' scopes: collected again only
+    // when either changed, and retained against every frame (state and async work can be
+    // registered for owners that already left).
+    if (ownership_.structure_generation != tree_.structure_generation() ||
+        ownership_.layer_scopes_generation != layer_scopes_generation_ || !ownership_.current) {
+        ownership_.structure_generation = tree_.structure_generation();
+        ownership_.layer_scopes_generation = layer_scopes_generation_;
+        ownership_.current = true;
+        ownership_.state_scopes.clear();
+        for (const auto& [layer, scopes] : state_scopes_by_layer_) {
+            static_cast<void>(layer);
+            ownership_.state_scopes.insert(scopes.begin(), scopes.end());
+        }
+        const runtime::StateScopeSet lazy_scopes = attached_description_state_scopes(tree_);
+        ownership_.state_scopes.insert(lazy_scopes.begin(), lazy_scopes.end());
+        ownership_.async_owners.clear();
+        if (tree_.root() != nullptr) {
+            const auto collect = [this](const auto& self, const RetainedNode& node) -> void {
+                if (node.lifecycle() != RetainedLifecycle::attached)
+                    return;
+                if (!node.description().state_scope.empty()) {
+                    ownership_.async_owners.insert(id_ + ":state:" +
+                                                   node.description().state_scope);
+                }
+                if (node.description().key.has_value() && !node.description().key->empty()) {
+                    ownership_.async_owners.insert(id_ + ":node:" + *node.description().key);
+                }
+                for (const auto& child : node.children())
+                    self(self, *child);
+            };
+            collect(collect, *tree_.root());
+        }
     }
-    const runtime::StateScopeSet lazy_scopes = attached_description_state_scopes(tree_);
-    attached_state_scopes.insert(lazy_scopes.begin(), lazy_scopes.end());
-    if (application_.state().retain_owned_scopes(attached_state_scopes) != 0U) {
+    if (application_.state().retain_owned_scopes(ownership_.state_scopes) != 0U) {
         // Entries must never recreate state whose retained owner has detached.
         application_.undo().clear(id_);
     }
 
-    std::set<std::string, std::less<>> async_owners;
-    if (tree_.root() != nullptr) {
-        const auto collect = [this, &async_owners](const auto& self,
-                                                   const RetainedNode& node) -> void {
-            if (node.lifecycle() != RetainedLifecycle::attached)
-                return;
-            if (!node.description().state_scope.empty()) {
-                async_owners.insert(id_ + ":state:" + node.description().state_scope);
-            }
-            if (node.description().key.has_value() && !node.description().key->empty()) {
-                async_owners.insert(id_ + ":node:" + *node.description().key);
-            }
-            if (node.description().type == "TreeView") {
-                const auto property = node.description().properties.find("expandedKeys");
-                const runtime::Value* expanded = property != node.description().properties.end()
-                                                     ? property->second.value()
-                                                     : nullptr;
-                if (expanded == nullptr || expanded->list() == nullptr) {
-                    expanded = node.retained_value("strata.tree.expanded");
-                }
-                if (expanded != nullptr && expanded->list() != nullptr) {
-                    for (const runtime::Value& value : expanded->list()->values) {
-                        const std::string* key =
-                            value.key() != nullptr ? &value.key()->value : value.string();
-                        if (key != nullptr && !key->empty()) {
-                            async_owners.insert(id_ + ":item:" + *key);
-                        }
-                    }
+    // A tree view's expanded rows own their loads; its expansion is state, not shape.
+    static constexpr std::string_view tree_view = "TreeView";
+    const std::vector<RetainedNode*> tree_views = tree_.nodes_of_types(std::span(&tree_view, 1U));
+    if (tree_views.empty()) {
+        static_cast<void>(application_.async().retain_owners(id_ + ":", ownership_.async_owners));
+        return;
+    }
+    std::set<std::string, std::less<>> async_owners = ownership_.async_owners;
+    for (const RetainedNode* node : tree_views) {
+        if (node->lifecycle() != RetainedLifecycle::attached)
+            continue;
+        const auto property = node->description().properties.find("expandedKeys");
+        const runtime::Value* expanded = property != node->description().properties.end()
+                                             ? property->second.value()
+                                             : nullptr;
+        if (expanded == nullptr || expanded->list() == nullptr) {
+            expanded = node->retained_value("strata.tree.expanded");
+        }
+        if (expanded != nullptr && expanded->list() != nullptr) {
+            for (const runtime::Value& value : expanded->list()->values) {
+                const std::string* key =
+                    value.key() != nullptr ? &value.key()->value : value.string();
+                if (key != nullptr && !key->empty()) {
+                    async_owners.insert(id_ + ":item:" + *key);
                 }
             }
-            for (const auto& child : node.children())
-                self(self, *child);
-        };
-        collect(collect, *tree_.root());
+        }
     }
     static_cast<void>(application_.async().retain_owners(id_ + ":", async_owners));
 }

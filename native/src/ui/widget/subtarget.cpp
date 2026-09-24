@@ -212,27 +212,41 @@ int detached_overlay_z_index(const RetainedNode& node) noexcept {
 std::vector<DetachedOverlayRoot> detached_overlay_roots(
     const RetainedTree& tree,
     const LayoutResult& layout,
+    const std::span<const std::string_view> candidate_types,
+    const bool behavior_candidates,
     const DetachedOverlayPredicate& participates
 ) {
     std::vector<DetachedOverlayRoot> result;
     if (tree.root() == nullptr || !participates) return result;
-    std::size_t author_order = 0U;
-    const auto visit = [&result, &layout, &participates, &author_order](
-                           const auto& self,
-                           const RetainedNode& node
-                       ) -> void {
-        if (layout.find(node.identity()) == nullptr) return;
-        const std::size_t order = author_order++;
-        if (participates(node)) {
-            result.push_back(DetachedOverlayRoot{
-                &node,
-                detached_overlay_z_index(node),
-                order,
-            });
+    std::vector<RetainedNode*> candidates = tree.nodes_of_types(candidate_types);
+    if (behavior_candidates && !tree.behavior_nodes().empty()) {
+        const std::size_t typed = candidates.size();
+        candidates.insert(
+            candidates.end(), tree.behavior_nodes().begin(), tree.behavior_nodes().end()
+        );
+        const auto by_preorder = [](const RetainedNode* const left,
+                                    const RetainedNode* const right) {
+            return left->preorder() < right->preorder();
+        };
+        std::inplace_merge(candidates.begin(),
+                           candidates.begin() + static_cast<std::ptrdiff_t>(typed),
+                           candidates.end(), by_preorder);
+        candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+    }
+    for (const RetainedNode* const node : candidates) {
+        // A node counts only while it and every ancestor are laid out.
+        bool laid_out = true;
+        for (const RetainedNode* current = node; current != nullptr && laid_out;
+             current = current->parent()) {
+            laid_out = layout.find(current->identity()) != nullptr;
         }
-        for (const auto& child : node.children()) self(self, *child);
-    };
-    visit(visit, *tree.root());
+        if (!laid_out || !participates(*node)) continue;
+        result.push_back(DetachedOverlayRoot{
+            node,
+            detached_overlay_z_index(*node),
+            node->preorder(),
+        });
+    }
     std::ranges::stable_sort(result, [](const DetachedOverlayRoot& left,
                                         const DetachedOverlayRoot& right) {
         return left.z_index != right.z_index
@@ -250,10 +264,19 @@ bool widget_projects_subtargets(const std::string_view type) noexcept {
         type == "CommandPalette" || type == "ToastRegion" || type == "ChipInput";
 }
 
+namespace {
+constexpr std::string_view detached_subtarget_type_names[] = {
+    "CommandPalette", "Menu", "MenuBar", "Select", "ToastRegion", "Toolbar", "Tooltip",
+};
+} // namespace
+
 bool widget_projects_detached_subtargets(const std::string_view type) noexcept {
-    return type == "Select" || type == "Menu" || type == "MenuBar" ||
-        type == "Toolbar" || type == "Tooltip" || type == "CommandPalette" ||
-        type == "ToastRegion";
+    return std::ranges::find(detached_subtarget_type_names, type) !=
+           std::end(detached_subtarget_type_names);
+}
+
+std::span<const std::string_view> detached_subtarget_types() noexcept {
+    return detached_subtarget_type_names;
 }
 
 std::vector<WidgetSubtarget> widget_subtargets(

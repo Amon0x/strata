@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -12,6 +13,28 @@
 #include "data/json.hpp"
 
 namespace strata::runtime {
+
+/**
+ * Orders names exactly as std::string does, comparing byte by byte inline: property and field
+ * names are short and usually differ early, where a memcmp call costs more than the comparison.
+ */
+struct NameLess final {
+    using is_transparent = void;
+    [[nodiscard]] static int compare(const std::string_view left,
+                                     const std::string_view right) noexcept {
+        const std::size_t count = left.size() < right.size() ? left.size() : right.size();
+        for (std::size_t index = 0U; index < count; ++index) {
+            const auto a = static_cast<unsigned char>(left[index]);
+            const auto b = static_cast<unsigned char>(right[index]);
+            if (a != b) return a < b ? -1 : 1;
+        }
+        return left.size() < right.size() ? -1 : left.size() > right.size() ? 1 : 0;
+    }
+    [[nodiscard]] bool operator()(const std::string_view left,
+                                  const std::string_view right) const noexcept {
+        return compare(left, right) < 0;
+    }
+};
 
 struct NullValue final {
     [[nodiscard]] friend constexpr bool operator==(NullValue, NullValue) noexcept = default;

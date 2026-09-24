@@ -876,7 +876,8 @@ void InputRouter::prepare_detached_subtargets() const {
     if (!pointer_geometry_ready_ || detached_subtargets_ready_)
         return;
     const std::vector<DetachedOverlayRoot> overlays =
-        detached_overlay_roots(*tree_, *layout_, [this](const RetainedNode& node) {
+        detached_overlay_roots(*tree_, *layout_, detached_subtarget_types(), false,
+                               [this](const RetainedNode& node) {
             if (!widget_projects_detached_subtargets(node.description().type))
                 return false;
             return std::ranges::any_of(projected_subtargets(node), &WidgetSubtarget::detached);

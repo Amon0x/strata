@@ -36,6 +36,7 @@ struct BatchKey final {
     SubmissionScissor scissor;
     std::vector<SubmissionRoundedClip> rounded_clips;
     bool texture_sampled = false;
+    [[nodiscard]] friend bool operator==(const BatchKey&, const BatchKey&) = default;
 };
 
 [[nodiscard]] bool compatible(const BatchKey& left, const BatchKey& right) noexcept {
@@ -746,6 +747,146 @@ void translate_vertex_positions(
     return capacity * 3U;
 }
 
+/** A draw's geometry: moved from its retained geometry when it only translated. */
+[[nodiscard]] EncodedDrawCacheEntry encoded_geometry(
+    const std::optional<EncodedDrawCacheEntry>& retained,
+    const PreparedDraw& draw,
+    const SubmissionContext& context
+) {
+    std::optional<Point> translated;
+    if (retained.has_value()) {
+        translated = translation_from_cached_geometry(retained->source, draw, context);
+    }
+    if (translated.has_value()) {
+        EncodedDrawCacheEntry updated = *retained;
+        translate_vertex_positions(updated.vertex_bytes, 0U, *translated);
+        if (updated.source.material.opacity != draw.material.opacity)
+            set_vertex_opacity(updated.vertex_bytes, draw.material.opacity);
+        updated.source = draw;
+        return updated;
+    }
+    RenderSubmission fragment;
+    geometry(fragment, draw, 0U, context);
+    return EncodedDrawCacheEntry{
+        draw,
+        std::move(fragment.vertex_bytes),
+        std::move(fragment.indices),
+    };
+}
+
+void append_patch(
+    std::vector<SubmissionGeometryPatch>& patches,
+    const std::size_t offset,
+    const std::span<const std::uint8_t> bytes
+) {
+    if (bytes.empty()) return;
+    if (offset > std::numeric_limits<std::uint32_t>::max() ||
+        bytes.size() > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::length_error("retained geometry patch exceeds uint32");
+    }
+    if (!patches.empty() &&
+        static_cast<std::size_t>(patches.back().offset) +
+                patches.back().bytes.size() == offset) {
+        patches.back().bytes.insert(
+            patches.back().bytes.end(),
+            bytes.begin(),
+            bytes.end()
+        );
+        return;
+    }
+    patches.push_back(SubmissionGeometryPatch{
+        static_cast<std::uint32_t>(offset),
+        std::vector<std::uint8_t>(bytes.begin(), bytes.end()),
+    });
+}
+
+/**
+ * Patches a retained draw's slot with its geometry: the vertices, and the slot's indices offset
+ * to its batch with unused capacity degenerate.
+ */
+void patch_slot(
+    const EncodedDrawPlacement& placement,
+    const EncodedDrawCacheEntry& retained,
+    const RenderSubmission& output,
+    std::vector<SubmissionGeometryPatch>& vertex_patches,
+    std::vector<SubmissionGeometryPatch>& index_patches
+) {
+    const std::uint8_t* const vertex_destination =
+        output.vertex_bytes.data() + placement.vertex_byte_offset;
+    if (placement.vertex_byte_count != 0U && std::memcmp(
+            vertex_destination,
+            retained.vertex_bytes.data(),
+            placement.vertex_byte_count
+        ) != 0) {
+        append_patch(vertex_patches, placement.vertex_byte_offset, retained.vertex_bytes);
+    }
+    std::vector<std::uint32_t> next_indices;
+    next_indices.assign(placement.index_capacity, placement.batch_local_vertex);
+    for (std::size_t index = 0U; index < placement.index_count; ++index) {
+        const std::uint32_t local = retained.indices[index];
+        if (local > std::numeric_limits<std::uint32_t>::max() - placement.batch_local_vertex) {
+            throw std::length_error("render submission cached index exceeds uint32");
+        }
+        next_indices[index] = placement.batch_local_vertex + local;
+    }
+    if (!std::equal(
+            next_indices.begin(),
+            next_indices.end(),
+            output.indices.begin() + static_cast<std::ptrdiff_t>(placement.index_offset)
+        )) {
+        const std::span<const std::byte> bytes =
+            std::as_bytes(std::span<const std::uint32_t>(next_indices));
+        append_patch(
+            index_patches,
+            placement.index_offset * sizeof(std::uint32_t),
+            std::span<const std::uint8_t>(
+                reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                bytes.size()
+            )
+        );
+    }
+}
+
+/** Applies a frame's patches, and publishes them when they are smaller than the buffers. */
+void apply_patches(
+    std::vector<SubmissionGeometryPatch> vertex_patches,
+    std::vector<SubmissionGeometryPatch> index_patches,
+    RenderSubmission& output
+) {
+    std::size_t patch_bytes = 0U;
+    for (const SubmissionGeometryPatch& patch : vertex_patches) {
+        patch_bytes += patch.bytes.size() + 8U;
+    }
+    for (const SubmissionGeometryPatch& patch : index_patches) {
+        patch_bytes += patch.bytes.size() + 8U;
+    }
+    const std::size_t full_bytes =
+        output.vertex_bytes.size() + output.indices.size() * sizeof(std::uint32_t);
+    output.candidate_geometry_patch_bytes = patch_bytes;
+    output.full_geometry_bytes = full_bytes;
+    output.patch_from_previous = full_bytes == 0U || patch_bytes < full_bytes;
+    for (const SubmissionGeometryPatch& patch : vertex_patches) {
+        std::memcpy(
+            output.vertex_bytes.data() + patch.offset,
+            patch.bytes.data(),
+            patch.bytes.size()
+        );
+    }
+    std::uint8_t* const output_index_bytes =
+        reinterpret_cast<std::uint8_t*>(output.indices.data());
+    for (const SubmissionGeometryPatch& patch : index_patches) {
+        std::memcpy(
+            output_index_bytes + patch.offset,
+            patch.bytes.data(),
+            patch.bytes.size()
+        );
+    }
+    if (output.patch_from_previous) {
+        output.vertex_patches = std::move(vertex_patches);
+        output.index_patches = std::move(index_patches);
+    }
+}
+
 } // namespace
 
 void encode(
@@ -854,26 +995,7 @@ void encode(
         std::optional<EncodedDrawCacheEntry>& retained = cache.geometry[item_index];
         if (!retained.has_value() || retained->source != draw) {
             changed[item_index] = true;
-            std::optional<Point> translated;
-            if (retained.has_value()) {
-                translated = translation_from_cached_geometry(retained->source, draw, context);
-            }
-            if (translated.has_value()) {
-                EncodedDrawCacheEntry updated = *retained;
-                translate_vertex_positions(updated.vertex_bytes, 0U, *translated);
-                if (updated.source.material.opacity != draw.material.opacity)
-                    set_vertex_opacity(updated.vertex_bytes, draw.material.opacity);
-                updated.source = draw;
-                geometry_updates[item_index] = std::move(updated);
-            } else {
-                RenderSubmission fragment;
-                geometry(fragment, draw, 0U, context);
-                geometry_updates[item_index] = EncodedDrawCacheEntry{
-                    draw,
-                    std::move(fragment.vertex_bytes),
-                    std::move(fragment.indices),
-                };
-            }
+            geometry_updates[item_index] = encoded_geometry(retained, draw, context);
         }
         const EncodedDrawCacheEntry& geometry =
             geometry_updates[item_index].has_value()
@@ -994,32 +1116,7 @@ void encode(
     output.full_geometry_bytes =
         vertex_byte_count + index_count * sizeof(std::uint32_t);
 
-    const auto append_patch = [](
-                                  std::vector<SubmissionGeometryPatch>& patches,
-                                  const std::size_t offset,
-                                  const std::span<const std::uint8_t> bytes
-                              ) {
-        if (bytes.empty()) return;
-        if (offset > std::numeric_limits<std::uint32_t>::max() ||
-            bytes.size() > std::numeric_limits<std::uint32_t>::max()) {
-            throw std::length_error("retained geometry patch exceeds uint32");
-        }
-        if (!patches.empty() &&
-            static_cast<std::size_t>(patches.back().offset) +
-                    patches.back().bytes.size() == offset) {
-            patches.back().bytes.insert(
-                patches.back().bytes.end(),
-                bytes.begin(),
-                bytes.end()
-            );
-            return;
-        }
-        patches.push_back(SubmissionGeometryPatch{
-            static_cast<std::uint32_t>(offset),
-            std::vector<std::uint8_t>(bytes.begin(), bytes.end()),
-        });
-    };
-    const auto changed_ranges = [&append_patch](
+    const auto changed_ranges = [](
                                     const std::span<const std::uint8_t> previous,
                                     const std::span<const std::uint8_t> current,
                                     const std::size_t stride
@@ -1071,87 +1168,10 @@ void encode(
     if (topology_reused) {
         for (std::size_t item_index = 0U; item_index < items.size(); ++item_index) {
             if (!changed[item_index] || !next_placements[item_index].has_value()) continue;
-            const EncodedDrawPlacement& placement = *next_placements[item_index];
-            const EncodedDrawCacheEntry& retained = geometry_at(item_index);
-            const std::uint8_t* const vertex_destination =
-                output.vertex_bytes.data() + placement.vertex_byte_offset;
-            if (placement.vertex_byte_count != 0U && std::memcmp(
-                    vertex_destination,
-                    retained.vertex_bytes.data(),
-                    placement.vertex_byte_count
-                ) != 0) {
-                append_patch(
-                    next_vertex_patches,
-                    placement.vertex_byte_offset,
-                    retained.vertex_bytes
-                );
-            }
-            std::vector<std::uint32_t> next_indices;
-            next_indices.assign(
-                placement.index_capacity,
-                placement.batch_local_vertex
-            );
-            for (std::size_t index = 0U; index < placement.index_count; ++index) {
-                const std::uint32_t local = retained.indices[index];
-                if (local > std::numeric_limits<std::uint32_t>::max() -
-                                placement.batch_local_vertex) {
-                    throw std::length_error("render submission cached index exceeds uint32");
-                }
-                const std::uint32_t next = placement.batch_local_vertex + local;
-                next_indices[index] = next;
-            }
-            if (!std::equal(
-                    next_indices.begin(),
-                    next_indices.end(),
-                    output.indices.begin() +
-                        static_cast<std::ptrdiff_t>(placement.index_offset)
-                )) {
-                const std::span<const std::uint32_t> indices(
-                    next_indices
-                );
-                const std::span<const std::byte> bytes = std::as_bytes(indices);
-                append_patch(
-                    next_index_patches,
-                    placement.index_offset * sizeof(std::uint32_t),
-                    std::span<const std::uint8_t>(
-                        reinterpret_cast<const std::uint8_t*>(bytes.data()),
-                        bytes.size()
-                    )
-                );
-            }
+            patch_slot(*next_placements[item_index], geometry_at(item_index), output,
+                       next_vertex_patches, next_index_patches);
         }
-        std::size_t patch_bytes = 0U;
-        for (const SubmissionGeometryPatch& patch : next_vertex_patches) {
-            patch_bytes += patch.bytes.size() + 8U;
-        }
-        for (const SubmissionGeometryPatch& patch : next_index_patches) {
-            patch_bytes += patch.bytes.size() + 8U;
-        }
-        const std::size_t full_bytes =
-            output.vertex_bytes.size() + output.indices.size() * sizeof(std::uint32_t);
-        output.candidate_geometry_patch_bytes = patch_bytes;
-        output.full_geometry_bytes = full_bytes;
-        output.patch_from_previous = full_bytes == 0U || patch_bytes < full_bytes;
-        for (const SubmissionGeometryPatch& patch : next_vertex_patches) {
-            std::memcpy(
-                output.vertex_bytes.data() + patch.offset,
-                patch.bytes.data(),
-                patch.bytes.size()
-            );
-        }
-        std::uint8_t* const output_index_bytes =
-            reinterpret_cast<std::uint8_t*>(output.indices.data());
-        for (const SubmissionGeometryPatch& patch : next_index_patches) {
-            std::memcpy(
-                output_index_bytes + patch.offset,
-                patch.bytes.data(),
-                patch.bytes.size()
-            );
-        }
-        if (output.patch_from_previous) {
-            output.vertex_patches = std::move(next_vertex_patches);
-            output.index_patches = std::move(next_index_patches);
-        }
+        apply_patches(std::move(next_vertex_patches), std::move(next_index_patches), output);
     } else {
         std::vector<std::uint8_t> next_vertices;
         std::vector<std::uint32_t> next_indices;
@@ -1287,6 +1307,57 @@ void encode(
     }
     output.batches = std::move(next_batches);
     cache.placements = std::move(next_placements);
+}
+
+bool encode_changed_draws(
+    const std::span<const std::size_t> changed_items,
+    const SubmissionContext& context,
+    RenderSubmission& output,
+    PreparationCache& cache
+) {
+    const std::vector<PlannedItem>& items = cache.planned_items;
+    if (cache.geometry.size() != items.size() || cache.placements.size() != items.size())
+        return false;
+    struct Update final {
+        std::size_t item = 0U;
+        EncodedDrawCacheEntry geometry;
+        EncodedDrawPlacement placement;
+    };
+    std::vector<Update> updates;
+    updates.reserve(changed_items.size());
+    for (const std::size_t item_index : changed_items) {
+        const auto* draw = std::get_if<PreparedDraw>(&items[item_index].value);
+        const std::optional<EncodedDrawCacheEntry>& retained = cache.geometry[item_index];
+        const std::optional<EncodedDrawPlacement>& placement = cache.placements[item_index];
+        if (draw == nullptr || !retained.has_value() || !placement.has_value()) return false;
+        if (retained->source == *draw) continue;
+        // The full encode would batch it as before and keep its slot, so every other draw's
+        // placement and batch stay as they are.
+        if (key(*draw) != key(retained->source)) return false;
+        EncodedDrawCacheEntry geometry = encoded_geometry(retained, *draw, context);
+        if (geometry.vertex_bytes.size() > placement->vertex_byte_capacity ||
+            geometry.indices.size() > placement->index_capacity) {
+            return false;
+        }
+        EncodedDrawPlacement next = *placement;
+        next.vertex_byte_count = geometry.vertex_bytes.size();
+        next.index_count = geometry.indices.size();
+        updates.push_back(Update{item_index, std::move(geometry), next});
+    }
+    output.previous_item_count = items.size();
+    output.item_count = items.size();
+    output.geometry_topology_reused = true;
+    std::vector<SubmissionGeometryPatch> vertex_patches;
+    std::vector<SubmissionGeometryPatch> index_patches;
+    for (const Update& update : updates) {
+        patch_slot(update.placement, update.geometry, output, vertex_patches, index_patches);
+    }
+    apply_patches(std::move(vertex_patches), std::move(index_patches), output);
+    for (Update& update : updates) {
+        cache.placements[update.item] = update.placement;
+        cache.geometry[update.item] = std::move(update.geometry);
+    }
+    return true;
 }
 
 static_assert(vertex_bytes == 88U);

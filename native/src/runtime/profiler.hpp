@@ -328,6 +328,9 @@ class Profiler final {
     mutable ProfilerSnapshot completed_snapshot_;
     mutable bool has_completed_snapshot_ = false;
     mutable bool completed_snapshot_dirty_ = false;
+    /** Counts recorded spikes, so publication copies them only when one was recorded. */
+    std::uint64_t spike_serial_ = 0U;
+    mutable std::uint64_t published_spike_serial_ = 0U;
 };
 
 } // namespace strata::runtime

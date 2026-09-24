@@ -46,6 +46,105 @@ void validate_texture_descriptors(
 } // namespace
 
 namespace submission_detail {
+namespace {
+
+/**
+ * Updates the submission for a stream that keeps the planned stream's shape: the same commands
+ * except a few draws, so every other command's items, placements and batches stand. False,
+ * leaving the full plan to run, when the stream or the text atlas moved on in any other way.
+ */
+[[nodiscard]] bool update_changed_draws(
+    const RenderCommandBuffer& commands,
+    font::GlyphAtlas& glyph_atlas,
+    const TextEngine* const text_engine,
+    const SubmissionContext& context,
+    PreparationCache& cache,
+    RenderSubmission& output
+) {
+    if (!cache.changed_draw_updates || !cache.plan_current) return false;
+    const std::vector<RenderCommand>& previous = cache.planned_commands.commands();
+    const std::vector<RenderCommand>& current = commands.commands();
+    if (&previous == &current || previous.size() != current.size() ||
+        cache.command_plans.size() != current.size() || cache.text.size() != current.size()) {
+        return false;
+    }
+    if (text_engine != nullptr && (glyph_atlas.reclamation_pending() ||
+                                   glyph_atlas.generation() != cache.planned_atlas_generation)) {
+        return false;
+    }
+    // A changed draw is planned again alone; a changed scope (a moved subtree's transform, a
+    // resized clip) with everything up to its end. Either way only the changed draws are encoded.
+    std::vector<CommandRange> ranges;
+    std::size_t covered = 0U;
+    for (std::size_t index = 0U; index < current.size(); ++index) {
+        if (current[index] == previous[index]) continue;
+        if (current[index].index() != previous[index].index()) return false;
+        if (index < covered) continue;
+        CommandRange range{index, index};
+        if (!draw_command(current[index])) {
+            if (scope_step(current[index]) != 1) return false;
+            int depth = 0;
+            std::size_t last = index;
+            for (; last < current.size(); ++last) {
+                depth += scope_step(current[last]);
+                if (depth == 0) break;
+            }
+            if (last == current.size()) return false;
+            range.last = last;
+        }
+        ranges.push_back(range);
+        covered = range.last + 1U;
+    }
+    if (ranges.empty()) return false;
+
+    output.planning_nanos = 0;
+    output.atlas_warmup_nanos = 0;
+    output.text_preparation_nanos = 0;
+    output.mesh_encoding_nanos = 0;
+    const std::size_t previous_full_geometry_bytes =
+        output.vertex_bytes.size() + output.indices.size() * sizeof(std::uint32_t);
+    const auto planning_started = std::chrono::steady_clock::now();
+    const std::optional<std::vector<std::size_t>> changed_items =
+        replan_ranges(commands, ranges, glyph_atlas, text_engine, context, output, cache);
+    if (!changed_items.has_value()) return false;
+    output.planning_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - planning_started
+    ).count();
+    const auto encoding_started = std::chrono::steady_clock::now();
+    output.vertex_patches.clear();
+    output.index_patches.clear();
+    if (encode_changed_draws(*changed_items, context, output, cache)) {
+        output.topology_change = SubmissionTopologyChange::none;
+        output.topology_change_item = 0U;
+    } else {
+        // A draw changed batch (a moved subtree's scissors) or outgrew its slot: encode the
+        // items again, as a full update would after its plan.
+        output.planned_draws = 0U;
+        output.texture_batch_breaks = 0U;
+        output.clip_batch_breaks = 0U;
+        output.material_batch_breaks = 0U;
+        output.effect_batch_breaks = 0U;
+        output.geometry_topology_reused = false;
+        output.candidate_geometry_patch_bytes = 0U;
+        output.full_geometry_bytes = 0U;
+        output.topology_change = SubmissionTopologyChange::none;
+        output.topology_change_item = 0U;
+        output.previous_item_count = 0U;
+        output.item_count = 0U;
+        output.patch_from_previous = false;
+        encode(cache.planned_items, context, output, cache);
+    }
+    output.mesh_encoding_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - encoding_started
+    ).count();
+    output.previous_full_geometry_bytes = previous_full_geometry_bytes;
+    cache.planned_commands = commands;
+    cache.planned_atlas_generation = glyph_atlas.generation();
+    ++cache.changed_draw_update_count;
+    return true;
+}
+
+} // namespace
 
 void update_cached(
     const RenderCommandBuffer& commands,
@@ -94,6 +193,7 @@ void update_cached(
         cache.geometry.clear();
         cache.geometry_environment = geometry_environment;
         cache.geometry_textures.assign(textures.begin(), textures.end());
+        cache.plan_current = false;
     }
     struct PreparationGuard final {
         font::GlyphAtlas* atlas = nullptr;
@@ -104,6 +204,7 @@ void update_cached(
         static_cast<void>(glyph_atlas.begin_frame_preparation());
         preparation.atlas = &glyph_atlas;
     }
+    if (update_changed_draws(commands, glyph_atlas, text_engine, context, cache, output)) return;
     output.planned_draws = 0U;
     output.skipped_draws = 0U;
     output.texture_batch_breaks = 0U;
@@ -139,6 +240,10 @@ void update_cached(
     output.mesh_encoding_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - encoding_started
     ).count();
+    cache.planned_commands = commands;
+    cache.planned_items = std::move(items);
+    cache.planned_atlas_generation = glyph_atlas.generation();
+    cache.plan_current = true;
 }
 
 RenderSubmission build_cached(

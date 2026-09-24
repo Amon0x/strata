@@ -95,7 +95,10 @@ private:
     std::string persistence_scope_;
     const RetainedTree* observed_tree_ = nullptr;
     std::uint64_t observed_tree_generation_ = 0U;
+    std::uint64_t observed_structure_generation_ = 0U;
     std::uint64_t observed_undo_generation_ = 0U;
+    /** The declaring nodes and their dirty generations when the entries were built. */
+    std::vector<std::pair<const RetainedNode*, DirtyGenerationSnapshot>> observed_declarations_;
 };
 
 } // namespace strata::ui

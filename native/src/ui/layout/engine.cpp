@@ -612,12 +612,29 @@ bool LayoutEngine::arranged_in_current_pass(const RetainedNode& node) const noex
     return false;
 }
 
-LayoutStyle LayoutEngine::resolved_style(const RetainedNode& node) const {
+const ParsedLayout& LayoutEngine::parsed_layout(const RetainedNode& node) const {
     // Parsed once per description change, not on every measure of the node (reconcile drops it).
-    if (node.layout_style_ == nullptr) {
-        node.layout_style_ = std::make_shared<const LayoutStyle>(layout_style(node.description()));
+    if (node.parsed_layout_ == nullptr) {
+        node.parsed_layout_ = std::make_shared<const ParsedLayout>(ParsedLayout{
+            layout_style(node.description()),
+            content_size_motion(node.description()),
+        });
     }
-    LayoutStyle style = *node.layout_style_;
+    return *node.parsed_layout_;
+}
+
+const LayoutStyle& LayoutEngine::style_of(const RetainedNode& node,
+                                          std::optional<LayoutStyle>& adjusted) const {
+    if (node.retained_value("strata.scroll.offset") == nullptr &&
+        node.retained_value("strata.gesture.runtimeSize") == nullptr &&
+        (motion_ == nullptr || motion_->computed_values(node.identity()) == nullptr)) {
+        return parsed_layout(node).style;
+    }
+    return adjusted.emplace(resolved_style(node));
+}
+
+LayoutStyle LayoutEngine::resolved_style(const RetainedNode& node) const {
+    LayoutStyle style = parsed_layout(node).style;
     style.scroll_offset = resolved_scroll_offset(node, style.scroll_offset);
     if (const runtime::Value* retained = node.retained_value("strata.gesture.runtimeSize");
         retained != nullptr && retained->object() != nullptr) {

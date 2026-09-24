@@ -315,7 +315,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     RenderOperationCounters counters;
     const auto collect_overlays = [&]() {
         return detached_overlay_roots(
-            tree, layout, [&widgets, &behaviors, &input](const RetainedNode& node) {
+            tree, layout, widgets.detached_overlay_types(), true,
+            [&widgets, &behaviors, &input](const RetainedNode& node) {
                 const WidgetLifecycle* lifecycle = widgets.find(node.description().type);
                 return (lifecycle != nullptr && lifecycle->present.overlay != nullptr &&
                         lifecycle->present.detached_overlay) ||

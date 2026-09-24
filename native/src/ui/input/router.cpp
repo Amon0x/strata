@@ -304,26 +304,21 @@ void InputRouter::synchronize_authored_presentations() {
     if (tree_ == nullptr || tree_->root() == nullptr)
         return;
     bool changed = false;
-    const auto visit = [this, &changed](const auto& self, RetainedNode& node) -> void {
-        const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
-        if (lifecycle != nullptr && !lifecycle->describe.authored_presentation_property.empty() &&
-            scalar_property(node, lifecycle->describe.authored_presentation_property) != nullptr) {
-            runtime::Value state(std::vector<std::pair<std::string, runtime::Value>>{
-                {"focused", runtime::Value(focused(node.identity()))},
-                {"focusVisible", runtime::Value(focus_visible(node.identity()))},
-                {"hovered", runtime::Value(hovered(node.identity()))},
-                {"pressed", runtime::Value(active(node.identity()))},
-            });
-            changed =
-                tree_->set_retained_value(node.identity(), std::string(authored_presentation_state),
-                                          std::move(state), DirtyReason::properties) ||
-                changed;
-        }
-        for (const std::unique_ptr<RetainedNode>& child : node.children()) {
-            self(self, *child);
-        }
-    };
-    visit(visit, *tree_->root());
+    for (RetainedNode* const node : tree_->nodes_of_types(widgets_.authored_presentation_types())) {
+        const WidgetLifecycle* lifecycle = widgets_.find(node->description().type);
+        if (scalar_property(*node, lifecycle->describe.authored_presentation_property) == nullptr)
+            continue;
+        runtime::Value state(std::vector<std::pair<std::string, runtime::Value>>{
+            {"focused", runtime::Value(focused(node->identity()))},
+            {"focusVisible", runtime::Value(focus_visible(node->identity()))},
+            {"hovered", runtime::Value(hovered(node->identity()))},
+            {"pressed", runtime::Value(active(node->identity()))},
+        });
+        changed =
+            tree_->set_retained_value(node->identity(), std::string(authored_presentation_state),
+                                      std::move(state), DirtyReason::properties) ||
+            changed;
+    }
     if (changed && description_invalidator_)
         description_invalidator_(nullptr, {});
 }

@@ -76,8 +76,16 @@ Value::Value(std::vector<std::pair<std::string, Value>> fields) {
         static_cast<void>(value);
         validate_text(name, "runtime object field", true);
     }
-    std::ranges::sort(fields, {}, &std::pair<std::string, Value>::first);
-    const auto duplicate = std::ranges::adjacent_find(fields, {}, &std::pair<std::string, Value>::first);
+    // Fields from a sorted map (most objects) are checked, not sorted again.
+    const auto name = [](const std::pair<std::string, Value>& field) -> std::string_view {
+        return field.first;
+    };
+    if (!std::ranges::is_sorted(fields, NameLess{}, name))
+        std::ranges::sort(fields, NameLess{}, name);
+    const auto duplicate =
+        std::ranges::adjacent_find(fields, [](const auto& left, const auto& right) {
+            return NameLess::compare(left.first, right.first) == 0;
+        });
     if (duplicate != fields.end()) {
         throw std::invalid_argument("runtime object fields must be unique");
     }
@@ -143,13 +151,16 @@ const void* Value::composite_identity() const noexcept {
 const Value* Value::field(const std::string_view name) const noexcept {
     const ValueObject* value = object();
     if (value == nullptr) return nullptr;
-    const auto found = std::ranges::lower_bound(
-        value->fields,
-        name,
-        {},
-        &std::pair<std::string, Value>::first
-    );
-    return found != value->fields.end() && found->first == name ? &found->second : nullptr;
+    std::size_t low = 0U;
+    std::size_t high = value->fields.size();
+    while (low < high) {
+        const std::size_t middle = low + (high - low) / 2U;
+        const int order = NameLess::compare(value->fields[middle].first, name);
+        if (order == 0) return &value->fields[middle].second;
+        if (order < 0) low = middle + 1U;
+        else high = middle;
+    }
+    return nullptr;
 }
 
 std::string_view Value::state_type_id() const noexcept {

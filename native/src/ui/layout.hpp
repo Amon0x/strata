@@ -478,6 +478,14 @@ class LayoutEngine final {
                  PinContext pin_context, const LayoutEnvironment& environment,
                  LayoutResult& result);
     [[nodiscard]] LayoutStyle resolved_style(const RetainedNode& node) const;
+    /** The node's style as parsed from its description, before runtime adjustments. */
+    [[nodiscard]] const ParsedLayout& parsed_layout(const RetainedNode& node) const;
+    /**
+     * The node's resolved style without a copy when nothing adjusts it at runtime (a scroll
+     * offset, a gesture size, a running motion); otherwise resolved into adjusted.
+     */
+    [[nodiscard]] const LayoutStyle& style_of(const RetainedNode& node,
+                                              std::optional<LayoutStyle>& adjusted) const;
     [[nodiscard]] static Point resolved_scroll_offset(const RetainedNode& node,
                                                       Point fallback) noexcept;
     [[nodiscard]] std::uint64_t advance_render_generation();
@@ -518,6 +526,12 @@ class LayoutEngine final {
 [[nodiscard]] LayoutStyle layout_style(const DescriptionNode& description);
 [[nodiscard]] std::optional<ContentSizeMotionSpec>
 content_size_motion(const DescriptionNode& description);
+
+/** What layout reads from a description, parsed once per description change. */
+struct ParsedLayout final {
+    LayoutStyle style;
+    std::optional<ContentSizeMotionSpec> content_motion;
+};
 [[nodiscard]] Rect snap_rectangle(Rect rectangle, const LayoutEnvironment& environment);
 [[nodiscard]] Point snap_point(Point point, const LayoutEnvironment& environment);
 [[nodiscard]] std::string_view layout_kind_name(LayoutKind kind) noexcept;

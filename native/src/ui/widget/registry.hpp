@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -213,6 +214,11 @@ struct WidgetLifecycle final {
 class WidgetRegistry final {
   public:
     WidgetRegistry();
+    // The trait type lists view the table's keys: a copy lists its own.
+    WidgetRegistry(const WidgetRegistry& other);
+    WidgetRegistry& operator=(const WidgetRegistry& other);
+    WidgetRegistry(WidgetRegistry&&) noexcept = default;
+    WidgetRegistry& operator=(WidgetRegistry&&) noexcept = default;
 
     [[nodiscard]] const WidgetLifecycle* find(std::string_view type) const noexcept;
     void register_lifecycle(WidgetLifecycle lifecycle);
@@ -225,6 +231,12 @@ class WidgetRegistry final {
     void register_persistence_phase(std::string type, WidgetPersistencePhase phase);
     void register_present_phase(std::string type, WidgetPresentPhase phase);
     [[nodiscard]] std::vector<std::string> text_editable_types() const;
+    /** Types whose nodes declare commands. */
+    [[nodiscard]] std::span<const std::string_view> command_declaration_types() const noexcept;
+    /** Types with an authored presentation property the input router keeps current. */
+    [[nodiscard]] std::span<const std::string_view> authored_presentation_types() const noexcept;
+    /** Types that present a detached overlay. */
+    [[nodiscard]] std::span<const std::string_view> detached_overlay_types() const noexcept;
 
     void apply_layout_defaults(std::string_view type,
                                DescriptionNode::Properties& properties) const;
@@ -243,8 +255,13 @@ class WidgetRegistry final {
         }
     };
     [[nodiscard]] WidgetLifecycle& lifecycle(std::string type);
+    void refresh_trait_types();
     /** Hashed: every retained node's presentation, input and command pass looks its type up. */
     std::unordered_map<std::string, WidgetLifecycle, TypeHash, std::equal_to<>> lifecycles_;
+    // Views of the map's keys, which stay put across rehashing; sorted, so passes are ordered.
+    std::vector<std::string_view> command_declaration_types_;
+    std::vector<std::string_view> authored_presentation_types_;
+    std::vector<std::string_view> detached_overlay_types_;
 };
 
 void register_builtin_widget_presenters(WidgetRegistry& registry);

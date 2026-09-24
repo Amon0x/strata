@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -50,12 +51,19 @@ struct DetachedOverlayRoot final {
 using DetachedOverlayPredicate = std::function<bool(const RetainedNode&)>;
 
 [[nodiscard]] int detached_overlay_z_index(const RetainedNode& node) noexcept;
-/** Ascending paint order; reverse iteration is topmost-first hit order. */
+/**
+ * Ascending paint order; reverse iteration is topmost-first hit order. Only nodes of the candidate
+ * types, and nodes with behaviors when asked, can participate, so the tree is not walked.
+ */
 [[nodiscard]] std::vector<DetachedOverlayRoot> detached_overlay_roots(
     const RetainedTree& tree,
     const LayoutResult& layout,
+    std::span<const std::string_view> candidate_types,
+    bool behavior_candidates,
     const DetachedOverlayPredicate& participates
 );
+/** The types whose nodes can project detached subtargets. */
+[[nodiscard]] std::span<const std::string_view> detached_subtarget_types() noexcept;
 
 enum class WidgetSubtargetKind {
     control,

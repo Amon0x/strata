@@ -489,7 +489,43 @@ void Profiler::invalidate_completed_snapshot_locked() {
 }
 
 void Profiler::publish_completed_snapshot_locked() const {
-    completed_snapshot_ = snapshot_locked();
+    // Sections are only appended between resets and spikes change only when one is recorded, so
+    // a frame's publication updates the previous snapshot in place instead of rebuilding it.
+    if (!has_completed_snapshot_ || completed_snapshot_.sections.size() > sections_.size() ||
+        published_spike_serial_ != spike_serial_) {
+        completed_snapshot_ = snapshot_locked();
+        published_spike_serial_ = spike_serial_;
+    } else {
+        completed_snapshot_.scope = scope_;
+        if (completed_snapshot_.scope_id != scope_id_)
+            completed_snapshot_.scope_id = scope_id_;
+        completed_snapshot_.frame_index = frame_index_;
+        completed_snapshot_.capture_enabled = enabled_;
+        completed_snapshot_.dropped_section_samples = dropped_section_samples_;
+        completed_snapshot_.dropped_timing_samples = dropped_timing_samples_;
+        completed_snapshot_.dropped_spikes = dropped_spikes_;
+        completed_snapshot_.counters = counters_locked(false);
+        std::vector<ProfilerSectionSnapshot>& sections = completed_snapshot_.sections;
+        for (std::size_t index = 0U; index < sections_.size(); ++index) {
+            const SectionRecord& section = sections_[index];
+            if (index == sections.size()) {
+                sections.push_back(ProfilerSectionSnapshot{
+                    section.id, section.parent_id, section.name, section.path});
+            }
+            ProfilerSectionSnapshot& published = sections[index];
+            published.sample_count = section.timings.samples.size();
+            published.last_sample_frame_index = section.last_sample_frame_index;
+            published.last_nanos =
+                section.last_sample_frame_index == frame_index_ && !section.timings.samples.empty()
+                    ? section.timings.samples.back()
+                    : 0;
+            published.average_nanos = section.timings.average();
+            published.p50_nanos = section.timings.percentile(0.50);
+            published.p95_nanos = section.timings.percentile(0.95);
+            published.p99_nanos = section.timings.percentile(0.99);
+            published.maximum_nanos = section.timings.maximum();
+        }
+    }
     has_completed_snapshot_ = true;
     completed_snapshot_dirty_ = false;
 }
@@ -508,6 +544,7 @@ void Profiler::reset() {
     open_sections_.clear();
     reset_counters_locked();
     spikes_.clear();
+    ++spike_serial_;
     dropped_section_samples_ = 0U;
     dropped_timing_samples_ = 0U;
     dropped_spikes_ = 0U;
@@ -680,6 +717,7 @@ void Profiler::record_spike_locked(const SectionRecord& section, const std::int6
         increment_saturated(dropped_spikes_);
     }
     spikes_.push_back(std::move(spike));
+    ++spike_serial_;
 }
 
 std::vector<std::uint64_t> Profiler::stack_locked(const std::uint64_t section_id) const {

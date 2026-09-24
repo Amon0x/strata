@@ -354,6 +354,15 @@ class Surface final {
     std::optional<std::string> observed_active_screen_;
     std::map<std::string, std::string, std::less<>> focus_by_screen_;
     std::map<std::string, runtime::StateScopeSet, std::less<>> state_scopes_by_layer_;
+    std::uint64_t layer_scopes_generation_ = 0U;
+    /** The state scopes and async owners the attached tree holds, as of the generations. */
+    struct Ownership final {
+        bool current = false;
+        std::uint64_t structure_generation = 0U;
+        std::uint64_t layer_scopes_generation = 0U;
+        runtime::StateScopeSet state_scopes;
+        std::set<std::string, std::less<>> async_owners;
+    } ownership_;
     std::vector<std::shared_ptr<const DescriptionMaterialization>> pending_lazy_materializations_;
     surface_detail::MaterializationPublicationLedger materialization_publications_;
     std::set<std::string, std::less<>> reported_theme_motion_diagnostics_;

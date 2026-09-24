@@ -260,11 +260,14 @@ private:
 struct ComponentExpressionDependencies final : runtime::ExpressionDependencyObserver {
     std::function<void(const runtime::ExpressionHostDependency&)> observe_host;
     runtime::ExpressionDependencyObserver* upstream = nullptr;
+    /** Counts lexical reads for the builder, which tells constant styles apart. */
+    std::uint64_t* observed_lexical = nullptr;
 
     void lexical(
         const std::string_view name,
         const runtime::ExpressionDependencyValue& value
     ) override {
+        if (observed_lexical != nullptr) ++*observed_lexical;
         if (upstream != nullptr) upstream->lexical(name, value);
     }
 
@@ -365,79 +368,6 @@ void collect_slot_names(
     auto resolved = std::make_shared<DescriptionNode>(*node);
     resolved->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
     return resolved;
-}
-
-/**
- * The rebuild of a component or layer with every part equal to the previous build taken from it:
- * the stages after description (theme, reconcile, layout) then find unchanged nodes by identity,
- * and a node that differs only in its children is linked to its previous self. Applying it again
- * to its own result returns that result.
- */
-[[nodiscard]] std::shared_ptr<const DescriptionNode> share_unchanged(
-    const std::shared_ptr<const DescriptionNode>& previous,
-    const std::shared_ptr<const DescriptionNode>& next
-) {
-    if (previous == nullptr || next == nullptr || previous == next ||
-        previous->type != next->type || previous->key != next->key) {
-        return next;
-    }
-    // Generated providers own their rows; only eagerly built children are compared.
-    const auto* previous_children =
-        dynamic_cast<const EagerDescriptionChildren*>(previous->children.get());
-    const auto* next_children = dynamic_cast<const EagerDescriptionChildren*>(next->children.get());
-    if (previous_children == nullptr || next_children == nullptr) return next;
-
-    const std::size_t previous_count = previous_children->size();
-    const std::size_t count = next_children->size();
-    std::vector<std::shared_ptr<const DescriptionNode>> children;
-    children.reserve(count);
-    bool differs_from_next = false;
-    bool same_as_previous = count == previous_count;
-    std::map<std::pair<std::string_view, std::string_view>, std::size_t> previous_keyed;
-    for (std::size_t index = 0U; index < count; ++index) {
-        std::shared_ptr<const DescriptionNode> child = next_children->at(index);
-        std::shared_ptr<const DescriptionNode> counterpart =
-            index < previous_count ? previous_children->at(index) : nullptr;
-        if (child->key.has_value() &&
-            (counterpart == nullptr || counterpart->type != child->type ||
-             counterpart->key != child->key)) {
-            // A keyed child that moved is found by its key among the previous children.
-            if (previous_keyed.empty()) {
-                for (std::size_t other = 0U; other < previous_count; ++other) {
-                    const std::shared_ptr<const DescriptionNode> candidate =
-                        previous_children->at(other);
-                    if (candidate->key.has_value()) {
-                        previous_keyed.emplace(
-                            std::pair<std::string_view, std::string_view>(
-                                candidate->type, *candidate->key
-                            ),
-                            other
-                        );
-                    }
-                }
-            }
-            const auto found = previous_keyed.find({child->type, *child->key});
-            counterpart = found != previous_keyed.end() ? previous_children->at(found->second)
-                                                        : nullptr;
-        }
-        std::shared_ptr<const DescriptionNode> shared = share_unchanged(counterpart, child);
-        differs_from_next = differs_from_next || shared != child;
-        same_as_previous = same_as_previous && index < previous_count &&
-                           shared == previous_children->at(index);
-        children.push_back(std::move(shared));
-    }
-    if (!description_content_equal(*previous, *next)) {
-        if (!differs_from_next) return next;
-        auto result = std::make_shared<DescriptionNode>(*next);
-        result->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
-        return result;
-    }
-    if (same_as_previous) return previous;
-    if (!differs_from_next && next->children_replaced_from.lock() == previous) return next;
-    auto result = std::make_shared<DescriptionNode>(*previous);
-    result->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
-    result->children_replaced_from = previous;
-    return result;
 }
 
 } // namespace
@@ -777,6 +707,7 @@ DescriptionLayersBuildResult DescriptionBuilder::build_layers(
         component_cache_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
         component_cache_.clear();
         layer_cache_.clear();
+        constant_styles_.clear();
         component_cache_epoch_ = 0U;
         component_cache_unit_ = application_.active_unit();
     }
@@ -924,6 +855,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_layer(
     ) {
         observe_host_dependency(dependency);
     };
+    dependencies.observed_lexical = &observed_dependencies_;
     ExpressionDependencyObserverRestore dependency_observer(
         *expressions_,
         &dependencies
@@ -948,7 +880,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_layer(
     );
     ++described_nodes_;
     if (const auto previous = layer_cache_.find(cache_key); previous != layer_cache_.end()) {
-        root = share_unchanged(previous->second.root, root);
+        root = share_unchanged_description(previous->second.root, root);
     }
     layer_cache_.insert_or_assign(cache_key, LayerCacheEntry{
         role,
@@ -964,38 +896,51 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_layer(
 
 std::vector<std::shared_ptr<const DescriptionNode>> DescriptionBuilder::build_block(
     const JsonValue block,
-    Scope scope,
+    const Scope& enclosing,
     const std::span<const std::size_t> skipped_statement_indices
 ) {
+    // The enclosing scope serves until a state or derived declaration extends it; only then is
+    // it copied, once for the block.
+    std::optional<Scope> extended;
+    const Scope* current = &enclosing;
+    const auto extend = [&extended, &current, &enclosing]() -> Scope& {
+        if (!extended.has_value()) {
+            extended.emplace(enclosing);
+            current = &*extended;
+        }
+        return *extended;
+    };
     std::vector<std::shared_ptr<const DescriptionNode>> nodes;
     const JsonArray statements = array_field(block, "statements");
     for (std::size_t statement_index = 0U; statement_index < statements.size(); ++statement_index) {
         if (std::ranges::binary_search(skipped_statement_indices, statement_index)) continue;
         const JsonValue statement = statements[statement_index];
         const std::string_view kind = string_field(statement, "kind");
+        const Scope& scope = *current;
         if (kind == "state") {
+            Scope& declaring = extend();
             const std::string name(string_field(statement, "name"));
             const runtime::UnitStateDeclaration* declaration =
-                application_.active_unit()->state_declaration(scope.declaration_scope, name);
+                application_.active_unit()->state_declaration(declaring.declaration_scope, name);
             if (declaration == nullptr) throw std::logic_error("indexed state declaration is missing");
             const std::string address_scope =
-                "dsl:" + application_.active_unit()->source_id() + ":" + scope.instance_path +
+                "dsl:" + application_.active_unit()->source_id() + ":" + declaring.instance_path +
                 "/state:" + declaration->declaration_path;
             own_state_scope(address_scope);
-            scope.expressions.state_bindings.insert_or_assign(
+            declaring.expressions.state_bindings.insert_or_assign(
                 name,
                 runtime::LexicalStateBinding{
                     runtime::StateAddress{address_scope, name},
-                    scope.declaration_scope,
+                    declaring.declaration_scope,
                 }
             );
             bind_state_scope(
-                scope.runtime_state_scope,
+                declaring.runtime_state_scope,
                 name,
-                scope.declaration_scope,
+                declaring.declaration_scope,
                 address_scope
             );
-            const runtime::ExpressionValue evaluated = evaluate(required(statement, "initializer"), scope.expressions);
+            const runtime::ExpressionValue evaluated = evaluate(required(statement, "initializer"), declaring.expressions);
             const runtime::Value initial = require_value(evaluated, statement);
             const std::string slot_type = declaration->type_id == "dsl.unknown"
                                               ? std::string(initial.state_type_id())
@@ -1004,7 +949,7 @@ std::vector<std::shared_ptr<const DescriptionNode>> DescriptionBuilder::build_bl
                 name,
                 slot_type,
                 initial,
-                scope.declaration_scope,
+                declaring.declaration_scope,
             };
             const runtime::StateAddress address{address_scope, name};
             if (declaration->persistence_key.has_value() &&
@@ -1019,7 +964,7 @@ std::vector<std::shared_ptr<const DescriptionNode>> DescriptionBuilder::build_bl
                             "STRATA.DURABILITY.TYPE_MISMATCH",
                             "Persisted value '" + *declaration->persistence_key +
                                 "' no longer matches state '" + name + "' and was discarded.",
-                            scope.runtime_state_scope,
+                            declaring.runtime_state_scope,
                             slot.type_id,
                             runtime::DiagnosticSeverity::warning,
                             std::nullopt,
@@ -1032,15 +977,16 @@ std::vector<std::shared_ptr<const DescriptionNode>> DescriptionBuilder::build_bl
             }
             const runtime::Value& state = application_.state().read(address, slot);
             observe_state_value(runtime::StateAddress{address_scope, name}, state);
-            scope.expressions.values.insert_or_assign(name, state);
+            declaring.expressions.values.insert_or_assign(name, state);
             continue;
         }
         if (kind == "derived") {
+            Scope& declaring = extend();
             const std::string name(string_field(statement, "name"));
             bind_expression(
-                scope.expressions,
+                declaring.expressions,
                 name,
-                evaluate(required(statement, "expression"), scope.expressions)
+                evaluate(required(statement, "expression"), declaring.expressions)
             );
             continue;
         }
@@ -1399,11 +1345,14 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
 
 std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
     const JsonValue call,
-    Scope scope
+    const Scope& scope
 ) {
     DescriptionNode::Properties properties;
     std::vector<DescriptionBehavior> behaviors;
-    for (const auto& [name, expression] : object_field(call, "arguments")) {
+    const JsonObject arguments = object_field(call, "arguments");
+    // Room for the arguments and the few properties description adds ($layout, defaults).
+    properties.reserve(arguments.size() + 4U);
+    for (const auto& [name, expression] : arguments) {
         if (name == "behaviors") {
             behaviors = build_behaviors(expression, scope.expressions);
             continue;
@@ -1499,18 +1448,22 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
         const JsonValue component = application_.active_unit()->component(type);
         if (!component) throw std::logic_error("component call lost its indexed declaration");
 
-        Scope projection_scope = scope;
+        // Caller content is projected in the caller's scope, extended only by the component's
+        // widget defaults when it declares any.
+        std::optional<Scope> projected;
         for (const JsonValue entry : array_field(component, "widgetDefaults")) {
             Scope::WidgetDefault defaults;
             const JsonValue style = required(entry, "style");
             const JsonValue variant = required(entry, "variant");
             if (!style.is_null()) defaults.style = evaluate(style, scope.expressions);
             if (!variant.is_null()) defaults.variant = evaluate(variant, scope.expressions);
-            projection_scope.widget_defaults.insert_or_assign(
+            if (!projected.has_value()) projected.emplace(scope);
+            projected->widget_defaults.insert_or_assign(
                 std::string(string_field(entry, "name")),
                 std::move(defaults)
             );
         }
+        const Scope& projection_scope = projected.has_value() ? *projected : scope;
 
         std::map<
             std::string,
@@ -1658,7 +1611,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
             ComponentEffects effects;
             const std::size_t diagnostics_before = diagnostics_.size();
             Scope rebuild_scope = component_scope;
-            component_root = share_unchanged(
+            component_root = share_unchanged_description(
                 previous_root,
                 build_component_body(type, std::move(component_scope), effects)
             );
@@ -1748,7 +1701,8 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
         scope.runtime_state_scope,
         application_.bundle()->action_registry(),
         retained,
-        [this, scope](
+        // Called only while the widget expands, within this call.
+        [this, &scope](
             const std::string_view component,
             std::string template_key,
             WidgetTemplateArguments arguments
@@ -2145,6 +2099,7 @@ void DescriptionBuilder::observe_state_value(
     const runtime::StateAddress& address,
     const runtime::Value& value
 ) {
+    ++observed_dependencies_;
     if (!component_effect_stack_.empty()) {
         component_effect_stack_.back()->state_values.insert_or_assign(address, value);
     }
@@ -2153,6 +2108,7 @@ void DescriptionBuilder::observe_state_value(
 void DescriptionBuilder::observe_host_dependency(
     const runtime::ExpressionHostDependency& dependency
 ) {
+    ++observed_dependencies_;
     const std::string path = runtime::canonical_host_dependency_path(dependency.path);
     if (!component_effect_stack_.empty()) {
         component_effect_stack_.back()->host_values.insert_or_assign(path, dependency);
@@ -2236,6 +2192,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_component_body(
     ) {
         observe_host_dependency(dependency);
     };
+    dependencies.observed_lexical = &observed_dependencies_;
     ExpressionDependencyObserverRestore dependency_observer(
         *expressions_,
         &dependencies
@@ -2373,7 +2330,7 @@ DescriptionBuilder::refresh_component_cache_entry(const std::string& cache_key) 
     entry.host_invalidation_count = application_.host().invalidation_count();
     entry.last_used_epoch = component_cache_epoch_;
     entry.effects = std::move(effects);
-    entry.root = share_unchanged(entry.root, rebuilt);
+    entry.root = share_unchanged_description(entry.root, rebuilt);
     return ComponentRefreshResult::changed;
 }
 
@@ -2655,7 +2612,12 @@ runtime::Value DescriptionBuilder::resolve_named_style(
     const runtime::ExpressionScope& scope,
     std::set<std::string, std::less<>>& resolving
 ) {
+    if (const auto constant = constant_styles_.find(name); constant != constant_styles_.end()) {
+        return constant->second;
+    }
     if (const auto cached = resolved_styles_.find(name); cached != resolved_styles_.end()) return cached->second;
+    const std::uint64_t observed_before = observed_dependencies_;
+    bool constant = true;
     const auto [resolving_entry, inserted] = resolving.emplace(name);
     if (!inserted) {
         throw std::logic_error("validated portable IR contains a cyclic style inheritance chain");
@@ -2669,6 +2631,7 @@ runtime::Value DescriptionBuilder::resolve_named_style(
     for (const JsonValue base : array_field(declaration, "bases")) {
         if (const std::optional<std::string_view> base_name = base.string(); base_name.has_value()) {
             merge_object(merged, resolve_named_style(*base_name, scope, resolving));
+            constant = constant && constant_styles_.contains(*base_name);
         }
     }
     for (const auto [property, expression] : object_field(declaration, "properties")) {
@@ -2679,7 +2642,11 @@ runtime::Value DescriptionBuilder::resolve_named_style(
     }
     resolving.erase(resolving_entry);
     runtime::Value result = map_value(std::move(merged));
-    resolved_styles_.emplace(std::string(name), result);
+    if (constant && observed_dependencies_ == observed_before) {
+        constant_styles_.emplace(std::string(name), result);
+    } else {
+        resolved_styles_.emplace(std::string(name), result);
+    }
     return result;
 }
 

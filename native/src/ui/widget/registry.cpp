@@ -119,6 +119,7 @@ void WidgetRegistry::register_lifecycle(WidgetLifecycle lifecycle) {
     if (!lifecycles_.emplace(type, std::move(lifecycle)).second) {
         throw std::invalid_argument("duplicate widget lifecycle for '" + type + "'");
     }
+    refresh_trait_types();
 }
 
 void WidgetRegistry::register_participation(
@@ -126,6 +127,7 @@ void WidgetRegistry::register_participation(
     WidgetParticipationHook participates
 ) {
     lifecycle(std::move(type)).participates = participates;
+    refresh_trait_types();
 }
 
 WidgetLifecycle& WidgetRegistry::lifecycle(std::string type) {
@@ -137,22 +139,27 @@ WidgetLifecycle& WidgetRegistry::lifecycle(std::string type) {
 
 void WidgetRegistry::register_describe_phase(std::string type, WidgetDescribePhase phase) {
     lifecycle(std::move(type)).describe = std::move(phase);
+    refresh_trait_types();
 }
 
 void WidgetRegistry::register_input_phase(std::string type, WidgetInputPhase phase) {
     lifecycle(std::move(type)).input = std::move(phase);
+    refresh_trait_types();
 }
 
 void WidgetRegistry::register_semantics_phase(std::string type, WidgetSemanticsPhase phase) {
     lifecycle(std::move(type)).semantics = std::move(phase);
+    refresh_trait_types();
 }
 
 void WidgetRegistry::register_inspection_phase(std::string type, WidgetInspectionPhase phase) {
     lifecycle(std::move(type)).inspection = std::move(phase);
+    refresh_trait_types();
 }
 
 void WidgetRegistry::register_command_phase(std::string type, WidgetCommandPhase phase) {
     lifecycle(std::move(type)).command = std::move(phase);
+    refresh_trait_types();
 }
 
 void WidgetRegistry::register_persistence_phase(
@@ -160,10 +167,51 @@ void WidgetRegistry::register_persistence_phase(
     WidgetPersistencePhase phase
 ) {
     lifecycle(std::move(type)).persistence = std::move(phase);
+    refresh_trait_types();
 }
 
 void WidgetRegistry::register_present_phase(std::string type, WidgetPresentPhase phase) {
     lifecycle(std::move(type)).present = std::move(phase);
+    refresh_trait_types();
+}
+
+WidgetRegistry::WidgetRegistry(const WidgetRegistry& other) : lifecycles_(other.lifecycles_) {
+    refresh_trait_types();
+}
+
+WidgetRegistry& WidgetRegistry::operator=(const WidgetRegistry& other) {
+    if (this != &other) {
+        lifecycles_ = other.lifecycles_;
+        refresh_trait_types();
+    }
+    return *this;
+}
+
+void WidgetRegistry::refresh_trait_types() {
+    command_declaration_types_.clear();
+    authored_presentation_types_.clear();
+    detached_overlay_types_.clear();
+    for (const auto& [type, lifecycle] : lifecycles_) {
+        if (lifecycle.command.declaration)
+            command_declaration_types_.push_back(type);
+        if (!lifecycle.describe.authored_presentation_property.empty())
+            authored_presentation_types_.push_back(type);
+        if (lifecycle.present.overlay != nullptr && lifecycle.present.detached_overlay)
+            detached_overlay_types_.push_back(type);
+    }
+    std::ranges::sort(command_declaration_types_);
+    std::ranges::sort(authored_presentation_types_);
+    std::ranges::sort(detached_overlay_types_);
+}
+
+std::span<const std::string_view> WidgetRegistry::command_declaration_types() const noexcept {
+    return command_declaration_types_;
+}
+std::span<const std::string_view> WidgetRegistry::authored_presentation_types() const noexcept {
+    return authored_presentation_types_;
+}
+std::span<const std::string_view> WidgetRegistry::detached_overlay_types() const noexcept {
+    return detached_overlay_types_;
 }
 
 std::vector<std::string> WidgetRegistry::text_editable_types() const {

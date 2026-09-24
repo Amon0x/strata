@@ -227,7 +227,7 @@ private:
 
     [[nodiscard]] std::vector<std::shared_ptr<const DescriptionNode>> build_block(
         data::JsonView block,
-        Scope scope,
+        const Scope& scope,
         std::span<const std::size_t> skipped_statement_indices = {}
     );
     [[nodiscard]] RepeaterChildren build_repeater_children(
@@ -244,7 +244,7 @@ private:
     ) const noexcept;
     [[nodiscard]] std::shared_ptr<const DescriptionNode> build_call(
         data::JsonView call,
-        Scope scope
+        const Scope& scope
     );
     [[nodiscard]] std::shared_ptr<const DescriptionNode> build_component_template(
         std::string_view component,
@@ -288,6 +288,11 @@ private:
     std::size_t described_nodes_ = 0U;
     runtime::StateScopeSet current_layer_state_scopes_;
     std::map<std::string, runtime::Value, std::less<>> resolved_styles_;
+    /** Named styles that read nothing that can change (no host, environment or state value):
+     * resolved once for the active unit rather than once per build. */
+    std::map<std::string, runtime::Value, std::less<>> constant_styles_;
+    /** Counts the dependencies expressions observe, to tell whether a style read any. */
+    std::uint64_t observed_dependencies_ = 0U;
     std::unique_ptr<runtime::ExpressionRuntime> expressions_;
     std::map<std::string, runtime::Value, std::less<>> contextual_host_roots_;
     std::shared_ptr<const RetainedDescriptionSnapshot> retained_snapshot_;

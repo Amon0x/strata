@@ -126,6 +126,31 @@ struct EncodedDrawPlacement final {
     ) = default;
 };
 
+/**
+ * The planner state before a command: enough to plan a balanced range of commands from it again.
+ * Clip lists and material overrides are shared between the commands that see the same ones.
+ */
+struct PlannerState final {
+    Transform transform;
+    Rect clip;
+    std::shared_ptr<const std::vector<SubmissionRoundedClip>> rounded_clips;
+    /** Where the rounded clips of the innermost content effect begin. */
+    std::size_t rounded_clip_baseline = 0U;
+    std::size_t content_effect_depth = 0U;
+    std::shared_ptr<const MaterialState> material_override;
+    double opacity = 1.0;
+    std::uint32_t group = 0U;
+    bool in_group = false;
+};
+
+/** What planning made of one command: its items and skipped draws, and the state before it. */
+struct CommandPlan final {
+    std::size_t first_item = 0U;
+    std::size_t item_count = 0U;
+    std::size_t skipped_draws = 0U;
+    PlannerState state;
+};
+
 struct PreparationCache final {
     std::vector<std::optional<PreparedTextCacheEntry>> text;
     std::vector<PreparedTextCacheEntry> detached_text;
@@ -134,6 +159,18 @@ struct PreparationCache final {
     std::vector<std::optional<EncodedDrawPlacement>> placements;
     std::optional<RenderSubmissionEnvironment> geometry_environment;
     std::vector<resource::TextureResourceDescriptor> geometry_textures;
+    /**
+     * The last planned command stream, its items and each command's plan. A stream that keeps
+     * its shape and changes only some draws is planned and encoded for those draws alone.
+     */
+    RenderCommandBuffer planned_commands;
+    std::vector<PlannedItem> planned_items;
+    std::vector<CommandPlan> command_plans;
+    std::uint64_t planned_atlas_generation = 0U;
+    bool plan_current = false;
+    /** Tests compare the fast path against a full plan of the same stream. */
+    bool changed_draw_updates = true;
+    std::size_t changed_draw_update_count = 0U;
     void clear() noexcept {
         text.clear();
         detached_text.clear();
@@ -142,6 +179,11 @@ struct PreparationCache final {
         placements.clear();
         geometry_environment.reset();
         geometry_textures.clear();
+        planned_commands.clear();
+        planned_items.clear();
+        command_plans.clear();
+        planned_atlas_generation = 0U;
+        plan_current = false;
     }
 };
 
@@ -187,6 +229,46 @@ void encode(
     RenderSubmission& output,
     PreparationCache& cache
 );
+
+/** A range of commands planned again as a whole: a changed draw, or a changed push to its pop. */
+struct CommandRange final {
+    std::size_t first = 0U;
+    std::size_t last = 0U;
+};
+
+/**
+ * Plans the given ranges of a stream whose other commands equal the planned one, into their
+ * commands' items. Returns the items whose draws changed, or nothing, with the planned items as
+ * they were, when a command's items would change in number or kind, an effect batch would
+ * change, or text could not be prepared against the current atlas generation.
+ */
+[[nodiscard]] std::optional<std::vector<std::size_t>> replan_ranges(
+    const RenderCommandBuffer& commands,
+    std::span<const CommandRange> ranges,
+    font::GlyphAtlas& glyph_atlas,
+    const TextEngine* text_engine,
+    const SubmissionContext& context,
+    RenderSubmission& telemetry,
+    PreparationCache& cache
+);
+
+/**
+ * Encodes changed planned draws in place: each keeps its batch and fits its retained slot, so the
+ * submission changes by patches alone. False, leaving the cache and submission as they were,
+ * otherwise.
+ */
+[[nodiscard]] bool encode_changed_draws(
+    std::span<const std::size_t> changed_items,
+    const SubmissionContext& context,
+    RenderSubmission& output,
+    PreparationCache& cache
+);
+
+/** Whether a command only draws: it changes no planner state and makes no effect batch. */
+[[nodiscard]] bool draw_command(const RenderCommand& command) noexcept;
+/** +1 for a command that opens a scope (clip, transform, material, opacity, group or content
+ * effect), -1 for one that closes it, 0 otherwise. */
+[[nodiscard]] int scope_step(const RenderCommand& command) noexcept;
 
 [[nodiscard]] MaterialState default_material(const PreparedCommand& command);
 [[nodiscard]] bool unified_material(std::string_view material) noexcept;

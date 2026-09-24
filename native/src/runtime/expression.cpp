@@ -577,10 +577,13 @@ ExpressionRuntime::read_host_dependency(const std::span<const HostPathSegment> p
         path.front().field.empty()) {
         throw std::invalid_argument("host dependency path requires a named root");
     }
-    const std::string canonical = canonical_host_dependency_path(path);
-    if (const auto frozen = scope.host_dependency_overrides.find(canonical);
-        frozen != scope.host_dependency_overrides.end()) {
-        return frozen->second;
+    // Only retained lazy identity evaluators freeze reads; others need no canonical path here.
+    if (!scope.host_dependency_overrides.empty()) {
+        const std::string canonical = canonical_host_dependency_path(path);
+        if (const auto frozen = scope.host_dependency_overrides.find(canonical);
+            frozen != scope.host_dependency_overrides.end()) {
+            return frozen->second;
+        }
     }
 
     const auto contextual = scope.contextual_host_roots.find(path.front().field);

@@ -162,6 +162,93 @@ GeneratedDescriptionChildren::at(const std::size_t index) const {
     return child;
 }
 
+namespace {
+
+[[nodiscard]] std::string_view property_name(const PropertyMap::value_type& entry) noexcept {
+    return entry.first;
+}
+
+} // namespace
+
+PropertyMap::PropertyMap(const std::initializer_list<value_type> entries) {
+    entries_.reserve(entries.size());
+    for (const value_type& entry : entries)
+        static_cast<void>(emplace(entry.first, entry.second));
+}
+
+PropertyMap::iterator PropertyMap::lower_bound(const std::string_view name) {
+    return std::ranges::lower_bound(entries_, name, runtime::NameLess{}, property_name);
+}
+
+bool PropertyMap::contains(const std::string_view name) const {
+    return find(name) != entries_.end();
+}
+
+std::size_t PropertyMap::count(const std::string_view name) const {
+    return contains(name) ? 1U : 0U;
+}
+
+runtime::ExpressionValue& PropertyMap::at(const std::string_view name) {
+    const iterator found = find(name);
+    if (found == entries_.end())
+        throw std::out_of_range("description has no property '" + std::string(name) + "'");
+    return found->second;
+}
+
+const runtime::ExpressionValue& PropertyMap::at(const std::string_view name) const {
+    const const_iterator found = find(name);
+    if (found == entries_.end())
+        throw std::out_of_range("description has no property '" + std::string(name) + "'");
+    return found->second;
+}
+
+std::pair<PropertyMap::iterator, bool>
+PropertyMap::insert_or_assign(const std::string_view name, runtime::ExpressionValue value) {
+    const iterator found = lower_bound(name);
+    if (found != entries_.end() && found->first == name) {
+        found->second = std::move(value);
+        return {found, false};
+    }
+    return {entries_.emplace(found, std::string(name), std::move(value)), true};
+}
+
+std::pair<PropertyMap::iterator, bool> PropertyMap::emplace(const std::string_view name,
+                                                            runtime::ExpressionValue value) {
+    const iterator found = lower_bound(name);
+    if (found != entries_.end() && found->first == name)
+        return {found, false};
+    return {entries_.emplace(found, std::string(name), std::move(value)), true};
+}
+
+std::pair<PropertyMap::iterator, bool> PropertyMap::try_emplace(const std::string_view name,
+                                                                runtime::ExpressionValue value) {
+    return emplace(name, std::move(value));
+}
+
+std::pair<PropertyMap::iterator, bool> PropertyMap::insert(value_type entry) {
+    return emplace(entry.first, std::move(entry.second));
+}
+
+PropertyMap::iterator PropertyMap::erase(const const_iterator position) {
+    return entries_.erase(position);
+}
+
+std::size_t PropertyMap::erase(const std::string_view name) {
+    const iterator found = find(name);
+    if (found == entries_.end())
+        return 0U;
+    entries_.erase(found);
+    return 1U;
+}
+
+void PropertyMap::clear() noexcept {
+    entries_.clear();
+}
+
+void PropertyMap::reserve(const std::size_t capacity) {
+    entries_.reserve(capacity);
+}
+
 std::shared_ptr<const DescriptionNode>
 DescriptionNode::create(std::string type, std::optional<std::string> key, std::string source_path,
                         std::string state_scope, Properties properties,
@@ -320,6 +407,9 @@ std::string_view RetainedNode::structural_path() const noexcept {
 }
 std::size_t RetainedNode::source_index() const noexcept {
     return source_index_;
+}
+std::size_t RetainedNode::preorder() const noexcept {
+    return preorder_;
 }
 std::uint64_t RetainedNode::revision() const noexcept {
     return revision_;
@@ -544,6 +634,23 @@ const std::vector<RetainedNode*>& RetainedTree::semantic_nodes() const noexcept 
 }
 const std::vector<RetainedNode*>& RetainedTree::virtual_nodes() const noexcept {
     return virtual_index_;
+}
+const std::vector<RetainedNode*>& RetainedTree::behavior_nodes() const noexcept {
+    return behavior_index_;
+}
+std::vector<RetainedNode*>
+RetainedTree::nodes_of_types(const std::span<const std::string_view> types) const {
+    std::vector<RetainedNode*> result;
+    for (const std::string_view type : types) {
+        if (const auto found = type_index_.find(type); found != type_index_.end())
+            result.insert(result.end(), found->second.begin(), found->second.end());
+    }
+    if (types.size() > 1U)
+        std::ranges::sort(result, {}, &RetainedNode::preorder_);
+    return result;
+}
+std::uint64_t RetainedTree::structure_generation() const noexcept {
+    return structure_generation_;
 }
 
 std::uint64_t RetainedTree::generation() const noexcept {
@@ -791,7 +898,9 @@ void RetainedTree::clear() {
     state_scope_index_.clear();
     semantic_index_.clear();
     virtual_index_.clear();
+    behavior_index_.clear();
     dirty_index_.clear();
+    ++structure_generation_;
 }
 
 void RetainedTree::detach(std::unique_ptr<RetainedNode> node,
@@ -814,6 +923,9 @@ void RetainedTree::detach(std::unique_ptr<RetainedNode> node,
 }
 
 void RetainedTree::rebuild_indexes() {
+    ++structure_generation_;
+    indexed_nodes_ = 0U;
+    behavior_index_.clear();
     key_index_.clear();
     identity_index_.clear();
     source_index_.clear();
@@ -827,7 +939,10 @@ void RetainedTree::rebuild_indexes() {
 }
 
 void RetainedTree::index(RetainedNode& node) {
+    node.preorder_ = indexed_nodes_++;
     identity_index_.emplace(node.identity_, &node);
+    if (!node.description_->behaviors.empty())
+        behavior_index_.push_back(&node);
     if (node.description_->key.has_value()) {
         key_index_[*node.description_->key].push_back(&node);
     }
@@ -1010,6 +1125,74 @@ bool description_content_equal(const DescriptionNode& left, const DescriptionNod
         ++right_property;
     }
     return true;
+}
+
+std::shared_ptr<const DescriptionNode>
+share_unchanged_description(const std::shared_ptr<const DescriptionNode>& previous,
+                            const std::shared_ptr<const DescriptionNode>& next) {
+    if (previous == nullptr || next == nullptr || previous == next ||
+        previous->type != next->type || previous->key != next->key) {
+        return next;
+    }
+    // Generated providers own their rows; only eagerly built children are compared.
+    const auto* previous_children =
+        dynamic_cast<const EagerDescriptionChildren*>(previous->children.get());
+    const auto* next_children = dynamic_cast<const EagerDescriptionChildren*>(next->children.get());
+    if (previous_children == nullptr || next_children == nullptr)
+        return next;
+
+    const std::size_t previous_count = previous_children->size();
+    const std::size_t count = next_children->size();
+    std::vector<std::shared_ptr<const DescriptionNode>> children;
+    children.reserve(count);
+    bool differs_from_next = false;
+    bool same_as_previous = count == previous_count;
+    std::map<std::pair<std::string_view, std::string_view>, std::size_t> previous_keyed;
+    for (std::size_t index = 0U; index < count; ++index) {
+        std::shared_ptr<const DescriptionNode> child = next_children->at(index);
+        std::shared_ptr<const DescriptionNode> counterpart =
+            index < previous_count ? previous_children->at(index) : nullptr;
+        if (child->key.has_value() &&
+            (counterpart == nullptr || counterpart->type != child->type ||
+             counterpart->key != child->key)) {
+            // A keyed child that moved is found by its key among the previous children.
+            if (previous_keyed.empty()) {
+                for (std::size_t other = 0U; other < previous_count; ++other) {
+                    const std::shared_ptr<const DescriptionNode> candidate =
+                        previous_children->at(other);
+                    if (candidate->key.has_value()) {
+                        previous_keyed.emplace(std::pair<std::string_view, std::string_view>(
+                                                   candidate->type, *candidate->key),
+                                               other);
+                    }
+                }
+            }
+            const auto found = previous_keyed.find({child->type, *child->key});
+            counterpart =
+                found != previous_keyed.end() ? previous_children->at(found->second) : nullptr;
+        }
+        std::shared_ptr<const DescriptionNode> shared =
+            share_unchanged_description(counterpart, child);
+        differs_from_next = differs_from_next || shared != child;
+        same_as_previous = same_as_previous && index < previous_count &&
+                           shared == previous_children->at(index);
+        children.push_back(std::move(shared));
+    }
+    if (!description_content_equal(*previous, *next)) {
+        if (!differs_from_next)
+            return next;
+        auto result = std::make_shared<DescriptionNode>(*next);
+        result->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
+        return result;
+    }
+    if (same_as_previous)
+        return previous;
+    if (!differs_from_next && next->children_replaced_from.lock() == previous)
+        return next;
+    auto result = std::make_shared<DescriptionNode>(*previous);
+    result->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
+    result->children_replaced_from = previous;
+    return result;
 }
 
 } // namespace strata::ui

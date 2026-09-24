@@ -214,7 +214,11 @@ void expand(WidgetDescriptionScope& scope) {
     description.children.clear();
     const double row_height = scope.number("rowHeight", 30.0);
     const double header_height = scope.number("headerHeight", 32.0);
-    const runtime::Value* row_source = scope.property("rows");
+    // Held as a copy (sharing its rows): setting layout below can move the properties it lives in.
+    const runtime::Value* const authored_rows_value = scope.property("rows");
+    const runtime::Value rows = authored_rows_value != nullptr ? *authored_rows_value
+                                                               : runtime::Value{};
+    const runtime::Value* row_source = authored_rows_value != nullptr ? &rows : nullptr;
     const std::string collection_key = description.key.value_or("$table");
     bool async_rows = false;
     const auto placeholder = [&scope, &description, &collection_key](

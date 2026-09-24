@@ -349,10 +349,11 @@ struct ThemeMaterializationResult final {
 
 /** What a theme gives every node of one widget type and variant within one theme scope. */
 struct ThemeWidgetContribution final {
-    /** The themed visual, text and layout fields and motion, before the node's authored fields. */
-    std::map<std::string, runtime::Value, std::less<>> fields;
+    /** The themed visual, text and layout fields and motion, before the node's authored fields,
+     * sorted by name as an object keeps them. */
+    std::vector<std::pair<std::string, runtime::Value>> fields;
     /** Laid again over the authored fields of a node without an authored style container. */
-    std::map<std::string, runtime::Value, std::less<>> defaults;
+    std::vector<std::pair<std::string, runtime::Value>> defaults;
     bool has_layout = false;
     bool layout_participates = true;
 };
@@ -403,6 +404,8 @@ private:
         ThemeWidgetContribution contribution;
     };
     std::map<ContributionKey, ContributionEntry> contributions_;
+    std::uint64_t purged_generation_ = 0U;
+    std::size_t purge_threshold_ = 0U;
     struct MotionPolicyEntry final {
         std::weak_ptr<const Theme> theme;
         runtime::Value value;

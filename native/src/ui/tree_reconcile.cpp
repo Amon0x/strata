@@ -246,7 +246,9 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
                 bump_dirty_generation(DirtyReason::properties);
             }
             if (previous.materialization.has_value() != description->materialization.has_value() ||
-                has_semantics(previous) != has_semantics(*description))
+                has_semantics(previous) != has_semantics(*description) ||
+                previous.behaviors.empty() != description->behaviors.empty() ||
+                previous.materialization_result != description->materialization_result)
                 reconcile_indexes_changed_ = true;
             if (previous.materialization_key != description->materialization_key) {
                 existing->mark_dirty(DirtyReason::layout);
@@ -293,7 +295,7 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
                     bump_dirty_generation(reason);
                     node_layout_updated = node_layout_updated || affects_layout(reason);
                     node_updated = true;
-                    existing->layout_style_.reset();
+                    existing->parsed_layout_.reset();
                 }
             }
             for (const auto& [name, current] : previous.properties) {
@@ -304,13 +306,13 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
                     bump_dirty_generation(reason);
                     node_layout_updated = node_layout_updated || affects_layout(reason);
                     node_updated = true;
-                    existing->layout_style_.reset();
+                    existing->parsed_layout_.reset();
                 }
             }
             if (previous.virtual_sequence != description->virtual_sequence ||
                 previous.virtual_item_members != description->virtual_item_members ||
                 previous.virtual_item_extents != description->virtual_item_extents) {
-                existing->layout_style_.reset();
+                existing->parsed_layout_.reset();
             }
             // The description snapshot carries the sequence itself, not only its generation.
             if (previous.virtual_sequence != description->virtual_sequence ||
@@ -531,10 +533,10 @@ ReconcileStats RetainedTree::realize_children(
                                  parent->realization_theme_ == projected_theme &&
                                  parent->realization_theme_scope_ == projected_theme_scope &&
                                  parent->realization_theme_generation_ == theme_generation;
+    // Recomputed from the realization cache below.
     if (!same_generation) {
         parent->realization_cache_.clear();
         parent->realization_cache_order_.clear();
-        parent->warm_realization_state_scopes_.clear();
     }
 
     std::vector<std::uint64_t> previous_order;
@@ -638,15 +640,17 @@ ReconcileStats RetainedTree::realize_children(
         parent->realization_cache_order_.pop_front();
         parent->realization_cache_.erase(expired);
     }
-    parent->warm_realization_state_scopes_.clear();
+    runtime::StateScopeSet warm_scopes;
     for (const auto& [index, description] : parent->realization_cache_) {
         static_cast<void>(index);
         if (description->materialization_result == nullptr)
             continue;
         const runtime::StateScopeSet& scopes =
             description->materialization_result->owned_state_scopes;
-        parent->warm_realization_state_scopes_.insert(scopes.begin(), scopes.end());
+        warm_scopes.insert(scopes.begin(), scopes.end());
     }
+    const bool warm_scopes_changed = warm_scopes != parent->warm_realization_state_scopes_;
+    parent->warm_realization_state_scopes_ = std::move(warm_scopes);
 
     std::vector<std::uint64_t> next_order;
     next_order.reserve(parent->children_.size());
@@ -671,6 +675,8 @@ ReconcileStats RetainedTree::realize_children(
         ++generation_;
         invalidate_description_snapshot();
         rebuild_indexes();
+    } else if (warm_scopes_changed) {
+        ++structure_generation_;
     }
     stats.generation = generation_;
     return stats;
