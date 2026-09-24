@@ -117,26 +117,31 @@ struct DescriptionBehavior final {
 };
 
 /**
- * A description's properties: sorted by name like the map it replaces, in one vector, so building,
- * copying and dropping a node allocate once instead of once per property. Unlike a map, inserting
- * or erasing invalidates iterators.
+ * A description's properties: sorted by name like the map it replaces, in one vector, so building
+ * and dropping a node allocate once instead of once per property. Copies share the vector until
+ * one of them changes it, so a node copied to change something else (its children, its theme
+ * projection) does not copy its properties. Unlike a map, inserting or erasing invalidates
+ * iterators, and so does the first change to a shared copy.
  */
 class PropertyMap final {
   public:
     using key_type = std::string;
     using mapped_type = runtime::ExpressionValue;
     using value_type = std::pair<std::string, runtime::ExpressionValue>;
-    using iterator = std::vector<value_type>::iterator;
-    using const_iterator = std::vector<value_type>::const_iterator;
+    using Entries = std::vector<value_type>;
+    using iterator = Entries::iterator;
+    using const_iterator = Entries::const_iterator;
 
     PropertyMap() = default;
     PropertyMap(std::initializer_list<value_type> entries);
 
     [[nodiscard]] iterator find(const std::string_view name) {
-        return entries_.begin() + static_cast<std::ptrdiff_t>(position(name));
+        const std::size_t index = position(name);
+        Entries& entries = owned();
+        return entries.begin() + static_cast<std::ptrdiff_t>(index);
     }
     [[nodiscard]] const_iterator find(const std::string_view name) const {
-        return entries_.begin() + static_cast<std::ptrdiff_t>(position(name));
+        return entries().begin() + static_cast<std::ptrdiff_t>(position(name));
     }
     [[nodiscard]] bool contains(std::string_view name) const;
     [[nodiscard]] std::size_t count(std::string_view name) const;
@@ -152,23 +157,30 @@ class PropertyMap final {
     void clear() noexcept;
     void reserve(std::size_t capacity);
 
-    [[nodiscard]] iterator begin() noexcept { return entries_.begin(); }
-    [[nodiscard]] iterator end() noexcept { return entries_.end(); }
-    [[nodiscard]] const_iterator begin() const noexcept { return entries_.begin(); }
-    [[nodiscard]] const_iterator end() const noexcept { return entries_.end(); }
-    [[nodiscard]] const_iterator cbegin() const noexcept { return entries_.cbegin(); }
-    [[nodiscard]] const_iterator cend() const noexcept { return entries_.cend(); }
-    [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
-    [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }
+    [[nodiscard]] iterator begin() { return owned().begin(); }
+    [[nodiscard]] iterator end() { return owned().end(); }
+    [[nodiscard]] const_iterator begin() const noexcept { return entries().begin(); }
+    [[nodiscard]] const_iterator end() const noexcept { return entries().end(); }
+    [[nodiscard]] const_iterator cbegin() const noexcept { return entries().cbegin(); }
+    [[nodiscard]] const_iterator cend() const noexcept { return entries().cend(); }
+    [[nodiscard]] std::size_t size() const noexcept { return entries().size(); }
+    [[nodiscard]] bool empty() const noexcept { return entries().empty(); }
 
   private:
+    [[nodiscard]] const Entries& entries() const noexcept {
+        static const Entries none;
+        return entries_ != nullptr ? *entries_ : none;
+    }
+    /** The entries to change: this map's own, copied first when another map shares them. */
+    [[nodiscard]] Entries& owned();
     /** The entry's index, or the size when there is none: one three-way comparison a step. */
     [[nodiscard]] std::size_t position(const std::string_view name) const noexcept {
+        const Entries& all = entries();
         std::size_t low = 0U;
-        std::size_t high = entries_.size();
+        std::size_t high = all.size();
         while (low < high) {
             const std::size_t middle = low + (high - low) / 2U;
-            const int order = runtime::NameLess::compare(entries_[middle].first, name);
+            const int order = runtime::NameLess::compare(all[middle].first, name);
             if (order == 0)
                 return middle;
             if (order < 0)
@@ -176,11 +188,11 @@ class PropertyMap final {
             else
                 high = middle;
         }
-        return entries_.size();
+        return all.size();
     }
     [[nodiscard]] iterator lower_bound(std::string_view name);
 
-    std::vector<value_type> entries_;
+    std::shared_ptr<Entries> entries_;
 };
 
 struct DescriptionNode final {

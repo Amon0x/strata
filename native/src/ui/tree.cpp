@@ -171,17 +171,27 @@ namespace {
 } // namespace
 
 PropertyMap::PropertyMap(const std::initializer_list<value_type> entries) {
-    entries_.reserve(entries.size());
+    reserve(entries.size());
     for (const value_type& entry : entries)
         static_cast<void>(emplace(entry.first, entry.second));
 }
 
+PropertyMap::Entries& PropertyMap::owned() {
+    if (entries_ == nullptr) {
+        entries_ = std::make_shared<Entries>();
+    } else if (entries_.use_count() > 1) {
+        entries_ = std::make_shared<Entries>(*entries_);
+    }
+    return *entries_;
+}
+
 PropertyMap::iterator PropertyMap::lower_bound(const std::string_view name) {
-    return std::ranges::lower_bound(entries_, name, runtime::NameLess{}, property_name);
+    Entries& entries = owned();
+    return std::ranges::lower_bound(entries, name, runtime::NameLess{}, property_name);
 }
 
 bool PropertyMap::contains(const std::string_view name) const {
-    return find(name) != entries_.end();
+    return position(name) != entries().size();
 }
 
 std::size_t PropertyMap::count(const std::string_view name) const {
@@ -190,14 +200,14 @@ std::size_t PropertyMap::count(const std::string_view name) const {
 
 runtime::ExpressionValue& PropertyMap::at(const std::string_view name) {
     const iterator found = find(name);
-    if (found == entries_.end())
+    if (found == owned().end())
         throw std::out_of_range("description has no property '" + std::string(name) + "'");
     return found->second;
 }
 
 const runtime::ExpressionValue& PropertyMap::at(const std::string_view name) const {
     const const_iterator found = find(name);
-    if (found == entries_.end())
+    if (found == entries().end())
         throw std::out_of_range("description has no property '" + std::string(name) + "'");
     return found->second;
 }
@@ -205,19 +215,21 @@ const runtime::ExpressionValue& PropertyMap::at(const std::string_view name) con
 std::pair<PropertyMap::iterator, bool>
 PropertyMap::insert_or_assign(const std::string_view name, runtime::ExpressionValue value) {
     const iterator found = lower_bound(name);
-    if (found != entries_.end() && found->first == name) {
+    Entries& entries = *entries_;
+    if (found != entries.end() && found->first == name) {
         found->second = std::move(value);
         return {found, false};
     }
-    return {entries_.emplace(found, std::string(name), std::move(value)), true};
+    return {entries.emplace(found, std::string(name), std::move(value)), true};
 }
 
 std::pair<PropertyMap::iterator, bool> PropertyMap::emplace(const std::string_view name,
                                                             runtime::ExpressionValue value) {
     const iterator found = lower_bound(name);
-    if (found != entries_.end() && found->first == name)
+    Entries& entries = *entries_;
+    if (found != entries.end() && found->first == name)
         return {found, false};
-    return {entries_.emplace(found, std::string(name), std::move(value)), true};
+    return {entries.emplace(found, std::string(name), std::move(value)), true};
 }
 
 std::pair<PropertyMap::iterator, bool> PropertyMap::try_emplace(const std::string_view name,
@@ -230,23 +242,27 @@ std::pair<PropertyMap::iterator, bool> PropertyMap::insert(value_type entry) {
 }
 
 PropertyMap::iterator PropertyMap::erase(const const_iterator position) {
-    return entries_.erase(position);
+    // An iterator into shared entries is converted to this map's own copy first.
+    const auto index = position - entries().begin();
+    Entries& entries = owned();
+    return entries.erase(entries.begin() + index);
 }
 
 std::size_t PropertyMap::erase(const std::string_view name) {
-    const iterator found = find(name);
-    if (found == entries_.end())
+    const std::size_t index = position(name);
+    if (index == entries().size())
         return 0U;
-    entries_.erase(found);
+    Entries& entries = owned();
+    entries.erase(entries.begin() + static_cast<std::ptrdiff_t>(index));
     return 1U;
 }
 
 void PropertyMap::clear() noexcept {
-    entries_.clear();
+    entries_.reset();
 }
 
 void PropertyMap::reserve(const std::size_t capacity) {
-    entries_.reserve(capacity);
+    owned().reserve(capacity);
 }
 
 std::shared_ptr<const DescriptionNode>

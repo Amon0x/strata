@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "runtime/application.hpp"
@@ -118,13 +119,18 @@ private:
         std::optional<DescriptionSequenceGeneration> generation;
     };
 
+    /** A component cache entry's identity, stable for its cache key while the unit is active. */
+    using ComponentId = std::uint64_t;
+
     struct ComponentEffects final {
         std::map<std::string, runtime::ExpressionHostDependency, std::less<>> host_values;
         std::map<runtime::StateAddress, runtime::Value> state_values;
         std::map<runtime::StateAddress, StateBindingEffect> state_bindings;
         runtime::StateScopeSet owned_state_scopes;
-        std::set<std::string, std::less<>> direct_descendant_cache_keys;
-        std::set<std::string, std::less<>> descendant_cache_keys;
+        /** Cached components built directly in this body, in the order they were met. */
+        std::vector<ComponentId> direct_descendants;
+        /** Every cached component built within this body, sorted. */
+        std::vector<ComponentId> descendants;
         std::vector<RetainedValueEffects> retained_values;
         std::vector<RetainedSequenceEffect> retained_sequences;
         bool captures_retained_snapshot = false;
@@ -148,6 +154,10 @@ private:
         ComponentEffects effects;
         std::shared_ptr<const DescriptionNode> root;
         Scope rebuild_scope;
+        std::string cache_key;
+        /** The build that last reached this entry: others are the first evicted. */
+        std::uint64_t visited_epoch = 0U;
+        bool refreshing = false;
     };
 
     struct LayerCacheEntry final {
@@ -195,9 +205,14 @@ private:
         Scope scope,
         ComponentEffects& effects
     );
-    [[nodiscard]] ComponentRefreshResult refresh_component_cache_entry(
-        const std::string& cache_key
-    );
+    [[nodiscard]] ComponentRefreshResult refresh_component_cache_entry(ComponentId id);
+    /** The id of a cache key, assigned on first use. */
+    [[nodiscard]] ComponentId component_id(const std::string& cache_key);
+    /** Drops a cache entry and its key's id. */
+    void forget_component(ComponentId id);
+    static void add_descendant(std::vector<ComponentId>& sorted, ComponentId id);
+    static void add_descendants(std::vector<ComponentId>& sorted,
+                                const std::vector<ComponentId>& more);
     [[nodiscard]] static std::shared_ptr<const DescriptionNode> replace_component_subtrees(
         const std::shared_ptr<const DescriptionNode>& root,
         const std::map<
@@ -297,10 +312,16 @@ private:
     std::map<std::string, runtime::Value, std::less<>> contextual_host_roots_;
     std::shared_ptr<const RetainedDescriptionSnapshot> retained_snapshot_;
     std::shared_ptr<const runtime::RuntimeUnit> component_cache_unit_;
-    std::map<std::string, ComponentCacheEntry, std::less<>> component_cache_;
+    struct KeyHash final {
+        using is_transparent = void;
+        [[nodiscard]] std::size_t operator()(const std::string_view key) const noexcept {
+            return std::hash<std::string_view>{}(key);
+        }
+    };
+    std::unordered_map<ComponentId, ComponentCacheEntry> component_cache_;
+    std::unordered_map<std::string, ComponentId, KeyHash, std::equal_to<>> component_ids_;
+    ComponentId next_component_id_ = 1U;
     std::map<std::string, LayerCacheEntry, std::less<>> layer_cache_;
-    std::set<std::string, std::less<>> visited_component_cache_keys_;
-    std::set<std::string, std::less<>> refreshing_component_cache_keys_;
     std::uint64_t component_cache_epoch_ = 0U;
     std::vector<ComponentEffects*> component_effect_stack_;
 };

@@ -706,13 +706,13 @@ DescriptionLayersBuildResult DescriptionBuilder::build_layers(
     if (component_cache_unit_ != application_.active_unit() ||
         component_cache_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
         component_cache_.clear();
+        component_ids_.clear();
         layer_cache_.clear();
         constant_styles_.clear();
         component_cache_epoch_ = 0U;
         component_cache_unit_ = application_.active_unit();
     }
     ++component_cache_epoch_;
-    visited_component_cache_keys_.clear();
     diagnostics_.clear();
     evaluated_expressions_ = 0U;
     described_nodes_ = 0U;
@@ -728,11 +728,11 @@ DescriptionLayersBuildResult DescriptionBuilder::build_layers(
         layer_state_scopes.push_back(current_layer_state_scopes_);
     }
     if (component_cache_.size() > maximum_component_cache_entries) {
-        std::vector<std::pair<std::uint64_t, std::string>> eviction_candidates;
+        std::vector<std::pair<std::uint64_t, ComponentId>> eviction_candidates;
         eviction_candidates.reserve(component_cache_.size());
-        for (const auto& [key, entry] : component_cache_) {
-            if (!visited_component_cache_keys_.contains(key)) {
-                eviction_candidates.emplace_back(entry.last_used_epoch, key);
+        for (const auto& [id, entry] : component_cache_) {
+            if (entry.visited_epoch != component_cache_epoch_) {
+                eviction_candidates.emplace_back(entry.last_used_epoch, id);
             }
         }
         std::ranges::sort(eviction_candidates);
@@ -741,7 +741,7 @@ DescriptionLayersBuildResult DescriptionBuilder::build_layers(
             eviction_candidates.size()
         );
         for (std::size_t index = 0U; index < removal_count; ++index) {
-            component_cache_.erase(eviction_candidates[index].second);
+            forget_component(eviction_candidates[index].second);
         }
     }
     return DescriptionLayersBuildResult{
@@ -777,21 +777,21 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_layer(
         cached->second.contextual_host_roots == contextual_host_roots_) {
         std::map<const DescriptionNode*, std::shared_ptr<const DescriptionNode>> replacements;
         bool valid = true;
-        for (const std::string& child_key :
-             cached->second.effects.direct_descendant_cache_keys) {
-            const auto child_before = component_cache_.find(child_key);
+        for (const ComponentId child :
+             cached->second.effects.direct_descendants) {
+            const auto child_before = component_cache_.find(child);
             if (child_before == component_cache_.end()) {
                 valid = false;
                 break;
             }
             const std::shared_ptr<const DescriptionNode> previous =
                 child_before->second.root;
-            if (refresh_component_cache_entry(child_key) ==
+            if (refresh_component_cache_entry(child) ==
                 ComponentRefreshResult::invalid) {
                 valid = false;
                 break;
             }
-            const auto child_after = component_cache_.find(child_key);
+            const auto child_after = component_cache_.find(child);
             if (child_after == component_cache_.end()) {
                 valid = false;
                 break;
@@ -1578,22 +1578,25 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
         const std::string cache_key = type + "\n" + component_scope.instance_path;
         std::shared_ptr<const DescriptionNode> component_root;
         std::shared_ptr<const DescriptionNode> previous_root;
+        std::optional<ComponentId> id;
         if (inputs.has_value()) {
-            visited_component_cache_keys_.insert(cache_key);
+            id = component_id(cache_key);
             for (ComponentEffects* const component_effect : component_effect_stack_) {
-                component_effect->descendant_cache_keys.insert(cache_key);
+                add_descendant(component_effect->descendants, *id);
             }
             if (!component_effect_stack_.empty()) {
-                component_effect_stack_.back()->direct_descendant_cache_keys.insert(cache_key);
+                std::vector<ComponentId>& direct =
+                    component_effect_stack_.back()->direct_descendants;
+                if (std::ranges::find(direct, *id) == direct.end()) direct.push_back(*id);
             }
-            auto cached = component_cache_.find(cache_key);
+            auto cached = component_cache_.find(*id);
             if (cached != component_cache_.end() &&
                 cached->second.component == type &&
                 cached->second.source_path == source_path &&
                 cached->second.inputs == *inputs &&
                 cached->second.contextual_host_roots == contextual_host_roots_) {
-                static_cast<void>(refresh_component_cache_entry(cache_key));
-                cached = component_cache_.find(cache_key);
+                static_cast<void>(refresh_component_cache_entry(*id));
+                cached = component_cache_.find(*id);
             }
             if (cached != component_cache_.end() && component_cache_entry_current(
                     cached->second, type, source_path, *inputs
@@ -1601,6 +1604,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
                 cached->second.host_invalidation_count =
                     application_.host().invalidation_count();
                 cached->second.last_used_epoch = component_cache_epoch_;
+                cached->second.visited_epoch = component_cache_epoch_;
                 replay_component_effects(cached->second.effects);
                 component_root = cached->second.root;
             } else if (cached != component_cache_.end()) {
@@ -1615,8 +1619,8 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
                 previous_root,
                 build_component_body(type, std::move(component_scope), effects)
             );
-            if (inputs.has_value() && diagnostics_.size() == diagnostics_before) {
-                component_cache_.insert_or_assign(cache_key, ComponentCacheEntry{
+            if (id.has_value() && diagnostics_.size() == diagnostics_before) {
+                component_cache_.insert_or_assign(*id, ComponentCacheEntry{
                     type,
                     source_path,
                     *inputs,
@@ -1626,17 +1630,23 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
                     std::move(effects),
                     component_root,
                     std::move(rebuild_scope),
+                    cache_key,
+                    component_cache_epoch_,
+                    false,
                 });
             } else {
-                if (inputs.has_value()) {
+                if (id.has_value()) {
                     for (ComponentEffects* const component_effect :
                          component_effect_stack_) {
-                        component_effect->direct_descendant_cache_keys.erase(cache_key);
-                        component_effect->descendant_cache_keys.erase(cache_key);
+                        std::erase(component_effect->direct_descendants, *id);
+                        std::erase(component_effect->descendants, *id);
                     }
+                    forget_component(*id);
+                } else if (const auto known = component_ids_.find(cache_key);
+                           known != component_ids_.end()) {
+                    forget_component(known->second);
                 }
                 absorb_uncached_component_effects(effects);
-                component_cache_.erase(cache_key);
             }
         }
         if (!call_children.is_null()) {
@@ -2259,29 +2269,31 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::replace_component_sub
 }
 
 DescriptionBuilder::ComponentRefreshResult
-DescriptionBuilder::refresh_component_cache_entry(const std::string& cache_key) {
-    auto found = component_cache_.find(cache_key);
+DescriptionBuilder::refresh_component_cache_entry(const ComponentId id) {
+    auto found = component_cache_.find(id);
     if (found == component_cache_.end()) return ComponentRefreshResult::invalid;
-    if (!refreshing_component_cache_keys_.insert(cache_key).second) {
-        return ComponentRefreshResult::unchanged;
-    }
+    if (found->second.refreshing) return ComponentRefreshResult::unchanged;
+    found->second.refreshing = true;
     struct RefreshGuard final {
-        std::set<std::string, std::less<>>& keys;
-        const std::string& key;
-        ~RefreshGuard() { keys.erase(key); }
-    } guard{refreshing_component_cache_keys_, cache_key};
+        std::unordered_map<ComponentId, ComponentCacheEntry>& cache;
+        ComponentId id;
+        ~RefreshGuard() {
+            if (const auto entry = cache.find(id); entry != cache.end())
+                entry->second.refreshing = false;
+        }
+    } guard{component_cache_, id};
 
+    // Entries are nodes: refreshing others (which may add entries) leaves this reference valid.
     ComponentCacheEntry& entry = found->second;
     std::map<const DescriptionNode*, std::shared_ptr<const DescriptionNode>> replacements;
-    for (const std::string& child_key : entry.effects.direct_descendant_cache_keys) {
-        const auto child_before = component_cache_.find(child_key);
+    for (const ComponentId child : entry.effects.direct_descendants) {
+        const auto child_before = component_cache_.find(child);
         if (child_before == component_cache_.end()) {
             return ComponentRefreshResult::invalid;
         }
         const std::shared_ptr<const DescriptionNode> previous = child_before->second.root;
-        const ComponentRefreshResult refreshed =
-            refresh_component_cache_entry(child_key);
-        const auto child_after = component_cache_.find(child_key);
+        const ComponentRefreshResult refreshed = refresh_component_cache_entry(child);
+        const auto child_after = component_cache_.find(child);
         if (refreshed == ComponentRefreshResult::invalid ||
             child_after == component_cache_.end()) {
             return ComponentRefreshResult::invalid;
@@ -2324,7 +2336,7 @@ DescriptionBuilder::refresh_component_cache_entry(const std::string& cache_key) 
         effects
     );
     if (diagnostics_.size() != diagnostics_before) {
-        component_cache_.erase(cache_key);
+        forget_component(id);
         return ComponentRefreshResult::invalid;
     }
     entry.host_invalidation_count = application_.host().invalidation_count();
@@ -2335,11 +2347,12 @@ DescriptionBuilder::refresh_component_cache_entry(const std::string& cache_key) 
 }
 
 void DescriptionBuilder::replay_component_effects(const ComponentEffects& effects) {
-    for (const std::string& cache_key : effects.descendant_cache_keys) {
-        visited_component_cache_keys_.insert(cache_key);
-        for (ComponentEffects* const component : component_effect_stack_) {
-            component->descendant_cache_keys.insert(cache_key);
-        }
+    for (const ComponentId id : effects.descendants) {
+        if (const auto entry = component_cache_.find(id); entry != component_cache_.end())
+            entry->second.visited_epoch = component_cache_epoch_;
+    }
+    for (ComponentEffects* const component : component_effect_stack_) {
+        add_descendants(component->descendants, effects.descendants);
     }
     for (const std::string& scope : effects.owned_state_scopes) own_state_scope(scope, true);
     for (const auto& [binding_address, binding] : effects.state_bindings) {
@@ -2357,15 +2370,16 @@ bool DescriptionBuilder::aggregate_component_effects(ComponentEffects& effects) 
     effects.state_bindings = effects.local_state_bindings;
     effects.owned_state_scopes = effects.local_owned_state_scopes;
     effects.captures_retained_snapshot = effects.local_captures_retained_snapshot;
-    effects.descendant_cache_keys.clear();
-    for (const std::string& child_key : effects.direct_descendant_cache_keys) {
-        const auto child = component_cache_.find(child_key);
+    effects.descendants.clear();
+    for (const ComponentId child_id : effects.direct_descendants) {
+        const auto child = component_cache_.find(child_id);
         if (child == component_cache_.end()) return false;
         const ComponentEffects& descendant = child->second.effects;
-        effects.descendant_cache_keys.insert(child_key);
-        effects.descendant_cache_keys.insert(
-            descendant.descendant_cache_keys.begin(),
-            descendant.descendant_cache_keys.end()
+        effects.descendants.push_back(child_id);
+        effects.descendants.insert(
+            effects.descendants.end(),
+            descendant.descendants.begin(),
+            descendant.descendants.end()
         );
         for (const auto& [address, binding] : descendant.state_bindings) {
             effects.state_bindings.insert_or_assign(address, binding);
@@ -2377,9 +2391,39 @@ bool DescriptionBuilder::aggregate_component_effects(ComponentEffects& effects) 
         effects.captures_retained_snapshot =
             effects.captures_retained_snapshot || descendant.captures_retained_snapshot;
     }
+    std::ranges::sort(effects.descendants);
+    const auto duplicates = std::ranges::unique(effects.descendants);
+    effects.descendants.erase(duplicates.begin(), duplicates.end());
     effects.retained_snapshot =
         effects.captures_retained_snapshot ? retained_snapshot_ : nullptr;
     return true;
+}
+
+DescriptionBuilder::ComponentId DescriptionBuilder::component_id(const std::string& cache_key) {
+    const auto [found, inserted] = component_ids_.try_emplace(cache_key, next_component_id_);
+    if (inserted) ++next_component_id_;
+    return found->second;
+}
+
+void DescriptionBuilder::forget_component(const ComponentId id) {
+    const auto found = component_cache_.find(id);
+    if (found == component_cache_.end()) return;
+    component_ids_.erase(found->second.cache_key);
+    component_cache_.erase(found);
+}
+
+void DescriptionBuilder::add_descendant(std::vector<ComponentId>& sorted, const ComponentId id) {
+    const auto position = std::ranges::lower_bound(sorted, id);
+    if (position == sorted.end() || *position != id) sorted.insert(position, id);
+}
+
+void DescriptionBuilder::add_descendants(std::vector<ComponentId>& sorted,
+                                         const std::vector<ComponentId>& more) {
+    if (more.empty()) return;
+    std::vector<ComponentId> merged;
+    merged.reserve(sorted.size() + more.size());
+    std::ranges::set_union(sorted, more, std::back_inserter(merged));
+    sorted = std::move(merged);
 }
 
 void DescriptionBuilder::absorb_uncached_component_effects(
@@ -2409,14 +2453,11 @@ void DescriptionBuilder::absorb_uncached_component_effects(
     );
     parent.local_captures_retained_snapshot =
         parent.local_captures_retained_snapshot || effects.local_captures_retained_snapshot;
-    parent.direct_descendant_cache_keys.insert(
-        effects.direct_descendant_cache_keys.begin(),
-        effects.direct_descendant_cache_keys.end()
-    );
-    parent.descendant_cache_keys.insert(
-        effects.descendant_cache_keys.begin(),
-        effects.descendant_cache_keys.end()
-    );
+    for (const ComponentId child : effects.direct_descendants) {
+        if (std::ranges::find(parent.direct_descendants, child) == parent.direct_descendants.end())
+            parent.direct_descendants.push_back(child);
+    }
+    add_descendants(parent.descendants, effects.descendants);
     for (const RetainedValueEffects& source : effects.retained_values) {
         auto destination = std::ranges::find(
             parent.retained_values,
