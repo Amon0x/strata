@@ -6104,6 +6104,14 @@ overlay Other { root Text(key: "cache.other", text: "other") }
               *beta_after->properties.at("text").value()->string() == "second",
           "a component reused output after its owning host snapshot changed");
 
+    // A host that republishes often (every frame) with the same value keeps the component that read it.
+    static_cast<void>(application.host().adopt(bundle->host_snapshot(
+        "component-cache-beta", 3U, data::parse_json(R"({"beta":{"value":"second"}})"))));
+    ui::DescriptionBuildResult republished = builder.build(runtime::LayerRole::overlay, "Main");
+    check(find_description(find_description, republished.root, "cache.host.beta") == beta_after &&
+              republished.described_nodes == 0U,
+          "a republished host snapshot with the same value rebuilt the component that read it");
+
     static_cast<void>(builder.build(runtime::LayerRole::overlay, "Other"));
     ui::DescriptionBuildResult returned = builder.build(runtime::LayerRole::overlay, "Main");
     check(find_description(find_description, returned.root, "cache.host.alpha") == alpha_after &&

@@ -2403,6 +2403,13 @@ bool DescriptionBuilder::component_effects_current(
         for (const auto& [path, dependency] : effects.host_values) {
             static_cast<void>(path);
             if (dependency.contextual) continue;
+            // What the component read, not which snapshot generation it came from: a host that
+            // republishes often (a HUD every frame) keeps every component whose values stayed.
+            if (dependency.value.has_value()) {
+                const std::optional<runtime::Value> current = application_.host().resolve(dependency.path);
+                if (!current.has_value() || *current != *dependency.value) return false;
+                continue;
+            }
             const std::optional<std::pair<std::string, std::uint64_t>> origin =
                 application_.host().origin(dependency.path);
             if (origin.has_value() != dependency.snapshot_id.has_value() ||
