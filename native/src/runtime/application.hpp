@@ -165,10 +165,10 @@ public:
     [[nodiscard]] std::optional<std::uint64_t> last_attempted_generation() const noexcept;
     [[nodiscard]] const ActivationResult* last_activation() const noexcept;
     void bind_state_scope(
-        std::string runtime_scope,
-        std::string state_name,
-        std::string declaration_scope,
-        std::string address_scope
+        std::string_view runtime_scope,
+        std::string_view state_name,
+        std::string_view declaration_scope,
+        std::string_view address_scope
     );
     void clear_state_scope_bindings() noexcept;
     [[nodiscard]] std::optional<StateScopeResolution> resolve_state_scope(
@@ -218,7 +218,7 @@ private:
         std::string declaration_scope;
         std::string address_scope;
     };
-    std::map<StateAddress, StateScopeBinding> state_scope_bindings_;
+    std::map<StateAddress, StateScopeBinding, std::less<>> state_scope_bindings_;
     bool batching_invalidations_ = false;
     bool batched_invalidation_ = false;
 };

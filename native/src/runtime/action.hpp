@@ -32,6 +32,8 @@ struct ActionOrigin final {
     std::optional<std::uint32_t> end_line;
     std::optional<std::uint32_t> end_column;
     std::optional<std::string> component_path;
+
+    [[nodiscard]] friend bool operator==(const ActionOrigin&, const ActionOrigin&) = default;
 };
 
 struct Action final {

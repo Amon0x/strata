@@ -200,5 +200,7 @@ void register_collection_widget_presenters(WidgetRegistry& registry);
 
 /** Shared detached overlay hook for command-bound Button and IconButton. */
 void command_tooltip_overlay(WidgetRenderScope& scope);
+/** Whether the command tooltip of a control is ready to show. */
+[[nodiscard]] bool command_tooltip_shown(const RetainedNode& node, const InputRouter& input);
 
 } // namespace strata::ui

@@ -125,7 +125,7 @@ private:
     struct ComponentEffects final {
         std::map<std::string, runtime::ExpressionHostDependency, std::less<>> host_values;
         std::map<runtime::StateAddress, runtime::Value> state_values;
-        std::map<runtime::StateAddress, StateBindingEffect> state_bindings;
+        std::map<runtime::StateAddress, StateBindingEffect, std::less<>> state_bindings;
         runtime::StateScopeSet owned_state_scopes;
         /** Cached components built directly in this body, in the order they were met. */
         std::vector<ComponentId> direct_descendants;
@@ -139,7 +139,7 @@ private:
         // the cached components inside it. A component whose own body is still current then
         // recomputes its aggregate from these and its direct descendants' entries instead of
         // being rebuilt when only a descendant changed.
-        std::map<runtime::StateAddress, StateBindingEffect> local_state_bindings;
+        std::map<runtime::StateAddress, StateBindingEffect, std::less<>> local_state_bindings;
         runtime::StateScopeSet local_owned_state_scopes;
         bool local_captures_retained_snapshot = false;
     };

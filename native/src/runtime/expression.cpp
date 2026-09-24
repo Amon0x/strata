@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <iomanip>
 #include <limits>
@@ -372,6 +373,35 @@ ExpressionValue::lexical_state_binding() const noexcept {
     return lexical_state_binding_;
 }
 
+bool same_action(const std::shared_ptr<const ActionValue>& left,
+                 const std::shared_ptr<const ActionValue>& right) {
+    if (left == right)
+        return true;
+    if (left == nullptr || right == nullptr || left->composition != right->composition ||
+        left->lexical_state_binding != right->lexical_state_binding ||
+        left->children.size() != right->children.size() ||
+        (left->action == nullptr) != (right->action == nullptr)) {
+        return false;
+    }
+    if (left->action != nullptr && left->action != right->action) {
+        const Action& first = *left->action;
+        const Action& second = *right->action;
+        // Registered contracts are shared; a dynamic action builds its contract from the id.
+        const bool same_contract =
+            first.contract == second.contract ||
+            (first.dynamic && second.dynamic && first.id() == second.id());
+        if (!same_contract || first.dynamic != second.dynamic || first.payload != second.payload ||
+            first.origin != second.origin) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0U; index < left->children.size(); ++index) {
+        if (!same_action(left->children[index], right->children[index]))
+            return false;
+    }
+    return true;
+}
+
 bool ExpressionDependencyValue::cacheable() const noexcept {
     if (kind == ExpressionDependencyValueKind::unsupported)
         return false;
@@ -431,6 +461,9 @@ ExpressionDependencyValue capture_expression_dependency(const ExpressionValue& v
     if (const Value* scalar = value.value()) {
         result.kind = ExpressionDependencyValueKind::scalar;
         result.scalar = *scalar;
+    } else if (const auto* action = value.action()) {
+        result.kind = ExpressionDependencyValueKind::action;
+        result.action.action = *action;
     }
     return result;
 }
@@ -498,6 +531,8 @@ ExpressionValue restore_expression_dependency(const ExpressionDependencyValue& v
             }
         ));
     }
+    case ExpressionDependencyValueKind::action:
+        return ExpressionValue(value.action.action);
     case ExpressionDependencyValueKind::unsupported:
         throw std::logic_error("unsupported expression dependency cannot be restored");
     }
@@ -563,6 +598,14 @@ const std::vector<RuntimeDiagnostic>& ExpressionRuntime::diagnostics() const noe
 
 void ExpressionRuntime::clear_diagnostics() {
     diagnostics_.clear();
+}
+
+void ExpressionRuntime::set_expression_source(std::shared_ptr<const void> source) {
+    if (source == expression_source_)
+        return;
+    collection_cache_.clear();
+    collection_cache_entries_ = 0U;
+    expression_source_ = std::move(source);
 }
 
 ExpressionDependencyObserver* ExpressionRuntime::exchange_dependency_observer(
@@ -1454,12 +1497,26 @@ ExpressionRuntime::collection_view(const JsonValue helper, const ExpressionScope
             },
         });
     }
+    // A frozen expression is named by where it lives and one from the declared source by its IR
+    // path; anything else only by what it says. The prefixes keep the three apart.
+    std::string expression_key;
     const std::string_view path = string_field(helper, "path");
-    const std::string expression_fingerprint = data::encode_canonical_json(helper);
-    for (CollectionCacheEntry& cached : collection_cache_) {
-        if (cached.path != path || cached.expression_fingerprint != expression_fingerprint) {
-            continue;
-        }
+    if (const auto identity = helper.frozen_identity()) {
+        expression_key.resize(1U + sizeof(identity->first) + sizeof(identity->second));
+        std::memcpy(expression_key.data() + 1U, &identity->first, sizeof(identity->first));
+        std::memcpy(expression_key.data() + 1U + sizeof(identity->first), &identity->second,
+                    sizeof(identity->second));
+    } else if (expression_source_ != nullptr && !path.empty()) {
+        expression_key.reserve(1U + path.size());
+        expression_key.push_back('\1');
+        expression_key.append(path);
+    } else {
+        expression_key = data::encode_canonical_json(helper);
+    }
+    const auto bucket = collection_cache_.find(expression_key);
+    for (std::size_t position = bucket != collection_cache_.end() ? bucket->second.size() : 0U;
+         position-- > 0U;) {
+        const CollectionCacheEntry& cached = bucket->second[position];
         bool dependencies_current = true;
         for (const CollectionDependencyRead& read : cached.dependency_order) {
             if (read.kind == CollectionDependencyKind::lexical) {
@@ -1696,8 +1753,18 @@ ExpressionRuntime::collection_view(const JsonValue helper, const ExpressionScope
         },
     });
     if (dependencies.cacheable) {
-        if (collection_cache_.size() >= 1024U)
-            collection_cache_.erase(collection_cache_.begin());
+        if (collection_cache_entries_ >= 1024U) {
+            collection_cache_.clear();
+            collection_cache_entries_ = 0U;
+        }
+        std::vector<CollectionCacheEntry>& entries = collection_cache_[std::move(expression_key)];
+        // An entry for the same lexical context is superseded: only its host reads differed.
+        if (const auto superseded = std::ranges::find(entries, dependencies.lexical_values,
+                                                      &CollectionCacheEntry::lexical_dependencies);
+            superseded != entries.end()) {
+            entries.erase(superseded);
+            --collection_cache_entries_;
+        }
         std::vector<CollectionDependencyRead> dependency_order;
         dependency_order.reserve(dependencies.order.size());
         for (auto& [host, key] : dependencies.order) {
@@ -1706,9 +1773,7 @@ ExpressionRuntime::collection_view(const JsonValue helper, const ExpressionScope
                 std::move(key),
             });
         }
-        collection_cache_.push_back(CollectionCacheEntry{
-            std::string(path),
-            expression_fingerprint,
+        entries.push_back(CollectionCacheEntry{
             std::move(dependencies.lexical_values),
             std::move(dependencies.host_values),
             std::move(dependency_order),

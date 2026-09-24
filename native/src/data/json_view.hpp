@@ -89,6 +89,8 @@ private:
     friend class JsonArrayView;
     friend class JsonObjectView;
 
+    /** Unique per constructed document for the process; copies share it with their content. */
+    std::uint64_t serial_ = 0U;
     std::shared_ptr<const std::vector<std::uint8_t>> storage_;
     std::vector<std::string_view> strings_;
     std::vector<FrozenJsonNode> nodes_;
@@ -114,6 +116,12 @@ public:
     [[nodiscard]] std::optional<JsonArrayView> array() const noexcept;
     [[nodiscard]] std::optional<JsonObjectView> object() const noexcept;
     [[nodiscard]] JsonView find(std::string_view key) const noexcept;
+    /**
+     * The document and node a frozen view reads, never reused by another document in this process,
+     * so it identifies the JSON itself. Owned JSON has none.
+     */
+    [[nodiscard]] std::optional<std::pair<std::uint64_t, std::uint32_t>>
+    frozen_identity() const noexcept;
     [[nodiscard]] friend bool operator==(
         const JsonView& left,
         const JsonView& right
@@ -265,6 +273,12 @@ inline bool JsonView::valid() const noexcept {
 }
 
 inline JsonView::operator bool() const noexcept { return valid(); }
+
+inline std::optional<std::pair<std::uint64_t, std::uint32_t>>
+JsonView::frozen_identity() const noexcept {
+    if (node_ == owned_node || frozen_ == nullptr) return std::nullopt;
+    return std::pair{frozen_->serial_, node_};
+}
 
 inline JsonViewKind JsonView::kind() const noexcept {
     if (node_ == owned_node) {

@@ -6242,6 +6242,150 @@ overlay Other { root Text(key: "cache.other", text: "other") }
           "detaching one layer eagerly discarded reusable component descriptions");
 }
 
+void test_component_cache_keeps_equal_action_arguments() {
+    using namespace strata;
+    const data::JsonValue schemas = data::parse_json(R"({
+      "extensionPackages":[],
+      "widgets":{"registry":"component-action-cache","required":[],"definitions":[]},
+      "actions":{"registry":"component-action-cache","required":[],"definitions":[]},
+      "host":[
+        {"path":"beta","nullable":false,"type":{"kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[{"name":"value","type":{"kind":"string"},"required":true,"nullable":false}]}}
+      ]
+    })");
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
+    runtime::ApplicationContext application("component-action-cache", bundle);
+    static_cast<void>(application.host().adopt(bundle->host_snapshot(
+        "component-action-beta", 1U, data::parse_json(R"({"beta":{"value":"first"}})"))));
+    const std::string source = R"(
+component Pick(key: key, label: string, choose: action) {
+  Button(key: key, label: label, onClick: choose)
+}
+
+component PickRoot() {
+  state picked = "";
+  Panel(key: "pick.root") {
+    Text(key: "pick.beta", text: beta.value)
+    Pick(key: "pick.fixed", label: "Fixed", choose: action("state.set", name: "picked", value: "fixed"))
+    Pick(key: "pick.host", label: "Host", choose: action("state.set", name: "picked", value: beta.value))
+  }
+}
+
+overlay Main { root PickRoot() }
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(
+                  compiler::ModuleSource{"component-action-cache.strata", source}, no_imports, 0U)
+              .activated(),
+          "component action-argument fixture did not activate");
+    const auto find_description =
+        [](const auto& self, const std::shared_ptr<const ui::DescriptionNode>& node,
+           const std::string_view key) -> std::shared_ptr<const ui::DescriptionNode> {
+        if (node->key.has_value() && *node->key == key)
+            return node;
+        for (std::size_t index = 0U; index < node->children->size(); ++index) {
+            if (auto found = self(self, node->children->at(index), key); found != nullptr) {
+                return found;
+            }
+        }
+        return nullptr;
+    };
+    const auto picked_value =
+        [](const std::shared_ptr<const ui::DescriptionNode>& node) -> std::string {
+        if (node == nullptr) return {};
+        const auto click = node->properties.find("onClick");
+        if (click == node->properties.end() || click->second.action() == nullptr ||
+            *click->second.action() == nullptr || (*click->second.action())->action == nullptr) {
+            return {};
+        }
+        const runtime::Value* value = (*click->second.action())->action->payload.field("value");
+        return value != nullptr && value->string() != nullptr ? *value->string() : std::string{};
+    };
+
+    ui::DescriptionBuilder builder(application);
+    const ui::DescriptionBuildResult first = builder.build(runtime::LayerRole::overlay, "Main");
+    check(first.diagnostics.empty(), "component action-argument fixture produced diagnostics");
+    const auto fixed_before = find_description(find_description, first.root, "pick.fixed");
+    const auto host_before = find_description(find_description, first.root, "pick.host");
+    check(fixed_before != nullptr && host_before != nullptr && picked_value(host_before) == "first",
+          "component action-argument fixture did not describe its buttons");
+
+    static_cast<void>(application.host().adopt(bundle->host_snapshot(
+        "component-action-beta", 2U, data::parse_json(R"({"beta":{"value":"second"}})"))));
+    const ui::DescriptionBuildResult second = builder.build(runtime::LayerRole::overlay, "Main");
+    check(find_description(find_description, second.root, "pick.beta") !=
+              find_description(find_description, first.root, "pick.beta"),
+          "the component owning the changed host value was not rebuilt");
+    check(find_description(find_description, second.root, "pick.fixed") == fixed_before,
+          "a component whose action argument was re-evaluated to an equal action was rebuilt");
+    const auto host_after = find_description(find_description, second.root, "pick.host");
+    check(host_after != host_before && picked_value(host_after) == "second",
+          "a component reused output after its action argument's payload changed");
+}
+
+void test_collection_cache_forgets_a_replaced_unit() {
+    using namespace strata;
+    const data::JsonValue schemas = data::parse_json(R"({
+      "extensionPackages":[],
+      "widgets":{"registry":"collection-unit-cache","required":[],"definitions":[]},
+      "actions":{"registry":"collection-unit-cache","required":[],"definitions":[]},
+      "host":[]
+    })");
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
+    runtime::ApplicationContext application("collection-unit-cache", bundle);
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    const auto activate = [&](const std::string_view threshold, const std::uint64_t generation) {
+        const std::string source = std::string(R"(
+component Shown() {
+  derived shown = filter([1, 2, 3, 4], n -> n > )") + std::string(threshold) + R"();
+  Panel(key: "shown.root") {
+    for n in shown { Text(key: format("shown.{0}", n), text: format("{0}", n)) }
+  }
+}
+
+overlay Main { root Shown() }
+)";
+        check(application
+                  .compile_and_activate(
+                      compiler::ModuleSource{"collection-unit-cache.strata", source}, no_imports,
+                      generation)
+                  .activated(),
+              "collection unit-cache fixture did not activate");
+    };
+    const auto count_texts = [](const std::shared_ptr<const ui::DescriptionNode>& root) {
+        const auto find = [](const auto& self,
+                             const std::shared_ptr<const ui::DescriptionNode>& node)
+            -> std::shared_ptr<const ui::DescriptionNode> {
+            if (node->key.has_value() && *node->key == "shown.root")
+                return node;
+            for (std::size_t index = 0U; index < node->children->size(); ++index) {
+                if (auto found = self(self, node->children->at(index)); found != nullptr)
+                    return found;
+            }
+            return nullptr;
+        };
+        const auto shown = root != nullptr ? find(find, root) : nullptr;
+        return shown != nullptr ? shown->children->size() : 0U;
+    };
+
+    activate("1", 0U);
+    ui::DescriptionBuilder builder(application);
+    const ui::DescriptionBuildResult first = builder.build(runtime::LayerRole::overlay, "Main");
+    check(first.diagnostics.empty() && count_texts(first.root) == 3U,
+          "collection unit-cache fixture did not filter its list");
+    // The replacement's filter sits at the same IR path but says something else.
+    activate("2", 1U);
+    const ui::DescriptionBuildResult second = builder.build(runtime::LayerRole::overlay, "Main");
+    check(second.diagnostics.empty() && count_texts(second.root) == 2U,
+          "a collection view cached for a replaced unit answered for its successor");
+}
+
 void test_component_change_patches_ancestors_and_shares_unchanged_nodes() {
     using namespace strata;
     const data::JsonValue schemas = data::parse_json(R"({
@@ -7128,6 +7272,8 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_content_transition_item_fills_definite_container();
             test_component_slot_projection();
             test_component_cache_tracks_exact_retained_dependencies();
+            test_component_cache_keeps_equal_action_arguments();
+            test_collection_cache_forgets_a_replaced_unit();
             test_component_change_patches_ancestors_and_shares_unchanged_nodes();
             test_named_styles_follow_the_values_they_read();
             test_parameterized_component_state_retains_its_evaluated_initializer();

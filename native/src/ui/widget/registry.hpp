@@ -23,6 +23,7 @@ class RuntimeActionRegistry;
 
 namespace strata::ui {
 
+class InputRouter;
 class WidgetInputScope;
 class WidgetInspectionScope;
 class WidgetRenderScope;
@@ -60,6 +61,8 @@ struct WidgetDescriptionExpansion final {
 
 using WidgetPresentHook = std::function<void(WidgetRenderScope& scope)>;
 using WidgetClipHook = std::function<std::optional<Rect>(WidgetRenderScope& scope)>;
+/** Whether a widget's overlay has anything to show now, decided without presenting it. */
+using WidgetOverlayShown = bool (*)(const RetainedNode& node, const InputRouter& input);
 using WidgetInputHook = std::function<bool(WidgetInputScope& scope)>;
 using WidgetInspectionHook = std::function<void(WidgetInspectionScope& scope)>;
 using WidgetSemanticsHook = std::function<void(WidgetSemanticsScope& scope)>;
@@ -183,6 +186,9 @@ struct WidgetPresentPhase final {
     WidgetPresentHook overlay = nullptr;
     WidgetClipHook descendant_clip = nullptr;
     bool detached_overlay = false;
+    /** When set, the overlay is presented only while this holds: a detached overlay that shows
+     * rarely (a hover tooltip) costs nothing on the frames it does not. */
+    WidgetOverlayShown overlay_shown = nullptr;
     bool depends_on_status_feedback = false;
     WidgetVisualProfile visual{};
     bool depends_on_motion_progress = false;

@@ -388,6 +388,7 @@ struct DescriptionBuilder::RepeaterIdentityEvaluationState final {
         index_name(std::move(source_index_name)),
         identity(std::move(source_identity)) {
         evaluator->set_contextual_host_roots(scope.expressions.contextual_host_roots);
+        evaluator->expressions_->set_expression_source(unit_keep_alive);
     }
 
     [[nodiscard]] std::string key(
@@ -431,6 +432,7 @@ struct DescriptionBuilder::GeneratedRowEvaluationContext final {
         evaluator(std::make_unique<DescriptionBuilder>(application, widgets)) {
         evaluator->set_contextual_host_roots(std::move(contextual_host_roots));
         evaluator->retained_snapshot_ = std::move(retained);
+        evaluator->expressions_->set_expression_source(application.active_unit());
     }
 
     void begin() {
@@ -711,6 +713,7 @@ DescriptionLayersBuildResult DescriptionBuilder::build_layers(
         constant_styles_.clear();
         component_cache_epoch_ = 0U;
         component_cache_unit_ = application_.active_unit();
+        expressions_->set_expression_source(component_cache_unit_);
     }
     ++component_cache_epoch_;
     diagnostics_.clear();
@@ -1590,17 +1593,24 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(
                 if (std::ranges::find(direct, *id) == direct.end()) direct.push_back(*id);
             }
             auto cached = component_cache_.find(*id);
+            bool current = false;
             if (cached != component_cache_.end() &&
                 cached->second.component == type &&
                 cached->second.source_path == source_path &&
                 cached->second.inputs == *inputs &&
                 cached->second.contextual_host_roots == contextual_host_roots_) {
-                static_cast<void>(refresh_component_cache_entry(*id));
+                const bool refreshing = cached->second.refreshing;
+                const ComponentRefreshResult refreshed = refresh_component_cache_entry(*id);
                 cached = component_cache_.find(*id);
+                // A refresh leaves a surviving entry current for the inputs it was matched on,
+                // unless it was already refreshing and so returned without looking.
+                current = cached != component_cache_.end() &&
+                          refreshed != ComponentRefreshResult::invalid &&
+                          (!refreshing || component_cache_entry_current(
+                                              cached->second, type, source_path, *inputs
+                                          ));
             }
-            if (cached != component_cache_.end() && component_cache_entry_current(
-                    cached->second, type, source_path, *inputs
-                )) {
+            if (current) {
                 cached->second.host_invalidation_count =
                     application_.host().invalidation_count();
                 cached->second.last_used_epoch = component_cache_epoch_;
@@ -2069,29 +2079,31 @@ void DescriptionBuilder::bind_state_scope(
     const std::string_view address_scope,
     const bool replayed
 ) {
-    const runtime::StateAddress binding_address{
-        std::string(runtime_scope),
-        std::string(state_name),
-    };
-    const StateBindingEffect effect{
-        std::string(declaration_scope),
-        std::string(address_scope),
+    const runtime::StateAddressView address{runtime_scope, state_name};
+    const auto record = [&](
+        std::map<runtime::StateAddress, StateBindingEffect, std::less<>>& bindings
+    ) {
+        const auto found = bindings.lower_bound(address);
+        if (found != bindings.end() && found->first == address) {
+            if (found->second.declaration_scope != declaration_scope)
+                found->second.declaration_scope = declaration_scope;
+            if (found->second.address_scope != address_scope)
+                found->second.address_scope = address_scope;
+            return;
+        }
+        bindings.emplace_hint(
+            found,
+            runtime::StateAddress{std::string(runtime_scope), std::string(state_name)},
+            StateBindingEffect{std::string(declaration_scope), std::string(address_scope)}
+        );
     };
     for (ComponentEffects* const component : component_effect_stack_) {
-        component->state_bindings.insert_or_assign(binding_address, effect);
+        record(component->state_bindings);
     }
     if (!replayed && !component_effect_stack_.empty()) {
-        component_effect_stack_.back()->local_state_bindings.insert_or_assign(
-            binding_address,
-            effect
-        );
+        record(component_effect_stack_.back()->local_state_bindings);
     }
-    application_.bind_state_scope(
-        binding_address.scope,
-        binding_address.name,
-        effect.declaration_scope,
-        effect.address_scope
-    );
+    application_.bind_state_scope(runtime_scope, state_name, declaration_scope, address_scope);
 }
 
 void DescriptionBuilder::own_state_scope(const std::string_view scope, const bool replayed) {

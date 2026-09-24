@@ -44,28 +44,6 @@ void validate_text(const std::string_view value, const std::string_view label,
     return reason != DirtyReason::semantics;
 }
 
-[[nodiscard]] bool action_value_equal(const std::shared_ptr<const runtime::ActionValue>& left,
-                                      const std::shared_ptr<const runtime::ActionValue>& right) {
-    if (left == right)
-        return true;
-    if (left == nullptr || right == nullptr || left->composition != right->composition ||
-        left->children.size() != right->children.size()) {
-        return false;
-    }
-    if ((left->action == nullptr) != (right->action == nullptr))
-        return false;
-    if (left->action != nullptr && (left->action->id() != right->action->id() ||
-                                    left->action->payload != right->action->payload ||
-                                    left->action->dynamic != right->action->dynamic)) {
-        return false;
-    }
-    for (std::size_t index = 0U; index < left->children.size(); ++index) {
-        if (!action_value_equal(left->children[index], right->children[index]))
-            return false;
-    }
-    return true;
-}
-
 [[nodiscard]] std::size_t reason_index(const DirtyReason reason) noexcept {
     switch (reason) {
     case DirtyReason::structure:
@@ -1067,7 +1045,7 @@ bool expression_value_equal(const runtime::ExpressionValue& left,
     }
     if (left.action() != nullptr || right.action() != nullptr) {
         return left.action() != nullptr && right.action() != nullptr &&
-               action_value_equal(*left.action(), *right.action());
+               runtime::same_action(*left.action(), *right.action());
     }
     if (left.lambda() != nullptr || right.lambda() != nullptr) {
         if (left.lambda() == nullptr || right.lambda() == nullptr)

@@ -608,15 +608,25 @@ void tooltip_overlay(WidgetRenderScope& scope) {
     );
 }
 
+/** A tooltip's own overlay shows while it is disclosed, unless authored content presents it. */
+[[nodiscard]] bool tooltip_overlay_shown(const RetainedNode& node, const InputRouter&) {
+    const auto authored = node.description().properties.find("contentTemplate");
+    return (authored == node.description().properties.end() ||
+            authored->second.data_value() == nullptr) &&
+           tooltip_disclosure_visible(node);
+}
+
 void add(
     WidgetRegistry& registry,
     std::string type,
     const WidgetPresentHook content,
     const WidgetPresentHook overlay = nullptr,
     const bool detached_overlay = false,
-    const WidgetVisualProfile visual = {}
+    const WidgetVisualProfile visual = {},
+    const WidgetOverlayShown overlay_shown = nullptr
 ) {
     WidgetPresentPhase phase{content, nullptr, overlay, nullptr, detached_overlay};
+    phase.overlay_shown = overlay_shown;
     phase.visual = visual;
     registry.register_present_phase(std::move(type), std::move(phase));
 }
@@ -632,7 +642,8 @@ void register_shell_widget_presenters(WidgetRegistry& registry) {
     add(registry, "Banner", &banner_content);
     add(registry, "ToastRegion", nullptr, &toast_region_overlay, true);
     add(registry, "Modal", &modal_content);
-    add(registry, "Tooltip", nullptr, &tooltip_overlay, true, {false, true, false});
+    add(registry, "Tooltip", nullptr, &tooltip_overlay, true, {false, true, false},
+        &tooltip_overlay_shown);
 }
 
 } // namespace strata::ui

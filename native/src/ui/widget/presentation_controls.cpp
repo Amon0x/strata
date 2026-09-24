@@ -622,8 +622,10 @@ void radio_foreground(WidgetRenderScope& scope) {
 void add(WidgetRegistry& registry, std::string type, const WidgetPresentHook content,
          const WidgetPresentHook foreground = nullptr, const WidgetPresentHook overlay = nullptr,
          const bool detached_overlay = false, const WidgetVisualProfile visual = {},
-         const bool depends_on_motion_progress = false) {
+         const bool depends_on_motion_progress = false,
+         const WidgetOverlayShown overlay_shown = nullptr) {
     WidgetPresentPhase phase{content, foreground, overlay, nullptr, detached_overlay};
+    phase.overlay_shown = overlay_shown;
     phase.visual = visual;
     phase.depends_on_motion_progress = depends_on_motion_progress;
     registry.register_present_phase(std::move(type), std::move(phase));
@@ -632,7 +634,8 @@ void add(WidgetRegistry& registry, std::string type, const WidgetPresentHook con
 } // namespace
 
 void register_control_widget_presenters(WidgetRegistry& registry) {
-    add(registry, "IconButton", &icon_button_content, nullptr, &command_tooltip_overlay, true);
+    add(registry, "IconButton", &icon_button_content, nullptr, &command_tooltip_overlay, true, {},
+        false, &command_tooltip_shown);
     add(registry, "Checkbox", &checkbox_content);
     add(registry, "Toggle", &toggle_content);
     add(registry, "Switch", &toggle_content);

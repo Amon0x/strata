@@ -319,7 +319,9 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             [&widgets, &behaviors, &input](const RetainedNode& node) {
                 const WidgetLifecycle* lifecycle = widgets.find(node.description().type);
                 return (lifecycle != nullptr && lifecycle->present.overlay != nullptr &&
-                        lifecycle->present.detached_overlay) ||
+                        lifecycle->present.detached_overlay &&
+                        (lifecycle->present.overlay_shown == nullptr ||
+                         lifecycle->present.overlay_shown(node, input))) ||
                        has_behavior_overlay(behaviors, node, input, true);
             });
     };

@@ -580,28 +580,33 @@ const ActivationResult* ApplicationContext::last_activation() const noexcept {
     return last_activation_.has_value() ? &*last_activation_ : nullptr;
 }
 void ApplicationContext::bind_state_scope(
-    std::string runtime_scope,
-    std::string state_name,
-    std::string declaration_scope,
-    std::string address_scope
+    const std::string_view runtime_scope,
+    const std::string_view state_name,
+    const std::string_view declaration_scope,
+    const std::string_view address_scope
 ) {
+    // Every description rebinds the scopes it walks: a known binding was validated when it was
+    // first made, so only its owners are compared.
+    const StateAddressView address{runtime_scope, state_name};
+    const auto existing = state_scope_bindings_.lower_bound(address);
+    if (existing != state_scope_bindings_.end() && existing->first == address) {
+        if (existing->second.declaration_scope != declaration_scope ||
+            existing->second.address_scope != address_scope) {
+            throw std::invalid_argument("runtime state scope has conflicting declaration owners");
+        }
+        return;
+    }
     if (runtime_scope.empty() || state_name.empty() || declaration_scope.empty() ||
         address_scope.empty() ||
         !core::valid_utf8(runtime_scope) || !core::valid_utf8(state_name) ||
         !core::valid_utf8(declaration_scope) || !core::valid_utf8(address_scope)) {
         throw std::invalid_argument("state scope binding names must be non-empty valid UTF-8");
     }
-    const StateAddress key{std::move(runtime_scope), std::move(state_name)};
-    const StateScopeBinding binding{std::move(declaration_scope), std::move(address_scope)};
-    const auto existing = state_scope_bindings_.find(key);
-    if (existing != state_scope_bindings_.end() &&
-        (existing->second.declaration_scope != binding.declaration_scope ||
-         existing->second.address_scope != binding.address_scope)) {
-        throw std::invalid_argument("runtime state scope has conflicting declaration owners");
-    }
-    if (existing == state_scope_bindings_.end()) {
-        state_scope_bindings_.emplace(std::move(key), std::move(binding));
-    }
+    state_scope_bindings_.emplace_hint(
+        existing,
+        StateAddress{std::string(runtime_scope), std::string(state_name)},
+        StateScopeBinding{std::string(declaration_scope), std::string(address_scope)}
+    );
 }
 
 void ApplicationContext::clear_state_scope_bindings() noexcept { state_scope_bindings_.clear(); }
@@ -610,10 +615,7 @@ std::optional<StateScopeResolution> ApplicationContext::resolve_state_scope(
     const std::string_view runtime_scope,
     const std::string_view state_name
 ) const {
-    const auto found = state_scope_bindings_.find(StateAddress{
-        std::string(runtime_scope),
-        std::string(state_name),
-    });
+    const auto found = state_scope_bindings_.find(StateAddressView{runtime_scope, state_name});
     if (found == state_scope_bindings_.end() || active_unit_ == nullptr) return std::nullopt;
     const UnitStateDeclaration* declaration = active_unit_->state_declaration(
         found->second.declaration_scope,

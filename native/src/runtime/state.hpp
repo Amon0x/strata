@@ -26,6 +26,25 @@ struct StateAddress final {
     [[nodiscard]] friend auto operator<=>(const StateAddress&, const StateAddress&) = default;
 };
 
+/** A borrowed StateAddress, for looking one up without building its strings. */
+struct StateAddressView final {
+    std::string_view scope;
+    std::string_view name;
+
+    [[nodiscard]] friend bool operator==(const StateAddressView&,
+                                         const StateAddressView&) = default;
+    [[nodiscard]] friend auto operator<=>(const StateAddressView&,
+                                          const StateAddressView&) = default;
+    [[nodiscard]] friend auto operator<=>(const StateAddress& left,
+                                          const StateAddressView& right) noexcept {
+        return StateAddressView{left.scope, left.name} <=> right;
+    }
+    [[nodiscard]] friend bool operator==(const StateAddress& left,
+                                         const StateAddressView& right) noexcept {
+        return left.scope == right.scope && left.name == right.name;
+    }
+};
+
 /**
  * Lexically resolved target captured by a framework state action while its expression is evaluated.
  * The address owns retained instance identity; declaration_scope owns schema/initializer lookup.

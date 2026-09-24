@@ -303,6 +303,22 @@ void InputRouter::update_tooltip_disclosures() {
 void InputRouter::synchronize_authored_presentations() {
     if (tree_ == nullptr || tree_->root() == nullptr)
         return;
+    // The state is a function of focus, hover and press over the current nodes: nodes and their
+    // properties only change with the tree generation, so an unchanged input set has nothing new.
+    AuthoredPresentationInputs& last = authored_presentation_inputs_;
+    if (last.tree == tree_ && last.generation == tree_->generation() &&
+        last.structure_generation == tree_->structure_generation() && last.focused == focused_ &&
+        last.focus_visible == focus_highlight_visible_ && last.active == active_ &&
+        last.hovered == hovered_)
+        return;
+    last.tree = tree_;
+    last.generation = tree_->generation();
+    last.structure_generation = tree_->structure_generation();
+    last.focused = focused_;
+    last.focus_visible = focus_highlight_visible_;
+    last.active = active_;
+    if (last.hovered != hovered_)
+        last.hovered = hovered_;
     bool changed = false;
     for (RetainedNode* const node : tree_->nodes_of_types(widgets_.authored_presentation_types())) {
         const WidgetLifecycle* lifecycle = widgets_.find(node->description().type);

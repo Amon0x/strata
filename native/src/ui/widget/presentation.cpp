@@ -252,6 +252,10 @@ std::string widget_number_text(const double value) {
     return std::string(buffer.data(), result.ptr);
 }
 
+bool command_tooltip_shown(const RetainedNode& node, const InputRouter& input) {
+    return input.command_tooltip_ready(node.identity());
+}
+
 void command_tooltip_overlay(WidgetRenderScope& scope) {
     if (!scope.input().command_tooltip_ready(scope.node().identity()) ||
         scope.text_engine() == nullptr) {
@@ -800,7 +804,9 @@ build_widget_overlay(const WidgetRegistry& registry, const RetainedNode& node,
     std::vector<RenderCommand> output;
     const WidgetLifecycle* lifecycle = registry.find(node.description().type);
     if (lifecycle == nullptr || !participates(*lifecycle, node) ||
-        lifecycle->present.overlay == nullptr) {
+        lifecycle->present.overlay == nullptr ||
+        (lifecycle->present.overlay_shown != nullptr &&
+         !lifecycle->present.overlay_shown(node, input))) {
         return output;
     }
     WidgetRenderScope scope(node, layout, layout_result, input, commands, text, svg_images, motion,

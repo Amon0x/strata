@@ -1,5 +1,6 @@
 #include "data/json_view.hpp"
 
+#include <atomic>
 #include <stdexcept>
 #include <string>
 
@@ -12,7 +13,11 @@ FrozenJsonDocument::FrozenJsonDocument(
     std::vector<std::uint32_t> array_items,
     std::vector<FrozenJsonObjectEntry> object_items,
     const std::uint32_t root
-) : storage_(std::move(storage)),
+) : serial_([] {
+        static std::atomic<std::uint64_t> next{1U};
+        return next.fetch_add(1U, std::memory_order_relaxed);
+    }()),
+    storage_(std::move(storage)),
     strings_(std::move(strings)),
     nodes_(std::move(nodes)),
     array_items_(std::move(array_items)),

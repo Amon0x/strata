@@ -295,8 +295,10 @@ void status_content(WidgetRenderScope& scope) {
 
 void add(WidgetRegistry& registry, std::string type, const WidgetPresentHook content,
          const WidgetPresentHook foreground = nullptr, const WidgetPresentHook overlay = nullptr,
-         const bool detached_overlay = false, const WidgetVisualProfile visual = {}) {
+         const bool detached_overlay = false, const WidgetVisualProfile visual = {},
+         const WidgetOverlayShown overlay_shown = nullptr) {
     WidgetPresentPhase phase{content, foreground, overlay, nullptr, detached_overlay};
+    phase.overlay_shown = overlay_shown;
     phase.visual = visual;
     registry.register_present_phase(std::move(type), std::move(phase));
 }
@@ -311,7 +313,8 @@ void register_primitive_widget_presenters(WidgetRegistry& registry) {
     add(registry, "Section", &section_content);
     add(registry, "Text", &text_content, nullptr, nullptr, false, {true, false, true});
     add(registry, "RichText", &rich_text_content, nullptr, nullptr, false, {true, false, true});
-    add(registry, "Button", &button_content, nullptr, &command_tooltip_overlay, true);
+    add(registry, "Button", &button_content, nullptr, &command_tooltip_overlay, true, {},
+        &command_tooltip_shown);
     add(registry, "Menu", &button_content, nullptr, &menu_overlay, true);
     add(registry, "Image", &image_content);
     add(registry, "Draw", &draw_content);

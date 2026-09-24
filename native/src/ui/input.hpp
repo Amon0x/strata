@@ -718,6 +718,17 @@ class InputRouter final {
     std::optional<Point> hover_position_;
     std::map<std::uint64_t, std::int64_t> hover_started_nanos_;
     std::set<std::uint64_t> matured_command_tooltips_;
+    /** What the authored presentation state last synchronized from; equal inputs skip the pass. */
+    struct AuthoredPresentationInputs {
+        const RetainedTree* tree = nullptr;
+        std::uint64_t generation = 0U;
+        std::uint64_t structure_generation = 0U;
+        std::optional<std::uint64_t> focused;
+        bool focus_visible = false;
+        std::optional<std::uint64_t> active;
+        std::set<std::uint64_t> hovered;
+    };
+    AuthoredPresentationInputs authored_presentation_inputs_;
     std::optional<std::uint64_t> active_;
     std::optional<WidgetSubtarget> routed_subtarget_;
     std::optional<std::pair<std::uint64_t, std::string>> hovered_subtarget_;

@@ -234,13 +234,15 @@ std::vector<DetachedOverlayRoot> detached_overlay_roots(
         candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
     }
     for (const RetainedNode* const node : candidates) {
-        // A node counts only while it and every ancestor are laid out.
+        // Whether it has anything to show is cheap; whether it and every ancestor are laid out
+        // is a walk.
+        if (!participates(*node)) continue;
         bool laid_out = true;
         for (const RetainedNode* current = node; current != nullptr && laid_out;
              current = current->parent()) {
             laid_out = layout.find(current->identity()) != nullptr;
         }
-        if (!laid_out || !participates(*node)) continue;
+        if (!laid_out) continue;
         result.push_back(DetachedOverlayRoot{
             node,
             detached_overlay_z_index(*node),

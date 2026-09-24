@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -163,7 +164,27 @@ enum class ExpressionDependencyValueKind {
     executable_list,
     executable_object,
     component_template,
+    action,
     unsupported,
+};
+
+/**
+ * Whether two evaluated actions dispatch identically: same contract, payload, origin, state
+ * binding and composition. Evaluation is pure, so this is also their identity as an input.
+ */
+[[nodiscard]] bool same_action(const std::shared_ptr<const ActionValue>& left,
+                               const std::shared_ptr<const ActionValue>& right);
+
+/** An action input. Evaluated actions are immutable, so the value is held rather than copied. */
+struct ExpressionActionDependencyValue final {
+    std::shared_ptr<const ActionValue> action;
+
+    [[nodiscard]] friend bool operator==(
+        const ExpressionActionDependencyValue& left,
+        const ExpressionActionDependencyValue& right
+    ) {
+        return same_action(left.action, right.action);
+    }
 };
 
 /** Frozen collection dependency snapshot; immutable view metadata forms its source identity. */
@@ -192,6 +213,7 @@ struct ExpressionDependencyValue final {
     std::vector<std::string> field_names;
     std::vector<ExpressionDependencyValue> field_values;
     std::string component;
+    ExpressionActionDependencyValue action;
 
     [[nodiscard]] bool cacheable() const noexcept;
     [[nodiscard]] friend bool operator==(
@@ -266,6 +288,12 @@ public:
     );
     [[nodiscard]] const std::vector<RuntimeDiagnostic>& diagnostics() const noexcept;
     void clear_diagnostics();
+    /**
+     * Names the IR every expression evaluated from now on comes from (the active unit), held until
+     * the next call. Within one source an expression is named by its IR path; a new source
+     * forgets what was cached for the last one.
+     */
+    void set_expression_source(std::shared_ptr<const void> source);
     /** Installs a synchronous observer and returns the previous observer. */
     ExpressionDependencyObserver* exchange_dependency_observer(
         ExpressionDependencyObserver* observer
@@ -288,8 +316,6 @@ private:
     };
 
     struct CollectionCacheEntry final {
-        std::string path;
-        std::string expression_fingerprint;
         std::map<std::string, ExpressionDependencyValue, std::less<>> lexical_dependencies;
         std::map<std::string, ExpressionHostDependency, std::less<>> host_dependencies;
         std::vector<CollectionDependencyRead> dependency_order;
@@ -340,7 +366,10 @@ private:
     const ExpressionScope* active_scope_ = nullptr;
     std::vector<RuntimeDiagnostic> diagnostics_;
     std::set<std::string, std::less<>> reported_diagnostics_;
-    std::vector<CollectionCacheEntry> collection_cache_;
+    /** Views per collection expression, one per lexical context, newest last. */
+    std::unordered_map<std::string, std::vector<CollectionCacheEntry>> collection_cache_;
+    std::size_t collection_cache_entries_ = 0U;
+    std::shared_ptr<const void> expression_source_;
     ExpressionDependencyObserver* dependency_observer_ = nullptr;
 };
 
