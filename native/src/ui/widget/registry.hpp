@@ -223,10 +223,13 @@ class WidgetRegistry final {
     // The trait type lists view the table's keys: a copy lists its own.
     WidgetRegistry(const WidgetRegistry& other);
     WidgetRegistry& operator=(const WidgetRegistry& other);
-    WidgetRegistry(WidgetRegistry&&) noexcept = default;
-    WidgetRegistry& operator=(WidgetRegistry&&) noexcept = default;
+    WidgetRegistry(WidgetRegistry&& other) noexcept;
+    WidgetRegistry& operator=(WidgetRegistry&& other) noexcept;
 
     [[nodiscard]] const WidgetLifecycle* find(std::string_view type) const noexcept;
+    /** Changes whenever the registry does, assignment included, and never repeats: what was
+     * looked up in it stays good while this does. */
+    [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
     void register_lifecycle(WidgetLifecycle lifecycle);
     void register_participation(std::string type, WidgetParticipationHook participates);
     void register_describe_phase(std::string type, WidgetDescribePhase phase);
@@ -268,6 +271,7 @@ class WidgetRegistry final {
     std::vector<std::string_view> command_declaration_types_;
     std::vector<std::string_view> authored_presentation_types_;
     std::vector<std::string_view> detached_overlay_types_;
+    std::uint64_t revision_ = 0U;
 };
 
 void register_builtin_widget_presenters(WidgetRegistry& registry);

@@ -1,6 +1,8 @@
 #include "runtime/value.hpp"
 
 #include <algorithm>
+#include <charconv>
+#include <iterator>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
@@ -181,6 +183,7 @@ std::string_view Value::state_type_id() const noexcept {
 }
 
 bool operator==(const Value& left, const Value& right) {
+    if (&left == &right) return true;
     if (left.storage_.index() != right.storage_.index()) return false;
     if (const auto* left_list = std::get_if<Value::ListPtr>(&left.storage_)) {
         return pointer_equal(*left_list, std::get<Value::ListPtr>(right.storage_));
@@ -249,6 +252,87 @@ data::JsonValue value_to_json(const Value& value) {
     }
     }
     throw std::logic_error("invalid runtime value kind");
+}
+
+bool truthy(const Value& value) noexcept {
+    switch (value.kind()) {
+    case ValueKind::null_value:
+        return false;
+    case ValueKind::boolean:
+        return *value.boolean();
+    case ValueKind::number:
+        return *value.number() != 0.0;
+    case ValueKind::duration:
+        return value.duration()->nanoseconds != 0;
+    case ValueKind::string:
+        return !value.string()->empty();
+    case ValueKind::list:
+        return !value.list()->values.empty();
+    case ValueKind::object:
+        return !value.object()->fields.empty();
+    case ValueKind::color:
+    case ValueKind::image:
+    case ValueKind::key:
+    case ValueKind::theme_token:
+        return true;
+    }
+    return false;
+}
+
+std::string display_string(const Value& value) {
+    switch (value.kind()) {
+    case ValueKind::null_value:
+        return {};
+    case ValueKind::boolean:
+        return *value.boolean() ? "true" : "false";
+    case ValueKind::number: {
+        char buffer[64]{};
+        const auto converted = std::to_chars(std::begin(buffer), std::end(buffer), *value.number());
+        return converted.ec == std::errc{} ? std::string(buffer, converted.ptr) : std::string{"0"};
+    }
+    case ValueKind::duration:
+        return std::to_string(value.duration()->nanoseconds);
+    case ValueKind::string:
+        return *value.string();
+    case ValueKind::color: {
+        static constexpr char digits[] = "0123456789abcdef";
+        const ColorValue color = *value.color();
+        const std::uint8_t channels[] = {color.red, color.green, color.blue, color.alpha};
+        std::string displayed = "#";
+        displayed.reserve(9U);
+        for (const std::uint8_t channel : channels) {
+            displayed.push_back(digits[channel >> 4U]);
+            displayed.push_back(digits[channel & 0x0FU]);
+        }
+        return displayed;
+    }
+    case ValueKind::image:
+        return value.image()->id;
+    case ValueKind::key:
+        return value.key()->value;
+    case ValueKind::theme_token:
+        return "theme." + value.theme_token()->name;
+    case ValueKind::list: {
+        std::string displayed = "[";
+        for (std::size_t index = 0U; index < value.list()->values.size(); ++index) {
+            if (index != 0U)
+                displayed += ", ";
+            displayed += display_string(value.list()->values[index]);
+        }
+        return displayed + "]";
+    }
+    case ValueKind::object: {
+        std::string displayed = "{";
+        for (std::size_t index = 0U; index < value.object()->fields.size(); ++index) {
+            if (index != 0U)
+                displayed += ", ";
+            displayed += value.object()->fields[index].first + "=" +
+                         display_string(value.object()->fields[index].second);
+        }
+        return displayed + "}";
+    }
+    }
+    return {};
 }
 
 } // namespace strata::runtime

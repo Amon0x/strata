@@ -171,6 +171,7 @@ public:
         std::string_view address_scope
     );
     void clear_state_scope_bindings() noexcept;
+    /** The state a name means in a runtime scope: its nearest declaration along the scope path. */
     [[nodiscard]] std::optional<StateScopeResolution> resolve_state_scope(
         std::string_view runtime_scope,
         std::string_view state_name

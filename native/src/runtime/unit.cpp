@@ -431,6 +431,25 @@ void RuntimeUnit::build_indexes() {
             "portable IR state declaration '" + duplicate->scope + "/" + duplicate->name + "' is ambiguous"
         );
     }
+    program_ = Program::lower_unit(root, [this](
+                                             const std::string_view scope,
+                                             const std::string_view name,
+                                             const ExpressionId initializer
+                                         ) {
+        const auto found = std::ranges::lower_bound(
+            state_declarations_,
+            std::pair{scope, name},
+            {},
+            [](const UnitStateDeclaration& value) {
+                return std::pair<std::string_view, std::string_view>{value.scope, value.name};
+            }
+        );
+        if (found == state_declarations_.end() || found->scope != scope || found->name != name) {
+            throw std::logic_error("indexed state declaration is missing");
+        }
+        found->initializer_expression = initializer;
+        return static_cast<std::uint32_t>(found - state_declarations_.begin());
+    });
 }
 
 } // namespace strata::runtime

@@ -555,10 +555,13 @@ std::optional<Value> ApplicationContext::state_initial_value(
     if (const Value* initial = state_.initial(resolution.address); initial != nullptr) {
         return *initial;
     }
+    if (resolution.declaration->initializer_expression == no_program_id || active_unit_ == nullptr)
+        return Value{};
     ExpressionScope expression_scope;
-    expression_scope.component_path = std::string(runtime_scope);
-    ExpressionRuntime expressions(host_, bundle_->action_registry(), std::move(expression_scope));
-    const ExpressionValue evaluated = expressions.evaluate(resolution.declaration->initializer);
+    expression_scope.set_component_path(std::string(runtime_scope));
+    ExpressionRuntime expressions(host_, bundle_->action_registry());
+    const ExpressionValue evaluated = expressions.evaluate(
+        active_unit_->program(), resolution.declaration->initializer_expression, expression_scope);
     const Value* value = evaluated.value();
     return value != nullptr && expressions.diagnostics().empty()
                ? std::optional<Value>(*value)
@@ -615,8 +618,19 @@ std::optional<StateScopeResolution> ApplicationContext::resolve_state_scope(
     const std::string_view runtime_scope,
     const std::string_view state_name
 ) const {
-    const auto found = state_scope_bindings_.find(StateAddressView{runtime_scope, state_name});
-    if (found == state_scope_bindings_.end() || active_unit_ == nullptr) return std::nullopt;
+    if (active_unit_ == nullptr) return std::nullopt;
+    // A state is bound where it is declared. Every instance inside that one (loop items,
+    // components, generated rows) extends its path, so the nearest declaration along the path
+    // is the state the name means there.
+    auto found = state_scope_bindings_.end();
+    for (std::string_view scope = runtime_scope; !scope.empty();) {
+        found = state_scope_bindings_.find(StateAddressView{scope, state_name});
+        if (found != state_scope_bindings_.end()) break;
+        const std::size_t separator = scope.rfind('/');
+        if (separator == std::string_view::npos) break;
+        scope = scope.substr(0U, separator);
+    }
+    if (found == state_scope_bindings_.end()) return std::nullopt;
     const UnitStateDeclaration* declaration = active_unit_->state_declaration(
         found->second.declaration_scope,
         state_name

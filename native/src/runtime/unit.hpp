@@ -14,6 +14,7 @@
 #include "data/json.hpp"
 #include "data/json_view.hpp"
 #include "runtime/diagnostic.hpp"
+#include "runtime/program.hpp"
 #include "runtime/value.hpp"
 #include "runtime/value_schema.hpp"
 
@@ -28,6 +29,8 @@ struct UnitStateDeclaration final {
     std::string declaration_path;
     data::JsonView initializer;
     std::optional<std::string> persistence_key;
+    /** The initializer in the unit's program; no id when the state has none. */
+    ExpressionId initializer_expression = no_program_id;
 
     [[nodiscard]] friend bool operator==(const UnitStateDeclaration&, const UnitStateDeclaration&) = default;
 };
@@ -49,6 +52,11 @@ public:
     );
 
     [[nodiscard]] data::JsonView portable_ir() const noexcept;
+    /** The portable IR lowered for evaluation; lives as long as the unit. */
+    [[nodiscard]] const Program& program() const noexcept { return *program_; }
+    [[nodiscard]] const std::shared_ptr<const Program>& shared_program() const noexcept {
+        return program_;
+    }
     [[nodiscard]] const std::string& source_id() const noexcept;
     [[nodiscard]] const std::vector<std::string>& screens() const noexcept;
     [[nodiscard]] const std::vector<std::string>& overlays() const noexcept;
@@ -79,6 +87,7 @@ private:
     void build_indexes();
 
     PortableIrStorage portable_ir_;
+    std::shared_ptr<const Program> program_;
     compiler::CompiledSourceMap source_map_;
     mutable std::once_flag source_map_path_index_once_;
     mutable std::map<std::string, std::size_t, std::less<>> source_map_path_indexes_;

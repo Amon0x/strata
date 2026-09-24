@@ -154,6 +154,11 @@ struct ValueObject final {
     [[nodiscard]] friend bool operator==(const ValueObject&, const ValueObject&) = default;
 };
 
+/** Whether a value counts as true in a condition. */
+[[nodiscard]] bool truthy(const Value& value) noexcept;
+/** How a value reads as text: formatted strings, keys, joins and host lookups all use it. */
+[[nodiscard]] std::string display_string(const Value& value);
+
 [[nodiscard]] Value value_from_json(const data::JsonValue& value);
 [[nodiscard]] data::JsonValue value_to_json(const Value& value);
 

@@ -319,10 +319,12 @@ add_library(
         src/runtime/host.cpp
         src/runtime/layer.cpp
         src/runtime/profiler.cpp
+        src/runtime/program.cpp
         src/runtime/registry.cpp
         src/runtime/services.cpp
         src/runtime/startup.cpp
         src/runtime/state.cpp
+        src/runtime/symbol.cpp
         src/runtime/undo.cpp
         src/runtime/unit.cpp
         src/runtime/value.cpp

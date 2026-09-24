@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "application": {
+    "id": "kitten.menu",
+    "module": "assets/strata/samples/kitten.strata",
+    "root": "Kitten"
+  },
+  "surface": {
+    "id": "kitten.menu",
+    "role": "overlay",
+    "backend": "d3d11",
+    "width": 1304,
+    "height": 794,
+    "scale": 1,
+    "reducedMotion": true,
+    "clearColor": "#00000000",
+    "fonts": [
+      {"id": "strata:fonts/default", "resource": "assets/strata/fonts/default.ttf"},
+      {"id": "strata:fonts/default-medium", "resource": "assets/strata/fonts/medium.ttf"}
+    ]
+  },
+  "steps": [
+    {"advance": {"milliseconds": 0, "frames": 1}},
+    {"capture": "kitten"}
+  ]
+}

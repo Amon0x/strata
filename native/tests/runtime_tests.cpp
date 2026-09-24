@@ -818,12 +818,12 @@ void test_portable_ir_expression_runtime() {
             R"({"app":{"title":"Lazy title","unused":"cold","items":[]},"other":{"value":"untouched"}})"));
     static_cast<void>(host.adopt(host_snapshot));
     ExpressionScope scope;
-    scope.component_path = "screen Main";
-    scope.values.emplace("items", Value(std::vector<Value>{Value("alpha"), Value("beta")}));
-    scope.values.emplace("count", Value(2.0));
-    ExpressionRuntime runtime(host, bundle->action_registry(), scope);
+    scope.set_component_path("screen Main");
+    scope.bind("items", Value(std::vector<Value>{Value("alpha"), Value("beta")}));
+    scope.bind("count", Value(2.0));
+    ExpressionRuntime runtime(host, bundle->action_registry());
     struct DependencyCapture final : ExpressionDependencyObserver {
-        void lexical(const std::string_view, const ExpressionDependencyValue&) override {}
+        void lexical(const Symbol, const ExpressionValue&) override {}
         void host(const ExpressionHostDependency& dependency) override {
             reads.push_back(dependency);
         }
@@ -835,7 +835,7 @@ void test_portable_ir_expression_runtime() {
       "kind":"property","name":"title","path":"/host/title",
       "receiver":{"kind":"variable","binding":"host","name":"app","path":"/host"}
     })");
-    const ExpressionValue host_value = runtime.evaluate(host_expression);
+    const ExpressionValue host_value = runtime.evaluate(host_expression, scope);
     check(host_value.value() != nullptr && *host_value.value()->string() == "Lazy title" &&
               host_snapshot->evaluated_scalar_count() == 1U,
           "portable IR host property evaluation was eager or incorrect");
@@ -844,7 +844,7 @@ void test_portable_ir_expression_runtime() {
       "receiver":{"kind":"property","name":"items","path":"/host/items",
         "receiver":{"kind":"variable","binding":"host","name":"app","path":"/host"}}
     })");
-    const ExpressionValue host_list_is_empty = runtime.evaluate(host_list_is_empty_expression);
+    const ExpressionValue host_list_is_empty = runtime.evaluate(host_list_is_empty_expression, scope);
     check(host_list_is_empty.value() != nullptr &&
               host_list_is_empty.value()->boolean() != nullptr &&
               *host_list_is_empty.value()->boolean(),
@@ -855,7 +855,7 @@ void test_portable_ir_expression_runtime() {
       "receiver":{"kind":"variable","binding":"host","name":"app","path":"/host"},
       "index":{"kind":"literal","path":"/host/key","value":{"kind":"string","value":"title"}}
     })");
-    const ExpressionValue indexed_host_value = runtime.evaluate(indexed_host_expression);
+    const ExpressionValue indexed_host_value = runtime.evaluate(indexed_host_expression, scope);
     check(indexed_host_value.value() != nullptr &&
               *indexed_host_value.value()->string() == "Lazy title" &&
               dependencies.reads.size() == 1U && dependencies.reads.front().path.size() == 2U &&
@@ -870,7 +870,7 @@ void test_portable_ir_expression_runtime() {
         "index":{"kind":"literal","path":"/host/unused-key","value":{"kind":"string","value":"unused"}}
       }
     })");
-    static_cast<void>(runtime.evaluate(short_circuit_host_expression));
+    static_cast<void>(runtime.evaluate(short_circuit_host_expression, scope));
     check(dependencies.reads.empty() && host_snapshot->evaluated_scalar_count() == 1U,
           "short-circuited host branch was observed or evaluated");
     static_cast<void>(runtime.exchange_dependency_observer(nullptr));
@@ -880,7 +880,7 @@ void test_portable_ir_expression_runtime() {
       "left":{"kind":"variable","binding":"local","name":"count","path":"/count"},
       "right":{"kind":"literal","path":"/two","value":{"kind":"number","value":2}}
     })");
-    check(*runtime.evaluate(arithmetic).value()->number() == 4.0,
+    check(*runtime.evaluate(arithmetic, scope).value()->number() == 4.0,
           "portable IR arithmetic evaluation changed");
 
     const auto mapped = strata::data::parse_json(R"({
@@ -893,8 +893,8 @@ void test_portable_ir_expression_runtime() {
         }}}
       ]
     })");
-    const ExpressionValue first_mapping = runtime.evaluate(mapped);
-    const ExpressionValue second_mapping = runtime.evaluate(mapped);
+    const ExpressionValue first_mapping = runtime.evaluate(mapped, scope);
+    const ExpressionValue second_mapping = runtime.evaluate(mapped, scope);
     check(first_mapping.collection() != nullptr && second_mapping.collection() != nullptr,
           "collection helper did not return a view");
     check(*first_mapping.collection() == *second_mapping.collection() &&
@@ -946,13 +946,13 @@ void test_portable_ir_expression_runtime() {
         });
     };
     ExpressionScope metadata_scope = scope;
-    metadata_scope.executable_values.insert_or_assign("view", ExpressionValue(metadata_view(1U)));
-    static_cast<void>(runtime.evaluate_in(metadata_inner_map, metadata_scope));
-    const ExpressionValue metadata_one = runtime.evaluate_in(nested_metadata_map, metadata_scope);
-    metadata_scope.executable_values.insert_or_assign("view", ExpressionValue(metadata_view(2U)));
-    const ExpressionValue metadata_two = runtime.evaluate_in(nested_metadata_map, metadata_scope);
+    metadata_scope.bind("view", ExpressionValue(metadata_view(1U)));
+    static_cast<void>(runtime.evaluate(metadata_inner_map, metadata_scope));
+    const ExpressionValue metadata_one = runtime.evaluate(nested_metadata_map, metadata_scope);
+    metadata_scope.bind("view", ExpressionValue(metadata_view(2U)));
+    const ExpressionValue metadata_two = runtime.evaluate(nested_metadata_map, metadata_scope);
     const ExpressionValue metadata_two_hit =
-        runtime.evaluate_in(nested_metadata_map, metadata_scope);
+        runtime.evaluate(nested_metadata_map, metadata_scope);
     check(metadata_one.collection() != nullptr && metadata_two.collection() != nullptr &&
               metadata_two_hit.collection() != nullptr &&
               (*metadata_one.collection())->items == (*metadata_two.collection())->items &&
@@ -971,12 +971,12 @@ void test_portable_ir_expression_runtime() {
       ]
     })");
     const std::shared_ptr<const CollectionViewValue> stable_source = metadata_view(2U);
-    metadata_scope.executable_values.insert_or_assign("view", ExpressionValue(stable_source));
+    metadata_scope.bind("view", ExpressionValue(stable_source));
     const ExpressionValue stable_metadata_one =
-        runtime.evaluate_in(stable_metadata_map, metadata_scope);
+        runtime.evaluate(stable_metadata_map, metadata_scope);
     static_cast<void>(stable_source->cache_hits.fetch_add(1U, std::memory_order_relaxed));
     const ExpressionValue stable_metadata_hit =
-        runtime.evaluate_in(stable_metadata_map, metadata_scope);
+        runtime.evaluate(stable_metadata_map, metadata_scope);
     check(stable_metadata_one.collection() != nullptr &&
               stable_metadata_hit.collection() != nullptr &&
               *stable_metadata_one.collection() == *stable_metadata_hit.collection() &&
@@ -1003,26 +1003,25 @@ void test_portable_ir_expression_runtime() {
       ]
     })");
     ExpressionScope traced_scope = scope;
-    traced_scope.values.insert_or_assign(
-        "numbers", Value(std::vector<Value>{Value(1.0), Value(2.0), Value(3.0)}));
-    traced_scope.values.insert_or_assign("enabled", Value(false));
-    traced_scope.values.insert_or_assign("unrelated", Value("first"));
-    const ExpressionValue guarded = runtime.evaluate_in(traced_filter, traced_scope);
+    traced_scope.bind("numbers", Value(std::vector<Value>{Value(1.0), Value(2.0), Value(3.0)}));
+    traced_scope.bind("enabled", Value(false));
+    traced_scope.bind("unrelated", Value("first"));
+    const ExpressionValue guarded = runtime.evaluate(traced_filter, traced_scope);
     const auto unrelated_host = HostSnapshot::from_json(
         "expression-host-unrelated", 2U,
         strata::data::parse_json(
             R"({"app":{"limits":{"minimum":100,"sibling":"cold"},"unrelated":"changed"}})"));
     static_cast<void>(host.adopt(unrelated_host));
-    traced_scope.values.insert_or_assign("unrelated", Value("second"));
-    const ExpressionValue guarded_hit = runtime.evaluate_in(traced_filter, traced_scope);
+    traced_scope.bind("unrelated", Value("second"));
+    const ExpressionValue guarded_hit = runtime.evaluate(traced_filter, traced_scope);
     check(guarded.collection() != nullptr && guarded_hit.collection() != nullptr &&
               *guarded.collection() == *guarded_hit.collection() &&
               unrelated_host->evaluated_scalar_count() == 0U,
           "unrelated lexical/host changes invalidated or evaluated a short-circuited collection "
           "dependency");
 
-    traced_scope.values.insert_or_assign("enabled", Value(true));
-    const ExpressionValue selected = runtime.evaluate_in(traced_filter, traced_scope);
+    traced_scope.bind("enabled", Value(true));
+    const ExpressionValue selected = runtime.evaluate(traced_filter, traced_scope);
     check(selected.collection() != nullptr && *selected.collection() != *guarded.collection() &&
               unrelated_host->evaluated_scalar_count() == 1U,
           "changing a traced lexical guard did not rebuild and trace its selected host branch");
@@ -1031,15 +1030,15 @@ void test_portable_ir_expression_runtime() {
         strata::data::parse_json(
             R"({"app":{"limits":{"minimum":100,"sibling":"still-cold"},"unrelated":"again"}})"));
     static_cast<void>(host.adopt(stable_host));
-    traced_scope.values.insert_or_assign("unrelated", Value("third"));
-    const ExpressionValue exact_host_hit = runtime.evaluate_in(traced_filter, traced_scope);
+    traced_scope.bind("unrelated", Value("third"));
+    const ExpressionValue exact_host_hit = runtime.evaluate(traced_filter, traced_scope);
     check(
         exact_host_hit.collection() != nullptr &&
             *exact_host_hit.collection() == *selected.collection() &&
             stable_host->evaluated_scalar_count() == 1U,
         "global host generation or an unread sibling invalidated the exact collection dependency");
 
-    traced_scope.contextual_host_roots.insert_or_assign(
+    traced_scope.set_contextual_host_root(
         "app", Value(std::vector<std::pair<std::string, Value>>{
                    {"limits", Value(std::vector<std::pair<std::string, Value>>{
                                   {"minimum", Value(100.0)},
@@ -1047,8 +1046,8 @@ void test_portable_ir_expression_runtime() {
                               })},
                    {"unrelated", Value("context-first")},
                }));
-    const ExpressionValue contextual = runtime.evaluate_in(traced_filter, traced_scope);
-    traced_scope.contextual_host_roots.insert_or_assign(
+    const ExpressionValue contextual = runtime.evaluate(traced_filter, traced_scope);
+    traced_scope.set_contextual_host_root(
         "app", Value(std::vector<std::pair<std::string, Value>>{
                    {"limits", Value(std::vector<std::pair<std::string, Value>>{
                                   {"minimum", Value(100.0)},
@@ -1056,26 +1055,26 @@ void test_portable_ir_expression_runtime() {
                               })},
                    {"unrelated", Value("context-second")},
                }));
-    const ExpressionValue contextual_hit = runtime.evaluate_in(traced_filter, traced_scope);
+    const ExpressionValue contextual_hit = runtime.evaluate(traced_filter, traced_scope);
     check(contextual.collection() != nullptr && contextual_hit.collection() != nullptr &&
               *contextual.collection() != *selected.collection() &&
               *contextual.collection() == *contextual_hit.collection(),
           "contextual origin or an unrelated contextual sibling was not tracked exactly");
-    traced_scope.contextual_host_roots.clear();
+    traced_scope.set_contextual_host_roots(nullptr);
 
     HostStore nullable_host;
-    ExpressionRuntime nullable_runtime(nullable_host, bundle->action_registry(), traced_scope);
+    ExpressionRuntime nullable_runtime(nullable_host, bundle->action_registry());
     const auto explicit_null_host = HostSnapshot::from_json(
         "expression-host-nullability", 1U,
         strata::data::parse_json(R"({"app":{"limits":{"minimum":null,"sibling":"cold"}}})"));
     static_cast<void>(nullable_host.adopt(explicit_null_host));
     const ExpressionValue explicit_null_view =
-        nullable_runtime.evaluate_in(traced_filter, traced_scope);
+        nullable_runtime.evaluate(traced_filter, traced_scope);
     const auto missing_host = HostSnapshot::from_json(
         "expression-host-nullability", 2U,
         strata::data::parse_json(R"({"app":{"limits":{"sibling":"cold"}}})"));
     static_cast<void>(nullable_host.adopt(missing_host));
-    const ExpressionValue missing_view = nullable_runtime.evaluate_in(traced_filter, traced_scope);
+    const ExpressionValue missing_view = nullable_runtime.evaluate(traced_filter, traced_scope);
     check(explicit_null_view.collection() != nullptr && missing_view.collection() != nullptr &&
               *explicit_null_view.collection() != *missing_view.collection() &&
               explicit_null_host->evaluated_scalar_count() == 0U &&
@@ -1090,7 +1089,7 @@ void test_portable_ir_expression_runtime() {
         {"name":"value","value":{"kind":"literal","path":"/action/value","value":{"kind":"number","value":7}}}
       ]
     })");
-    const ExpressionValue action = runtime.evaluate(action_expression);
+    const ExpressionValue action = runtime.evaluate(action_expression, scope);
     check(action.action() != nullptr && (*action.action())->action != nullptr &&
               (*action.action())->action->id() == "state.set" &&
               *(*action.action())->action->payload.field("name")->string() == "count",

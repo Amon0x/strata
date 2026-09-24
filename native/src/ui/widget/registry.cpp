@@ -7,6 +7,7 @@
 #include "ui/widget/semantics.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <stdexcept>
 #include <utility>
 
@@ -187,7 +188,39 @@ WidgetRegistry& WidgetRegistry::operator=(const WidgetRegistry& other) {
     return *this;
 }
 
+namespace {
+
+[[nodiscard]] std::uint64_t next_registry_revision() noexcept {
+    static std::atomic<std::uint64_t> next{1U};
+    return next.fetch_add(1U, std::memory_order_relaxed);
+}
+
+} // namespace
+
+// Moving keeps the table's nodes, and so the trait lists' views of its keys.
+WidgetRegistry::WidgetRegistry(WidgetRegistry&& other) noexcept
+    : lifecycles_(std::move(other.lifecycles_)),
+      command_declaration_types_(std::move(other.command_declaration_types_)),
+      authored_presentation_types_(std::move(other.authored_presentation_types_)),
+      detached_overlay_types_(std::move(other.detached_overlay_types_)),
+      revision_(next_registry_revision()) {
+    other.revision_ = next_registry_revision();
+}
+
+WidgetRegistry& WidgetRegistry::operator=(WidgetRegistry&& other) noexcept {
+    if (this != &other) {
+        lifecycles_ = std::move(other.lifecycles_);
+        command_declaration_types_ = std::move(other.command_declaration_types_);
+        authored_presentation_types_ = std::move(other.authored_presentation_types_);
+        detached_overlay_types_ = std::move(other.detached_overlay_types_);
+        revision_ = next_registry_revision();
+        other.revision_ = next_registry_revision();
+    }
+    return *this;
+}
+
 void WidgetRegistry::refresh_trait_types() {
+    revision_ = next_registry_revision();
     command_declaration_types_.clear();
     authored_presentation_types_.clear();
     detached_overlay_types_.clear();

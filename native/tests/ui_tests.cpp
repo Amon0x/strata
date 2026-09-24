@@ -65,6 +65,12 @@ void check(const bool condition, const std::string_view message) {
         throw std::runtime_error(std::string(message));
 }
 
+/** The collection view a lexical dependency snapshot holds. */
+[[nodiscard]] const strata::runtime::CollectionViewImmutableIdentity&
+dependency_collection(const strata::runtime::ExpressionDependencyValue& dependency) {
+    return **dependency.value.collection();
+}
+
 [[nodiscard]] std::string read_text_file(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input)
@@ -3874,12 +3880,12 @@ overlay IndexedDependencyRepeater {
             builder.build(runtime::LayerRole::overlay, "CollectionMetadata");
         const std::shared_ptr<const ui::DescriptionNode> one_repeater = one.root->children->at(0U);
         const auto one_view =
-            one_repeater->virtual_sequence_generation->lexical_dependencies.find("view");
+            one_repeater->virtual_sequence_generation->lexical_dependencies.find(runtime::Symbol::intern("view"));
         check(one_repeater->virtual_sequence->key_at(0U) == "one.row" &&
                   one_view !=
                       one_repeater->virtual_sequence_generation->lexical_dependencies.end() &&
-                  one_view->second.kind == runtime::ExpressionDependencyValueKind::collection &&
-                  one_view->second.collection.total == 1U,
+                  one_view->second.kind() == runtime::ExpressionDependencyValueKind::collection &&
+                  dependency_collection(one_view->second).total == 1U,
               "Repeater did not stamp external CollectionView metadata");
         static_cast<void>(metadata_retained.reconcile(one.root));
         builder.set_retained_tree(&metadata_retained);
@@ -3897,8 +3903,7 @@ overlay IndexedDependencyRepeater {
         const std::shared_ptr<const ui::DescriptionNode> two_repeater = two.root->children->at(0U);
         check(two_repeater->virtual_sequence != one_repeater->virtual_sequence &&
                   two_repeater->virtual_sequence->key_at(0U) == "many.row" &&
-                  two_repeater->virtual_sequence_generation->lexical_dependencies.at("view")
-                          .collection.total == 2U,
+                  dependency_collection(two_repeater->virtual_sequence_generation->lexical_dependencies.at(runtime::Symbol::intern("view"))).total == 2U,
               "equal Repeater items hid a changed external CollectionView total");
         static_cast<void>(metadata_retained.reconcile(two.root));
         builder.set_retained_tree(&metadata_retained);
@@ -3942,9 +3947,9 @@ overlay IndexedDependencyRepeater {
             builder.build(runtime::LayerRole::overlay, "DirectCollectionMetadata");
         const std::shared_ptr<const ui::DescriptionNode> one_repeater = one.root->children->at(0U);
         check(one_repeater->virtual_sequence->key_at(0U) == "A" &&
-                  one_repeater->virtual_sequence_generation->source.kind ==
+                  one_repeater->virtual_sequence_generation->source.kind() ==
                       runtime::ExpressionDependencyValueKind::collection &&
-                  one_repeater->virtual_sequence_generation->source.collection.total == 1U &&
+                  dependency_collection(one_repeater->virtual_sequence_generation->source).total == 1U &&
                   one_repeater->virtual_sequence_generation->lexical_dependencies.empty() &&
                   one_repeater->virtual_sequence_generation->host_dependencies.size() == 1U &&
                   one_repeater->virtual_sequence_generation->host_dependencies.begin()
@@ -3969,9 +3974,9 @@ overlay IndexedDependencyRepeater {
         const std::shared_ptr<const ui::DescriptionNode> two_repeater = two.root->children->at(0U);
         check(two_repeater->virtual_sequence != one_repeater->virtual_sequence &&
                   two_repeater->virtual_sequence->key_at(0U) == "A" &&
-                  two_repeater->virtual_sequence_generation->source.collection.items ==
-                      one_repeater->virtual_sequence_generation->source.collection.items &&
-                  two_repeater->virtual_sequence_generation->source.collection.total == 2U,
+                  dependency_collection(two_repeater->virtual_sequence_generation->source).items ==
+                      dependency_collection(one_repeater->virtual_sequence_generation->source).items &&
+                  dependency_collection(two_repeater->virtual_sequence_generation->source).total == 2U,
               "direct Repeater source collapsed changed metadata into equal visible items");
         static_cast<void>(direct_source_retained.reconcile(two.root));
         builder.set_retained_tree(&direct_source_retained);
@@ -3998,14 +4003,14 @@ overlay IndexedDependencyRepeater {
             builder.build(runtime::LayerRole::overlay, "LexicalCollectionSource");
         const std::shared_ptr<const ui::DescriptionNode> one_repeater = one.root->children->at(0U);
         const auto lexical =
-            one_repeater->virtual_sequence_generation->lexical_dependencies.find("item");
+            one_repeater->virtual_sequence_generation->lexical_dependencies.find(runtime::Symbol::intern("item"));
         check(one_repeater->virtual_sequence->count() == 1U &&
                   one_repeater->virtual_sequence->key_at(0U) == "A" &&
-                  one_repeater->virtual_sequence_generation->source.kind ==
+                  one_repeater->virtual_sequence_generation->source.kind() ==
                       runtime::ExpressionDependencyValueKind::scalar &&
                   lexical !=
                       one_repeater->virtual_sequence_generation->lexical_dependencies.end() &&
-                  lexical->second.kind == runtime::ExpressionDependencyValueKind::scalar,
+                  lexical->second.kind() == runtime::ExpressionDependencyValueKind::scalar,
               "direct lexical Repeater source was not included in its dependency stamp");
         static_cast<void>(lexical_source_retained.reconcile(one.root));
         builder.set_retained_tree(&lexical_source_retained);

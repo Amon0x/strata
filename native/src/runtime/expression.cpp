@@ -1,11 +1,8 @@
 #include "runtime/expression.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
-#include <functional>
 #include <iomanip>
 #include <limits>
 #include <locale>
@@ -18,51 +15,11 @@ namespace strata::runtime {
 namespace {
 
 constexpr std::size_t maximum_derived_items = 100'000U;
-using JsonValue = data::JsonView;
-using JsonArray = data::JsonArrayView;
-using JsonObject = data::JsonObjectView;
 
 [[nodiscard]] std::string operator+(const char* const left, const std::string_view right) {
     std::string result(left);
     result.append(right);
     return result;
-}
-
-[[nodiscard]] JsonValue required(const JsonValue value, const std::string_view field) {
-    const JsonValue found = value.find(field);
-    if (!found)
-        throw std::runtime_error("runtime IR is missing field '" + std::string(field) + "'");
-    return found;
-}
-
-[[nodiscard]] std::string_view string_field(const JsonValue value, const std::string_view field) {
-    const std::optional<std::string_view> text = required(value, field).string();
-    if (!text.has_value())
-        throw std::runtime_error("runtime IR field must be a string");
-    return *text;
-}
-
-[[nodiscard]] JsonArray array_field(const JsonValue value, const std::string_view field) {
-    const std::optional<JsonArray> array = required(value, field).array();
-    if (!array.has_value())
-        throw std::runtime_error("runtime IR field must be an array");
-    return *array;
-}
-
-[[nodiscard]] JsonObject object_field(const JsonValue value, const std::string_view field) {
-    const std::optional<JsonObject> object = required(value, field).object();
-    if (!object.has_value())
-        throw std::runtime_error("runtime IR field must be an object");
-    return *object;
-}
-
-[[nodiscard]] double json_number(const JsonValue value) {
-    if (const std::optional<double> number = value.number(); number.has_value())
-        return *number;
-    if (const std::optional<std::int64_t> integer = value.integer(); integer.has_value()) {
-        return static_cast<double>(*integer);
-    }
-    throw std::runtime_error("runtime IR number is invalid");
 }
 
 [[nodiscard]] std::optional<std::size_t> bounded_index(const Value& value) {
@@ -72,30 +29,6 @@ using JsonObject = data::JsonObjectView;
         return std::nullopt;
     }
     return static_cast<std::size_t>(std::trunc(*number));
-}
-
-[[nodiscard]] int hexadecimal(const char value) noexcept {
-    if (value >= '0' && value <= '9')
-        return value - '0';
-    if (value >= 'a' && value <= 'f')
-        return value - 'a' + 10;
-    if (value >= 'A' && value <= 'F')
-        return value - 'A' + 10;
-    return -1;
-}
-
-[[nodiscard]] ColorValue parse_color(const std::string_view rgba) {
-    if (rgba.size() != 8U)
-        throw std::runtime_error("portable IR color must contain RGBA bytes");
-    std::uint8_t channels[4]{};
-    for (std::size_t index = 0U; index < 4U; ++index) {
-        const int high = hexadecimal(rgba[index * 2U]);
-        const int low = hexadecimal(rgba[index * 2U + 1U]);
-        if (high < 0 || low < 0)
-            throw std::runtime_error("portable IR color is not hexadecimal");
-        channels[index] = static_cast<std::uint8_t>(high * 16 + low);
-    }
-    return ColorValue{channels[0], channels[1], channels[2], channels[3]};
 }
 
 [[nodiscard]] std::string lower_ascii(std::string value) {
@@ -175,45 +108,97 @@ using JsonObject = data::JsonObjectView;
     return Value{};
 }
 
+[[nodiscard]] std::pair<std::size_t, std::size_t> collection_counts(const ExpressionValue& value) {
+    if (const auto* collection = value.collection())
+        return {(*collection)->total, (*collection)->matched};
+    const ValueList* list = value.value() != nullptr ? value.value()->list() : nullptr;
+    return list != nullptr
+               ? std::pair<std::size_t, std::size_t>{list->values.size(), list->values.size()}
+               : std::pair<std::size_t, std::size_t>{0U, 0U};
+}
+
+/** Names the evaluator looks arguments and properties up by, interned once. */
+struct Names final {
+    Symbol source = Symbol::intern("source");
+    Symbol predicate = Symbol::intern("predicate");
+    Symbol transform = Symbol::intern("transform");
+    Symbol selector = Symbol::intern("selector");
+    Symbol initial = Symbol::intern("initial");
+    Symbol condition = Symbol::intern("condition");
+    Symbol when_true = Symbol::intern("whenTrue");
+    Symbol when_false = Symbol::intern("whenFalse");
+    Symbol value = Symbol::intern("value");
+    Symbol min = Symbol::intern("min");
+    Symbol max = Symbol::intern("max");
+    Symbol precision = Symbol::intern("precision");
+    Symbol separator = Symbol::intern("separator");
+    Symbol needle = Symbol::intern("needle");
+    Symbol prefix = Symbol::intern("prefix");
+    Symbol suffix = Symbol::intern("suffix");
+    Symbol red = Symbol::intern("red");
+    Symbol green = Symbol::intern("green");
+    Symbol blue = Symbol::intern("blue");
+    Symbol alpha = Symbol::intern("alpha");
+    Symbol name = Symbol::intern("name");
+    Symbol active = Symbol::intern("active");
+    Symbol backdrop_source = Symbol::intern("backdropSource");
+    Symbol refresh_rate = Symbol::intern("refreshRate");
+    Symbol size = Symbol::intern("size");
+    Symbol length = Symbol::intern("length");
+    Symbol is_empty = Symbol::intern("isEmpty");
+    Symbol items = Symbol::intern("items");
+    Symbol matched = Symbol::intern("matched");
+    Symbol total = Symbol::intern("total");
+    Symbol range_start = Symbol::intern("rangeStart");
+    Symbol range_end = Symbol::intern("rangeEnd");
+    Symbol cache_hits = Symbol::intern("cacheHits");
+    Symbol rebuilds = Symbol::intern("rebuilds");
+};
+
+[[nodiscard]] const Names& names() {
+    static const Names instance;
+    return instance;
+}
+
+/** Records what one collection expression reads, while still telling the outer observer. */
 struct CollectionDependencyTrace final : ExpressionDependencyObserver {
     explicit CollectionDependencyTrace(ExpressionDependencyObserver* source_parent)
         : parent(source_parent) {}
 
-    void lexical(const std::string_view name, const ExpressionDependencyValue& value) override {
+    void lexical(const Symbol name, const ExpressionValue& value) override {
         if (parent != nullptr)
             parent->lexical(name, value);
-        if (!value.cacheable()) {
-            cacheable = false;
-            return;
-        }
-        const auto [stored, inserted] = lexical_values.insert_or_assign(std::string(name), value);
-        if (inserted)
-            order.emplace_back(false, stored->first);
+        if (lexical_values.try_emplace(name, value).second)
+            order.push_back({false, name, {}});
     }
 
     void host(const ExpressionHostDependency& dependency) override {
         if (parent != nullptr)
             parent->host(dependency);
-        const auto [stored, inserted] = host_values.insert_or_assign(
-            canonical_host_dependency_path(dependency.path), dependency);
-        if (inserted)
-            order.emplace_back(true, stored->first);
+        std::string key = canonical_host_dependency_path(dependency.path);
+        if (host_values.try_emplace(key, dependency).second)
+            order.push_back({true, {}, std::move(key)});
     }
 
+    struct Read final {
+        bool host = false;
+        Symbol name;
+        std::string host_key;
+    };
+
     ExpressionDependencyObserver* parent;
-    bool cacheable = true;
-    std::map<std::string, ExpressionDependencyValue, std::less<>> lexical_values;
+    std::map<Symbol, ExpressionValue> lexical_values;
     std::map<std::string, ExpressionHostDependency, std::less<>> host_values;
-    std::vector<std::pair<bool, std::string>> order;
+    std::vector<Read> order;
 };
 
 /** Hides one helper's data-domain input while preserving outer/nested lexical dependencies. */
 struct LambdaDependencyFilter final : ExpressionDependencyObserver {
     LambdaDependencyFilter(ExpressionDependencyObserver* source_parent,
-                           std::string_view source_parameter)
+                           const Symbol source_parameter)
         : parent(source_parent), parameter(source_parameter) {}
 
-    void lexical(const std::string_view name, const ExpressionDependencyValue& value) override {
+    void lexical(const Symbol name, const ExpressionValue& value) override {
         if (parent != nullptr && name != parameter)
             parent->lexical(name, value);
     }
@@ -224,65 +209,71 @@ struct LambdaDependencyFilter final : ExpressionDependencyObserver {
     }
 
     ExpressionDependencyObserver* parent;
-    std::string_view parameter;
+    Symbol parameter;
 };
 
-[[nodiscard]] std::pair<std::size_t, std::size_t> collection_counts(const ExpressionValue& value) {
-    if (const auto* collection = value.collection())
-        return {(*collection)->total, (*collection)->matched};
-    const ValueList* list = value.value() != nullptr ? value.value()->list() : nullptr;
-    return list != nullptr
-               ? std::pair<std::size_t, std::size_t>{list->values.size(), list->values.size()}
-               : std::pair<std::size_t, std::size_t>{0U, 0U};
+class ObserverRestore final {
+  public:
+    ObserverRestore(ExpressionDependencyObserver*& slot, ExpressionDependencyObserver* next)
+        : slot_(slot), previous_(std::exchange(slot, next)) {}
+    ~ObserverRestore() {
+        slot_ = previous_;
+    }
+    ObserverRestore(const ObserverRestore&) = delete;
+    ObserverRestore& operator=(const ObserverRestore&) = delete;
+
+  private:
+    ExpressionDependencyObserver*& slot_;
+    ExpressionDependencyObserver* previous_;
+};
+
+[[nodiscard]] bool same_state_binding(const LexicalStateBinding* const left,
+                                      const LexicalStateBinding* const right) {
+    return left == right || (left != nullptr && right != nullptr && *left == *right);
 }
 
-[[nodiscard]] std::optional<ActionOrigin> action_origin(const JsonValue expression,
-                                                        const ExpressionScope& scope) {
-    const JsonValue span = expression.find("span");
-    const JsonValue start = span.find("start");
-    const JsonValue end = span.find("end");
-    const std::optional<std::string_view> source_id = span.find("sourceId").string();
-    if (!source_id.has_value() || !start || !end)
-        return std::nullopt;
-    const auto position = [](const JsonValue value, const std::string_view field) {
-        const std::optional<std::int64_t> number = value.find(field).integer();
-        return number.has_value() && *number > 0 && *number <= static_cast<std::int64_t>(UINT32_MAX)
-                   ? std::optional<std::uint32_t>(static_cast<std::uint32_t>(*number))
-                   : std::nullopt;
-    };
-    std::optional<std::string> component_path;
-    if (scope.component_path.starts_with("/component/")) {
-        component_path = scope.component_path;
-    } else if (const std::optional<std::string_view> path = expression.find("path").string();
-               path.has_value()) {
-        const std::size_t arguments = path->find("/arguments/");
-        component_path = arguments == std::string_view::npos
-                             ? std::string(*path)
-                             : std::string(path->substr(0U, arguments));
-    } else if (!scope.component_path.empty()) {
-        component_path = scope.component_path;
+[[nodiscard]] bool same_lambda(const LambdaValue& left, const LambdaValue& right) {
+    if (&left == &right)
+        return true;
+    if (left.program != right.program || left.expression != right.expression)
+        return false;
+    const ExpressionScope& first = left.captured;
+    const ExpressionScope& second = right.captured;
+    if (first.shared_contextual_host_roots() != second.shared_contextual_host_roots() &&
+        first.contextual_host_roots() != second.contextual_host_roots()) {
+        return false;
     }
-    constexpr std::string_view instance_root_suffix = "/root";
-    if (component_path.has_value() && component_path->starts_with("/component/") &&
-        component_path->ends_with(instance_root_suffix)) {
-        component_path->erase(component_path->size() - instance_root_suffix.size());
+    const FrozenHostReads* first_frozen = first.host_dependency_overrides();
+    const FrozenHostReads* second_frozen = second.host_dependency_overrides();
+    if (first_frozen != second_frozen &&
+        (first_frozen == nullptr || second_frozen == nullptr || *first_frozen != *second_frozen)) {
+        return false;
     }
-    return ActionOrigin{
-        std::string(*source_id), position(start, "line"), position(start, "column"),
-        position(end, "line"),   position(end, "column"), std::move(component_path),
-    };
+    if (first.frame() == second.frame())
+        return true;
+    // Only what the body reads can differ in effect.
+    const ProgramExpression& lambda = left.program->expression(left.expression);
+    for (const Symbol name : left.program->free_variables(lambda)) {
+        const ExpressionValue* first_value = first.find(name);
+        const ExpressionValue* second_value = second.find(name);
+        if ((first_value == nullptr) != (second_value == nullptr))
+            return false;
+        if (first_value != nullptr && !same_expression_value(*first_value, *second_value))
+            return false;
+    }
+    return true;
 }
 
 } // namespace
 
-std::optional<DiagnosticRange> portable_expression_range(const JsonValue expression) {
-    const JsonValue span = expression.find("span");
+std::optional<DiagnosticRange> portable_expression_range(const data::JsonView expression) {
+    const data::JsonView span = expression.find("span");
     const std::optional<std::string_view> source_id = span.find("sourceId").string();
-    const JsonValue start = span.find("start");
-    const JsonValue end = span.find("end");
+    const data::JsonView start = span.find("start");
+    const data::JsonView end = span.find("end");
     if (!source_id.has_value() || !start || !end)
         return std::nullopt;
-    const auto position = [](const JsonValue value) -> std::optional<DiagnosticPosition> {
+    const auto position = [](const data::JsonView value) -> std::optional<DiagnosticPosition> {
         const std::optional<std::int64_t> line = value.find("line").integer();
         const std::optional<std::int64_t> column = value.find("column").integer();
         if (!line.has_value() || !column.has_value() || *line <= 0 || *column <= 0 ||
@@ -316,7 +307,11 @@ ExpressionValue::ExpressionValue() : storage_(Value{}) {}
 ExpressionValue::ExpressionValue(Value value) : storage_(std::move(value)) {}
 ExpressionValue::ExpressionValue(Value value, LexicalStateBinding state_binding)
     : storage_(std::move(value)),
-      lexical_state_binding_(std::move(state_binding)) {}
+      lexical_state_binding_(
+          std::make_shared<const LexicalStateBinding>(std::move(state_binding))) {}
+ExpressionValue::ExpressionValue(Value value,
+                                 std::shared_ptr<const LexicalStateBinding> state_binding)
+    : storage_(std::move(value)), lexical_state_binding_(std::move(state_binding)) {}
 ExpressionValue::ExpressionValue(std::shared_ptr<const CollectionViewValue> value)
     : storage_(std::move(value)) {}
 ExpressionValue::ExpressionValue(std::shared_ptr<const LambdaValue> value)
@@ -368,9 +363,100 @@ const std::shared_ptr<const ComponentTemplateValue>*
 ExpressionValue::component_template() const noexcept {
     return std::get_if<std::shared_ptr<const ComponentTemplateValue>>(&storage_);
 }
-const std::optional<LexicalStateBinding>&
-ExpressionValue::lexical_state_binding() const noexcept {
-    return lexical_state_binding_;
+bool ExpressionValue::executable() const noexcept {
+    return !std::holds_alternative<Value>(storage_);
+}
+ExpressionValue ExpressionValue::without_state_binding() const {
+    ExpressionValue result = *this;
+    result.lexical_state_binding_.reset();
+    return result;
+}
+
+const ExpressionValue* ExpressionObjectValue::field(const std::string_view name) const noexcept {
+    const auto found = std::ranges::find(fields, name, &decltype(fields)::value_type::first);
+    return found != fields.end() ? &found->second : nullptr;
+}
+
+const ExpressionValue* ExpressionScope::find(const Symbol name) const noexcept {
+    for (const ScopeFrame* frame = frame_.get(); frame != nullptr; frame = frame->parent.get()) {
+        for (auto binding = frame->bindings.rbegin(); binding != frame->bindings.rend();
+             ++binding) {
+            if (binding->name == name && binding->has_value)
+                return &binding->value;
+        }
+        if (frame->hides_parent_values)
+            return nullptr;
+    }
+    return nullptr;
+}
+
+const ExpressionValue* ExpressionScope::find(const std::string_view name) const {
+    const std::optional<Symbol> symbol = Symbol::find(name);
+    return symbol.has_value() ? find(*symbol) : nullptr;
+}
+
+const std::shared_ptr<const LexicalStateBinding>*
+ExpressionScope::state_binding(const Symbol name) const noexcept {
+    for (const ScopeFrame* frame = frame_.get(); frame != nullptr; frame = frame->parent.get()) {
+        for (auto binding = frame->bindings.rbegin(); binding != frame->bindings.rend();
+             ++binding) {
+            if (binding->name != name || binding->state == ScopeStateBinding::inherit)
+                continue;
+            return binding->state == ScopeStateBinding::bound && binding->binding != nullptr
+                       ? &binding->binding
+                       : nullptr;
+        }
+        if (frame->hides_parent_states)
+            return nullptr;
+    }
+    return nullptr;
+}
+
+const HostRoots& ExpressionScope::contextual_host_roots() const noexcept {
+    static const HostRoots none;
+    return contextual_host_roots_ != nullptr ? *contextual_host_roots_ : none;
+}
+
+const std::string& ExpressionScope::component_path() const noexcept {
+    static const std::string none;
+    return component_path_ != nullptr ? *component_path_ : none;
+}
+
+void ExpressionScope::push(ScopeFrame frame) {
+    frame.parent = std::move(frame_);
+    frame_ = std::make_shared<const ScopeFrame>(std::move(frame));
+}
+
+void ExpressionScope::bind(const Symbol name, ExpressionValue value) {
+    ScopeFrame frame;
+    frame.bindings.push_back(
+        ScopeBinding{name, true, ScopeStateBinding::inherit, std::move(value), nullptr});
+    push(std::move(frame));
+}
+
+void ExpressionScope::bind(const std::string_view name, ExpressionValue value) {
+    bind(Symbol::intern(name), std::move(value));
+}
+
+void ExpressionScope::declare(const Symbol name, ExpressionValue value,
+                              std::shared_ptr<const LexicalStateBinding> binding) {
+    ScopeFrame frame;
+    const ScopeStateBinding state =
+        binding != nullptr ? ScopeStateBinding::bound : ScopeStateBinding::cleared;
+    frame.bindings.push_back(ScopeBinding{name, true, state, std::move(value), std::move(binding)});
+    push(std::move(frame));
+}
+
+void ExpressionScope::set_component_path(std::string path) {
+    component_path_ = std::make_shared<const std::string>(std::move(path));
+}
+
+void ExpressionScope::set_contextual_host_root(std::string name, Value value) {
+    auto roots = contextual_host_roots_ != nullptr
+                     ? std::make_shared<HostRoots>(*contextual_host_roots_)
+                     : std::make_shared<HostRoots>();
+    roots->insert_or_assign(std::move(name), std::move(value));
+    contextual_host_roots_ = std::move(roots);
 }
 
 bool same_action(const std::shared_ptr<const ActionValue>& left,
@@ -387,9 +473,8 @@ bool same_action(const std::shared_ptr<const ActionValue>& left,
         const Action& first = *left->action;
         const Action& second = *right->action;
         // Registered contracts are shared; a dynamic action builds its contract from the id.
-        const bool same_contract =
-            first.contract == second.contract ||
-            (first.dynamic && second.dynamic && first.id() == second.id());
+        const bool same_contract = first.contract == second.contract ||
+                                   (first.dynamic && second.dynamic && first.id() == second.id());
         if (!same_contract || first.dynamic != second.dynamic || first.payload != second.payload ||
             first.origin != second.origin) {
             return false;
@@ -402,170 +487,97 @@ bool same_action(const std::shared_ptr<const ActionValue>& left,
     return true;
 }
 
-bool ExpressionDependencyValue::cacheable() const noexcept {
-    if (kind == ExpressionDependencyValueKind::unsupported)
+bool same_expression_value(const ExpressionValue& left, const ExpressionValue& right) {
+    if (!same_state_binding(left.lexical_state_binding(), right.lexical_state_binding()))
         return false;
-    if (kind == ExpressionDependencyValueKind::executable_list) {
-        return std::ranges::all_of(elements, &ExpressionDependencyValue::cacheable);
+    if (left.list() != nullptr || right.list() != nullptr) {
+        if (left.list() == nullptr || right.list() == nullptr)
+            return false;
+        const ExpressionListValue& first = **left.list();
+        const ExpressionListValue& second = **right.list();
+        if (&first == &second)
+            return true;
+        return std::ranges::equal(first.values, second.values, same_expression_value);
     }
-    if (kind == ExpressionDependencyValueKind::executable_object) {
-        return field_names.size() == field_values.size() &&
-               std::ranges::all_of(field_values, &ExpressionDependencyValue::cacheable);
+    if (left.object() != nullptr || right.object() != nullptr) {
+        if (left.object() == nullptr || right.object() == nullptr)
+            return false;
+        const ExpressionObjectValue& first = **left.object();
+        const ExpressionObjectValue& second = **right.object();
+        if (&first == &second)
+            return true;
+        return std::ranges::equal(first.fields, second.fields, [](const auto& a, const auto& b) {
+            return a.first == b.first && same_expression_value(a.second, b.second);
+        });
     }
-    if (kind == ExpressionDependencyValueKind::component_template) {
-        return field_names.size() == field_values.size() &&
-               std::ranges::all_of(field_values, &ExpressionDependencyValue::cacheable);
+    if (left.component_template() != nullptr || right.component_template() != nullptr) {
+        if (left.component_template() == nullptr || right.component_template() == nullptr)
+            return false;
+        const ComponentTemplateValue& first = **left.component_template();
+        const ComponentTemplateValue& second = **right.component_template();
+        if (&first == &second)
+            return true;
+        return first.component == second.component &&
+               std::ranges::equal(
+                   first.arguments, second.arguments, [](const auto& a, const auto& b) {
+                       return a.first == b.first && same_expression_value(a.second, b.second);
+                   });
     }
-    return true;
+    if (left.collection() != nullptr || right.collection() != nullptr) {
+        if (left.collection() == nullptr || right.collection() == nullptr)
+            return false;
+        const auto& first = *left.collection();
+        const auto& second = *right.collection();
+        return first == second || (first != nullptr && second != nullptr &&
+                                   collection_view_immutable_identity(*first) ==
+                                       collection_view_immutable_identity(*second));
+    }
+    if (left.action() != nullptr || right.action() != nullptr) {
+        return left.action() != nullptr && right.action() != nullptr &&
+               same_action(*left.action(), *right.action());
+    }
+    if (left.lambda() != nullptr || right.lambda() != nullptr) {
+        if (left.lambda() == nullptr || right.lambda() == nullptr)
+            return false;
+        const auto& first = *left.lambda();
+        const auto& second = *right.lambda();
+        return first == second ||
+               (first != nullptr && second != nullptr && same_lambda(*first, *second));
+    }
+    return *left.value() == *right.value();
+}
+
+ExpressionDependencyValueKind ExpressionDependencyValue::kind() const noexcept {
+    if (value.collection() != nullptr)
+        return ExpressionDependencyValueKind::collection;
+    if (value.list() != nullptr)
+        return ExpressionDependencyValueKind::executable_list;
+    if (value.object() != nullptr)
+        return ExpressionDependencyValueKind::executable_object;
+    if (value.component_template() != nullptr)
+        return ExpressionDependencyValueKind::component_template;
+    if (value.action() != nullptr)
+        return ExpressionDependencyValueKind::action;
+    if (value.lambda() != nullptr)
+        return ExpressionDependencyValueKind::lambda;
+    return ExpressionDependencyValueKind::scalar;
 }
 
 ExpressionDependencyValue capture_expression_dependency(const ExpressionValue& value) {
-    ExpressionDependencyValue result;
-    if (const auto* collection = value.collection()) {
-        result.kind = ExpressionDependencyValueKind::collection;
-        result.collection = ExpressionCollectionDependencyValue{
-            collection_view_immutable_identity(**collection),
-            (*collection)->cache_hits.load(std::memory_order_relaxed),
-        };
-        return result;
-    }
-    if (const auto* list = value.list()) {
-        result.kind = ExpressionDependencyValueKind::executable_list;
-        result.elements.reserve((**list).values.size());
-        for (const ExpressionValue& element : (**list).values) {
-            result.elements.push_back(capture_expression_dependency(element));
-        }
-        return result;
-    }
-    if (const auto* object = value.object()) {
-        result.kind = ExpressionDependencyValueKind::executable_object;
-        result.field_names.reserve((**object).fields.size());
-        result.field_values.reserve((**object).fields.size());
-        for (const auto& [name, field] : (**object).fields) {
-            result.field_names.push_back(name);
-            result.field_values.push_back(capture_expression_dependency(field));
-        }
-        return result;
-    }
-    if (const auto* component = value.component_template()) {
-        result.kind = ExpressionDependencyValueKind::component_template;
-        result.component = (**component).component;
-        result.field_names.reserve((**component).arguments.size());
-        result.field_values.reserve((**component).arguments.size());
-        for (const auto& [name, argument] : (**component).arguments) {
-            result.field_names.push_back(name);
-            result.field_values.push_back(capture_expression_dependency(argument));
-        }
-        return result;
-    }
-    if (const Value* scalar = value.value()) {
-        result.kind = ExpressionDependencyValueKind::scalar;
-        result.scalar = *scalar;
-    } else if (const auto* action = value.action()) {
-        result.kind = ExpressionDependencyValueKind::action;
-        result.action.action = *action;
-    }
-    return result;
+    return ExpressionDependencyValue{value};
 }
 
 ExpressionValue restore_expression_dependency(const ExpressionDependencyValue& value) {
-    switch (value.kind) {
-    case ExpressionDependencyValueKind::scalar:
-        return ExpressionValue(value.scalar);
-    case ExpressionDependencyValueKind::collection: {
-        auto restored = std::shared_ptr<CollectionViewValue>(new CollectionViewValue{
-            collection_view_immutable_identity(value.collection),
-        });
-        restored->cache_hits.store(value.collection.cache_hits, std::memory_order_relaxed);
-        return ExpressionValue(std::shared_ptr<const CollectionViewValue>(std::move(restored)));
-    }
-    case ExpressionDependencyValueKind::executable_list: {
-        std::vector<ExpressionValue> executable;
-        std::vector<Value> materialized;
-        executable.reserve(value.elements.size());
-        materialized.reserve(value.elements.size());
-        for (const ExpressionDependencyValue& element : value.elements) {
-            ExpressionValue restored = restore_expression_dependency(element);
-            materialized.push_back(materialized_value(restored));
-            executable.push_back(std::move(restored));
-        }
-        return ExpressionValue(std::make_shared<const ExpressionListValue>(ExpressionListValue{
-            Value(std::move(materialized)),
-            std::move(executable),
-        }));
-    }
-    case ExpressionDependencyValueKind::executable_object: {
-        std::vector<std::pair<std::string, ExpressionValue>> executable;
-        std::vector<std::pair<std::string, Value>> materialized;
-        if (value.field_names.size() != value.field_values.size()) {
-            throw std::logic_error("executable object dependency fields are inconsistent");
-        }
-        executable.reserve(value.field_values.size());
-        materialized.reserve(value.field_values.size());
-        for (std::size_t index = 0U; index < value.field_values.size(); ++index) {
-            ExpressionValue restored = restore_expression_dependency(value.field_values[index]);
-            materialized.emplace_back(value.field_names[index], materialized_value(restored));
-            executable.emplace_back(value.field_names[index], std::move(restored));
-        }
-        return ExpressionValue(std::make_shared<const ExpressionObjectValue>(ExpressionObjectValue{
-            Value(std::move(materialized)),
-            std::move(executable),
-        }));
-    }
-    case ExpressionDependencyValueKind::component_template: {
-        if (value.field_names.size() != value.field_values.size()) {
-            throw std::logic_error("component-template dependency arguments are inconsistent");
-        }
-        std::map<std::string, ExpressionValue, std::less<>> arguments;
-        for (std::size_t index = 0U; index < value.field_values.size(); ++index) {
-            arguments.insert_or_assign(
-                value.field_names[index],
-                restore_expression_dependency(value.field_values[index])
-            );
-        }
-        return ExpressionValue(std::make_shared<const ComponentTemplateValue>(
-            ComponentTemplateValue{
-                value.component,
-                std::move(arguments),
-                Value(value.component),
-            }
-        ));
-    }
-    case ExpressionDependencyValueKind::action:
-        return ExpressionValue(value.action.action);
-    case ExpressionDependencyValueKind::unsupported:
-        throw std::logic_error("unsupported expression dependency cannot be restored");
-    }
-    throw std::logic_error("unknown expression dependency kind");
+    return value.value;
 }
 
 std::optional<ExpressionDependencyValue> expression_scope_dependency(const ExpressionScope& scope,
-                                                                     const std::string_view name) {
-    if (const auto frozen = scope.lexical_dependency_overrides.find(name);
-        frozen != scope.lexical_dependency_overrides.end()) {
-        return frozen->second;
-    }
-    if (const auto executable = scope.executable_values.find(name);
-        executable != scope.executable_values.end()) {
-        return capture_expression_dependency(executable->second);
-    }
-    if (const auto scalar = scope.values.find(name); scalar != scope.values.end()) {
-        ExpressionDependencyValue result;
-        result.kind = ExpressionDependencyValueKind::scalar;
-        result.scalar = scalar->second;
-        return result;
-    }
-    return std::nullopt;
+                                                                     const Symbol name) {
+    const ExpressionValue* value = scope.find(name);
+    return value != nullptr
+               ? std::optional<ExpressionDependencyValue>(ExpressionDependencyValue{*value})
+               : std::nullopt;
 }
-
-const ExpressionValue* ExpressionObjectValue::field(const std::string_view name) const noexcept {
-    const auto found = std::ranges::find(fields, name, &decltype(fields)::value_type::first);
-    return found != fields.end() ? &found->second : nullptr;
-}
-
-ExpressionRuntime::ExpressionRuntime(const HostStore& host, const RuntimeActionRegistry& actions,
-                                     ExpressionScope scope)
-    : host_(host), actions_(actions), scope_(std::move(scope)) {}
 
 std::string canonical_host_dependency_path(const std::span<const HostPathSegment> path) {
     std::string result;
@@ -583,13 +595,21 @@ std::string canonical_host_dependency_path(const std::span<const HostPathSegment
     return result;
 }
 
-ExpressionValue ExpressionRuntime::evaluate(const JsonValue expression) {
-    return evaluate(expression, scope_);
+ExpressionRuntime::ExpressionRuntime(const HostStore& host, const RuntimeActionRegistry& actions)
+    : host_(host), actions_(actions) {}
+
+ExpressionValue ExpressionRuntime::evaluate(const Program& program, const ExpressionId expression,
+                                            const ExpressionScope& scope) {
+    return evaluate_node(program, expression, scope);
 }
 
-ExpressionValue ExpressionRuntime::evaluate_in(const JsonValue expression,
-                                               const ExpressionScope& scope) {
-    return evaluate(expression, scope);
+ExpressionValue ExpressionRuntime::evaluate(const data::JsonView expression,
+                                            const ExpressionScope& scope) {
+    std::shared_ptr<const Program>& program =
+        standalone_programs_[data::encode_canonical_json(expression)];
+    if (program == nullptr)
+        program = Program::lower_expression(expression);
+    return evaluate_node(*program, program->root(), scope);
 }
 
 const std::vector<RuntimeDiagnostic>& ExpressionRuntime::diagnostics() const noexcept {
@@ -600,12 +620,9 @@ void ExpressionRuntime::clear_diagnostics() {
     diagnostics_.clear();
 }
 
-void ExpressionRuntime::set_expression_source(std::shared_ptr<const void> source) {
-    if (source == expression_source_)
-        return;
+void ExpressionRuntime::clear_caches() noexcept {
     collection_cache_.clear();
     collection_cache_entries_ = 0U;
-    expression_source_ = std::move(source);
 }
 
 ExpressionDependencyObserver* ExpressionRuntime::exchange_dependency_observer(
@@ -621,16 +638,17 @@ ExpressionRuntime::read_host_dependency(const std::span<const HostPathSegment> p
         throw std::invalid_argument("host dependency path requires a named root");
     }
     // Only retained lazy identity evaluators freeze reads; others need no canonical path here.
-    if (!scope.host_dependency_overrides.empty()) {
-        const std::string canonical = canonical_host_dependency_path(path);
-        if (const auto frozen = scope.host_dependency_overrides.find(canonical);
-            frozen != scope.host_dependency_overrides.end()) {
-            return frozen->second;
+    if (const FrozenHostReads* frozen = scope.host_dependency_overrides();
+        frozen != nullptr && !frozen->empty()) {
+        if (const auto read = frozen->find(canonical_host_dependency_path(path));
+            read != frozen->end()) {
+            return read->second;
         }
     }
 
-    const auto contextual = scope.contextual_host_roots.find(path.front().field);
-    if (contextual == scope.contextual_host_roots.end()) {
+    const HostRoots& roots = scope.contextual_host_roots();
+    const auto contextual = roots.find(path.front().field);
+    if (contextual == roots.end()) {
         std::optional<HostResolution> resolution = host_.resolve_with_origin(path);
         return ExpressionHostDependency{
             std::vector<HostPathSegment>(path.begin(), path.end()),
@@ -665,108 +683,52 @@ ExpressionRuntime::read_host_dependency(const std::span<const HostPathSegment> p
     };
 }
 
-ExpressionValue ExpressionRuntime::evaluate(const JsonValue expression,
-                                            const ExpressionScope& scope) {
-    struct ActiveScopeRestore final {
-        const ExpressionScope*& slot;
-        const ExpressionScope* previous;
-        ~ActiveScopeRestore() {
-            slot = previous;
+std::optional<ExpressionHostDependency> ExpressionRuntime::host_read(const Program& program,
+                                                                     const ProgramExpression& node,
+                                                                     const ExpressionScope& scope) {
+    const ProgramHostPath& path = program.host_path(node.host);
+    // A local of the root's name shadows the host root.
+    if (scope.find(path.root) != nullptr)
+        return std::nullopt;
+    if (path.fixed.has_value())
+        return read_host_dependency(*path.fixed, scope);
+    std::vector<HostPathSegment> segments;
+    segments.reserve(path.steps.size() + 1U);
+    segments.push_back(HostPathSegment::named(std::string(path.root.name())));
+    for (const ProgramHostStep& step : path.steps) {
+        if (!step.dynamic) {
+            segments.push_back(step.segment);
+            continue;
         }
-    } restore{active_scope_, active_scope_};
-    active_scope_ = &scope;
-    const std::string_view kind = string_field(expression, "kind");
-    if (kind == "literal")
-        return evaluate_literal(expression);
-    if (kind == "variable" || kind == "property" || kind == "index") {
-        if (std::optional<HostAccess> access = host_access(expression, scope); access.has_value()) {
-            const ExpressionHostDependency dependency = read_host_dependency(access->path, scope);
-            bool computed_property = false;
-            if (!dependency.value.has_value() && kind == "property") {
-                const std::string_view name = string_field(expression, "name");
-                if (std::optional<HostAccess> receiver =
-                        host_access(required(expression, "receiver"), scope);
-                    receiver.has_value()) {
-                    const ExpressionHostDependency receiver_dependency =
-                        read_host_dependency(receiver->path, scope);
-                    const Value* value = receiver_dependency.value.has_value()
-                                             ? &*receiver_dependency.value
-                                             : nullptr;
-                    computed_property =
-                        (value != nullptr && value->list() != nullptr &&
-                         (name == "size" || name == "length" || name == "isEmpty")) ||
-                        (value != nullptr && value->string() != nullptr &&
-                         (name == "length" || name == "isEmpty"));
-                }
-            }
-            if (!computed_property) {
-                if (dependency_observer_ != nullptr)
-                    dependency_observer_->host(dependency);
-                if (dependency.value.has_value())
-                    return ExpressionValue(*dependency.value);
-                const bool root = access->path.size() == 1U;
-                report(expression,
-                       root ? "STRATA.DSL.RUNTIME_MISSING_HOST_ROOT"
-                            : "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
-                       root ? "Host binding '" + access->path.front().field + "' is not available."
-                            : "Host path selected by the expression is not available.",
-                       root ? std::optional<std::string>("host adapter root") : std::nullopt);
-                return ExpressionValue{};
-            }
-        }
+        const ProgramExpression& index = program.expression(step.index);
+        const Value lookup = require_value(evaluate_node(program, step.index, scope), index, scope);
+        segments.push_back(HostPathSegment::lookup(
+            lookup.string() != nullptr ? *lookup.string() : display_string(lookup),
+            bounded_index(lookup)));
     }
-    if (kind == "variable") {
-        const std::string_view name = string_field(expression, "name");
-        const auto frozen = scope.lexical_dependency_overrides.find(name);
-        if (frozen != scope.lexical_dependency_overrides.end()) {
-            if (dependency_observer_ != nullptr) {
-                dependency_observer_->lexical(name, frozen->second);
-            }
-            return restore_expression_dependency(frozen->second);
-        }
-        const auto executable = scope.executable_values.find(name);
-        if (executable != scope.executable_values.end()) {
-            if (dependency_observer_ != nullptr) {
-                dependency_observer_->lexical(name,
-                                              capture_expression_dependency(executable->second));
-            }
-            return executable->second;
-        }
-        const auto local = scope.values.find(name);
-        if (local != scope.values.end()) {
-            const JsonValue state_binding_value = expression.find("stateBinding");
-            const std::optional<bool> preserve_state_binding =
-                state_binding_value ? state_binding_value.boolean() : std::optional<bool>{};
-            const auto state_binding =
-                preserve_state_binding.value_or(false)
-                    ? scope.state_bindings.find(name)
-                    : scope.state_bindings.end();
-            const ExpressionValue value =
-                state_binding != scope.state_bindings.end()
-                    ? ExpressionValue(local->second, state_binding->second)
-                    : ExpressionValue(local->second);
-            if (dependency_observer_ != nullptr) {
-                dependency_observer_->lexical(name, capture_expression_dependency(value));
-            }
-            return value;
-        }
-        const std::string_view binding = string_field(expression, "binding");
-        if (binding == "host") {
-            throw std::logic_error("host variable bypassed structural host resolution");
-        } else if (binding == "style" || binding == "animation" || binding == "component") {
-            return ExpressionValue(Value(std::string(name)));
-        } else {
-            report(expression, "STRATA.DSL.RUNTIME_MISSING_BINDING",
-                   "Binding '" + name + "' is not available.",
-                   "local state, component parameter, or host root");
-        }
-        return ExpressionValue{};
-    }
-    if (kind == "list") {
+    return read_host_dependency(segments, scope);
+}
+
+ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
+                                                 const ExpressionId expression,
+                                                 const ExpressionScope& scope) {
+    const ProgramExpression& node = program.expression(expression);
+    switch (node.kind) {
+    case ExpressionKind::literal:
+        return ExpressionValue(node.value);
+    case ExpressionKind::variable:
+        return evaluate_variable(program, node, scope);
+    case ExpressionKind::property:
+        return evaluate_property(program, node, scope);
+    case ExpressionKind::index:
+        return evaluate_index(program, node, scope);
+    case ExpressionKind::list: {
         std::vector<ExpressionValue> executable;
         std::vector<Value> materialized;
-        for (const JsonValue element : array_field(expression, "elements")) {
-            ExpressionValue value = evaluate(element, scope);
+        executable.reserve(node.arguments_count);
+        materialized.reserve(node.arguments_count);
+        for (const ProgramArgument& element : program.arguments(node)) {
+            ExpressionValue value = evaluate_node(program, element.value, scope);
             materialized.push_back(materialized_value(value));
             executable.push_back(std::move(value));
         }
@@ -775,299 +737,384 @@ ExpressionValue ExpressionRuntime::evaluate(const JsonValue expression,
             std::move(executable),
         }));
     }
-    if (kind == "map") {
+    case ExpressionKind::map: {
         std::vector<std::pair<std::string, ExpressionValue>> executable;
         std::vector<std::pair<std::string, Value>> materialized;
-        for (const auto& [name, child] : object_field(expression, "entries")) {
-            ExpressionValue value = evaluate(child, scope);
-            materialized.emplace_back(std::string(name), materialized_value(value));
-            executable.emplace_back(std::string(name), std::move(value));
+        executable.reserve(node.arguments_count);
+        materialized.reserve(node.arguments_count);
+        for (const ProgramArgument& entry : program.arguments(node)) {
+            ExpressionValue value = evaluate_node(program, entry.value, scope);
+            const std::string name(entry.name.name());
+            materialized.emplace_back(name, materialized_value(value));
+            executable.emplace_back(name, std::move(value));
         }
         return ExpressionValue(std::make_shared<const ExpressionObjectValue>(ExpressionObjectValue{
             Value(std::move(materialized)),
             std::move(executable),
         }));
     }
-    if (kind == "componentTemplate") {
+    case ExpressionKind::component_template: {
         std::map<std::string, ExpressionValue, std::less<>> arguments;
-        for (const JsonValue argument : array_field(expression, "arguments")) {
-            arguments.insert_or_assign(
-                std::string(string_field(argument, "name")),
-                evaluate(required(argument, "value"), scope)
-            );
+        for (const ProgramArgument& argument : program.arguments(node)) {
+            arguments.insert_or_assign(std::string(argument.name.name()),
+                                       evaluate_node(program, argument.value, scope));
         }
         return ExpressionValue(std::make_shared<const ComponentTemplateValue>(
-            ComponentTemplateValue{
-                std::string(string_field(expression, "component")),
-                std::move(arguments),
-                Value(std::string(string_field(expression, "component"))),
-            }
-        ));
+            ComponentTemplateValue{node.text, std::move(arguments), Value(node.text)}));
     }
-    if (kind == "lambda") {
+    case ExpressionKind::lambda:
         return ExpressionValue(std::make_shared<const LambdaValue>(LambdaValue{
-            std::string(string_field(expression, "parameter")),
-            required(expression, "body"),
-            scope.values,
-            scope.executable_values,
-            scope.contextual_host_roots,
-            scope.host_dependency_overrides,
-            scope.lexical_dependency_overrides,
-            scope.component_path,
+            program.shared_from_this(),
+            expression,
+            node.first,
+            node.name,
+            scope,
         }));
-    }
-    if (kind == "action")
-        return evaluate_action(expression, scope);
-    if (kind == "helper")
-        return evaluate_helper(expression, scope);
-    if (kind == "property") {
-        const ExpressionValue receiver = evaluate(required(expression, "receiver"), scope);
-        const std::string_view name = string_field(expression, "name");
-        if (const auto* object_value = receiver.object()) {
-            if (const ExpressionValue* field = (**object_value).field(name); field != nullptr) {
-                return *field;
-            }
-        }
-        if (const auto* list_value = receiver.list()) {
-            if (name == "size" || name == "length") {
-                return ExpressionValue(Value(static_cast<double>((**list_value).values.size())));
-            }
-            if (name == "isEmpty")
-                return ExpressionValue(Value((**list_value).values.empty()));
-        }
-        if (const Value* value = receiver.value()) {
-            if (const Value* field = value->field(name))
-                return ExpressionValue(*field);
-            if (const ValueList* list = value->list()) {
-                if (name == "size" || name == "length")
-                    return ExpressionValue(Value(static_cast<double>(list->values.size())));
-                if (name == "isEmpty")
-                    return ExpressionValue(Value(list->values.empty()));
-            }
-            if (const std::string* text = value->string()) {
-                if (name == "length")
-                    return ExpressionValue(Value(static_cast<double>(utf16_length(*text))));
-                if (name == "isEmpty")
-                    return ExpressionValue(Value(text->empty()));
-            }
-        } else if (const auto* view_pointer = receiver.collection()) {
-            const CollectionViewValue& view = **view_pointer;
-            if (name == "items")
-                return ExpressionValue(view.items);
-            if (name == "size" || name == "length" || name == "matched")
-                return ExpressionValue(Value(static_cast<double>(view.matched)));
-            if (name == "total")
-                return ExpressionValue(Value(static_cast<double>(view.total)));
-            if (name == "rangeStart")
-                return ExpressionValue(Value(static_cast<double>(view.range_start)));
-            if (name == "rangeEnd")
-                return ExpressionValue(Value(static_cast<double>(view.range_end_exclusive)));
-            if (name == "isEmpty")
-                return ExpressionValue(Value(view.matched == 0U));
-            if (name == "cacheHits")
-                return ExpressionValue(
-                    Value(static_cast<double>(view.cache_hits.load(std::memory_order_relaxed))));
-            if (name == "rebuilds")
-                return ExpressionValue(Value(static_cast<double>(view.rebuilds)));
-        }
-        report(expression, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
-               "Property '" + name + "' is not available on this value.");
-        return ExpressionValue{};
-    }
-    if (kind == "index") {
-        const ExpressionValue receiver = evaluate(required(expression, "receiver"), scope);
-        const Value index =
-            require_value(evaluate(required(expression, "index"), scope), expression);
-        if (const auto* list_value = receiver.list()) {
-            const auto position = bounded_index(index);
-            return position.has_value() && *position < (**list_value).values.size()
-                       ? (**list_value).values[*position]
-                       : ExpressionValue{};
-        }
-        if (const auto* object_value = receiver.object()) {
-            const std::string name =
-                index.string() != nullptr ? *index.string() : display_string(index);
-            const ExpressionValue* field = (**object_value).field(name);
-            return field != nullptr ? *field : ExpressionValue{};
-        }
-        const Value scalar_receiver = require_value(receiver, expression);
-        if (const ValueList* list = scalar_receiver.list()) {
-            const auto position = bounded_index(index);
-            return position.has_value() && *position < list->values.size()
-                       ? ExpressionValue(list->values[*position])
-                       : ExpressionValue{};
-        }
-        if (scalar_receiver.object() != nullptr) {
-            const std::string name =
-                index.string() != nullptr ? *index.string() : display_string(index);
-            const Value* field = scalar_receiver.field(name);
-            return field != nullptr ? ExpressionValue(*field) : ExpressionValue{};
-        }
-        return ExpressionValue{};
-    }
-    if (kind == "conditional") {
+    case ExpressionKind::action:
+        return evaluate_action(program, node, scope);
+    case ExpressionKind::helper:
+        return evaluate_helper(program, expression, scope);
+    case ExpressionKind::conditional: {
         const Value condition =
-            require_value(evaluate(required(expression, "condition"), scope), expression);
-        return evaluate(required(expression, truthy(condition) ? "then" : "else"), scope);
+            require_value(evaluate_node(program, node.first, scope), node, scope);
+        return evaluate_node(program, truthy(condition) ? node.second : node.third, scope);
     }
-    if (kind == "unary") {
-        const Value operand =
-            require_value(evaluate(required(expression, "operand"), scope), expression);
-        const std::string_view operation = string_field(expression, "operator");
-        if (operation == "not")
+    case ExpressionKind::unary: {
+        const Value operand = require_value(evaluate_node(program, node.first, scope), node, scope);
+        if (node.unary == UnaryOperator::logical_not)
             return ExpressionValue(Value(!truthy(operand)));
-        if (operation == "negate") {
-            if (operand.number() != nullptr)
-                return ExpressionValue(Value(-*operand.number()));
-            if (operand.duration() != nullptr)
-                return ExpressionValue(Value(DurationValue{-operand.duration()->nanoseconds}));
-        }
-        report(expression, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
+        if (operand.number() != nullptr)
+            return ExpressionValue(Value(-*operand.number()));
+        if (operand.duration() != nullptr)
+            return ExpressionValue(Value(DurationValue{-operand.duration()->nanoseconds}));
+        report(node, scope, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
                "Unary operator received an incompatible value.");
         return ExpressionValue(Value(0.0));
     }
-    if (kind == "group")
-        return evaluate(required(expression, "expression"), scope);
-    if (kind == "binary") {
-        const std::string_view operation = string_field(expression, "operator");
-        const Value left = require_value(evaluate(required(expression, "left"), scope), expression);
-        if (operation == "and" && !truthy(left))
-            return ExpressionValue(Value(false));
-        if (operation == "or" && truthy(left))
-            return ExpressionValue(Value(true));
-        if (operation == "coalesce" && left.kind() != ValueKind::null_value)
-            return ExpressionValue(left);
-        const Value right =
-            require_value(evaluate(required(expression, "right"), scope), expression);
-        if (operation == "and" || operation == "or")
-            return ExpressionValue(Value(truthy(right)));
-        if (operation == "coalesce")
-            return ExpressionValue(right);
-        if (operation == "equal")
-            return ExpressionValue(Value(left == right));
-        if (operation == "not_equal")
-            return ExpressionValue(Value(!(left == right)));
-        if (operation == "add" && (left.string() != nullptr || right.string() != nullptr)) {
-            return ExpressionValue(Value(display_string(left) + display_string(right)));
-        }
-        const double* left_number = left.number();
-        const double* right_number = right.number();
-        const double left_numeric = left_number != nullptr ? *left_number
-                                    : left.duration() != nullptr
-                                        ? static_cast<double>(left.duration()->nanoseconds)
-                                        : 0.0;
-        const double right_numeric = right_number != nullptr ? *right_number
-                                     : right.duration() != nullptr
-                                         ? static_cast<double>(right.duration()->nanoseconds)
-                                         : 0.0;
-        const bool numeric = (left_number != nullptr || left.duration() != nullptr) &&
-                             (right_number != nullptr || right.duration() != nullptr);
-        if ((operation == "less" || operation == "less_equal" || operation == "greater" ||
-             operation == "greater_equal") &&
-            numeric) {
-            return ExpressionValue(Value(operation == "less"         ? left_numeric < right_numeric
-                                         : operation == "less_equal" ? left_numeric <= right_numeric
-                                         : operation == "greater" ? left_numeric > right_numeric
-                                                                  : left_numeric >= right_numeric));
-        }
-        if (numeric) {
-            double result = 0.0;
-            if (operation == "add")
-                result = left_numeric + right_numeric;
-            else if (operation == "subtract")
-                result = left_numeric - right_numeric;
-            else if (operation == "multiply")
-                result = left_numeric * right_numeric;
-            else if (operation == "divide")
-                result = right_numeric == 0.0 ? 0.0 : left_numeric / right_numeric;
-            else if (operation == "modulo")
-                result = right_numeric == 0.0 ? 0.0 : std::fmod(left_numeric, right_numeric);
-            else {
-                report(expression, "STRATA.DSL.RUNTIME_UNKNOWN_OPERATOR",
-                       "Binary operator '" + operation + "' is not supported.");
-                return ExpressionValue{};
-            }
-            if (!std::isfinite(result))
-                result = 0.0;
-            return left.duration() != nullptr || right.duration() != nullptr
-                       ? ExpressionValue(Value(DurationValue{static_cast<std::int64_t>(result)}))
-                       : ExpressionValue(Value(result));
-        }
-        report(expression, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
-               "Binary operator received incompatible values.");
-        return ExpressionValue(Value(0.0));
-    }
-    if (kind == "error")
-        return ExpressionValue{};
-    if (kind == "materialReference" || kind == "materialCall") {
+    case ExpressionKind::binary:
+        return evaluate_binary(program, node, scope);
+    case ExpressionKind::material: {
         std::vector<std::pair<std::string, Value>> material{
-            {"id", Value(std::string(string_field(expression, "id")))},
+            {"id", Value(node.text)},
         };
-        if (kind == "materialCall") {
+        if (node.material_call) {
             std::vector<std::pair<std::string, Value>> parameters;
-            for (const JsonValue parameter : array_field(expression, "parameters")) {
+            for (const ProgramArgument& parameter : program.arguments(node)) {
                 parameters.emplace_back(
-                    std::string(string_field(parameter, "name")),
-                    require_value(evaluate(required(parameter, "value"), scope), parameter));
+                    std::string(parameter.name.name()),
+                    require_value(evaluate_node(program, parameter.value, scope),
+                                  program.expression(parameter.value), scope));
             }
             material.emplace_back("parameters", Value(std::move(parameters)));
         }
         return ExpressionValue(Value(std::move(material)));
     }
-    report(expression, "STRATA.DSL.RUNTIME_UNKNOWN_EXPRESSION",
-           "Portable expression kind '" + kind + "' is not supported.");
-    return ExpressionValue{};
-}
-
-ExpressionValue ExpressionRuntime::evaluate_literal(const JsonValue expression) {
-    const JsonValue literal = required(expression, "value");
-    const std::string_view kind = string_field(literal, "kind");
-    if (kind == "null")
+    case ExpressionKind::unknown:
+        if (node.text.starts_with("literal ")) {
+            report(node, scope, "STRATA.DSL.RUNTIME_UNKNOWN_LITERAL",
+                   "Portable literal kind '" + node.text.substr(8U) + "' is not supported.");
+        } else {
+            report(node, scope, "STRATA.DSL.RUNTIME_UNKNOWN_EXPRESSION",
+                   "Portable expression kind '" + node.text + "' is not supported.");
+        }
         return ExpressionValue{};
-    if (kind == "boolean")
-        return ExpressionValue(Value(*required(literal, "value").boolean()));
-    if (kind == "number")
-        return ExpressionValue(Value(json_number(required(literal, "value"))));
-    if (kind == "duration")
-        return ExpressionValue(Value(DurationValue{*required(literal, "nanos").integer()}));
-    if (kind == "string")
-        return ExpressionValue(Value(std::string(string_field(literal, "value"))));
-    if (kind == "image")
-        return ExpressionValue(Value(ImageValue{std::string(string_field(literal, "value"))}));
-    if (kind == "key")
-        return ExpressionValue(Value(KeyValue{std::string(string_field(literal, "value"))}));
-    if (kind == "color")
-        return ExpressionValue(Value(parse_color(string_field(literal, "rgba"))));
-    if (kind == "themeToken")
-        return ExpressionValue(Value(ThemeTokenValue{std::string(string_field(literal, "name"))}));
-    if (kind == "styleReference" || kind == "animation") {
-        return ExpressionValue(Value(std::string(string_field(literal, "name"))));
     }
-    report(expression, "STRATA.DSL.RUNTIME_UNKNOWN_LITERAL",
-           "Portable literal kind '" + kind + "' is not supported.");
     return ExpressionValue{};
 }
 
-ExpressionValue ExpressionRuntime::evaluate_action(const JsonValue expression,
+ExpressionValue ExpressionRuntime::evaluate_variable(const Program& program,
+                                                     const ProgramExpression& node,
+                                                     const ExpressionScope& scope) {
+    if (node.host != no_program_id) {
+        if (std::optional<ExpressionHostDependency> read = host_read(program, node, scope)) {
+            if (dependency_observer_ != nullptr)
+                dependency_observer_->host(*read);
+            if (read->value.has_value())
+                return ExpressionValue(std::move(*read->value));
+            report(node, scope, "STRATA.DSL.RUNTIME_MISSING_HOST_ROOT",
+                   "Host binding '" + node.name.name() + "' is not available.",
+                   "host adapter root");
+            return ExpressionValue{};
+        }
+    }
+    if (const ExpressionValue* bound = scope.find(node.name)) {
+        if (bound->executable()) {
+            if (dependency_observer_ != nullptr)
+                dependency_observer_->lexical(node.name, *bound);
+            return *bound;
+        }
+        const std::shared_ptr<const LexicalStateBinding>* binding =
+            node.state_binding ? scope.state_binding(node.name) : nullptr;
+        ExpressionValue value = binding != nullptr ? ExpressionValue(*bound->value(), *binding)
+                                                   : ExpressionValue(*bound->value());
+        if (dependency_observer_ != nullptr)
+            dependency_observer_->lexical(node.name, value);
+        return value;
+    }
+    switch (node.fallback) {
+    case VariableFallback::host:
+        throw std::logic_error("host variable bypassed structural host resolution");
+    case VariableFallback::name:
+        return ExpressionValue(node.value);
+    case VariableFallback::missing:
+        break;
+    }
+    report(node, scope, "STRATA.DSL.RUNTIME_MISSING_BINDING",
+           "Binding '" + node.name.name() + "' is not available.",
+           "local state, component parameter, or host root");
+    return ExpressionValue{};
+}
+
+ExpressionValue ExpressionRuntime::evaluate_property(const Program& program,
+                                                     const ProgramExpression& node,
+                                                     const ExpressionScope& scope) {
+    const Names& known = names();
+    const Symbol name = node.name;
+    if (node.host != no_program_id) {
+        if (std::optional<ExpressionHostDependency> read = host_read(program, node, scope)) {
+            // A size of a host list or string is computed, not a host field.
+            bool computed = false;
+            if (!read->value.has_value() &&
+                (name == known.size || name == known.length || name == known.is_empty)) {
+                const ProgramExpression& receiver = program.expression(node.first);
+                if (receiver.host != no_program_id) {
+                    if (const std::optional<ExpressionHostDependency> receiver_read =
+                            host_read(program, receiver, scope);
+                        receiver_read.has_value() && receiver_read->value.has_value()) {
+                        const Value& value = *receiver_read->value;
+                        computed = value.list() != nullptr ||
+                                   (value.string() != nullptr && name != known.size);
+                    }
+                }
+            }
+            if (!computed) {
+                if (dependency_observer_ != nullptr)
+                    dependency_observer_->host(*read);
+                if (read->value.has_value())
+                    return ExpressionValue(std::move(*read->value));
+                report(node, scope, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
+                       "Host path selected by the expression is not available.");
+                return ExpressionValue{};
+            }
+        }
+    }
+    const ExpressionValue receiver = evaluate_node(program, node.first, scope);
+    if (const auto* object_value = receiver.object()) {
+        if (const ExpressionValue* field = (**object_value).field(node.text); field != nullptr)
+            return *field;
+    }
+    if (const auto* list_value = receiver.list()) {
+        if (name == known.size || name == known.length)
+            return ExpressionValue(Value(static_cast<double>((**list_value).values.size())));
+        if (name == known.is_empty)
+            return ExpressionValue(Value((**list_value).values.empty()));
+    }
+    if (const Value* value = receiver.value()) {
+        if (const Value* field = value->field(node.text))
+            return ExpressionValue(*field);
+        if (const ValueList* list = value->list()) {
+            if (name == known.size || name == known.length)
+                return ExpressionValue(Value(static_cast<double>(list->values.size())));
+            if (name == known.is_empty)
+                return ExpressionValue(Value(list->values.empty()));
+        }
+        if (const std::string* text = value->string()) {
+            if (name == known.length)
+                return ExpressionValue(Value(static_cast<double>(utf16_length(*text))));
+            if (name == known.is_empty)
+                return ExpressionValue(Value(text->empty()));
+        }
+    } else if (const auto* view_pointer = receiver.collection()) {
+        const CollectionViewValue& view = **view_pointer;
+        if (name == known.items)
+            return ExpressionValue(view.items);
+        if (name == known.size || name == known.length || name == known.matched)
+            return ExpressionValue(Value(static_cast<double>(view.matched)));
+        if (name == known.total)
+            return ExpressionValue(Value(static_cast<double>(view.total)));
+        if (name == known.range_start)
+            return ExpressionValue(Value(static_cast<double>(view.range_start)));
+        if (name == known.range_end)
+            return ExpressionValue(Value(static_cast<double>(view.range_end_exclusive)));
+        if (name == known.is_empty)
+            return ExpressionValue(Value(view.matched == 0U));
+        if (name == known.cache_hits) {
+            return ExpressionValue(
+                Value(static_cast<double>(view.cache_hits.load(std::memory_order_relaxed))));
+        }
+        if (name == known.rebuilds)
+            return ExpressionValue(Value(static_cast<double>(view.rebuilds)));
+    }
+    report(node, scope, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
+           "Property '" + node.text + "' is not available on this value.");
+    return ExpressionValue{};
+}
+
+ExpressionValue ExpressionRuntime::evaluate_index(const Program& program,
+                                                  const ProgramExpression& node,
+                                                  const ExpressionScope& scope) {
+    if (node.host != no_program_id) {
+        if (std::optional<ExpressionHostDependency> read = host_read(program, node, scope)) {
+            if (dependency_observer_ != nullptr)
+                dependency_observer_->host(*read);
+            if (read->value.has_value())
+                return ExpressionValue(std::move(*read->value));
+            report(node, scope, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
+                   "Host path selected by the expression is not available.");
+            return ExpressionValue{};
+        }
+    }
+    const ExpressionValue receiver = evaluate_node(program, node.first, scope);
+    const Value index = require_value(evaluate_node(program, node.second, scope), node, scope);
+    if (const auto* list_value = receiver.list()) {
+        const auto position = bounded_index(index);
+        return position.has_value() && *position < (**list_value).values.size()
+                   ? (**list_value).values[*position]
+                   : ExpressionValue{};
+    }
+    if (const auto* object_value = receiver.object()) {
+        const std::string name =
+            index.string() != nullptr ? *index.string() : display_string(index);
+        const ExpressionValue* field = (**object_value).field(name);
+        return field != nullptr ? *field : ExpressionValue{};
+    }
+    const Value scalar_receiver = require_value(receiver, node, scope);
+    if (const ValueList* list = scalar_receiver.list()) {
+        const auto position = bounded_index(index);
+        return position.has_value() && *position < list->values.size()
+                   ? ExpressionValue(list->values[*position])
+                   : ExpressionValue{};
+    }
+    if (scalar_receiver.object() != nullptr) {
+        const std::string name =
+            index.string() != nullptr ? *index.string() : display_string(index);
+        const Value* field = scalar_receiver.field(name);
+        return field != nullptr ? ExpressionValue(*field) : ExpressionValue{};
+    }
+    return ExpressionValue{};
+}
+
+ExpressionValue ExpressionRuntime::evaluate_binary(const Program& program,
+                                                   const ProgramExpression& node,
                                                    const ExpressionScope& scope) {
-    const std::string_view id = string_field(expression, "id");
+    const BinaryOperator operation = node.binary;
+    const bool known = node.text.empty();
+    const Value left = require_value(evaluate_node(program, node.first, scope), node, scope);
+    if (known) {
+        if (operation == BinaryOperator::logical_and && !truthy(left))
+            return ExpressionValue(Value(false));
+        if (operation == BinaryOperator::logical_or && truthy(left))
+            return ExpressionValue(Value(true));
+        if (operation == BinaryOperator::coalesce && left.kind() != ValueKind::null_value)
+            return ExpressionValue(left);
+    }
+    const Value right = require_value(evaluate_node(program, node.second, scope), node, scope);
+    if (known) {
+        switch (operation) {
+        case BinaryOperator::logical_and:
+        case BinaryOperator::logical_or:
+            return ExpressionValue(Value(truthy(right)));
+        case BinaryOperator::coalesce:
+            return ExpressionValue(right);
+        case BinaryOperator::equal:
+            return ExpressionValue(Value(left == right));
+        case BinaryOperator::not_equal:
+            return ExpressionValue(Value(!(left == right)));
+        case BinaryOperator::add:
+            if (left.string() != nullptr || right.string() != nullptr)
+                return ExpressionValue(Value(display_string(left) + display_string(right)));
+            break;
+        default:
+            break;
+        }
+    }
+    const double* left_number = left.number();
+    const double* right_number = right.number();
+    const double left_numeric = left_number != nullptr ? *left_number
+                                : left.duration() != nullptr
+                                    ? static_cast<double>(left.duration()->nanoseconds)
+                                    : 0.0;
+    const double right_numeric = right_number != nullptr ? *right_number
+                                 : right.duration() != nullptr
+                                     ? static_cast<double>(right.duration()->nanoseconds)
+                                     : 0.0;
+    const bool numeric = (left_number != nullptr || left.duration() != nullptr) &&
+                         (right_number != nullptr || right.duration() != nullptr);
+    if (known && numeric) {
+        switch (operation) {
+        case BinaryOperator::less:
+            return ExpressionValue(Value(left_numeric < right_numeric));
+        case BinaryOperator::less_equal:
+            return ExpressionValue(Value(left_numeric <= right_numeric));
+        case BinaryOperator::greater:
+            return ExpressionValue(Value(left_numeric > right_numeric));
+        case BinaryOperator::greater_equal:
+            return ExpressionValue(Value(left_numeric >= right_numeric));
+        default:
+            break;
+        }
+    }
+    if (numeric) {
+        double result = 0.0;
+        if (!known) {
+            report(node, scope, "STRATA.DSL.RUNTIME_UNKNOWN_OPERATOR",
+                   "Binary operator '" + node.text + "' is not supported.");
+            return ExpressionValue{};
+        }
+        switch (operation) {
+        case BinaryOperator::add:
+            result = left_numeric + right_numeric;
+            break;
+        case BinaryOperator::subtract:
+            result = left_numeric - right_numeric;
+            break;
+        case BinaryOperator::multiply:
+            result = left_numeric * right_numeric;
+            break;
+        case BinaryOperator::divide:
+            result = right_numeric == 0.0 ? 0.0 : left_numeric / right_numeric;
+            break;
+        case BinaryOperator::modulo:
+            result = right_numeric == 0.0 ? 0.0 : std::fmod(left_numeric, right_numeric);
+            break;
+        default:
+            report(node, scope, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
+                   "Binary operator received incompatible values.");
+            return ExpressionValue(Value(0.0));
+        }
+        if (!std::isfinite(result))
+            result = 0.0;
+        return left.duration() != nullptr || right.duration() != nullptr
+                   ? ExpressionValue(Value(DurationValue{static_cast<std::int64_t>(result)}))
+                   : ExpressionValue(Value(result));
+    }
+    report(node, scope, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
+           "Binary operator received incompatible values.");
+    return ExpressionValue(Value(0.0));
+}
+
+ExpressionValue ExpressionRuntime::evaluate_action(const Program& program,
+                                                   const ProgramExpression& node,
+                                                   const ExpressionScope& scope) {
+    const std::string& id = node.text;
     const auto contract = actions_.contract(id);
     if (contract == nullptr) {
-        report(expression, "STRATA.DSL.RUNTIME_UNKNOWN_ACTION",
+        report(node, scope, "STRATA.DSL.RUNTIME_UNKNOWN_ACTION",
                "Action '" + id + "' is not registered.");
         return ExpressionValue{};
     }
     Value payload;
     if (contract->payload_contract != "no payload") {
         std::vector<std::pair<std::string, Value>> fields;
-        for (const JsonValue argument_value : array_field(expression, "arguments")) {
-            fields.emplace_back(
-                std::string(string_field(argument_value, "name")),
-                require_value(evaluate(required(argument_value, "value"), scope), argument_value));
+        fields.reserve(node.arguments_count);
+        for (const ProgramArgument& argument : program.arguments(node)) {
+            fields.emplace_back(std::string(argument.name.name()),
+                                require_value(evaluate_node(program, argument.value, scope),
+                                              program.expression(argument.value), scope));
         }
         payload = Value(std::move(fields));
     }
-    const std::optional<ActionOrigin> origin = action_origin(expression, scope);
+    const std::optional<ActionOrigin> origin = action_origin(program, node, scope);
     try {
         payload = actions_.decode_payload(id, std::move(payload));
         auto action = std::make_shared<const Action>(contract, std::move(payload), origin);
@@ -1077,9 +1124,10 @@ ExpressionValue ExpressionRuntime::evaluate_action(const JsonValue expression,
             const std::string* state_name =
                 state_name_value != nullptr ? state_name_value->string() : nullptr;
             if (state_name != nullptr) {
-                const auto binding = scope.state_bindings.find(*state_name);
-                if (binding != scope.state_bindings.end())
-                    state_binding = binding->second;
+                if (const std::optional<Symbol> name = Symbol::find(*state_name)) {
+                    if (const auto* binding = scope.state_binding(*name))
+                        state_binding = **binding;
+                }
             }
         }
         return ExpressionValue(std::make_shared<const ActionValue>(ActionValue{
@@ -1096,11 +1144,14 @@ ExpressionValue ExpressionRuntime::evaluate_action(const JsonValue expression,
                 origin->column.value_or(1U),
                 std::nullopt,
             };
-            const DiagnosticPosition end = origin->end_line.has_value()
-                ? DiagnosticPosition{
-                      *origin->end_line, origin->end_column.value_or(1U), std::nullopt,
-                  }
-                : start;
+            const DiagnosticPosition end =
+                origin->end_line.has_value()
+                    ? DiagnosticPosition{
+                          *origin->end_line,
+                          origin->end_column.value_or(1U),
+                          std::nullopt,
+                      }
+                    : start;
             range = DiagnosticRange{origin->source_id, start, end};
         }
         report(RuntimeDiagnostic{
@@ -1118,90 +1169,158 @@ ExpressionValue ExpressionRuntime::evaluate_action(const JsonValue expression,
     }
 }
 
-ExpressionValue ExpressionRuntime::evaluate_helper(const JsonValue expression,
+std::optional<ActionOrigin> ExpressionRuntime::action_origin(const Program& program,
+                                                             const ProgramExpression& node,
+                                                             const ExpressionScope& scope) const {
+    if (node.origin == no_program_id)
+        return std::nullopt;
+    const ProgramActionOrigin& authored = program.action_origin(node.origin);
+    ActionOrigin origin = authored.origin;
+    const std::string& path = scope.component_path();
+    if (path.starts_with("/component/")) {
+        origin.component_path = path;
+    } else if (authored.fallback_component_path.has_value()) {
+        origin.component_path = authored.fallback_component_path;
+    } else if (!path.empty()) {
+        origin.component_path = path;
+    }
+    constexpr std::string_view instance_root_suffix = "/root";
+    if (origin.component_path.has_value() && origin.component_path->starts_with("/component/") &&
+        origin.component_path->ends_with(instance_root_suffix)) {
+        origin.component_path->erase(origin.component_path->size() - instance_root_suffix.size());
+    }
+    return origin;
+}
+
+const ProgramArgument* ExpressionRuntime::argument(const Program& program,
+                                                   const ProgramExpression& node, const Symbol name,
+                                                   const std::size_t position) const {
+    const std::span<const ProgramArgument> arguments = program.arguments(node);
+    for (const ProgramArgument& candidate : arguments) {
+        if (candidate.named && candidate.name == name)
+            return &candidate;
+    }
+    return position < arguments.size() && !arguments[position].named ? &arguments[position]
+                                                                     : nullptr;
+}
+
+Value ExpressionRuntime::argument_value(const Program& program, const ProgramExpression& node,
+                                        const ExpressionScope& scope, const Symbol name,
+                                        const std::size_t position) {
+    const ProgramArgument* found = argument(program, node, name, position);
+    return found != nullptr ? require_value(evaluate_node(program, found->value, scope),
+                                            program.expression(found->value), scope)
+                            : Value{};
+}
+
+ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
+                                                   const ExpressionId expression,
                                                    const ExpressionScope& scope) {
-    const std::string_view name = string_field(expression, "name");
-    if (name == "filter" || name == "map" || name == "sortBy" || name == "distinctBy" ||
-        name == "groupBy" || name == "flatten" || name == "takeWhile" || name == "window" ||
-        name == "page") {
-        return ExpressionValue(collection_view(expression, scope));
+    const ProgramExpression& node = program.expression(expression);
+    const Names& known = names();
+    const auto value_of = [&](const ProgramArgument& entry) {
+        return require_value(evaluate_node(program, entry.value, scope),
+                             program.expression(entry.value), scope);
+    };
+    switch (node.helper) {
+    case HelperKind::filter:
+    case HelperKind::map:
+    case HelperKind::sort_by:
+    case HelperKind::distinct_by:
+    case HelperKind::group_by:
+    case HelperKind::flatten:
+    case HelperKind::take_while:
+    case HelperKind::window:
+    case HelperKind::page:
+        return ExpressionValue(collection_view(program, expression, scope));
+    case HelperKind::persisted: {
+        const ProgramArgument* initial = argument(program, node, known.initial, 1U);
+        return initial != nullptr ? evaluate_node(program, initial->value, scope)
+                                  : ExpressionValue{};
     }
-    if (name == "persisted") {
-        const JsonValue initial = argument_expression(expression, "initial", 1U);
-        return initial ? evaluate(initial, scope) : ExpressionValue{};
+    case HelperKind::sequence:
+        return ExpressionValue(
+            composed_action(program, node, scope, ActionCompositionMode::sequence));
+    case HelperKind::parallel:
+        return ExpressionValue(
+            composed_action(program, node, scope, ActionCompositionMode::parallel));
+    case HelperKind::choose: {
+        const bool condition = truthy(argument_value(program, node, scope, known.condition, 0U));
+        const ProgramArgument* selected = argument(
+            program, node, condition ? known.when_true : known.when_false, condition ? 1U : 2U);
+        return selected != nullptr ? evaluate_node(program, selected->value, scope)
+                                   : ExpressionValue{};
     }
-    if (name == "sequence")
-        return ExpressionValue(composed_action(expression, scope, ActionCompositionMode::sequence));
-    if (name == "parallel")
-        return ExpressionValue(composed_action(expression, scope, ActionCompositionMode::parallel));
-    if (name == "choose" || name == "chooseAction") {
-        const bool condition = truthy(argument(expression, scope, "condition", 0U));
-        const JsonValue selected = argument_expression(
-            expression, condition ? "whenTrue" : "whenFalse", condition ? 1U : 2U);
-        return selected ? evaluate(selected, scope) : ExpressionValue{};
-    }
-    if (name == "count" || name == "any" || name == "all") {
-        const JsonValue source_expression = argument_expression(expression, "source", 0U);
-        if (!source_expression)
-            return ExpressionValue(name == "count" ? Value(0.0) : Value(false));
-        const ExpressionValue source = evaluate(source_expression, scope);
+    case HelperKind::count:
+    case HelperKind::any:
+    case HelperKind::all: {
+        const HelperKind helper = node.helper;
+        const ProgramArgument* source_argument = argument(program, node, known.source, 0U);
+        if (source_argument == nullptr)
+            return ExpressionValue(helper == HelperKind::count ? Value(0.0) : Value(false));
+        const ExpressionValue source = evaluate_node(program, source_argument->value, scope);
         const ValueList* items = collection_items(source);
         if (items == nullptr) {
-            report(expression, "STRATA.DSL.RUNTIME_COLLECTION_SOURCE",
+            report(node, scope, "STRATA.DSL.RUNTIME_COLLECTION_SOURCE",
                    "Collection aggregate requires a list or derived view.");
-            return ExpressionValue(name == "count" ? Value(0.0) : Value(false));
+            return ExpressionValue(helper == HelperKind::count ? Value(0.0) : Value(false));
         }
-        const JsonValue predicate_expression = argument_expression(expression, "predicate", 1U);
-        const auto predicate_value =
-            predicate_expression ? evaluate(predicate_expression, scope) : ExpressionValue{};
+        const ProgramArgument* predicate_argument = argument(program, node, known.predicate, 1U);
+        const ExpressionValue predicate_value =
+            predicate_argument != nullptr ? evaluate_node(program, predicate_argument->value, scope)
+                                          : ExpressionValue{};
         const auto* predicate = predicate_value.lambda();
         std::size_t matches = 0U;
         for (const Value& item : items->values) {
             if (predicate == nullptr || truthy(evaluate_lambda(**predicate, item)))
                 ++matches;
-            if (name == "any" && matches != 0U)
+            if (helper == HelperKind::any && matches != 0U)
                 break;
         }
-        if (name == "count")
+        if (helper == HelperKind::count)
             return ExpressionValue(Value(static_cast<double>(matches)));
-        if (name == "any")
+        if (helper == HelperKind::any)
             return ExpressionValue(Value(matches != 0U));
         return ExpressionValue(Value(!items->values.empty() && matches == items->values.size()));
     }
-    if (name == "min" || name == "max") {
+    case HelperKind::min:
+    case HelperKind::max: {
         double result = 0.0;
         bool first = true;
-        for (const JsonValue entry : array_field(expression, "arguments")) {
-            const Value value = require_value(evaluate(required(entry, "value"), scope), entry);
+        for (const ProgramArgument& entry : program.arguments(node)) {
+            const Value value = value_of(entry);
             const double number = value.number() != nullptr ? *value.number() : 0.0;
-            result = first           ? number
-                     : name == "min" ? std::min(result, number)
-                                     : std::max(result, number);
+            result = first                            ? number
+                     : node.helper == HelperKind::min ? std::min(result, number)
+                                                      : std::max(result, number);
             first = false;
         }
         return ExpressionValue(Value(result));
     }
-    if (name == "clamp") {
-        const Value value_argument = argument(expression, scope, "value", 0U);
-        const Value minimum_argument = argument(expression, scope, "min", 1U);
-        const Value maximum_argument = argument(expression, scope, "max", 2U);
+    case HelperKind::clamp: {
+        const Value value_argument = argument_value(program, node, scope, known.value, 0U);
+        const Value minimum_argument = argument_value(program, node, scope, known.min, 1U);
+        const Value maximum_argument = argument_value(program, node, scope, known.max, 2U);
         const double value = value_argument.number() != nullptr ? *value_argument.number() : 0.0;
         const double minimum =
             minimum_argument.number() != nullptr ? *minimum_argument.number() : value;
         const double maximum =
             maximum_argument.number() != nullptr ? *maximum_argument.number() : value;
         if (minimum > maximum) {
-            report(expression, "STRATA.DSL.RUNTIME_INVALID_RANGE",
+            report(node, scope, "STRATA.DSL.RUNTIME_INVALID_RANGE",
                    "clamp minimum exceeds its maximum.");
             return ExpressionValue(Value(value));
         }
         return ExpressionValue(Value(std::clamp(value, minimum, maximum)));
     }
-    if (name == "abs" || name == "floor" || name == "ceil" || name == "round") {
-        const Value value = argument(expression, scope, "value", 0U);
+    case HelperKind::abs:
+    case HelperKind::floor:
+    case HelperKind::ceil:
+    case HelperKind::round: {
+        const Value value = argument_value(program, node, scope, known.value, 0U);
         const double number = value.number() != nullptr ? *value.number() : 0.0;
-        if (name == "round") {
-            const Value precision_value = argument(expression, scope, "precision", 1U);
+        if (node.helper == HelperKind::round) {
+            const Value precision_value = argument_value(program, node, scope, known.precision, 1U);
             const int precision =
                 precision_value.number() != nullptr
                     ? std::clamp(static_cast<int>(*precision_value.number()), 0, 12)
@@ -1209,22 +1328,25 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const JsonValue expression,
             const double scale = std::pow(10.0, static_cast<double>(precision));
             return ExpressionValue(Value(std::round(number * scale) / scale));
         }
-        return ExpressionValue(Value(name == "abs"     ? std::abs(number)
-                                     : name == "floor" ? std::floor(number)
-                                                       : std::ceil(number)));
+        return ExpressionValue(Value(node.helper == HelperKind::abs     ? std::abs(number)
+                                     : node.helper == HelperKind::floor ? std::floor(number)
+                                                                        : std::ceil(number)));
     }
-    if (name == "length" || name == "size" || name == "isEmpty") {
-        const Value value = argument(expression, scope, "value", 0U);
-        std::size_t size = value.string() != nullptr   ? utf16_length(*value.string())
-                           : value.list() != nullptr   ? value.list()->values.size()
-                           : value.object() != nullptr ? value.object()->fields.size()
-                                                       : 0U;
-        return ExpressionValue(name == "isEmpty" ? Value(size == 0U)
-                                                 : Value(static_cast<double>(size)));
+    case HelperKind::length:
+    case HelperKind::size:
+    case HelperKind::is_empty: {
+        const Value value = argument_value(program, node, scope, known.value, 0U);
+        const std::size_t size = value.string() != nullptr   ? utf16_length(*value.string())
+                                 : value.list() != nullptr   ? value.list()->values.size()
+                                 : value.object() != nullptr ? value.object()->fields.size()
+                                                             : 0U;
+        return ExpressionValue(node.helper == HelperKind::is_empty
+                                   ? Value(size == 0U)
+                                   : Value(static_cast<double>(size)));
     }
-    if (name == "join") {
-        const Value values = argument(expression, scope, "value", 0U);
-        const Value separator_value = argument(expression, scope, "separator", 1U);
+    case HelperKind::join: {
+        const Value values = argument_value(program, node, scope, known.value, 0U);
+        const Value separator_value = argument_value(program, node, scope, known.separator, 1U);
         const std::string separator = separator_value.kind() == ValueKind::null_value
                                           ? ", "
                                           : display_string(separator_value);
@@ -1238,13 +1360,16 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const JsonValue expression,
         }
         return ExpressionValue(Value(std::move(joined)));
     }
-    if (name == "lower" || name == "upper" || name == "trim" || name == "title") {
-        std::string value = display_string(argument(expression, scope, "value", 0U));
-        if (name == "lower")
+    case HelperKind::lower:
+    case HelperKind::upper:
+    case HelperKind::trim:
+    case HelperKind::title: {
+        std::string value = display_string(argument_value(program, node, scope, known.value, 0U));
+        if (node.helper == HelperKind::lower) {
             value = lower_ascii(std::move(value));
-        else if (name == "upper")
+        } else if (node.helper == HelperKind::upper) {
             value = upper_ascii(std::move(value));
-        else if (name == "trim") {
+        } else if (node.helper == HelperKind::trim) {
             const std::size_t first = value.find_first_not_of(" \t\r\n");
             const std::size_t last = value.find_last_not_of(" \t\r\n");
             value =
@@ -1254,9 +1379,8 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const JsonValue expression,
             std::string titled;
             for (std::string word; words >> word;) {
                 word = lower_ascii(std::move(word));
-                if (!word.empty() && word.front() >= 'a' && word.front() <= 'z') {
+                if (!word.empty() && word.front() >= 'a' && word.front() <= 'z')
                     word.front() = static_cast<char>(word.front() - 'a' + 'A');
-                }
                 if (!titled.empty())
                     titled.push_back(' ');
                 titled += word;
@@ -1265,42 +1389,42 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const JsonValue expression,
         }
         return ExpressionValue(Value(std::move(value)));
     }
-    if (name == "contains") {
-        const Value value = argument(expression, scope, "value", 0U);
-        const Value needle = argument(expression, scope, "needle", 1U);
+    case HelperKind::contains: {
+        const Value value = argument_value(program, node, scope, known.value, 0U);
+        const Value needle = argument_value(program, node, scope, known.needle, 1U);
         if (value.string() != nullptr)
             return ExpressionValue(Value(value.string()->contains(display_string(needle))));
-        if (value.list() != nullptr)
+        if (value.list() != nullptr) {
             return ExpressionValue(Value(std::ranges::find(value.list()->values, needle) !=
                                          value.list()->values.end()));
+        }
         return ExpressionValue(Value(false));
     }
-    if (name == "startsWith" || name == "endsWith") {
-        const std::string value = display_string(argument(expression, scope, "value", 0U));
+    case HelperKind::starts_with:
+    case HelperKind::ends_with: {
+        const bool starts = node.helper == HelperKind::starts_with;
+        const std::string value =
+            display_string(argument_value(program, node, scope, known.value, 0U));
         const std::string part = display_string(
-            argument(expression, scope, name == "startsWith" ? "prefix" : "suffix", 1U));
-        return ExpressionValue(
-            Value(name == "startsWith" ? value.starts_with(part) : value.ends_with(part)));
+            argument_value(program, node, scope, starts ? known.prefix : known.suffix, 1U));
+        return ExpressionValue(Value(starts ? value.starts_with(part) : value.ends_with(part)));
     }
-    if (name == "format") {
-        const auto& arguments = array_field(expression, "arguments");
+    case HelperKind::format: {
+        const std::span<const ProgramArgument> arguments = program.arguments(node);
         if (arguments.empty())
             return ExpressionValue(Value(""));
-        std::string formatted = display_string(
-            require_value(evaluate(required(arguments[0], "value"), scope), arguments[0]));
+        std::string formatted = display_string(value_of(arguments[0]));
         for (std::size_t index = 1U; index < arguments.size(); ++index) {
             const std::string marker = "{" + std::to_string(index - 1U) + "}";
-            const std::string replacement = display_string(require_value(
-                evaluate(required(arguments[index], "value"), scope), arguments[index]));
+            const std::string replacement = display_string(value_of(arguments[index]));
             std::size_t position = 0U;
             while ((position = formatted.find(marker, position)) != std::string::npos) {
                 formatted.replace(position, marker.size(), replacement);
                 position += replacement.size();
             }
-            const JsonValue argument_name = required(arguments[index], "name");
-            if (const std::optional<std::string_view> encoded_name = argument_name.string();
-                encoded_name.has_value()) {
-                const std::string named_marker = "{" + std::string(*encoded_name) + "}";
+            if (arguments[index].named) {
+                const std::string named_marker =
+                    "{" + std::string(arguments[index].name.name()) + "}";
                 position = 0U;
                 while ((position = formatted.find(named_marker, position)) != std::string::npos) {
                     formatted.replace(position, named_marker.size(), replacement);
@@ -1310,9 +1434,9 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const JsonValue expression,
         }
         return ExpressionValue(Value(std::move(formatted)));
     }
-    if (name == "formatNumber") {
-        const Value value = argument(expression, scope, "value", 0U);
-        const Value precision_value = argument(expression, scope, "precision", 1U);
+    case HelperKind::format_number: {
+        const Value value = argument_value(program, node, scope, known.value, 0U);
+        const Value precision_value = argument_value(program, node, scope, known.precision, 1U);
         const double number = value.number() != nullptr ? *value.number() : 0.0;
         const int precision = precision_value.number() != nullptr
                                   ? std::clamp(static_cast<int>(*precision_value.number()), 0, 12)
@@ -1322,170 +1446,114 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const JsonValue expression,
         formatted << std::fixed << std::setprecision(precision) << number;
         return ExpressionValue(Value(formatted.str()));
     }
-    if (name == "rgb" || name == "rgba") {
-        const std::uint8_t red = color_channel(argument(expression, scope, "red", 0U));
-        const std::uint8_t green = color_channel(argument(expression, scope, "green", 1U));
-        const std::uint8_t blue = color_channel(argument(expression, scope, "blue", 2U));
+    case HelperKind::rgb:
+    case HelperKind::rgba: {
+        const std::uint8_t red = color_channel(argument_value(program, node, scope, known.red, 0U));
+        const std::uint8_t green =
+            color_channel(argument_value(program, node, scope, known.green, 1U));
+        const std::uint8_t blue =
+            color_channel(argument_value(program, node, scope, known.blue, 2U));
         const std::uint8_t alpha =
-            name == "rgba" ? color_channel(argument(expression, scope, "alpha", 3U)) : UINT8_MAX;
+            node.helper == HelperKind::rgba
+                ? color_channel(argument_value(program, node, scope, known.alpha, 3U))
+                : UINT8_MAX;
         return ExpressionValue(Value(ColorValue{red, green, blue, alpha}));
     }
-    if (name == "animation") {
-        return ExpressionValue(Value(display_string(argument(expression, scope, "name", 0U))));
-    }
-    if (name == "style") {
+    case HelperKind::animation:
+        return ExpressionValue(
+            Value(display_string(argument_value(program, node, scope, known.name, 0U))));
+    case HelperKind::style: {
         std::vector<Value> bases;
         std::vector<std::pair<std::string, Value>> properties;
-        for (const JsonValue entry : array_field(expression, "arguments")) {
-            const Value value = require_value(evaluate(required(entry, "value"), scope), entry);
-            const JsonValue argument_name = required(entry, "name");
-            if (const std::optional<std::string_view> encoded_name = argument_name.string();
-                !encoded_name.has_value()) {
-                bases.push_back(value);
+        for (const ProgramArgument& entry : program.arguments(node)) {
+            Value value = value_of(entry);
+            if (!entry.named) {
+                bases.push_back(std::move(value));
             } else {
-                properties.emplace_back(std::string(*encoded_name), value);
+                properties.emplace_back(std::string(entry.name.name()), std::move(value));
             }
         }
         properties.emplace_back("$bases", Value(std::move(bases)));
         return ExpressionValue(Value(std::move(properties)));
     }
-    if (name == "whenStyle") {
-        const Value condition = argument(expression, scope, "condition", 0U);
-        if (condition.boolean() == nullptr || !*condition.boolean()) {
+    case HelperKind::when_style: {
+        const Value condition = argument_value(program, node, scope, known.condition, 0U);
+        if (condition.boolean() == nullptr || !*condition.boolean())
             return ExpressionValue(Value{});
-        }
-        return ExpressionValue(argument(expression, scope, "active", 1U));
+        return ExpressionValue(argument_value(program, node, scope, known.active, 1U));
     }
-    if (name == "effect") {
+    case HelperKind::effect: {
         std::vector<std::pair<std::string, Value>> arguments;
         std::optional<Value> backdrop_source;
         std::optional<Value> refresh_rate;
-        for (const JsonValue entry : array_field(expression, "arguments")) {
-            const JsonValue argument_name = required(entry, "name");
-            const std::optional<std::string_view> encoded_name = argument_name.string();
-            if (!encoded_name.has_value() || *encoded_name == "name")
+        for (const ProgramArgument& entry : program.arguments(node)) {
+            if (!entry.named || entry.name == known.name)
                 continue;
-            if (*encoded_name == "backdropSource") {
-                backdrop_source = require_value(evaluate(required(entry, "value"), scope), entry);
+            if (entry.name == known.backdrop_source) {
+                backdrop_source = value_of(entry);
                 continue;
             }
-            if (*encoded_name == "refreshRate") {
-                refresh_rate = require_value(evaluate(required(entry, "value"), scope), entry);
+            if (entry.name == known.refresh_rate) {
+                refresh_rate = value_of(entry);
                 continue;
             }
-            arguments.emplace_back(std::string(*encoded_name),
-                                   require_value(evaluate(required(entry, "value"), scope), entry));
+            arguments.emplace_back(std::string(entry.name.name()), value_of(entry));
         }
         std::vector<std::pair<std::string, Value>> fields{
             {"arguments", Value(std::move(arguments))},
-            {"name", argument(expression, scope, "name", 0U)},
+            {"name", argument_value(program, node, scope, known.name, 0U)},
         };
-        if (backdrop_source.has_value()) {
+        if (backdrop_source.has_value())
             fields.emplace_back("backdropSource", std::move(*backdrop_source));
-        }
-        if (refresh_rate.has_value()) {
+        if (refresh_rate.has_value())
             fields.emplace_back("refreshRate", std::move(*refresh_rate));
-        }
         return ExpressionValue(Value(std::move(fields)));
     }
-    report(expression, "STRATA.DSL.RUNTIME_UNKNOWN_HELPER",
-           "Helper '" + name + "' is not available at runtime.", "registered helper");
+    case HelperKind::unknown:
+        break;
+    }
+    report(node, scope, "STRATA.DSL.RUNTIME_UNKNOWN_HELPER",
+           "Helper '" + node.text + "' is not available at runtime.", "registered helper");
     return ExpressionValue{};
 }
 
 Value ExpressionRuntime::require_value(const ExpressionValue& evaluated,
-                                       const JsonValue expression) {
+                                       const ProgramExpression& node,
+                                       const ExpressionScope& scope) {
     if (const Value* value = evaluated.value())
         return *value;
     if (const auto* collection = evaluated.collection())
         return (*collection)->items;
-    report(expression, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
+    report(node, scope, "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
            "Expression did not produce a scalar runtime value.");
     return Value{};
 }
 
-Value ExpressionRuntime::argument(const JsonValue helper, const ExpressionScope& scope,
-                                  const std::string_view name, const std::size_t position) {
-    const JsonValue expression = argument_expression(helper, name, position);
-    return expression ? require_value(evaluate(expression, scope), expression) : Value{};
-}
-
-JsonValue ExpressionRuntime::argument_expression(const JsonValue helper,
-                                                 const std::string_view name,
-                                                 const std::size_t position) const {
-    const JsonArray arguments = array_field(helper, "arguments");
-    for (const JsonValue argument_value : arguments) {
-        const JsonValue argument_name = required(argument_value, "name");
-        if (argument_name.string() == std::optional<std::string_view>(name)) {
-            return required(argument_value, "value");
-        }
-    }
-    if (position < arguments.size() && required(arguments[position], "name").is_null()) {
-        return required(arguments[position], "value");
-    }
-    return {};
-}
-
 Value ExpressionRuntime::evaluate_lambda(const LambdaValue& lambda, const Value& input) {
-    ExpressionScope nested{
-        lambda.captured,
-        lambda.captured_executable,
-        lambda.captured_host_roots,
-        lambda.component_path + "/" + lambda.parameter,
-        {},
-        lambda.captured_host_dependencies,
-        lambda.captured_lexical_dependencies,
-    };
-    nested.values.insert_or_assign(lambda.parameter, input);
-    nested.executable_values.erase(lambda.parameter);
-    nested.lexical_dependency_overrides.erase(lambda.parameter);
+    ExpressionScope nested = lambda.captured;
+    ScopeFrame frame;
+    frame.hides_parent_states = true;
+    frame.bindings.push_back(ScopeBinding{lambda.parameter, true, ScopeStateBinding::inherit,
+                                          ExpressionValue(input), nullptr});
+    nested.push(std::move(frame));
+    nested.set_component_path(lambda.captured.component_path() + "/" +
+                              std::string(lambda.parameter.name()));
     LambdaDependencyFilter dependency_filter(dependency_observer_, lambda.parameter);
-    struct DependencyObserverRestore final {
-        ExpressionDependencyObserver*& slot;
-        ExpressionDependencyObserver* previous;
-        ~DependencyObserverRestore() {
-            slot = previous;
-        }
-    } dependency_restore{dependency_observer_, dependency_observer_};
-    dependency_observer_ = &dependency_filter;
-    return require_value(evaluate(lambda.body, nested), lambda.body);
-}
-
-std::optional<ExpressionRuntime::HostAccess>
-ExpressionRuntime::host_access(const JsonValue expression, const ExpressionScope& scope) {
-    const std::string_view kind = string_field(expression, "kind");
-    if (kind == "variable" && string_field(expression, "binding") == "host") {
-        const std::string_view name = string_field(expression, "name");
-        if (scope.values.contains(name) || scope.executable_values.contains(name) ||
-            scope.lexical_dependency_overrides.contains(name)) {
-            return std::nullopt;
-        }
-        return HostAccess{{HostPathSegment::named(std::string(name))}};
-    }
-    if (kind != "property" && kind != "index")
-        return std::nullopt;
-    std::optional<HostAccess> receiver = host_access(required(expression, "receiver"), scope);
-    if (!receiver.has_value())
-        return std::nullopt;
-    if (kind == "property") {
-        receiver->path.push_back(
-            HostPathSegment::named(std::string(string_field(expression, "name"))));
-        return receiver;
-    }
-    const Value lookup = require_value(evaluate(required(expression, "index"), scope), expression);
-    receiver->path.push_back(HostPathSegment::lookup(
-        lookup.string() != nullptr ? *lookup.string() : display_string(lookup),
-        bounded_index(lookup)));
-    return receiver;
+    ObserverRestore restore(dependency_observer_, &dependency_filter);
+    const Program& program = *lambda.program;
+    return require_value(evaluate_node(program, lambda.body, nested),
+                         program.expression(lambda.body), nested);
 }
 
 std::shared_ptr<const CollectionViewValue>
-ExpressionRuntime::collection_view(const JsonValue helper, const ExpressionScope& scope) {
-    const std::string_view operation = string_field(helper, "name");
-    const JsonValue source_expression = argument_expression(helper, "source", 0U);
-    if (!source_expression) {
-        report(helper, "STRATA.DSL.RUNTIME_COLLECTION_SOURCE",
-               "Collection helper requires a source list.");
+ExpressionRuntime::collection_view(const Program& program, const ExpressionId expression,
+                                   const ExpressionScope& scope) {
+    const ProgramExpression& helper = program.expression(expression);
+    const Names& known = names();
+    const std::string& operation = helper.text;
+    const HelperKind kind = helper.helper;
+    const ProgramArgument* source_argument = argument(program, helper, known.source, 0U);
+    const auto empty_view = [&operation] {
         return std::shared_ptr<const CollectionViewValue>(new CollectionViewValue{
             CollectionViewImmutableIdentity{
                 Value(std::vector<Value>{}),
@@ -1493,133 +1561,102 @@ ExpressionRuntime::collection_view(const JsonValue helper, const ExpressionScope
                 0U,
                 0U,
                 0U,
-                std::string(operation),
+                operation,
             },
         });
+    };
+    if (source_argument == nullptr) {
+        report(helper, scope, "STRATA.DSL.RUNTIME_COLLECTION_SOURCE",
+               "Collection helper requires a source list.");
+        return empty_view();
     }
-    // A frozen expression is named by where it lives and one from the declared source by its IR
-    // path; anything else only by what it says. The prefixes keep the three apart.
-    std::string expression_key;
-    const std::string_view path = string_field(helper, "path");
-    if (const auto identity = helper.frozen_identity()) {
-        expression_key.resize(1U + sizeof(identity->first) + sizeof(identity->second));
-        std::memcpy(expression_key.data() + 1U, &identity->first, sizeof(identity->first));
-        std::memcpy(expression_key.data() + 1U + sizeof(identity->first), &identity->second,
-                    sizeof(identity->second));
-    } else if (expression_source_ != nullptr && !path.empty()) {
-        expression_key.reserve(1U + path.size());
-        expression_key.push_back('\1');
-        expression_key.append(path);
-    } else {
-        expression_key = data::encode_canonical_json(helper);
-    }
-    const auto bucket = collection_cache_.find(expression_key);
-    for (std::size_t position = bucket != collection_cache_.end() ? bucket->second.size() : 0U;
-         position-- > 0U;) {
-        const CollectionCacheEntry& cached = bucket->second[position];
-        bool dependencies_current = true;
-        for (const CollectionDependencyRead& read : cached.dependency_order) {
-            if (read.kind == CollectionDependencyKind::lexical) {
-                const auto stored = cached.lexical_dependencies.find(read.key);
-                const std::optional<ExpressionDependencyValue> current =
-                    expression_scope_dependency(scope, read.key);
-                if (stored == cached.lexical_dependencies.end() || !current.has_value() ||
-                    *current != stored->second) {
-                    dependencies_current = false;
-                    break;
-                }
-            } else {
-                const auto stored = cached.host_dependencies.find(read.key);
-                if (stored == cached.host_dependencies.end()) {
-                    dependencies_current = false;
-                    break;
-                }
-                const ExpressionHostDependency current =
-                    read_host_dependency(stored->second.path, scope);
-                if (canonical_host_dependency_path(current.path) != read.key ||
-                    current != stored->second) {
-                    dependencies_current = false;
-                    break;
-                }
-            }
-        }
-        if (!dependencies_current)
-            continue;
-        if (dependency_observer_ != nullptr) {
+    const CollectionCacheKey key{program.serial(), expression};
+    if (const auto bucket = collection_cache_.find(key); bucket != collection_cache_.end()) {
+        for (std::size_t position = bucket->second.size(); position-- > 0U;) {
+            const CollectionCacheEntry& cached = bucket->second[position];
+            bool current = true;
             for (const CollectionDependencyRead& read : cached.dependency_order) {
                 if (read.kind == CollectionDependencyKind::lexical) {
-                    dependency_observer_->lexical(read.key,
-                                                  cached.lexical_dependencies.at(read.key));
+                    const ExpressionValue* value = scope.find(read.name);
+                    if (value == nullptr ||
+                        !same_expression_value(*value, cached.lexical_dependencies.at(read.name))) {
+                        current = false;
+                        break;
+                    }
                 } else {
-                    dependency_observer_->host(cached.host_dependencies.at(read.key));
+                    const ExpressionHostDependency& stored =
+                        cached.host_dependencies.at(read.host_key);
+                    if (read_host_dependency(stored.path, scope) != stored) {
+                        current = false;
+                        break;
+                    }
                 }
             }
+            if (!current)
+                continue;
+            if (dependency_observer_ != nullptr) {
+                for (const CollectionDependencyRead& read : cached.dependency_order) {
+                    if (read.kind == CollectionDependencyKind::lexical) {
+                        dependency_observer_->lexical(read.name,
+                                                      cached.lexical_dependencies.at(read.name));
+                    } else {
+                        dependency_observer_->host(cached.host_dependencies.at(read.host_key));
+                    }
+                }
+            }
+            static_cast<void>(cached.view->cache_hits.fetch_add(1U, std::memory_order_relaxed));
+            return cached.view;
         }
-        static_cast<void>(cached.view->cache_hits.fetch_add(1U, std::memory_order_relaxed));
-        return cached.view;
     }
 
     CollectionDependencyTrace dependencies(dependency_observer_);
-    struct DependencyObserverRestore final {
-        ExpressionDependencyObserver*& slot;
-        ExpressionDependencyObserver* previous;
-        ~DependencyObserverRestore() {
-            slot = previous;
-        }
-    } dependency_restore{dependency_observer_, dependency_observer_};
-    dependency_observer_ = &dependencies;
+    ObserverRestore restore(dependency_observer_, &dependencies);
 
-    const ExpressionValue source = evaluate(source_expression, scope);
+    const ExpressionValue source = evaluate_node(program, source_argument->value, scope);
     const ValueList* source_items = collection_items(source);
     const auto [total, source_matched] = collection_counts(source);
     if (source_items == nullptr) {
-        report(helper, "STRATA.DSL.RUNTIME_COLLECTION_SOURCE",
+        report(helper, scope, "STRATA.DSL.RUNTIME_COLLECTION_SOURCE",
                "Collection helper requires a list or derived collection view.");
-        return std::shared_ptr<const CollectionViewValue>(new CollectionViewValue{
-            CollectionViewImmutableIdentity{
-                Value(std::vector<Value>{}),
-                0U,
-                0U,
-                0U,
-                0U,
-                std::string(operation),
-            },
-        });
+        return empty_view();
     }
 
     std::vector<Value> scalar_arguments;
-    const auto& arguments = array_field(helper, "arguments");
+    const std::span<const ProgramArgument> arguments = program.arguments(helper);
     for (std::size_t index = 1U; index < arguments.size(); ++index) {
-        const JsonValue argument_value = required(arguments[index], "value");
-        if (string_field(argument_value, "kind") != "lambda") {
+        const ProgramExpression& value = program.expression(arguments[index].value);
+        if (value.kind != ExpressionKind::lambda) {
             scalar_arguments.push_back(
-                require_value(evaluate(argument_value, scope), argument_value));
+                require_value(evaluate_node(program, arguments[index].value, scope), value, scope));
         }
     }
 
-    JsonValue lambda_expression;
-    if (operation == "filter" || operation == "takeWhile")
-        lambda_expression = argument_expression(helper, "predicate", 1U);
-    else if (operation == "map")
-        lambda_expression = argument_expression(helper, "transform", 1U);
-    else if (operation == "sortBy" || operation == "distinctBy" || operation == "groupBy")
-        lambda_expression = argument_expression(helper, "selector", 1U);
-    ExpressionValue lambda_value =
-        lambda_expression ? evaluate(lambda_expression, scope) : ExpressionValue{};
+    const ProgramArgument* lambda_argument = nullptr;
+    if (kind == HelperKind::filter || kind == HelperKind::take_while)
+        lambda_argument = argument(program, helper, known.predicate, 1U);
+    else if (kind == HelperKind::map)
+        lambda_argument = argument(program, helper, known.transform, 1U);
+    else if (kind == HelperKind::sort_by || kind == HelperKind::distinct_by ||
+             kind == HelperKind::group_by)
+        lambda_argument = argument(program, helper, known.selector, 1U);
+    const ExpressionValue lambda_value = lambda_argument != nullptr
+                                             ? evaluate_node(program, lambda_argument->value, scope)
+                                             : ExpressionValue{};
     const auto* lambda_pointer = lambda_value.lambda();
 
     std::vector<Value> result;
-    if (operation == "filter") {
+    if (kind == HelperKind::filter) {
         for (const Value& value : source_items->values) {
             if (lambda_pointer != nullptr && truthy(evaluate_lambda(**lambda_pointer, value)))
                 result.push_back(value);
         }
-    } else if (operation == "map") {
+    } else if (kind == HelperKind::map) {
+        result.reserve(source_items->values.size());
         for (const Value& value : source_items->values) {
             result.push_back(lambda_pointer != nullptr ? evaluate_lambda(**lambda_pointer, value)
                                                        : Value{});
         }
-    } else if (operation == "sortBy") {
+    } else if (kind == HelperKind::sort_by) {
         const bool descending = !scalar_arguments.empty() &&
                                 scalar_arguments.back().boolean() != nullptr &&
                                 *scalar_arguments.back().boolean();
@@ -1631,68 +1668,68 @@ ExpressionRuntime::collection_view(const JsonValue helper, const ExpressionScope
                                               : Value{});
         }
         std::stable_sort(decorated.begin(), decorated.end(),
-                         [this, descending](const auto& left, const auto& right) {
+                         [descending](const auto& left, const auto& right) {
                              const int compared = compare_keys(left.second, right.second);
                              return descending ? compared > 0 : compared < 0;
                          });
         result.reserve(decorated.size());
-        for (auto& [value, key] : decorated) {
-            static_cast<void>(key);
+        for (auto& [value, sort_key] : decorated) {
+            static_cast<void>(sort_key);
             result.push_back(std::move(value));
         }
-    } else if (operation == "distinctBy") {
+    } else if (kind == HelperKind::distinct_by) {
         std::vector<Value> seen;
         for (const Value& value : source_items->values) {
-            const Value key =
+            const Value distinct =
                 lambda_pointer != nullptr ? evaluate_lambda(**lambda_pointer, value) : value;
-            if (std::ranges::find(seen, key) == seen.end()) {
-                seen.push_back(key);
+            if (std::ranges::find(seen, distinct) == seen.end()) {
+                seen.push_back(distinct);
                 result.push_back(value);
             }
         }
-    } else if (operation == "groupBy") {
+    } else if (kind == HelperKind::group_by) {
         std::vector<std::pair<Value, std::vector<Value>>> groups;
         for (const Value& value : source_items->values) {
-            const Value key =
+            const Value group_key =
                 lambda_pointer != nullptr ? evaluate_lambda(**lambda_pointer, value) : Value{};
             auto found = std::ranges::find_if(
-                groups, [&key](const auto& group) { return group.first == key; });
+                groups, [&group_key](const auto& group) { return group.first == group_key; });
             if (found == groups.end()) {
-                groups.emplace_back(key, std::vector<Value>{value});
+                groups.emplace_back(group_key, std::vector<Value>{value});
             } else {
                 found->second.push_back(value);
             }
         }
-        for (auto& [key, items] : groups) {
+        for (auto& [group_key, items] : groups) {
             result.emplace_back(std::vector<std::pair<std::string, Value>>{
-                {"key", key},
+                {"key", group_key},
                 {"items", Value(std::move(items))},
             });
         }
-    } else if (operation == "flatten") {
+    } else if (kind == HelperKind::flatten) {
         for (const Value& value : source_items->values) {
-            if (const ValueList* nested = value.list()) {
+            if (const ValueList* nested = value.list())
                 result.insert(result.end(), nested->values.begin(), nested->values.end());
-            }
         }
-    } else if (operation == "takeWhile") {
+    } else if (kind == HelperKind::take_while) {
         for (const Value& value : source_items->values) {
             if (lambda_pointer == nullptr || !truthy(evaluate_lambda(**lambda_pointer, value)))
                 break;
             result.push_back(value);
         }
-    } else if (operation == "window" || operation == "page") {
+    } else if (kind == HelperKind::window || kind == HelperKind::page) {
+        const bool page = kind == HelperKind::page;
         const std::size_t first =
             !scalar_arguments.empty() ? bounded_index(scalar_arguments[0]).value_or(0U) : 0U;
         const std::size_t amount =
             scalar_arguments.size() > 1U
                 ? std::min(bounded_index(scalar_arguments[1]).value_or(0U), maximum_derived_items)
                 : 0U;
-        const std::size_t offset = operation == "page" && amount != 0U &&
-                                           first <= std::numeric_limits<std::size_t>::max() / amount
-                                       ? first * amount
-                                   : operation == "page" ? std::numeric_limits<std::size_t>::max()
-                                                         : first;
+        const std::size_t offset =
+            page && amount != 0U && first <= std::numeric_limits<std::size_t>::max() / amount
+                ? first * amount
+            : page ? std::numeric_limits<std::size_t>::max()
+                   : first;
         if (offset < source_items->values.size()) {
             const std::size_t end =
                 std::min(source_items->values.size(),
@@ -1704,31 +1741,32 @@ ExpressionRuntime::collection_view(const JsonValue helper, const ExpressionScope
     }
     if (result.size() > maximum_derived_items) {
         result.resize(maximum_derived_items);
-        report(helper, "STRATA.DSL.RUNTIME_COLLECTION_BOUND_EXCEEDED",
+        report(helper, scope, "STRATA.DSL.RUNTIME_COLLECTION_BOUND_EXCEEDED",
                "Collection helper output exceeded the runtime bound.");
     }
-    if (operation == "map" && std::ranges::any_of(result, [](const Value& value) {
+    if (kind == HelperKind::map && std::ranges::any_of(result, [](const Value& value) {
             if (value.object() == nullptr)
                 return false;
-            const Value* key = value.field("key");
-            if (key == nullptr)
-                key = value.field("id");
-            return key == nullptr || key->kind() == ValueKind::null_value ||
-                   key->kind() == ValueKind::list || key->kind() == ValueKind::object;
+            const Value* stable = value.field("key");
+            if (stable == nullptr)
+                stable = value.field("id");
+            return stable == nullptr || stable->kind() == ValueKind::null_value ||
+                   stable->kind() == ValueKind::list || stable->kind() == ValueKind::object;
         })) {
-        report(helper, "STRATA.DSL.RUNTIME_COLLECTION_UNSTABLE_KEY",
+        report(helper, scope, "STRATA.DSL.RUNTIME_COLLECTION_UNSTABLE_KEY",
                "Mapped record results must expose a stable 'key' or 'id' field before they are "
                "repeated.",
                "record containing key or id");
     }
-    const bool changes_match_count = operation == "filter" || operation == "distinctBy" ||
-                                     operation == "groupBy" || operation == "flatten" ||
-                                     operation == "takeWhile";
+    const bool changes_match_count = kind == HelperKind::filter ||
+                                     kind == HelperKind::distinct_by ||
+                                     kind == HelperKind::group_by || kind == HelperKind::flatten ||
+                                     kind == HelperKind::take_while;
     const std::size_t matched = changes_match_count ? result.size() : source_matched;
     std::size_t range_start = 0U;
-    if ((operation == "window" || operation == "page") && !scalar_arguments.empty()) {
+    if ((kind == HelperKind::window || kind == HelperKind::page) && !scalar_arguments.empty()) {
         range_start = bounded_index(scalar_arguments[0]).value_or(0U);
-        if (operation == "page" && scalar_arguments.size() > 1U) {
+        if (kind == HelperKind::page && scalar_arguments.size() > 1U) {
             const std::size_t amount = bounded_index(scalar_arguments[1]).value_or(0U);
             range_start =
                 amount != 0U && range_start <= std::numeric_limits<std::size_t>::max() / amount
@@ -1749,55 +1787,61 @@ ExpressionRuntime::collection_view(const JsonValue helper, const ExpressionScope
             matched,
             range_start,
             range_end,
-            std::string(operation),
+            operation,
         },
     });
-    if (dependencies.cacheable) {
-        if (collection_cache_entries_ >= 1024U) {
-            collection_cache_.clear();
-            collection_cache_entries_ = 0U;
-        }
-        std::vector<CollectionCacheEntry>& entries = collection_cache_[std::move(expression_key)];
-        // An entry for the same lexical context is superseded: only its host reads differed.
-        if (const auto superseded = std::ranges::find(entries, dependencies.lexical_values,
-                                                      &CollectionCacheEntry::lexical_dependencies);
-            superseded != entries.end()) {
-            entries.erase(superseded);
-            --collection_cache_entries_;
-        }
-        std::vector<CollectionDependencyRead> dependency_order;
-        dependency_order.reserve(dependencies.order.size());
-        for (auto& [host, key] : dependencies.order) {
-            dependency_order.push_back(CollectionDependencyRead{
-                host ? CollectionDependencyKind::host : CollectionDependencyKind::lexical,
-                std::move(key),
-            });
-        }
-        entries.push_back(CollectionCacheEntry{
-            std::move(dependencies.lexical_values),
-            std::move(dependencies.host_values),
-            std::move(dependency_order),
-            view,
+    if (collection_cache_entries_ >= 1024U) {
+        collection_cache_.clear();
+        collection_cache_entries_ = 0U;
+    }
+    std::vector<CollectionCacheEntry>& entries = collection_cache_[key];
+    // An entry for the same lexical context is superseded: only its host reads differed.
+    const auto same_context = [&dependencies](const CollectionCacheEntry& entry) {
+        return std::ranges::equal(entry.lexical_dependencies, dependencies.lexical_values,
+                                  [](const auto& left, const auto& right) {
+                                      return left.first == right.first &&
+                                             same_expression_value(left.second, right.second);
+                                  });
+    };
+    if (const auto superseded = std::ranges::find_if(entries, same_context);
+        superseded != entries.end()) {
+        entries.erase(superseded);
+        --collection_cache_entries_;
+    }
+    std::vector<CollectionDependencyRead> dependency_order;
+    dependency_order.reserve(dependencies.order.size());
+    for (auto& read : dependencies.order) {
+        dependency_order.push_back(CollectionDependencyRead{
+            read.host ? CollectionDependencyKind::host : CollectionDependencyKind::lexical,
+            read.name,
+            std::move(read.host_key),
         });
     }
+    entries.push_back(CollectionCacheEntry{
+        std::move(dependencies.lexical_values),
+        std::move(dependencies.host_values),
+        std::move(dependency_order),
+        view,
+    });
+    ++collection_cache_entries_;
     return view;
 }
 
 std::shared_ptr<const ActionValue>
-ExpressionRuntime::composed_action(const JsonValue helper, const ExpressionScope& scope,
-                                   const ActionCompositionMode mode) {
+ExpressionRuntime::composed_action(const Program& program, const ProgramExpression& node,
+                                   const ExpressionScope& scope, const ActionCompositionMode mode) {
     std::vector<std::shared_ptr<const ActionValue>> children;
-    for (const JsonValue argument_value : array_field(helper, "arguments")) {
-        const ExpressionValue evaluated = evaluate(required(argument_value, "value"), scope);
+    for (const ProgramArgument& argument : program.arguments(node)) {
+        const ExpressionValue evaluated = evaluate_node(program, argument.value, scope);
         if (evaluated.action() == nullptr) {
-            report(helper, "STRATA.DSL.RUNTIME_ACTION_COMPOSITION",
+            report(node, scope, "STRATA.DSL.RUNTIME_ACTION_COMPOSITION",
                    "Action composition requires typed actions.");
             return std::make_shared<const ActionValue>(ActionValue{});
         }
         children.push_back(*evaluated.action());
     }
     if (children.empty()) {
-        report(helper, "STRATA.DSL.RUNTIME_ACTION_COMPOSITION",
+        report(node, scope, "STRATA.DSL.RUNTIME_ACTION_COMPOSITION",
                "Action composition must not be empty.");
         return std::make_shared<const ActionValue>(ActionValue{});
     }
@@ -1805,13 +1849,13 @@ ExpressionRuntime::composed_action(const JsonValue helper, const ExpressionScope
         mode == ActionCompositionMode::sequence ? "action.sequence" : "action.parallel";
     const auto contract = actions_.contract(id);
     if (contract == nullptr) {
-        report(helper, "STRATA.DSL.RUNTIME_UNKNOWN_ACTION",
+        report(node, scope, "STRATA.DSL.RUNTIME_UNKNOWN_ACTION",
                "Framework composition action is not registered.");
         return std::make_shared<const ActionValue>(ActionValue{});
     }
     Value payload(std::vector<std::pair<std::string, Value>>{});
-    auto action =
-        std::make_shared<const Action>(contract, std::move(payload), action_origin(helper, scope));
+    auto action = std::make_shared<const Action>(contract, std::move(payload),
+                                                 action_origin(program, node, scope));
     return std::make_shared<const ActionValue>(ActionValue{
         std::move(action),
         mode,
@@ -1819,21 +1863,20 @@ ExpressionRuntime::composed_action(const JsonValue helper, const ExpressionScope
     });
 }
 
-void ExpressionRuntime::report(const JsonValue expression, std::string code, std::string message,
+void ExpressionRuntime::report(const ProgramExpression& node, const ExpressionScope& scope,
+                               std::string code, std::string message,
                                std::optional<std::string> expected) {
-    const std::optional<std::string_view> path = expression.find("path").string();
-    const std::string diagnostic_path =
-        active_scope_ != nullptr && !active_scope_->component_path.empty()
-            ? active_scope_->component_path
-        : path.has_value() ? std::string(*path)
-                           : std::string{};
+    const std::string& component_path = scope.component_path();
+    const std::optional<std::string_view> path = node.source.find("path").string();
     report(RuntimeDiagnostic{
         std::move(code),
         std::move(message),
-        diagnostic_path,
+        !component_path.empty() ? component_path
+        : path.has_value()      ? std::string(*path)
+                                : std::string{},
         std::move(expected),
         DiagnosticSeverity::error,
-        portable_expression_range(expression),
+        portable_expression_range(node.source),
     });
 }
 
@@ -1849,87 +1892,6 @@ void ExpressionRuntime::report(RuntimeDiagnostic diagnostic) {
     if (!reported_diagnostics_.insert(std::move(fingerprint)).second)
         return;
     diagnostics_.push_back(std::move(diagnostic));
-}
-
-bool truthy(const Value& value) noexcept {
-    switch (value.kind()) {
-    case ValueKind::null_value:
-        return false;
-    case ValueKind::boolean:
-        return *value.boolean();
-    case ValueKind::number:
-        return *value.number() != 0.0;
-    case ValueKind::duration:
-        return value.duration()->nanoseconds != 0;
-    case ValueKind::string:
-        return !value.string()->empty();
-    case ValueKind::list:
-        return !value.list()->values.empty();
-    case ValueKind::object:
-        return !value.object()->fields.empty();
-    case ValueKind::color:
-    case ValueKind::image:
-    case ValueKind::key:
-    case ValueKind::theme_token:
-        return true;
-    }
-    return false;
-}
-
-std::string display_string(const Value& value) {
-    switch (value.kind()) {
-    case ValueKind::null_value:
-        return {};
-    case ValueKind::boolean:
-        return *value.boolean() ? "true" : "false";
-    case ValueKind::number: {
-        char buffer[64]{};
-        const auto converted = std::to_chars(std::begin(buffer), std::end(buffer), *value.number());
-        return converted.ec == std::errc{} ? std::string(buffer, converted.ptr) : std::string{"0"};
-    }
-    case ValueKind::duration:
-        return std::to_string(value.duration()->nanoseconds);
-    case ValueKind::string:
-        return *value.string();
-    case ValueKind::color: {
-        static constexpr char digits[] = "0123456789abcdef";
-        const ColorValue color = *value.color();
-        const std::uint8_t channels[] = {color.red, color.green, color.blue, color.alpha};
-        std::string displayed = "#";
-        displayed.reserve(9U);
-        for (const std::uint8_t channel : channels) {
-            displayed.push_back(digits[channel >> 4U]);
-            displayed.push_back(digits[channel & 0x0FU]);
-        }
-        return displayed;
-    }
-    case ValueKind::image:
-        return value.image()->id;
-    case ValueKind::key:
-        return value.key()->value;
-    case ValueKind::theme_token:
-        return "theme." + value.theme_token()->name;
-    case ValueKind::list: {
-        std::string displayed = "[";
-        for (std::size_t index = 0U; index < value.list()->values.size(); ++index) {
-            if (index != 0U)
-                displayed += ", ";
-            displayed += display_string(value.list()->values[index]);
-        }
-        return displayed + "]";
-    }
-    case ValueKind::object: {
-        std::string displayed = "{";
-        for (std::size_t index = 0U; index < value.object()->fields.size(); ++index) {
-            if (index != 0U)
-                displayed += ", ";
-            displayed += value.object()->fields[index].first + "=" +
-                         display_string(value.object()->fields[index].second);
-        }
-        return displayed + "}";
-    }
-    }
-    return {};
 }
 
 } // namespace strata::runtime
