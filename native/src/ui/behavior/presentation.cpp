@@ -156,9 +156,43 @@ void reorder_target_overlay(const DescriptionBehavior& attachment, WidgetRenderS
         color, std::nullopt, 1.5);
 }
 
+[[nodiscard]] bool movement_guides_active(const RetainedNode& node, const DescriptionBehavior&,
+                                          const InputRouter&) {
+    const runtime::Value* guides = node.retained_value("strata.movement.guides");
+    return guides != nullptr && guides->object() != nullptr;
+}
+
+/** A snapped move's aligned lines across its container, over everything else, while dragging. */
+void movement_guides_overlay(const DescriptionBehavior& attachment, WidgetRenderScope& scope) {
+    const runtime::Value* guides = scope.node().retained_value("strata.movement.guides");
+    const RetainedNode* parent = scope.node().parent();
+    const LayoutRecord* record =
+        parent != nullptr ? scope.layout_result().find(parent->identity()) : nullptr;
+    if (guides == nullptr || record == nullptr)
+        return;
+    const runtime::Value* snap = attachment.options.field("snap");
+    const runtime::Value* shown = snap != nullptr ? snap->field("guides") : nullptr;
+    if (shown != nullptr && shown->boolean() != nullptr && !*shown->boolean())
+        return;
+    RenderColor color{255U, 255U, 255U, 120U};
+    if (shown != nullptr && shown->color() != nullptr)
+        color = RenderColor{shown->color()->red, shown->color()->green, shown->color()->blue,
+                            shown->color()->alpha};
+    const Rect area = record->viewport.value_or(record->content_bounds);
+    const runtime::Value* x = guides->field("x");
+    const runtime::Value* y = guides->field("y");
+    if (x != nullptr && x->number() != nullptr)
+        scope.solid_rect(Rect{*x->number() - 0.5, area.y, 1.0, area.height}, color);
+    if (y != nullptr && y->number() != nullptr)
+        scope.solid_rect(Rect{area.x, *y->number() - 0.5, area.width, 1.0}, color);
+}
+
 } // namespace
 
 void register_builtin_behavior_presenters(BehaviorRegistry& registry) {
+    registry.register_present_phase(
+        "strata.movable",
+        BehaviorPresentPhase{movement_guides_active, movement_guides_overlay, true});
     registry.register_present_phase("strata.hoverable",
                                     BehaviorPresentPhase{hovered, hover_overlay, false});
     registry.register_present_phase(

@@ -24,6 +24,7 @@ constexpr std::string_view activate_session = "strata.activate.session";
 constexpr std::string_view activate_click = "strata.activate.click";
 constexpr std::string_view movement_offset = "strata.movement.offset";
 constexpr std::string_view movement_session = "strata.movement.session";
+constexpr std::string_view movement_guides = "strata.movement.guides";
 constexpr std::string_view runtime_size = "strata.gesture.runtimeSize";
 constexpr std::string_view resize_session = "strata.gesture.resizeSession";
 constexpr std::string_view split_ratio = "strata.gesture.splitRatio";
@@ -246,6 +247,145 @@ long_press_duration(const BehaviorInputScope& scope) noexcept {
     return offset;
 }
 
+[[nodiscard]] runtime::Value rect_value(const Rect& rect) {
+    return object({
+        {"x", runtime::Value(rect.x)},
+        {"y", runtime::Value(rect.y)},
+        {"width", runtime::Value(rect.width)},
+        {"height", runtime::Value(rect.height)},
+    });
+}
+
+[[nodiscard]] bool movable(const RetainedNode& node) noexcept {
+    for (const DescriptionBehavior& attachment : node.description().behaviors) {
+        if (attachment.enabled && attachment.id == "strata.movable")
+            return true;
+    }
+    return false;
+}
+
+/** Where a movable shows: its layout bounds translated by its retained movement offset. */
+[[nodiscard]] Rect moved_bounds(const RetainedNode& node, const LayoutRecord& layout) {
+    const Point offset = retained_point(node.retained_value(movement_offset));
+    return Rect{layout.bounds.x + offset.x, layout.bounds.y + offset.y, layout.bounds.width,
+                layout.bounds.height};
+}
+
+[[nodiscard]] std::optional<Rect> movement_area(const BehaviorInputScope& scope) {
+    const RetainedNode* parent = scope.node().parent();
+    const LayoutRecord* layout = parent != nullptr ? scope.layout(*parent) : nullptr;
+    if (layout == nullptr)
+        return std::nullopt;
+    return layout->viewport.value_or(layout->content_bounds);
+}
+
+/** The lines a snapped move aligned to, in surface coordinates; empty when unsnapped. */
+struct MovementGuides final {
+    std::optional<double> x;
+    std::optional<double> y;
+};
+
+struct AxisSnap final {
+    double delta = 0.0;
+    std::optional<double> line;
+    double best = std::numeric_limits<double>::infinity();
+
+    void consider(const double edge, const double target, const double limit) noexcept {
+        const double distance = std::abs(target - edge);
+        if (distance <= limit && distance < best) {
+            best = distance;
+            delta = target - edge;
+            line = target;
+        }
+    }
+};
+
+/**
+ * Option `snap`: per axis, the moving box's start edge, centre or end edge within `distance`
+ * (default 6) of a target moves onto it; the nearest target wins. Targets are the container's
+ * edges inset by `margin` (default 0) and its centre, and, unless `siblings` is false, every
+ * other movable sibling's edges and centre as it shows, or beside it at `gap` (default `margin`).
+ */
+[[nodiscard]] Point snap_movement(const BehaviorInputScope& scope, const Point offset,
+                                  MovementGuides& guides) {
+    guides = MovementGuides{};
+    const runtime::Value* snap = scope.option("snap");
+    const LayoutRecord* own = scope.layout();
+    const std::optional<Rect> area = movement_area(scope);
+    if (snap == nullptr || snap->object() == nullptr || !boolean(field(snap, "enabled"), true) ||
+        own == nullptr || !area.has_value()) {
+        return offset;
+    }
+    const double limit = std::max(0.0, number(field(snap, "distance"), 6.0));
+    const double margin = number(field(snap, "margin"), 0.0);
+    const double gap = number(field(snap, "gap"), margin);
+    const Rect box{own->bounds.x + offset.x, own->bounds.y + offset.y, own->bounds.width,
+                   own->bounds.height};
+    AxisSnap x;
+    AxisSnap y;
+    const auto against = [&](const Rect& target, const double inset, const bool beside) {
+        x.consider(box.x, target.x + inset, limit);
+        x.consider(box.x + box.width * 0.5, target.x + target.width * 0.5, limit);
+        x.consider(box.right(), target.right() - inset, limit);
+        y.consider(box.y, target.y + inset, limit);
+        y.consider(box.y + box.height * 0.5, target.y + target.height * 0.5, limit);
+        y.consider(box.bottom(), target.bottom() - inset, limit);
+        if (beside) {
+            x.consider(box.x, target.right() + gap, limit);
+            x.consider(box.right(), target.x - gap, limit);
+            y.consider(box.y, target.bottom() + gap, limit);
+            y.consider(box.bottom(), target.y - gap, limit);
+        }
+    };
+    against(*area, margin, false);
+    if (boolean(field(snap, "siblings"), true)) {
+        for (const auto& child : scope.node().parent()->children()) {
+            if (child.get() == &scope.node() || !movable(*child))
+                continue;
+            if (const LayoutRecord* record = scope.layout(*child); record != nullptr)
+                against(moved_bounds(*child, *record), 0.0, true);
+        }
+    }
+    guides.x = x.line;
+    guides.y = y.line;
+    return Point{offset.x + x.delta, offset.y + y.delta};
+}
+
+[[nodiscard]] runtime::Value guides_value(const MovementGuides& guides) {
+    if (!guides.x.has_value() && !guides.y.has_value())
+        return runtime::Value{};
+    return object({
+        {"x", guides.x.has_value() ? runtime::Value(*guides.x) : runtime::Value{}},
+        {"y", guides.y.has_value() ? runtime::Value(*guides.y) : runtime::Value{}},
+    });
+}
+
+/**
+ * The `moved` event: `phase` (move, end or cancel), the offset, the box where it shows and its
+ * container (surface coordinates), and the lines a snap aligned it to, so a host can keep the
+ * placement the user chose and present guides of its own.
+ */
+[[nodiscard]] bool emit_moved(BehaviorInputScope& scope, const std::string_view phase,
+                              const Point offset, const MovementGuides& guides) {
+    const LayoutRecord* own = scope.layout();
+    const std::optional<Rect> area = movement_area(scope);
+    const Rect bounds = own != nullptr
+                            ? Rect{own->bounds.x + offset.x, own->bounds.y + offset.y,
+                                   own->bounds.width, own->bounds.height}
+                            : Rect{};
+    return scope.emit(
+        "moved",
+        object({
+            {"phase", runtime::Value(std::string(phase))},
+            {"x", runtime::Value(offset.x)},
+            {"y", runtime::Value(offset.y)},
+            {"bounds", rect_value(bounds)},
+            {"container", rect_value(area.value_or(Rect{}))},
+            {"guideX", guides.x.has_value() ? runtime::Value(*guides.x) : runtime::Value{}},
+            {"guideY", guides.y.has_value() ? runtime::Value(*guides.y) : runtime::Value{}},
+        }));
+}
+
 [[nodiscard]] bool movement_phase(const BehaviorInputScope& scope) {
     const std::string handle_key = text(scope.option("handleKey"));
     if (handle_key.empty()) {
@@ -292,13 +432,18 @@ long_press_duration(const BehaviorInputScope& scope) noexcept {
     }
     if (event->type == PointerEventType::cancel) {
         static_cast<void>(scope.cancel_gesture());
+        const Point restored{number(field(session, "offsetX"), 0.0),
+                             number(field(session, "offsetY"), 0.0)};
         scope.set_retained(std::string(movement_offset),
                            object({
-                               {"x", runtime::Value(number(field(session, "offsetX"), 0.0))},
-                               {"y", runtime::Value(number(field(session, "offsetY"), 0.0))},
+                               {"x", runtime::Value(restored.x)},
+                               {"y", runtime::Value(restored.y)},
                            }),
                            DirtyReason::input);
         scope.set_retained(std::string(movement_session), runtime::Value{}, DirtyReason::input);
+        scope.set_retained(std::string(movement_guides), runtime::Value{}, DirtyReason::input);
+        if (boolean(field(session, "dragged"), false))
+            static_cast<void>(emit_moved(scope, "cancel", restored, MovementGuides{}));
         return true;
     }
     if (event->type == PointerEventType::move) {
@@ -312,10 +457,18 @@ long_press_duration(const BehaviorInputScope& scope) noexcept {
             number(field(session, "offsetY"), 0.0) + event->position.y -
                 number(field(session, "startY"), event->position.y),
         };
-        next = clamp_movement(scope, next);
+        MovementGuides guides;
+        const Point snapped = snap_movement(scope, next, guides);
+        next = clamp_movement(scope, snapped);
+        // A snap the bounds then overrode no longer lines anything up.
+        if (next.x != snapped.x)
+            guides.x.reset();
+        if (next.y != snapped.y)
+            guides.y.reset();
         scope.set_retained(std::string(movement_offset),
                            object({{"x", runtime::Value(next.x)}, {"y", runtime::Value(next.y)}}),
                            DirtyReason::input);
+        scope.set_retained(std::string(movement_guides), guides_value(guides), DirtyReason::input);
         scope.set_retained(
             std::string(movement_session),
             object({
@@ -327,14 +480,57 @@ long_press_duration(const BehaviorInputScope& scope) noexcept {
                 {"dragged", runtime::Value(true)},
             }),
             DirtyReason::input);
+        static_cast<void>(emit_moved(scope, "move", next, guides));
         return true;
     }
     if (event->type == PointerEventType::release) {
         const bool dragged = boolean(field(session, "dragged"), false);
         scope.set_retained(std::string(movement_session), runtime::Value{}, DirtyReason::input);
+        if (dragged) {
+            const runtime::Value* shown = scope.retained(movement_guides);
+            const MovementGuides guides{
+                shown != nullptr && field(shown, "x") != nullptr && field(shown, "x")->number() != nullptr
+                    ? std::optional<double>(*field(shown, "x")->number())
+                    : std::nullopt,
+                shown != nullptr && field(shown, "y") != nullptr && field(shown, "y")->number() != nullptr
+                    ? std::optional<double>(*field(shown, "y")->number())
+                    : std::nullopt,
+            };
+            scope.set_retained(std::string(movement_guides), runtime::Value{}, DirtyReason::input);
+            static_cast<void>(
+                emit_moved(scope, "end", retained_point(scope.retained(movement_offset)), guides));
+        }
         return dragged;
     }
     return false;
+}
+
+/** Arrow keys nudge a focused movable by `step` (default 1), ten times that with Shift; each is a finished move. */
+[[nodiscard]] bool movable_key(BehaviorInputScope& scope) {
+    const runtime::Value* session = scope.retained(movement_session);
+    if (scope.phase() != BehaviorInputEventPhase::target || !boolean(scope.option("enabled"), true) ||
+        (session != nullptr && session->object() != nullptr)) {
+        return false;
+    }
+    const double step =
+        std::max(0.0, number(scope.option("step"), 1.0)) * (scope.modifiers().shift ? 10.0 : 1.0);
+    Point next = retained_point(scope.retained(movement_offset));
+    if (scope.key() == "left")
+        next.x -= step;
+    else if (scope.key() == "right")
+        next.x += step;
+    else if (scope.key() == "up")
+        next.y -= step;
+    else if (scope.key() == "down")
+        next.y += step;
+    else
+        return false;
+    next = clamp_movement(scope, next);
+    scope.set_retained(std::string(movement_offset),
+                       object({{"x", runtime::Value(next.x)}, {"y", runtime::Value(next.y)}}),
+                       DirtyReason::input);
+    static_cast<void>(emit_moved(scope, "end", next, MovementGuides{}));
+    return true;
 }
 
 struct ResizeSpec final {
@@ -609,6 +805,7 @@ void register_builtin_behavior_inputs(BehaviorRegistry& registry) {
                                                      });
     registry.register_input_phase("strata.movable", BehaviorInputPhase{
                                                         .pointer = &movable_pointer,
+                                                        .key = &movable_key,
                                                         .focusable = true,
                                                         .accepts_pointer = true,
                                                     });

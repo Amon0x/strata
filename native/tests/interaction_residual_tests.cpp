@@ -1527,6 +1527,105 @@ void test_manipulation_slop(InputFixture& fixture) {
           "over-slop split failed to claim or mutate its pane ratio");
 }
 
+// Snapping to the container and to a movable sibling (beside it at the gap), the moved events a
+// host keeps the placement from, guides only while dragging, and arrow-key nudges.
+void test_movable_snapping(InputFixture& fixture) {
+    const auto movable = [](runtime::Value options) {
+        return std::vector<ui::DescriptionBehavior>{
+            ui::DescriptionBehavior{"strata.movable", true, std::move(options), nullptr}};
+    };
+    const auto options = [] {
+        return object({{"snap", object({
+                                    {"distance", runtime::Value(6.0)},
+                                    {"gap", runtime::Value(4.0)},
+                                })}});
+    };
+    fixture.adopt(node("Panel", "snap.root",
+                       {
+                           node("Panel", "snap.area",
+                                {
+                                    node("Panel", "snap.anchor", {}, sized(100.0, 40.0), movable(options())),
+                                    node("Panel", "snap.moving", {}, sized(60.0, 30.0), movable(options())),
+                                },
+                                sized(400.0, 300.0, "ROW")),
+                       },
+                       sized(640.0, 480.0, "COLUMN")));
+    ui::RetainedNode* moving = fixture.tree_.find_key("snap.moving");
+    check(moving != nullptr, "snapping fixture was not retained");
+    const ui::Rect start = fixture.bounds("snap.moving").bounds;
+    const ui::Point grip = center(start);
+    const auto offset = [moving] {
+        const runtime::Value* value = moving->retained_value("strata.movement.offset");
+        const runtime::Value* x = value != nullptr ? value->field("x") : nullptr;
+        const runtime::Value* y = value != nullptr ? value->field("y") : nullptr;
+        return ui::Point{x != nullptr && x->number() != nullptr ? *x->number() : 0.0,
+                         y != nullptr && y->number() != nullptr ? *y->number() : 0.0};
+    };
+    const auto guides_shown = [moving] {
+        const runtime::Value* guides = moving->retained_value("strata.movement.guides");
+        return guides != nullptr && guides->object() != nullptr;
+    };
+    const auto last_moved = [](const ui::InputOperationResult& result) -> const data::JsonValue* {
+        const data::JsonValue* found = nullptr;
+        for (const data::JsonValue& event : result.events) {
+            const data::JsonValue* type = event.find("type");
+            if (type != nullptr && type->string() != nullptr && *type->string() == "moved")
+                found = event.find("value");
+        }
+        return found;
+    };
+    const auto number_at = [](const data::JsonValue* value, const std::string_view path_a,
+                              const std::string_view path_b = {}) {
+        const data::JsonValue* current = value != nullptr ? value->find(path_a) : nullptr;
+        if (current != nullptr && !path_b.empty())
+            current = current->find(path_b);
+        return current != nullptr && current->number() != nullptr ? *current->number() : -1.0;
+    };
+
+    // Right edge dragged to 3 px from the container's: it lands on it.
+    ui::InputOperationResult result = fixture.pointer({
+        ui::PointerInputEvent{grip, ui::PointerEventType::press, 21, 0},
+        ui::PointerInputEvent{ui::Point{grip.x + 80.0, grip.y + 80.0}, ui::PointerEventType::move, 21, 0},
+        ui::PointerInputEvent{ui::Point{grip.x + 237.0, grip.y + 120.0}, ui::PointerEventType::move, 21, 0},
+    });
+    check(guides_shown(), "a snapped drag showed no guides");
+    check(number_at(last_moved(result), "guideX") == 400.0, "the guide is not the container edge");
+    result = fixture.pointer({
+        ui::PointerInputEvent{ui::Point{grip.x + 237.0, grip.y + 120.0}, ui::PointerEventType::release, 21, 0},
+    });
+    const data::JsonValue* ended = last_moved(result);
+    check(offset().x == 400.0 - start.right() && offset().y == 120.0,
+          "the right edge did not snap to the container's");
+    check(ended != nullptr && ended->find("phase") != nullptr &&
+              *ended->find("phase")->string() == "end" &&
+              number_at(ended, "bounds", "x") == 340.0 && number_at(ended, "container", "width") == 400.0,
+          "the finished move did not report where it shows");
+    check(!guides_shown(), "guides outlived the drag");
+
+    // Left edge 3 px from the anchor's right plus the gap: it lands beside it. This fixture has no
+    // motion runtime, so hit testing sees layout bounds: the press goes where the box was laid out.
+    const ui::Point from = grip;
+    const double target = fixture.bounds("snap.anchor").bounds.right() + 4.0 + 3.0;
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{from, ui::PointerEventType::press, 22, 0},
+        ui::PointerInputEvent{ui::Point{from.x - 90.0, from.y - 40.0}, ui::PointerEventType::move, 22, 0},
+        ui::PointerInputEvent{ui::Point{from.x + (target - (start.x + offset().x)), from.y - 60.0},
+                              ui::PointerEventType::move, 22, 0},
+        ui::PointerInputEvent{ui::Point{from.x + (target - (start.x + offset().x)), from.y - 60.0},
+                              ui::PointerEventType::release, 22, 0},
+    }));
+    check(start.x + offset().x == fixture.bounds("snap.anchor").bounds.right() + 4.0 && offset().y == 60.0,
+          "the box did not snap beside its sibling at the gap");
+
+    // Arrow keys nudge a focused movable and report a finished move.
+    check(fixture.focused("snap.moving"), "pressing a movable did not focus it");
+    const ui::Point before = offset();
+    result = fixture.input_.key("right", ui::KeyModifiers{});
+    check(offset().x == before.x + 1.0 && last_moved(result) != nullptr, "an arrow key did not nudge");
+    static_cast<void>(fixture.input_.key("down", ui::KeyModifiers{.shift = true}));
+    check(offset().y == before.y + 10.0, "Shift did not nudge ten times as far");
+}
+
 void test_passive_descendant_activation(InputFixture& fixture) {
     const auto activate = [&fixture](std::string message) {
         return std::vector<ui::DescriptionBehavior>{ui::DescriptionBehavior{
@@ -1937,6 +2036,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_choice_semantics(fixture);
         test_tooltip_disclosure(fixture);
         test_manipulation_slop(fixture);
+        test_movable_snapping(fixture);
         test_passive_descendant_activation(fixture);
         test_release_target_activation(fixture);
         test_select_inside_modal(fixture);
