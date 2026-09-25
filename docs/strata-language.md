@@ -122,6 +122,11 @@ collection bound through the component boundary. Type references are available t
 that application and may also be reused from host/action schemas with `{ "ref": "ProjectRow" }`.
 Duplicate and cyclic application types reject schema composition.
 
+Host fields declared as `color` use JSON `[red, green, blue, alpha]`, with four integer channels
+in `0..255`. Snapshot conversion produces a color value, including inside lists and objects, so
+expressions can pass the field directly to a shape's `fill` or `stroke`. Arrays without a color
+schema remain lists.
+
 Use `Binding<T>` when a reusable component must edit caller-owned retained state:
 
 ```strata

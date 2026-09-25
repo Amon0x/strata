@@ -1,6 +1,8 @@
 #include "runtime/host.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
@@ -59,6 +61,25 @@ void validate_name(const std::string_view value, const std::string_view label) {
             return HostNode::constant(Value(KeyValue{*text}), counter);
         }
         return HostNode::from_json(value, counter);
+    }
+    if (schema->kind() == ValueSchemaKind::color) {
+        const data::JsonValue::Array* array = value.array();
+        if (array == nullptr || array->size() != 4U) return HostNode::from_json(value, counter);
+        std::array<std::uint8_t, 4U> channels{};
+        for (std::size_t index = 0U; index < channels.size(); ++index) {
+            const data::JsonValue& item = (*array)[index];
+            double channel;
+            if (const auto* integer = item.integer()) channel = static_cast<double>(*integer);
+            else if (const auto* number = item.number()) channel = *number;
+            else return HostNode::from_json(value, counter);
+            if (!std::isfinite(channel) || channel < 0.0 || channel > 255.0 ||
+                std::trunc(channel) != channel) {
+                return HostNode::from_json(value, counter);
+            }
+            channels[index] = static_cast<std::uint8_t>(channel);
+        }
+        return HostNode::constant(
+            Value(ColorValue{channels[0], channels[1], channels[2], channels[3]}), counter);
     }
     if (schema->kind() == ValueSchemaKind::list) {
         const data::JsonValue::Array* array = value.array();

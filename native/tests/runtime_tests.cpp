@@ -167,6 +167,51 @@ void test_host_snapshots_are_lazy_and_generation_invalidated() {
           "independent host roots did not compose across immutable snapshot ids");
 }
 
+void test_host_color_schema_conversion() {
+    using namespace strata::runtime;
+    const auto color = ValueSchema::scalar(ValueSchemaKind::color);
+    const auto schema = ValueSchema::object({
+        {"ink", color, true, false},
+        {"parts", ValueSchema::list(ValueSchema::object({
+            {"fill", color, true, true},
+        })), true, false},
+        {"palette", ValueSchema::object({}, true, color), true, false},
+        {"numbers", ValueSchema::list(ValueSchema::scalar(ValueSchemaKind::number)), true, false},
+    });
+    const auto snapshot = HostSnapshot::from_json("colors", 1U, strata::data::parse_json(R"({
+        "skin":{"ink":[0,127,255,64],"parts":[{"fill":[47,150,150,255]},{"fill":null}],
+        "palette":{"accent":[255,0,1,0]},"numbers":[0,127,255,64]},"raw":[0,127,255,64]
+    })"), {{"skin", schema}});
+    const auto ink = snapshot->resolve("skin.ink");
+    check(ink == Value(ColorValue{0U, 127U, 255U, 64U}),
+          "host color field did not preserve RGBA channels");
+    check(snapshot->evaluated_scalar_count() == 1U,
+          "resolving a host color evaluated its channels or siblings separately");
+    const auto parts = snapshot->resolve("skin.parts");
+    check(parts->list()->values[0U].field("fill") != nullptr &&
+              *parts->list()->values[0U].field("fill") == Value(ColorValue{47U, 150U, 150U, 255U}) &&
+              parts->list()->values[1U].field("fill")->kind() == ValueKind::null_value,
+          "nested host colors or nullable colors changed during materialization");
+    const std::vector<HostPathSegment> path{
+        HostPathSegment::named("skin"), HostPathSegment::named("parts"),
+        HostPathSegment::lookup("0", 0U), HostPathSegment::named("fill"),
+    };
+    check(snapshot->resolve(path) == Value(ColorValue{47U, 150U, 150U, 255U}),
+          "indexed host color resolution differs from parent materialization");
+    check(snapshot->resolve("skin.palette.accent") == Value(ColorValue{255U, 0U, 1U, 0U}),
+          "open object color schema was ignored");
+    check(snapshot->resolve("skin.numbers")->kind() == ValueKind::list &&
+              snapshot->resolve("raw")->kind() == ValueKind::list,
+          "a numeric array without a color schema was converted to a color");
+    for (const auto invalid : {"[1,2,3]", "[1,2,3,4,5]", "[-1,0,0,255]",
+                               "[256,0,0,255]", "[1.5,0,0,255]", "[true,0,0,255]"}) {
+        const auto malformed = HostSnapshot::from_json("invalid", 1U,
+            strata::data::parse_json(std::string("{\"ink\":") + invalid + "}"), {{"ink", color}});
+        check(malformed->resolve("ink")->kind() == ValueKind::list,
+              "invalid host color channels were silently coerced");
+    }
+}
+
 void test_state_store_and_typed_mutations() {
     using namespace strata::runtime;
     std::uint64_t invalidations = 0U;
@@ -1749,6 +1794,7 @@ int strata_test_runtime(const int argument_count, const char* const* const argum
         };
         test_immutable_values_and_runtime_schemas();
         test_host_snapshots_are_lazy_and_generation_invalidated();
+        test_host_color_schema_conversion();
         test_state_store_and_typed_mutations();
         test_durability_round_trip_migration_and_corruption();
         test_declared_widget_persistence_is_exact();
