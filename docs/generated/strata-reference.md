@@ -38,7 +38,7 @@ Children: `false` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -77,7 +77,7 @@ Children: `false` · Capabilities: —
 | `textVisualStyle` | style | false | false | — |
 | `onSelect` | action | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -119,7 +119,7 @@ Children: `false` · Capabilities: —
 | `animation` | animation | false | false | — |
 | `onClick` | action | false | false | — |
 | `command` | string | false | true | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -164,7 +164,7 @@ Children: `false` · Capabilities: —
 | `animation` | animation | false | false | — |
 | `onChange` | action | false | false | — |
 | `bind` | any | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -208,7 +208,7 @@ Children: `false` · Capabilities: —
 | `onChange` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -257,7 +257,7 @@ Children: `false` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -308,7 +308,7 @@ Children: `false` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -351,7 +351,7 @@ Children: `false` · Capabilities: —
 | `textVisualStyle` | style | false | false | — |
 | `onSelect` | action | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -395,7 +395,7 @@ Children: `true` · Capabilities: —
 | `textVisualStyle` | style | false | false | — |
 | `onSelect` | action | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -433,7 +433,7 @@ Children: `false` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -482,7 +482,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 1 · Binding shorthands: 0
 
@@ -520,7 +520,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -559,7 +559,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -599,7 +599,7 @@ Children: `false` · Capabilities: —
 | `animation` | animation | false | false | — |
 | `onClick` | action | false | false | — |
 | `command` | string | false | true | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -639,7 +639,7 @@ Children: `false` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -687,7 +687,7 @@ Children: `false` · Capabilities: effective-scroll
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -730,7 +730,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -777,7 +777,7 @@ Children: `false` · Capabilities: —
 | `textVisualStyle` | style | false | false | — |
 | `onSelect` | action | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -817,7 +817,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 1 · Binding shorthands: 0
 
@@ -854,7 +854,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -900,7 +900,7 @@ Children: `false` · Capabilities: —
 | `onChange` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -938,7 +938,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 1 · Binding shorthands: 0
 
@@ -974,7 +974,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1016,7 +1016,7 @@ Children: `false` · Capabilities: —
 | `animation` | animation | false | false | — |
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -1055,7 +1055,7 @@ Children: `false` · Capabilities: —
 | `onChange` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1099,7 +1099,7 @@ Children: `true` · Capabilities: effective-scroll
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1144,7 +1144,7 @@ Children: `false` · Capabilities: —
 | `selectable` | boolean | false | false | — |
 | `selectionContainer` | string | false | true | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -1184,7 +1184,7 @@ Children: `true` · Capabilities: effective-scroll
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1229,7 +1229,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1280,7 +1280,7 @@ Children: `false` · Capabilities: —
 | `onChange` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1329,7 +1329,7 @@ Children: `false` · Capabilities: —
 | `animation` | animation | false | false | — |
 | `onChange` | action | false | false | — |
 | `bind` | any | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1368,7 +1368,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -1409,7 +1409,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1447,7 +1447,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -1510,7 +1510,7 @@ Children: `false` · Capabilities: effective-scroll
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 | `loadingText` | string | false | false | — |
 | `errorText` | string | false | false | — |
 | `emptyText` | string | false | false | — |
@@ -1561,7 +1561,7 @@ Children: `false` · Capabilities: —
 | `onChange` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1606,7 +1606,7 @@ Children: `false` · Capabilities: —
 | `selectable` | boolean | false | false | — |
 | `selectionContainer` | string | false | true | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -1656,7 +1656,7 @@ Children: `false` · Capabilities: —
 | `onChange` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1711,7 +1711,7 @@ Children: `false` · Capabilities: —
 | `onChange` | action | false | false | — |
 | `bind` | any | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1749,7 +1749,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -1787,7 +1787,7 @@ Children: `false` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -1828,7 +1828,7 @@ Children: `false` · Capabilities: —
 | `animation` | animation | false | false | — |
 | `onChange` | action | false | false | — |
 | `bind` | any | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -1868,7 +1868,7 @@ Children: `false` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 1 · Binding shorthands: 0
 
@@ -1906,7 +1906,7 @@ Children: `true` · Capabilities: —
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 Retained state entries: 0 · Binding shorthands: 0
 
@@ -1960,7 +1960,7 @@ Children: `false` · Capabilities: effective-scroll
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 | `loadingText` | string | false | false | — |
 | `errorText` | string | false | false | — |
 | `emptyText` | string | false | false | — |
@@ -2019,7 +2019,7 @@ Children: `true` · Capabilities: effective-scroll
 | `textStyle` | style | false | false | — |
 | `textVisualStyle` | style | false | false | — |
 | `animation` | animation | false | false | — |
-| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
+| `behaviors` | list of one of (map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any, map of any) | false | false | — |
 
 | Event | Callback | Phase | Contract |
 |---|---|---|---|
@@ -2038,6 +2038,7 @@ Retained state entries: 1 · Binding shorthands: 0
 - `strata.movable`: map of any
 - `strata.reorder-target`: map of any
 - `strata.resize`: map of any
+- `strata.scale`: map of any
 - `strata.split-handle`: map of any
 
 ## Declarative actions

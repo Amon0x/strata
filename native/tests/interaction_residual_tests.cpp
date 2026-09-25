@@ -1626,6 +1626,70 @@ void test_movable_snapping(InputFixture& fixture) {
     check(offset().y == before.y + 10.0, "Shift did not nudge ten times as far");
 }
 
+// A scale handle inside a movable card: the handle owns its gesture, the scale follows the pointer's
+// progress away from the fixed anchor (clamped and stepped), and arrow keys step it.
+void test_scale_handle(InputFixture& fixture) {
+    const auto attach = [](std::string id, runtime::Value options) {
+        return std::vector<ui::DescriptionBehavior>{
+            ui::DescriptionBehavior{std::move(id), true, std::move(options), nullptr}};
+    };
+    fixture.adopt(node("Panel", "scale.root",
+                       {
+                           node("Panel", "scale.card",
+                                {
+                                    node("Panel", "scale.body", {}, sized(90.0, 50.0)),
+                                    node("Panel", "scale.handle", {}, sized(10.0, 10.0),
+                                         attach("strata.scale", object({
+                                                                    {"value", runtime::Value(1.0)},
+                                                                    {"min", runtime::Value(0.5)},
+                                                                    {"max", runtime::Value(2.0)},
+                                                                    {"step", runtime::Value(0.05)},
+                                                                    {"anchor", object({{"x", runtime::Value(0.0)},
+                                                                                       {"y", runtime::Value(0.0)}})},
+                                                                }))),
+                                },
+                                sized(100.0, 50.0, "ROW"),
+                                attach("strata.movable", object({{"bounds", runtime::Value("none")}}))),
+                       },
+                       sized(640.0, 480.0, "COLUMN")));
+    ui::RetainedNode* card = fixture.tree_.find_key("scale.card");
+    check(card != nullptr, "scale fixture was not retained");
+    const ui::Rect box = fixture.bounds("scale.card").bounds;
+    const ui::Point grip = center(fixture.bounds("scale.handle").bounds);
+    const auto scaled = [](const ui::InputOperationResult& result, const std::string_view phase) {
+        double found = -1.0;
+        for (const data::JsonValue& event : result.events) {
+            const data::JsonValue* type = event.find("type");
+            const data::JsonValue* value = event.find("value");
+            if (type == nullptr || type->string() == nullptr || *type->string() != "scaled" || value == nullptr)
+                continue;
+            if (*value->find("phase")->string() == phase)
+                found = *value->find("scale")->number();
+        }
+        return found;
+    };
+    // Half as far again along the line from the card's top-left through the press: 1.5.
+    const ui::Point target{box.x + (grip.x - box.x) * 1.5, box.y + (grip.y - box.y) * 1.5};
+    ui::InputOperationResult result = fixture.pointer({
+        ui::PointerInputEvent{grip, ui::PointerEventType::press, 31, 0},
+        ui::PointerInputEvent{ui::Point{grip.x + 20.0, grip.y}, ui::PointerEventType::move, 31, 0},
+        ui::PointerInputEvent{target, ui::PointerEventType::move, 31, 0},
+        ui::PointerInputEvent{target, ui::PointerEventType::release, 31, 0},
+    });
+    const runtime::Value* moved = card->retained_value("strata.movement.offset");
+    check(moved == nullptr || moved->object() == nullptr, "the enclosing movable took the handle's drag");
+    check(std::abs(scaled(result, "end") - 1.5) < 1e-9, "the handle did not scale along its drag");
+    result = fixture.pointer({
+        ui::PointerInputEvent{grip, ui::PointerEventType::press, 32, 0},
+        ui::PointerInputEvent{ui::Point{grip.x + 300.0, grip.y + 60.0}, ui::PointerEventType::move, 32, 0},
+        ui::PointerInputEvent{ui::Point{grip.x + 300.0, grip.y + 60.0}, ui::PointerEventType::release, 32, 0},
+    });
+    check(scaled(result, "end") == 2.0, "the scale was not clamped to its maximum");
+    check(fixture.focused("scale.handle"), "pressing the handle did not focus it");
+    result = fixture.input_.key("up", ui::KeyModifiers{});
+    check(std::abs(scaled(result, "end") - 1.05) < 1e-9, "an arrow key did not step the scale");
+}
+
 void test_passive_descendant_activation(InputFixture& fixture) {
     const auto activate = [&fixture](std::string message) {
         return std::vector<ui::DescriptionBehavior>{ui::DescriptionBehavior{
@@ -2037,6 +2101,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_tooltip_disclosure(fixture);
         test_manipulation_slop(fixture);
         test_movable_snapping(fixture);
+        test_scale_handle(fixture);
         test_passive_descendant_activation(fixture);
         test_release_target_activation(fixture);
         test_select_inside_modal(fixture);

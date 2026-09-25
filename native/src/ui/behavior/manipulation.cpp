@@ -25,6 +25,7 @@ constexpr std::string_view activate_click = "strata.activate.click";
 constexpr std::string_view movement_offset = "strata.movement.offset";
 constexpr std::string_view movement_session = "strata.movement.session";
 constexpr std::string_view movement_guides = "strata.movement.guides";
+constexpr std::string_view scale_session = "strata.scale.session";
 constexpr std::string_view runtime_size = "strata.gesture.runtimeSize";
 constexpr std::string_view resize_session = "strata.gesture.resizeSession";
 constexpr std::string_view split_ratio = "strata.gesture.splitRatio";
@@ -386,12 +387,40 @@ struct AxisSnap final {
         }));
 }
 
+[[nodiscard]] bool manipulation_handle(const RetainedNode& node) noexcept {
+    for (const DescriptionBehavior& attachment : node.description().behaviors) {
+        if (attachment.enabled &&
+            (attachment.id == "strata.movable" || attachment.id == "strata.resize" ||
+             attachment.id == "strata.scale" || attachment.id == "strata.split-handle")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * A press on a descendant that is itself a manipulation handle (a movable, resize, scale or split
+ * handle) belongs to that handle: the innermost one owns the gesture, not an enclosing one seeing
+ * the press first in its capture phase.
+ */
+[[nodiscard]] bool nested_handle_pressed(const BehaviorInputScope& scope) {
+    if (scope.phase() != BehaviorInputEventPhase::capture)
+        return false;
+    WidgetInputScope widget = scope.widget_scope();
+    for (const RetainedNode* current = widget.pointer_target();
+         current != nullptr && current != &scope.node(); current = current->parent()) {
+        if (manipulation_handle(*current))
+            return true;
+    }
+    return false;
+}
+
 [[nodiscard]] bool movement_phase(const BehaviorInputScope& scope) {
     const std::string handle_key = text(scope.option("handleKey"));
     if (handle_key.empty()) {
         return scope.phase() == BehaviorInputEventPhase::target ||
                (scope.phase() == BehaviorInputEventPhase::capture &&
-                boolean(scope.option("includeDescendants"), true));
+                boolean(scope.option("includeDescendants"), true) && !nested_handle_pressed(scope));
     }
     if (scope.phase() != BehaviorInputEventPhase::capture)
         return false;
@@ -565,7 +594,8 @@ void set_runtime_size(BehaviorInputScope& scope, const double width, const doubl
 [[nodiscard]] bool resize_pointer(BehaviorInputScope& scope) {
     const bool accepted_phase = scope.phase() == BehaviorInputEventPhase::target ||
                                 (scope.phase() == BehaviorInputEventPhase::capture &&
-                                 boolean(scope.option("includeDescendants"), true));
+                                 boolean(scope.option("includeDescendants"), true) &&
+                                 !nested_handle_pressed(scope));
     if (!accepted_phase || scope.pointer() == nullptr)
         return false;
     const PointerInputEvent& event = *scope.pointer();
@@ -666,6 +696,144 @@ void set_runtime_size(BehaviorInputScope& scope, const double width, const doubl
     width = std::clamp(width, spec.min_width, spec.max_width);
     height = std::clamp(height, spec.min_height, spec.max_height);
     set_runtime_size(scope, width, height);
+    return true;
+}
+
+/**
+ * `strata.scale`: a handle that sets a scale by dragging away from or towards an anchor point of
+ * its target (the node keyed `targetKey`, by default the handle's parent), such as a corner of a
+ * card whose content is laid out at that scale. The anchor (fractions of the target's box, as it
+ * shows) and the press are fixed when the gesture starts, so the target growing under the pointer
+ * does not feed back into the measure: the scale is `value` times the pointer's progress along the
+ * line from the anchor through the press, clamped to `min`/`max` and rounded to `step`. It emits
+ * `scaled` events (phase move, end or cancel, with `scale` and `factor`) and leaves applying the
+ * scale to whoever lays the target out. Arrow keys step it (up/right larger).
+ */
+struct ScaleSpec final {
+    double value = 1.0;
+    double min = 0.0;
+    double max = std::numeric_limits<double>::infinity();
+    double step = 0.0;
+};
+
+[[nodiscard]] ScaleSpec scale_spec(const BehaviorInputScope& scope) noexcept {
+    ScaleSpec spec;
+    spec.min = std::max(0.0, number(scope.option("min"), 0.0));
+    spec.max = std::max(spec.min, number(scope.option("max"), spec.max));
+    spec.step = std::max(0.0, number(scope.option("step"), 0.0));
+    spec.value = std::clamp(number(scope.option("value"), 1.0), spec.min, spec.max);
+    return spec;
+}
+
+[[nodiscard]] double settle_scale(const ScaleSpec& spec, double scale) noexcept {
+    if (spec.step > 0.0)
+        scale = std::round(scale / spec.step) * spec.step;
+    return std::clamp(scale, spec.min, spec.max);
+}
+
+[[nodiscard]] bool emit_scaled(BehaviorInputScope& scope, const std::string_view phase,
+                               const double scale, const double from) {
+    return scope.emit("scaled", object({
+                                    {"phase", runtime::Value(std::string(phase))},
+                                    {"scale", runtime::Value(scale)},
+                                    {"factor", runtime::Value(from > 0.0 ? scale / from : 1.0)},
+                                }));
+}
+
+[[nodiscard]] bool scale_pointer(BehaviorInputScope& scope) {
+    const bool accepted_phase = scope.phase() == BehaviorInputEventPhase::target ||
+                                (scope.phase() == BehaviorInputEventPhase::capture &&
+                                 boolean(scope.option("includeDescendants"), true) &&
+                                 !nested_handle_pressed(scope));
+    if (!accepted_phase || scope.pointer() == nullptr || !boolean(scope.option("enabled"), true))
+        return false;
+    const PointerInputEvent& event = *scope.pointer();
+    const runtime::Value* session = scope.retained(scale_session);
+    if (event.type == PointerEventType::press) {
+        if (event.button != 0)
+            return false;
+        const std::string target_key = text(scope.option("targetKey"));
+        const RetainedNode* target =
+            target_key.empty() ? scope.node().parent() : scope.find_key(target_key);
+        const LayoutRecord* record = target != nullptr ? scope.layout(*target) : nullptr;
+        if (record == nullptr)
+            return false;
+        const Rect box = moved_bounds(*target, *record);
+        const runtime::Value* anchor = scope.option("anchor");
+        const ScaleSpec spec = scale_spec(scope);
+        scope.set_retained(
+            std::string(scale_session),
+            object({
+                {"pointerId", runtime::Value(static_cast<double>(event.pointer_id))},
+                {"startX", runtime::Value(event.position.x)},
+                {"startY", runtime::Value(event.position.y)},
+                {"anchorX", runtime::Value(box.x + box.width * number(field(anchor, "x"), 0.0))},
+                {"anchorY", runtime::Value(box.y + box.height * number(field(anchor, "y"), 0.0))},
+                {"value", runtime::Value(spec.value)},
+                {"scale", runtime::Value(spec.value)},
+            }),
+            DirtyReason::input);
+        return false;
+    }
+    if (session == nullptr || session->object() == nullptr ||
+        integer(field(session, "pointerId"), -1) != event.pointer_id) {
+        return false;
+    }
+    const double from = number(field(session, "value"), 1.0);
+    if (event.type == PointerEventType::move) {
+        if (!scope.press_moved_beyond_slop() || !scope.claim_gesture())
+            return false;
+        const double ax = number(field(session, "anchorX"), 0.0);
+        const double ay = number(field(session, "anchorY"), 0.0);
+        const double sx = number(field(session, "startX"), ax) - ax;
+        const double sy = number(field(session, "startY"), ay) - ay;
+        const double length = sx * sx + sy * sy;
+        const double progress =
+            length < 1.0
+                ? 1.0
+                : std::max(0.0, ((event.position.x - ax) * sx + (event.position.y - ay) * sy) / length);
+        const double scale = settle_scale(scale_spec(scope), from * progress);
+        if (scale != number(field(session, "scale"), from)) {
+            std::vector<std::pair<std::string, runtime::Value>> fields;
+            for (const auto& [name, value] : session->object()->fields) {
+                fields.emplace_back(name, name == "scale" ? runtime::Value(scale) : value);
+            }
+            scope.set_retained(std::string(scale_session), runtime::Value(std::move(fields)),
+                               DirtyReason::input);
+            static_cast<void>(emit_scaled(scope, "move", scale, from));
+        }
+        return true;
+    }
+    if (event.type == PointerEventType::cancel) {
+        static_cast<void>(scope.cancel_gesture());
+        scope.set_retained(std::string(scale_session), runtime::Value{}, DirtyReason::input);
+        static_cast<void>(emit_scaled(scope, "cancel", from, from));
+        return true;
+    }
+    if (event.type == PointerEventType::release) {
+        const bool claimed = scope.gesture_claim_state() == GestureClaimState::claimed;
+        const double scale = number(field(session, "scale"), from);
+        scope.set_retained(std::string(scale_session), runtime::Value{}, DirtyReason::input);
+        if (claimed)
+            static_cast<void>(emit_scaled(scope, "end", scale, from));
+        return claimed;
+    }
+    return false;
+}
+
+[[nodiscard]] bool scale_key(BehaviorInputScope& scope) {
+    if (scope.phase() != BehaviorInputEventPhase::target || !boolean(scope.option("enabled"), true))
+        return false;
+    const ScaleSpec spec = scale_spec(scope);
+    const double step = spec.step > 0.0 ? spec.step : 0.05;
+    double scale = spec.value;
+    if (scope.key() == "up" || scope.key() == "right")
+        scale += step;
+    else if (scope.key() == "down" || scope.key() == "left")
+        scale -= step;
+    else
+        return false;
+    static_cast<void>(emit_scaled(scope, "end", settle_scale(spec, scale), spec.value));
     return true;
 }
 
@@ -815,6 +983,12 @@ void register_builtin_behavior_inputs(BehaviorRegistry& registry) {
                                                        .focusable = true,
                                                        .accepts_pointer = true,
                                                    });
+    registry.register_input_phase("strata.scale", BehaviorInputPhase{
+                                                      .pointer = &scale_pointer,
+                                                      .key = &scale_key,
+                                                      .focusable = true,
+                                                      .accepts_pointer = true,
+                                                  });
     registry.register_input_phase("strata.split-handle", BehaviorInputPhase{
                                                              .pointer = &split_pointer,
                                                              .key = &split_key,

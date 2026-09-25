@@ -325,6 +325,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredBehavior{.id = "strata.movable", .options = declared_type_reference("t31")},
         DeclaredBehavior{.id = "strata.reorder-target", .options = declared_type_reference("t33")},
         DeclaredBehavior{.id = "strata.resize", .options = declared_type_reference("t34")},
+        DeclaredBehavior{.id = "strata.scale", .options = declared_type_reference("t185")},
         DeclaredBehavior{.id = "strata.split-handle", .options = declared_type_reference("t35")},
     };
     catalog.materials = {
