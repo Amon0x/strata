@@ -104,7 +104,7 @@ class Reader final {
     if (kind == 3U) {
         result.format = input.u32();
         result.sampling = input.u32();
-        if (result.format != 0U)
+        if (result.format != texture_encoding_png && result.format != texture_encoding_rgba8)
             throw std::invalid_argument("encoded texture format is unknown");
         if (result.sampling > 1U)
             throw std::invalid_argument("texture sampling is unknown");
@@ -113,6 +113,10 @@ class Reader final {
         const std::span<const std::uint8_t> bytes = input.raw(input.count());
         if (result.width == 0U || result.height == 0U || bytes.empty()) {
             throw std::invalid_argument("encoded texture dimensions and payload must be positive");
+        }
+        if (result.format == texture_encoding_rgba8 &&
+            static_cast<std::uint64_t>(result.width) * result.height * 4U != bytes.size()) {
+            throw std::invalid_argument("RGBA8 texture payload differs from its dimensions");
         }
         result.bytes.assign(bytes.begin(), bytes.end());
         input.exhausted("encoded texture");
@@ -560,7 +564,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
         input.u32() != STRATA_RENDER_PACKET_VERSION_CURRENT) {
-        throw std::invalid_argument("render packet decoder requires protocol v11");
+        throw std::invalid_argument("render packet decoder requires protocol v12");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();

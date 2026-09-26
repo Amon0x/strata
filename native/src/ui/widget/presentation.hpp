@@ -121,6 +121,7 @@ class WidgetRenderScope final {
     void push_clip(Rect bounds, CornerRadii radii = {});
     void pop_clip();
     void push_transform(double scale, Point translation);
+    void push_transform(const TransformPushRenderCommand& transform);
     void pop_transform();
     void append(RenderCommand command, double opacity = 1.0);
     void text(std::string_view value, Point origin, RenderColor color, double alignment_width = 0.0,

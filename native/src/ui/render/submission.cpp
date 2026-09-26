@@ -166,7 +166,6 @@ void update_cached(
         framebuffer_height > static_cast<std::int64_t>(UINT32_MAX)) {
         throw std::invalid_argument("render submission environment is invalid");
     }
-    validate_texture_descriptors(textures);
     const bool text_required = requires_text_engine(commands);
     if (text_required && text_engine == nullptr) {
         throw std::invalid_argument(
@@ -188,8 +187,10 @@ void update_cached(
         logical_width,
         logical_height,
     };
-    if (cache.geometry_environment != geometry_environment ||
-        !std::ranges::equal(cache.geometry_textures, textures)) {
+    const bool textures_changed = !std::ranges::equal(cache.geometry_textures, textures);
+    if (textures_changed)
+        validate_texture_descriptors(textures);
+    if (cache.geometry_environment != geometry_environment || textures_changed) {
         cache.geometry.clear();
         cache.geometry_environment = geometry_environment;
         cache.geometry_textures.assign(textures.begin(), textures.end());

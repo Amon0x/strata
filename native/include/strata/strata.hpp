@@ -1473,6 +1473,32 @@ class Runtime final {
         return detail::publish_host_snapshot(control_, id, value_json);
     }
 
+    /**
+     * Publishes or replaces a runtime image: straight-alpha RGBA8 rows, width * height * 4 bytes.
+     * Documents reference it by id like a Surface's static images; a missing id draws nothing.
+     */
+    void publish_image(const std::string_view id, const std::uint32_t width,
+                       const std::uint32_t height, const std::span<const std::uint8_t> pixels,
+                       const ImageSampling sampling = ImageSampling::linear) {
+        const strata_runtime_image_config image{
+            sizeof(strata_runtime_image_config),
+            strata_string_view{id.data(), id.size()},
+            width,
+            height,
+            sampling == ImageSampling::nearest ? STRATA_IMAGE_SAMPLING_NEAREST
+                                               : STRATA_IMAGE_SAMPLING_LINEAR,
+            0U,
+            pixels.data(),
+            pixels.size(),
+        };
+        require(strata_runtime_publish_image(native_handle(), &image), "runtime image publication");
+    }
+
+    void release_image(const std::string_view id) {
+        require(strata_runtime_release_image(native_handle(), strata_string_view{id.data(), id.size()}),
+                "runtime image release");
+    }
+
     [[nodiscard]] ActivationInfo activate(const SourceActivation& activation) {
         detail::SourceLoaderBridge loader{
             activation.load_module ? &activation.load_module : nullptr,

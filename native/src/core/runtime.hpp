@@ -13,6 +13,7 @@
 #include "core/arena.hpp"
 #include "core/diagnostics.hpp"
 #include "core/identity.hpp"
+#include "resource/runtime_images.hpp"
 #include "runtime/host.hpp"
 #include "runtime/application.hpp"
 
@@ -51,6 +52,8 @@ public:
         std::string_view id
     ) const noexcept;
     [[nodiscard]] std::optional<runtime::Value> read_host_value(std::string_view path) const;
+    [[nodiscard]] resource::RuntimeImageStore& images() noexcept { return images_; }
+    [[nodiscard]] const resource::RuntimeImageStore& images() const noexcept { return images_; }
     void configure_application(
         std::string id,
         const data::JsonValue* schemas,
@@ -77,6 +80,7 @@ private:
     strata_clock clock_;
     StableIdentitySource identities_;
     runtime::HostStore host_store_;
+    resource::RuntimeImageStore images_;
     std::shared_ptr<const runtime::ApplicationBundle> application_bundle_;
     std::unique_ptr<runtime::ApplicationContext> application_;
     std::uint64_t generation_ = 0U;

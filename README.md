@@ -22,7 +22,7 @@ The native framework supports two platform profiles:
   presents Surfaces into targets owned by an existing graphics application. `Strata::win32`
   optionally translates an existing window's messages into portable Surface input.
 - **Linux x64:** the platform-neutral framework, C/C++ host APIs, extensions, compiler/authoring
-  tools, public packet-v11 decoder, CPU reference renderer, and Vulkan GPU renderer with HLSL
+  tools, public packet-v12 decoder, CPU reference renderer, and Vulkan GPU renderer with HLSL
   materials and effects. `Strata::vulkan` presents into host-owned targets; the headless host captures
   real GPU output. `strata_preview` adds an interactive SDL window with native input and clipboard
   for testing generic applications on Wayland and X11.
@@ -96,7 +96,7 @@ exports these portable targets:
 | `Strata::c` | Stable shared C ABI. |
 | `Strata::host` | C++ ownership and structured host-data/action bindings. |
 | `Strata::extensions` | Authoring support linked into independently loaded extension libraries. |
-| `Strata::render_host` | Stateful public packet-v11 decoder for custom render backends. |
+| `Strata::render_host` | Stateful public packet-v12 decoder for custom render backends. |
 | `Strata::svg` | Dependency-free static SVG parser and deterministic CPU rasterizer. |
 
 Windows additionally exports `Strata::d3d11`, `Strata::win32`, and `Strata::desktop`. See
@@ -147,7 +147,7 @@ Win32 window/input example is [`native/samples/desktop_app.cpp`](native/samples/
 ## Headless application testing
 
 `strata_headless` runs complete applications with a deterministic clock and ordinary input routing.
-It emits canonical state/semantics/inspection JSON and renders packet-v11 geometry to PNG. Linux uses
+It emits canonical state/semantics/inspection JSON and renders packet-v12 geometry to PNG. Linux uses
 both the CPU reference backend and Vulkan with authored HLSL shaders; Windows tests the shared
 D3D11/WARP pipeline. GPU scenarios cover textures, blur, and nested effects.
 
@@ -173,7 +173,7 @@ the single source of truth and application-owned JSON remains confined to the st
 `Strata_VSCODE_EXTENSION` VSIX provides schema-aware editing backed by the same metadata and native
 compiler.
 
-- [PNG and SVG images](docs/svg.md)
+- [Images: PNG, SVG and runtime images](docs/svg.md)
 - [C/C++ embedding and custom renderer guide](docs/embedding.md)
 - [Rendering into a host-owned Vulkan target](docs/vulkan-hosting.md)
 - [Rendering into a host-owned D3D11 target](docs/d3d11-hosting.md)

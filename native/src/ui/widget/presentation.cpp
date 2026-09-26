@@ -571,6 +571,10 @@ void WidgetRenderScope::push_transform(const double scale, const Point translati
     });
 }
 
+void WidgetRenderScope::push_transform(const TransformPushRenderCommand& transform) {
+    output_.emplace_back(transform);
+}
+
 void WidgetRenderScope::pop_transform() {
     output_.emplace_back(TransformPopRenderCommand{});
 }

@@ -37,6 +37,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.ABI.INVALID_INSPECTOR_SELECTION` | `native/src/surface_inspector_abi.cpp` |
 | `STRATA.ABI.INVALID_RESOURCE_ADAPTER` | `native/src/abi_services.cpp` |
 | `STRATA.ABI.INVALID_RESOURCE_READ` | `native/src/abi_services.cpp` |
+| `STRATA.ABI.INVALID_RUNTIME_IMAGE` | `native/src/abi_application.cpp` |
 | `STRATA.ABI.INVALID_SCROLL_ANIMATION` | `native/src/surface_theme_abi.cpp` |
 | `STRATA.ABI.INVALID_SOURCE_MAP_QUERY` | `native/src/abi_application.cpp` |
 | `STRATA.ABI.INVALID_STRING_SINK` | `native/src/abi_services.cpp` |

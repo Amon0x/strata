@@ -103,7 +103,7 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
     const std::vector<std::uint8_t> encoded = encode(commands, resources);
     check(encoded.size() > 12U &&
               encoded[8U] == static_cast<std::uint8_t>(STRATA_RENDER_PACKET_VERSION_CURRENT),
-          "effect packet did not use render protocol v11");
+          "effect packet did not use render protocol v12");
     const host::RenderPacket packet = decoder.decode(encoded);
     check(packet.batches.size() == 4U, "effect packet changed its ordered batch count");
     const auto* backdrop = std::get_if<host::EffectBatch>(&packet.batches[0U]);

@@ -1,8 +1,9 @@
-# PNG and SVG images
+# Images
 
-Strata exposes PNG and static SVG resources through one author-facing image model. A Surface maps a
-logical id to resource-adapter bytes, and `.strata` uses that id with `Image` or any widget icon
-property:
+Strata exposes PNG and static SVG resources and host-published runtime images through one
+author-facing image model. A Surface maps a logical id to resource-adapter bytes, the Runtime maps
+runtime image ids to pixels, and `.strata` uses either id with `Image`, a `Draw` image shape or any
+widget icon property:
 
 ```strata
 Image(
@@ -38,14 +39,14 @@ authoring and render packets carry only logical or Surface-scoped ids.
 
 ## Rendering model
 
-PNG bytes are inspected at Surface creation, transferred once through packet v11, decoded by the
-host, and sampled as ordinary textures. SVG documents are parsed at Surface creation into immutable
+PNG bytes are inspected at Surface creation, reach the host through packet v12 the first time a
+frame samples them, are decoded by the host, and are sampled as ordinary textures. SVG documents are parsed at Surface creation into immutable
 display lists. During widget presentation, Strata projects their curves, fills, strokes,
 transforms, `viewBox`, and `preserveAspectRatio` into ordinary clipped path commands. Submission
 then tessellates those paths at the current logical size and device scale.
 
 SVG is therefore resolution-independent and needs no SVG feature in D3D11, the CPU reference
-renderer, or a custom packet-v11 backend. Both desktop and headless rendering consume the same
+renderer, or a custom packet-v12 backend. Both desktop and headless rendering consume the same
 vertices, indices, materials, and scissors. PNG/SVG image content is immutable for a Surface
 lifetime; edited assets take effect after rebuilding the owning artifact and recreating the session.
 
@@ -53,6 +54,26 @@ lifetime; edited assets take effect after rebuilding the owning artifact and rec
 makes monochrome icon assets naturally themeable. The default white tint preserves literal colors
 and renders `currentColor` as white. Image opacity, source regions, root clipping, fill rules, and
 source paint order are retained. Raster sampling modes do not apply to SVG geometry.
+
+## Runtime images
+
+A host publishes pictures it only has while running (downloads, generated previews, captures) as
+straight-alpha RGBA8 pixels, and replaces or releases them at any time:
+
+```cpp
+runtime.publish_image("app:skin/steve", 64, 64, rgba, strata::ImageSampling::nearest);
+runtime.release_image("app:skin/steve");
+```
+
+At the C boundary these are `strata_runtime_publish_image` and `strata_runtime_release_image`.
+Documents reference the id like any static image; until it is published, or after it is released,
+the draw is skipped. Each Surface uploads an image the first time one of its frames samples it
+(packet v12 encoding 1, raw RGBA8), uploads it again only when it is replaced, and releases it from
+the host when it is released. A settled Surface sends nothing for its resident images. Publishing
+or releasing an image replans every Surface once, because the set of drawable images changed;
+replacing an image with one of the same size only re-uploads its pixels. A Surface's static image
+shadows a runtime image with the same id. The Runtime owns images on its thread, like host
+snapshots.
 
 ## Supported static SVG subset
 

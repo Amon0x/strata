@@ -347,6 +347,21 @@ typedef struct strata_host_snapshot_config {
     strata_string_view values_json;
 } strata_host_snapshot_config;
 
+/*
+ * A runtime image: tightly packed straight-alpha RGBA8 rows, width * height * 4 bytes, copied
+ * during the call. sampling is STRATA_IMAGE_SAMPLING_*. Publishing an existing id replaces it.
+ */
+typedef struct strata_runtime_image_config {
+    size_t struct_size;
+    strata_string_view id;
+    uint32_t width;
+    uint32_t height;
+    uint32_t sampling;
+    uint32_t reserved;
+    const uint8_t* pixels;
+    size_t pixel_bytes;
+} strata_runtime_image_config;
+
 typedef struct strata_host_snapshot_info {
     size_t struct_size;
     uint64_t generation;
@@ -1735,7 +1750,7 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Packet v11 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * Packet v12 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
  * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
  * [u32 kind, u32 payload byte count, payload]:
  *
@@ -1767,8 +1782,8 @@ typedef struct strata_surface_frame_info {
  * Resource payloads begin
  * with a texture-id string. Atlas create/upload then carry u32 format (0 = R8, 1 = RGBA8) and u32
  * x/y/width/height; upload adds u32 byte count and raw texels. Release has no additional fields.
- * Encoded texture creation carries u32 encoding (0 = PNG), u32 sampling, u32 width/height, a u32
- * byte count, and encoded bytes. STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES advances the epoch
+ * Encoded texture creation carries u32 encoding (0 = PNG, 1 = raw straight-alpha RGBA8 rows),
+ * u32 sampling, u32 width/height, a u32 byte count, and the bytes; either way the texture is RGBA8. STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES advances the epoch
  * from the immediately preceding retained epoch. Header geometry counts describe the complete
  * retained arrays; resource records are followed by vertex and index patch lists. Each list is
  * u32 count followed by [u32 byte offset, u32 byte count, raw bytes], then the complete updated
@@ -1780,7 +1795,7 @@ typedef struct strata_surface_frame_info {
  *
  * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
  * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
- * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v11 records.
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v12 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
@@ -1793,7 +1808,8 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_9 UINT32_C(9)
 #define STRATA_RENDER_PACKET_VERSION_10 UINT32_C(10)
 #define STRATA_RENDER_PACKET_VERSION_11 UINT32_C(11)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_11
+#define STRATA_RENDER_PACKET_VERSION_12 UINT32_C(12)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_12
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)
@@ -1877,6 +1893,16 @@ STRATA_API strata_result strata_runtime_publish_host_snapshot(
     strata_runtime* runtime, const strata_host_snapshot_config* snapshot);
 STRATA_API strata_result strata_runtime_get_host_snapshot_info(const strata_runtime* runtime,
                                                                strata_host_snapshot_info* out_info);
+/*
+ * Runtime images are referenced by id from Image, Draw image shapes and icons, exactly like a
+ * Surface's static images, and may be published, replaced and released at any time. A Surface
+ * uploads one only when a frame samples it; a missing id draws nothing.
+ */
+STRATA_API strata_result strata_runtime_publish_image(strata_runtime* runtime,
+                                                      const strata_runtime_image_config* image);
+/* Releasing an id that has no image succeeds and changes nothing. */
+STRATA_API strata_result strata_runtime_release_image(strata_runtime* runtime,
+                                                      strata_string_view id);
 /* Reads the retained generation for one snapshot producer id. */
 STRATA_API strata_result strata_runtime_get_host_snapshot_generation(const strata_runtime* runtime,
                                                                      strata_string_view id,

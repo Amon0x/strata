@@ -2,6 +2,7 @@
 #include <strata/contracts/demo_surface.hpp>
 #include <strata/contracts/settings_app.hpp>
 #include <strata/host.hpp>
+#include <strata/render_packet.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -482,6 +483,101 @@ void generated_root_models_publish_changed_fields_only() {
     active_runtime.close();
 }
 
+void runtime_images_upload_only_when_sampled() {
+    std::int64_t now = 100;
+    strata::RuntimeOptions options;
+    options.clock = [&now] { return now; };
+    strata::Runtime runtime(std::move(options));
+    runtime.configure_application(strata::ApplicationOptions{.id = "host-tests.images"});
+    check(runtime
+              .activate(strata::SourceActivation{
+                  .generation = 1U,
+                  .entry_source_id = "host-tests/images.strata",
+                  .entry_text = R"(
+                    overlay Main {
+                      root Panel(key: "images.root", layout: { kind: "COLUMN" }) {
+                        Image(key: "images.photo", image: "test:photo",
+                          layout: { width: 32, height: 32 })
+                        Draw(key: "images.face", layout: { width: 40, height: 40 }, shapes: [
+                          { kind: "image", image: "test:photo", tint: #808080FF,
+                            source: { u: 0.5, v: 0, width: 0.5, height: 1 },
+                            points: [{ x: 0.1, y: 0 }, { x: 1, y: 0.2 }, { x: 0, y: 1 }] }
+                        ])
+                      }
+                    }
+                  )",
+              })
+              .activated(),
+          "runtime image fixture did not activate");
+    strata::SurfaceOptions surface_options;
+    surface_options.id = "host-tests.images.surface";
+    surface_options.root_role = strata::SurfaceRootRole::overlay;
+    surface_options.root_name = "Main";
+    surface_options.environment.framebuffer_width = 320;
+    surface_options.environment.framebuffer_height = 200;
+    surface_options.environment.logical_width = 320.0;
+    surface_options.environment.logical_height = 200.0;
+    strata::Surface surface = runtime.create_surface(surface_options);
+    strata::host::RenderPacketDecoder decoder;
+    const auto frame = [&]() -> const strata::host::RenderPacket& {
+        now += 16'000'000;
+        static_cast<void>(surface.frame(now));
+        return decoder.decode(surface.render_packet());
+    };
+    const auto sampled = [](const strata::host::RenderPacket& packet) {
+        return std::ranges::count_if(packet.batches, [](const auto& batch) {
+            const auto* draw = std::get_if<strata::host::DrawBatch>(&batch);
+            return draw != nullptr && draw->texture.has_value() &&
+                   draw->texture->find("test:photo") != std::string::npos;
+        });
+    };
+
+    const strata::host::RenderPacket& missing = frame();
+    check(missing.resources.empty() && sampled(missing) == 0,
+          "an unpublished runtime image was uploaded or drawn");
+
+    std::vector<std::uint8_t> pixels(2U * 2U * 4U, 200U);
+    runtime.publish_image("test:photo", 2U, 2U, pixels, strata::ImageSampling::nearest);
+    runtime.publish_image("test:unused", 1U, 1U, std::vector<std::uint8_t>(4U, 1U));
+    const strata::host::RenderPacket& published = frame();
+    check(published.resources.size() == 1U &&
+              published.resources.front().kind == strata::host::resource_encoded_image &&
+              published.resources.front().texture.ends_with("/image/test:photo") &&
+              published.resources.front().format == strata::host::texture_encoding_rgba8 &&
+              published.resources.front().sampling == strata::host::texture_sampling_nearest &&
+              published.resources.front().width == 2U && published.resources.front().bytes == pixels,
+          "a published runtime image was not uploaded exactly once as RGBA8 when sampled");
+    check(sampled(published) >= 1, "a published runtime image was not drawn");
+    const std::string host_id = published.resources.front().texture;
+
+    const strata::host::RenderPacket& settled = frame();
+    check(settled.resources.empty() && !settled.full_geometry_payload,
+          "a settled Surface re-sent a resident runtime image or its geometry");
+
+    std::ranges::fill(pixels, std::uint8_t{40U});
+    runtime.publish_image("test:photo", 2U, 2U, pixels, strata::ImageSampling::nearest);
+    const strata::host::RenderPacket& replaced = frame();
+    check(replaced.resources.size() == 1U && replaced.resources.front().texture == host_id &&
+              replaced.resources.front().bytes == pixels && !replaced.full_geometry_payload,
+          "replacing a runtime image did not re-upload only its pixels");
+
+    runtime.release_image("test:photo");
+    const strata::host::RenderPacket& released = frame();
+    check(released.resources.size() == 1U &&
+              released.resources.front().kind == strata::host::resource_release &&
+              released.resources.front().texture == host_id && sampled(released) == 0,
+          "a released runtime image was not released from the host and dropped from drawing");
+
+    const std::vector<std::uint8_t> teardown = surface.prepare_release_packet();
+    const strata::host::RenderPacket& closing = decoder.decode(teardown);
+    check(std::ranges::none_of(closing.resources,
+                               [&host_id](const auto& resource) { return resource.texture == host_id; }),
+          "Surface teardown released a runtime image the host no longer held");
+    surface.acknowledge_release_packet();
+    surface.close();
+    runtime.close();
+}
+
 } // namespace
 
 int strata_test_host() {
@@ -496,6 +592,7 @@ int strata_test_host() {
         snapshot_bindings_publish_only_changed_revisions();
         generated_root_models_publish_changed_fields_only();
         public_runtime_facade_owns_host_boundaries();
+        runtime_images_upload_only_when_sampled();
         std::cout << "strata_host_tests: typed values, models, and complete host facade OK\n";
         return 0;
     } catch (const std::exception& error) {

@@ -625,8 +625,9 @@ strata_result strata_surface_prepare_release_packet(strata_surface* const surfac
             const std::uint64_t release_frame =
                 last_frame == std::numeric_limits<std::uint64_t>::max() ? last_frame
                                                                         : last_frame + 1U;
+            const std::vector<std::string> resident = surface->textures.resident();
             static_cast<void>(surface->host_render_packet_cache.prepare_resource_release(
-                release_frame, surface->glyph_atlas, surface->textures));
+                release_frame, surface->glyph_atlas, resident));
             surface->frame_json.clear();
             surface->frame_snapshot_available = false;
             surface->release_packet_prepared = true;
@@ -869,22 +870,18 @@ strata_result strata_surface_frame(strata_surface* const surface,
         const strata::ui::SurfaceFrame frame = surface->core.frame(frame_time_nanoseconds);
         const auto packet_started = std::chrono::steady_clock::now();
         const strata::ui::TextEngine* const engine = surface->core.text_engine();
+        const bool textures_changed = surface->textures.sync(surface->owner->core.images());
         const bool settled = frame.operations.render.nodes_visited == 0U &&
-                             frame.operations.render.commands_emitted == 0U &&
-                             !surface->texture_resources_pending;
+                             frame.operations.render.commands_emitted == 0U && !textures_changed;
         if (!settled || !surface->host_render_packet_cache.reuse(frame.frame_index)) {
             static_cast<void>(surface->host_render_packet_cache.encode(
-                surface->core.render_commands(), frame.frame_index,
-                surface->texture_resources_pending
-                    ? std::span<const strata::resource::EncodedTextureResource>(surface->textures)
-                    : std::span<const strata::resource::EncodedTextureResource>{},
+                surface->core.render_commands(), frame.frame_index, &surface->textures,
                 surface->glyph_atlas, engine, surface->core.environment().scale,
                 surface->core.environment().framebuffer_width,
                 surface->core.environment().framebuffer_height,
                 surface->core.environment().logical_width,
                 surface->core.environment().logical_height));
         }
-        surface->texture_resources_pending = false;
         const std::int64_t packet_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                               std::chrono::steady_clock::now() - packet_started)
                                               .count();

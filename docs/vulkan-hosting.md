@@ -1,6 +1,6 @@
 # Rendering into a host-owned Vulkan target
 
-`Strata::vulkan` renders packet-v11 Surfaces with Vulkan 1.1 or newer. It provides a C++
+`Strata::vulkan` renders packet-v12 Surfaces with Vulkan 1.1 or newer. It provides a C++
 `Renderer` and `Presenter` in `<strata/vulkan.hpp>`, and an exception-contained C presenter API
 in `<strata/vulkan.h>`. The installed package exports the same target and headers. No Kitten or
 Minecraft dependency is introduced.

@@ -538,6 +538,15 @@ void StrokeStyle::validate() const {
     }
 }
 
+std::array<Point, 3U> image_shape_corners(const runtime::Value& shape) {
+    const std::vector<Point> points = point_list(shape, "points");
+    if (points.size() != 3U) {
+        throw std::invalid_argument(
+            "an image shape requires three points: top-left, top-right and bottom-left");
+    }
+    return {points[0], points[1], points[2]};
+}
+
 std::string_view path_cap_name(const PathCap cap) noexcept {
     switch (cap) {
     case PathCap::butt: return "butt";

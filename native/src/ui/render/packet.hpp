@@ -2,11 +2,13 @@
 
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "font/atlas.hpp"
 #include "resource/image.hpp"
 #include "ui/render/submission.hpp"
+#include "ui/render/surface_textures.hpp"
 
 namespace strata::ui {
 
@@ -56,7 +58,7 @@ class TextEngine;
 namespace strata::ui {
 
 /**
- * Packet v11: retained geometry epochs, incremental geometry patches, GPU presentation groups,
+ * Packet v12: retained geometry epochs, incremental geometry patches, GPU presentation groups,
  * rate-limited effects, explicit current/surface backdrop sources, ordered application effect
  * programs, and rounded descendant masks. The logical v3 encoder remains available only to command-stream inspection tooling.
  */
@@ -68,45 +70,36 @@ class HostRenderPacketCache final {
     HostRenderPacketCache(HostRenderPacketCache&&) = delete;
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
-    /** A null TextEngine selects the packet-v11 non-text path; text runs are then rejected. */
+    /**
+     * A null TextEngine selects the packet-v12 non-text path; text runs are then rejected. Null
+     * textures means the stream draws no raster images.
+     */
     [[nodiscard]] const std::vector<std::uint8_t>&
     encode(const RenderCommandBuffer& commands, std::uint64_t frame_index,
-           std::span<const resource::EncodedTextureResource> texture_resources,
-           font::GlyphAtlas& glyph_atlas, const TextEngine* text_engine, double display_scale,
-           std::int64_t framebuffer_width, std::int64_t framebuffer_height, double logical_width,
-           double logical_height);
+           SurfaceTextures* textures, font::GlyphAtlas& glyph_atlas, const TextEngine* text_engine,
+           double display_scale, std::int64_t framebuffer_width, std::int64_t framebuffer_height,
+           double logical_width, double logical_height);
     /** Compatibility overload for text-backed surfaces. */
     [[nodiscard]] const std::vector<std::uint8_t>&
     encode(const RenderCommandBuffer& commands, std::uint64_t frame_index,
-           std::span<const resource::EncodedTextureResource> texture_resources,
-           font::GlyphAtlas& glyph_atlas, const TextEngine& text_engine, double display_scale,
-           std::int64_t framebuffer_width, std::int64_t framebuffer_height, double logical_width,
-           double logical_height);
+           SurfaceTextures* textures, font::GlyphAtlas& glyph_atlas, const TextEngine& text_engine,
+           double display_scale, std::int64_t framebuffer_width, std::int64_t framebuffer_height,
+           double logical_width, double logical_height);
     /** Emits a compact packet referencing the settled geometry epoch. */
     [[nodiscard]] bool reuse(std::uint64_t frame_index);
     /**
-     * Compatibility terminal entry point. It releases the surface-owned glyph atlas and every
-     * static texture descriptor already retained by this cache. Call prepare_resource_release()
-     * when teardown must also cover textures that have never reached a frame.
-     */
-    [[nodiscard]] const std::vector<std::uint8_t>&
-    prepare_atlas_release(std::uint64_t frame_index, font::GlyphAtlas& glyph_atlas);
-    /**
-     * Encodes terminal releases for every supplied surface-owned static texture together with the
-     * atlas. The encoded packet is retained before either resource set is committed/drained.
+     * Encodes terminal releases for the glyph atlas and every texture the host holds. The encoded
+     * packet is retained before either resource set is committed/drained.
      */
     [[nodiscard]] const std::vector<std::uint8_t>&
     prepare_resource_release(std::uint64_t frame_index, font::GlyphAtlas& glyph_atlas,
-                             std::span<const resource::EncodedTextureResource> static_textures);
+                             std::span<const std::string> textures);
     void clear() noexcept;
     [[nodiscard]] const std::vector<std::uint8_t>& packet() const noexcept;
     [[nodiscard]] const HostRenderPacketTelemetry& telemetry() const noexcept;
 
   private:
     RenderSubmissionCache submission_cache_;
-    // Submission planning still needs the complete descriptor table after one-shot encoded
-    // resource payloads have been consumed by the host.
-    std::vector<resource::TextureResourceDescriptor> texture_descriptors_;
     std::vector<std::uint8_t> geometry_packet_;
     std::vector<std::uint8_t> reuse_packet_;
     std::vector<std::uint8_t> resource_packet_;

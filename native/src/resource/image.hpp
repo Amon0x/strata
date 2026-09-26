@@ -8,7 +8,7 @@
 namespace strata::resource {
 
 enum class TextureSampling : std::uint32_t { nearest = 0U, linear = 1U };
-enum class ImageEncoding : std::uint32_t { png = 0U };
+enum class ImageEncoding : std::uint32_t { png = 0U, rgba8 = 1U };
 
 struct ImageDimensions final {
     std::uint32_t width = 0U;
@@ -55,6 +55,9 @@ struct EncodedTextureResource final {
         };
     }
 };
+
+/** Throws unless the dimensions fit the portable texture limits shared by every image source. */
+void validate_image_dimensions(ImageDimensions dimensions);
 
 /** Validates the bounded PNG envelope and reads its mandatory IHDR dimensions. */
 [[nodiscard]] ImageDimensions inspect_png(const std::vector<std::uint8_t>& bytes);

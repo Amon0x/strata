@@ -344,9 +344,9 @@ switch and behave identically on every backend.
 
 ## Vector drawing
 
-`Draw` paints authored outlines inside its own bounds, in the same normalized space paints use.
-Every shape declares a `fill`, a `stroke`, or both; stroke widths and dash lengths are logical
-pixels so they stay honest at any UI scale.
+`Draw` paints authored outlines and images inside its own bounds, in the same normalized space
+paints use. Every outline declares a `fill`, a `stroke`, or both; stroke widths and dash lengths are
+logical pixels so they stay honest at any UI scale.
 
 ```strata
 Draw(layout: { width: { weight: 1 }, height: 58 }, shapes: [
@@ -367,6 +367,18 @@ Shape kinds are `line`, `polyline`, `polygon`, `rect`, `circle`, `ellipse`, `arc
 literal, not a shape missing at runtime. `strokeStyle` carries `width`, `cap` (`butt`/`round`/
 `square`), `join` (`miter`/`round`/`bevel`), `miterLimit`, `dash` and `dashOffset`. Fills and
 strokes are antialiased by the tessellator, and a `points` list may come straight from host data.
+
+An `image` shape maps an image's `source` region (normalized, as for `Image.source`) onto the
+parallelogram whose top-left, top-right and bottom-left corners are its three `points`, multiplied
+by `tint`. It draws anything `Image` can, including [runtime images](svg.md#runtime-images), so a
+turned or sheared picture needs no pre-rendered asset:
+
+```strata
+Draw(layout: { width: 96, height: 96 }, shapes: [
+  { kind: "image", image: "app:skin/steve", source: { u: 0.125, v: 0.125, width: 0.125, height: 0.125 },
+    points: [{ x: 0.2, y: 0.1 }, { x: 0.9, y: 0.2 }, { x: 0.2, y: 0.8 }], tint: #D8D8D8FF }
+])
+```
 
 ## Authored materials
 
@@ -501,7 +513,7 @@ composition, and clips work to the intersection of the effect bounds and inherit
 The D3D11 desktop and headless hosts execute the full pass program. The reference software backend
 executes declared blur passes, ignores authored shader stages, and then applies the same rounded
 mask, opacity, and backdrop/content composition. This approximation is intentionally deterministic
-rather than a claim of shader fidelity. Packet v11 carries ordered backdrop/content batches,
+rather than a claim of shader fidelity. Packet v12 carries ordered backdrop/content batches,
 current/surface backdrop selection, active rounded-clip geometry, effect refresh-rate policy, and a
 bounded sixteen-float parameter block.
 The public decoder rejects malformed clip/effect state, caps nested `CONTENT` effects at four

@@ -1313,16 +1313,17 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
 
     ui::HostRenderPacketCache packet_cache;
     textures.front().dimensions = texture_descriptors.front().dimensions;
-    static_cast<void>(packet_cache.encode(commands, 1U, textures, atlas, *text_engine, 1.0, 640,
-                                          480, 640.0, 480.0));
+    ui::SurfaceTextures surface_textures("fixture", textures);
+    static_cast<void>(packet_cache.encode(commands, 1U, &surface_textures, atlas, *text_engine, 1.0,
+                                          640, 480, 640.0, 480.0));
     commands.append(ui::SolidRectRenderCommand{
         ui::Rect{0.0, 0.0, 1.0, 1.0},
         ui::RenderColor{255U, 255U, 255U, 255U},
     });
-    const std::vector<std::uint8_t>& descriptor_only_packet =
-        packet_cache.encode(commands, 2U, {}, atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
-    check(!descriptor_only_packet.empty(),
-          "one-shot texture upload discarded descriptors required by later geometry");
+    const std::vector<std::uint8_t>& later_packet = packet_cache.encode(
+        commands, 2U, &surface_textures, atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0);
+    check(!later_packet.empty() && surface_textures.resident().size() == 1U,
+          "an uploaded texture lost the descriptor later geometry needs");
 
     const std::uint16_t teardown_glyph = text_engine->control_font().glyph_id('A');
     check(teardown_glyph != 0U, "control font lost the atlas teardown fixture");
@@ -1332,10 +1333,11 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
               .has_value(),
           "atlas teardown fixture did not allocate a live page");
     // Publish the page once so teardown models a resource that can genuinely be host-owned.
-    static_cast<void>(
-        packet_cache.encode(commands, 3U, {}, atlas, *text_engine, 1.0, 640, 480, 640.0, 480.0));
+    static_cast<void>(packet_cache.encode(commands, 3U, &surface_textures, atlas, *text_engine, 1.0,
+                                          640, 480, 640.0, 480.0));
+    const std::vector<std::string> resident = surface_textures.resident();
     const std::vector<std::uint8_t>& release_packet =
-        packet_cache.prepare_resource_release(4U, atlas, textures);
+        packet_cache.prepare_resource_release(4U, atlas, resident);
     std::size_t release_offset = 8U;
     check(release_packet.size() >= release_offset &&
               std::string_view(reinterpret_cast<const char*>(release_packet.data()),
@@ -5641,6 +5643,63 @@ overlay Pages {
           "a finished exit was not pruned");
 }
 
+void test_draw_image_shape_maps_a_parallelogram() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("draw-image-shape", bundle);
+    const std::string source = R"(
+overlay Figure {
+  root Draw(key: "figure", layout: { width: 40, height: 20 }, shapes: [
+    { kind: "image", image: "test:skin", tint: #808080FF,
+      source: { u: 0.5, v: 0.25, width: 0.25, height: 0.5 },
+      points: [{ x: 0.1, y: 0 }, { x: 1, y: 0.2 }, { x: 0, y: 1 }] }
+  ])
+}
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"figure.strata", source}, no_imports, 0U)
+              .activated(),
+          "image shape fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 180;
+    environment.logical_width = 320.0;
+    environment.logical_height = 180.0;
+    ui::Surface surface("draw-image-shape", application, runtime::LayerRole::overlay, "Figure",
+                        environment);
+    static_cast<void>(surface.frame(1'000'000));
+    const ui::RetainedNode* figure = surface.tree().find_key("figure");
+    const ui::LayoutRecord* record =
+        figure != nullptr ? surface.layout().find(figure->identity()) : nullptr;
+    check(record != nullptr, "image shape fixture lost its layout");
+    const ui::Rect bounds = record->bounds;
+    const std::vector<ui::RenderCommand>& commands = surface.render_commands().commands();
+    const auto push = std::ranges::find_if(commands, [](const ui::RenderCommand& command) {
+        return std::holds_alternative<ui::TransformPushRenderCommand>(command);
+    });
+    check(push != commands.end() && std::next(push) != commands.end() &&
+              std::next(push, 2) != commands.end(),
+          "an image shape did not draw through a transform");
+    const auto& transform = std::get<ui::TransformPushRenderCommand>(*push);
+    check_near(transform.m00, 36.0, "image shape top edge x");
+    check_near(transform.m10, 4.0, "image shape top edge y");
+    check_near(transform.m01, -4.0, "image shape left edge x");
+    check_near(transform.m11, 20.0, "image shape left edge y");
+    check_near(transform.m02, bounds.x + 4.0, "image shape origin x");
+    check_near(transform.m12, bounds.y, "image shape origin y");
+    const auto* image = std::get_if<ui::ImageRenderCommand>(&*std::next(push));
+    check(image != nullptr && image->bounds == ui::Rect{0.0, 0.0, 1.0, 1.0} &&
+              image->texture == "test:skin" &&
+              image->source == ui::TextureRegion{0.5, 0.25, 0.25, 0.5} &&
+              image->tint == ui::RenderColor{128U, 128U, 128U, 255U} &&
+              std::holds_alternative<ui::TransformPopRenderCommand>(*std::next(push, 2)),
+          "an image shape did not draw its tinted source region in the unit square");
+}
+
 void test_content_transition_item_fills_definite_container() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -7340,6 +7399,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_entry_stagger_and_surface_reveal();
             test_content_transition_item_fills_definite_container();
             test_exit_is_owned_by_the_removed_node();
+            test_draw_image_shape_maps_a_parallelogram();
             test_component_slot_projection();
             test_component_cache_tracks_exact_retained_dependencies();
             test_component_cache_keeps_equal_action_arguments();

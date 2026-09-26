@@ -166,6 +166,83 @@ strata_result strata_runtime_publish_host_snapshot(
     }
 }
 
+strata_result strata_runtime_publish_image(
+    strata_runtime* const runtime,
+    const strata_runtime_image_config* const image
+) {
+    if (runtime == nullptr) return invalid_argument();
+    if (image == nullptr || image->struct_size < sizeof(strata_runtime_image_config) ||
+        !valid_view(image->id, false) || image->reserved != 0U ||
+        (image->sampling != STRATA_IMAGE_SAMPLING_NEAREST &&
+         image->sampling != STRATA_IMAGE_SAMPLING_LINEAR) ||
+        (image->pixels == nullptr && image->pixel_bytes != 0U)) {
+        return runtime_failure(
+            *runtime,
+            STRATA_STATUS_INVALID_ARGUMENT,
+            "STRATA.ABI.INVALID_RUNTIME_IMAGE",
+            "A runtime image requires a complete structure, non-empty id, known sampling, and pixels."
+        );
+    }
+    try {
+        static_cast<void>(runtime->core.images().publish(
+            copied_string(image->id),
+            strata::resource::ImageDimensions{image->width, image->height},
+            image->sampling == STRATA_IMAGE_SAMPLING_NEAREST
+                ? strata::resource::TextureSampling::nearest
+                : strata::resource::TextureSampling::linear,
+            std::vector<std::uint8_t>(image->pixels, image->pixels + image->pixel_bytes)
+        ));
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (const std::bad_alloc&) {
+        return runtime_failure(
+            *runtime,
+            STRATA_STATUS_OUT_OF_MEMORY,
+            "STRATA.CORE.OUT_OF_MEMORY",
+            "Runtime image publication exhausted memory."
+        );
+    } catch (const std::invalid_argument& error) {
+        return runtime_failure(
+            *runtime,
+            STRATA_STATUS_INVALID_ARGUMENT,
+            "STRATA.ABI.INVALID_RUNTIME_IMAGE",
+            error.what()
+        );
+    } catch (...) {
+        return runtime_failure(
+            *runtime,
+            STRATA_STATUS_INTERNAL_ERROR,
+            "STRATA.ABI.UNCAUGHT_EXCEPTION",
+            "Runtime image publication failed inside the C ABI exception boundary."
+        );
+    }
+}
+
+strata_result strata_runtime_release_image(
+    strata_runtime* const runtime,
+    const strata_string_view id
+) {
+    if (runtime == nullptr) return invalid_argument();
+    if (!valid_view(id, false)) {
+        return runtime_failure(
+            *runtime,
+            STRATA_STATUS_INVALID_ARGUMENT,
+            "STRATA.ABI.INVALID_RUNTIME_IMAGE",
+            "Releasing a runtime image requires a non-empty id."
+        );
+    }
+    try {
+        static_cast<void>(runtime->core.images().release(copied_string(id)));
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (...) {
+        return runtime_failure(
+            *runtime,
+            STRATA_STATUS_INTERNAL_ERROR,
+            "STRATA.ABI.UNCAUGHT_EXCEPTION",
+            "Runtime image release failed inside the C ABI exception boundary."
+        );
+    }
+}
+
 strata_result strata_runtime_get_host_snapshot_info(
     const strata_runtime* const runtime,
     strata_host_snapshot_info* const out_info

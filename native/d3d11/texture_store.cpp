@@ -165,11 +165,14 @@ struct TextureStore::Impl final {
             return;
         }
         if (operation.kind == 3U) {
-            const std::vector<std::uint8_t> pixels = decode_png(operation);
+            const bool raw = operation.format == host::texture_encoding_rgba8;
+            const std::vector<std::uint8_t> decoded = raw ? std::vector<std::uint8_t>{}
+                                                          : decode_png(operation);
             textures.insert_or_assign(operation.texture,
                                       create_texture(operation.width, operation.height,
                                                      DXGI_FORMAT_R8G8B8A8_UNORM, operation.sampling,
-                                                     pixels.data(), operation.width * 4U));
+                                                     raw ? operation.bytes.data() : decoded.data(),
+                                                     operation.width * 4U));
             return;
         }
         Texture& destination = textures.at(operation.texture);

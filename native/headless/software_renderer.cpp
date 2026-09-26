@@ -360,7 +360,9 @@ void SoftwareRenderer::apply(const host::ResourceOperation& operation) {
     }
     if (operation.kind == 3U) {
         DecodedImage image =
-            image_codec_.decode_png(operation.bytes, operation.width, operation.height);
+            operation.format == host::texture_encoding_rgba8
+                ? DecodedImage{operation.width, operation.height, operation.bytes}
+                : image_codec_.decode_png(operation.bytes, operation.width, operation.height);
         textures_.insert_or_assign(operation.texture, Texture{
                                                           image.width,
                                                           image.height,

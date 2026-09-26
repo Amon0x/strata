@@ -10,7 +10,7 @@ Strata ships two desktop entry points:
   launches the prebuilt executable named by a custom-host manifest. With no manifest, the executable
   opens Strata's bundled showcase.
 
-Both paths use the same public C ABI, packet-v11 decoder, D3D11 renderer, resource loader,
+Both paths use the same public C ABI, packet-v12 decoder, D3D11 renderer, resource loader,
 clipboard/IMM32 adapters, source-import resolver, complete window-message translator, and ordered
 GPU-resource release barrier.
 
@@ -71,7 +71,7 @@ Installed targets are:
 | `Strata::d3d11` | D3D11 Surface presenter and packet renderer for host-owned devices, contexts, and targets. |
 | `Strata::win32` | Input translation for a host-owned Win32 window procedure. |
 | `Strata::extensions` | Authoring support linked into independently loaded extension libraries. |
-| `Strata::render_host` | Public stateful packet-v11 decoder used by custom render backends. |
+| `Strata::render_host` | Public stateful packet-v12 decoder used by custom render backends. |
 
 Applications that already own a graphics loop should use `Strata::d3d11` instead of
 `Strata::desktop`; it neither creates nor presents a swap chain. See
@@ -143,7 +143,7 @@ and candidate windows at the logical editor caret using the current Surface scal
 
 Low-level `resize`, `pointer`, `scroll`, `key`, `text`, and `ime_preedit` methods remain available to
 applications with an existing platform translation layer. The message loop calls `host.frame()`.
-The host synchronizes revision-watched bindings, frames the Surface, decodes packet v11, submits
+The host synchronizes revision-watched bindings, frames the Surface, decodes packet v12, submits
 D3D11 work, and presents. Fonts and images are immutable session resources; editing them requires
 rebuilding the owning artifact and recreating the desktop application. `close()` is optional during
 ordinary scope destruction; calling it explicitly reports release errors. Either path consumes and

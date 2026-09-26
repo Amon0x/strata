@@ -211,7 +211,7 @@ struct strata_surface final {
           glyph_atlas(host_resource_namespace),
           fonts(std::move(font_bindings)),
           image_bindings(std::move(owned_image_bindings)),
-          textures(std::move(texture_resources)),
+          textures(host_resource_namespace, std::move(texture_resources)),
           core(
               std::move(id),
               host_runtime->core.application(),
@@ -243,8 +243,7 @@ struct strata_surface final {
     strata::font::GlyphAtlas glyph_atlas;
     std::vector<strata_surface_font_binding> fonts;
     std::vector<strata_surface_image_binding> image_bindings;
-    std::vector<strata::resource::EncodedTextureResource> textures;
-    bool texture_resources_pending = true;
+    strata::ui::SurfaceTextures textures;
     /** Preparing the final atlas-release packet is a terminal Surface lifecycle transition. */
     bool release_packet_prepared = false;
     /** Set only after the host confirms synchronous consumption of the terminal packet. */

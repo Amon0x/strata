@@ -1,6 +1,8 @@
 #include "ui/widget/presentation.hpp"
 
 #include <algorithm>
+#include <array>
+#include <stdexcept>
 
 #include "ui/input.hpp"
 #include "ui/status.hpp"
@@ -172,8 +174,36 @@ void image_content(WidgetRenderScope& scope) {
 }
 
 /**
- * Draw projects authored vector shapes. Geometry is normalized to the widget's own bounds, so the
- * same drawing scales with layout, and a malformed shape is skipped rather than failing the frame.
+ * Maps an image's source region onto the parallelogram whose top-left, top-right and bottom-left
+ * corners are the shape's points: an Image in the unit square under one affine transform, so
+ * raster and SVG images, tints and missing runtime images behave exactly as they do for Image.
+ */
+void image_shape(WidgetRenderScope& scope, const runtime::Value& shape) {
+    const std::string* image = widget_image_value(shape.field("image"));
+    if (image == nullptr)
+        throw std::invalid_argument("an image shape requires its 'image'");
+    const std::array<Point, 3U> corners = image_shape_corners(shape);
+    const Rect bounds = scope.layout().bounds;
+    const auto place = [&bounds](const Point point) {
+        return Point{bounds.x + point.x * bounds.width, bounds.y + point.y * bounds.height};
+    };
+    const Point origin = place(corners[0]);
+    const Point right = place(corners[1]);
+    const Point down = place(corners[2]);
+    scope.push_transform(TransformPushRenderCommand{
+        right.x - origin.x, down.x - origin.x, origin.x,
+        right.y - origin.y, down.y - origin.y, origin.y,
+    });
+    scope.image(Rect{0.0, 0.0, 1.0, 1.0}, *image,
+                widget_color(shape.field("tint"), RenderColor{255U, 255U, 255U, 255U}),
+                widget_texture_region(shape.field("source")));
+    scope.pop_transform();
+}
+
+/**
+ * Draw projects authored vector shapes and images. Geometry is normalized to the widget's own
+ * bounds, so the same drawing scales with layout, and a malformed shape is skipped rather than
+ * failing the frame.
  */
 void draw_content(WidgetRenderScope& scope) {
     const runtime::ValueList* shapes = scope.list("shapes");
@@ -183,6 +213,11 @@ void draw_content(WidgetRenderScope& scope) {
         scope.rounded_rect(scope.layout().bounds, *scope.visual().background);
     }
     for (const runtime::Value& value : shapes->values) {
+        if (const runtime::Value* kind = value.field("kind");
+            kind != nullptr && kind->string() != nullptr && *kind->string() == "image") {
+            image_shape(scope, value);
+            continue;
+        }
         const std::optional<PathShape> shape = path_shape_from_value(&value);
         if (shape.has_value())
             scope.shape(scope.layout().bounds, *shape);

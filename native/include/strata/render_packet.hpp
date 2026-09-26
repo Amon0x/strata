@@ -35,6 +35,9 @@ inline constexpr std::uint32_t maximum_presentation_group = 511U;
 
 inline constexpr std::uint32_t texture_format_r8 = 0U;
 inline constexpr std::uint32_t texture_format_rgba8 = 1U;
+/** Encodings of a resource_encoded_image payload; either way the texture is RGBA8. */
+inline constexpr std::uint32_t texture_encoding_png = 0U;
+inline constexpr std::uint32_t texture_encoding_rgba8 = 1U;
 inline constexpr std::uint32_t texture_sampling_nearest = 0U;
 inline constexpr std::uint32_t texture_sampling_linear = 1U;
 

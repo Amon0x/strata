@@ -308,6 +308,7 @@ add_library(
         src/resource/assets.cpp
         src/resource/image.cpp
         src/resource/resource.cpp
+        src/resource/runtime_images.cpp
         src/resource/svg_image.cpp
         src/runtime/action.cpp
         src/runtime/application.cpp
@@ -387,6 +388,7 @@ add_library(
         src/ui/render/submission_cache.cpp
         src/ui/render/submission_planner.cpp
         src/ui/render/submission_mesh.cpp
+        src/ui/render/surface_textures.cpp
         src/ui/render/material_registry.cpp
         src/ui/scale.cpp
         src/ui/scheduler.cpp
@@ -1194,7 +1196,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     )
     target_link_libraries(
         strata_host_tests
-        PRIVATE Strata::host strata_application_contracts strata_host_support
+        PRIVATE Strata::host Strata::render_host strata_application_contracts strata_host_support
     )
     target_include_directories(strata_host_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop)
     strata_target_defaults(strata_host_tests)

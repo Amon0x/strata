@@ -100,11 +100,17 @@ constexpr std::size_t maximum_content_effect_depth = 4U;
     }, command);
 }
 
-[[nodiscard]] std::optional<std::string> command_texture(
+/** A command's texture: none when it samples nothing, else its host id or an unknown image. */
+struct CommandTexture final {
+    std::optional<std::string> host_id;
+    bool missing = false;
+};
+
+[[nodiscard]] CommandTexture command_texture(
     const PreparedCommand& command,
     const SubmissionContext& context
 ) {
-    return std::visit([&context](const auto& value) -> std::optional<std::string> {
+    return std::visit([&context](const auto& value) -> CommandTexture {
         using Type = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<Type, ImageRenderCommand> ||
                       std::is_same_v<Type, NinePatchRenderCommand> ||
@@ -116,21 +122,23 @@ constexpr std::size_t maximum_content_effect_depth = 4U;
                     return std::optional<std::string>{value.texture};
                 }
             }();
-            if (!logical_texture.has_value()) return std::nullopt;
+            if (!logical_texture.has_value()) return {};
             const auto declared = std::ranges::find(
                 context.textures,
                 *logical_texture,
                 &resource::TextureResourceDescriptor::logical_id
             );
-            // Undeclared ids retain the pre-existing host-managed texture path. Surface-declared
-            // static images are always translated to their collision-free host identity.
-            return declared == context.textures.end()
-                ? logical_texture
-                : std::optional<std::string>{declared->host_id};
+            // An image the Surface cannot resolve (a runtime image not yet published or already
+            // released) draws nothing rather than sampling a texture the host lacks.
+            if (declared == context.textures.end()) return CommandTexture{std::nullopt, true};
+            return CommandTexture{declared->host_id, false};
         } else if constexpr (std::is_same_v<Type, PreparedTextPtr>) {
-            return value != nullptr ? std::optional<std::string>(value->texture) : std::nullopt;
+            return CommandTexture{
+                value != nullptr ? std::optional<std::string>(value->texture) : std::nullopt,
+                false,
+            };
         } else {
-            return std::nullopt;
+            return {};
         }
     }, command);
 }
@@ -461,18 +469,22 @@ void append_draw(
         ++skipped_draws;
         return;
     }
+    CommandTexture texture = command_texture(command, context);
+    if (texture.missing) {
+        ++skipped_draws;
+        return;
+    }
     if (retained_empty) ++skipped_draws;
     MaterialState material = merged_material(command, material_override);
     // Scope opacity reaches the per-vertex material opacity, not the command's colours.
     material.opacity *= opacity;
-    std::optional<std::string> texture = command_texture(command, context);
     output.emplace_back(PreparedDraw{
         source_order,
         std::move(command),
         local_bounds,
         transform,
         std::move(material),
-        std::move(texture),
+        std::move(texture.host_id),
         resolved_scissor,
         rounded_clips,
         false,

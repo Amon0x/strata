@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -127,6 +128,13 @@ struct PathShape final {
  * first violated rule; returns nothing when the value is not a shape object at all.
  */
 [[nodiscard]] std::optional<PathShape> path_shape_from_value(const runtime::Value* value);
+
+/**
+ * Reads an `image` shape's `points`: the top-left, top-right and bottom-left corners of the
+ * parallelogram its image region is mapped onto. Throws std::invalid_argument unless there are
+ * exactly three finite points.
+ */
+[[nodiscard]] std::array<Point, 3U> image_shape_corners(const runtime::Value& shape);
 
 [[nodiscard]] std::string_view path_cap_name(PathCap cap) noexcept;
 [[nodiscard]] std::string_view path_join_name(PathJoin join) noexcept;
