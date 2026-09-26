@@ -45,27 +45,16 @@ void MotionRuntime::set_supplemental(std::map<std::string, CompiledMotion, std::
 }
 
 bool MotionRuntime::should_retain_for_exit(const RetainedNode& node) {
-    bool retain = false;
-    const auto visit = [&](auto&& self, const RetainedNode& candidate) -> void {
-        if (!layout_participates(candidate))
-            return;
-        const motion_detail::NodeMotionConfig config =
-            motion_detail::node_motion_config(candidate, implementation_->catalog);
-        if (std::ranges::any_of(config.triggers, [](const auto& binding) {
-                return binding.trigger == MotionTrigger::exit && binding.animation != nullptr &&
-                       binding.cancel_on_detach &&
-                       binding.animation->timing.repeat.kind != MotionRepeatKind::forever;
-            })) {
-            retain = true;
-            return;
-        }
-        for (const auto& child : candidate.children()) {
-            if (!retain)
-                self(self, *child);
-        }
-    };
-    visit(visit, node);
-    return retain;
+    // Only the removed node's own exit keeps it: a descendant's exit belongs to its own removal.
+    if (!layout_participates(node))
+        return false;
+    const motion_detail::NodeMotionConfig config =
+        motion_detail::node_motion_config(node, implementation_->catalog);
+    return std::ranges::any_of(config.triggers, [](const auto& binding) {
+        return binding.trigger == MotionTrigger::exit && binding.animation != nullptr &&
+               binding.cancel_on_detach &&
+               binding.animation->timing.repeat.kind != MotionRepeatKind::forever;
+    });
 }
 
 bool MotionRuntime::exit_finished(const RetainedNode& node) {

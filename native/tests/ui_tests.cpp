@@ -5577,6 +5577,70 @@ overlay Grouped {
     check(encode(3U).groups.empty(), "a settled surface still published presentation groups");
 }
 
+void test_exit_is_owned_by_the_removed_node() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("exit-owner", bundle);
+    const auto show = [&application](const std::uint64_t generation, const bool shown) {
+        static_cast<void>(application.host().adopt(runtime::HostSnapshot::from_json(
+            "page", generation,
+            data::parse_json(std::string(R"({"page":{"shown":)") + (shown ? "true" : "false") +
+                             "}}"))));
+    };
+    show(1U, true);
+    const std::string source = R"(
+animation Fade {
+  from { opacity: 0 }
+  to { opacity: 1 }
+  duration: 200ms;
+}
+overlay Pages {
+  root Panel(key: "pages.root", layout: { width: 200, height: 100 }) {
+    if page.shown {
+      Panel(key: "pages.title", layout: { width: 100, height: 40 }) {
+        Panel(key: "pages.title.hover", transition: Fade, layout: { width: 10, height: 10 })
+      }
+    } else {
+      Panel(key: "pages.other", transition: Fade, layout: { width: 100, height: 40 })
+    }
+  }
+}
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"pages.strata", source}, no_imports, 0U)
+              .activated(),
+          "exit owner fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 180;
+    environment.logical_width = 320.0;
+    environment.logical_height = 180.0;
+    ui::Surface surface("exit-owner", application, runtime::LayerRole::overlay, "Pages",
+                        environment);
+    static_cast<void>(surface.frame(1'000'000));
+    static_cast<void>(surface.frame(500'000'000));
+    check(surface.tree().find_key("pages.title") != nullptr, "exit owner fixture has no page");
+    show(2U, false);
+    static_cast<void>(surface.frame(516'000'000));
+    check(surface.tree().find_key("pages.title") == nullptr &&
+              surface.tree().find_key("pages.other") != nullptr,
+          "a descendant's exit kept its removed ancestor on screen");
+    static_cast<void>(surface.frame(1'000'000'000));
+    show(3U, true);
+    static_cast<void>(surface.frame(1'016'000'000));
+    const ui::RetainedNode* leaving = surface.tree().find_key("pages.other");
+    check(leaving != nullptr && leaving->lifecycle() == ui::RetainedLifecycle::exiting,
+          "a node with its own exit was not retained while it plays");
+    static_cast<void>(surface.frame(1'400'000'000));
+    static_cast<void>(surface.frame(1'416'000'000));
+    check(surface.tree().find_key("pages.other") == nullptr,
+          "a finished exit was not pruned");
+}
+
 void test_content_transition_item_fills_definite_container() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -7275,6 +7339,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_motion_timing_and_indeterminate_progress();
             test_entry_stagger_and_surface_reveal();
             test_content_transition_item_fills_definite_container();
+            test_exit_is_owned_by_the_removed_node();
             test_component_slot_projection();
             test_component_cache_tracks_exact_retained_dependencies();
             test_component_cache_keeps_equal_action_arguments();

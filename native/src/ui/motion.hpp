@@ -84,7 +84,7 @@ public:
     /** Binds the immutable declaration catalog before reconciliation asks lifecycle questions. */
     void bind(const std::shared_ptr<const runtime::RuntimeUnit>& unit);
     void set_supplemental(std::map<std::string, CompiledMotion, std::less<>> motions);
-    /** True when this removal boundary contains at least one executable exit attachment. */
+    /** True when this removal boundary has its own executable exit attachment. */
     [[nodiscard]] bool should_retain_for_exit(const RetainedNode& node);
     /** True after every exit attachment in an EXITING subtree reached its terminal sample. */
     [[nodiscard]] bool exit_finished(const RetainedNode& node);
