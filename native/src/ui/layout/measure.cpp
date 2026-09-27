@@ -448,6 +448,14 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         std::max(child_intrinsic.height, own_intrinsic.height),
     };
     measured.content_size = resolve_content_box(measured.style, intrinsic, constraints);
+    // Own content aligns within the box it resolves to: a minimum width wider than a text is room for its
+    // END or CENTER alignment, so the content lays out again at that width.
+    if (own_intrinsic.width > child_intrinsic.width &&
+        measured.content_size.width > own_intrinsic.width) {
+        Constraints resolved = content_constraints;
+        resolved.min_width = resolved.max_width = measured.content_size.width;
+        static_cast<void>(intrinsic_measure_(node, resolved));
+    }
     if (std::optional<ContentSizeMotionSpec> motion = parsed_layout(node).content_motion;
         motion.has_value()) {
         measured.content_motion_target_size = measured.content_size;

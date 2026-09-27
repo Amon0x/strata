@@ -20,6 +20,7 @@
 #include "resource/resource.hpp"
 #include "runtime/expression.hpp"
 #include "runtime/value.hpp"
+#include "ui/layout.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
 #include "ui/render.hpp"
@@ -1538,6 +1539,49 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
         );
         check(selection.size() == 1U && selection.front().width == 0.0,
               "selection geometry lost the zero-width soft-wrap source gap");
+    }
+
+    // A minimum width wider than the text leaves its alignment room: the text lays out within its box.
+    for (const std::string& alignment : {std::string("CENTER"), std::string("END")}) {
+        const auto leaf = ui::DescriptionNode::create(
+            "Text", std::optional<std::string>("text.boxed"), "/text-boxed", "screen TextFixture",
+            ui::DescriptionNode::Properties{
+                {"text", runtime::ExpressionValue(runtime::Value("AA"))},
+                {"$layout", runtime::ExpressionValue(object({
+                    {"alignment", runtime::Value(alignment)},
+                    {"font", runtime::Value("primary")},
+                    {"pixelSize", runtime::Value(12.0)},
+                    {"minWidth", runtime::Value(wrap_width)},
+                }))},
+            },
+            std::make_shared<const ui::EagerDescriptionChildren>(
+                std::vector<std::shared_ptr<const ui::DescriptionNode>>{}
+            )
+        );
+        ui::RetainedTree boxed_tree;
+        static_cast<void>(retain(boxed_tree, ui::DescriptionNode::create(
+            "Panel", std::optional<std::string>("text.boxed.row"), "/text-boxed-row", "screen TextFixture",
+            ui::DescriptionNode::Properties{
+                {"$layout", runtime::ExpressionValue(object({{"kind", runtime::Value("ROW")}}))},
+            },
+            std::make_shared<const ui::EagerDescriptionChildren>(
+                std::vector<std::shared_ptr<const ui::DescriptionNode>>{leaf}
+            )
+        )));
+        ui::LayoutEngine boxed_layout(
+            [&engine](const ui::RetainedNode& node, const ui::Constraints& constraints) {
+                return engine.measure(node, constraints);
+            }
+        );
+        static_cast<void>(boxed_layout.layout(boxed_tree, ui::LayoutEnvironment{
+            0U, ui::Rect{0.0, 0.0, 200.0, 40.0}, 1.0,
+        }));
+        const ui::RetainedNode& boxed = *boxed_tree.root()->children().front();
+        const ui::TextLayout laid_out = engine.layout(boxed, "AA");
+        check(!laid_out.lines.empty(), "boxed text lost its line");
+        check_near(laid_out.lines.front().x,
+                   alignment == "CENTER" ? (wrap_width - word_width) * 0.5 : wrap_width - word_width,
+                   "text with a minimum width ignored its alignment inside the wider box");
     }
 }
 
