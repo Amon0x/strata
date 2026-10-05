@@ -126,7 +126,13 @@ component DemoSwatch(key: key, index: number, start: color, end: color, scene: n
     behaviors: [
       { id: "strata.focusable" },
       { id: "strata.hoverable" },
-      { id: "strata.activate", action: action("state.set", name: "scene", value: index) }
+      {
+        id: "strata.activate",
+        action: sequence(
+          action("state.set", name: "previousScene", value: scene),
+          action("state.set", name: "scene", value: index)
+        )
+      }
     ],
     semantics: { role: "BUTTON", label: format("Wallpaper {0}", index + 1) }
   )
@@ -175,8 +181,10 @@ overlay Hyalite {
 
   state showLens = true;
   state showWordmark = true;
-  // Which wallpaper is behind the glass; 5 and 6 are the light ones.
+  // Which wallpaper is behind the glass; 5 and 6 are the light ones. The previous scene stays
+  // opaque underneath while the new one fades in over it, so a change never dips through dark.
   state scene = 0;
+  state previousScene = 0;
   derived sceneKey = format("scene-{0}", scene);
 
   state labBlur = 2;
@@ -188,17 +196,18 @@ overlay Hyalite {
 
   root Panel(style: DemoRoot) {
     // Scenes crossfade, so the backdrop's brightness sweeps through every glass element's
-    // thresholds and each one flips when its own patch of wallpaper does.
-    Panel(
-      style: style(DemoFill, kind: "OVERLAY"),
-      contentKey: sceneKey,
-      contentTransition: GlassFade,
-      contentTransitionMode: "TOGETHER"
-    ) {
+    // thresholds and each one flips when its own patch of wallpaper does. The outgoing scene is
+    // never faded: it stays underneath at full opacity and the incoming one fades in over it.
+    Panel(style: style(DemoFill, kind: "OVERLAY")) {
+      Panel(
+        style: style(DemoWallpaper, background: previousScene >= 5 ? #EEF2FAFF : #0A0C1CFF),
+        material: material("hyalite:wallpaper", scene: previousScene)
+      )
       Panel(
         key: sceneKey,
         style: style(DemoWallpaper, background: scene >= 5 ? #EEF2FAFF : #0A0C1CFF),
-        material: material("hyalite:wallpaper", scene: scene)
+        material: material("hyalite:wallpaper", scene: scene),
+        enter: GlassFade
       )
     }
     Panel(
