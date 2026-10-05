@@ -12,11 +12,10 @@
 //   specular            strength of the rim light
 //   brightness / shade  exposure of the body, and how firmly it is held in its scheme's band
 //
-// Glass adapts to what is behind it. A surface that carries the `strata.backdrop` behavior is told
-// whether its backdrop is light or dark, and answers by setting its `tone`: 0 keeps the content's
-// light ink and holds the body dark enough to carry it, 1 mirrors that ink to dark and lifts the
-// body pale. Tone is inherited, so everything inside a surface follows it without being told, and
-// a surface that must not follow (accent, lit) sets its own.
+// Glass inherits the enclosing scene's tone: 0 keeps light ink and a dark body, 1 mirrors the ink
+// to dark and lifts the body pale. One animated tone on the scene keeps cards, bars and controls
+// in the same scheme even when a bright patch moves behind just one of them. Accent and lit
+// controls set their own tone to preserve their intentional contrast.
 
 style GlassNone { background: null; border: null; }
 
@@ -89,6 +88,7 @@ style GlassInset extends GlassNone {
 
 // Accent: glass with colour poured into it, for the one action that matters.
 style GlassAccent extends GlassNone {
+  tone: 0;
   effect: effect(
     "hyalite:glass",
     blur: 8, downsample: 2, tint: #0A84FFB8,
@@ -103,6 +103,7 @@ style GlassAccent extends GlassNone {
 
 // Lit: a control in its "on" state, bright enough to carry dark ink.
 style GlassLit extends GlassNone {
+  tone: 0;
   effect: effect(
     "hyalite:glass",
     blur: 6, downsample: 2, tint: #FFFFFFD9,
@@ -185,9 +186,15 @@ animation GlassGrab {
   to { scale: 1.28; }
 }
 animation GlassFade {
-  duration: 520ms; easing: "ease";
+  duration: 250ms; easing: "cubic-in-out";
   from { opacity: 0; }
   to { opacity: 1; }
+}
+// Scheme changes are scenery, not control feedback: let the body and its ink ease together.
+animation GlassTone {
+  duration: 250ms; easing: "cubic-in-out";
+  from { tone: 0; }
+  to { tone: 1; }
 }
 animation GlassAppear {
   duration: 260ms; easing: "cubic-out";
@@ -314,7 +321,7 @@ component GlassIcon(name: string, size: number = 22, ink: color = #FFFFFFF2, wei
   }
 }
 
-// An adaptive surface: a sheet of glass that fills its parent, follows its backdrop, and lays its
+// A surface: a sheet of glass that fills its parent, inherits its tone, and lays its
 // content out as `kind`. `look` is "regular", "clear", "frosted" or "control". Size it with the
 // panel you put it in; set `fillHeight: false` for a card that should wrap its content instead.
 component GlassSurface(
@@ -326,22 +333,18 @@ component GlassSurface(
   gap: number = 0,
   fillHeight: boolean = true
 ) {
-  state onLight = false;
   Panel(
     style: style(
       look == "clear" ? GlassClear
         : look == "frosted" ? GlassFrosted
         : look == "control" ? GlassControl
         : GlassRegular,
-      radius: radius,
-      tone: onLight ? 1 : 0
+      radius: radius
     ),
-    animateChanges: { properties: ["tone"], policy: "standard" },
     layout: {
       kind: "OVERLAY", width: { weight: 1 }, height: fillHeight ? { weight: 1 } : "content",
       padding: pad
-    },
-    behaviors: [{ id: "strata.backdrop", action: action("state.setFromEvent", name: "onLight") }]
+    }
   ) {
     Slot(
       name: "content",
@@ -355,7 +358,7 @@ component GlassSurface(
   }
 }
 
-// An adaptive capsule that wraps its content in a row: toolbar titles, chips, badges. `look` is
+// A capsule that wraps its content in a row: toolbar titles, chips, badges. `look` is
 // as for GlassSurface.
 component GlassPill(
   look: string = "control",
@@ -364,22 +367,18 @@ component GlassPill(
   padLeft: number = 18,
   padRight: number = 20
 ) {
-  state onLight = false;
   Panel(
     style: style(
       look == "clear" ? GlassClear
         : look == "frosted" ? GlassFrosted
         : look == "regular" ? GlassRegular
         : GlassControl,
-      radius: 999,
-      tone: onLight ? 1 : 0
+      radius: 999
     ),
-    animateChanges: { properties: ["tone"], policy: "standard" },
     layout: {
       kind: "ROW", width: "content", height: height,
       padding: { left: padLeft, right: padRight, top: 0, bottom: 0 }, alignItems: "CENTER"
-    },
-    behaviors: [{ id: "strata.backdrop", action: action("state.setFromEvent", name: "onLight") }]
+    }
   ) {
     Slot(
       name: "content",
@@ -390,9 +389,8 @@ component GlassPill(
 }
 
 // A capsule button. `look` is "regular", "accent" or "inset". Accent glass carries its own colour
-// and keeps light ink whatever is behind it; the other two follow their backdrop.
+// and keeps light ink whatever is behind it; the other two inherit the scene's tone.
 component GlassButton(key: key, label: string, activate: action, look: string = "regular", icon: string = "") {
-  state onLight = false;
   Panel(
     key: key,
     style: style(
@@ -400,24 +398,20 @@ component GlassButton(key: key, label: string, activate: action, look: string = 
       radius: 999,
       hoverOverlay: #FFFFFF1C,
       activeOverlay: #FFFFFF30,
-      focusRing: { width: 2, color: #FFFFFF99 },
-      tone: look != "accent" && onLight ? 1 : 0
+      focusRing: { width: 2, color: #FFFFFF99 }
     ),
-    animateChanges: { properties: ["tone"], policy: "standard" },
     layout: {
       kind: "ROW", width: "content", height: 44,
       padding: { horizontal: 20, vertical: 0 }, gap: 8,
       alignItems: "CENTER", justifyContent: "CENTER"
     },
-    motions: [{ id: "glass.button.press", interaction: "PRESSED", animation: GlassPress }],
+    motions: [
+      { id: "glass.button.press", interaction: "PRESSED", animation: GlassPress }
+    ],
     behaviors: [
       { id: "strata.focusable" },
       { id: "strata.hoverable" },
-      { id: "strata.activate", action: activate },
-      {
-        id: "strata.backdrop", enabled: look != "accent",
-        action: action("state.setFromEvent", name: "onLight")
-      }
+      { id: "strata.activate", action: activate }
     ],
     semantics: { role: "BUTTON", label: label }
   ) {
@@ -427,7 +421,7 @@ component GlassButton(key: key, label: string, activate: action, look: string = 
 }
 
 // A round icon button. `lit` shows the control in its on state: bright glass with dark ink, which
-// it keeps over any backdrop. Unlit, it follows its backdrop.
+// it keeps over any backdrop. Unlit, it inherits the scene's tone; `look` selects its material.
 component GlassIconButton(
   key: key,
   icon: string,
@@ -435,27 +429,30 @@ component GlassIconButton(
   activate: action,
   size: number = 44,
   lit: boolean = false,
-  look: string = "regular"
+  look: string = "control"
 ) {
-  state onLight = false;
   Panel(
     key: key,
     style: style(
-      lit ? GlassLit : look == "inset" ? GlassInset : GlassControl,
+      lit ? GlassLit
+        : look == "inset" ? GlassInset
+        : look == "clear" ? GlassClear
+        : look == "frosted" ? GlassFrosted
+        : look == "regular" ? GlassRegular
+        : GlassControl,
       radius: 999,
       hoverOverlay: #FFFFFF1C,
       activeOverlay: #FFFFFF30,
-      focusRing: { width: 2, color: #FFFFFF99 },
-      tone: !lit && onLight ? 1 : 0
+      focusRing: { width: 2, color: #FFFFFF99 }
     ),
-    animateChanges: { properties: ["tone"], policy: "standard" },
     layout: { kind: "ROW", width: size, height: size, alignItems: "CENTER", justifyContent: "CENTER" },
-    motions: [{ id: "glass.icon.press", interaction: "PRESSED", animation: GlassPress }],
+    motions: [
+      { id: "glass.icon.press", interaction: "PRESSED", animation: GlassPress }
+    ],
     behaviors: [
       { id: "strata.focusable" },
       { id: "strata.hoverable" },
-      { id: "strata.activate", action: activate },
-      { id: "strata.backdrop", enabled: !lit, action: action("state.setFromEvent", name: "onLight") }
+      { id: "strata.activate", action: activate }
     ],
     semantics: { role: "BUTTON", label: label }
   ) {
@@ -533,13 +530,15 @@ component GlassSlider(
 }
 
 // One cell of a segmented control or tab bar. The selection lens is drawn by the owner; a segment
-// is only its hit target and its ink, so it draws no hover plate of its own: a plate appearing
-// under the pointer and vanishing as the lens slides in reads as a flicker, not as feedback.
+// is only its hit target and its ink, so it draws neither of the plates a pressable control gets
+// by default. The theme's press plate is black, and a black pill snapping over the lens on every
+// press reads as the control flashing dark, not as feedback; the lens sliding is the feedback.
 component GlassSegment(key: key, label: string, icon: string, activate: action) {
   Panel(
     key: key,
     style: style(
-      GlassNone, radius: 999, hoverOverlay: null, focusRing: { width: 2, color: #FFFFFF99 }
+      GlassNone, radius: 999, hoverOverlay: null, activeOverlay: null,
+      focusRing: { width: 2, color: #FFFFFF99 }
     ),
     layout: {
       kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 }, gap: 3,

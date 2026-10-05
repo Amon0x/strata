@@ -5579,6 +5579,74 @@ overlay Grouped {
     check(encode(3U).groups.empty(), "a settled surface still published presentation groups");
 }
 
+void test_cached_tone_during_pointer_hold() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("cached-tone", bundle);
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application.compile_and_activate(compiler::ModuleSource{"tone.strata", R"(
+overlay Toned {
+  state selected = false;
+  root Panel(style: style(tone: 1, background: #FFFFFFFF),
+             layout: { kind: "ROW", width: 200, height: 120 }) {
+    Panel(key: "segment", style: style(background: #FFFFFF44),
+          layout: { width: 100, height: 60 },
+          behaviors: [
+            { id: "strata.hoverable" },
+            { id: "strata.activate", action: action("state.toggle", name: "selected") }
+          ])
+    Panel(style: style(tone: 0, background: #FFFFFFFF),
+          layout: { width: 50, height: 60 })
+  }
+}
+)"},
+          no_imports, 0U).activated(), "cached tone fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 200;
+    environment.framebuffer_height = 120;
+    environment.logical_width = 200.0;
+    environment.logical_height = 120.0;
+    ui::Surface surface("cached-tone", application, runtime::LayerRole::overlay,
+                        "Toned", environment);
+    ui::RenderEngine renderer;
+    ui::RenderCommandBuffer commands;
+    ui::MaterialRegistry materials;
+    font::GlyphAtlas atlas("cached-tone");
+    ui::HostRenderPacketCache packets;
+    host::RenderPacketDecoder decoder;
+    std::int64_t now = 0;
+    std::uint64_t packet_index = 0U;
+    for (const ui::PointerEventType event : {
+             ui::PointerEventType::move, ui::PointerEventType::press,
+             ui::PointerEventType::move, ui::PointerEventType::release}) {
+        static_cast<void>(surface.frame(now += 16'666'667));
+        static_cast<void>(surface.input().enqueue_pointer(
+            ui::PointerInputEvent{{50.0, 30.0}, event, 1, 0}));
+        static_cast<void>(surface.frame(now += 16'666'667));
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            const auto counters = renderer.render(
+                surface.tree(), surface.layout(), surface.input(), surface.commands(),
+                surface.widget_registry(), surface.behavior_registry(), surface.motion(),
+                nullptr, nullptr, materials, {}, commands);
+            if (repeat != 0)
+                check(counters.nodes_visited == 0U, "tone fixture missed the base cache path");
+            const auto& packet = decoder.decode(packets.encode(
+                commands, ++packet_index, {}, atlas,
+                static_cast<const ui::TextEngine*>(nullptr), 1.0, 200, 120, 200.0, 120.0));
+            check(commands.groups().size() == 2U,
+                  "cached pointer frame lost its presentation groups");
+            for (const ui::RenderGroup& group : commands.groups()) {
+                check(group.index < packet.groups.size() &&
+                          packet.groups[group.index].tone == (group.parent == 0U ? 1.0 : 0.0),
+                      "cached pointer frame lost light tone or its local dark override");
+            }
+        }
+    }
+}
+
 void test_exit_is_owned_by_the_removed_node() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -7386,6 +7454,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_svg_image_projection_and_compound_fill();
         test_render_submission_opacity_scope_reuse();
         test_presentation_group_animation();
+        test_cached_tone_during_pointer_hold();
         if (argument_count >= 3 && std::string_view(arguments[2]).size() != 0U) {
             test_bundled_font_metrics(arguments[1]);
             test_bundled_texture_descriptor(arguments[1]);

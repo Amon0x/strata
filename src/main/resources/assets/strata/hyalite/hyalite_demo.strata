@@ -56,6 +56,7 @@ style DemoStageLine {
 }
 style DemoValue extends GlassCaption { width: 44; alignment: "END"; }
 style DemoSwatch {
+  tone: 0;
   width: 30; height: 30; radius: 999;
   border: { width: 1, color: #FFFFFF2E };
   focusRing: { width: 2, color: #FFFFFF99 };
@@ -63,22 +64,18 @@ style DemoSwatch {
 style DemoSwatchSelected extends DemoSwatch { border: { width: 2, color: #FFFFFFF0 }; }
 style DemoRowLabel extends GlassLabel { width: 92; }
 
-// A card cut from whichever surface the toolbar has selected. It follows its backdrop the way
+// A card cut from whichever surface the toolbar has selected. It inherits the scene's tone as
 // GlassSurface does; it is spelled out here because the surface itself is chosen by state.
 component DemoCard(surface: number, grow: boolean = false, pad: number = 22, gap: number = 14) {
-  state onLight = false;
   Panel(
     style: style(
       surface == 1 ? GlassClear : surface == 2 ? GlassFrosted : GlassRegular,
-      radius: 30,
-      tone: onLight ? 1 : 0
+      radius: 30
     ),
-    animateChanges: { properties: ["tone"], policy: "standard" },
     layout: {
       kind: "COLUMN", width: { weight: 1 }, height: grow ? { weight: 1 } : "content",
       padding: pad
-    },
-    behaviors: [{ id: "strata.backdrop", action: action("state.setFromEvent", name: "onLight") }]
+    }
   ) {
     Slot(
       name: "content",
@@ -127,7 +124,7 @@ component DemoSwatch(key: key, index: number, start: color, end: color, scene: n
       { id: "strata.focusable" },
       { id: "strata.hoverable" },
       {
-        id: "strata.activate",
+        id: "strata.activate", enabled: scene != index,
         action: sequence(
           action("state.set", name: "previousScene", value: scene),
           action("state.set", name: "scene", value: index)
@@ -166,7 +163,7 @@ overlay Hyalite {
   state surface = 0;
   state tab = 0;
   // The toolbar and tab bar are cut from the same surface as the cards.
-  derived barLook = surface == 1 ? "clear" : surface == 2 ? "frosted" : "control";
+  derived barLook = surface == 1 ? "clear" : surface == 2 ? "frosted" : "regular";
 
   state wifi = true;
   state bluetooth = true;
@@ -194,10 +191,12 @@ overlay Hyalite {
   state labRadius = 62;
   state labTint = 8;
 
-  root Panel(style: DemoRoot) {
-    // Scenes crossfade, so the backdrop's brightness sweeps through every glass element's
-    // thresholds and each one flips when its own patch of wallpaper does. The outgoing scene is
-    // never faded: it stays underneath at full opacity and the incoming one fades in over it.
+  root Panel(
+    style: style(DemoRoot, tone: scene >= 5 ? 1 : 0),
+    motions: [{ id: "glass.tone", target: scene >= 5, animation: GlassTone }]
+  ) {
+    // The scene and its shared palette ease together. The outgoing wallpaper stays opaque
+    // underneath the incoming one, so the crossfade never dips through the dark root.
     Panel(style: style(DemoFill, kind: "OVERLAY")) {
       Panel(
         style: style(DemoWallpaper, background: previousScene >= 5 ? #EEF2FAFF : #0A0C1CFF),
@@ -215,10 +214,9 @@ overlay Hyalite {
       animateChanges: { properties: ["opacity"], policy: "fast" }
     )
     if showWordmark {
-      // The wordmark sits on the bare wallpaper, so it sets its own tone from the scene.
+      // The wordmark shares the same palette transition as the surrounding glass.
       Panel(
-        style: style(DemoFill, kind: "PANEL", tone: scene >= 5 ? 1 : 0),
-        animateChanges: { properties: ["tone"], policy: "standard" },
+        style: style(DemoFill, kind: "PANEL"),
         transition: GlassAppear
       ) {
         Text(
@@ -250,9 +248,9 @@ overlay Hyalite {
           }
         }
         Panel(style: DemoSpacer)
-        GlassIconButton(key: "toolbar.search", icon: "search", label: "Search", size: 48, activate: action("state.set", name: "tab", value: 1))
-        GlassIconButton(key: "toolbar.bell", icon: "bell", label: "Notifications", size: 48, activate: action("state.toggle", name: "focus"))
-        GlassIconButton(key: "toolbar.person", icon: "person", label: "Account", size: 48, activate: action("state.set", name: "tab", value: 3))
+        GlassIconButton(key: "toolbar.search", icon: "search", label: "Search", size: 48, look: barLook, activate: action("state.set", name: "tab", value: 1))
+        GlassIconButton(key: "toolbar.bell", icon: "bell", label: "Notifications", size: 48, look: barLook, activate: action("state.toggle", name: "focus"))
+        GlassIconButton(key: "toolbar.person", icon: "person", label: "Account", size: 48, look: barLook, activate: action("state.set", name: "tab", value: 3))
       }
 
       Panel(style: DemoColumns) {
@@ -376,7 +374,7 @@ overlay Hyalite {
             }
           }
         }
-        GlassIconButton(key: "tab.search", icon: "search", label: "Search", size: 66, activate: action("state.set", name: "tab", value: 1))
+        GlassIconButton(key: "tab.search", icon: "search", label: "Search", size: 66, look: barLook, activate: action("state.set", name: "tab", value: 1))
       }
     }
 

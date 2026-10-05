@@ -1038,9 +1038,10 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         visit(visit, *portal, true, std::nullopt, MotionTransform{}, 1.0, 0U);
         ++counters.portals_rendered;
     }
+    // Cache the presentation table with its commands; cache hits must retain tone and motion.
+    implementation_->publish_groups(output);
     implementation_->retain_base(tree, layout, input, generations, output);
     append_detached_overlays(overlays);
-    implementation_->publish_groups(output);
     counters.commands_emitted = output.size();
     return counters;
 }

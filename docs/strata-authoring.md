@@ -33,7 +33,7 @@ component SettingsCard(title: string) {
 overlay Settings {
   state advanced = false;
   state sections: List<string> = ["account", "privacy"];
-  derived summary = join(sections, " Â· ");
+  derived summary = join(sections, " · ");
 
   root SettingsCard(title: "Display") {
     Slot(name: "body") {
@@ -102,7 +102,7 @@ Editable controls separate mechanics from optional chrome. Use `appearance: "BAR
 
 ```strata
 Panel(style: SearchGlass) {
-  TextBox(key: "search.editor", bind: query, appearance: "BARE", hint: "Searchâ€¦")
+  TextBox(key: "search.editor", bind: query, appearance: "BARE", hint: "Search…")
 }
 ```
 
@@ -242,6 +242,8 @@ a backdrop that hovers near a threshold cannot flicker; the action fires only wh
 changes. `options` may be omitted for the defaults shown. What the component does with the boolean
 is ordinary authoring: here it sets [`tone`](strata-language.md#tone), which flips the ink of
 everything inside the card and tells the glass shader which contrast band to hold.
+Retained render frames preserve that tone, including while a child control is pressed or held;
+reusing cached drawing does not reset the surface to dark.
 
 Each observer reads its own backdrop, so a control on a card follows the card's body rather than the
 wallpaper, and elements over different parts of a scene can disagree. Measurement is a host
@@ -250,10 +252,16 @@ on the GPU, so a reading follows its frame by one or two). Under a host that doe
 observer simply never fires and the node presents as over a dark backdrop. A node without a
 `BACKDROP` effect has nothing to measure.
 
+For a coordinated application palette, set `tone` once on the scene instead of observing each
+control independently. Hyalite uses this approach: its cards, toolbar, navigation and unlit controls
+inherit one tone, animated with the wallpaper over 250 ms. Bright wallpaper details cannot switch
+just one control to a different scheme. Accent/lit controls and wallpaper swatches retain their
+own colors; toolbar and navigation surfaces follow the selected Regular, Clear or Frosted material.
+
 ### Scroll observation
 
-Every built-in scroll viewportâ€”`Scroll`, `Repeater`, `VirtualList`, `ItemGrid`, `Table`, and
-`TreeView`â€”accepts `onScroll`. It emits after the retained offset changes and has been clamped:
+Every built-in scroll viewport—`Scroll`, `Repeater`, `VirtualList`, `ItemGrid`, `Table`, and
+`TreeView`—accepts `onScroll`. It emits after the retained offset changes and has been clamped:
 
 ```strata
 Scroll(
@@ -366,8 +374,8 @@ input, measure/arrange, semantics, and render callbacks; they do not acquire com
 host-global state. Built-ins and extensions share stable identity, invalidation, focus/capture,
 motion, layout, semantics, and packet planning.
 
-Adding a reusable custom composition is not an extension reasonâ€”write a `.strata` component. Adding
-a game callback is not an extension reasonâ€”register a typed host action.
+Adding a reusable custom composition is not an extension reason—write a `.strata` component. Adding
+a game callback is not an extension reason—register a typed host action.
 
 ## Diagnostics and source reactivation
 
