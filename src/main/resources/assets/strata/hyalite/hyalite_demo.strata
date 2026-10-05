@@ -55,6 +55,12 @@ style DemoStageLine {
   color: #FFFFFFE6;
 }
 style DemoValue extends GlassCaption { width: 44; alignment: "END"; }
+style DemoSwatch {
+  width: 30; height: 30; radius: 999;
+  border: { width: 1, color: #FFFFFF2E };
+  focusRing: { width: 2, color: #FFFFFF99 };
+}
+style DemoSwatchSelected extends DemoSwatch { border: { width: 2, color: #FFFFFFF0 }; }
 style DemoRowLabel extends GlassLabel { width: 92; }
 
 // A card cut from whichever surface the toolbar has selected. It follows its backdrop the way
@@ -107,6 +113,25 @@ component DemoSwitchRow(key: key, label: string, detail: string, on: boolean, ch
   }
 }
 
+// One wallpaper choice: a disc of the scene's two colours, ringed when it is the current one.
+component DemoSwatch(key: key, index: number, start: color, end: color, scene: number) {
+  Panel(
+    key: key,
+    style: style(
+      scene == index ? DemoSwatchSelected : DemoSwatch,
+      background: { kind: "linear", angle: 135, stops: [ { color: start }, { color: end } ] }
+    ),
+    animateChanges: { properties: ["border"], policy: "fast" },
+    motions: [{ id: "swatch.press", interaction: "PRESSED", animation: GlassPress }],
+    behaviors: [
+      { id: "strata.focusable" },
+      { id: "strata.hoverable" },
+      { id: "strata.activate", action: action("state.set", name: "scene", value: index) }
+    ],
+    semantics: { role: "BUTTON", label: format("Wallpaper {0}", index + 1) }
+  )
+}
+
 component DemoSliderRow(key: key, icon: string, value: number, change: action) {
   Panel(style: DemoRow) {
     GlassIcon(name: icon, size: 20, ink: #FFFFFFD9)
@@ -134,6 +159,8 @@ component DemoLabRow(
 overlay Hyalite {
   state surface = 0;
   state tab = 0;
+  // The toolbar and tab bar are cut from the same surface as the cards.
+  derived barLook = surface == 1 ? "clear" : surface == 2 ? "frosted" : "control";
 
   state wifi = true;
   state bluetooth = true;
@@ -148,7 +175,9 @@ overlay Hyalite {
 
   state showLens = true;
   state showWordmark = true;
-  state daylight = false;
+  // Which wallpaper is behind the glass; 5 and 6 are the light ones.
+  state scene = 0;
+  derived sceneKey = format("scene-{0}", scene);
 
   state labBlur = 2;
   state labRefraction = 1.3;
@@ -158,14 +187,20 @@ overlay Hyalite {
   state labTint = 8;
 
   root Panel(style: DemoRoot) {
-    Panel(style: DemoWallpaper, material: material("hyalite:wallpaper", daylight: 0))
-    // The daytime field fades in over the night one, so the backdrop's brightness sweeps through
-    // every glass element's thresholds and each one flips when its own patch of wallpaper does.
+    // Scenes crossfade, so the backdrop's brightness sweeps through every glass element's
+    // thresholds and each one flips when its own patch of wallpaper does.
     Panel(
-      style: style(DemoWallpaper, background: #EEF2FAFF, opacity: daylight ? 1 : 0),
-      material: material("hyalite:wallpaper", daylight: 1),
-      animateChanges: { properties: ["opacity"], policy: "standard" }
-    )
+      style: style(DemoFill, kind: "OVERLAY"),
+      contentKey: sceneKey,
+      contentTransition: GlassFade,
+      contentTransitionMode: "TOGETHER"
+    ) {
+      Panel(
+        key: sceneKey,
+        style: style(DemoWallpaper, background: scene >= 5 ? #EEF2FAFF : #0A0C1CFF),
+        material: material("hyalite:wallpaper", scene: scene)
+      )
+    }
     Panel(
       style: style(DemoFill, background: #000000FF, opacity: (100 - brightness) * 0.0085),
       animateChanges: { properties: ["opacity"], policy: "fast" }
@@ -173,7 +208,7 @@ overlay Hyalite {
     if showWordmark {
       // The wordmark sits on the bare wallpaper, so it sets its own tone from the scene.
       Panel(
-        style: style(DemoFill, kind: "PANEL", tone: daylight ? 1 : 0),
+        style: style(DemoFill, kind: "PANEL", tone: scene >= 5 ? 1 : 0),
         animateChanges: { properties: ["tone"], policy: "standard" },
         transition: GlassAppear
       ) {
@@ -190,13 +225,13 @@ overlay Hyalite {
     Panel(style: DemoPage) {
       // Toolbar.
       Panel(style: DemoBar) {
-        GlassPill(padLeft: 16) {
+        GlassPill(look: barLook, padLeft: 16) {
           GlassIcon(name: "sparkle", size: 20)
           Text(text: "Hyalite", style: GlassHeadline, maxLines: 1)
         }
         Panel(style: DemoSpacer)
         Panel(style: GlassNone, layout: { kind: "OVERLAY", width: 330, height: 48 }) {
-          GlassSurface(look: "control", radius: 999, kind: "OVERLAY") {
+          GlassSurface(look: barLook, radius: 999, kind: "OVERLAY") {
             GlassSelection(index: surface, count: 3)
             Panel(style: style(DemoFill, kind: "ROW", padding: 4)) {
               GlassSegment(key: "surface.regular", label: "Regular", icon: "", activate: action("state.set", name: "surface", value: 0))
@@ -262,7 +297,16 @@ overlay Hyalite {
             DemoSliderRow(key: "cc.volume", icon: "speaker", value: volume, change: action("state.setFromEvent", name: "volume"))
             DemoSwitchRow(key: "scene.lens", label: "Magnifier", detail: "A free lens you can drag anywhere", on: showLens, change: action("state.setFromEvent", name: "showLens"))
             DemoSwitchRow(key: "scene.wordmark", label: "Wordmark", detail: "Large type behind the glass", on: showWordmark, change: action("state.setFromEvent", name: "showWordmark"))
-            DemoSwitchRow(key: "scene.daylight", label: "Daylight", detail: "A pale wallpaper; the glass follows", on: daylight, change: action("state.setFromEvent", name: "daylight"))
+            Text(text: "WALLPAPER", style: GlassOverline, maxLines: 1)
+            Panel(style: style(DemoRow, gap: 10)) {
+              DemoSwatch(key: "scene.aurora", index: 0, start: #1E4FD8FF, end: #8A3DFFFF, scene: scene)
+              DemoSwatch(key: "scene.dusk", index: 1, start: #2A1040FF, end: #F0702AFF, scene: scene)
+              DemoSwatch(key: "scene.marine", index: 2, start: #03202BFF, end: #19B6B0FF, scene: scene)
+              DemoSwatch(key: "scene.graphite", index: 3, start: #1A1B1FFF, end: #5A5E66FF, scene: scene)
+              DemoSwatch(key: "scene.orbs", index: 4, start: #2C2270FF, end: #FF6A5FFF, scene: scene)
+              DemoSwatch(key: "scene.daylight", index: 5, start: #BFD9FFFF, end: #FFD2E0FF, scene: scene)
+              DemoSwatch(key: "scene.paper", index: 6, start: #F4EFE6FF, end: #E6D8C6FF, scene: scene)
+            }
           }
         }
 
@@ -313,7 +357,7 @@ overlay Hyalite {
       // Tab bar.
       Panel(style: style(DemoBar, height: 66, justifyContent: "CENTER")) {
         Panel(style: GlassNone, layout: { kind: "OVERLAY", width: 400, height: 66 }) {
-          GlassSurface(look: "control", radius: 999, kind: "OVERLAY") {
+          GlassSurface(look: barLook, radius: 999, kind: "OVERLAY") {
             GlassSelection(index: tab, count: 4, inset: 5)
             Panel(style: style(DemoFill, kind: "ROW", padding: 5)) {
               GlassSegment(key: "tab.home", label: "Home", icon: "home", activate: action("state.set", name: "tab", value: 0))

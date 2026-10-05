@@ -184,6 +184,11 @@ animation GlassGrab {
   from { scale: 1; }
   to { scale: 1.28; }
 }
+animation GlassFade {
+  duration: 520ms; easing: "ease";
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 animation GlassAppear {
   duration: 260ms; easing: "cubic-out";
   from { opacity: 0; scale: 0.86; }
@@ -350,11 +355,25 @@ component GlassSurface(
   }
 }
 
-// An adaptive capsule that wraps its content in a row: toolbar titles, chips, badges.
-component GlassPill(height: number = 48, gap: number = 10, padLeft: number = 18, padRight: number = 20) {
+// An adaptive capsule that wraps its content in a row: toolbar titles, chips, badges. `look` is
+// as for GlassSurface.
+component GlassPill(
+  look: string = "control",
+  height: number = 48,
+  gap: number = 10,
+  padLeft: number = 18,
+  padRight: number = 20
+) {
   state onLight = false;
   Panel(
-    style: style(GlassControl, radius: 999, tone: onLight ? 1 : 0),
+    style: style(
+      look == "clear" ? GlassClear
+        : look == "frosted" ? GlassFrosted
+        : look == "regular" ? GlassRegular
+        : GlassControl,
+      radius: 999,
+      tone: onLight ? 1 : 0
+    ),
     animateChanges: { properties: ["tone"], policy: "standard" },
     layout: {
       kind: "ROW", width: "content", height: height,
@@ -514,11 +533,14 @@ component GlassSlider(
 }
 
 // One cell of a segmented control or tab bar. The selection lens is drawn by the owner; a segment
-// is only its hit target and its ink.
+// is only its hit target and its ink, so it draws no hover plate of its own: a plate appearing
+// under the pointer and vanishing as the lens slides in reads as a flicker, not as feedback.
 component GlassSegment(key: key, label: string, icon: string, activate: action) {
   Panel(
     key: key,
-    style: style(GlassNone, radius: 999, focusRing: { width: 2, color: #FFFFFF99 }),
+    style: style(
+      GlassNone, radius: 999, hoverOverlay: null, focusRing: { width: 2, color: #FFFFFF99 }
+    ),
     layout: {
       kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 }, gap: 3,
       alignItems: "CENTER", justifyContent: "CENTER"
