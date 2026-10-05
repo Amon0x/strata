@@ -52,6 +52,7 @@ constexpr std::array property_names{
     PropertyName{MotionProperty::scale, "scale"},
     PropertyName{MotionProperty::scale_x, "scaleX"},
     PropertyName{MotionProperty::scale_y, "scaleY"},
+    PropertyName{MotionProperty::tone, "tone"},
 };
 
 [[nodiscard]] std::string normalized(const std::string_view value) {

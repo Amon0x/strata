@@ -24,6 +24,7 @@
 
 #include "host/extensions.hpp"
 #include "host/module_path.hpp"
+#include "host/system_fonts.hpp"
 #include "host_services.hpp"
 #include "ime.hpp"
 #include "renderer.hpp"
@@ -235,10 +236,15 @@ struct ApplicationHost::Impl final {
         require_resource_id(config.module_resource, "desktop application module");
         if (!config.schemas_resource.empty())
             require_resource_id(config.schemas_resource, "desktop application schemas");
-        for (const FontResource& font : config.fonts) {
+        for (FontResource& font : config.fonts) {
             if (font.id.empty())
                 throw std::invalid_argument("desktop font id must not be empty");
             require_resource_id(font.resource, "desktop font resource");
+            // An installed `system` candidate replaces the bundled face for this run.
+            if (std::optional<std::string> installed = host::select_system_font(font.system);
+                installed.has_value()) {
+                font.resource = std::move(*installed);
+            }
         }
         for (const ImageResource& image : config.images) {
             if (image.id.empty())
@@ -478,6 +484,11 @@ struct ApplicationHost::Impl final {
         const host::RenderPacket& packet = decoder.decode(surface->render_packet());
         renderer.render(packet);
         frame_available = true;
+        // Backdrop probes read back without waiting on the GPU, so these describe an earlier frame.
+        const std::vector<strata_backdrop_sample> backdrop =
+            renderer.take_backdrop_samples("default");
+        if (!backdrop.empty())
+            surface->report_backdrop(backdrop);
 
         strata_profiler_host_frame telemetry{};
         telemetry.struct_size = sizeof(telemetry);

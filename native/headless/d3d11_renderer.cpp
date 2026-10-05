@@ -69,7 +69,8 @@ struct D3D11Renderer::Impl final {
                                           static_cast<UINT>(feature_levels.size()),
                                           D3D11_SDK_VERSION, &device, &selected, &context),
                         "headless D3D11/WARP device creation");
-        renderer = std::make_unique<d3d11::RenderContext>(device.Get(), context.Get());
+        // Captures are deterministic: a probe is read back in the frame that measured it.
+        renderer = std::make_unique<d3d11::RenderContext>(device.Get(), context.Get(), false, true);
     }
 
     ~Impl() {
@@ -212,6 +213,10 @@ void D3D11Renderer::declare_effect_pass(const std::string_view effect_id, const 
                                         const std::string_view source) {
     impl_->declare_effect_pass(effect_id, index, kind, radius, downsample, radius_parameter,
                                downsample_parameter, source);
+}
+
+std::vector<strata_backdrop_sample> D3D11Renderer::take_backdrop_samples() {
+    return impl_->renderer->take_backdrop_samples("headless");
 }
 
 void D3D11Renderer::render(const host::RenderPacket& packet, const std::int64_t time_nanoseconds) {

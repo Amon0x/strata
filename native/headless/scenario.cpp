@@ -413,8 +413,19 @@ Scenario load_scenario(const std::filesystem::path& path) {
             FontConfig font{
                 text(required(value, "id"), "font.id"),
                 text(required(value, "resource"), "font.resource"),
+                {},
             };
             require_relative_resource(font.resource, "font.resource");
+            if (const JsonValue* candidates = optional(value, "system"); candidates != nullptr) {
+                for (const JsonValue& candidate : as_array(*candidates, "font.system")) {
+                    std::string name = text(candidate, "font.system entry");
+                    if (name.empty() || name.find_first_of("/\\:") != std::string::npos) {
+                        throw std::invalid_argument(
+                            "font.system entries must be bare font file names");
+                    }
+                    font.system.push_back(std::move(name));
+                }
+            }
             result.fonts.push_back(std::move(font));
         }
     }

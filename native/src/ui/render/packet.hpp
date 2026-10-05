@@ -58,7 +58,7 @@ class TextEngine;
 namespace strata::ui {
 
 /**
- * Packet v12: retained geometry epochs, incremental geometry patches, GPU presentation groups,
+ * Packet v13: retained geometry epochs, incremental geometry patches, GPU presentation groups,
  * rate-limited effects, explicit current/surface backdrop sources, ordered application effect
  * programs, and rounded descendant masks. The logical v3 encoder remains available only to command-stream inspection tooling.
  */
@@ -71,7 +71,7 @@ class HostRenderPacketCache final {
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
     /**
-     * A null TextEngine selects the packet-v12 non-text path; text runs are then rejected. Null
+     * A null TextEngine selects the packet-v13 non-text path; text runs are then rejected. Null
      * textures means the stream draws no raster images.
      */
     [[nodiscard]] const std::vector<std::uint8_t>&

@@ -1,5 +1,7 @@
 #include "host_services.hpp"
 
+#include "host/system_fonts.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -137,8 +139,12 @@ struct HostServices::Impl final {
             const std::string resource_id = copy(id);
             const std::filesystem::path relative(resource_id);
             auto [found, inserted] = self.resource_cache.try_emplace(resource_id);
-            if (inserted)
-                found->second = read_bytes(self.resource_path(relative));
+            if (inserted) {
+                std::optional<std::vector<std::uint8_t>> system =
+                    host::read_system_font(resource_id);
+                found->second = system.has_value() ? std::move(*system)
+                                                   : read_bytes(self.resource_path(relative));
+            }
             output->data = found->second.data();
             output->size = found->second.size();
             return output->size == 0U ? STRATA_STATUS_NOT_FOUND : STRATA_STATUS_OK;

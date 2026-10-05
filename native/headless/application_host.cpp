@@ -23,6 +23,7 @@
 #include "capture_renderer.hpp"
 #include "host/extensions.hpp"
 #include "host/module_path.hpp"
+#include "host/system_fonts.hpp"
 #include <strata/render_packet.hpp>
 
 namespace strata::headless {
@@ -152,8 +153,13 @@ struct ApplicationHost::Impl final {
             auto& self = *static_cast<Impl*>(user_data);
             const std::string resource_id = copy(id);
             auto [found, inserted] = self.resource_cache.try_emplace(resource_id);
-            if (inserted)
-                found->second = read_bytes(self.resource_path(resource_id));
+            if (inserted) {
+                std::optional<std::vector<std::uint8_t>> system =
+                    host::read_system_font(resource_id);
+                found->second = system.has_value()
+                                    ? std::move(*system)
+                                    : read_bytes(self.resource_path(resource_id));
+            }
             output->data = found->second.data();
             output->size = found->second.size();
             return output->size == 0U ? STRATA_STATUS_NOT_FOUND : STRATA_STATUS_OK;
@@ -484,12 +490,18 @@ struct ApplicationHost::Impl final {
             throw std::runtime_error("headless scenario module did not activate");
         }
 
+        // An installed `system` candidate replaces the bundled face for this run.
+        std::vector<std::string> font_resources;
+        font_resources.reserve(scenario.fonts.size());
+        for (const FontConfig& font : scenario.fonts)
+            font_resources.push_back(
+                host::select_system_font(font.system).value_or(font.resource));
         std::vector<strata_surface_font_resource> fonts;
         fonts.reserve(scenario.fonts.size());
-        for (const FontConfig& font : scenario.fonts) {
+        for (std::size_t index = 0U; index < scenario.fonts.size(); ++index) {
             fonts.push_back(strata_surface_font_resource{
-                strata::view(font.id),
-                strata::view(font.resource),
+                strata::view(scenario.fonts[index].id),
+                strata::view(font_resources[index]),
             });
         }
         std::vector<strata_surface_image_resource> images;
@@ -546,6 +558,9 @@ struct ApplicationHost::Impl final {
         const host::RenderPacket& packet = decoder.decode(encoded);
         renderer->render(packet, time_nanoseconds);
         frame_available = true;
+        const std::vector<strata_backdrop_sample> backdrop = renderer->take_backdrop_samples();
+        if (!backdrop.empty())
+            surface->report_backdrop(backdrop);
         if (!options.capture_frames)
             return;
         last_frame_json = surface->frame_json();

@@ -88,9 +88,11 @@ struct DrawBatch final {
 };
 
 /**
- * A presentation group's complete transform and opacity over logical layout space for the current
- * frame. Vertices in the group are placed at position * scale + translate, with the translation
- * rounded to whole framebuffer pixels, and their material opacity is multiplied by `opacity`.
+ * A presentation group's complete transform, opacity and tone over logical layout space for the
+ * current frame. Vertices in the group are placed at position * scale + translate, with the
+ * translation rounded to whole framebuffer pixels, and their material opacity is multiplied by
+ * `opacity`. `tone` in [0, 1] mirrors the lightness of the group's light, unsaturated vertex
+ * colours toward dark ink (see tone_color); images and shadows are not toned.
  */
 struct PresentationGroup final {
     double scale_x = 1.0;
@@ -98,9 +100,43 @@ struct PresentationGroup final {
     double translate_x = 0.0;
     double translate_y = 0.0;
     double opacity = 1.0;
+    double tone = 0.0;
     [[nodiscard]] friend bool operator==(const PresentationGroup&,
                                          const PresentationGroup&) = default;
 };
+
+/**
+ * A group's tone applied to one straight-alpha colour, channels in [0, 1]. Light, unsaturated
+ * colours are ink: their lightness is mirrored toward dark ink in proportion to `tone`. Saturated
+ * colours and dark colours are left as authored, so accents keep their hue and dark ink stays dark.
+ * The GPU vertex stage and every CPU backend implement exactly this.
+ */
+constexpr void tone_color(float& red, float& green, float& blue, const float tone) noexcept {
+    const float high = red > green ? (red > blue ? red : blue) : (green > blue ? green : blue);
+    const float low = red < green ? (red < blue ? red : blue) : (green < blue ? green : blue);
+    const auto unit = [](const float value) { return value < 0.0F ? 0.0F : value > 1.0F ? 1.0F : value; };
+    const float ink = unit((high - 0.5F) * 4.0F) * unit(1.0F - (high - low) * 2.5F);
+    const float amount = unit(tone) * ink;
+    const float lift = (1.0F - high) * 0.6F;
+    red += (0.043F + lift - red) * amount;
+    green += (0.071F + lift - green) * amount;
+    blue += (0.125F + lift - blue) * amount;
+}
+
+/**
+ * The alpha a grayscale glyph's atlas coverage contributes, given the ink it is drawn in (after
+ * tone), channels in [0, 1]. Blending coverage as plain alpha in an encoded framebuffer makes light
+ * text on dark come out thin and dark text on light come out heavy; weighting the midtones by the
+ * ink's lightness puts back what a linear-light blend would have given light ink and leaves dark ink
+ * close to its outline. The unified pixel stage and every CPU backend implement exactly this.
+ */
+constexpr float text_coverage(const float coverage, const float red, const float green,
+                              const float blue) noexcept {
+    const float lightness = 0.2126F * red + 0.7152F * green + 0.0722F * blue;
+    const float strength = 0.12F + 0.68F * lightness;
+    const float weighted = coverage + strength * coverage * (1.0F - coverage);
+    return weighted < 0.0F ? 0.0F : weighted > 1.0F ? 1.0F : weighted;
+}
 
 /** Region bounds are already presented through `group` for the decoded frame. */
 struct BlurBatch final {
@@ -127,7 +163,9 @@ enum class EffectBackdropSource : std::uint32_t {
     surface = 1U,
 };
 
-/** Bounds, radii and opacity are already presented through `group` for the decoded frame. */
+/**
+ * Bounds, radii, opacity and tone are already presented through `group` for the decoded frame.
+ */
 struct EffectBatch final {
     EffectBatchKind kind = EffectBatchKind::backdrop;
     EffectBackdropSource backdrop_source = EffectBackdropSource::current;
@@ -146,6 +184,14 @@ struct EffectBatch final {
     std::uint32_t parameter_count = 0U;
     std::vector<RoundedClip> rounded_clips;
     std::uint32_t group = 0U;
+    /**
+     * Nonzero asks the backend to measure the mean colour of the backdrop this effect captures and
+     * hand it back to the Surface under this token (strata_surface_report_backdrop). A backend that
+     * cannot measure simply reports nothing.
+     */
+    std::uint64_t probe = 0U;
+    /** The owning group's tone, exposed to authored passes as effectTone(). */
+    double tone = 0.0;
     [[nodiscard]] friend bool operator==(const EffectBatch&, const EffectBatch&) = default;
 };
 

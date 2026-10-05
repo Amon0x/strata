@@ -1680,6 +1680,15 @@ class Surface final {
     /** Replays retained entry motion from the next frame when a hidden Surface is shown again. */
     void reveal() { require(strata_surface_reveal(value_), "surface reveal"); }
 
+    /**
+     * Reports what the host measured behind nodes that observe their backdrop; see
+     * strata_surface_report_backdrop.
+     */
+    void report_backdrop(const std::span<const strata_backdrop_sample> samples) {
+        require(strata_surface_report_backdrop(value_, samples.data(), samples.size()),
+                "surface backdrop report");
+    }
+
     [[nodiscard]] ActionDispatchInfo dispatch(const ActionDispatch& action) {
         const strata_action_dispatch_config config = detail::action_dispatch(action);
         strata_action_dispatch_info info{};

@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include <strata/strata.h>
+
 namespace strata::host {
 struct RenderPacket;
 }
@@ -35,6 +37,11 @@ class CaptureRenderer {
     ) = 0;
     virtual void render(const host::RenderPacket& packet, std::int64_t time_nanoseconds) = 0;
     virtual void consume_resources(const host::RenderPacket& packet) = 0;
+    /**
+     * What backdrop probes measured in the frame just rendered. Backends that cannot measure
+     * return nothing, and observing nodes keep presenting as over a dark backdrop.
+     */
+    [[nodiscard]] virtual std::vector<strata_backdrop_sample> take_backdrop_samples() { return {}; }
 
     [[nodiscard]] virtual std::string_view backend() const noexcept = 0;
     [[nodiscard]] virtual std::uint32_t width() const noexcept = 0;

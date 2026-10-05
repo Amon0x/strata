@@ -287,6 +287,30 @@ side has more room. Shift clamps the final result to the root viewport. Anchored
 normally in retained rendering, hit testing, focus, semantics, clipping, motion, and nested portal
 placement.
 
+### Tone
+
+`tone` is how a subtree's ink answers the brightness of what is behind it. It is a number from 0 to
+1, set like any other style property, and inherited: a node that sets `tone` owns it for everything
+it contains until a descendant sets its own.
+
+```strata
+style OnLightBackdrop { tone: 1; }
+Panel(style: style(Card, tone: onLight ? 1 : 0), animateChanges: { properties: ["tone"] })
+```
+
+At 0 colours are drawn as authored. Author for a dark backdrop: light ink, at whatever opacities
+give the hierarchy. As tone rises to 1, every light, unsaturated colour in the subtree (text, vector
+shapes, fills, borders, overlays) has its lightness mirrored toward dark ink. Saturated colours keep
+their hue and dark colours stay dark, so an accent, a status colour, or ink that was authored dark on
+a bright control is left alone. Images and shadows are never toned. To exempt part of a toned
+subtree, give it `tone: 0`.
+
+Tone is presentation, like opacity: it rides the node's GPU presentation group, so animating it
+re-plans nothing, and `animateChanges`, `motions` value channels and keyframes can all drive it. A
+node that sets a tone renders as a presentation group for as long as it does, which is why it is
+set on a surface rather than on every label. A node's BACKDROP effect is told its tone through
+`effectTone()`, so glass can hold its body in the band its content's ink needs.
+
 ### Exterior shadows
 
 `shadows` adds up to four ordered exterior shadow layers to any styled widget. Each layer is
@@ -504,18 +528,26 @@ immediately. Numeric rates must be positive; `"UNBOUNDED"` requests evaluation o
 
 An HLSL pass defines `float4 effect(EffectInput input)`. The host prelude provides
 `sampleEffectSource`, `sampleEffectBackdrop`, `effectFloat`, `effectFloat2`, `effectFloat4`,
-`effectColor`, `effectTime`, `effectOpacity`, `effectDistance`, and `effectMask`. `EffectInput`
+`effectColor`, `effectTime`, `effectOpacity`, `effectTone`, `effectDistance`, and `effectMask`.
+`effectTone()` is the [tone](#tone) of the widget the effect belongs to, including while it animates. `EffectInput`
 carries framebuffer `uv`/`pixel`,
 logical pixels, and `localUv` within the affected widget. Samples are straight-alpha values; the
 host premultiplies pass output, applies the rounded widget mask and effect opacity once at final
 composition, and clips work to the intersection of the effect bounds and inherited scissor.
 
+`sampleEffectSource` and `sampleEffectBackdrop` are defined inside the effect's bounds extended by
+64 logical pixels; a coordinate beyond that reads the nearest defined texel. A pass can therefore
+refract, reflect, or average its immediate surroundings, while the D3D11 host captures only that
+region per effect instead of the whole framebuffer, so an effect costs its own area rather than
+the window's.
+
 The D3D11 desktop and headless hosts execute the full pass program. The reference software backend
 executes declared blur passes, ignores authored shader stages, and then applies the same rounded
 mask, opacity, and backdrop/content composition. This approximation is intentionally deterministic
-rather than a claim of shader fidelity. Packet v12 carries ordered backdrop/content batches,
-current/surface backdrop selection, active rounded-clip geometry, effect refresh-rate policy, and a
-bounded sixteen-float parameter block.
+rather than a claim of shader fidelity. Packet v13 carries ordered backdrop/content batches,
+current/surface backdrop selection, active rounded-clip geometry, effect refresh-rate policy, a
+backdrop probe token, and a bounded sixteen-float parameter block; presentation groups carry tone
+beside their transform and opacity.
 The public decoder rejects malformed clip/effect state, caps nested `CONTENT` effects at four
 levels, and caps rounded clip stacks at sixteen.
 

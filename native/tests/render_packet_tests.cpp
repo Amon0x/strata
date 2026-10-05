@@ -34,8 +34,31 @@ strata::ui::EffectState effect(const strata::ui::EffectInput input) {
         strata::ui::MaterialParameter{"radius", strata::runtime::Value(12.0)});
     result.packed_parameters[0U] = 12.0;
     result.packed_parameter_count = 1U;
+    // Only a backdrop effect has a backdrop to measure.
+    if (input == strata::ui::EffectInput::backdrop)
+        result.probe = 0x1'0000'002AU;
     return result;
 }
+
+// Tone is defined once for every backend, so its fixed points are checked where it is defined.
+constexpr bool toned(const float red, const float green, const float blue, const float tone,
+                     const float expected_red, const float expected_green,
+                     const float expected_blue) {
+    float r = red;
+    float g = green;
+    float b = blue;
+    strata::host::tone_color(r, g, b, tone);
+    const auto near = [](const float left, const float right) {
+        return left - right < 0.002F && right - left < 0.002F;
+    };
+    return near(r, expected_red) && near(g, expected_green) && near(b, expected_blue);
+}
+static_assert(toned(1.0F, 1.0F, 1.0F, 0.0F, 1.0F, 1.0F, 1.0F), "tone 0 must leave ink as authored");
+static_assert(toned(1.0F, 1.0F, 1.0F, 1.0F, 0.043F, 0.071F, 0.125F),
+              "white ink must mirror to dark ink at full tone");
+static_assert(toned(0.04F, 0.07F, 0.13F, 1.0F, 0.04F, 0.07F, 0.13F), "dark ink must stay dark");
+static_assert(toned(0.19F, 0.82F, 0.35F, 1.0F, 0.19F, 0.82F, 0.35F),
+              "a saturated colour must keep its hue");
 
 std::vector<std::uint8_t> encode(const strata::ui::RenderCommandBuffer& commands,
                                  const std::filesystem::path& resources) {
@@ -62,7 +85,7 @@ std::vector<std::size_t> batch_kind_offsets(const std::vector<std::uint8_t>& byt
     const std::uint32_t vertex_bytes = u32(bytes, 40U);
     const std::uint32_t index_count = u32(bytes, 44U);
     const std::uint32_t group_count = u32(bytes, 56U);
-    std::size_t offset = 60U + static_cast<std::size_t>(group_count) * 44U;
+    std::size_t offset = 60U + static_cast<std::size_t>(group_count) * 52U;
     for (std::uint32_t index = 0U; index < resource_count; ++index) {
         offset += sizeof(std::uint32_t);
         const std::uint32_t record_size = u32(bytes, offset);
@@ -103,7 +126,7 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
     const std::vector<std::uint8_t> encoded = encode(commands, resources);
     check(encoded.size() > 12U &&
               encoded[8U] == static_cast<std::uint8_t>(STRATA_RENDER_PACKET_VERSION_CURRENT),
-          "effect packet did not use render protocol v12");
+          "effect packet did not use the current render protocol");
     const host::RenderPacket packet = decoder.decode(encoded);
     check(packet.batches.size() == 4U, "effect packet changed its ordered batch count");
     const auto* backdrop = std::get_if<host::EffectBatch>(&packet.batches[0U]);
@@ -113,6 +136,9 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
               backdrop->effect == "test:effect" && backdrop->parameter_count == 1U &&
               backdrop->parameters[0U] == 12.0 && backdrop->refresh_rate == 120.0,
           "backdrop effect batch lost its typed program state");
+    check(backdrop->probe == 0x1'0000'002AU && backdrop->tone == 0.0 && content != nullptr &&
+              content->probe == 0U,
+          "backdrop probe token did not round-trip on the backdrop effect alone");
     check(content != nullptr && content->kind == host::EffectBatchKind::content_begin &&
               std::holds_alternative<host::DrawBatch>(packet.batches[2U]) &&
               std::holds_alternative<host::ContentEffectEndBatch>(packet.batches[3U]),

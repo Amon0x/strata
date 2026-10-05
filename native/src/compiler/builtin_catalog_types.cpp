@@ -838,7 +838,8 @@ void add_builtin_types(BuiltinCatalog& catalog) {
             .definition = declared_type(DeclaredType{
                 .kind = DeclaredTypeKind::union_value,
                 .label = "behavior attachment",
-                .options = {declared_type_reference("t87"), declared_type_reference("t89"),
+                .options = {declared_type_reference("t87"), declared_type_reference("t190"),
+                            declared_type_reference("t89"),
                             declared_type_reference("t91"), declared_type_reference("t93"),
                             declared_type_reference("t95"), declared_type_reference("t97"),
                             declared_type_reference("t99"), declared_type_reference("t101"),
@@ -2105,6 +2106,47 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
                                                          .literal = "strata.scale"})},
+        DeclaredNamedType{
+            .id = "t189",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "backdrop options",
+                .fields =
+                    {
+                        DeclaredTypeField{.name = "dark",
+                                          .type = declared_type_reference("t3"),
+                                          .required = false},
+                        DeclaredTypeField{.name = "light",
+                                          .type = declared_type_reference("t3"),
+                                          .required = false},
+                    },
+                .value = declared_type_reference("t7"),
+            })},
+        DeclaredNamedType{.id = "t190",
+                          .definition = declared_type(DeclaredType{
+                              .kind = DeclaredTypeKind::map,
+                              .label = "strata.backdrop behavior",
+                              .fields = {DeclaredTypeField{.name = "action",
+                                                           .type = declared_type_reference("t36"),
+                                                           .required = false,
+                                                           .nullable = true},
+                                         DeclaredTypeField{.name = "enabled",
+                                                           .type = declared_type_reference("t2"),
+                                                           .required = false,
+                                                           .nullable = false},
+                                         DeclaredTypeField{.name = "id",
+                                                           .type = declared_type_reference("t191"),
+                                                           .required = true,
+                                                           .nullable = false},
+                                         DeclaredTypeField{.name = "options",
+                                                           .type = declared_type_reference("t189"),
+                                                           .required = false,
+                                                           .nullable = false}},
+                              .value = declared_type_reference("t7")})},
+        DeclaredNamedType{.id = "t191",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
+                                                         .literal = "strata.backdrop"})},
         DeclaredNamedType{
             .id = "t184",
             .definition = declared_type(DeclaredType{

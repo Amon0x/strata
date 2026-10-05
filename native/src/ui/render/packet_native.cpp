@@ -174,6 +174,7 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
         output.number(batch.effect->opacity);
         output.number(batch.effect->refresh_rate);
         output.integer(static_cast<std::uint32_t>(batch.effect->backdrop_source));
+        output.integer(batch.effect->probe);
         output.integer(batch.effect->packed_parameter_count);
         for (std::uint32_t index = 0U; index < batch.effect->packed_parameter_count; ++index) {
             output.number(batch.effect->packed_parameters[index]);
@@ -230,14 +231,19 @@ bool compose_groups(const std::span<const RenderGroup> relative, std::vector<Ren
             group.scale_x *= parent.scale_x;
             group.scale_y *= parent.scale_y;
             group.opacity *= parent.opacity;
+            // Tone replaces rather than multiplies: the nearest group that sets one owns it.
+            if (group.tone < 0.0)
+                group.tone = parent.tone;
         }
         state[at] = 2U;
         return next[at];
     };
     for (std::size_t at = 0U; at < next.size(); ++at)
         resolve(resolve, at);
-    for (RenderGroup& group : next)
+    for (RenderGroup& group : next) {
         group.parent = 0U;
+        group.tone = std::clamp(group.tone, 0.0, 1.0);
+    }
     if (next == world)
         return false;
     world.swap(next);
@@ -316,6 +322,7 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
         output.number(group.translate_x);
         output.number(group.translate_y);
         output.number(group.opacity);
+        output.number(group.tone);
     }
     // Resource operations preserve atlas order, and every release precedes the texture creations
     // that may reuse a Surface-scoped host id.

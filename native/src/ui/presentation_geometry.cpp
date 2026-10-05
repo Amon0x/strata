@@ -51,6 +51,16 @@ bool motion_presentation_group(const RetainedNode& node, const MotionRuntime& mo
     return false;
 }
 
+std::optional<double> local_presentation_tone(const RetainedNode& node,
+                                              const MotionRuntime& motion) noexcept {
+    const MotionComputedValues* computed = motion.computed_values(node.identity());
+    std::optional<double> tone =
+        computed != nullptr ? computed->number(MotionProperty::tone) : std::nullopt;
+    if (!tone.has_value())
+        tone = visual_number(node, "tone");
+    return tone.has_value() ? std::optional<double>(std::clamp(*tone, 0.0, 1.0)) : std::nullopt;
+}
+
 MotionTransform local_presentation_transform(
     const RetainedNode& node,
     const MotionRuntime& motion,

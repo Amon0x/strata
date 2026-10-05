@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 #include <strata/d3d11.hpp>
 
@@ -19,13 +20,14 @@ struct RenderPacket;
 
 namespace strata::d3d11 {
 
-/** Shared D3D11 packet-v12 pipeline for swap-chain and offscreen targets. */
+/** Shared D3D11 packet-v13 pipeline for swap-chain and offscreen targets. */
 class RenderContext final {
   public:
     explicit RenderContext(
         ID3D11Device* device,
         ID3D11DeviceContext* context,
-        bool asynchronous_shader_compilation = false
+        bool asynchronous_shader_compilation = false,
+        bool synchronous_backdrop_readback = false
     );
     ~RenderContext();
 
@@ -45,6 +47,11 @@ class RenderContext final {
     void begin_frame(std::optional<std::array<float, 4U>> clear_color, double frame_seconds);
     [[nodiscard]] RenderLayerTelemetry render_layer(std::string_view id,
                                                     const host::RenderPacket& packet);
+    /**
+     * Removes and returns what the layer's backdrop probes measured, oldest first. The owner of the
+     * layer's Surface hands them to strata_surface_report_backdrop.
+     */
+    [[nodiscard]] std::vector<strata_backdrop_sample> take_backdrop_samples(std::string_view id);
     void release_layer(std::string_view id) noexcept;
 
   private:

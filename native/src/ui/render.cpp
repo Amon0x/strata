@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "ui/behavior/backdrop.hpp"
 #include "ui/behavior/presentation.hpp"
 #include "ui/behavior/registry.hpp"
 #include "ui/command.hpp"
@@ -568,10 +569,12 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             local_content_effect->input == EffectInput::content;
         // A motion-driven node renders as a presentation group: its transform and opacity move
         // into the group table (applied on the GPU), and everything it draws is emitted relative
-        // to it. Isolating effects and portals keep the baked path.
+        // to it. A node that sets a tone is a group for as long as it does, because tone exists
+        // only in the group table. Isolating effects and portals keep the baked path.
+        const std::optional<double> tone = local_presentation_tone(node, motion);
         std::uint32_t group = 0U;
         if (!isolates_content && !isolates_descendants && record->kind != LayoutKind::portal &&
-            motion_presentation_group(node, motion)) {
+            (tone.has_value() || motion_presentation_group(node, motion))) {
             group = implementation_->acquire_group(node.identity());
         }
         if (group != 0U) {
@@ -579,13 +582,17 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 node.identity(),
                 RenderGroup{group, inherited_group, effective_transform.scale_x,
                             effective_transform.scale_y, effective_transform.translate_x,
-                            effective_transform.translate_y, descendant_opacity});
+                            effective_transform.translate_y, descendant_opacity,
+                            tone.value_or(-1.0)});
             effective_transform = MotionTransform{};
             descendant_opacity = 1.0;
         }
         std::optional<EffectState> rendered_effect = local_effect;
         if (rendered_effect.has_value()) {
             rendered_effect->opacity *= descendant_opacity;
+            // A node that observes its backdrop asks the host to measure what this effect captures.
+            if (rendered_effect->input == EffectInput::backdrop && observes_backdrop(node))
+                rendered_effect->probe = node.identity();
         }
         std::optional<EffectState> rendered_content_effect = local_content_effect;
         if (rendered_content_effect.has_value()) {

@@ -1110,6 +1110,7 @@ typedef uint32_t strata_theme_motion_property;
 #define STRATA_THEME_MOTION_PROPERTY_SCALE UINT32_C(33)
 #define STRATA_THEME_MOTION_PROPERTY_SCALE_X UINT32_C(34)
 #define STRATA_THEME_MOTION_PROPERTY_SCALE_Y UINT32_C(35)
+#define STRATA_THEME_MOTION_PROPERTY_TONE UINT32_C(36)
 
 typedef uint32_t strata_theme_motion_value_kind;
 #define STRATA_THEME_MOTION_VALUE_NUMBER UINT32_C(0)
@@ -1750,7 +1751,7 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Packet v12 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * Packet v13 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
  * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
  * [u32 kind, u32 payload byte count, payload]:
  *
@@ -1761,10 +1762,12 @@ typedef struct strata_surface_frame_info {
  *
  * A vertex is 88 bytes: f32 x/y/z/u/v, u8 red/green/blue/alpha, then sixteen f32 material values.
  * z is the vertex's presentation group index (0 = none). Each group record is u32 index (1..511)
- * followed by f64 scale x/y, translate x/y and opacity: the group's complete presentation over
- * logical layout space, applied to its vertices as position * scale + translate (the translation
- * rounded to whole framebuffer pixels), with material opacity (float 15) multiplied by the group
- * opacity. Every packet carries the frame's complete
+ * followed by f64 scale x/y, translate x/y, opacity and tone: the group's complete presentation
+ * over logical layout space, applied to its vertices as position * scale + translate (the
+ * translation rounded to whole framebuffer pixels), with material opacity (float 15) multiplied by
+ * the group opacity. Tone in [0, 1] mirrors the lightness of light, unsaturated vertex colours
+ * toward dark ink; textured-image and shadow draws are not toned. Every packet carries the frame's
+ * complete
  * table, including packets that retain their geometry epoch; absent indices are the identity.
  * Every batch payload begins with source order, a u32 framebuffer scissor, and a u32 rounded-clip
  * count. Each rounded clip contains f64 x/y/width/height, four f64 corner radii, and a six-f64
@@ -1775,8 +1778,10 @@ typedef struct strata_surface_frame_info {
  * u32 group index; f64 x/y/width/height; four
  * f64 corner radii; the
  * effect-id string; f64 opacity; f64 maximum refresh rate (zero = unbounded); u32 backdrop source
- * (0 = current framebuffer, 1 = framebuffer before this Surface); a u32 packed-parameter count;
- * and up to sixteen f64 values. Content effects require backdrop source 0.
+ * (0 = current framebuffer, 1 = framebuffer before this Surface); a u64 backdrop probe token
+ * (zero = none; a host that can measure reports the captured backdrop's mean luma back through
+ * strata_surface_report_backdrop); a u32 packed-parameter count; and up to sixteen f64 values.
+ * Content effects require backdrop source 0 and probe 0.
  * Content-end carries only the common prefix. Rounded clip stacks are limited to sixteen entries;
  * authored CONTENT effect isolation is limited to four layers.
  * Resource payloads begin
@@ -1795,7 +1800,7 @@ typedef struct strata_surface_frame_info {
  *
  * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
  * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
- * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v12 records.
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v13 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
@@ -1809,7 +1814,8 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_10 UINT32_C(10)
 #define STRATA_RENDER_PACKET_VERSION_11 UINT32_C(11)
 #define STRATA_RENDER_PACKET_VERSION_12 UINT32_C(12)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_12
+#define STRATA_RENDER_PACKET_VERSION_13 UINT32_C(13)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_13
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)
@@ -2107,6 +2113,21 @@ STRATA_API strata_result strata_surface_cancel_interactions(strata_surface* surf
  * that stop presenting a Surface and later show it again; nothing is rebuilt, so state, focus,
  * scroll, and layout are preserved. Looping, interaction, and target channels are unaffected. */
 STRATA_API strata_result strata_surface_reveal(strata_surface* surface);
+/* One measurement of what lies behind a node that observes its backdrop (`strata.backdrop`).
+ * `probe` is the nonzero token carried by that node's BACKDROP effect record in the render packet;
+ * `luminance` is the mean encoded luma, in [0, 1], of the framebuffer pixels the effect captured
+ * before it drew. */
+typedef struct strata_backdrop_sample {
+    uint64_t probe;
+    double luminance;
+} strata_backdrop_sample;
+/* Reports backdrop measurements for the frame the host last rendered. Each sample is resolved
+ * against its node's light/dark thresholds; a changed reading dispatches the node's action and is
+ * published with the next frame. Samples for unknown probes are ignored, so a host may report late
+ * (asynchronous readback) or not at all: an unmeasured node presents as over a dark backdrop. */
+STRATA_API strata_result strata_surface_report_backdrop(strata_surface* surface,
+                                                        const strata_backdrop_sample* samples,
+                                                        size_t sample_count);
 STRATA_API strata_result strata_surface_dispatch_action_json(
     strata_surface* surface, const strata_action_dispatch_config* config,
     strata_action_dispatch_info* out_info);

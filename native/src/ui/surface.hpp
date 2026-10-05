@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -244,6 +245,17 @@ class Surface final {
      * surface again. Nothing is rebuilt: state, focus, scroll, and layout are preserved.
      */
     void reveal();
+    /**
+     * Delivers host measurements of what lies behind nodes that observe their backdrop
+     * (`strata.backdrop`). `probe` is the token the node's BACKDROP effect batch carried and
+     * `luminance` the mean encoded luma, in [0, 1], of the pixels that effect captured. A changed
+     * light/dark reading dispatches the node's action and is published with the next frame.
+     */
+    struct BackdropSample final {
+        std::uint64_t probe = 0U;
+        double luminance = 0.0;
+    };
+    void report_backdrop(std::span<const BackdropSample> samples);
     /** Injects an action as a surface event and publishes its event/outcome on the next frame. */
     [[nodiscard]] runtime::ActionDispatchOutcome
     dispatch_action(std::string action_id, runtime::Value payload, std::string event_kind,

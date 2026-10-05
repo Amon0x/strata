@@ -298,11 +298,19 @@ struct Presenter::Impl final {
 
         const host::SurfacePacketFrame frame = entry->second.stream->frame(time_nanoseconds);
         options.time_seconds = static_cast<double>(time_nanoseconds) / 1'000'000'000.0;
-        return PresentedFrame{
+        const PresentedFrame presented{
             frame.surface,
             frame.packet_bytes,
             renderer.render(layer_id, *frame.packet, target, options),
         };
+        // What this layer's backdrop probes measured goes back to the Surface that asked.
+        const std::vector<strata_backdrop_sample> samples =
+            renderer.take_backdrop_samples(layer_id);
+        if (!samples.empty()) {
+            static_cast<void>(
+                strata_surface_report_backdrop(surface, samples.data(), samples.size()));
+        }
+        return presented;
     }
 
     void detach(const std::string_view layer_id) {

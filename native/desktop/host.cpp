@@ -1911,6 +1911,10 @@ struct Host::Impl final {
         const std::vector<std::uint8_t> encoded = session.surface->render_packet();
         const RenderPacket& packet = session.decoder.decode(encoded);
         const RenderLayerTelemetry render_telemetry = renderer.render_layer(session.id, packet);
+        const std::vector<strata_backdrop_sample> backdrop =
+            renderer.take_backdrop_samples(session.id);
+        if (!backdrop.empty())
+            session.surface->report_backdrop(backdrop);
         const auto submit_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - submit_started
         ).count();

@@ -1,8 +1,10 @@
 #include "ui/behavior/registry.hpp"
 
 #include <stdexcept>
+#include <string>
 #include <utility>
 
+#include "ui/behavior/backdrop.hpp"
 #include "ui/behavior/collection_marquee.hpp"
 
 namespace strata::ui {
@@ -17,6 +19,8 @@ BehaviorRegistry::BehaviorRegistry() {
     );
     register_input_phase("strata.drop-target", BehaviorInputPhase{.accepts_pointer = true});
     register_input_phase("strata.reorder-target", BehaviorInputPhase{.accepts_pointer = true});
+    // Driven by host backdrop reports (InputRouter::observe_backdrop), not by routed input.
+    register_input_phase(std::string(backdrop_behavior_id), BehaviorInputPhase{});
     register_builtin_behavior_inputs(*this);
     register_collection_behavior_inputs(*this);
     register_builtin_behavior_presenters(*this);

@@ -1522,6 +1522,17 @@ void Surface::reveal() {
         invalidate_frame();
 }
 
+void Surface::report_backdrop(const std::span<const BackdropSample> samples) {
+    InputOperationResult result;
+    for (const BackdropSample& sample : samples)
+        input_.observe_backdrop(sample.probe, sample.luminance, result);
+    // A steady backdrop reports the same reading every frame; only a change is frame work.
+    if (result.events.empty() && result.action_outcomes.empty())
+        return;
+    append_input(pending_lifecycle_input_, std::move(result));
+    invalidate_frame();
+}
+
 runtime::ActionDispatchOutcome
 Surface::dispatch_action(std::string action_id, runtime::Value payload, std::string event_kind,
                          std::optional<std::string> source_key, runtime::Value event_value,

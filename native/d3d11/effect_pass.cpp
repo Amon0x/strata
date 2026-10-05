@@ -57,6 +57,7 @@ using gpu::effect_prelude;
 using gpu::effect_entry;
 using gpu::composite_pixel;
 using gpu::cached_composite_pixel;
+using gpu::backdrop_probe_pixel;
 using gpu::EffectConstants;
 
 [[nodiscard]] D3D11_RECT effect_scissor(const host::EffectBatch& effect, const std::uint32_t width,
@@ -133,16 +134,27 @@ struct EffectPassRenderer::Impl final {
         std::uint64_t geometry_epoch = 0U;
         host::EffectBatch effect;
     };
+    /** One queued readback of the probe strip: which layer measured it, and which probes. */
+    struct ProbeReadback final {
+        ComPtr<ID3D11Texture2D> staging;
+        std::string layer;
+        std::vector<std::uint64_t> probes;
+        bool pending = false;
+        std::uint64_t order = 0U;
+    };
+    static constexpr std::uint32_t probe_capacity = 128U;
 
     Impl(
         ID3D11Device* const source_device,
         ID3D11DeviceContext* const source_context,
-        const bool asynchronous_shader_compilation
+        const bool asynchronous_shader_compilation,
+        const bool synchronous_backdrop_readback
     )
         : device(source_device),
           context(source_context),
           blur(source_device, source_context),
-          asynchronous_shader_compilation(asynchronous_shader_compilation) {
+          asynchronous_shader_compilation(asynchronous_shader_compilation),
+          synchronous_backdrop_readback(synchronous_backdrop_readback) {
         if (device == nullptr || context == nullptr) {
             throw std::invalid_argument("D3D11 effects require a device and context");
         }
@@ -170,6 +182,33 @@ struct EffectPassRenderer::Impl final {
                                                   cached_composite_code->GetBufferSize(), nullptr,
                                                   &cached_composite),
                         "D3D11 cached effect composite shader creation");
+        const ComPtr<ID3DBlob> probe_code = compile_shader(backdrop_probe_pixel, "main", "ps_5_0");
+        require_hresult(device->CreatePixelShader(probe_code->GetBufferPointer(),
+                                                  probe_code->GetBufferSize(), nullptr,
+                                                  &probe_shader),
+                        "D3D11 backdrop probe shader creation");
+        // Probes are one texel each in a shared strip, so a frame's worth reads back in one copy.
+        D3D11_TEXTURE2D_DESC strip_descriptor{};
+        strip_descriptor.Width = probe_capacity;
+        strip_descriptor.Height = 1U;
+        strip_descriptor.MipLevels = 1U;
+        strip_descriptor.ArraySize = 1U;
+        strip_descriptor.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        strip_descriptor.SampleDesc.Count = 1U;
+        strip_descriptor.Usage = D3D11_USAGE_DEFAULT;
+        strip_descriptor.BindFlags = D3D11_BIND_RENDER_TARGET;
+        require_hresult(device->CreateTexture2D(&strip_descriptor, nullptr, &probe_strip),
+                        "D3D11 backdrop probe strip creation");
+        require_hresult(device->CreateRenderTargetView(probe_strip.Get(), nullptr,
+                                                       &probe_strip_target),
+                        "D3D11 backdrop probe strip view creation");
+        strip_descriptor.Usage = D3D11_USAGE_STAGING;
+        strip_descriptor.BindFlags = 0U;
+        strip_descriptor.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        for (ProbeReadback& readback : probe_readbacks) {
+            require_hresult(device->CreateTexture2D(&strip_descriptor, nullptr, &readback.staging),
+                            "D3D11 backdrop probe readback creation");
+        }
         D3D11_BUFFER_DESC constants_descriptor{};
         constants_descriptor.ByteWidth = sizeof(EffectConstants);
         constants_descriptor.Usage = D3D11_USAGE_DYNAMIC;
@@ -452,7 +491,7 @@ struct EffectPassRenderer::Impl final {
 
     void upload_constants(const host::EffectBatch& effect, const double logical_width,
                           const double logical_height, const double frame_seconds,
-                          const float cache_origin_x = 0.0F,
+                          const bool cached = false, const float cache_origin_x = 0.0F,
                           const float cache_origin_y = 0.0F) const {
         const double scale_x = logical_width > 0.0 ? width / logical_width : 1.0;
         const double scale_y = logical_height > 0.0 ? height / logical_height : 1.0;
@@ -476,6 +515,8 @@ struct EffectPassRenderer::Impl final {
         value.time = static_cast<float>(frame_seconds);
         value.padding[0] = cache_origin_x;
         value.padding[1] = cache_origin_y;
+        if (!cached)
+            value.padding[0] = static_cast<float>(effect.tone);
         D3D11_MAPPED_SUBRESOURCE mapped{};
         require_hresult(context->Map(constants.Get(), 0U, D3D11_MAP_WRITE_DISCARD, 0U, &mapped),
                         "D3D11 effect constant mapping");
@@ -486,7 +527,7 @@ struct EffectPassRenderer::Impl final {
     void draw_cached(const CachedSample& sample, ID3D11RenderTargetView* const destination,
                      const host::EffectBatch& effect, const double logical_width,
                      const double logical_height, const double frame_seconds) const {
-        upload_constants(effect, logical_width, logical_height, frame_seconds,
+        upload_constants(effect, logical_width, logical_height, frame_seconds, true,
                          static_cast<float>(sample.left), static_cast<float>(sample.top));
         ID3D11ShaderResourceView* resources[]{sample.view.Get(), nullptr};
         ID3D11Buffer* constant_buffers[]{constants.Get()};
@@ -552,9 +593,122 @@ struct EffectPassRenderer::Impl final {
         context->PSSetShaderResources(0U, 2U, cleared);
     }
 
+    /** Reduces the effect's captured backdrop to the next free texel of the probe strip. */
+    void measure_backdrop(const host::EffectBatch& effect, ID3D11ShaderResourceView* const capture,
+                          const double logical_width, const double logical_height,
+                          const double frame_seconds) {
+        if (layer_probes.size() >= probe_capacity)
+            return;
+        const auto index = static_cast<LONG>(layer_probes.size());
+        upload_constants(effect, logical_width, logical_height, frame_seconds);
+        ID3D11ShaderResourceView* resources[]{capture, nullptr};
+        ID3D11Buffer* constant_buffers[]{constants.Get()};
+        ID3D11SamplerState* samplers[]{sampler.Get()};
+        ID3D11RenderTargetView* const destination = probe_strip_target.Get();
+        const D3D11_VIEWPORT viewport{static_cast<float>(index), 0.0F, 1.0F, 1.0F, 0.0F, 1.0F};
+        const D3D11_RECT texel{index, 0, index + 1, 1};
+        context->OMSetRenderTargets(1U, &destination, nullptr);
+        context->OMSetBlendState(replace_blend.Get(), nullptr, UINT32_MAX);
+        context->RSSetState(rasterizer.Get());
+        context->RSSetViewports(1U, &viewport);
+        context->RSSetScissorRects(1U, &texel);
+        context->IASetInputLayout(nullptr);
+        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context->VSSetShader(vertex.Get(), nullptr, 0U);
+        context->PSSetShader(probe_shader.Get(), nullptr, 0U);
+        context->PSSetConstantBuffers(0U, 1U, constant_buffers);
+        context->PSSetSamplers(0U, 1U, samplers);
+        context->PSSetShaderResources(0U, 2U, resources);
+        context->Draw(3U, 0U);
+        ID3D11ShaderResourceView* cleared[]{nullptr, nullptr};
+        context->PSSetShaderResources(0U, 2U, cleared);
+        context->OMSetRenderTargets(0U, nullptr, nullptr);
+        layer_probes.push_back(effect.probe);
+    }
+
+    void end_layer(const std::string_view layer_id) {
+        if (!layer_probes.empty()) {
+            const auto free = std::ranges::find_if(
+                probe_readbacks, [](const ProbeReadback& readback) { return !readback.pending; });
+            // Every readback still in flight means the GPU is behind; this frame's probes are
+            // dropped rather than queued without bound, and the next frame measures again.
+            if (free != probe_readbacks.end()) {
+                context->OMSetRenderTargets(0U, nullptr, nullptr);
+                context->CopyResource(free->staging.Get(), probe_strip.Get());
+                free->layer = std::string(layer_id);
+                free->probes = std::move(layer_probes);
+                free->pending = true;
+                free->order = ++probe_order;
+            }
+            layer_probes.clear();
+        }
+        // Oldest first, so a layer's samples come out in the order they were measured.
+        std::array<ProbeReadback*, 4U> ordered{};
+        for (std::size_t index = 0U; index < probe_readbacks.size(); ++index)
+            ordered[index] = &probe_readbacks[index];
+        std::ranges::sort(ordered, {}, [](const ProbeReadback* readback) { return readback->order; });
+        for (ProbeReadback* const readback : ordered) {
+            if (!readback->pending)
+                continue;
+            D3D11_MAPPED_SUBRESOURCE mapped{};
+            const HRESULT status = context->Map(
+                readback->staging.Get(), 0U, D3D11_MAP_READ,
+                synchronous_backdrop_readback ? 0U : D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped);
+            if (status == DXGI_ERROR_WAS_STILL_DRAWING)
+                continue;
+            readback->pending = false;
+            if (FAILED(status))
+                continue;
+            const auto* const texels = static_cast<const std::uint8_t*>(mapped.pData);
+            std::vector<strata_backdrop_sample>& samples = completed_probes[readback->layer];
+            for (std::size_t index = 0U; index < readback->probes.size(); ++index) {
+                const std::uint8_t* const texel = texels + index * 4U;
+                samples.push_back(strata_backdrop_sample{
+                    readback->probes[index],
+                    (0.2126 * texel[0] + 0.7152 * texel[1] + 0.0722 * texel[2]) / 255.0,
+                });
+            }
+            context->Unmap(readback->staging.Get(), 0U);
+        }
+    }
+
     [[nodiscard]] double parameter(const host::EffectBatch& effect, const std::uint32_t slot,
                                    const double fallback) const noexcept {
         return slot < effect.parameter_count ? effect.parameters[slot] : fallback;
+    }
+
+    // The framebuffer region one effect can read: its bounds extended by the prelude's sample reach,
+    // or by its widest blur when that reaches further. Blur plans its own source rect from the
+    // clipped effect rect plus its radius, which this always contains.
+    [[nodiscard]] D3D11_BOX sample_region(const host::EffectBatch& effect,
+                                          const std::vector<Pass>* const passes,
+                                          const double logical_width,
+                                          const double logical_height) const noexcept {
+        const double scale_x = logical_width > 0.0 ? width / logical_width : 1.0;
+        const double scale_y = logical_height > 0.0 ? height / logical_height : 1.0;
+        const double scale = std::max(scale_x, scale_y);
+        double reach = gpu::effect_sample_reach * scale;
+        if (passes != nullptr) {
+            for (const Pass& pass : *passes) {
+                if (pass.kind != 0U)
+                    continue;
+                const double radius =
+                    std::max(0.0, parameter(effect, pass.radius_parameter, pass.radius));
+                reach = std::max(reach, std::clamp(std::ceil(radius * scale), 1.0, 256.0));
+            }
+        }
+        reach = std::ceil(reach);
+        const auto bounded = [](const double value, const std::uint32_t limit) {
+            return static_cast<UINT>(std::clamp(value, 0.0, static_cast<double>(limit)));
+        };
+        return D3D11_BOX{
+            bounded(std::floor(effect.x * scale_x) - reach, width),
+            bounded(std::floor(effect.y * scale_y) - reach, height),
+            0U,
+            bounded(std::ceil((effect.x + effect.width) * scale_x) + reach, width),
+            bounded(std::ceil((effect.y + effect.height) * scale_y) + reach, height),
+            1U,
+        };
     }
 
     [[nodiscard]] EffectPassTelemetry
@@ -629,16 +783,30 @@ struct EffectPassRenderer::Impl final {
         context->OMSetRenderTargets(0U, nullptr, nullptr);
         ID3D11ShaderResourceView* cleared[]{nullptr, nullptr};
         context->PSSetShaderResources(0U, 2U, cleared);
+        const auto program = programs.find(effect.effect);
+        // An effect reads its inputs only inside its bounds extended by the sample reach and by its
+        // widest blur, so that region is all the workspace has to hold. Capturing the whole
+        // framebuffer instead makes every effect cost the window's area rather than its own.
+        const bool samples_backdrop =
+            program != programs.end() &&
+            std::ranges::any_of(program->second, [](const Pass& pass) { return pass.kind == 1U; });
+        const D3D11_BOX region = sample_region(
+            effect, program != programs.end() ? &program->second : nullptr, logical_width,
+            logical_height);
         Target* current = &work.capture;
         if (resolved_source != current->texture.Get()) {
-            context->CopyResource(current->texture.Get(), resolved_source);
+            context->CopySubresourceRegion(current->texture.Get(), 0U, region.left, region.top, 0U,
+                                           resolved_source, 0U, &region);
         }
-        if (direct_backdrop == nullptr) {
-            context->CopyResource(work.backdrop.texture.Get(), resolved_backdrop);
+        if (direct_backdrop == nullptr && samples_backdrop) {
+            context->CopySubresourceRegion(work.backdrop.texture.Get(), 0U, region.left,
+                                           region.top, 0U, resolved_backdrop, 0U, &region);
             direct_backdrop = work.backdrop.view.Get();
         }
+        if (effect.probe != 0U && !content)
+            measure_backdrop(effect, current->view.Get(), logical_width, logical_height,
+                             frame_seconds);
         EffectPassTelemetry telemetry;
-        const auto program = programs.find(effect.effect);
         if (program != programs.end()) {
             for (const Pass& pass : program->second) {
                 if (pass.kind == 0U) {
@@ -734,18 +902,44 @@ struct EffectPassRenderer::Impl final {
     std::map<std::string, std::uint64_t, std::less<>> layer_epochs;
     bool surface_backdrop_available = false;
     bool asynchronous_shader_compilation = false;
+    bool synchronous_backdrop_readback = false;
+    ComPtr<ID3D11PixelShader> probe_shader;
+    ComPtr<ID3D11Texture2D> probe_strip;
+    ComPtr<ID3D11RenderTargetView> probe_strip_target;
+    std::array<ProbeReadback, 4U> probe_readbacks;
+    std::uint64_t probe_order = 0U;
+    /** Probes measured so far in the layer being rendered, in strip order. */
+    std::vector<std::uint64_t> layer_probes;
+    std::map<std::string, std::vector<strata_backdrop_sample>, std::less<>> completed_probes;
 };
 
 EffectPassRenderer::EffectPassRenderer(
     ID3D11Device* const device,
     ID3D11DeviceContext* const context,
-    const bool asynchronous_shader_compilation
+    const bool asynchronous_shader_compilation,
+    const bool synchronous_backdrop_readback
 )
     : impl_(std::make_unique<Impl>(
           device,
           context,
-          asynchronous_shader_compilation
+          asynchronous_shader_compilation,
+          synchronous_backdrop_readback
       )) {}
+
+void EffectPassRenderer::end_layer(const std::string_view layer_id) {
+    impl_->end_layer(layer_id);
+}
+
+std::vector<strata_backdrop_sample> EffectPassRenderer::take_backdrop_samples(
+    const std::string_view layer_id
+) {
+    const auto found = impl_->completed_probes.find(layer_id);
+    if (found == impl_->completed_probes.end())
+        return {};
+    std::vector<strata_backdrop_sample> samples = std::move(found->second);
+    impl_->completed_probes.erase(found);
+    return samples;
+}
 
 EffectPassRenderer::~EffectPassRenderer() = default;
 
@@ -807,6 +1001,14 @@ void EffectPassRenderer::release_layer(const std::string_view layer_id) noexcept
         impl_->layer_epochs.erase(epoch);
     std::erase_if(impl_->cached_samples,
                   [layer_id](const auto& entry) { return entry.first.layer == layer_id; });
+    if (const auto completed = impl_->completed_probes.find(layer_id);
+        completed != impl_->completed_probes.end()) {
+        impl_->completed_probes.erase(completed);
+    }
+    for (Impl::ProbeReadback& readback : impl_->probe_readbacks) {
+        if (readback.layer == layer_id)
+            readback.pending = false;
+    }
 }
 
 void EffectPassRenderer::declare_pass(const std::string_view effect_id, const std::uint32_t index,

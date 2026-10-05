@@ -137,6 +137,11 @@ struct EffectState final {
     std::vector<MaterialParameter> parameters{};
     std::array<double, 16U> packed_parameters{};
     std::uint32_t packed_parameter_count = 0U;
+    /**
+     * Nonzero asks the host to measure the backdrop this effect captures and report it under this
+     * token (Surface::report_backdrop). Only BACKDROP effects carry one.
+     */
+    std::uint64_t probe = 0U;
     [[nodiscard]] friend bool operator==(const EffectState&, const EffectState&) = default;
 };
 
@@ -334,6 +339,8 @@ struct RenderGroup final {
     double translate_x = 0.0;
     double translate_y = 0.0;
     double opacity = 1.0;
+    /** The group's tone in [0, 1]; negative inherits the parent group's tone. */
+    double tone = -1.0;
     [[nodiscard]] friend bool operator==(const RenderGroup&, const RenderGroup&) = default;
 };
 

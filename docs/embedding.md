@@ -114,7 +114,7 @@ with the existing HLSL materials and effects. See [Vulkan hosting](vulkan-hostin
 image ownership, synchronous submission, and Surface release ordering.
 
 Custom renderers can instead link `Strata::render_host` and include `<strata/render_packet.hpp>`
-to consume packet-v12 without duplicating parsing:
+to consume packet-v13 without duplicating parsing:
 
 ```cpp
 strata::host::RenderPacketDecoder decoder;
@@ -149,7 +149,14 @@ Surface/backend stream. Compact packets are deltas and cannot initialize a fresh
 exposes ordered texture mutations, fixed-layout vertex bytes, indices, scissors,
 material/blend/texture bindings, draw batches, blur batches, backdrop/content effect batches, and
 content stack markers. Effect batches carry a maximum refresh rate; custom backends may retain the
-latest filtered sample between deadlines while continuing to composite every frame. The consumer
+latest filtered sample between deadlines while continuing to composite every frame. A backdrop
+effect batch with a nonzero `probe` belongs to a node that observes its backdrop: a backend that can
+measure reports the mean luma of what that effect captured through
+`strata_surface_report_backdrop` (`Surface::report_backdrop`), in any later frame, and one that
+cannot simply does not. Presentation groups carry a `tone` that the vertex stage applies to ink
+colours with `host::tone_color`; effect batches expose their group's tone as `EffectBatch::tone`.
+Grayscale glyph atlases hold plain coverage: a backend turns it into alpha per pixel with
+`host::text_coverage`, which weights it by the lightness of the ink being drawn. The consumer
 remains responsible for GPU resources, shader/material
 implementation, presentation, and the Surface release-packet barrier.
 
@@ -320,7 +327,7 @@ runners and remote protocols whose schema is selected only at runtime.
 
 Adopt a complete Surface environment generation atomically: framebuffer and logical sizes, scale,
 safe insets, snapping, density, reduced-motion preference, and input capabilities. Enqueue input in
-ordered batches, call `strata_surface_frame`, then read packet v12 through a bytes sink.
+ordered batches, call `strata_surface_frame`, then read packet v13 through a bytes sink.
 
 The packet bytes are borrowed only during the sink callback. Copy them if the backend submits later;
 consume them directly if submission is synchronous. Packet-v10 full packets contain native geometry,

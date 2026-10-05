@@ -39,14 +39,14 @@ authoring and render packets carry only logical or Surface-scoped ids.
 
 ## Rendering model
 
-PNG bytes are inspected at Surface creation, reach the host through packet v12 the first time a
+PNG bytes are inspected at Surface creation, reach the host through packet v13 the first time a
 frame samples them, are decoded by the host, and are sampled as ordinary textures. SVG documents are parsed at Surface creation into immutable
 display lists. During widget presentation, Strata projects their curves, fills, strokes,
 transforms, `viewBox`, and `preserveAspectRatio` into ordinary clipped path commands. Submission
 then tessellates those paths at the current logical size and device scale.
 
 SVG is therefore resolution-independent and needs no SVG feature in D3D11, the CPU reference
-renderer, or a custom packet-v12 backend. Both desktop and headless rendering consume the same
+renderer, or a custom packet-v13 backend. Both desktop and headless rendering consume the same
 vertices, indices, materials, and scissors. PNG/SVG image content is immutable for a Surface
 lifetime; edited assets take effect after rebuilding the owning artifact and recreating the session.
 
@@ -68,7 +68,7 @@ runtime.release_image("app:skin/steve");
 At the C boundary these are `strata_runtime_publish_image` and `strata_runtime_release_image`.
 Documents reference the id like any static image; until it is published, or after it is released,
 the draw is skipped. Each Surface uploads an image the first time one of its frames samples it
-(packet v12 encoding 1, raw RGBA8), uploads it again only when it is replaced, and releases it from
+(packet v13 encoding 1, raw RGBA8), uploads it again only when it is replaced, and releases it from
 the host when it is released. A settled Surface sends nothing for its resident images. Publishing
 or releasing an image replans every Surface once, because the set of drawable images changed;
 replacing an image with one of the same size only re-uploads its pixels. A Surface's static image

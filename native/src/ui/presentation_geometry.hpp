@@ -32,6 +32,15 @@ class RetainedNode;
 [[nodiscard]] bool motion_presentation_group(const RetainedNode& node,
                                              const MotionRuntime& motion) noexcept;
 
+/**
+ * The tone this node sets for itself and its subtree: the animated value while a tone channel has
+ * one, else the resolved `tone` style. Empty when the node sets none and inherits its ancestors'.
+ * Tone has no baked form, so a node that sets one renders as a presentation group for as long as
+ * it does.
+ */
+[[nodiscard]] std::optional<double> local_presentation_tone(const RetainedNode& node,
+                                                            const MotionRuntime& motion) noexcept;
+
 /** Effective local opacity shared by rendering and presentation-aware input hit testing. */
 [[nodiscard]] double local_presentation_opacity(
     const RetainedNode& node,

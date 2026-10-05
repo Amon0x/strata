@@ -76,7 +76,8 @@ struct Renderer::Impl final {
     Impl(ID3D11Device* const device, ID3D11DeviceContext* const context,
          const RendererOptions options)
         : device(device), context(context), state_policy(options.context_state),
-          renderer(device, context, options.asynchronous_shader_compilation) {
+          renderer(device, context, options.asynchronous_shader_compilation,
+                   options.synchronous_backdrop_readback) {
         if (device == nullptr || context == nullptr)
             throw std::invalid_argument("D3D11 renderer requires a device and context");
 
@@ -186,6 +187,11 @@ RenderLayerTelemetry Renderer::render(const std::string_view layer_id,
                                       const host::RenderPacket& packet, const RenderTarget& target,
                                       const FrameOptions options) {
     return impl_->render(layer_id, packet, target, options);
+}
+
+std::vector<strata_backdrop_sample> Renderer::take_backdrop_samples(
+    const std::string_view layer_id) {
+    return impl_->renderer.take_backdrop_samples(layer_id);
 }
 
 void Renderer::consume_resources(const host::RenderPacket& packet) {

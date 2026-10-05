@@ -49,6 +49,7 @@ enum class MotionProperty {
     scale,
     scale_x,
     scale_y,
+    tone,
 };
 
 enum class MotionTrigger {

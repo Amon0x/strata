@@ -56,6 +56,8 @@ class Renderer final {
     void begin_frame();
     [[nodiscard]] RenderLayerTelemetry render_layer(std::string_view id,
                                                     const host::RenderPacket& packet);
+    /** What the layer's backdrop probes have measured since the last call, oldest first. */
+    [[nodiscard]] std::vector<strata_backdrop_sample> take_backdrop_samples(std::string_view id);
     void release_layer(std::string_view id) noexcept;
     /** Presents and returns false when DXGI reports the window as occluded. */
     [[nodiscard]] bool end_frame();

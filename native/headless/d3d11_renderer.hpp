@@ -38,6 +38,7 @@ class D3D11Renderer final : public CaptureRenderer {
     ) override;
     void render(const host::RenderPacket& packet, std::int64_t time_nanoseconds) override;
     void consume_resources(const host::RenderPacket& packet) override;
+    [[nodiscard]] std::vector<strata_backdrop_sample> take_backdrop_samples() override;
 
     [[nodiscard]] std::string_view backend() const noexcept override;
     [[nodiscard]] std::uint32_t width() const noexcept override;

@@ -122,6 +122,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{
             .name = "justifySelf", .type = declared_type_reference("t37"), .nullable = true},
         DeclaredProperty{.name = "kind", .type = declared_type_reference("t44")},
+        DeclaredProperty{.name = "letterSpacing", .type = declared_type_reference("t3")},
         DeclaredProperty{
             .name = "lineHeight", .type = declared_type_reference("t3"), .nullable = true},
         DeclaredProperty{.name = "lineHeightMultiplier", .type = declared_type_reference("t3")},
@@ -166,6 +167,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
             .name = "thumbSize", .type = declared_type_reference("t3"), .nullable = true},
         DeclaredProperty{
             .name = "thumbWidth", .type = declared_type_reference("t3"), .nullable = true},
+        DeclaredProperty{.name = "tone", .type = declared_type_reference("t3")},
         DeclaredProperty{
             .name = "track", .type = declared_type_reference("t145"), .nullable = true},
         DeclaredProperty{
@@ -215,6 +217,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "thumb", .type = declared_type_reference("t8")},
         DeclaredProperty{.name = "thumbRadius", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "thumbSize", .type = declared_type_reference("t3")},
+        DeclaredProperty{.name = "tone", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "track", .type = declared_type_reference("t8")},
         DeclaredProperty{.name = "trackRadius", .type = declared_type_reference("t3")},
         DeclaredProperty{.name = "translateX", .type = declared_type_reference("t3")},
@@ -317,6 +320,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
     };
     catalog.behaviors = {
         DeclaredBehavior{.id = "strata.activate", .options = declared_type_reference("t16")},
+        DeclaredBehavior{.id = "strata.backdrop", .options = declared_type_reference("t189")},
         DeclaredBehavior{.id = "strata.disabled", .options = declared_type_reference("t21")},
         DeclaredBehavior{.id = "strata.drag-source", .options = declared_type_reference("t22")},
         DeclaredBehavior{.id = "strata.drop-target", .options = declared_type_reference("t26")},

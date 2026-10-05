@@ -1,6 +1,6 @@
 # Rendering into a host-owned D3D11 target
 
-`Strata::d3d11` submits decoded packet-v12 layers into a D3D11 device, immediate context, texture,
+`Strata::d3d11` submits decoded packet-v13 layers into a D3D11 device, immediate context, texture,
 and render-target view owned by an embedding application. It does not create a window or swap
 chain, clear existing content by default, resize host resources, or present. This makes it suitable
 for engines, editors, overlays, plug-ins, and applications that already own their graphics loop.
@@ -9,7 +9,7 @@ The target is intentionally separate from the UI runtime:
 
 ```text
 any Strata language binding
-  -> stable Surface packet-v12 bytes
+  -> stable Surface packet-v13 bytes
   -> backend-specific presenter or Strata::render_host decoder
   -> host-owned graphics target
 ```
@@ -219,3 +219,13 @@ packets cannot initialize a new decoder.
 renders into an existing texture, verifies that target contents are preserved unless explicitly
 cleared, verifies that host pipeline state is restored even when a frame is rejected, and exercises
 the presenter and Win32 input adapter against a live Runtime and Surface.
+
+## Backdrop probes
+
+Nodes that observe their backdrop (`strata.backdrop`) mark their effect batch with a probe. The
+renderer reduces each probed effect's captured backdrop to one texel and reads the frame's probes
+back in a single copy, without waiting on the GPU, so results describe a frame or two ago.
+`Presenter` hands them to the owning Surface itself. With `Renderer` alone, call
+`take_backdrop_samples(layer_id)` after `render` and pass the result to
+`strata_surface_report_backdrop`. `RendererOptions::synchronous_backdrop_readback` waits for the
+GPU instead, which makes offscreen captures deterministic.

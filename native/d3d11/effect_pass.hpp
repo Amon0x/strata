@@ -5,10 +5,12 @@
 #include <memory>
 #include <span>
 #include <string_view>
+#include <vector>
 
 #include <d3d11.h>
 
 #include <strata/render_packet.hpp>
+#include <strata/strata.h>
 
 namespace strata::d3d11 {
 
@@ -29,7 +31,8 @@ class EffectPassRenderer final {
     explicit EffectPassRenderer(
         ID3D11Device* device,
         ID3D11DeviceContext* context,
-        bool asynchronous_shader_compilation = false
+        bool asynchronous_shader_compilation = false,
+        bool synchronous_backdrop_readback = false
     );
     ~EffectPassRenderer();
     EffectPassRenderer(const EffectPassRenderer&) = delete;
@@ -57,6 +60,16 @@ class EffectPassRenderer final {
      * SURFACE effect whose retained sample is due for refresh.
      */
     void begin_surface(ID3D11Texture2D* target_texture, bool capture_backdrop);
+    /**
+     * Ends one layer: queues the backdrop probes it measured for readback and collects any earlier
+     * readbacks that have completed. Readback never waits on the GPU unless the renderer was built
+     * for synchronous readback, so samples normally arrive a frame or two after they were measured.
+     */
+    void end_layer(std::string_view layer_id);
+    /** Removes and returns the layer's completed backdrop samples, oldest first. */
+    [[nodiscard]] std::vector<strata_backdrop_sample> take_backdrop_samples(
+        std::string_view layer_id
+    );
     void release_layer(std::string_view layer_id) noexcept;
     void declare_pass(std::string_view effect_id, std::uint32_t index, std::uint32_t kind,
                       double radius, std::uint32_t downsample, std::uint32_t radius_parameter,

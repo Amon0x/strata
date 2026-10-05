@@ -112,6 +112,15 @@ struct PixelRect final {
         result.data[value] = read_float(bytes, base + 24U + value * sizeof(float));
     }
     result.data[15U] *= static_cast<float>(group.opacity);
+    // Tone, as in the vertex stage: images (mode 1) and shadows (mode 6) are not ink, and a rounded
+    // rect (mode 2) carries its border colour in values 8 to 10.
+    const int mode = static_cast<int>(std::floor(result.data[14U] + 0.5F));
+    if (group.tone > 0.0 && mode != 1 && mode != 6) {
+        const float tone = static_cast<float>(group.tone);
+        host::tone_color(result.color.red, result.color.green, result.color.blue, tone);
+        if (mode == 2)
+            host::tone_color(result.data[8U], result.data[9U], result.data[10U], tone);
+    }
     return result;
 }
 
@@ -628,7 +637,8 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.alpha *= outside * falloff;
                     }
                 } else if (mode == 4) {
-                    source.alpha *= texture_sample(u, v).red;
+                    source.alpha *= host::text_coverage(texture_sample(u, v).red, source.red,
+                                                        source.green, source.blue);
                 } else if (mode == 5) {
                     const Color sampled = texture_sample(u, v);
                     const float median =

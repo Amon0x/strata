@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -14,6 +15,8 @@
 #include "runtime/action.hpp"
 #include "runtime/expression.hpp"
 #include "runtime/value.hpp"
+#include "ui/behavior/backdrop.hpp"
+#include "ui/behavior/input.hpp"
 #include "ui/command.hpp"
 #include "ui/input/detail.hpp"
 #include "ui/status.hpp"
@@ -22,6 +25,41 @@
 
 namespace strata::ui {
 using namespace input_detail;
+
+void InputRouter::observe_backdrop(const std::uint64_t probe, const double luminance,
+                                   InputOperationResult& result) {
+    RetainedNode* const node = tree_ != nullptr ? tree_->find_identity(probe) : nullptr;
+    const DescriptionBehavior* const observer =
+        node != nullptr ? backdrop_observer(*node) : nullptr;
+    if (observer == nullptr || !std::isfinite(luminance))
+        return;
+    const auto threshold = [observer](const std::string_view name, const double fallback) {
+        const runtime::Value* const value = observer->options.field(name);
+        return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
+                   ? std::clamp(*value->number(), 0.0, 1.0)
+                   : fallback;
+    };
+    const double light = threshold("light", default_backdrop_light_threshold);
+    const double dark = std::min(threshold("dark", default_backdrop_dark_threshold), light);
+    const runtime::Value* const retained = node->retained_value(backdrop_light_value);
+    const bool known = retained != nullptr && retained->boolean() != nullptr;
+    const bool was_light = known && *retained->boolean();
+    // Between the thresholds the reading holds, so a backdrop hovering near either one cannot
+    // flicker. The first report has nothing to hold and takes the nearer side.
+    const bool is_light = luminance >= light   ? true
+                          : luminance <= dark  ? false
+                          : known              ? was_light
+                                               : luminance >= (light + dark) * 0.5;
+    if (known && is_light == was_light)
+        return;
+    tree_->set_input_value(probe, backdrop_light_value, runtime::Value(is_light));
+    tree_->set_input_value(probe, backdrop_luminance_value, runtime::Value(luminance));
+    // An unreported node already presents as dark, so a first dark reading is not a change.
+    if (!known && !is_light)
+        return;
+    BehaviorInputScope scope(*this, *node, *observer, InputEventPhase::target, result);
+    static_cast<void>(scope.emit("backdrop-changed", runtime::Value(is_light)));
+}
 
 runtime::ActionDispatchOutcome InputRouter::emit(
     JsonValue event,

@@ -21,7 +21,13 @@ enum class ImageSampling : std::uint32_t { nearest = 0U, linear = 1U };
 
 struct FontResource final {
     std::string id;
+    /** The bundled face; used wherever no `system` candidate is installed. */
     std::string resource;
+    /**
+     * Installed font file names in preference order, such as "segoeui.ttf". The first one found in
+     * the platform's font directories is used instead of `resource`.
+     */
+    std::vector<std::string> system{};
 };
 
 struct ImageResource final {

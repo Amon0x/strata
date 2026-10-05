@@ -13,8 +13,9 @@ cbuffer FrameData : register(b0) {
 };
 
 /**
- * Presentation groups: `transform` is scale.xy then translate.xy over logical layout space and
- * `opacity.x` multiplies material opacity. Entry zero (and every unused entry) is the identity.
+ * Presentation groups: `transform` is scale.xy then translate.xy over logical layout space,
+ * `opacity.x` multiplies material opacity and `opacity.y` is the group's tone. Entry zero (and
+ * every unused entry) is the identity.
  */
 struct PresentationGroup {
     float4 transform;
@@ -45,6 +46,18 @@ struct PixelInput {
     float4 drawData3 : TEXCOORD4;
 };
 
+/**
+ * A group's tone applied to one straight-alpha colour: host::tone_color. Light, unsaturated colours
+ * are ink and have their lightness mirrored toward dark ink; saturated and dark colours pass.
+ */
+float3 strataTone(float3 color, float tone) {
+    float high = max(color.r, max(color.g, color.b));
+    float low = min(color.r, min(color.g, color.b));
+    float ink = saturate((high - 0.5) * 4.0) * saturate(1.0 - (high - low) * 2.5);
+    float3 mirrored = float3(0.043, 0.071, 0.125) + (1.0 - high) * 0.6;
+    return lerp(color, mirrored, saturate(tone) * ink);
+}
+
 PixelInput main(VertexInput input) {
     PixelInput output;
     // Position z carries the vertex's presentation group; nothing draws with depth.
@@ -60,10 +73,17 @@ PixelInput main(VertexInput input) {
         1.0
     );
     output.uv = input.uv;
-    output.color = input.color;
+    // Tone belongs to ink: fills, borders, shapes and text. An image (mode 1) keeps its own colours
+    // and a shadow (mode 6) stays a shadow. A rounded rect (mode 2) carries its border colour in
+    // drawData2, which is toned with it.
+    int mode = (int)floor(input.drawData3.z + 0.5);
+    float tone = (mode == 1 || mode == 6) ? 0.0 : group.opacity.y;
+    output.color = float4(strataTone(input.color.rgb, tone), input.color.a);
     output.drawData0 = input.drawData0;
     output.drawData1 = input.drawData1;
-    output.drawData2 = input.drawData2;
+    output.drawData2 = mode == 2
+        ? float4(strataTone(input.drawData2.rgb, tone), input.drawData2.a)
+        : input.drawData2;
     output.drawData3 = float4(input.drawData3.xyz, input.drawData3.w * group.opacity.x);
     return output;
 }
@@ -116,6 +136,15 @@ float median3(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
 }
 
+/**
+ * The alpha a grayscale glyph's coverage contributes in this ink: host::text_coverage. Light ink
+ * has its midtones weighted up, as a linear-light blend would; dark ink stays near its outline.
+ */
+float strataTextCoverage(float coverage, float3 ink) {
+    float strength = 0.12 + 0.68 * dot(ink, float3(0.2126, 0.7152, 0.0722));
+    return saturate(coverage + strength * coverage * (1.0 - coverage));
+}
+
 /** The draw mode this vertex was submitted with; selects which silhouette the draw data describes. */
 int strataDrawMode(PixelInput input) {
     return (int)floor(input.drawData3.z + 0.5);
@@ -155,7 +184,7 @@ float4 strataShade(PixelInput input) {
         float inner = 1.0 - smoothstep(-softness, softness, distance + width);
         color.a *= saturate(outer - inner);
     } else if (mode == 4) {
-        color.a *= Texture0.Sample(Sampler0, input.uv).r;
+        color.a *= strataTextCoverage(Texture0.Sample(Sampler0, input.uv).r, color.rgb);
     } else if (mode == 5) {
         float3 sampled = Texture0.Sample(Sampler0, input.uv).rgb;
         float signedDistance = median3(sampled.r, sampled.g, sampled.b) - 0.5;

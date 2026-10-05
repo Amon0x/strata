@@ -66,8 +66,12 @@ struct CoverageRasterConfig final {
     double stem_darkening_pixels = 0.16;
     double stem_darkening_taper_start_physical_pixel_size = 14.0;
     double stem_darkening_taper_end_physical_pixel_size = 28.0;
-    /** Perceptual weighting that keeps grayscale antialiasing from looking frail on dark UI. */
-    double transfer_strength = 0.60;
+    /**
+     * Midtone weighting baked into the bitmap. Zero by default: the atlas holds plain coverage, and
+     * the weighting is applied at draw time from the ink's lightness (host::text_coverage), because
+     * light ink on dark needs far more of it than dark ink on light.
+     */
+    double transfer_strength = 0.0;
 };
 
 struct MsdfRasterConfig final {

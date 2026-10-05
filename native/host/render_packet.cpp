@@ -383,9 +383,11 @@ void append_group_regions(const std::vector<PresentationGroup>& previous,
         group.translate_x = input.number();
         group.translate_y = input.number();
         group.opacity = input.number();
+        group.tone = input.number();
         if (!std::isfinite(group.scale_x) || !std::isfinite(group.scale_y) ||
             !std::isfinite(group.translate_x) || !std::isfinite(group.translate_y) ||
-            !std::isfinite(group.opacity) || group.opacity < 0.0 || group.opacity > 1.0) {
+            !std::isfinite(group.opacity) || group.opacity < 0.0 || group.opacity > 1.0 ||
+            !std::isfinite(group.tone) || group.tone < 0.0 || group.tone > 1.0) {
             throw std::invalid_argument("render group is outside the portable domain");
         }
         result.resize(index + 1U);
@@ -427,6 +429,7 @@ void present(const SubmissionBatch& local, const std::vector<PresentationGroup>&
         for (std::size_t corner = 0U; corner < output.radii.size(); ++corner)
             output.radii[corner] = effect->radii[corner] * radius_scale;
         output.opacity = effect->opacity * group.opacity;
+        output.tone = group.tone;
     }
 }
 
@@ -564,7 +567,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
         input.u32() != STRATA_RENDER_PACKET_VERSION_CURRENT) {
-        throw std::invalid_argument("render packet decoder requires protocol v12");
+        throw std::invalid_argument("render packet decoder requires protocol v13");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();
@@ -744,6 +747,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
                 throw std::invalid_argument("render effect backdrop source is unknown");
             }
             effect.backdrop_source = static_cast<EffectBackdropSource>(backdrop_source);
+            effect.probe = batch.u64();
             effect.parameter_count = batch.u32();
             if (effect.effect.empty() || effect.parameter_count > effect.parameters.size() ||
                 !std::isfinite(effect.x) || !std::isfinite(effect.y) ||
@@ -761,6 +765,9 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
                 throw std::invalid_argument(
                     "content effects cannot select a backdrop source"
                 );
+            }
+            if (effect.kind != EffectBatchKind::backdrop && effect.probe != 0U) {
+                throw std::invalid_argument("content effects cannot probe a backdrop");
             }
             for (std::uint32_t parameter = 0U; parameter < effect.parameter_count; ++parameter) {
                 effect.parameters[parameter] = batch.number();

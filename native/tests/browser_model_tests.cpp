@@ -1,6 +1,9 @@
 #include "headless/scenario.hpp"
 #include "host/browser_model.hpp"
+#include "host/system_fonts.hpp"
 
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -187,10 +190,56 @@ void pointer_drag_steps_preserve_motion_samples() {
           "headless pointer drag did not preserve coordinates, duration, or sample count");
 }
 
+// System fonts resolve by bare file name only, and a scenario may name them as preferences beside
+// its bundled face.
+void system_fonts_resolve_bare_file_names_only() {
+    using namespace strata;
+    for (const char* const name : {"", ".", "..", "sub/face.ttf", "..\\face.ttf", "C:face.ttf"}) {
+        check(host::find_system_font(name).empty(),
+              std::string("a system font name with a path component resolved: ") + name);
+    }
+    const std::vector<std::string> absent{"strata-absent-face-7c1e.ttf"};
+    check(!host::select_system_font(absent).has_value(),
+          "an absent system font was selected");
+    check(!host::read_system_font("assets/strata/fonts/default.ttf").has_value(),
+          "an ordinary resource id was treated as a system font");
+    const auto missing = host::read_system_font("system-font:strata-absent-face-7c1e.ttf");
+    check(missing.has_value() && missing->empty(),
+          "an absent system font did not read as an empty resource");
+
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / "strata-system-font-scenarios";
+    std::filesystem::create_directories(directory);
+    const auto scenario = [&directory](const std::string& name, const std::string& system) {
+        const std::filesystem::path path = directory / name;
+        std::ofstream(path) << R"({"version":1,"application":{"id":"t","module":"a.strata","root":"R"},)"
+                            << R"("surface":{"id":"t","width":10,"height":10,"scale":1,"fonts":[)"
+                            << R"({"id":"f","resource":"fonts/f.ttf","system":)" << system
+                            << "}]}}";
+        return path;
+    };
+    const headless::Scenario parsed = headless::load_scenario(
+        scenario("valid.json", R"(["segoeui.ttf","Inter-Regular.ttf"])"));
+    check(parsed.fonts.size() == 1U && parsed.fonts.front().resource == "fonts/f.ttf" &&
+              parsed.fonts.front().system ==
+                  std::vector<std::string>{"segoeui.ttf", "Inter-Regular.ttf"},
+          "a scenario font lost its system candidates or its bundled fallback");
+    bool rejected = false;
+    try {
+        static_cast<void>(
+            headless::load_scenario(scenario("escaping.json", R"(["../outside.ttf"])")));
+    } catch (const std::exception&) {
+        rejected = true;
+    }
+    check(rejected, "a scenario accepted a system font candidate with a path component");
+    std::filesystem::remove_all(directory);
+}
+
 } // namespace
 
 int strata_test_browser_model() {
     try {
+        system_fonts_resolve_bare_file_names_only();
         virtual_menu_rows_require_exact_geometry();
         indexed_virtual_controls_keep_index_geometry();
         click_steps_accept_secondary_buttons();

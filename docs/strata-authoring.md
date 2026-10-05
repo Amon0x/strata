@@ -213,6 +213,43 @@ channels. Boolean/numeric/color retargeting interrupts from the displayed value.
 disclosure motion use the same retained layout/focus/input system. Reduced-motion surfaces resolve
 to the same final tree without a parallel behavior implementation.
 
+### Backdrop observation
+
+A surface that floats over arbitrary content cannot know at authoring time whether that content is
+light or dark. `strata.backdrop` tells it. Attach the behavior to a node that has a `BACKDROP`
+effect: the host measures the mean luma of the pixels that effect captured, and the runtime resolves
+it into a bistable reading that the attachment's action receives as a boolean event.
+
+```strata
+component GlassCard() {
+  state onLight = false;
+  Panel(
+    style: style(Glass, tone: onLight ? 1 : 0),
+    animateChanges: { properties: ["tone"], policy: "standard" },
+    behaviors: [{
+      id: "strata.backdrop",
+      action: action("state.setFromEvent", name: "onLight"),
+      options: { light: 0.60, dark: 0.46 }
+    }]
+  ) {
+    Slot(name: "content")
+  }
+}
+```
+
+The reading becomes `true` at or above `light`, `false` at or below `dark`, and holds in between, so
+a backdrop that hovers near a threshold cannot flicker; the action fires only when the reading
+changes. `options` may be omitted for the defaults shown. What the component does with the boolean
+is ordinary authoring: here it sets [`tone`](strata-language.md#tone), which flips the ink of
+everything inside the card and tells the glass shader which contrast band to hold.
+
+Each observer reads its own backdrop, so a control on a card follows the card's body rather than the
+wallpaper, and elements over different parts of a scene can disagree. Measurement is a host
+capability: the D3D11 desktop, headless and presenter hosts provide it (the desktop without waiting
+on the GPU, so a reading follows its frame by one or two). Under a host that does not measure, an
+observer simply never fires and the node presents as over a dark backdrop. A node without a
+`BACKDROP` effect has nothing to measure.
+
 ### Scroll observation
 
 Every built-in scroll viewport—`Scroll`, `Repeater`, `VirtualList`, `ItemGrid`, `Table`, and
@@ -240,6 +277,22 @@ Text uses the bundled Regular face and size-specific, TrueType-hinted grayscale 
 every font size and display scale. Controls use the Medium face; headings and other emphasized text
 should select `strata:fonts/default-medium` explicitly. Grayscale runs are regenerated
 for their physical scale, retain quarter-pixel horizontal positioning, and use R8 atlas pages.
+
+The atlas holds plain coverage; how much each glyph contributes is decided when it is drawn, from
+the ink it is drawn in. Light ink has its midtones weighted up, the way a linear-light blend would,
+so it does not thin out over a dark surface, and dark ink is left close to its outline so it does
+not turn heavy over a light one. The same glyphs therefore serve both sides of a [tone](strata-language.md#tone)
+change. An application chooses the faces behind the two ids, and may prefer the platform's own
+interface face; see [application manifests](desktop-hosting.md#application-manifests-and-preview).
+
+`letterSpacing` adds logical pixels between glyphs. Type set large wants a little taken out and
+small capitals want some let in; whole-pixel `pixelSize` values keep hinting clean, and a fixed
+`lineHeight` keeps a layout independent of the face's own line gap:
+
+```strata
+style Display { pixelSize: 44; lineHeight: 50; letterSpacing: -0.9; }
+style Overline { pixelSize: 11; lineHeight: 14; letterSpacing: 0.9; }
+```
 
 MSDF remains available for text that is deliberately scaled or transformed after layout. Opt in on
 only those runs:

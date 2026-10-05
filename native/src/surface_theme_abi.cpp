@@ -455,7 +455,7 @@ private:
 }
 
 [[nodiscard]] strata::ui::MotionProperty motion_property(const strata_theme_motion_property value) {
-    if (value > STRATA_THEME_MOTION_PROPERTY_SCALE_Y) throw std::invalid_argument("theme motion property is invalid");
+    if (value > STRATA_THEME_MOTION_PROPERTY_TONE) throw std::invalid_argument("theme motion property is invalid");
     return static_cast<strata::ui::MotionProperty>(value);
 }
 

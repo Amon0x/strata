@@ -418,6 +418,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         bool multi_window = false;
         bool uncapped = false;
         bool watch = false;
+        bool show_frame_time = false;
         std::filesystem::path performance_scenario_path;
         std::filesystem::path performance_output;
         std::filesystem::path performance_baseline;
@@ -432,8 +433,8 @@ int wmain(const int argument_count, wchar_t** const arguments) {
             const std::wstring_view argument(arguments[index]);
             if (argument == L"--help" || argument == L"-h") {
                 std::cout << "usage:\n"
-                             "  strata_desktop app.strata-app.json [--watch] [--uncapped]\n"
-                             "  strata_desktop [--multi-window] [--uncapped] [resource-root]\n"
+                             "  strata_desktop app.strata-app.json [--watch] [--uncapped] [--fps]\n"
+                             "  strata_desktop [--multi-window] [--uncapped] [--fps] [resource-root]\n"
                              "  strata_desktop --performance scenario.json --output directory "
                              "[--baseline performance.json] [resource-root]\n";
                 return 0;
@@ -448,6 +449,8 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                 uncapped = true;
             else if (argument == L"--watch")
                 watch = true;
+            else if (argument == L"--fps")
+                show_frame_time = true;
             else if (argument == L"--resources")
                 resources = require_value(index, "--resources");
             else if (argument == L"--performance")
@@ -612,7 +615,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                     if (!application_launch->fonts.empty()) {
                         config.fonts.clear();
                         for (const strata::headless::FontConfig& font : application_launch->fonts) {
-                            config.fonts.push_back({font.id, font.resource});
+                            config.fonts.push_back({font.id, font.resource, font.system});
                         }
                     }
                     if (!application_launch->images.empty()) {
@@ -744,6 +747,18 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         }
         bool profile_started = false;
         std::size_t profile_frames_after_open = 0U;
+        // --fps reports the host loop's own cadence in the title bar: the mean interval between
+        // presented frames over the last half second. With --uncapped that is the full cost of a
+        // frame; without it the interval is the display's.
+        std::wstring frame_time_title;
+        if (show_frame_time && !applications.empty()) {
+            frame_time_title.resize(256U);
+            frame_time_title.resize(static_cast<std::size_t>(
+                GetWindowTextW(applications.front()->window_handle, frame_time_title.data(),
+                               static_cast<int>(frame_time_title.size()))));
+        }
+        auto frame_time_window_started = std::chrono::steady_clock::now();
+        std::size_t frame_time_window_frames = 0U;
         while (running) {
             MSG message{};
             while (PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE)) {
@@ -774,6 +789,25 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                     running = false;
                     exit_code = 1;
                     break;
+                }
+            }
+            if (show_frame_time && running) {
+                ++frame_time_window_frames;
+                const auto now = std::chrono::steady_clock::now();
+                const double seconds =
+                    std::chrono::duration<double>(now - frame_time_window_started).count();
+                if (seconds >= 0.5) {
+                    const double frames_per_second =
+                        static_cast<double>(frame_time_window_frames) / seconds;
+                    wchar_t suffix[64]{};
+                    static_cast<void>(swprintf_s(suffix, L"  —  %.2f ms  ·  %.0f fps",
+                                                 1000.0 / frames_per_second, frames_per_second));
+                    SetWindowTextW(applications.front()->window_handle,
+                                   (frame_time_title + suffix).c_str());
+                    std::cout << "STRATA FRAME " << 1000.0 / frames_per_second << " ms "
+                              << frames_per_second << " fps" << std::endl;
+                    frame_time_window_started = now;
+                    frame_time_window_frames = 0U;
                 }
             }
             if (profile_showcase && running) {

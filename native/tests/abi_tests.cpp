@@ -1099,6 +1099,15 @@ screen Main {
               strata_surface_reveal(surface).status == STRATA_STATUS_OK &&
               strata_surface_frame(surface, 12'000, &frame_info).status == STRATA_STATUS_OK,
           "Surface reveal was not accepted through the C ABI");
+    const strata_backdrop_sample unknown_probe{UINT64_C(0xFFFFFFFF00000001), 0.9};
+    check(strata_surface_report_backdrop(nullptr, &unknown_probe, 1U).status ==
+                  STRATA_STATUS_INVALID_ARGUMENT &&
+              strata_surface_report_backdrop(surface, nullptr, 1U).status ==
+                  STRATA_STATUS_INVALID_ARGUMENT &&
+              strata_surface_report_backdrop(surface, nullptr, 0U).status == STRATA_STATUS_OK &&
+              strata_surface_report_backdrop(surface, &unknown_probe, 1U).status ==
+                  STRATA_STATUS_OK,
+          "Surface backdrop reports were not validated through the C ABI");
 
     strata_surface_environment resized = surface_environment;
     resized.generation = 2U;

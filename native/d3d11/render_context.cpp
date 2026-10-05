@@ -120,7 +120,8 @@ struct RenderContext::Impl final {
     Impl(
         ID3D11Device* const device,
         ID3D11DeviceContext* const context,
-        const bool asynchronous_shader_compilation
+        const bool asynchronous_shader_compilation,
+        const bool synchronous_backdrop_readback
     )
         : device(device),
           context(context),
@@ -135,7 +136,8 @@ struct RenderContext::Impl final {
         effects = std::make_unique<EffectPassRenderer>(
             device,
             context,
-            asynchronous_shader_compilation
+            asynchronous_shader_compilation,
+            synchronous_backdrop_readback
         );
     }
 
@@ -789,12 +791,14 @@ struct RenderContext::Impl final {
 RenderContext::RenderContext(
     ID3D11Device* const device,
     ID3D11DeviceContext* const context,
-    const bool asynchronous_shader_compilation
+    const bool asynchronous_shader_compilation,
+    const bool synchronous_backdrop_readback
 )
     : impl_(std::make_unique<Impl>(
           device,
           context,
-          asynchronous_shader_compilation
+          asynchronous_shader_compilation,
+          synchronous_backdrop_readback
       )) {}
 
 RenderContext::~RenderContext() = default;
@@ -837,7 +841,15 @@ void RenderContext::begin_frame(const std::optional<std::array<float, 4U>> clear
 
 RenderLayerTelemetry RenderContext::render_layer(const std::string_view id,
                                                  const host::RenderPacket& packet) {
-    return impl_->render_layer(id, packet);
+    const RenderLayerTelemetry telemetry = impl_->render_layer(id, packet);
+    impl_->effects->end_layer(id);
+    return telemetry;
+}
+
+std::vector<strata_backdrop_sample> RenderContext::take_backdrop_samples(
+    const std::string_view id
+) {
+    return impl_->effects->take_backdrop_samples(id);
 }
 
 void RenderContext::release_layer(const std::string_view id) noexcept {

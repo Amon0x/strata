@@ -172,15 +172,15 @@ struct RenderEngine::Impl final {
                retained.paint == current.paint;
     }
 
-    // Fragments are built without presentation opacity or transform (the traversal applies both),
-    // so those channels never invalidate a fragment.
+    // Fragments are built without presentation opacity, transform or tone (the traversal applies
+    // all three through the node's group), so those channels never invalidate a fragment.
     [[nodiscard]] static CachedFragment::MotionSnapshot
     fragment_motion_snapshot(const MotionComputedValues* computed) {
         CachedFragment::MotionSnapshot result;
         if (computed == nullptr)
             return result;
         for (const auto& [property, value] : computed->values) {
-            if (property >= MotionProperty::opacity && property <= MotionProperty::scale_y)
+            if (property >= MotionProperty::opacity && property <= MotionProperty::tone)
                 continue;
             result.values.emplace_back(property, value);
         }

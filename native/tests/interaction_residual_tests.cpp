@@ -1626,6 +1626,51 @@ void test_movable_snapping(InputFixture& fixture) {
     check(offset().y == before.y + 10.0, "Shift did not nudge ten times as far");
 }
 
+// A backdrop observer resolves host luma reports into a bistable light/dark reading: it changes
+// only past a threshold, holds between them, and emits once per change.
+void test_backdrop_observer(InputFixture& fixture) {
+    const auto observer = [](const bool enabled) {
+        return std::vector<ui::DescriptionBehavior>{ui::DescriptionBehavior{
+            "strata.backdrop", enabled,
+            object({{"light", runtime::Value(0.6)}, {"dark", runtime::Value(0.4)}}), nullptr}};
+    };
+    fixture.adopt(node("Panel", "backdrop.root",
+                       {
+                           node("Panel", "backdrop.glass", {}, sized(100.0, 40.0), observer(true)),
+                           node("Panel", "backdrop.off", {}, sized(100.0, 40.0), observer(false)),
+                       },
+                       sized(640.0, 480.0, "COLUMN")));
+    ui::RetainedNode* glass = fixture.tree_.find_key("backdrop.glass");
+    ui::RetainedNode* off = fixture.tree_.find_key("backdrop.off");
+    check(glass != nullptr && off != nullptr, "backdrop fixture was not retained");
+    const auto report = [&fixture](const std::uint64_t probe, const double luminance) {
+        ui::InputOperationResult result;
+        fixture.input_.observe_backdrop(probe, luminance, result);
+        return result.events.size();
+    };
+    const auto light = [glass]() -> std::optional<bool> {
+        const runtime::Value* value = glass->retained_value("strata.backdrop.light");
+        return value != nullptr && value->boolean() != nullptr
+                   ? std::optional<bool>(*value->boolean())
+                   : std::nullopt;
+    };
+    check(!light().has_value(), "an unreported observer already had a reading");
+    check(report(glass->identity(), 0.45) == 0U && light() == std::optional<bool>(false),
+          "a first dark reading was announced although the node already presents as dark");
+    check(report(glass->identity(), 0.55) == 0U && light() == std::optional<bool>(false),
+          "a reading between the thresholds did not hold");
+    check(report(glass->identity(), 0.7) == 1U && light() == std::optional<bool>(true),
+          "a reading above the light threshold did not flip and emit once");
+    check(report(glass->identity(), 0.5) == 0U && light() == std::optional<bool>(true),
+          "a light reading did not hold between the thresholds");
+    check(report(glass->identity(), 0.3) == 1U && light() == std::optional<bool>(false),
+          "a reading below the dark threshold did not flip back and emit once");
+    check(report(off->identity(), 0.9) == 0U &&
+              off->retained_value("strata.backdrop.light") == nullptr,
+          "a disabled observer accepted a report");
+    check(report(glass->identity() + 100'000U, 0.9) == 0U, "an unknown probe was not ignored");
+}
+
 // A scale handle inside a movable card: the handle owns its gesture, the scale follows the pointer's
 // progress away from the fixed anchor (clamped and stepped), and arrow keys step it.
 void test_scale_handle(InputFixture& fixture) {
@@ -2101,6 +2146,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_tooltip_disclosure(fixture);
         test_manipulation_slop(fixture);
         test_movable_snapping(fixture);
+        test_backdrop_observer(fixture);
         test_scale_handle(fixture);
         test_passive_descendant_activation(fixture);
         test_release_target_activation(fixture);

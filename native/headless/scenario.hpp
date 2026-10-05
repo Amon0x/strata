@@ -15,7 +15,14 @@ namespace strata::headless {
 
 struct FontConfig final {
     std::string id;
+    /** The bundled face; always present, and used wherever no `system` candidate is installed. */
     std::string resource;
+    /**
+     * Installed font file names in preference order (host::find_system_font). The first one found
+     * on the machine is used instead of `resource`, so an application can present in the
+     * platform's own interface face without shipping it.
+     */
+    std::vector<std::string> system;
 };
 
 struct ImageConfig final {

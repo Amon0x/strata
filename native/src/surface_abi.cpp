@@ -799,6 +799,30 @@ strata_result strata_surface_reveal(strata_surface* const surface) {
     }
 }
 
+strata_result strata_surface_report_backdrop(strata_surface* const surface,
+                                             const strata_backdrop_sample* const samples,
+                                             const size_t sample_count) {
+    if (surface == nullptr || (samples == nullptr && sample_count != 0U))
+        return invalid_argument();
+    if (surface->release_packet_prepared)
+        return terminal_surface_failure(*surface);
+    try {
+        std::vector<strata::ui::Surface::BackdropSample> reports;
+        reports.reserve(sample_count);
+        for (size_t index = 0U; index < sample_count; ++index)
+            reports.push_back({samples[index].probe, samples[index].luminance});
+        surface->core.report_backdrop(reports);
+        return strata::core::result(STRATA_STATUS_OK);
+    } catch (const std::bad_alloc&) {
+        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
+                               "Surface backdrop report exhausted memory.");
+    } catch (...) {
+        return surface_failure(
+            *surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.UNCAUGHT_EXCEPTION",
+            "Surface backdrop report failed inside the C ABI exception boundary.");
+    }
+}
+
 strata_result strata_surface_dispatch_action_json(strata_surface* const surface,
                                                   const strata_action_dispatch_config* const config,
                                                   strata_action_dispatch_info* const out_info) {

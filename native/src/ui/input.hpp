@@ -356,6 +356,13 @@ class InputRouter final {
 
     [[nodiscard]] std::optional<std::uint64_t> focused_identity() const noexcept;
     [[nodiscard]] std::optional<std::string_view> focused_key() const noexcept;
+    /**
+     * Applies one host backdrop report to the node that owns `probe`: resolves the luma against
+     * the node's `strata.backdrop` thresholds and, when the light/dark reading changes, retains it
+     * and emits the attachment's action with the reading as a boolean event. Reports for nodes
+     * that no longer exist or no longer observe are ignored.
+     */
+    void observe_backdrop(std::uint64_t probe, double luminance, InputOperationResult& result);
     /** Constrains all focus acquisition and traversal to one retained subtree; null clears it. */
     [[nodiscard]] bool set_focus_containment(std::optional<std::string_view> key,
                                              InputOperationResult& result);

@@ -216,6 +216,10 @@ RenderLayerTelemetry Renderer::render_layer(const std::string_view id,
     return impl_->renderer->render_layer(id, packet);
 }
 
+std::vector<strata_backdrop_sample> Renderer::take_backdrop_samples(const std::string_view id) {
+    return impl_->renderer->take_backdrop_samples(id);
+}
+
 void Renderer::release_layer(const std::string_view id) noexcept {
     impl_->renderer->release_layer(id);
 }

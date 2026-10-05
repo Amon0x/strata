@@ -49,6 +49,7 @@ gpu::EffectConstants Renderer::Impl::effect_constants(const host::EffectBatch& e
         c.parameters[i] = static_cast<float>(effect.parameters[i]);
     c.opacity = static_cast<float>(effect.opacity);
     c.time = static_cast<float>(seconds);
+    c.padding[0] = static_cast<float>(effect.tone);
     return c;
 }
 

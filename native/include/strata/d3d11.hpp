@@ -40,6 +40,11 @@ enum class ContextStatePolicy {
 struct RendererOptions final {
     ContextStatePolicy context_state = ContextStatePolicy::preserve;
     bool asynchronous_shader_compilation = false;
+    /**
+     * Backdrop probes normally read back without waiting on the GPU and arrive a frame or two
+     * late. Set this to wait instead, which makes captures deterministic at the cost of a stall.
+     */
+    bool synchronous_backdrop_readback = false;
 };
 
 using ProgramSourceLoader = std::function<std::string(std::string_view)>;
@@ -110,6 +115,14 @@ class Renderer final {
                                               const host::RenderPacket& packet,
                                               const RenderTarget& target,
                                               FrameOptions options = {});
+
+    /**
+     * Removes and returns what the layer's backdrop probes have measured, oldest first. Pass them to
+     * strata_surface_report_backdrop on the Surface that produced the layer's packets; Presenter
+     * does this itself.
+     */
+    [[nodiscard]] std::vector<strata_backdrop_sample> take_backdrop_samples(
+        std::string_view layer_id);
 
     /** Applies terminal or otherwise resource-only packets without requiring a render target. */
     void consume_resources(const host::RenderPacket& packet);
