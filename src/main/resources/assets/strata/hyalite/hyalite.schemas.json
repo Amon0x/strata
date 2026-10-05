@@ -1,0 +1,171 @@
+{
+  "widgets": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "actions": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "host": [],
+  "materials": {
+    "definitions": [
+      {
+        "id": "hyalite:wallpaper",
+        "blendMode": "straight_alpha",
+        "fallback": "strata:rounded_rect",
+        "parameters": [
+          {
+            "name": "daylight",
+            "materialType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "shaders": {
+          "hlsl": "assets/strata/shaders/materials/hyalite-wallpaper.hlsl"
+        }
+      }
+    ]
+  },
+  "effects": {
+    "definitions": [
+      {
+        "id": "hyalite:glass",
+        "input": "BACKDROP",
+        "parameters": [
+          {
+            "name": "blur",
+            "effectType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "downsample",
+            "effectType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "tint",
+            "effectType": "COLOR",
+            "type": {
+              "kind": "color"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "refraction",
+            "effectType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "bezel",
+            "effectType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "dispersion",
+            "effectType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "saturation",
+            "effectType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "specular",
+            "effectType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "brightness",
+            "effectType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "shade",
+            "effectType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "passes": [
+          {
+            "kind": "BLUR",
+            "radiusParameter": "blur",
+            "downsampleParameter": "downsample"
+          },
+          {
+            "kind": "SHADER",
+            "shaders": {
+              "hlsl": "assets/strata/shaders/effects/hyalite.hlsl"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "launch": {
+    "kind": "generic",
+    "resourceRoot": "../../..",
+    "title": "Strata / Hyalite"
+  },
+  "application": {
+    "id": "strata.hyalite",
+    "module": "assets/strata/hyalite/hyalite_demo.strata",
+    "schemas": "assets/strata/hyalite/hyalite.schemas.json",
+    "root": "Hyalite"
+  },
+  "surface": {
+    "id": "strata.hyalite",
+    "width": 1400,
+    "height": 880,
+    "scale": 1,
+    "fonts": [
+      {
+        "id": "strata:fonts/default",
+        "system": [
+          "segoeui.ttf",
+          "Inter-Regular.ttf",
+          "NotoSans-Regular.ttf"
+        ],
+        "resource": "assets/strata/fonts/default.ttf"
+      },
+      {
+        "id": "strata:fonts/default-medium",
+        "system": [
+          "seguisb.ttf",
+          "Inter-SemiBold.ttf",
+          "NotoSans-SemiBold.ttf"
+        ],
+        "resource": "assets/strata/fonts/medium.ttf"
+      }
+    ]
+  }
+}

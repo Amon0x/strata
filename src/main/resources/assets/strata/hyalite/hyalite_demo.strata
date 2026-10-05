@@ -1,0 +1,348 @@
+// Hyalite showcase: every surface and control from hyalite.strata over a live wallpaper.
+// All state is local, so the application needs no host model.
+
+import "hyalite.strata";
+
+style DemoRoot {
+  kind: "OVERLAY"; width: { weight: 1 }; height: { weight: 1 };
+  background: #04050CFF; border: null;
+}
+style DemoFill extends GlassNone { width: { weight: 1 }; height: { weight: 1 }; }
+style DemoWallpaper { width: { weight: 1 }; height: { weight: 1 }; background: #0A0C1CFF; border: null; }
+style DemoWordmark {
+  font: "strata:fonts/default-medium"; pixelSize: 250; letterSpacing: -7; color: #FFFFFF2E;
+}
+style DemoPage extends GlassNone {
+  kind: "COLUMN"; width: { weight: 1 }; height: { weight: 1 };
+  padding: { horizontal: 26, vertical: 20 }; gap: 20;
+}
+style DemoBar extends GlassNone {
+  kind: "ROW"; width: { weight: 1 }; height: 56; gap: 14; alignItems: "CENTER";
+}
+style DemoColumns extends GlassNone {
+  kind: "ROW"; width: { weight: 1 }; height: { weight: 1 }; gap: 20;
+}
+style DemoColumn extends GlassNone {
+  kind: "COLUMN"; width: { weight: 1 }; height: { weight: 1 }; gap: 20;
+}
+style DemoRow extends GlassNone {
+  kind: "ROW"; width: { weight: 1 }; height: "content"; gap: 12; alignItems: "CENTER";
+}
+style DemoStack extends GlassNone {
+  kind: "COLUMN"; width: { weight: 1 }; height: "content"; gap: 4;
+}
+style DemoSpacer extends GlassNone { width: { weight: 1 }; height: 1; }
+style DemoArtwork {
+  tone: 0;
+  width: 76; height: 76; radius: 20; border: { width: 1, color: #FFFFFF40 };
+  kind: "ROW"; alignItems: "CENTER"; justifyContent: "CENTER";
+  background: {
+    kind: "linear", angle: 140,
+    stops: [ { color: #FF9F5AFF }, { color: #FF3D7FFF }, { color: #7B3DFFFF } ]
+  };
+}
+style DemoStage {
+  kind: "OVERLAY"; width: { weight: 1 }; height: { weight: 1 }; radius: 22; clip: true;
+  background: #0000002E; border: { width: 1, color: #FFFFFF12 };
+  alignItems: "CENTER"; justifyContent: "CENTER";
+}
+style DemoStageCopy extends GlassNone {
+  kind: "COLUMN"; width: { weight: 1 }; height: { weight: 1 };
+  padding: { horizontal: 20, vertical: 16 }; gap: 7;
+}
+style DemoStageLine {
+  font: "strata:fonts/default-medium"; pixelSize: 18; lineHeight: 25; letterSpacing: -0.15;
+  color: #FFFFFFE6;
+}
+style DemoValue extends GlassCaption { width: 44; alignment: "END"; }
+style DemoRowLabel extends GlassLabel { width: 92; }
+
+// A card cut from whichever surface the toolbar has selected. It follows its backdrop the way
+// GlassSurface does; it is spelled out here because the surface itself is chosen by state.
+component DemoCard(surface: number, grow: boolean = false, pad: number = 22, gap: number = 14) {
+  state onLight = false;
+  Panel(
+    style: style(
+      surface == 1 ? GlassClear : surface == 2 ? GlassFrosted : GlassRegular,
+      radius: 30,
+      tone: onLight ? 1 : 0
+    ),
+    animateChanges: { properties: ["tone"], policy: "standard" },
+    layout: {
+      kind: "COLUMN", width: { weight: 1 }, height: grow ? { weight: 1 } : "content",
+      padding: pad
+    },
+    behaviors: [{ id: "strata.backdrop", action: action("state.setFromEvent", name: "onLight") }]
+  ) {
+    Slot(
+      name: "content",
+      style: GlassNone,
+      layout: {
+        kind: "COLUMN", width: { weight: 1 }, height: grow ? { weight: 1 } : "content", gap: gap
+      }
+    )
+  }
+}
+
+// The toggle action is authored by the caller, beside the state it names.
+component DemoToggleTile(key: key, icon: string, label: string, on: boolean, toggle: action) {
+  Panel(
+    style: GlassNone,
+    layout: { kind: "COLUMN", width: { weight: 1 }, height: "content", gap: 8, alignItems: "CENTER" }
+  ) {
+    GlassIconButton(
+      key: key, icon: icon, label: label, size: 58, lit: on, look: "inset", activate: toggle
+    )
+    Text(text: label, style: GlassCaption, maxLines: 1)
+  }
+}
+
+component DemoSwitchRow(key: key, label: string, detail: string, on: boolean, change: action) {
+  Panel(style: DemoRow) {
+    Panel(style: DemoStack) {
+      Text(text: label, style: GlassLabel, maxLines: 1)
+      Text(text: detail, style: GlassCaption, maxLines: 1)
+    }
+    GlassSwitch(key: key, label: label, checked: on, change: change)
+  }
+}
+
+component DemoSliderRow(key: key, icon: string, value: number, change: action) {
+  Panel(style: DemoRow) {
+    GlassIcon(name: icon, size: 20, ink: #FFFFFFD9)
+    GlassSlider(key: key, value: value, change: change)
+  }
+}
+
+component DemoLabRow(
+  key: key,
+  label: string,
+  value: number,
+  change: action,
+  min: number,
+  max: number,
+  step: number,
+  precision: number = 0
+) {
+  Panel(style: DemoRow) {
+    Text(text: label, style: DemoRowLabel, maxLines: 1)
+    GlassSlider(key: key, value: value, change: change, min: min, max: max, step: step)
+    Text(text: formatNumber(value, precision), style: DemoValue, maxLines: 1)
+  }
+}
+
+overlay Hyalite {
+  state surface = 0;
+  state tab = 0;
+
+  state wifi = true;
+  state bluetooth = true;
+  state airdrop = false;
+  state focus = false;
+
+  state playing = true;
+  state liked = false;
+  state progress = 36;
+  state brightness = 100;
+  state volume = 64;
+
+  state showLens = true;
+  state showWordmark = true;
+  state daylight = false;
+
+  state labBlur = 2;
+  state labRefraction = 1.3;
+  state labBezel = 34;
+  state labDispersion = 1;
+  state labRadius = 62;
+  state labTint = 8;
+
+  root Panel(style: DemoRoot) {
+    Panel(style: DemoWallpaper, material: material("hyalite:wallpaper", daylight: 0))
+    // The daytime field fades in over the night one, so the backdrop's brightness sweeps through
+    // every glass element's thresholds and each one flips when its own patch of wallpaper does.
+    Panel(
+      style: style(DemoWallpaper, background: #EEF2FAFF, opacity: daylight ? 1 : 0),
+      material: material("hyalite:wallpaper", daylight: 1),
+      animateChanges: { properties: ["opacity"], policy: "standard" }
+    )
+    Panel(
+      style: style(DemoFill, background: #000000FF, opacity: (100 - brightness) * 0.0085),
+      animateChanges: { properties: ["opacity"], policy: "fast" }
+    )
+    if showWordmark {
+      // The wordmark sits on the bare wallpaper, so it sets its own tone from the scene.
+      Panel(
+        style: style(DemoFill, kind: "PANEL", tone: daylight ? 1 : 0),
+        animateChanges: { properties: ["tone"], policy: "standard" },
+        transition: GlassAppear
+      ) {
+        Text(
+          text: "strata", style: DemoWordmark, maxLines: 1,
+          layout: {
+            width: "content", height: "content",
+            placement: { x: { fraction: 0.5 }, anchorX: 0.5, y: { fraction: 0.71 }, anchorY: 0.5 }
+          }
+        )
+      }
+    }
+
+    Panel(style: DemoPage) {
+      // Toolbar.
+      Panel(style: DemoBar) {
+        GlassPill(padLeft: 16) {
+          GlassIcon(name: "sparkle", size: 20)
+          Text(text: "Hyalite", style: GlassHeadline, maxLines: 1)
+        }
+        Panel(style: DemoSpacer)
+        Panel(style: GlassNone, layout: { kind: "OVERLAY", width: 330, height: 48 }) {
+          GlassSurface(look: "control", radius: 999, kind: "OVERLAY") {
+            GlassSelection(index: surface, count: 3)
+            Panel(style: style(DemoFill, kind: "ROW", padding: 4)) {
+              GlassSegment(key: "surface.regular", label: "Regular", icon: "", activate: action("state.set", name: "surface", value: 0))
+              GlassSegment(key: "surface.clear", label: "Clear", icon: "", activate: action("state.set", name: "surface", value: 1))
+              GlassSegment(key: "surface.frosted", label: "Frosted", icon: "", activate: action("state.set", name: "surface", value: 2))
+            }
+          }
+        }
+        Panel(style: DemoSpacer)
+        GlassIconButton(key: "toolbar.search", icon: "search", label: "Search", size: 48, activate: action("state.set", name: "tab", value: 1))
+        GlassIconButton(key: "toolbar.bell", icon: "bell", label: "Notifications", size: 48, activate: action("state.toggle", name: "focus"))
+        GlassIconButton(key: "toolbar.person", icon: "person", label: "Account", size: 48, activate: action("state.set", name: "tab", value: 3))
+      }
+
+      Panel(style: DemoColumns) {
+        // Introduction and media.
+        Panel(style: DemoColumn) {
+          DemoCard(surface: surface, grow: true, pad: 28, gap: 12) {
+            Text(text: "STRATA DESIGN SYSTEM", style: GlassOverline, maxLines: 1)
+            Text(text: "Hyalite", style: GlassDisplay, maxLines: 1)
+            Text(
+              text: "One material for every surface. It bends what is behind it at the edge, lifts its colour through the body, and catches the light along its rim.",
+              style: GlassBody, wrapMode: "WORD", maxLines: 5,
+              layout: { width: { weight: 1 }, height: "content" }
+            )
+            Panel(style: style(DemoFill, height: { weight: 1 }))
+            Panel(style: DemoRow) {
+              GlassButton(key: "hero.start", label: "Get started", icon: "sparkle", look: "accent", activate: action("state.set", name: "surface", value: 1))
+              GlassButton(key: "hero.docs", label: "Documentation", look: "inset", activate: action("state.set", name: "surface", value: 0))
+            }
+          }
+          DemoCard(surface: surface) {
+            Panel(style: DemoRow) {
+              Panel(style: DemoArtwork) { GlassIcon(name: "note", size: 34) }
+              Panel(style: DemoStack) {
+                Text(text: "NOW PLAYING", style: GlassOverline, maxLines: 1)
+                Text(text: "Refraction", style: GlassTitle, maxLines: 1)
+                Text(text: "The Strata Ensemble", style: GlassCaption, maxLines: 1)
+              }
+              GlassIconButton(key: "media.like", icon: "heart", label: "Favourite", size: 40, lit: liked, look: "inset", activate: action("state.toggle", name: "liked"))
+            }
+            GlassSlider(key: "media.progress", value: progress, change: action("state.setFromEvent", name: "progress"))
+            Panel(style: style(DemoRow, justifyContent: "CENTER", gap: 22)) {
+              GlassIconButton(key: "media.back", icon: "backward", label: "Previous", size: 46, look: "inset", activate: action("state.set", name: "progress", value: 0))
+              GlassIconButton(key: "media.play", icon: playing ? "pause" : "play", label: "Play or pause", size: 58, lit: playing, look: "inset", activate: action("state.toggle", name: "playing"))
+              GlassIconButton(key: "media.next", icon: "forward", label: "Next", size: 46, look: "inset", activate: action("state.set", name: "progress", value: 100))
+            }
+          }
+        }
+
+        // Controls. The space beneath them is left open: it is where the wordmark shows through
+        // and where the magnifier starts.
+        Panel(style: DemoColumn) {
+          DemoCard(surface: surface, gap: 16) {
+            Text(text: "CONTROL CENTRE", style: GlassOverline, maxLines: 1)
+            Panel(style: style(DemoRow, alignItems: "START")) {
+              DemoToggleTile(key: "cc.wifi", icon: "wifi", label: "Wi-Fi", on: wifi, toggle: action("state.toggle", name: "wifi"))
+              DemoToggleTile(key: "cc.bluetooth", icon: "bluetooth", label: "Bluetooth", on: bluetooth, toggle: action("state.toggle", name: "bluetooth"))
+              DemoToggleTile(key: "cc.airdrop", icon: "airdrop", label: "AirDrop", on: airdrop, toggle: action("state.toggle", name: "airdrop"))
+              DemoToggleTile(key: "cc.focus", icon: "moon", label: "Focus", on: focus, toggle: action("state.toggle", name: "focus"))
+            }
+            DemoSliderRow(key: "cc.brightness", icon: "sun", value: brightness, change: action("state.setFromEvent", name: "brightness"))
+            DemoSliderRow(key: "cc.volume", icon: "speaker", value: volume, change: action("state.setFromEvent", name: "volume"))
+            DemoSwitchRow(key: "scene.lens", label: "Magnifier", detail: "A free lens you can drag anywhere", on: showLens, change: action("state.setFromEvent", name: "showLens"))
+            DemoSwitchRow(key: "scene.wordmark", label: "Wordmark", detail: "Large type behind the glass", on: showWordmark, change: action("state.setFromEvent", name: "showWordmark"))
+            DemoSwitchRow(key: "scene.daylight", label: "Daylight", detail: "A pale wallpaper; the glass follows", on: daylight, change: action("state.setFromEvent", name: "daylight"))
+          }
+        }
+
+        // Material lab.
+        Panel(style: DemoColumn) {
+          DemoCard(surface: surface, grow: true, gap: 12) {
+            Text(text: "MATERIAL LAB", style: GlassOverline, maxLines: 1)
+            Panel(style: DemoStage) {
+              Panel(style: DemoStageCopy) {
+                Text(text: "Glass is a lens before it is a colour.", style: DemoStageLine, maxLines: 1)
+                Text(text: "Its edge folds the scene inward,", style: DemoStageLine, maxLines: 1)
+                Text(text: "splits it by wavelength, and hands", style: DemoStageLine, maxLines: 1)
+                Text(text: "it back a few pixels from where it", style: DemoStageLine, maxLines: 1)
+                Text(text: "started. Drag the sliders below and", style: DemoStageLine, maxLines: 1)
+                Text(text: "watch these lines bend. 0123456789", style: DemoStageLine, maxLines: 1)
+                Text(text: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", style: DemoStageLine, maxLines: 1)
+                Text(text: "the quick brown fox jumps over", style: DemoStageLine, maxLines: 1)
+                Text(text: "the lazy dog, twice, and lands.", style: DemoStageLine, maxLines: 1)
+              }
+              Panel(
+                style: style(GlassNone, radius: labRadius),
+                effect: effect(
+                  "hyalite:glass",
+                  blur: labBlur,
+                  downsample: labBlur > 16 ? 4 : labBlur > 5 ? 2 : 1,
+                  tint: rgba(255, 255, 255, labTint * 2.55),
+                  refraction: labRefraction,
+                  bezel: labBezel,
+                  dispersion: labDispersion,
+                  saturation: 1.2,
+                  specular: 1.1,
+                  brightness: 1.03,
+                  shade: 0.0
+                ),
+                layout: { width: 270, height: 124 }
+              )
+            }
+            DemoLabRow(key: "lab.blur", label: "Blur", value: labBlur, change: action("state.setFromEvent", name: "labBlur"), min: 0, max: 40, step: 0.5, precision: 1)
+            DemoLabRow(key: "lab.refraction", label: "Refraction", value: labRefraction, change: action("state.setFromEvent", name: "labRefraction"), min: 0, max: 2.5, step: 0.05, precision: 2)
+            DemoLabRow(key: "lab.bezel", label: "Bezel", value: labBezel, change: action("state.setFromEvent", name: "labBezel"), min: 2, max: 62, step: 1)
+            DemoLabRow(key: "lab.dispersion", label: "Dispersion", value: labDispersion, change: action("state.setFromEvent", name: "labDispersion"), min: 0, max: 4, step: 0.1, precision: 1)
+            DemoLabRow(key: "lab.radius", label: "Radius", value: labRadius, change: action("state.setFromEvent", name: "labRadius"), min: 0, max: 62, step: 1)
+            DemoLabRow(key: "lab.tint", label: "Tint", value: labTint, change: action("state.setFromEvent", name: "labTint"), min: 0, max: 100, step: 1)
+          }
+        }
+      }
+
+      // Tab bar.
+      Panel(style: style(DemoBar, height: 66, justifyContent: "CENTER")) {
+        Panel(style: GlassNone, layout: { kind: "OVERLAY", width: 400, height: 66 }) {
+          GlassSurface(look: "control", radius: 999, kind: "OVERLAY") {
+            GlassSelection(index: tab, count: 4, inset: 5)
+            Panel(style: style(DemoFill, kind: "ROW", padding: 5)) {
+              GlassSegment(key: "tab.home", label: "Home", icon: "home", activate: action("state.set", name: "tab", value: 0))
+              GlassSegment(key: "tab.browse", label: "Browse", icon: "grid", activate: action("state.set", name: "tab", value: 1))
+              GlassSegment(key: "tab.library", label: "Library", icon: "library", activate: action("state.set", name: "tab", value: 2))
+              GlassSegment(key: "tab.settings", label: "Settings", icon: "gear", activate: action("state.set", name: "tab", value: 3))
+            }
+          }
+        }
+        GlassIconButton(key: "tab.search", icon: "search", label: "Search", size: 66, activate: action("state.set", name: "tab", value: 1))
+      }
+    }
+
+    // The magnifier floats above everything and can be dragged anywhere in the window. It is a
+    // direct child of the root so that nothing window-sized sits above the page and takes its input.
+    if showLens {
+      Panel(
+        key: "scene.lens.glass",
+        style: GlassLens,
+        transition: GlassAppear,
+        layout: {
+          width: 168, height: 168,
+          placement: { x: { fraction: 0.5 }, anchorX: 0.5, y: { fraction: 0.71 }, anchorY: 0.5 }
+        },
+        behaviors: [
+          { id: "strata.hoverable" },
+          { id: "strata.movable", options: { bounds: "parent" } }
+        ]
+      )
+    }
+  }
+}
