@@ -1657,6 +1657,36 @@ void test_logical_glyph_json_default_absence() {
 
 } // namespace
 
+// Every distinct text is cached, so text that keeps changing (a counter, a clock, typing) must not
+// grow the cache for the life of the app: layouts no frame asks for are dropped once the cache is
+// past its working size, while the ones still in use stay cached.
+void test_layout_cache_drops_unused_text(const std::filesystem::path& resources) {
+    using namespace strata;
+    const font::OpenTypeFont regular = font::OpenTypeFont::parse(resource::load_binary_resource(
+        resources, resource::ResourceId::parse("assets/strata/fonts/default.ttf")));
+    ui::TextEngine engine(ui::TextEngine::FontRegistry{
+        {"strata:fonts/default", regular},
+        {"strata:fonts/default-medium", regular},
+    });
+    ui::RetainedTree tree;
+    const ui::RetainedNode& node =
+        *retain(tree, text_node("Text", object({{"pixelSize", runtime::Value(12.0)}})));
+    const std::size_t frames = ui::TextEngine::retained_layout_limit + 1000U;
+    for (std::size_t frame = 0U; frame < frames; ++frame) {
+        engine.begin_frame();
+        static_cast<void>(engine.layout(node, "steady"));
+        static_cast<void>(engine.layout(node, "tick " + std::to_string(frame)));
+    }
+    check(engine.cached_layout_count() <=
+              ui::TextEngine::retained_layout_limit + ui::TextEngine::unused_layout_frames + 64U,
+          "the text layout cache kept every text it ever laid out: " +
+              std::to_string(engine.cached_layout_count()));
+    const std::uint64_t hits_before = engine.operation_counters().cache_hits;
+    static_cast<void>(engine.layout(node, "steady"));
+    check(engine.operation_counters().cache_hits == hits_before + 1U,
+          "trimming the text layout cache dropped a layout every frame still uses");
+}
+
 int strata_test_text_font_residual(const int argument_count, const char* const* arguments) {
     try {
         if (argument_count != 2) throw std::runtime_error("expected resource root");
@@ -1664,6 +1694,7 @@ int strata_test_text_font_residual(const int argument_count, const char* const* 
         test_logical_glyph_json_default_absence();
         test_optional_tables_and_generic_positioning(resources);
         test_layout_runs_fallback_and_soft_wrap(resources);
+        test_layout_cache_drops_unused_text(resources);
         std::cout << "text/font residual tests passed\n";
         return 0;
     } catch (const std::exception& error) {

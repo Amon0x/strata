@@ -161,8 +161,17 @@ class TextEngine final {
                                     const TextLayoutOptions& options) const;
     /** Invalidates shape/layout entries when the logical-to-framebuffer scale changes. */
     void adopt_scale_context(std::uint64_t scale_context) const;
+    /**
+     * Starts a frame. Every text ever laid out is cached, so the cache is trimmed here, between
+     * frames, of layouts no frame has asked for in a while once it grows past its working size;
+     * laid-out values already handed out own their storage and are unaffected.
+     */
     void begin_frame() const noexcept;
     [[nodiscard]] TextOperationCounters operation_counters() const noexcept;
+    [[nodiscard]] std::size_t cached_layout_count() const noexcept;
+    /** Layouts kept regardless of use, and how long an unused one survives beyond them. */
+    static constexpr std::size_t retained_layout_limit = 2048U;
+    static constexpr std::uint64_t unused_layout_frames = 120U;
     [[nodiscard]] std::vector<runtime::RuntimeDiagnostic> take_diagnostics() const;
     void clear_diagnostics() const noexcept;
 
@@ -214,7 +223,12 @@ class TextEngine final {
     void record_missing_font(std::string_view font_id) const;
 
     FontRegistry fonts_;
-    mutable std::map<CacheKey, TextLayout> cache_;
+    struct CachedLayout final {
+        TextLayout layout;
+        std::uint64_t last_used_frame = 0U;
+    };
+    mutable std::map<CacheKey, CachedLayout> cache_;
+    mutable std::uint64_t frame_ = 0U;
     mutable std::map<std::uint64_t, CacheKey> measured_requests_;
     mutable std::set<std::string, std::less<>> missing_fonts_;
     mutable std::set<std::string, std::less<>> missing_glyph_groups_;

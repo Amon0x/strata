@@ -511,7 +511,8 @@ const TextLayout& TextEngine::cached_layout(CacheKey key, const bool count_reque
         const auto restore_started = std::chrono::steady_clock::now();
         if (count_request)
             ++operation_counters_.cache_hits;
-        const TextLayout& restored = found->second;
+        found->second.last_used_frame = frame_;
+        const TextLayout& restored = found->second.layout;
         operation_counters_.cache_restore_nanos +=
             static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                            std::chrono::steady_clock::now() - restore_started)
@@ -532,7 +533,8 @@ const TextLayout& TextEngine::cached_layout(CacheKey key, const bool count_reque
         ++operation_counters_.cache_misses;
     const auto store_started = std::chrono::steady_clock::now();
     const TextLayout& stored =
-        cache_.emplace(std::move(key), std::move(layout_value)).first->second;
+        cache_.emplace(std::move(key), CachedLayout{std::move(layout_value), frame_})
+            .first->second.layout;
     operation_counters_.cache_store_nanos +=
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                        std::chrono::steady_clock::now() - store_started)
@@ -1231,6 +1233,17 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
 
 void TextEngine::begin_frame() const noexcept {
     operation_counters_ = {};
+    ++frame_;
+    // Checked periodically so a working set larger than the limit is not rescanned every frame.
+    if (cache_.size() > retained_layout_limit && frame_ % 64U == 0U) {
+        std::erase_if(cache_, [this](const auto& entry) {
+            return frame_ - entry.second.last_used_frame > unused_layout_frames;
+        });
+    }
+}
+
+std::size_t TextEngine::cached_layout_count() const noexcept {
+    return cache_.size();
 }
 
 TextOperationCounters TextEngine::operation_counters() const noexcept {
