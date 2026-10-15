@@ -110,7 +110,9 @@ namespace {
 
 void require_resource_id(const std::string_view value, const std::string_view label) {
     const std::filesystem::path path{std::string(value)};
-    if (value.empty() || path.is_absolute())
+    // On Windows "/x" (root directory, no drive) and "D:x" (drive-relative) are not absolute, yet
+    // either one joined to the resource root leaves it.
+    if (value.empty() || path.has_root_name() || path.has_root_directory())
         throw std::invalid_argument(std::string(label) + " must be a relative resource id");
     for (const std::filesystem::path& part : path) {
         if (part == "..")

@@ -135,7 +135,9 @@ struct ApplicationHost::Impl final {
 
     [[nodiscard]] std::filesystem::path resource_path(const std::string_view id) const {
         const std::filesystem::path relative{std::string(id)};
-        if (id.empty() || relative.is_absolute()) {
+        // On Windows "/x" (root directory, no drive) and "D:x" (drive-relative) are not absolute, yet
+    // either one joined to the resource root leaves it.
+        if (id.empty() || relative.has_root_name() || relative.has_root_directory()) {
             throw std::invalid_argument("headless resource id must be relative");
         }
         for (const std::filesystem::path& part : relative) {

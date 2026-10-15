@@ -122,7 +122,9 @@ using data::JsonValue;
 }
 
 void require_relative_resource(const std::filesystem::path& path, const std::string_view label) {
-    if (path.empty() || path.is_absolute()) {
+    // On Windows "/x" (root directory, no drive) and "D:x" (drive-relative) are not absolute, yet
+    // either one joined to the resource root leaves it.
+    if (path.empty() || path.has_root_name() || path.has_root_directory()) {
         throw std::invalid_argument(std::string(label) + " must be a relative resource path");
     }
     for (const std::filesystem::path& part : path) {

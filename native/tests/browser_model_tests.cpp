@@ -235,11 +235,37 @@ void system_fonts_resolve_bare_file_names_only() {
     std::filesystem::remove_all(directory);
 }
 
+// A resource path must stay under the resource root. On Windows "/x" and "C:x" are not absolute
+// paths, but either one joined to the root leaves it.
+void scenario_paths_stay_under_the_resource_root() {
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / "strata-rooted-resource-scenarios";
+    std::filesystem::create_directories(directory);
+    const auto rejected = [&directory](const std::string& module) {
+        const std::filesystem::path path = directory / "scenario.json";
+        std::ofstream(path) << R"({"version":1,"application":{"id":"t","module":")" << module
+                            << R"(","root":"R"},"surface":{"id":"t","width":10,"height":10,)"
+                            << R"("scale":1}})";
+        try {
+            static_cast<void>(strata::headless::load_scenario(path));
+        } catch (const std::exception&) {
+            return true;
+        }
+        return false;
+    };
+    check(!rejected("ui/app.strata"), "a relative module path was rejected");
+    check(rejected("/Users/someone/app.strata"), "a root-relative module path was accepted");
+    check(rejected("C:app.strata"), "a drive-relative module path was accepted");
+    check(rejected("../app.strata"), "a parent-relative module path was accepted");
+    std::filesystem::remove_all(directory);
+}
+
 } // namespace
 
 int strata_test_browser_model() {
     try {
         system_fonts_resolve_bare_file_names_only();
+        scenario_paths_stay_under_the_resource_root();
         virtual_menu_rows_require_exact_geometry();
         indexed_virtual_controls_keep_index_geometry();
         click_steps_accept_secondary_buttons();

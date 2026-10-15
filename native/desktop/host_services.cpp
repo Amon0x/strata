@@ -110,7 +110,9 @@ struct HostServices::Impl final {
     }
 
     [[nodiscard]] std::filesystem::path resource_path(const std::filesystem::path& relative) const {
-        if (relative.empty() || relative.is_absolute()) {
+        // On Windows "/x" (root directory, no drive) and "D:x" (drive-relative) are not absolute, yet
+    // either one joined to the resource root leaves it.
+        if (relative.empty() || relative.has_root_name() || relative.has_root_directory()) {
             throw std::invalid_argument("desktop resource id must be relative");
         }
         for (const std::filesystem::path& component : relative) {
