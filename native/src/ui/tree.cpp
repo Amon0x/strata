@@ -390,6 +390,9 @@ std::uint64_t RetainedNode::identity() const noexcept {
 const DescriptionNode& RetainedNode::description() const noexcept {
     return *description_;
 }
+const std::shared_ptr<const DescriptionNode>& RetainedNode::shared_description() const noexcept {
+    return description_;
+}
 RetainedNode* RetainedNode::parent() const noexcept {
     return parent_;
 }

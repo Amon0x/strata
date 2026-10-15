@@ -29,6 +29,7 @@ void MotionRuntime::bind(const std::shared_ptr<const runtime::RuntimeUnit>& unit
     implementation_->unit = unit;
     implementation_->catalog.bind(unit);
     implementation_->nodes.clear();
+    implementation_->configs.clear();
     implementation_->active_nodes.clear();
     implementation_->disclosure_players.clear();
     implementation_->disclosure_samples.clear();
@@ -38,6 +39,7 @@ void MotionRuntime::bind(const std::shared_ptr<const runtime::RuntimeUnit>& unit
 void MotionRuntime::set_supplemental(std::map<std::string, CompiledMotion, std::less<>> motions) {
     implementation_->catalog.set_supplemental(std::move(motions));
     implementation_->nodes.clear();
+    implementation_->configs.clear();
     implementation_->active_nodes.clear();
     implementation_->disclosure_players.clear();
     implementation_->disclosure_samples.clear();
@@ -48,8 +50,7 @@ bool MotionRuntime::should_retain_for_exit(const RetainedNode& node) {
     // Only the removed node's own exit keeps it: a descendant's exit belongs to its own removal.
     if (!layout_participates(node))
         return false;
-    const motion_detail::NodeMotionConfig config =
-        motion_detail::node_motion_config(node, implementation_->catalog);
+    const motion_detail::NodeMotionConfig& config = implementation_->config(node);
     return std::ranges::any_of(config.triggers, [](const auto& binding) {
         return binding.trigger == MotionTrigger::exit && binding.animation != nullptr &&
                binding.cancel_on_detach &&
@@ -61,8 +62,7 @@ bool MotionRuntime::exit_finished(const RetainedNode& node) {
     bool saw_exit = false;
     bool finished = true;
     const auto visit = [&](auto&& self, const RetainedNode& candidate) -> void {
-        const motion_detail::NodeMotionConfig config =
-            motion_detail::node_motion_config(candidate, implementation_->catalog);
+        const motion_detail::NodeMotionConfig& config = implementation_->config(candidate);
         const auto state = implementation_->nodes.find(candidate.identity());
         for (const motion_detail::TriggerBinding& binding : config.triggers) {
             if (binding.trigger != MotionTrigger::exit || binding.animation == nullptr ||
@@ -109,6 +109,7 @@ void MotionRuntime::clear() noexcept {
     implementation_->catalog.clear();
     implementation_->unit.reset();
     implementation_->nodes.clear();
+    implementation_->configs.clear();
     implementation_->active_nodes.clear();
     implementation_->disclosure_players.clear();
     implementation_->disclosure_samples.clear();

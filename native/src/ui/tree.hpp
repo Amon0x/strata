@@ -319,6 +319,8 @@ class RetainedNode final {
 
     [[nodiscard]] std::uint64_t identity() const noexcept;
     [[nodiscard]] const DescriptionNode& description() const noexcept;
+    /** The description itself, for caches that must keep it alive while keyed on its identity. */
+    [[nodiscard]] const std::shared_ptr<const DescriptionNode>& shared_description() const noexcept;
     [[nodiscard]] RetainedNode* parent() const noexcept;
     [[nodiscard]] const std::vector<std::unique_ptr<RetainedNode>>& children() const noexcept;
     [[nodiscard]] std::string_view structural_path() const noexcept;

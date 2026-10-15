@@ -6,11 +6,14 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "ui/motion.hpp"
 #include "ui/motion/catalog.hpp"
+#include "ui/motion/config.hpp"
 #include "ui/motion/players.hpp"
+#include "ui/tree.hpp"
 
 namespace strata::ui {
 
@@ -38,6 +41,27 @@ struct MotionRuntime::Impl final {
     std::map<std::uint64_t, motion_detail::TargetPlayer> disclosure_players;
     std::map<std::uint64_t, NormalizedMotionSample> disclosure_samples;
     std::optional<bool> reduced_motion;
+
+    /**
+     * A node's motion config is a pure function of its immutable description and this catalog, but
+     * rebuilding it allocates its bindings, so it is kept until the node's description changes.
+     * The description is held so a new one can never reuse a cached one's address; every catalog
+     * change clears this along with the node state.
+     */
+    struct CachedConfig final {
+        std::shared_ptr<const DescriptionNode> description;
+        motion_detail::NodeMotionConfig config;
+    };
+    std::unordered_map<std::uint64_t, CachedConfig> configs;
+
+    [[nodiscard]] const motion_detail::NodeMotionConfig& config(const RetainedNode& node) {
+        CachedConfig& cached = configs[node.identity()];
+        if (cached.description.get() != &node.description()) {
+            cached.config = motion_detail::node_motion_config(node, catalog);
+            cached.description = node.shared_description();
+        }
+        return cached.config;
+    }
 };
 
 } // namespace strata::ui

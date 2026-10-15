@@ -156,8 +156,7 @@ MotionFrameCounters MotionRuntime::evaluate(
         }
         const auto existing = implementation_->nodes.find(node->identity());
         const DirtyGenerationSnapshot current = node->dirty_generations();
-        const motion_detail::NodeMotionConfig config =
-            motion_detail::node_motion_config(*node, implementation_->catalog);
+        const motion_detail::NodeMotionConfig& config = implementation_->config(*node);
         if ((has_motion(config) || disclosure_motion(*node).has_value() ||
              existing != implementation_->nodes.end()) &&
             (existing == implementation_->nodes.end() ||
@@ -178,8 +177,7 @@ MotionFrameCounters MotionRuntime::evaluate(
                                      const auto& self,
                                      RetainedNode& candidate
                                  ) -> void {
-            const motion_detail::NodeMotionConfig config =
-                motion_detail::node_motion_config(candidate, implementation_->catalog);
+            const motion_detail::NodeMotionConfig& config = implementation_->config(candidate);
             if (std::ranges::any_of(config.triggers, [](const auto& binding) {
                     return binding.trigger == MotionTrigger::exit && binding.animation != nullptr &&
                            binding.cancel_on_detach;
@@ -212,8 +210,7 @@ MotionFrameCounters MotionRuntime::evaluate(
                 node.description(), reduced_motion
             );
             Impl::NodeState& state = implementation_->nodes[node.identity()];
-            const motion_detail::NodeMotionConfig config =
-                motion_detail::node_motion_config(node, implementation_->catalog);
+            const motion_detail::NodeMotionConfig& config = implementation_->config(node);
             const auto move_binding = std::ranges::find(
                 config.triggers,
                 MotionTrigger::move,
@@ -508,6 +505,9 @@ MotionFrameCounters MotionRuntime::evaluate(
     });
     result.running_players = next_active.size();
     implementation_->active_nodes = std::move(next_active);
+    std::erase_if(implementation_->configs, [&tree](const auto& entry) {
+        return tree.find_identity(entry.first) == nullptr;
+    });
     std::erase_if(implementation_->nodes, [&tree](const auto& entry) {
         return tree.find_identity(entry.first) == nullptr;
     });
