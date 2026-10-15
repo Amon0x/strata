@@ -1562,6 +1562,125 @@ overlay Main { root Panel(style: Crad) })");
               "STRATA.DSL.PARSE_DUPLICATE_MAP_KEY"),
           "a key repeated in a map literal compiled");
 
+    const auto typo = diagnostics(R"(overlay Main {
+  state count = 0;
+  root Text(text: format("Count {0}", cuont))
+})");
+    check(message(typo, "STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER").ends_with("Did you mean 'count'?"),
+          "a misspelled state name compiled: " +
+              message(typo, "STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER"));
+    check(!has(diagnostics(R"(overlay Main { root Text(text: format("{0}", hostRoot.title)) })"),
+               "STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER"),
+          "an undeclared host root was rejected although no schema declares the host roots");
+    check(!has(diagnostics(R"(overlay Main { root Text(text: env.compact ? "a" : "b") })"),
+               "STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER"),
+          "the surface-supplied env root was reported as unknown");
+    {
+        compiler::SchemaRegistry declared = compiler::SchemaRegistry::builtins();
+        declared.apply_scenario_declarations(data::parse_json(R"({
+          "widgets":{"registry":"test","required":[],"definitions":[]},
+          "actions":{"registry":"test","required":[],"definitions":[]},
+          "host":[{"path":"app","type":{"kind":"object","fields":[],"allowUnknownFields":true}}]
+        })"));
+        const auto declared_diagnostics = [&declared](const std::string_view source) {
+            const compiler::ParseResult parsed =
+                compiler::parse_source("declared.strata", std::string(source));
+            return compiler::validate_semantics(parsed.file, declared).diagnostics;
+        };
+        check(declared_diagnostics(R"(overlay Main { root Text(text: format("{0}", app.title)) })")
+                  .empty(),
+              "a declared host root was reported");
+        check(has(declared_diagnostics(
+                      R"(overlay Main { root Text(text: format("{0}", other.title)) })"),
+                  "STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER"),
+              "an undeclared root compiled although the schemas declare the host roots");
+        check(message(declared_diagnostics(R"(overlay Main {
+  root Button(label: "x", onClick: action("async.query", binding: "b", payload: event.value))
+})"),
+                      "STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER")
+                  .contains("fromEvent: true"),
+              "reading 'event' did not point at the action's event parameters");
+    }
+
+    const auto record = diagnostics(R"(overlay Main {
+  state rec: Record = { title: "Ready", saved: false };
+  root Text(text: rec.titel)
+})");
+    check(message(record, "STRATA.DSL.SEMANTIC_UNKNOWN_FIELD").ends_with("Did you mean 'title'?"),
+          "a misspelled Record field compiled: " +
+              message(record, "STRATA.DSL.SEMANTIC_UNKNOWN_FIELD"));
+    check(diagnostics(R"(overlay Main {
+  state rec: Record = { title: "Ready", saved: false };
+  root Text(text: rec.saved ? rec.title : "Unsaved")
+})").empty(),
+          "reading a Record's declared fields produced diagnostics");
+    check(has(diagnostics(R"(overlay Main {
+  state point = { x: 1, y: 2 };
+  root Text(text: format("{0}", point.z))
+})"),
+              "STRATA.DSL.SEMANTIC_UNKNOWN_FIELD"),
+          "a field missing from an object literal state compiled");
+    {
+        compiler::SchemaRegistry closed = compiler::SchemaRegistry::builtins();
+        closed.apply_scenario_declarations(data::parse_json(R"({
+          "widgets":{"registry":"test","required":[],"definitions":[]},
+          "actions":{"registry":"test","required":[],"definitions":[]},
+          "host":[{"path":"app","type":{"kind":"object","label":"app view",
+            "allowUnknownFields":false,"fields":[{"name":"title","type":{"kind":"string"}}]}}]
+        })"));
+        const compiler::ParseResult parsed = compiler::parse_source(
+            "closed.strata", "overlay Main { root Text(text: app.titel) }");
+        const auto found = compiler::validate_semantics(parsed.file, closed).diagnostics;
+        check(message(found, "STRATA.DSL.SEMANTIC_UNKNOWN_FIELD").ends_with("Did you mean 'title'?"),
+              "a misspelled field of a closed host object compiled");
+    }
+
+    const auto state_actions = [&diagnostics](const std::string_view action) {
+        return diagnostics(std::string(R"(overlay Main {
+  state count = 0;
+  state open = false;
+  state name = "";
+  state tags: List<string> = [];
+  state rec: Record = { title: "Ready", saved: false };
+  root Button(label: "Go", onClick: )") + std::string(action) + ")\n}");
+    };
+    check(message(state_actions(R"(action("state.adjust", name: "cont", amount: 1))"),
+                  "STRATA.DSL.SEMANTIC_UNKNOWN_STATE")
+              .ends_with("Did you mean 'count'?"),
+          "a state action targeting an undeclared state compiled");
+    check(has(state_actions(R"(action("state.toggle", name: "count"))"),
+              "STRATA.DSL.SEMANTIC_STATE_ACTION_TYPE"),
+          "toggling a number state compiled");
+    check(has(state_actions(R"(action("state.adjust", name: "name", amount: 1))"),
+              "STRATA.DSL.SEMANTIC_STATE_ACTION_TYPE"),
+          "adjusting a string state compiled");
+    check(has(state_actions(R"(action("state.set", name: "count", value: "ten"))"),
+              "STRATA.DSL.SEMANTIC_TYPE_MISMATCH"),
+          "setting a number state to a string compiled");
+    check(has(state_actions(R"(action("state.listAppend", name: "tags", value: 5))"),
+              "STRATA.DSL.SEMANTIC_TYPE_MISMATCH"),
+          "appending a number to a List<string> compiled");
+    check(message(state_actions(R"(action("state.recordSet", name: "rec", field: "titel", value: "x"))"),
+                  "STRATA.DSL.SEMANTIC_UNKNOWN_FIELD")
+              .ends_with("Did you mean 'title'?"),
+          "setting an undeclared Record field compiled");
+    for (const std::string_view valid : {
+             R"(action("state.adjust", name: "count", amount: 1))",
+             R"(action("state.toggle", name: "open"))",
+             R"(action("state.set", name: "name", value: "Ada"))",
+             R"(action("state.listAppend", name: "tags", value: "new"))",
+             R"(action("state.recordSet", name: "rec", field: "saved", value: true))",
+         }) {
+        const auto found = state_actions(valid);
+        check(found.empty(), "a valid state action produced diagnostics: " + std::string(valid) +
+                                 " -> " + (found.empty() ? std::string() : found.front().message));
+    }
+    // A component's state action may target the state of the screen that hosts it.
+    check(!has(diagnostics(R"(component Bump() { Button(label: "+", onClick: action("state.adjust", name: "count", amount: 1)) }
+overlay Main { state count = 0; root Panel { Bump() } })"),
+               "STRATA.DSL.SEMANTIC_UNKNOWN_STATE"),
+          "a component action targeting its host screen's state was rejected");
+
     const auto theme = diagnostics(R"(style Card { background: theme.surfaceRasied; }
 overlay Main { root Panel(style: Card) })");
     check(message(theme, "STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN")

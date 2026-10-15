@@ -207,6 +207,11 @@ public:
 
     void apply_scenario_declarations(const data::JsonValue& schemas);
     [[nodiscard]] const std::unordered_map<std::string, SemanticTypePtr>& host_types() const noexcept;
+    /**
+     * Whether applied schemas declared the host roots (a `host` section, even an empty one). Only
+     * then is a name that is neither local nor a declared root certainly a mistake.
+     */
+    [[nodiscard]] bool host_roots_declared() const noexcept;
 
 private:
     [[nodiscard]] static SchemaRegistry from_catalog(const BuiltinCatalog& catalog);
@@ -224,6 +229,7 @@ private:
     std::unordered_map<std::string, EffectSchema> effects_;
     std::unordered_map<std::string, SemanticTypePtr> component_parameter_types_;
     std::unordered_map<std::string, SemanticTypePtr> host_types_;
+    bool host_roots_declared_ = false;
     std::vector<SchemaParameter> framework_widget_parameters_;
     std::vector<SchemaParameter> layout_properties_;
     std::vector<SchemaParameter> style_properties_;

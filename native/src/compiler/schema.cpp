@@ -1342,10 +1342,16 @@ void SchemaRegistry::apply_scenario_declarations(const data::JsonValue& schemas)
             }
         }
     }
+    if (schemas.find("host") != nullptr)
+        host_roots_declared_ = true;
     for (const data::JsonValue& host : array_field(schemas, "host")) {
         host_types_.insert_or_assign(string_field(host, "path"),
                                      parse_type(required(host, "type")));
     }
+}
+
+bool SchemaRegistry::host_roots_declared() const noexcept {
+    return host_roots_declared_;
 }
 
 const std::unordered_map<std::string, SemanticTypePtr>&

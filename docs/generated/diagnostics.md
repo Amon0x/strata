@@ -199,6 +199,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_REPEATER_IDENTITY_EXTRACTOR` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_REPEATER_ITEM_ROOT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_STATEMENT_NOT_ALLOWED` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_STATE_ACTION_TYPE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_STYLE_CYCLE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_TOO_MANY_ARGUMENTS` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_TYPE_MISMATCH` | `native/src/compiler/semantic.cpp` |
@@ -213,11 +214,13 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_UNKNOWN_EFFECT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_FIELD` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_HELPER` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_LAYOUT_PROPERTY` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_MATERIAL` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_MATERIAL_PARAMETER` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_PROPERTY` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_SLOT` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_UNKNOWN_STATE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_STYLE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_STYLE_BASE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN` | `native/src/compiler/semantic.cpp` |

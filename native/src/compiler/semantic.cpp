@@ -1555,6 +1555,20 @@ class Validator final {
                                       scope);
                 }
                 persisted_owner_ = previous_persisted_owner;
+                // A Record's fields are fixed by its initializer, so reads are checked against
+                // them; their values change at runtime, so literal field types widen.
+                if (declared->kind == SemanticTypeKind::map && declared->label == "record" &&
+                    initializer->kind == SemanticTypeKind::map && !initializer->fields.empty()) {
+                    auto record = std::make_shared<SemanticType>(*initializer);
+                    record->label = "record '" + state->name + "'";
+                    for (ObjectField& field : record->fields) {
+                        if (field.type != nullptr &&
+                            field.type->kind == SemanticTypeKind::string_literal) {
+                            field.type = simple(SemanticTypeKind::string);
+                        }
+                    }
+                    declared = std::move(record);
+                }
                 scope.insert_or_assign(state->name, std::move(declared));
                 retained_states.insert(state->name);
             } else if (const auto* derived = std::get_if<DerivedStatement>(&statement->node)) {
@@ -2310,6 +2324,165 @@ class Validator final {
                            call.target.span, component_path,
                            parameter.name + ": " + parameter.type->diagnostic_name());
                 }
+            }
+            if (id->starts_with("state."))
+                validate_state_action(*id, call, scope, component_path);
+        }
+    }
+
+    [[nodiscard]] static const Expression* named_argument(const CallExpression& call,
+                                                          const std::string_view name) {
+        for (const Argument& argument : call.arguments) {
+            if (argument.name == name && argument.value != nullptr)
+                return argument.value.get();
+        }
+        return nullptr;
+    }
+
+    /** Every state declared anywhere in the module, since a state action can only target one. */
+    [[nodiscard]] const std::vector<std::string>& declared_state_names() {
+        if (declared_state_names_.has_value())
+            return *declared_state_names_;
+        std::vector<std::string> names;
+        const auto visit = [&names](const auto& self, const Block& block) -> void {
+            for (const StatementPtr& statement : block.statements) {
+                std::visit(
+                    [&](const auto& node) {
+                        using Node = std::decay_t<decltype(node)>;
+                        if constexpr (std::is_same_v<Node, StateStatement>) {
+                            names.push_back(node.name);
+                        } else if constexpr (std::is_same_v<Node, WidgetStatement> ||
+                                             std::is_same_v<Node, RootStatement>) {
+                            if (node.call.body != nullptr)
+                                self(self, *node.call.body);
+                        } else if constexpr (std::is_same_v<Node, IfStatement>) {
+                            self(self, *node.then_block);
+                            if (node.else_block != nullptr)
+                                self(self, *node.else_block);
+                        } else if constexpr (std::is_same_v<Node, WhenStatement>) {
+                            for (const WhenBranch& branch : node.branches)
+                                self(self, *branch.block);
+                        } else if constexpr (std::is_same_v<Node, ForStatement>) {
+                            self(self, *node.block);
+                        }
+                    },
+                    statement->node);
+            }
+        };
+        for (const Declaration& declaration : file_.declarations) {
+            std::visit(
+                [&](const auto& node) {
+                    using Node = std::decay_t<decltype(node)>;
+                    if constexpr (std::is_same_v<Node, ScreenDeclaration> ||
+                                  std::is_same_v<Node, OverlayDeclaration> ||
+                                  std::is_same_v<Node, ComponentDeclaration>) {
+                        if (node.body != nullptr)
+                            visit(visit, *node.body);
+                    }
+                },
+                declaration.node);
+        }
+        std::ranges::sort(names);
+        names.erase(std::ranges::unique(names).begin(), names.end());
+        declared_state_names_ = std::move(names);
+        return *declared_state_names_;
+    }
+
+    /** The type a state can hold, rather than the literal it starts from. */
+    [[nodiscard]] static SemanticTypePtr widened(const SemanticTypePtr& type) {
+        if (type == nullptr)
+            return type;
+        if (type->kind == SemanticTypeKind::string_literal)
+            return simple(SemanticTypeKind::string);
+        if ((type->kind == SemanticTypeKind::list || type->kind == SemanticTypeKind::map) &&
+            (type->element != nullptr || !type->fields.empty())) {
+            auto copy = std::make_shared<SemanticType>(*type);
+            copy->element = widened(copy->element);
+            for (ObjectField& field : copy->fields)
+                field.type = widened(field.type);
+            return copy;
+        }
+        return type;
+    }
+
+    /**
+     * A state action names its target with a string, which the compiler can check: the name must
+     * be a declared state, and where that state is in scope its value must fit. Actions in a
+     * component may target a state of whatever screen hosts it, so only the name is checked there
+     * when the state is not local.
+     */
+    void validate_state_action(const std::string& id, const CallExpression& call,
+                               const Scope& scope, const std::string& component_path) {
+        const Expression* name_expression = named_argument(call, "name");
+        const std::string* name =
+            name_expression != nullptr ? string_literal_value(*name_expression) : nullptr;
+        if (name == nullptr)
+            return;
+        const std::vector<std::string>& states = declared_state_names();
+        if (!std::ranges::binary_search(states, *name)) {
+            report("STRATA.DSL.SEMANTIC_UNKNOWN_STATE",
+                   "Action '" + id + "' targets state '" + *name + "', which no state declares." +
+                       did_you_mean(*name, states),
+                   name_expression->span, component_path + ".name", expected_names(states));
+            return;
+        }
+        const auto found = scope.find(*name);
+        if (found == scope.end() || found->second == nullptr)
+            return;
+        SemanticTypePtr state = found->second;
+        if (state->kind == SemanticTypeKind::state_binding)
+            state = state->value;
+        if (state == nullptr || state->kind == SemanticTypeKind::unknown ||
+            state->kind == SemanticTypeKind::any ||
+            state->kind == SemanticTypeKind::unsafe_component_parameter) {
+            return;
+        }
+        state = widened(state);
+        const auto require_kind = [&](const SemanticTypeKind kind, const std::string_view what) {
+            if (state->kind == kind)
+                return true;
+            report("STRATA.DSL.SEMANTIC_STATE_ACTION_TYPE",
+                   "Action '" + id + "' needs " + std::string(what) + " state, but '" + *name +
+                       "' holds " + state->diagnostic_name() + ".",
+                   name_expression->span, component_path + ".name", std::string(what));
+            return false;
+        };
+        const auto check_value = [&](const std::string_view parameter, const SemanticType& type) {
+            if (const Expression* value = named_argument(call, parameter); value != nullptr)
+                validate_expected(*value, type, false, component_path + "." + std::string(parameter),
+                                  scope);
+        };
+        if (id == "state.toggle") {
+            static_cast<void>(require_kind(SemanticTypeKind::boolean, "boolean"));
+        } else if (id == "state.adjust") {
+            static_cast<void>(require_kind(SemanticTypeKind::number, "number"));
+        } else if (id == "state.set") {
+            check_value("value", *state);
+        } else if (id == "state.listAppend" || id == "state.listInsert" ||
+                   id == "state.listRemoveValue" || id == "state.listToggle") {
+            if (require_kind(SemanticTypeKind::list, "list") && state->element != nullptr)
+                check_value("value", *state->element);
+        } else if (id == "state.listClear" || id == "state.listRemoveAt") {
+            static_cast<void>(require_kind(SemanticTypeKind::list, "list"));
+        } else if (id == "state.recordSet") {
+            if (!require_kind(SemanticTypeKind::map, "record") || state->fields.empty())
+                return;
+            const Expression* field_expression = named_argument(call, "field");
+            const std::string* field =
+                field_expression != nullptr ? string_literal_value(*field_expression) : nullptr;
+            if (field == nullptr)
+                return;
+            const ObjectField* declared = state->find_field(*field);
+            if (declared == nullptr) {
+                std::vector<std::string> names;
+                for (const ObjectField& candidate : state->fields)
+                    names.push_back(candidate.name);
+                report("STRATA.DSL.SEMANTIC_UNKNOWN_FIELD",
+                       "Field '" + *field + "' is not part of " + state->diagnostic_name() + "." +
+                           did_you_mean(*field, names),
+                       field_expression->span, component_path + ".field", expected_names(names));
+            } else if (declared->type != nullptr) {
+                check_value("value", *declared->type);
             }
         }
     }
@@ -3126,6 +3299,43 @@ class Validator final {
         return did_you_mean(actual.literal, values);
     }
 
+    /**
+     * A name that resolves to nothing would read as a missing host binding at runtime and quietly
+     * draw nothing. With the host roots declared it is certainly a mistake; without them it may be
+     * an undeclared host root, so it is reported only when it is a near miss of a name in scope.
+     */
+    void report_unknown_identifier(const IdentifierExpression& identifier,
+                                   const Expression& expression, const Scope& scope,
+                                   const std::string& component_path) {
+        std::vector<std::string> names;
+        names.reserve(scope.size() + components_.size() + styles_.size() + animations_.size());
+        for (const auto& [name, type] : scope) {
+            static_cast<void>(type);
+            names.push_back(name);
+        }
+        for (const auto& [name, schema] : components_) {
+            static_cast<void>(schema);
+            names.push_back(name);
+        }
+        names.insert(names.end(), styles_.begin(), styles_.end());
+        names.insert(names.end(), animations_.begin(), animations_.end());
+        if (std::ranges::contains(contextual_host_roots, identifier.name))
+            return;
+        const std::optional<std::string> suggestion = nearest_name(identifier.name, names);
+        if (!registry_.host_roots_declared() && !suggestion.has_value())
+            return;
+        // Event values reach actions through their own parameters, never through a name.
+        const std::string hint =
+            identifier.name == "event"
+                ? " An action receives its event through fromEvent: true or state.setFromEvent."
+            : suggestion.has_value() ? " Did you mean '" + *suggestion + "'?"
+                                     : std::string{};
+        report("STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER",
+               "'" + identifier.name + "' is not a state, parameter, local value or declared host "
+               "root." + hint,
+               expression.span, component_path, expected_names(names));
+    }
+
     /** The type of a `theme.<name>` read; an unknown token would silently resolve to nothing. */
     [[nodiscard]] SemanticTypePtr theme_token_type(const std::string& name,
                                                    const Expression& expression,
@@ -3171,6 +3381,7 @@ class Validator final {
             if (std::ranges::find(animations_, identifier->name) != animations_.end()) {
                 return simple(SemanticTypeKind::animation);
             }
+            report_unknown_identifier(*identifier, expression, scope, component_path);
             return simple(SemanticTypeKind::unknown);
         }
         if (const auto* grouping = std::get_if<GroupingExpression>(&expression.node)) {
@@ -3255,6 +3466,20 @@ class Validator final {
             if (const ObjectField* field = receiver->find_field(property->property_name);
                 field != nullptr) {
                 return field->type;
+            }
+            // A closed object's fields are all known, so any other name reads nothing at runtime.
+            if ((receiver->kind == SemanticTypeKind::map ||
+                 receiver->kind == SemanticTypeKind::host_object) &&
+                !receiver->fields.empty() && !receiver->allow_unknown_fields) {
+                std::vector<std::string> names;
+                names.reserve(receiver->fields.size());
+                for (const ObjectField& declared : receiver->fields)
+                    names.push_back(declared.name);
+                report("STRATA.DSL.SEMANTIC_UNKNOWN_FIELD",
+                       "Field '" + property->property_name + "' is not part of " +
+                           receiver->diagnostic_name() + "." +
+                           did_you_mean(property->property_name, names),
+                       expression.span, component_path, expected_names(names));
             }
             return simple(SemanticTypeKind::unknown);
         }
@@ -3429,6 +3654,7 @@ class Validator final {
     std::vector<std::string> styles_;
     std::map<std::string, const StyleDeclaration*, std::less<>> style_declarations_;
     std::vector<std::string> animations_;
+    std::optional<std::vector<std::string>> declared_state_names_;
     std::vector<Diagnostic> diagnostics_;
     std::vector<Diagnostic> lowering_diagnostics_;
     std::map<std::string, ValidatedAnimation, std::less<>> validated_animations_;

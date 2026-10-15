@@ -62,6 +62,8 @@ inline constexpr std::array<std::string_view, 3U> theme_number_tokens{
     "radius",
     "density",
 };
+/** Host roots every surface supplies itself, without an application schema declaring them. */
+inline constexpr std::array<std::string_view, 1U> contextual_host_roots{"env"};
 
 struct SemanticResult final {
     std::vector<Diagnostic> diagnostics;

@@ -4650,7 +4650,7 @@ overlay AsyncCollections {
       items: data.treeItems,
       rowTemplate: AsyncTreeRow,
       rowHeight: 28,
-      onLoadChildren: action("async.query", binding: "asyncTreeChildren", payload: event.value),
+      onLoadChildren: action("async.query", binding: "asyncTreeChildren", fromEvent: true),
       layout: { kind: "SCROLL", width: { weight: 1 }, height: 120 }
     )
     when asyncResults.status {

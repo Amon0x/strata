@@ -209,7 +209,15 @@ and pressed space around the thumb; `thumbWidth`/`thumbHeight` and their `active
 resting value, so a press never changes track or thumb geometry unless the style requests it.
 
 The generated reference separates general style properties, layout properties/size forms, text
-properties, theme tokens, and enum values.
+properties, and enum values. The theme tokens are fixed, and the compiler rejects any other name
+and checks each token's kind where it is used:
+
+| Token | Kind |
+|---|---|
+| `theme.surface`, `theme.surfaceRaised` | color |
+| `theme.foreground`, `theme.mutedForeground` | color |
+| `theme.accent`, `theme.danger`, `theme.focus` | color |
+| `theme.spacingUnit`, `theme.radius`, `theme.density` | number |
 
 ### Layer placement and anchors
 
@@ -572,7 +580,11 @@ Button(label: "Saved", onClick: action("state.recordSet", name: "record", field:
 `state.set`, `state.setFromEvent`, `state.adjust`, `state.toggle`, and `state.reset` are compiler-
 known actions. Lists additionally support append, insert, remove by value/index, toggle membership,
 and clear; records support checked field updates. List element types and a `Record` initializer's
-fixed fields are validated at compile time. Derived declarations are pure, evaluated once per
+fixed fields are validated at compile time: a `state.*` action must name a declared state, its value
+must fit that state's type where the state is in scope, and reading or setting a field a record does
+not declare is an error. A name that is not a state, parameter, local value or declared host root is
+an error once the application schemas declare their host roots; without schemas, a near miss of a
+name in scope is still reported. Derived declarations are pure, evaluated once per
 rebuild, and rejected when their dependency graph cycles. Their exact action payload fields and
 policies are generated from `DslActionRegistry`.
 
