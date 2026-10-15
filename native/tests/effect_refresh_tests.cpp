@@ -1,8 +1,10 @@
 #include <strata/render_packet.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <span>
@@ -283,6 +285,78 @@ void test_temporal_refresh_contract() {
           "effect-pass redeclaration reused a stale sample");
 }
 
+/**
+ * A red/blue edge blurred at reduced resolution on a 1.5x surface. The software renderer stands in
+ * for the GPU backends in captures, so its downsampled blur has to land on the same pixels.
+ */
+[[nodiscard]] strata::host::RenderPacket downsampled_blur_packet() {
+    using namespace strata;
+    constexpr std::size_t vertex_size = 88U;
+    host::RenderPacket packet;
+    packet.geometry_epoch = 1U;
+    packet.vertices.resize(8U * vertex_size);
+    constexpr std::array<std::array<float, 2U>, 4U> corners{{
+        {0.0F, 0.0F},
+        {1.0F, 0.0F},
+        {1.0F, 1.0F},
+        {0.0F, 1.0F},
+    }};
+    for (std::size_t half = 0U; half < 2U; ++half) {
+        for (std::size_t corner = 0U; corner < 4U; ++corner) {
+            const std::size_t vertex = half * 4U + corner;
+            write_float(packet.vertices, vertex, 0U,
+                        static_cast<float>(half) * 16.0F + corners[corner][0U] * 16.0F);
+            write_float(packet.vertices, vertex, 4U, corners[corner][1U] * 32.0F);
+            packet.vertices[vertex * vertex_size + (half == 0U ? 20U : 22U)] = 255U;
+            packet.vertices[vertex * vertex_size + 23U] = 255U;
+            write_float(packet.vertices, vertex, 84U, 1.0F);
+        }
+    }
+    packet.indices = {0U, 1U, 2U, 0U, 2U, 3U, 4U, 5U, 6U, 4U, 6U, 7U};
+    packet.batches.emplace_back(host::DrawBatch{
+        .source_order = 0U,
+        .scissor = host::Scissor{0U, 0U, 48U, 48U},
+        .material = "strata:unified_ui",
+        .blend_mode = "opaque",
+        .base_vertex = 0U,
+        .first_index = 0U,
+        .index_count = 12U,
+    });
+    host::BlurBatch blur;
+    blur.source_order = 1U;
+    blur.scissor = host::Scissor{6U, 9U, 33U, 30U};
+    blur.x = 4.0;
+    blur.y = 6.0;
+    blur.width = 22.0;
+    blur.height = 20.0;
+    blur.radius = 5.0;
+    blur.downsample = 2U;
+    packet.batches.emplace_back(std::move(blur));
+    return packet;
+}
+
+#ifdef _WIN32
+void test_downsampled_blur_matches_d3d11() {
+    using namespace strata;
+    headless::SoftwareRenderer software(headless::platform_image_codec());
+    headless::D3D11Renderer d3d11;
+    for (headless::CaptureRenderer* renderer :
+         std::array<headless::CaptureRenderer*, 2U>{&software, &d3d11}) {
+        renderer->resize(48U, 48U, 32.0, 32.0);
+        renderer->set_clear_color({0U, 0U, 0U, 255U});
+        renderer->render(downsampled_blur_packet(), 0);
+    }
+    const std::span<const std::uint8_t> expected = d3d11.pixels();
+    const std::span<const std::uint8_t> actual = software.pixels();
+    check(expected.size() == actual.size(), "renderers captured different sizes");
+    int largest = 0;
+    for (std::size_t index = 0U; index < expected.size(); ++index)
+        largest = std::max(largest, std::abs(int{expected[index]} - int{actual[index]}));
+    check(largest <= 4, "software downsampled blur differs from D3D11 by " +
+                            std::to_string(largest) + " in a channel");
+}
+#endif
+
 } // namespace
 
 int main() {
@@ -294,6 +368,7 @@ int main() {
         strata::headless::D3D11Renderer d3d11;
         test_surface_backdrop_source(d3d11);
         test_surface_backdrop_inside_content(d3d11);
+        test_downsampled_blur_matches_d3d11();
 #endif
         test_temporal_refresh_contract();
         std::cout << "strata_effect_refresh_tests: OK\n";

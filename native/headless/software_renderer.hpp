@@ -82,6 +82,9 @@ class SoftwareRenderer final : public CaptureRenderer {
     void apply(const host::ResourceOperation& operation);
     void draw(const host::DrawBatch& batch, const host::RenderPacket& packet);
     void blur(const host::BlurBatch& batch);
+    void blur_downsampled(const host::BlurBatch& batch, std::uint32_t left, std::uint32_t top,
+                          std::uint32_t right, std::uint32_t bottom, std::uint32_t downsample,
+                          const std::vector<std::uint8_t>& clipped_original);
     void apply_effect(const host::EffectBatch& effect);
     [[nodiscard]] bool effect_refresh_due(const host::EffectBatch& effect, bool content,
                                           std::int64_t time_nanoseconds) const;

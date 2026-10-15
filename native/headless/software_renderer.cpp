@@ -799,6 +799,11 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
             );
         }
     }
+    const std::uint32_t downsample = std::clamp(batch.downsample, 1U, 8U);
+    if (downsample > 1U) {
+        blur_downsampled(batch, left, top, right, bottom, downsample, clipped_original);
+        return;
+    }
     const double physical_radius = std::clamp(batch.radius * std::max(scale_x, scale_y), 0.5, 32.0);
     const std::uint32_t radius = static_cast<std::uint32_t>(std::ceil(physical_radius));
     const std::uint32_t source_left = left > radius ? left - radius : 0U;
@@ -892,6 +897,163 @@ void SoftwareRenderer::blur(const host::BlurBatch& batch) {
                 pixels_[target + component] = static_cast<std::uint8_t>(
                     std::clamp(std::lround(composed), 0L, 255L)
                 );
+            }
+        }
+    }
+}
+
+/**
+ * A blur with a downsample, as the GPU renderers run one: the padded source is reduced by
+ * averaging each downsample x downsample block, blurred there with the radius scaled down to match
+ * (clamped as D3D11 clamps it), and filtered back up bilinearly onto the effect region.
+ */
+void SoftwareRenderer::blur_downsampled(const host::BlurBatch& batch, const std::uint32_t left,
+                                        const std::uint32_t top, const std::uint32_t right,
+                                        const std::uint32_t bottom, const std::uint32_t downsample,
+                                        const std::vector<std::uint8_t>& clipped_original) {
+    const double scale_x = static_cast<double>(width_) / logical_width_;
+    const double scale_y = static_cast<double>(height_) / logical_height_;
+    const double physical_radius = batch.radius * std::max(scale_x, scale_y);
+    const std::uint32_t padding =
+        static_cast<std::uint32_t>(std::clamp(std::ceil(physical_radius), 1.0, 256.0));
+    const std::uint32_t source_left = left > padding ? left - padding : 0U;
+    const std::uint32_t source_top = top > padding ? top - padding : 0U;
+    const std::uint32_t source_right = static_cast<std::uint32_t>(
+        std::min<std::uint64_t>(static_cast<std::uint64_t>(right) + padding, width_));
+    const std::uint32_t source_bottom = static_cast<std::uint32_t>(
+        std::min<std::uint64_t>(static_cast<std::uint64_t>(bottom) + padding, height_));
+    const std::uint32_t source_width = source_right - source_left;
+    const std::uint32_t source_height = source_bottom - source_top;
+    const auto reduced = [downsample](const std::uint32_t extent) {
+        return std::max(1U, extent / downsample + (extent % downsample == 0U ? 0U : 1U));
+    };
+    const std::uint32_t reduced_width = reduced(source_width);
+    const std::uint32_t reduced_height = reduced(source_height);
+
+    // Bilinear sampling with clamped edges, at a position in texel units, as the GPU sampler reads.
+    const auto bilinear = [](const auto& read, const std::uint32_t texture_width,
+                             const std::uint32_t texture_height, const double x, const double y,
+                             const std::size_t component) {
+        const double cx = std::clamp(x, 0.0, static_cast<double>(texture_width - 1U));
+        const double cy = std::clamp(y, 0.0, static_cast<double>(texture_height - 1U));
+        const auto x0 = static_cast<std::uint32_t>(cx);
+        const auto y0 = static_cast<std::uint32_t>(cy);
+        const std::uint32_t x1 = std::min(x0 + 1U, texture_width - 1U);
+        const std::uint32_t y1 = std::min(y0 + 1U, texture_height - 1U);
+        const double fx = cx - x0;
+        const double fy = cy - y0;
+        return (read(x0, y0, component) * (1.0 - fx) + read(x1, y0, component) * fx) * (1.0 - fy) +
+               (read(x0, y1, component) * (1.0 - fx) + read(x1, y1, component) * fx) * fy;
+    };
+    const auto source_texel = [this, source_left, source_top](const std::uint32_t x,
+                                                              const std::uint32_t y,
+                                                              const std::size_t component) {
+        return static_cast<double>(
+            pixels_[(static_cast<std::size_t>(source_top + y) * width_ + source_left + x) * 4U +
+                    component]);
+    };
+    // One sample per reduced texel at its centre, mapped across the whole source region.
+    std::vector<double> small(static_cast<std::size_t>(reduced_width) * reduced_height * 4U);
+    for (std::uint32_t y = 0U; y < reduced_height; ++y) {
+        const double sample_y =
+            (static_cast<double>(y) + 0.5) * source_height / reduced_height - 0.5;
+        for (std::uint32_t x = 0U; x < reduced_width; ++x) {
+            const double sample_x =
+                (static_cast<double>(x) + 0.5) * source_width / reduced_width - 0.5;
+            const std::size_t target = (static_cast<std::size_t>(y) * reduced_width + x) * 4U;
+            for (std::size_t component = 0U; component < 4U; ++component) {
+                small[target + component] = bilinear(source_texel, source_width, source_height,
+                                                     sample_x, sample_y, component);
+            }
+        }
+    }
+
+    const double reduced_radius = std::clamp(physical_radius / downsample, 0.5, 32.0);
+    const std::uint32_t radius = static_cast<std::uint32_t>(std::ceil(reduced_radius));
+    const double sigma = std::max(reduced_radius / 3.0, 0.5);
+    const double inverse_two_sigma_squared = 0.5 / (sigma * sigma);
+    std::vector<double> weights(radius + 1U);
+    for (std::uint32_t offset = 0U; offset <= radius; ++offset) {
+        const double distance = static_cast<double>(offset);
+        const double coverage = std::clamp(reduced_radius + 0.5 - distance, 0.0, 1.0);
+        weights[offset] = std::exp(-distance * distance * inverse_two_sigma_squared) * coverage;
+    }
+    const auto pass = [&](const std::vector<double>& input, const bool horizontal) {
+        std::vector<double> output(input.size());
+        for (std::uint32_t y = 0U; y < reduced_height; ++y) {
+            for (std::uint32_t x = 0U; x < reduced_width; ++x) {
+                std::array<double, 4U> sums{};
+                double total_weight = 0.0;
+                for (std::int64_t offset = -static_cast<std::int64_t>(radius);
+                     offset <= static_cast<std::int64_t>(radius); ++offset) {
+                    const std::int64_t along = (horizontal ? x : y) + offset;
+                    const std::int64_t limit = (horizontal ? reduced_width : reduced_height) - 1;
+                    const auto sample = static_cast<std::uint32_t>(std::clamp<std::int64_t>(
+                        along, 0, limit));
+                    const std::size_t source =
+                        (static_cast<std::size_t>(horizontal ? y : sample) * reduced_width +
+                         (horizontal ? sample : x)) * 4U;
+                    const double weight = weights[static_cast<std::size_t>(std::abs(offset))];
+                    for (std::size_t component = 0U; component < 4U; ++component)
+                        sums[component] += input[source + component] * weight;
+                    total_weight += weight;
+                }
+                const std::size_t target = (static_cast<std::size_t>(y) * reduced_width + x) * 4U;
+                for (std::size_t component = 0U; component < 4U; ++component)
+                    output[target + component] = sums[component] / total_weight;
+            }
+        }
+        return output;
+    };
+    const std::vector<double> blurred = pass(pass(small, true), false);
+
+    // The effect region reads the reduced result through the window D3D11 uses: it starts at the
+    // effect's integer-divided offset and spans its rounded-up reduced size.
+    const auto blurred_texel = [&blurred, reduced_width](const std::uint32_t x,
+                                                         const std::uint32_t y,
+                                                         const std::size_t component) {
+        return blurred[(static_cast<std::size_t>(y) * reduced_width + x) * 4U + component];
+    };
+    const std::uint32_t clipped_width = right - left;
+    const std::uint32_t effect_height = bottom - top;
+    const double window_x = static_cast<double>((left - source_left) / downsample);
+    const double window_y = static_cast<double>((top - source_top) / downsample);
+    const double window_width = reduced(clipped_width);
+    const double window_height = reduced(effect_height);
+    for (std::uint32_t row = top; row < bottom; ++row) {
+        const double sample_y = window_y +
+                                (static_cast<double>(row - top) + 0.5) / effect_height *
+                                    window_height -
+                                0.5;
+        for (std::uint32_t column = left; column < right; ++column) {
+            const double sample_x = window_x +
+                                    (static_cast<double>(column - left) + 0.5) / clipped_width *
+                                        window_width -
+                                    0.5;
+            const float clip_coverage =
+                clipped_original.empty()
+                    ? 1.0F
+                    : rounded_clip_coverage(
+                          batch.rounded_clips,
+                          static_cast<float>((static_cast<double>(column) + 0.5) / scale_x),
+                          static_cast<float>((static_cast<double>(row) + 0.5) / scale_y),
+                          static_cast<float>(1.0 / scale_x), static_cast<float>(1.0 / scale_y));
+            const std::size_t target = (static_cast<std::size_t>(row) * width_ + column) * 4U;
+            for (std::size_t component = 0U; component < 4U; ++component) {
+                const double value = bilinear(blurred_texel, reduced_width, reduced_height,
+                                              sample_x, sample_y, component);
+                double composed = value;
+                if (!clipped_original.empty()) {
+                    const std::size_t original =
+                        (static_cast<std::size_t>(row - top) * clipped_width + (column - left)) *
+                            4U +
+                        component;
+                    composed = static_cast<double>(clipped_original[original]) *
+                                   (1.0 - clip_coverage) +
+                               value * clip_coverage;
+                }
+                pixels_[target + component] =
+                    static_cast<std::uint8_t>(std::clamp(std::lround(composed), 0L, 255L));
             }
         }
     }
