@@ -479,4 +479,17 @@ bool widget_semantic_hidden(const RetainedNode& node) {
     return decorative != nullptr && decorative->boolean() != nullptr && *decorative->boolean();
 }
 
+std::optional<std::string> property_text(WidgetSemanticsScope& scope,
+                                         const std::string_view property) {
+    return scope.text(scope.property(property));
+}
+
+void label_or_key(WidgetSemanticsScope& scope) {
+    if (const auto label = property_text(scope, "label"); label.has_value()) {
+        scope.name(*label);
+    } else if (scope.node().description().key.has_value()) {
+        scope.default_name(*scope.node().description().key);
+    }
+}
+
 } // namespace strata::ui

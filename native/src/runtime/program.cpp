@@ -82,15 +82,6 @@ using JsonObject = data::JsonObjectView;
     return ColorValue{channels[0], channels[1], channels[2], channels[3]};
 }
 
-[[nodiscard]] std::optional<std::size_t> bounded_index(const Value& value) {
-    const double* number = value.number();
-    if (number == nullptr || *number < 0.0 ||
-        *number > static_cast<double>(std::numeric_limits<std::size_t>::max())) {
-        return std::nullopt;
-    }
-    return static_cast<std::size_t>(std::trunc(*number));
-}
-
 [[nodiscard]] HelperKind helper_kind(const std::string_view name) noexcept {
     static constexpr std::pair<std::string_view, HelperKind> helpers[] = {
         {"filter", HelperKind::filter},
@@ -204,6 +195,15 @@ using JsonObject = data::JsonObjectView;
 }
 
 } // namespace
+
+std::optional<std::size_t> bounded_index(const Value& value) {
+    const double* number = value.number();
+    if (number == nullptr || *number < 0.0 ||
+        *number > static_cast<double>(std::numeric_limits<std::size_t>::max())) {
+        return std::nullopt;
+    }
+    return static_cast<std::size_t>(std::trunc(*number));
+}
 
 /** Builds one Program from portable IR, in the order its tables need. */
 class ProgramLowering final {

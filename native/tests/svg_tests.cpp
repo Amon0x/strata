@@ -136,6 +136,17 @@ void test_view_box_mapping_and_fill_rules() {
   d="M1 1h8v8H1z M3 3h4v4H3z"/></svg>)SVG"),
                                strata::svg::RasterOptions{10U, 10U, 4U, {0U, 0U, 0U, 0U}});
     check(nonzero.pixel(5U, 5U)[3] == 255U, "nonzero fill rule changed");
+
+    // A drawing command after Z starts a new subpath at the closed one's start: two separate
+    // triangles, not one polygon through all five points (which would also cover 7,12).
+    const auto reopened =
+        strata::svg::rasterize(strata::svg::parse(R"SVG(
+<svg width="20" height="20"><path d="M5 5 L15 5 L15 15 Z L5 15 L0 15 Z"/></svg>)SVG"),
+                               strata::svg::RasterOptions{20U, 20U, 4U, {0U, 0U, 0U, 0U}});
+    check(reopened.pixel(12U, 7U)[3] == 255U && reopened.pixel(4U, 13U)[3] == 255U,
+          "subpaths around a close lost their own coverage");
+    check(reopened.pixel(7U, 12U)[3] == 0U,
+          "a drawing command after Z continued the closed contour");
 }
 
 void test_compositing_and_encoding() {
@@ -210,6 +221,13 @@ void test_lucide_reference_coverage(const std::filesystem::path& fixtures) {
     }
 }
 
+void test_inert_text_elements_are_accepted() {
+    const strata::svg::Document document = strata::svg::parse(
+        "<svg width='1' height='1'><title>Icon</title><desc>A square</desc>"
+        "<metadata>exported by a tool</metadata><rect width='1' height='1'/></svg>");
+    check(document.commands.size() == 1U, "SVG title, desc or metadata text was not ignored");
+}
+
 void test_active_and_ambiguous_content_is_rejected() {
     constexpr std::array forbidden{
         std::string_view{"<!DOCTYPE svg [<!ENTITY x SYSTEM 'file:///secret'>]><svg>&x;</svg>"},
@@ -217,6 +235,7 @@ void test_active_and_ambiguous_content_is_rejected() {
         std::string_view{"<?xml-stylesheet href='theme.css'?><svg width='1' height='1'/>"},
         std::string_view{"<svg width='1' height='1'><style>path{fill:red}</style></svg>"},
         std::string_view{"<svg width='1' height='1'><title><script/></title></svg>"},
+        std::string_view{"<svg width='1' height='1'><metadata><script/></metadata></svg>"},
         std::string_view{"<svg width='1' height='1' onload='run()'/>"},
         std::string_view{"<svg width='1' height='1'><path d='M0 0' style='fill:red'/></svg>"},
         std::string_view{"<svg width='1' height='1'><path d='M0 0' class='red'/></svg>"},
@@ -405,6 +424,7 @@ int strata_test_svg(const int argument_count, const char* const* const arguments
         test_view_box_mapping_and_fill_rules();
         test_compositing_and_encoding();
         test_lucide_reference_coverage(fixtures);
+        test_inert_text_elements_are_accepted();
         test_active_and_ambiguous_content_is_rejected();
         test_limits();
         test_truncated_and_arbitrary_inputs(fixtures);

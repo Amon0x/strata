@@ -8,14 +8,6 @@
 namespace strata::ui {
 namespace {
 
-void label_or_key(WidgetSemanticsScope& scope) {
-    if (const auto label = scope.text(scope.property("label")); label.has_value()) {
-        scope.name(*label);
-    } else if (scope.node().description().key.has_value()) {
-        scope.default_name(*scope.node().description().key);
-    }
-}
-
 void empty_value(WidgetSemanticsScope& scope) {
     label_or_key(scope);
     scope.default_value_text(std::string{});

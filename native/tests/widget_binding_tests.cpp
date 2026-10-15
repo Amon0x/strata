@@ -1235,6 +1235,15 @@ overlay Main { root ControlDefaults() }
             *string_property(select, "selectedId") == "quality",
         "Select typeahead did not move and commit the matching option"
     );
+    // A modified letter is a shortcut, not a search: Ctrl+F must not select "Fast".
+    static_cast<void>(surface.input().key("f", strata::ui::KeyModifiers{false, true, false, false}));
+    static_cast<void>(surface.frame(2'100'000));
+    select = surface.tree().find_key("defaults.select");
+    check(
+        string_property(select, "selectedId") != nullptr &&
+            *string_property(select, "selectedId") == "quality",
+        "Select typeahead treated Ctrl+F as typing \"f\""
+    );
     static_cast<void>(surface.input().click("defaults.custom-select"));
     static_cast<void>(surface.input().key("tab"));
     check(

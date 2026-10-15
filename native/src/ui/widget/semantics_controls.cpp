@@ -17,31 +17,17 @@ using data::JsonValue;
     return JsonValue(JsonValue::Object(entries));
 }
 
-[[nodiscard]] std::optional<std::string> text(
-    WidgetSemanticsScope& scope,
-    const std::string_view property
-) {
-    return scope.text(scope.property(property));
-}
-
-void label_or_key(WidgetSemanticsScope& scope) {
-    if (const auto label = text(scope, "label"); label.has_value()) scope.name(*label);
-    else if (scope.node().description().key.has_value()) {
-        scope.default_name(*scope.node().description().key);
-    }
-}
-
 void icon_button(WidgetSemanticsScope& scope) {
     if (scope.node().description().key.has_value()) scope.name(*scope.node().description().key);
     else label_or_key(scope);
 }
 
 void text_field(WidgetSemanticsScope& scope) {
-    if (const auto hint = text(scope, "hint"); hint.has_value()) scope.name(*hint);
+    if (const auto hint = property_text(scope, "hint"); hint.has_value()) scope.name(*hint);
     else label_or_key(scope);
     std::optional<std::string> value;
     if (const std::string* edited = scope.edited_text(); edited != nullptr) value = *edited;
-    if (!value.has_value()) value = text(scope, "text");
+    if (!value.has_value()) value = property_text(scope, "text");
     if (!value.has_value()) value = scope.text(scope.retained("$text"));
     scope.default_value_text(std::move(value));
     scope.read_only(scope.boolean(scope.property("readOnly")).value_or(false));

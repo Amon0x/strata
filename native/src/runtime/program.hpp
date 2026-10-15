@@ -122,6 +122,9 @@ enum class HelperKind : std::uint8_t {
     unknown,
 };
 
+/** A list position from a number value: its integer part, or nullopt when negative or too large. */
+[[nodiscard]] std::optional<std::size_t> bounded_index(const Value& value);
+
 /** A named or positional argument of a helper, action, component template or material. */
 struct ProgramArgument final {
     /** Empty for a positional argument. */

@@ -290,11 +290,8 @@ void flatten_cubic(std::vector<Point>& points, const Point first, const Point co
     if (join == LineJoin::bevel)
         return false;
 
-    const double directions_cross = cross(incoming, outgoing);
-    if (std::abs(directions_cross) <= epsilon)
-        return false;
-    const double distance_along_incoming =
-        cross(subtract(second, first), outgoing) / directions_cross;
+    // `turn` is nonzero here: a straight join returned before the bevel.
+    const double distance_along_incoming = cross(subtract(second, first), outgoing) / turn;
     const Point miter = add(first, scale(incoming, distance_along_incoming));
     if (std::sqrt(squared_distance(miter, vertex)) > half_width * miter_limit)
         return false;

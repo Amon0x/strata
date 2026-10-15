@@ -19,20 +19,6 @@ using data::JsonValue;
     return JsonValue(JsonValue::Object(entries));
 }
 
-[[nodiscard]] std::optional<std::string> text(
-    WidgetSemanticsScope& scope,
-    const std::string_view property
-) {
-    return scope.text(scope.property(property));
-}
-
-void label_or_key(WidgetSemanticsScope& scope) {
-    if (const auto label = text(scope, "label"); label.has_value()) scope.name(*label);
-    else if (scope.node().description().key.has_value()) {
-        scope.default_name(*scope.node().description().key);
-    }
-}
-
 void referenced_commands(
     WidgetSemanticsScope& scope,
     const std::string_view role
@@ -63,7 +49,7 @@ void toolbar(WidgetSemanticsScope& scope) {
 }
 
 void command_palette(WidgetSemanticsScope& scope) {
-    if (const auto label = text(scope, "label"); label.has_value()) scope.name(*label);
+    if (const auto label = property_text(scope, "label"); label.has_value()) scope.name(*label);
     else scope.name("Command palette");
     const bool open = scope.effective_boolean(
         "open", "strata.palette.open", "defaultOpen", false
@@ -124,7 +110,7 @@ void banner(WidgetSemanticsScope& scope) {
         scope.actions({});
         return;
     }
-    if (const auto message = text(scope, "message"); message.has_value()) scope.name(*message);
+    if (const auto message = property_text(scope, "message"); message.has_value()) scope.name(*message);
     else label_or_key(scope);
     scope.live_region("assertive");
     std::vector<std::string> actions;
@@ -226,7 +212,7 @@ void split_pane(WidgetSemanticsScope& scope) {
 }
 
 void tooltip(WidgetSemanticsScope& scope) {
-    if (const auto value = text(scope, "text"); value.has_value()) scope.name(*value);
+    if (const auto value = property_text(scope, "text"); value.has_value()) scope.name(*value);
     else label_or_key(scope);
 }
 

@@ -11,21 +11,6 @@
 namespace strata::ui {
 namespace {
 
-[[nodiscard]] std::optional<std::string> text(
-    WidgetSemanticsScope& scope,
-    const std::string_view property
-) {
-    return scope.text(scope.property(property));
-}
-
-void label_or_key(WidgetSemanticsScope& scope) {
-    if (const auto label = text(scope, "label"); label.has_value()) {
-        scope.name(*label);
-    } else if (scope.node().description().key.has_value()) {
-        scope.default_name(*scope.node().description().key);
-    }
-}
-
 void panel(WidgetSemanticsScope& scope) {
     if (scope.explicit_field("role") == nullptr && scope.node().parent() != nullptr &&
         scope.node().parent()->description().type == "Table") {
@@ -41,8 +26,8 @@ void text_node(WidgetSemanticsScope& scope) {
         scope.role("grid_cell");
         scope.selected(false);
     }
-    if (const auto label = text(scope, "label"); label.has_value()) scope.name(*label);
-    else if (const auto value = text(scope, "text"); value.has_value()) scope.name(*value);
+    if (const auto label = property_text(scope, "label"); label.has_value()) scope.name(*label);
+    else if (const auto value = property_text(scope, "text"); value.has_value()) scope.name(*value);
     else if (scope.node().description().key.has_value()) {
         scope.default_name(*scope.node().description().key);
     }
@@ -153,7 +138,7 @@ void list(WidgetSemanticsScope& scope) {
 }
 
 void menu(WidgetSemanticsScope& scope) {
-    if (const auto label = text(scope, "label"); label.has_value()) scope.name(*label);
+    if (const auto label = property_text(scope, "label"); label.has_value()) scope.name(*label);
     const bool expanded = scope.effective_boolean("open", "$expanded", "defaultOpen", false);
     scope.expanded(expanded);
     scope.actions({expanded ? "collapse" : "expand", "focus"});

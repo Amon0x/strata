@@ -443,10 +443,6 @@ class NumberList final {
             error("unexpected data after SVG numbers");
     }
 
-    [[nodiscard]] std::size_t position() const noexcept {
-        return position_;
-    }
-
   private:
     [[noreturn]] void error(const std::string_view message) const {
         throw ParseError(source_offset_ + position_, std::string(message));
@@ -1350,9 +1346,9 @@ void validate_transformed_geometry(const XmlNode& node, const DrawCommand& comma
 void visit(const XmlNode& node, const AffineTransform& parent_transform,
            const PaintStyle& parent_paint, const ParseOptions& options, Document& document) {
     const std::string name = local_name(node.name, node.offset);
-    if (name == "title" || name == "desc") {
+    if (name == "title" || name == "desc" || name == "metadata") {
         if (!node.children.empty())
-            fail(node, "SVG title and desc cannot contain elements");
+            fail(node, "SVG title, desc and metadata cannot contain elements");
         return;
     }
     if (name == "g") {

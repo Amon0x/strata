@@ -564,68 +564,6 @@ void append_compact_value(std::string& output, const JsonValue& value) {
     }
 }
 
-void append_value(std::string& output, const JsonValue& value, const std::size_t depth) {
-    const JsonValue::Storage& storage = value.storage();
-    if (std::holds_alternative<JsonValue::Null>(storage)) {
-        output.append("null");
-    } else if (const auto* boolean = std::get_if<bool>(&storage)) {
-        output.append(*boolean ? "true" : "false");
-    } else if (const auto* integer = std::get_if<std::int64_t>(&storage)) {
-        char buffer[32]{};
-        const auto converted = std::to_chars(std::begin(buffer), std::end(buffer), *integer);
-        output.append(buffer, converted.ptr);
-    } else if (const auto* number = std::get_if<double>(&storage)) {
-        if (!std::isfinite(*number)) {
-            throw std::invalid_argument("canonical JSON rejects non-finite numbers");
-        }
-        output.append(plain_decimal(*number));
-    } else if (const auto* string = std::get_if<std::string>(&storage)) {
-        append_quoted(output, *string);
-    } else if (const auto* array = std::get_if<JsonValue::Array>(&storage)) {
-        if (array->empty()) {
-            output.append("[]");
-            return;
-        }
-        output.append("[\n");
-        for (std::size_t index = 0U; index < array->size(); ++index) {
-            append_indent(output, depth + 1U);
-            append_value(output, (*array)[index], depth + 1U);
-            if (index + 1U != array->size()) {
-                output.push_back(',');
-            }
-            output.push_back('\n');
-        }
-        append_indent(output, depth);
-        output.push_back(']');
-    } else {
-        const auto& object = std::get<JsonValue::Object>(storage);
-        if (object.empty()) {
-            output.append("{}");
-            return;
-        }
-        std::vector<const JsonValue::ObjectEntry*> sorted;
-        sorted.reserve(object.size());
-        for (const auto& entry : object) {
-            sorted.push_back(&entry);
-        }
-        std::ranges::sort(sorted, {},
-                          [](const auto* entry) -> const std::string& { return entry->first; });
-        output.append("{\n");
-        for (std::size_t index = 0U; index < sorted.size(); ++index) {
-            append_indent(output, depth + 1U);
-            append_quoted(output, sorted[index]->first);
-            output.append(": ");
-            append_value(output, sorted[index]->second, depth + 1U);
-            if (index + 1U != sorted.size()) {
-                output.push_back(',');
-            }
-            output.push_back('\n');
-        }
-        append_indent(output, depth);
-        output.push_back('}');
-    }
-}
-
 } // namespace
 
 JsonError::JsonError(const std::size_t offset, std::string message)
@@ -740,10 +678,7 @@ JsonValue parse_json(const std::string_view source, const JsonLimits& limits) {
 }
 
 std::string encode_canonical_json(const JsonValue& value) {
-    std::string output;
-    append_value(output, value, 0U);
-    output.push_back('\n');
-    return output;
+    return encode_canonical_json(JsonView(value));
 }
 
 std::string encode_canonical_json(const JsonView value) {

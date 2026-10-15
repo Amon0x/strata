@@ -112,6 +112,11 @@ class WidgetSemanticsScope final {
 };
 
 [[nodiscard]] bool widget_semantic_hidden(const RetainedNode& node);
+/** The text of an authored property, when it holds a string or key. */
+[[nodiscard]] std::optional<std::string> property_text(WidgetSemanticsScope& scope,
+                                                       std::string_view property);
+/** Names the node by its `label`, falling back to its key as a default name. */
+void label_or_key(WidgetSemanticsScope& scope);
 void register_primitive_widget_semantics(WidgetRegistry& registry);
 void register_control_widget_semantics(WidgetRegistry& registry);
 void register_shell_widget_semantics(WidgetRegistry& registry);

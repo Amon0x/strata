@@ -1,7 +1,10 @@
 #include "ui/widget/input.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 
@@ -473,6 +476,48 @@ void WidgetInputScope::emit_event(const std::string_view event_kind, runtime::Va
     });
     result_.action_outcomes.push_back(input_detail::no_action_outcome(event));
     result_.events.push_back(std::move(event));
+}
+
+TypeaheadStep typeahead_step(WidgetInputScope& scope, const std::string_view state,
+                             const std::size_t count, const std::size_t current,
+                             const std::function<const std::string*(std::size_t)>& label_at) {
+    // Modified letters are shortcuts (Ctrl+C, Alt+F), never a search.
+    if (scope.key().size() != 1U ||
+        !std::isalnum(static_cast<unsigned char>(scope.key().front())) ||
+        scope.modifiers().control || scope.modifiers().super_key || scope.modifiers().alt) {
+        return {};
+    }
+    constexpr std::int64_t timeout = 700'000'000;
+    const std::string deadline_state = std::string(state) + "Deadline";
+    std::string query;
+    const runtime::Value* deadline = scope.retained(deadline_state);
+    if (deadline != nullptr && deadline->number() != nullptr &&
+        static_cast<double>(scope.frame_time_nanos()) <= *deadline->number()) {
+        const runtime::Value* retained = scope.retained(state);
+        if (retained != nullptr && retained->string() != nullptr)
+            query = *retained->string();
+    }
+    const std::string typed = input_detail::lower_ascii(std::string(scope.key()));
+    query += typed;
+    const auto match = [count, current, &label_at](const std::string& prefix) {
+        for (std::size_t offset = 1U; offset <= count; ++offset) {
+            const std::size_t index = (current + offset) % count;
+            const std::string* label = label_at(index);
+            if (label != nullptr && input_detail::lower_ascii(*label).starts_with(prefix))
+                return std::optional<std::size_t>(index);
+        }
+        return std::optional<std::size_t>{};
+    };
+    std::optional<std::size_t> selected = match(query);
+    if (!selected.has_value() && query.size() > 1U) {
+        query = typed;
+        selected = match(query);
+    }
+    scope.set_retained(state, runtime::Value(query), DirtyReason::input);
+    scope.set_retained(deadline_state,
+                       runtime::Value(static_cast<double>(scope.frame_time_nanos() + timeout)),
+                       DirtyReason::input);
+    return TypeaheadStep{true, selected};
 }
 
 } // namespace strata::ui

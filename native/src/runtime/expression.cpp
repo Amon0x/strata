@@ -22,15 +22,6 @@ constexpr std::size_t maximum_derived_items = 100'000U;
     return result;
 }
 
-[[nodiscard]] std::optional<std::size_t> bounded_index(const Value& value) {
-    const double* number = value.number();
-    if (number == nullptr || *number < 0.0 ||
-        *number > static_cast<double>(std::numeric_limits<std::size_t>::max())) {
-        return std::nullopt;
-    }
-    return static_cast<std::size_t>(std::trunc(*number));
-}
-
 [[nodiscard]] std::string lower_ascii(std::string value) {
     std::ranges::transform(value, value.begin(), [](const unsigned char character) {
         return character >= 'A' && character <= 'Z' ? static_cast<char>(character - 'A' + 'a')

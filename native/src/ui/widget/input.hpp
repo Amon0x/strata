@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -130,6 +131,24 @@ class WidgetInputScope final {
     std::string_view input_text_;
     InputDispatchContext* dispatch_ = nullptr;
 };
+
+/** The outcome of one key press offered to a type-to-select list. */
+struct TypeaheadStep final {
+    /** False when the key is not a plain character, so the widget should not consume it. */
+    bool handled = false;
+    /** The next item after the current one whose label starts with the typed query. */
+    std::optional<std::size_t> match;
+};
+
+/**
+ * Type-to-select over `count` items: extends the query kept in retained `state` (or starts a new
+ * one once `state` + "Deadline" passes), then matches labels case-insensitively, wrapping from the
+ * item after `current`. A query nothing matches restarts from the key just typed, so repeating a
+ * letter cycles. `label_at` returns null for items that cannot be selected.
+ */
+[[nodiscard]] TypeaheadStep
+typeahead_step(WidgetInputScope& scope, std::string_view state, std::size_t count,
+               std::size_t current, const std::function<const std::string*(std::size_t)>& label_at);
 
 void register_primitive_widget_inputs(WidgetRegistry& registry);
 void register_control_widget_inputs(WidgetRegistry& registry);
