@@ -74,6 +74,16 @@ class Reader final {
         return Reader(raw(count()));
     }
 
+    /**
+     * How many of `count` records of at least `minimum_bytes` each the unread bytes could hold.
+     * Counts come from the packet, so storage is reserved only for what can actually follow;
+     * a truncated packet is still rejected by the reads themselves.
+     */
+    [[nodiscard]] std::size_t plausible(const std::uint32_t count,
+                                        const std::size_t minimum_bytes) const noexcept {
+        return std::min<std::size_t>(count, (bytes_.size() - offset_) / minimum_bytes);
+    }
+
     void exhausted(const std::string_view label) const {
         if (offset_ != bytes_.size()) {
             throw std::invalid_argument(std::string(label) + " contains trailing bytes");
@@ -233,7 +243,7 @@ void validate_geometry(const RenderPacket& packet) {
 ) {
     std::vector<GeometryPatch> result;
     const std::uint32_t count = input.count();
-    result.reserve(count);
+    result.reserve(input.plausible(count, 8U));
     std::size_t previous_end = 0U;
     for (std::uint32_t index = 0U; index < count; ++index) {
         GeometryPatch patch;
@@ -590,7 +600,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     std::vector<PresentationGroup> groups = presentation_groups(input);
 
     std::vector<ResourceOperation> resources;
-    resources.reserve(resource_count);
+    resources.reserve(input.plausible(resource_count, 8U));
     for (std::uint32_t index = 0U; index < resource_count; ++index) {
         const std::uint32_t kind = input.u32();
         resources.push_back(resource(kind, input.record()));
@@ -679,12 +689,12 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         const std::span<const std::uint8_t> vertices = input.raw(vertex_bytes);
         result.vertices.assign(vertices.begin(), vertices.end());
         result.indices.clear();
-        result.indices.reserve(index_count);
+        result.indices.reserve(input.plausible(index_count, 4U));
         for (std::uint32_t index = 0U; index < index_count; ++index)
             result.indices.push_back(input.u32());
     }
     result.batches.clear();
-    result.batches.reserve(batch_count);
+    result.batches.reserve(input.plausible(batch_count, 8U));
     for (std::uint32_t index = 0U; index < batch_count; ++index) {
         const std::uint32_t kind = input.u32();
         Reader batch = input.record();

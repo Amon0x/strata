@@ -944,6 +944,12 @@ if(STRATA_BUILD_SAMPLES)
             PRIVATE Strata::d3d11 Strata::host Strata::win32
         )
         strata_target_defaults(strata_d3d11_target_smoke)
+
+        # D3D11 renderer behaviour on a WARP device: recovery after a failed frame and PNG
+        # decoding on a thread that never initialised COM.
+        add_executable(strata_d3d11_renderer_tests tests/d3d11_renderer_tests.cpp)
+        target_link_libraries(strata_d3d11_renderer_tests PRIVATE Strata::d3d11 Strata::host d3d11)
+        strata_target_defaults(strata_d3d11_renderer_tests)
     endif()
 endif()
 
@@ -1375,6 +1381,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         if(WIN32)
             add_test(NAME strata.embed.adapter_c COMMAND strata_adapter_c_smoke)
             add_test(NAME strata.embed.d3d11_target COMMAND strata_d3d11_target_smoke)
+            add_test(NAME strata.d3d11.renderer COMMAND strata_d3d11_renderer_tests)
         endif()
     endif()
     if(STRATA_BUILD_TOOLS)

@@ -28,6 +28,24 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
+/**
+ * Initialises COM for one call when the thread has not, and undoes only its own initialisation.
+ * A thread already initialised in another apartment (RPC_E_CHANGED_MODE) can use WIC as it is.
+ */
+class ComScope final {
+  public:
+    ComScope() noexcept : result_(CoInitializeEx(nullptr, COINIT_MULTITHREADED)) {}
+    ~ComScope() {
+        if (SUCCEEDED(result_))
+            CoUninitialize();
+    }
+    ComScope(const ComScope&) = delete;
+    ComScope& operator=(const ComScope&) = delete;
+
+  private:
+    HRESULT result_;
+};
+
 void require_hresult(const HRESULT result, const std::string_view operation) {
     if (FAILED(result)) {
         throw std::runtime_error(std::string(operation) + " failed with HRESULT " +
@@ -108,6 +126,9 @@ struct TextureStore::Impl final {
     }
 
     [[nodiscard]] std::vector<std::uint8_t> decode_png(const ResourceOperation& operation) const {
+        // WIC needs COM on the calling thread, and an embedding engine's render thread may not
+        // have initialised it. Declared first, so every WIC object is released before it ends.
+        const ComScope com;
         ComPtr<IWICImagingFactory> factory;
         require_hresult(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                                          IID_PPV_ARGS(&factory)),

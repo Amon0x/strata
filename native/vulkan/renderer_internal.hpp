@@ -8,6 +8,7 @@
 #include "gpu/shaders.hpp"
 #include "resources.hpp"
 #include "shader.hpp"
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <optional>
@@ -199,6 +200,11 @@ struct Renderer::Impl {
               host::Scissor scissor, const host::DrawBatch* batch = nullptr, Slice vertices = {},
               Slice indices = {});
     Image& blur(Image& source, double radius, std::uint32_t downsample);
+    /** Device pixels per logical pixel on `target`; blur radii are authored in logical pixels. */
+    [[nodiscard]] double pixel_scale(const Target& target) const noexcept {
+        return std::max(static_cast<double>(target.width) / logical_width,
+                        static_cast<double>(target.height) / logical_height);
+    }
     gpu::EffectConstants effect_constants(const host::EffectBatch& effect, const Target& target);
     host::Scissor bounds(const host::EffectBatch& effect, const Target& target);
     void effect(Target& destination, Image& source, Image& backdrop,

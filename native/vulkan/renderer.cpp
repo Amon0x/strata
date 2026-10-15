@@ -119,7 +119,8 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                      *texture, *texture, batch->scissor, batch, vertices, indices);
             } else if (const auto* blur_batch = std::get_if<host::BlurBatch>(&submission)) {
                 Image& original = capture(target);
-                Image& blurred = blur(original, blur_batch->radius, blur_batch->downsample);
+                Image& blurred = blur(original, blur_batch->radius * pixel_scale(target),
+                                      blur_batch->downsample);
                 BlurData data;
                 data.composite = 1;
                 data.logical[0] = static_cast<float>(logical_width);

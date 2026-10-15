@@ -5,7 +5,8 @@ namespace strata::vulkan {
 Image& Renderer::Impl::blur(Image& source, double radius, std::uint32_t downsample) {
     if (!std::isfinite(radius) || radius < 0)
         throw std::invalid_argument("invalid blur radius");
-    downsample = std::clamp(downsample, 1U, 16U);
+    // The same bound as the D3D11 and reference renderers, so a packet blurs alike everywhere.
+    downsample = std::clamp(downsample, 1U, 8U);
     const auto w = std::max(1U, source.width / downsample),
                h = std::max(1U, source.height / downsample);
     Image& ping = temporary(w, h, source.format);
@@ -108,9 +109,9 @@ void Renderer::Impl::effect(Target& destination, Image& source, Image& backdrop,
                 if (pass.downsample_parameter >= batch.parameter_count)
                     throw std::invalid_argument("effect downsample parameter out of range");
                 downsample = static_cast<std::uint32_t>(
-                    std::clamp(batch.parameters[pass.downsample_parameter], 1.0, 16.0));
+                    std::clamp(batch.parameters[pass.downsample_parameter], 1.0, 8.0));
             }
-            current = &blur(*current, radius, downsample);
+            current = &blur(*current, radius * pixel_scale(destination), downsample);
         } else if (pass.kind == 1) {
             auto& next = temporary(destination.width, destination.height, destination.format);
             clear(next);

@@ -57,8 +57,14 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
                             operation.format == host::texture_format_r8;
             auto image = std::make_unique<Image>(device, operation.width, operation.height,
                                                  r8 ? VK_FORMAT_R8_UNORM : VK_FORMAT_R8G8B8A8_UNORM);
-            image->filter = operation.sampling == host::texture_sampling_nearest ? VK_FILTER_NEAREST
-                                                                                 : VK_FILTER_LINEAR;
+            // Only encoded images carry a sampling mode. A created atlas is sampled as the other
+            // renderers sample it: coverage (R8) texel-exact, MSDF (RGBA) bilinear, which its
+            // distance reconstruction depends on.
+            image->filter = operation.kind == host::resource_create
+                                ? (r8 ? VK_FILTER_NEAREST : VK_FILTER_LINEAR)
+                            : operation.sampling == host::texture_sampling_nearest
+                                ? VK_FILTER_NEAREST
+                                : VK_FILTER_LINEAR;
             if (auto it = textures.find(id); it != textures.end())
                 retire(std::move(it->second));
             textures[id] = std::move(image);

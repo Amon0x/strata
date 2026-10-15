@@ -609,8 +609,12 @@ struct RenderContext::Impl final {
         if (!retained.epoch.has_value() || *retained.epoch != packet.geometry_epoch) {
             const std::size_t index_bytes = packet.indices.size() * sizeof(std::uint32_t);
             ensure_geometry_buffers(retained, packet.vertices.size(), index_bytes);
-            const bool incremental =
-                retained.epoch.has_value() && !packet.full_geometry_payload;
+            // Patches describe the step from the previous epoch only. After a skipped epoch (a
+            // frame that failed after the decoder had applied it) the buffer is older than that,
+            // so it is replaced from the decoder's complete geometry instead.
+            const bool incremental = retained.epoch.has_value() &&
+                                     *retained.epoch + 1U == packet.geometry_epoch &&
+                                     !packet.full_geometry_payload;
             if (incremental &&
                 (!packet.vertex_patches.empty() || !packet.index_patches.empty())) {
                 patch_geometry(
