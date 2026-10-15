@@ -75,8 +75,6 @@ public:
     [[nodiscard]] CommandReferenceProjection reference_projection(
         const RetainedNode& node
     ) const;
-    /** Stable retained declaration/traversal order, independent of keyed lookup ordering. */
-    [[nodiscard]] const std::vector<const CommandSnapshot*>& ordered_entries() const noexcept;
     [[nodiscard]] const std::map<std::string, CommandSnapshot, std::less<>>& entries() const noexcept;
     /** Records only a successfully resolved execution in surface-local recency order. */
     void record_execution(std::string_view id);

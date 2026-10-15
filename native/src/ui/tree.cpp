@@ -620,15 +620,6 @@ RetainedTree::find_type(const std::string_view type) const noexcept {
     return found != type_index_.end() ? &found->second : nullptr;
 }
 
-const std::vector<RetainedNode*>*
-RetainedTree::find_state_scope(const std::string_view scope) const noexcept {
-    const auto found = state_scope_index_.find(scope);
-    return found != state_scope_index_.end() ? &found->second : nullptr;
-}
-
-const std::vector<RetainedNode*>& RetainedTree::semantic_nodes() const noexcept {
-    return semantic_index_;
-}
 const std::vector<RetainedNode*>& RetainedTree::virtual_nodes() const noexcept {
     return virtual_index_;
 }
@@ -892,8 +883,6 @@ void RetainedTree::clear() {
     identity_index_.clear();
     source_index_.clear();
     type_index_.clear();
-    state_scope_index_.clear();
-    semantic_index_.clear();
     virtual_index_.clear();
     behavior_index_.clear();
     dirty_index_.clear();
@@ -927,8 +916,6 @@ void RetainedTree::rebuild_indexes() {
     identity_index_.clear();
     source_index_.clear();
     type_index_.clear();
-    state_scope_index_.clear();
-    semantic_index_.clear();
     virtual_index_.clear();
     dirty_index_.clear();
     if (root_ != nullptr)
@@ -946,13 +933,6 @@ void RetainedTree::index(RetainedNode& node) {
     if (!node.description_->source_path.empty())
         source_index_[node.description_->source_path].push_back(&node);
     type_index_[node.description_->type].push_back(&node);
-    if (!node.description_->state_scope.empty())
-        state_scope_index_[node.description_->state_scope].push_back(&node);
-    const auto semantics = node.description_->properties.find("semantics");
-    if (semantics != node.description_->properties.end() && semantics->second.value() != nullptr &&
-        semantics->second.value()->kind() != runtime::ValueKind::null_value) {
-        semantic_index_.push_back(&node);
-    }
     if (node.lifecycle_ == RetainedLifecycle::attached &&
         node.description_->materialization.has_value()) {
         virtual_index_.push_back(&node);

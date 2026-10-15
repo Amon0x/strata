@@ -159,11 +159,9 @@ public:
         std::string_view undo_scope = "application",
         std::int64_t timestamp_nanos = 0
     );
-    [[nodiscard]] const DeclarativeLayerRegistry& layer_registry() const noexcept;
     [[nodiscard]] const std::shared_ptr<const RuntimeUnit>& active_unit() const noexcept;
     [[nodiscard]] std::optional<std::uint64_t> active_generation() const noexcept;
     [[nodiscard]] std::optional<std::uint64_t> last_attempted_generation() const noexcept;
-    [[nodiscard]] const ActivationResult* last_activation() const noexcept;
     void bind_state_scope(
         std::string_view runtime_scope,
         std::string_view state_name,

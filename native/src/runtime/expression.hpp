@@ -211,9 +211,6 @@ class ExpressionScope final {
         return contextual_host_roots_;
     }
     [[nodiscard]] const std::string& component_path() const noexcept;
-    [[nodiscard]] const std::shared_ptr<const std::string>& shared_component_path() const noexcept {
-        return component_path_;
-    }
     [[nodiscard]] const FrozenHostReads* host_dependency_overrides() const noexcept {
         return host_dependency_overrides_.get();
     }

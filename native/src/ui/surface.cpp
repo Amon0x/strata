@@ -1898,10 +1898,6 @@ SurfaceEventDrain Surface::drain_events() {
     return result;
 }
 
-void Surface::report_diagnostic(runtime::RuntimeDiagnostic diagnostic) {
-    application_.services().report(std::move(diagnostic));
-}
-
 void Surface::clear_diagnostics() noexcept {
     input_.clear_diagnostics();
     layout_engine_.clear_diagnostics();

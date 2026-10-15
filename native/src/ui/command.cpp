@@ -388,10 +388,6 @@ CommandReferenceProjection CommandIndex::reference_projection(
     return result;
 }
 
-const std::vector<const CommandSnapshot*>& CommandIndex::ordered_entries() const noexcept {
-    return declaration_order_;
-}
-
 const std::map<std::string, CommandSnapshot, std::less<>>& CommandIndex::entries() const noexcept {
     return entries_;
 }

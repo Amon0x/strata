@@ -67,7 +67,6 @@ public:
     [[nodiscard]] NotificationSnapshot snapshot(std::size_t max_visible = 3U) const;
     [[nodiscard]] const Notification* find(std::uint64_t id) const noexcept;
     [[nodiscard]] std::uint64_t generation() const noexcept;
-    [[nodiscard]] bool has_expiring() const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;
     [[nodiscard]] std::size_t capacity() const noexcept;
 

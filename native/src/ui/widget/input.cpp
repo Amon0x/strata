@@ -114,10 +114,6 @@ bool WidgetInputScope::cancel_gesture() noexcept {
 std::vector<WidgetSubtarget> WidgetInputScope::subtargets() const {
     return router_.subtargets(node_.identity());
 }
-std::optional<std::size_t> WidgetInputScope::text_offset(const std::string_view text) const {
-    return pointer_ != nullptr ? router_.resolve_text_offset(node_, text, pointer_->position)
-                               : std::nullopt;
-}
 std::int64_t WidgetInputScope::frame_time_nanos() const noexcept {
     return router_.frame_time_nanos_;
 }

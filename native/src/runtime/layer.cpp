@@ -151,14 +151,6 @@ void DeclarativeLayerRegistry::register_overlay(std::string name, std::string id
     }
 }
 
-bool DeclarativeLayerRegistry::unregister_screen(const std::string_view name) {
-    return screens_.erase(std::string(name)) != 0U;
-}
-
-bool DeclarativeLayerRegistry::unregister_overlay(const std::string_view name) {
-    return overlays_.erase(std::string(name)) != 0U;
-}
-
 LayerOperationResult DeclarativeLayerRegistry::execute(
     LayerStack& stack,
     const DeclarativeLayerOperation operation,

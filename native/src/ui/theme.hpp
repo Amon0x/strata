@@ -246,7 +246,6 @@ public:
     [[nodiscard]] bool reduced_motion() const noexcept;
     [[nodiscard]] const std::map<std::string, MotionTiming, std::less<>>& timings() const noexcept;
     [[nodiscard]] const MotionTiming* find(std::string_view name) const noexcept;
-    [[nodiscard]] const MotionTiming& timing_or_default(std::string_view name) const noexcept;
     [[nodiscard]] friend bool operator==(
         const ThemeMotionPolicy&,
         const ThemeMotionPolicy&

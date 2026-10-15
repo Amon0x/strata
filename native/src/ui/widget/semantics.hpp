@@ -39,9 +39,6 @@ class WidgetSemanticsScope final {
     [[nodiscard]] bool effective_boolean(std::string_view controlled,
                                          std::string_view retained_name, std::string_view initial,
                                          bool fallback) const noexcept;
-    [[nodiscard]] std::optional<std::string> effective_text(std::string_view controlled,
-                                                            std::string_view retained_name,
-                                                            std::string_view initial) const;
     [[nodiscard]] bool has_ancestor(std::string_view type) const noexcept;
 
     [[nodiscard]] std::string_view role() const noexcept;
@@ -80,8 +77,6 @@ class WidgetSemanticsScope final {
                  std::optional<std::string> value_text = std::nullopt) const;
     [[nodiscard]] data::JsonValue virtual_command(const CommandSnapshot& command, std::size_t index,
                                                   std::string_view role = "menu_item") const;
-    [[nodiscard]] data::JsonValue
-    virtual_tab(const runtime::Value& entry, std::string_view selected_id, std::size_t index) const;
 
     [[nodiscard]] data::JsonValue build(data::JsonValue::Array retained_children) const;
 

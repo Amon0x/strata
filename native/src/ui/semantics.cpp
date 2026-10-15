@@ -220,7 +220,6 @@ JsonValue SemanticsEngine::snapshot(const std::string_view surface_id) const {
 }
 
 std::uint64_t SemanticsEngine::generation() const noexcept { return generation_; }
-std::uint64_t SemanticsEngine::publish_count() const noexcept { return publish_count_; }
 
 std::vector<runtime::RuntimeDiagnostic> SemanticsEngine::take_diagnostics() {
     std::vector<runtime::RuntimeDiagnostic> result = std::move(diagnostics_);

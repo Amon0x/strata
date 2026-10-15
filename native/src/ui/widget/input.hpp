@@ -52,7 +52,6 @@ class WidgetInputScope final {
     [[nodiscard]] bool claim_gesture() noexcept;
     [[nodiscard]] bool cancel_gesture() noexcept;
     [[nodiscard]] std::vector<WidgetSubtarget> subtargets() const;
-    [[nodiscard]] std::optional<std::size_t> text_offset(std::string_view text) const;
     [[nodiscard]] std::int64_t frame_time_nanos() const noexcept;
     /** Active drag whose current target is this widget or one of its descendants. */
     [[nodiscard]] std::optional<WidgetDragInteraction> active_drag() const;

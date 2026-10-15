@@ -32,7 +32,6 @@ public:
     [[nodiscard]] const data::JsonValue* find(std::uint64_t identity) const;
     [[nodiscard]] data::JsonValue snapshot(std::string_view surface_id) const;
     [[nodiscard]] std::uint64_t generation() const noexcept;
-    [[nodiscard]] std::uint64_t publish_count() const noexcept;
     [[nodiscard]] std::vector<runtime::RuntimeDiagnostic> take_diagnostics();
     void clear_diagnostics() noexcept;
     void clear() noexcept;

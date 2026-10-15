@@ -177,15 +177,6 @@ std::optional<Point> InputDispatchContext::press_origin() const noexcept {
                                                            : std::nullopt;
 }
 
-std::optional<Point> InputDispatchContext::press_last_position() const noexcept {
-    if (pointer_ == nullptr)
-        return std::nullopt;
-    const auto found = router_.pressed_pointer_targets_.find(pointer_->pointer_id);
-    return found != router_.pressed_pointer_targets_.end()
-               ? std::optional(found->second.last_position)
-               : std::nullopt;
-}
-
 bool InputDispatchContext::press_moved_beyond_slop() const noexcept {
     if (pointer_ == nullptr)
         return false;
@@ -206,14 +197,6 @@ GestureClaimState InputDispatchContext::gesture_claim_state() const noexcept {
     const auto found = router_.pressed_pointer_targets_.find(pointer_->pointer_id);
     return found != router_.pressed_pointer_targets_.end() ? found->second.gesture
                                                            : GestureClaimState::unclaimed;
-}
-
-std::optional<std::uint64_t> InputDispatchContext::gesture_claim_owner() const noexcept {
-    if (pointer_ == nullptr)
-        return std::nullopt;
-    const auto found = router_.pressed_pointer_targets_.find(pointer_->pointer_id);
-    return found != router_.pressed_pointer_targets_.end() ? found->second.gesture_owner
-                                                           : std::nullopt;
 }
 
 void InputDispatchContext::consume() noexcept {

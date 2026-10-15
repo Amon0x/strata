@@ -567,9 +567,6 @@ std::optional<Value> ApplicationContext::state_initial_value(
                ? std::optional<Value>(*value)
                : std::nullopt;
 }
-const DeclarativeLayerRegistry& ApplicationContext::layer_registry() const noexcept {
-    return layer_registry_;
-}
 const std::shared_ptr<const RuntimeUnit>& ApplicationContext::active_unit() const noexcept {
     return active_unit_;
 }
@@ -578,9 +575,6 @@ std::optional<std::uint64_t> ApplicationContext::active_generation() const noexc
 }
 std::optional<std::uint64_t> ApplicationContext::last_attempted_generation() const noexcept {
     return last_attempted_generation_;
-}
-const ActivationResult* ApplicationContext::last_activation() const noexcept {
-    return last_activation_.has_value() ? &*last_activation_ : nullptr;
 }
 void ApplicationContext::bind_state_scope(
     const std::string_view runtime_scope,

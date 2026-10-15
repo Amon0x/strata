@@ -79,7 +79,6 @@ public:
     /** True when nothing this paint can produce is visible. */
     [[nodiscard]] bool transparent() const noexcept;
     void multiply_alpha(double opacity) noexcept;
-    [[nodiscard]] Paint with_alpha_multiplied(double opacity) const;
 
     [[nodiscard]] friend bool operator==(const Paint&, const Paint&) = default;
 

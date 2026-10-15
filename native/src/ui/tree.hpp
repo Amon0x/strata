@@ -462,9 +462,6 @@ class RetainedTree final {
     [[nodiscard]] const std::vector<RetainedNode*>*
     find_source(std::string_view source_path) const noexcept;
     [[nodiscard]] const std::vector<RetainedNode*>* find_type(std::string_view type) const noexcept;
-    [[nodiscard]] const std::vector<RetainedNode*>*
-    find_state_scope(std::string_view scope) const noexcept;
-    [[nodiscard]] const std::vector<RetainedNode*>& semantic_nodes() const noexcept;
     [[nodiscard]] const std::vector<RetainedNode*>& virtual_nodes() const noexcept;
     /** Nodes with behaviors attached, in preorder. */
     [[nodiscard]] const std::vector<RetainedNode*>& behavior_nodes() const noexcept;
@@ -542,8 +539,6 @@ class RetainedTree final {
     std::map<std::uint64_t, RetainedNode*> identity_index_;
     std::map<std::string, std::vector<RetainedNode*>, std::less<>> source_index_;
     std::map<std::string, std::vector<RetainedNode*>, std::less<>> type_index_;
-    std::map<std::string, std::vector<RetainedNode*>, std::less<>> state_scope_index_;
-    std::vector<RetainedNode*> semantic_index_;
     std::vector<RetainedNode*> virtual_index_;
     std::vector<RetainedNode*> behavior_index_;
     std::size_t indexed_nodes_ = 0U;

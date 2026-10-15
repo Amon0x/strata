@@ -73,8 +73,6 @@ class DeclarativeLayerRegistry final {
 public:
     void register_screen(std::string name, std::string id);
     void register_overlay(std::string name, std::string id);
-    [[nodiscard]] bool unregister_screen(std::string_view name);
-    [[nodiscard]] bool unregister_overlay(std::string_view name);
     [[nodiscard]] LayerOperationResult execute(
         LayerStack& stack,
         DeclarativeLayerOperation operation,

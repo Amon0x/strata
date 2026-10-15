@@ -229,18 +229,6 @@ bool WidgetSemanticsScope::effective_boolean(const std::string_view controlled,
     return value.value_or(fallback);
 }
 
-std::optional<std::string>
-WidgetSemanticsScope::effective_text(const std::string_view controlled,
-                                     const std::string_view retained_name,
-                                     const std::string_view initial) const {
-    std::optional<std::string> value = text(property(controlled));
-    if (!value.has_value())
-        value = text(retained(retained_name));
-    if (!value.has_value())
-        value = text(property(initial));
-    return value;
-}
-
 bool WidgetSemanticsScope::has_ancestor(const std::string_view type) const noexcept {
     for (const RetainedNode* current = node_.parent(); current != nullptr;
          current = current->parent()) {
@@ -401,32 +389,6 @@ JsonValue WidgetSemanticsScope::virtual_command(const CommandSnapshot& command,
                                      std::to_string(2'000'000U + index))},
         {"virtualCommandId", JsonValue(command.id)},
         {"virtualIndex", JsonValue{}},
-        {"virtualNotificationId", JsonValue{}},
-    });
-}
-
-JsonValue WidgetSemanticsScope::virtual_tab(const runtime::Value& entry,
-                                            const std::string_view selected_id,
-                                            const std::size_t index) const {
-    const std::string id = text(entry.field("id")).value_or(std::string{});
-    const std::string label = text(entry.field("label")).value_or(id);
-    std::vector<JsonValue> actions;
-    for (std::string action : actions_for("tab"))
-        actions.emplace_back(std::move(action));
-    return object({
-        {"actions", array(std::move(actions))},
-        {"children", array()},
-        {"description", JsonValue{}},
-        {"key",
-         node_.description().key.has_value() ? JsonValue(*node_.description().key) : JsonValue{}},
-        {"liveRegion", JsonValue("off")},
-        {"name", JsonValue(label)},
-        {"role", JsonValue("tab")},
-        {"state", semantic_state(id == selected_id)},
-        {"structuralPath", JsonValue(std::string(node_.structural_path()) + "/" +
-                                     std::to_string(2'000'000U + index))},
-        {"virtualCommandId", JsonValue{}},
-        {"virtualIndex", JsonValue(static_cast<std::int64_t>(index))},
         {"virtualNotificationId", JsonValue{}},
     });
 }

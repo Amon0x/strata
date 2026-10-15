@@ -172,13 +172,6 @@ const Notification* NotificationService::find(const std::uint64_t id) const noex
 
 std::uint64_t NotificationService::generation() const noexcept { return generation_; }
 
-bool NotificationService::has_expiring() const noexcept {
-    return std::ranges::any_of(notifications_, [](const Notification& notification) {
-        return notification.expires_at_nanos.has_value() &&
-               !notification.paused_at_nanos.has_value();
-    });
-}
-
 std::size_t NotificationService::size() const noexcept { return notifications_.size(); }
 std::size_t NotificationService::capacity() const noexcept { return capacity_; }
 

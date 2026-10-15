@@ -339,15 +339,6 @@ void InputRouter::synchronize_authored_presentations() {
         description_invalidator_(nullptr, {});
 }
 
-bool InputRouter::hover_ready(const std::uint64_t identity,
-                              const std::int64_t delay_nanos) const noexcept {
-    if (!hovered_.contains(identity))
-        return false;
-    const auto started = hover_started_nanos_.find(identity);
-    return started != hover_started_nanos_.end() && frame_time_nanos_ >= started->second &&
-           frame_time_nanos_ - started->second >= std::max<std::int64_t>(0, delay_nanos);
-}
-
 bool InputRouter::focusable(const RetainedNode& node) const noexcept {
     if (!node_input_enabled(node))
         return false;
@@ -1015,10 +1006,6 @@ InputRouter::activation_action(const RetainedNode& node, const std::string_view 
         std::nullopt,
         {},
     });
-}
-
-std::optional<std::uint64_t> InputRouter::focused_identity() const noexcept {
-    return focused_;
 }
 
 std::optional<std::string_view> InputRouter::focused_key() const noexcept {

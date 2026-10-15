@@ -176,11 +176,9 @@ class InputDispatchContext final {
     [[nodiscard]] bool consumed() const noexcept;
     [[nodiscard]] bool propagation_stopped() const noexcept;
     [[nodiscard]] std::optional<Point> press_origin() const noexcept;
-    [[nodiscard]] std::optional<Point> press_last_position() const noexcept;
     [[nodiscard]] bool press_moved_beyond_slop() const noexcept;
     [[nodiscard]] bool long_press_emitted() const noexcept;
     [[nodiscard]] GestureClaimState gesture_claim_state() const noexcept;
-    [[nodiscard]] std::optional<std::uint64_t> gesture_claim_owner() const noexcept;
 
     void consume() noexcept;
     void stop_propagation() noexcept;
@@ -354,7 +352,6 @@ class InputRouter final {
     [[nodiscard]] std::vector<runtime::RuntimeDiagnostic> take_diagnostics();
     void clear_diagnostics() noexcept;
 
-    [[nodiscard]] std::optional<std::uint64_t> focused_identity() const noexcept;
     [[nodiscard]] std::optional<std::string_view> focused_key() const noexcept;
     /**
      * Applies one host backdrop report to the node that owns `probe`: resolves the luma against
@@ -374,7 +371,6 @@ class InputRouter final {
     [[nodiscard]] bool hovered(std::uint64_t identity) const noexcept;
     /** True after a stationary command-bound hover crosses its one-shot disclosure deadline. */
     [[nodiscard]] bool command_tooltip_ready(std::uint64_t identity) const noexcept;
-    [[nodiscard]] bool hover_ready(std::uint64_t identity, std::int64_t delay_nanos) const noexcept;
     [[nodiscard]] bool active(std::uint64_t identity) const noexcept;
     [[nodiscard]] std::vector<WidgetSubtarget> subtargets(std::uint64_t identity) const;
     [[nodiscard]] bool subtarget_hovered(std::uint64_t identity,

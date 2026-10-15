@@ -54,9 +54,6 @@ public:
     [[nodiscard]] data::JsonView portable_ir() const noexcept;
     /** The portable IR lowered for evaluation; lives as long as the unit. */
     [[nodiscard]] const Program& program() const noexcept { return *program_; }
-    [[nodiscard]] const std::shared_ptr<const Program>& shared_program() const noexcept {
-        return program_;
-    }
     [[nodiscard]] const std::string& source_id() const noexcept;
     [[nodiscard]] const std::vector<std::string>& screens() const noexcept;
     [[nodiscard]] const std::vector<std::string>& overlays() const noexcept;

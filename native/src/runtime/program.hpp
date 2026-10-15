@@ -449,9 +449,6 @@ class Program final : public std::enable_shared_from_this<Program> {
     branches(const ProgramIdentity& identity) const {
         return {identity_branches_.data() + identity.branches_begin, identity.branches_count};
     }
-    [[nodiscard]] std::size_t expression_count() const noexcept {
-        return expressions_.size();
-    }
     [[nodiscard]] std::size_t call_count() const noexcept {
         return calls_.size();
     }

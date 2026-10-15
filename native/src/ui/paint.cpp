@@ -219,12 +219,6 @@ void Paint::multiply_alpha(const double opacity) noexcept {
     for (GradientStop& stop : std::get<Gradient>(value_).stops) scale(stop.color);
 }
 
-Paint Paint::with_alpha_multiplied(const double opacity) const {
-    Paint result = *this;
-    result.multiply_alpha(opacity);
-    return result;
-}
-
 double gradient_parameter(
     const Gradient& gradient,
     const Point normalized,

@@ -264,8 +264,6 @@ class Surface final {
     [[nodiscard]] SurfaceFrame frame(std::int64_t frame_time_nanos);
     /** Drains the bounded ordered event/outcome publication stream exactly once. */
     [[nodiscard]] SurfaceEventDrain drain_events();
-    /** Queues work completed before begin-frame for publication on the next frame call. */
-    void report_diagnostic(runtime::RuntimeDiagnostic diagnostic);
     /** Clears Surface-owned pending diagnostics and its last-frame diagnostic projection only. */
     void clear_diagnostics() noexcept;
 

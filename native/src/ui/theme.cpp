@@ -1551,13 +1551,6 @@ const MotionTiming* ThemeMotionPolicy::find(const std::string_view name) const n
     return found != timings_.end() ? &found->second : nullptr;
 }
 
-const MotionTiming&
-ThemeMotionPolicy::timing_or_default(const std::string_view name) const noexcept {
-    if (const MotionTiming* timing = find(name); timing != nullptr)
-        return *timing;
-    return timings_.find(default_motion_timing_name)->second;
-}
-
 Theme::Theme() : Theme(std::string(default_theme_name), ThemeTokens{}) {}
 
 Theme::Theme(std::string name, ThemeTokens tokens, std::shared_ptr<const Theme> parent,
