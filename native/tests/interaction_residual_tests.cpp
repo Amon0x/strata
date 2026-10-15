@@ -1627,12 +1627,15 @@ void test_movable_snapping(InputFixture& fixture) {
 }
 
 // A backdrop observer resolves host luma reports into a bistable light/dark reading: it changes
-// only past a threshold, holds between them, and emits once per change.
+// only past a threshold, holds between them, believes a change only once it has persisted for the
+// dwell, and emits once per change.
 void test_backdrop_observer(InputFixture& fixture) {
     const auto observer = [](const bool enabled) {
         return std::vector<ui::DescriptionBehavior>{ui::DescriptionBehavior{
             "strata.backdrop", enabled,
-            object({{"light", runtime::Value(0.6)}, {"dark", runtime::Value(0.4)}}), nullptr}};
+            object({{"light", runtime::Value(0.6)}, {"dark", runtime::Value(0.4)},
+                    {"dwell", runtime::Value(2.0)}}),
+            nullptr}};
     };
     fixture.adopt(node("Panel", "backdrop.root",
                        {
@@ -1659,12 +1662,17 @@ void test_backdrop_observer(InputFixture& fixture) {
           "a first dark reading was announced although the node already presents as dark");
     check(report(glass->identity(), 0.55) == 0U && light() == std::optional<bool>(false),
           "a reading between the thresholds did not hold");
+    check(report(glass->identity(), 0.7) == 0U && light() == std::optional<bool>(false),
+          "a single light reading flipped before the dwell");
     check(report(glass->identity(), 0.7) == 1U && light() == std::optional<bool>(true),
-          "a reading above the light threshold did not flip and emit once");
+          "a light reading held for the dwell did not flip and emit once");
     check(report(glass->identity(), 0.5) == 0U && light() == std::optional<bool>(true),
           "a light reading did not hold between the thresholds");
+    check(report(glass->identity(), 0.3) == 0U && report(glass->identity(), 0.5) == 0U &&
+              report(glass->identity(), 0.3) == 0U && light() == std::optional<bool>(true),
+          "an interrupted dark streak counted toward the dwell");
     check(report(glass->identity(), 0.3) == 1U && light() == std::optional<bool>(false),
-          "a reading below the dark threshold did not flip back and emit once");
+          "a dark reading held for the dwell did not flip back and emit once");
     check(report(off->identity(), 0.9) == 0U &&
               off->retained_value("strata.backdrop.light") == nullptr,
           "a disabled observer accepted a report");

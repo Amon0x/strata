@@ -55,10 +55,13 @@ style DemoStageLine {
   color: #FFFFFFE6;
 }
 style DemoValue extends GlassCaption { width: 44; alignment: "END"; }
+// Swatches answer a press by scaling and a selection by their ring; the default hover and press
+// plates would paint over the colour they exist to show.
 style DemoSwatch {
   tone: 0;
   width: 30; height: 30; radius: 999;
   border: { width: 1, color: #FFFFFF2E };
+  hoverOverlay: null; activeOverlay: null;
   focusRing: { width: 2, color: #FFFFFF99 };
 }
 style DemoSwatchSelected extends DemoSwatch { border: { width: 2, color: #FFFFFFF0 }; }
@@ -389,10 +392,7 @@ overlay Hyalite {
           width: 168, height: 168,
           placement: { x: { fraction: 0.5 }, anchorX: 0.5, y: { fraction: 0.71 }, anchorY: 0.5 }
         },
-        behaviors: [
-          { id: "strata.hoverable" },
-          { id: "strata.movable", options: { bounds: "parent" } }
-        ]
+        behaviors: [{ id: "strata.movable", options: { bounds: "parent" } }]
       )
     }
   }

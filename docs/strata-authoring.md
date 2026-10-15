@@ -33,7 +33,7 @@ component SettingsCard(title: string) {
 overlay Settings {
   state advanced = false;
   state sections: List<string> = ["account", "privacy"];
-  derived summary = join(sections, " · ");
+  derived summary = join(sections, " Â· ");
 
   root SettingsCard(title: "Display") {
     Slot(name: "body") {
@@ -102,7 +102,7 @@ Editable controls separate mechanics from optional chrome. Use `appearance: "BAR
 
 ```strata
 Panel(style: SearchGlass) {
-  TextBox(key: "search.editor", bind: query, appearance: "BARE", hint: "Search…")
+  TextBox(key: "search.editor", bind: query, appearance: "BARE", hint: "Searchâ€¦")
 }
 ```
 
@@ -238,8 +238,10 @@ component GlassCard() {
 ```
 
 The reading becomes `true` at or above `light`, `false` at or below `dark`, and holds in between, so
-a backdrop that hovers near a threshold cannot flicker; the action fires only when the reading
-changes. `options` may be omitted for the defaults shown. What the component does with the boolean
+a backdrop that hovers near a threshold cannot flicker. A changed reading is believed only once it
+has held for `dwell` consecutive reports (three by default), so a single odd frame while a scene or
+surface is changing cannot flip a node and flip it straight back; the action fires only when the
+reading changes. `options` may be omitted for the defaults shown. What the component does with the boolean
 is ordinary authoring: here it sets [`tone`](strata-language.md#tone), which flips the ink of
 everything inside the card and tells the glass shader which contrast band to hold.
 Retained render frames preserve that tone, including while a child control is pressed or held;
@@ -260,8 +262,8 @@ own colors; toolbar and navigation surfaces follow the selected Regular, Clear o
 
 ### Scroll observation
 
-Every built-in scroll viewport—`Scroll`, `Repeater`, `VirtualList`, `ItemGrid`, `Table`, and
-`TreeView`—accepts `onScroll`. It emits after the retained offset changes and has been clamped:
+Every built-in scroll viewportâ€”`Scroll`, `Repeater`, `VirtualList`, `ItemGrid`, `Table`, and
+`TreeView`â€”accepts `onScroll`. It emits after the retained offset changes and has been clamped:
 
 ```strata
 Scroll(
@@ -374,8 +376,8 @@ input, measure/arrange, semantics, and render callbacks; they do not acquire com
 host-global state. Built-ins and extensions share stable identity, invalidation, focus/capture,
 motion, layout, semantics, and packet planning.
 
-Adding a reusable custom composition is not an extension reason—write a `.strata` component. Adding
-a game callback is not an extension reason—register a typed host action.
+Adding a reusable custom composition is not an extension reasonâ€”write a `.strata` component. Adding
+a game callback is not an extension reasonâ€”register a typed host action.
 
 ## Diagnostics and source reactivation
 

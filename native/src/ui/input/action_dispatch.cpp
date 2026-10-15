@@ -41,6 +41,10 @@ void InputRouter::observe_backdrop(const std::uint64_t probe, const double lumin
     };
     const double light = threshold("light", default_backdrop_light_threshold);
     const double dark = std::min(threshold("dark", default_backdrop_dark_threshold), light);
+    const runtime::Value* const dwell_option = observer->options.field("dwell");
+    const int dwell = dwell_option != nullptr && dwell_option->number() != nullptr
+                          ? std::clamp(static_cast<int>(std::lround(*dwell_option->number())), 1, 60)
+                          : default_backdrop_dwell;
     const runtime::Value* const retained = node->retained_value(backdrop_light_value);
     const bool known = retained != nullptr && retained->boolean() != nullptr;
     const bool was_light = known && *retained->boolean();
@@ -50,8 +54,27 @@ void InputRouter::observe_backdrop(const std::uint64_t probe, const double lumin
                           : luminance <= dark  ? false
                           : known              ? was_light
                                                : luminance >= (light + dark) * 0.5;
-    if (known && is_light == was_light)
+    if (known && is_light == was_light) {
+        tree_->set_input_value(probe, backdrop_pending_value, runtime::Value());
         return;
+    }
+    // A changed reading must hold for `dwell` consecutive reports before it is believed. Host
+    // readback runs a frame or two behind, and a frame in which a scene or a surface is changing
+    // can measure something neither the old nor the new scene will: without the dwell, such a
+    // frame flips the scheme and the next one flips it straight back.
+    if (known && dwell > 1) {
+        const runtime::Value* const pending = node->retained_value(backdrop_pending_value);
+        const int streak =
+            pending != nullptr && pending->number() != nullptr ? static_cast<int>(*pending->number()) : 0;
+        // The streak is signed by the reading it counts: positive light, negative dark.
+        const int agreed = is_light ? std::max(streak, 0) + 1 : std::min(streak, 0) - 1;
+        if (std::abs(agreed) < dwell) {
+            tree_->set_input_value(probe, backdrop_pending_value,
+                                   runtime::Value(static_cast<double>(agreed)));
+            return;
+        }
+    }
+    tree_->set_input_value(probe, backdrop_pending_value, runtime::Value());
     tree_->set_input_value(probe, backdrop_light_value, runtime::Value(is_light));
     tree_->set_input_value(probe, backdrop_luminance_value, runtime::Value(luminance));
     // An unreported node already presents as dark, so a first dark reading is not a change.
