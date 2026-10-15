@@ -200,6 +200,7 @@ struct Renderer::Impl {
               host::Scissor scissor, const host::DrawBatch* batch = nullptr, Slice vertices = {},
               Slice indices = {});
     Image& blur(Image& source, double radius, std::uint32_t downsample);
+    static void validate_target(const RenderTarget& target, const FrameOptions& options);
     /** Device pixels per logical pixel on `target`; blur radii are authored in logical pixels. */
     [[nodiscard]] double pixel_scale(const Target& target) const noexcept {
         return std::max(static_cast<double>(target.width) / logical_width,

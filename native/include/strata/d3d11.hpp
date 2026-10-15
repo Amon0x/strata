@@ -124,6 +124,14 @@ class Renderer final {
     [[nodiscard]] std::vector<strata_backdrop_sample> take_backdrop_samples(
         std::string_view layer_id);
 
+    /**
+     * Throws std::invalid_argument when `target` cannot be rendered to (null resources, another
+     * device, a view of a different texture, multisampling, or sizes that disagree). render()
+     * checks this itself; a host that pulls packets from a stream checks it first, so a bad
+     * target fails the frame before the stream hands over resource operations it cannot apply.
+     */
+    void validate_target(const RenderTarget& target) const;
+
     /** Applies terminal or otherwise resource-only packets without requiring a render target. */
     void consume_resources(const host::RenderPacket& packet);
     void release_layer(std::string_view layer_id) noexcept;

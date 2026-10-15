@@ -100,17 +100,9 @@ struct Renderer::Impl final {
         }
     }
 
-    [[nodiscard]] RenderLayerTelemetry render(const std::string_view layer_id,
-                                              const host::RenderPacket& packet,
-                                              const RenderTarget& target,
-                                              const FrameOptions options) {
-        if (layer_id.empty())
-            throw std::invalid_argument("D3D11 renderer layer id must not be empty");
-        if (!std::isfinite(options.time_seconds))
-            throw std::invalid_argument("D3D11 renderer frame time must be finite");
+    void validate_target(const RenderTarget& target) const {
         if (target.texture == nullptr || target.view == nullptr)
             throw std::invalid_argument("D3D11 renderer target resources must not be null");
-
         ComPtr<ID3D11Device> target_device;
         target.texture->GetDevice(&target_device);
         if (!same_object(device.Get(), target_device.Get()))
@@ -124,6 +116,26 @@ struct Renderer::Impl final {
         target.texture->GetDesc(&target_description);
         if (target_description.SampleDesc.Count != 1U)
             throw std::invalid_argument("D3D11 renderer target must not be multisampled");
+        if (target.framebuffer_width == 0U || target.framebuffer_height == 0U ||
+            !std::isfinite(target.logical_width) || !std::isfinite(target.logical_height) ||
+            target.logical_width <= 0.0 || target.logical_height <= 0.0) {
+            throw std::invalid_argument("D3D11 render target dimensions must be positive");
+        }
+        if (target_description.Width != target.framebuffer_width ||
+            target_description.Height != target.framebuffer_height) {
+            throw std::invalid_argument("D3D11 render target dimensions do not match its texture");
+        }
+    }
+
+    [[nodiscard]] RenderLayerTelemetry render(const std::string_view layer_id,
+                                              const host::RenderPacket& packet,
+                                              const RenderTarget& target,
+                                              const FrameOptions options) {
+        if (layer_id.empty())
+            throw std::invalid_argument("D3D11 renderer layer id must not be empty");
+        if (!std::isfinite(options.time_seconds))
+            throw std::invalid_argument("D3D11 renderer frame time must be finite");
+        validate_target(target);
 
         StateScope state(*this);
         renderer.set_target(target.texture, target.view, target.framebuffer_width,
@@ -192,6 +204,10 @@ RenderLayerTelemetry Renderer::render(const std::string_view layer_id,
 std::vector<strata_backdrop_sample> Renderer::take_backdrop_samples(
     const std::string_view layer_id) {
     return impl_->renderer.take_backdrop_samples(layer_id);
+}
+
+void Renderer::validate_target(const RenderTarget& target) const {
+    impl_->validate_target(target);
 }
 
 void Renderer::consume_resources(const host::RenderPacket& packet) {

@@ -2,12 +2,10 @@
 
 namespace strata::vulkan {
 
-RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
-                                            const RenderTarget& output, FrameOptions options) {
+void Renderer::Impl::validate_target(const RenderTarget& output, const FrameOptions& options) {
     if (!output.image || !output.view || !output.framebuffer_width || !output.framebuffer_height ||
         !std::isfinite(output.logical_width) || !std::isfinite(output.logical_height) ||
-        output.logical_width <= 0 || output.logical_height <= 0 ||
-        !std::isfinite(options.time_seconds))
+        output.logical_width <= 0 || output.logical_height <= 0)
         throw std::invalid_argument("invalid Vulkan render target");
     if (output.format != VK_FORMAT_R8G8B8A8_UNORM && output.format != VK_FORMAT_B8G8R8A8_UNORM &&
         output.format != VK_FORMAT_R16G16B16A16_SFLOAT)
@@ -18,6 +16,13 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
     if (options.load_action == TargetLoadAction::preserve &&
         output.initial_layout == VK_IMAGE_LAYOUT_UNDEFINED)
         throw std::invalid_argument("cannot preserve an undefined Vulkan target");
+}
+
+RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
+                                            const RenderTarget& output, FrameOptions options) {
+    if (!std::isfinite(options.time_seconds))
+        throw std::invalid_argument("invalid Vulkan render target");
+    validate_target(output, options);
     logical_width = output.logical_width;
     logical_height = output.logical_height;
     seconds = options.time_seconds;
@@ -227,6 +232,10 @@ void Renderer::declare_effect_pass(std::string_view id, std::uint32_t index, std
         Impl::Pass{kind, radius, downsample, radius_parameter, downsample_parameter, program});
     impl_->prune_programs();
 }
+void Renderer::validate_target(const RenderTarget& target, const FrameOptions& options) const {
+    Impl::validate_target(target, options);
+}
+
 RenderLayerTelemetry Renderer::render(std::string_view layer, const host::RenderPacket& packet,
                                       const RenderTarget& target, FrameOptions options) {
     if (layer.empty())

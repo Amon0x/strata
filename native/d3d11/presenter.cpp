@@ -295,6 +295,9 @@ struct Presenter::Impl final {
         if (!programs_synchronized) synchronize_programs();
         attach(layer_id, surface);
         const auto entry = layers.find(layer_id);
+        // Taking a frame hands over its resource operations for good, so a target this frame
+        // cannot render to is rejected before the stream is advanced.
+        renderer.validate_target(target);
 
         const host::SurfacePacketFrame frame = entry->second.stream->frame(time_nanoseconds);
         options.time_seconds = static_cast<double>(time_nanoseconds) / 1'000'000'000.0;

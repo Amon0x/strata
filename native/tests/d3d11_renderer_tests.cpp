@@ -147,6 +147,22 @@ void test_geometry_after_a_failed_frame() {
           "a patch after a failed frame was applied over stale geometry");
 }
 
+// A target that cannot be rendered to is reported before a presenter takes the next packet.
+void test_target_is_validated_on_its_own() {
+    Fixture fixture;
+    const d3d11::Renderer renderer(fixture.device.Get(), fixture.context.Get());
+    renderer.validate_target(fixture.target());
+    d3d11::RenderTarget resized = fixture.target();
+    resized.framebuffer_width = 8U;
+    bool rejected = false;
+    try {
+        renderer.validate_target(resized);
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    check(rejected, "a target whose size disagrees with its texture was accepted");
+}
+
 // An embedding engine's render thread may never have initialised COM; PNG textures still decode.
 void test_png_upload_without_com() {
     Fixture fixture;
@@ -186,6 +202,7 @@ int main() {
     try {
         test_geometry_after_a_failed_frame();
         test_png_upload_without_com();
+        test_target_is_validated_on_its_own();
         std::cout << "strata_d3d11_renderer_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {
