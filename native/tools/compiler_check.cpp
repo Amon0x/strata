@@ -118,10 +118,13 @@ struct ModuleCompilation final {
     const std::filesystem::path& entry_path,
     const std::filesystem::path& schemas_path,
     const std::optional<std::filesystem::path>& source_root,
-    const std::vector<std::filesystem::path>& extension_paths
+    const std::vector<std::filesystem::path>& extension_paths,
+    const std::optional<std::filesystem::path>& import_root
 ) {
     const std::filesystem::path entry = canonical_file(entry_path, "entry module");
-    const std::filesystem::path module_root = entry.parent_path();
+    const std::filesystem::path module_root = import_root.value_or(entry.parent_path());
+    if (!is_within(module_root, entry))
+        throw std::runtime_error("entry module is outside the resource root");
 
     compiler::SchemaRegistry registry = compiler::SchemaRegistry::builtins();
     std::vector<std::string> extension_schemas;
@@ -250,13 +253,22 @@ void print_diagnostic(const compiler::Diagnostic& diagnostic) {
 
 } // namespace
 
+[[nodiscard]] std::optional<std::filesystem::path> optional_root(
+    const std::filesystem::path& resource_root
+) {
+    return resource_root.empty()
+        ? std::nullopt
+        : std::optional(canonical_directory(resource_root, "resource root"));
+}
+
 int check_module(
     const std::filesystem::path& entry_path,
     const std::filesystem::path& schemas_path,
-    const std::vector<std::filesystem::path>& extension_paths
+    const std::vector<std::filesystem::path>& extension_paths,
+    const std::filesystem::path& resource_root
 ) {
     ModuleCompilation compilation = compile_module(
-        entry_path, schemas_path, std::nullopt, extension_paths
+        entry_path, schemas_path, std::nullopt, extension_paths, optional_root(resource_root)
     );
 
     for (const compiler::Diagnostic& diagnostic : compilation.result.diagnostics) {
@@ -274,11 +286,12 @@ int check_module(
 int check_module_json(
     const std::filesystem::path& entry_path,
     const std::filesystem::path& schemas_path,
-    const std::vector<std::filesystem::path>& extension_paths
+    const std::vector<std::filesystem::path>& extension_paths,
+    const std::filesystem::path& resource_root
 ) {
     try {
         ModuleCompilation compilation = compile_module(
-            entry_path, schemas_path, std::nullopt, extension_paths
+            entry_path, schemas_path, std::nullopt, extension_paths, optional_root(resource_root)
         );
         std::vector<data::JsonValue> diagnostics;
         diagnostics.reserve(compilation.result.diagnostics.size());
@@ -331,7 +344,7 @@ int write_module_artifact(
 ) {
     const std::filesystem::path root = canonical_directory(resource_root, "resource root");
     ModuleCompilation compilation = compile_module(
-        entry_path, schemas_path, root, extension_paths
+        entry_path, schemas_path, root, extension_paths, root
     );
     for (const compiler::Diagnostic& diagnostic : compilation.result.diagnostics) {
         print_diagnostic(diagnostic);

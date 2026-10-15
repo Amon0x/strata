@@ -18,7 +18,9 @@ Install the Strata SDK or build the repository, then set `strata.compiler.path` 
 discovery cannot find `strata_compile`. `strata.applicationSchemas.path` accepts an absolute path,
 a workspace-relative path, or
 `${workspaceFolder}` placeholders. External package directories go in `strata.extensions.paths` and
-are forwarded as repeatable native compiler `--extension-path` options. The command **Strata:
+are forwarded as repeatable native compiler `--extension-path` options. Set
+`strata.resourceRoot.path` to the folder the host loads resources from so imports may reach shared
+modules under it, as they do at run time. The command **Strata:
 Validate Current Module** saves and checks the active module immediately.
 The command **Strata: Preview Application** finds the current `*.strata-app.json`, launches the
 configured `strata_desktop` runner, and keeps its last-good UI open while compatible `.strata`

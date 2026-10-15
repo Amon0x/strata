@@ -20,3 +20,11 @@ assert.deepStrictEqual(
         'ui/main.schemas.json',
     ]
 );
+assert.deepStrictEqual(
+    compilerArguments('assets/app/main.strata', '', ['extensions'], 'resources'),
+    [
+        '--extension-path', 'extensions',
+        '--resource-root', 'resources',
+        '--check-module-json', 'assets/app/main.strata',
+    ]
+);

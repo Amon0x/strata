@@ -65,6 +65,11 @@
           "default": "",
           "description": "Application *.schemas.json used for validation and app-specific completions. Empty discovers a schema beside the module."
         },
+        "strata.resourceRoot.path": {
+          "type": "string",
+          "default": "",
+          "description": "Resource root the host loads modules from; imports may reach any module under it, as in the desktop and headless hosts. Empty keeps imports inside the module's own folder. Relative paths resolve from the workspace folder."
+        },
         "strata.extensions.paths": {
           "type": "array",
           "items": {"type": "string"},

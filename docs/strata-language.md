@@ -9,7 +9,10 @@ every diagnostic code present in production source; the build verifies exact cov
 ## Files, imports, and comments
 
 A module is a UTF-8 `.strata` file. Imports use a quoted path resolved relative to the importing
-file and remain inside the application's configured development roots.
+file. They may reach any module under the application's resource root, so apps can share
+components from a sibling folder (`import "../shared/forms.strata";`), and never outside it.
+`strata_compile --check-module` takes the same root with `--resource-root <directory>` (the VS Code
+setting `strata.resourceRoot.path`); without one it keeps imports inside the entry module's folder.
 
 ```strata
 import "components/forms.strata";

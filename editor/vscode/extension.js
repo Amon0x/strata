@@ -561,7 +561,8 @@ async function validateDocument(document, diagnostics, output, explicit) {
     const args = compilerArguments(
         document.uri.fsPath,
         schema,
-        extensionPaths(document)
+        extensionPaths(document),
+        configuredPath(document, 'resourceRoot.path')
     );
     const result = await executeCompiler(compiler, args, workspaceFolder(document));
     const lines = result.stdout.trim().split(/\r?\n/);
