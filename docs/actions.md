@@ -16,7 +16,10 @@ environment preferences use framework actions and do not cross the ABI or call a
 state page = "HOME";
 state modalOpen = false;
 
-Tabs(selectedId: page, onChange: action("state.setFromEvent", name: "page"))
+Tabs(
+  tabs: [{ id: "HOME", label: "Home" }, { id: "SETTINGS", label: "Settings" }],
+  selectedId: page, onChange: action("state.setFromEvent", name: "page")
+)
 Button(label: "Open", onClick: action("state.set", name: "modalOpen", value: true))
 Button(label: "Focus search", onClick: action("focus.request", key: "search"))
 Button(label: "Validate", onClick: action("form.validate", key: "settings.form"))

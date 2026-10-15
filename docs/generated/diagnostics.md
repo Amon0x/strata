@@ -102,6 +102,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.PARSE_DECLARATION_NAME` | `native/src/compiler/parser.cpp` |
 | `STRATA.DSL.PARSE_DERIVED_EXPRESSION` | `native/src/compiler/parser.cpp` |
 | `STRATA.DSL.PARSE_DERIVED_NAME` | `native/src/compiler/parser.cpp` |
+| `STRATA.DSL.PARSE_DUPLICATE_MAP_KEY` | `native/src/compiler/parser.cpp` |
 | `STRATA.DSL.PARSE_EXPECTED_DECLARATION` | `native/src/compiler/parser.cpp` |
 | `STRATA.DSL.PARSE_EXPECTED_EXPRESSION` | `native/src/compiler/parser.cpp` |
 | `STRATA.DSL.PARSE_EXPECTED_PROPERTY` | `native/src/compiler/parser.cpp` |
@@ -165,6 +166,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_DUPLICATE_ANIMATION_FRAME` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_ARGUMENT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_DECLARATION` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_DUPLICATE_KEY` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_PARAMETER` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_PERSISTENCE_KEY` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DUPLICATE_PROPERTY` | `native/src/compiler/semantic.cpp` |
@@ -181,8 +183,10 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_DYNAMIC_STYLE_KEY` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_INVALID_PATH` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_INVALID_WIDGET_DEFAULTS` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_LAYER_ROOT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_LAYOUT_PROPERTY_KIND` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_LOOP_BOUND_EXCEEDED` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_LOOP_CONSTANT_KEY` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_MISSING_ACTION_ARGUMENT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_MISSING_ARGUMENT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_MISSING_FIELD` | `native/src/compiler/semantic.cpp` |
@@ -216,6 +220,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_UNKNOWN_SLOT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_STYLE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_STYLE_BASE` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET_DEFAULT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET_DEFAULT_PROPERTY` | `native/src/compiler/semantic.cpp` |
@@ -245,7 +250,6 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.IME.UPDATE_FAILED` | `native/src/abi_services.cpp` |
 | `STRATA.INPUT.INVALID_EVENT` | `native/src/surface_abi.cpp` |
 | `STRATA.INSPECT.INVALID_TARGET` | `native/src/surface_inspector_abi.cpp` |
-| `STRATA.PROFILER.MISUSE` | `native/src/runtime/services.cpp` |
 | `STRATA.RENDER2D.EFFECT_OPACITY` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.EFFECT_PARAMETER_DUPLICATE` | `native/src/ui/render/material_registry.cpp` |
 | `STRATA.RENDER2D.EFFECT_PARAMETER_REQUIRED` | `native/src/ui/render/material_registry.cpp` |
@@ -267,7 +271,6 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.RUNTIME.ACTIVATION_GENERATION` | `native/src/runtime/application.cpp` |
 | `STRATA.RUNTIME.ACTIVATION_REJECTED` | `native/src/abi_application.cpp` |
 | `STRATA.RUNTIME.CLOCK_REGRESSION` | `native/src/core/runtime.cpp` |
-| `STRATA.RUNTIME.FRAME_BOUNDARY_TASK_FAILED` | `native/src/runtime/services.cpp` |
 | `STRATA.RUNTIME.INVALID_COMPILED_ARTIFACT` | `native/src/abi_application.cpp` |
 | `STRATA.RUNTIME.INVALID_PORTABLE_IR` | `native/src/runtime/application.cpp` |
 | `STRATA.RUNTIME.LIVE_SURFACES` | `native/src/abi.cpp` |

@@ -21,6 +21,7 @@
 #include "ui/layout.hpp"
 #include "ui/layout/detail_algorithms.hpp"
 #include "ui/surface.hpp"
+#include "compiler/semantic.hpp"
 #include "ui/theme.hpp"
 #include "ui/tree.hpp"
 
@@ -110,6 +111,21 @@ void test_defaults_and_validation() {
     check(compact.visual->radius == 0.0 && compact.text_layout->pixel_size == 10.8 &&
               compact.text_layout->primary_font == "strata:fonts/default-medium",
           "compact control typography or theme semantics changed");
+}
+
+// The compiler types `theme.<name>` from its own token list; every name it accepts must resolve at
+// runtime, or an app that compiled cleanly would read nothing.
+void test_compiler_theme_tokens_match_runtime() {
+    using namespace strata;
+    const ui::ThemeTokens tokens;
+    for (const std::string_view name : compiler::theme_color_tokens) {
+        check(tokens.color(name) != nullptr,
+              "compiler colour token '" + std::string(name) + "' does not resolve at runtime");
+    }
+    for (const std::string_view name : compiler::theme_number_tokens) {
+        check(tokens.number(name).has_value(),
+              "compiler number token '" + std::string(name) + "' does not resolve at runtime");
+    }
 }
 
 void test_scopes_styles_tokens_and_lazy_ranges() {
@@ -1083,6 +1099,7 @@ overlay Main {
 int strata_test_theme() {
     try {
         test_defaults_and_validation();
+        test_compiler_theme_tokens_match_runtime();
         test_scopes_styles_tokens_and_lazy_ranges();
         test_catalog_and_motion_policy();
         test_exact_resolution_validation_and_local_scope();

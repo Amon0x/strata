@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -759,10 +761,28 @@ ExpressionPtr Parser::parse_list(const Token& left) {
 
 ExpressionPtr Parser::parse_map(const Token& left) {
     std::vector<MapEntry> entries;
+    // A map literal becomes one object, so a key written twice would silently drop a value.
+    std::set<std::string, std::less<>> keys;
     if (!check(TokenType::right_brace)) {
         do {
             entries.push_back(parse_map_entry());
             check_collection_size(entries.size());
+            const MapKey& key = entries.back().key;
+            const std::string* name = nullptr;
+            if (const auto* identifier = std::get_if<IdentifierMapKey>(&key))
+                name = &identifier->name;
+            else if (const auto* string = std::get_if<StringMapKey>(&key))
+                name = &string->value;
+            if (name != nullptr && !keys.insert(*name).second) {
+                diagnostics_.push_back(Diagnostic{
+                    "STRATA.DSL.PARSE_DUPLICATE_MAP_KEY",
+                    DiagnosticSeverity::error,
+                    "Key '" + *name + "' is already set in this map.",
+                    entries.back().span.range(),
+                    std::nullopt,
+                    std::nullopt,
+                });
+            }
         } while (match(TokenType::comma, TokenType::semicolon) &&
                  !check(TokenType::right_brace));
     }

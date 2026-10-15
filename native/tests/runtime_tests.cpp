@@ -1470,6 +1470,117 @@ void test_authored_effect_schema_and_semantics() {
           "authored effect calls did not enforce required, known, typed parameters");
 }
 
+// Common authoring mistakes produce a diagnostic that names the fix: a likely intended name for a
+// typo, one error rather than an unknown-plus-missing pair, and a structural error at compile time
+// for what the surface would otherwise reject on its first frame.
+void test_authoring_mistakes_get_actionable_diagnostics() {
+    using namespace strata;
+    const compiler::SchemaRegistry schema = compiler::SchemaRegistry::builtins();
+    const auto diagnostics = [&schema](const std::string_view source) {
+        const compiler::ParseResult parsed =
+            compiler::parse_source("mistakes.strata", std::string(source));
+        std::vector<compiler::Diagnostic> result = parsed.diagnostics;
+        const compiler::SemanticResult semantic = compiler::validate_semantics(parsed.file, schema);
+        result.insert(result.end(), semantic.diagnostics.begin(), semantic.diagnostics.end());
+        return result;
+    };
+    const auto message = [](const std::vector<compiler::Diagnostic>& found,
+                            const std::string_view code) -> std::string {
+        const auto match = std::ranges::find(found, code, &compiler::Diagnostic::code);
+        return match != found.end() ? match->message : std::string("<no ") + std::string(code) + ">";
+    };
+    const auto has = [](const std::vector<compiler::Diagnostic>& found,
+                        const std::string_view code) {
+        return std::ranges::find(found, code, &compiler::Diagnostic::code) != found.end();
+    };
+
+    const auto widget = diagnostics(R"(overlay Main { root Panel { Buton(label: "Save") } })");
+    check(message(widget, "STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET").ends_with("Did you mean 'Button'?"),
+          "an unknown widget did not suggest the near match: " +
+              message(widget, "STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET"));
+
+    const auto argument = diagnostics(R"(overlay Main { root Button(lable: "Save") })");
+    check(message(argument, "STRATA.DSL.SEMANTIC_UNKNOWN_ARGUMENT").ends_with("Did you mean 'label'?"),
+          "an unknown argument did not suggest the near match");
+    check(!has(argument, "STRATA.DSL.SEMANTIC_MISSING_ARGUMENT"),
+          "a misspelled required argument was also reported as missing");
+
+    const auto style = diagnostics(R"(style Card { padding: 4; }
+overlay Main { root Panel(style: Crad) })");
+    check(message(style, "STRATA.DSL.SEMANTIC_UNKNOWN_STYLE").ends_with("Did you mean 'Card'?"),
+          "a transposed style name did not suggest the near match");
+
+    const auto unrelated = diagnostics(R"(overlay Main { root Button(xyzzy: 1, label: "Save") })");
+    check(!message(unrelated, "STRATA.DSL.SEMANTIC_UNKNOWN_ARGUMENT").contains("Did you mean"),
+          "an unrelated unknown argument received a far-fetched suggestion");
+
+    const auto enumeration = diagnostics(R"(overlay Main { root Panel(layout: { kind: "COLUM" }) })");
+    check(message(enumeration, "STRATA.DSL.SEMANTIC_TYPE_MISMATCH").ends_with("Did you mean 'COLUMN'?"),
+          "a misspelled enumeration value did not suggest the near match");
+
+    const auto fill = diagnostics(R"(overlay Main { root Panel(layout: { width: "fill" }) })");
+    check(message(fill, "STRATA.DSL.SEMANTIC_TYPE_MISMATCH").contains("{ weight: 1 }"),
+          "a 'fill' layout size did not point at the weight form");
+
+    const auto siblings = diagnostics(R"(overlay Main {
+  root Panel {
+    Button(key: "save", label: "Save")
+    Button(key: "save", label: "Save again")
+  }
+})");
+    check(has(siblings, "STRATA.DSL.SEMANTIC_DUPLICATE_KEY"),
+          "sibling widgets with the same literal key compiled");
+    const auto branches = diagnostics(R"(overlay Main {
+  state saving = false;
+  root Panel {
+    if saving { Button(key: "save", label: "Saving") } else { Button(key: "save", label: "Save") }
+  }
+})");
+    check(!has(branches, "STRATA.DSL.SEMANTIC_DUPLICATE_KEY"),
+          "the same key in exclusive if/else branches was reported as a duplicate");
+    const auto loop = diagnostics(R"(overlay Main {
+  root Panel {
+    for item in ["a", "b"] { Text(key: "row", text: item) }
+  }
+})");
+    check(has(loop, "STRATA.DSL.SEMANTIC_LOOP_CONSTANT_KEY"),
+          "a literal key inside a loop body compiled");
+
+    check(has(diagnostics("screen Main { state count = 0; }"), "STRATA.DSL.SEMANTIC_LAYER_ROOT"),
+          "a screen without a root compiled");
+    check(has(diagnostics(R"(overlay Main { root Panel root Panel })"),
+              "STRATA.DSL.SEMANTIC_LAYER_ROOT"),
+          "an overlay with two roots compiled");
+    check(!has(diagnostics(R"(overlay Main {
+  state wide = false;
+  if wide { root Panel } else { root Panel }
+})"),
+               "STRATA.DSL.SEMANTIC_LAYER_ROOT"),
+          "one root per branch was reported as a root error");
+
+    check(has(diagnostics(R"(overlay Main { root Panel(layout: { width: 100, width: 200 }) })"),
+              "STRATA.DSL.PARSE_DUPLICATE_MAP_KEY"),
+          "a key repeated in a map literal compiled");
+
+    const auto theme = diagnostics(R"(style Card { background: theme.surfaceRasied; }
+overlay Main { root Panel(style: Card) })");
+    check(message(theme, "STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN")
+              .ends_with("Did you mean 'surfaceRaised'?"),
+          "a misspelled theme token compiled or lacked a suggestion");
+    check(has(diagnostics(R"(style Card { padding: theme.accent; }
+overlay Main { root Panel(style: Card) })"),
+              "STRATA.DSL.SEMANTIC_TYPE_MISMATCH"),
+          "a colour theme token was accepted where a number is required");
+    check(diagnostics(R"(style Card { background: theme.surfaceRaised; padding: theme.spacingUnit; }
+overlay Main { root Panel(style: Card) })").empty(),
+          "valid theme tokens produced diagnostics");
+
+    check(has(diagnostics(R"(component Panel(title: string) { Text(text: title) }
+overlay Main { root Panel(title: "x") })"),
+              "STRATA.DSL.SEMANTIC_DUPLICATE_DECLARATION"),
+          "a component named after a built-in widget compiled");
+}
+
 void test_durability_round_trip_migration_and_corruption() {
     using namespace strata::runtime;
     std::optional<std::string> bytes;
@@ -1810,6 +1921,8 @@ int strata_test_runtime(const int argument_count, const char* const* const argum
             test_application_types_are_component_parameter_types();
         });
         run("authored effect schema", [&] { test_authored_effect_schema_and_semantics(); });
+        run("actionable authoring diagnostics",
+            [&] { test_authoring_mistakes_get_actionable_diagnostics(); });
         run("application isolation", [&] { test_application_bundle_and_runtime_isolation(); });
         run("portable expression runtime", [&] { test_portable_ir_expression_runtime(); });
         if (argument_count >= 2 && std::string_view(arguments[1]).size() != 0U) {

@@ -28,7 +28,8 @@ dependency recompiles the module atomically; a rejected edit leaves the last-goo
 - Numbers support `_` separators, fractions, exponents, and `ms`/`s` duration suffixes.
 - Colors use `#RGB`, `#RGBA`, `#RRGGBB`, or `#RRGGBBAA`.
 - Literals are strings, numbers/durations, colors, `true`, `false`, `null`, lists, and objects.
-- Statements and style properties end with `;`. Widget calls do not require a trailing semicolon.
+- Statements and style properties may end with `;`; the separator is optional, so a line break
+  is enough. Map entries are separated by `,` (or `;`).
 
 The VS Code extension under `editor/vscode` packages the generated TextMate grammar and catalog
 metadata. It provides schema-aware widget/action/host/property completions, hovers, signature help,
@@ -42,7 +43,7 @@ Screens and overlays are named entry points. Exactly one `root` widget supplies 
 
 ```strata
 screen Main {
-  root Panel(layout: { kind: "COLUMN", width: "fill", height: "fill" }) {
+  root Panel(layout: { kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 } }) {
     Text(text: "Hello")
   }
 }
@@ -666,7 +667,7 @@ Panel(animateChanges: { properties: ["background", "radius", "opacity", "transla
 Panel(animateContentSize: { width: false, height: true, clip: true, policy: "standard" })
 Panel(disclosure: { expanded: expanded, collapsedExtent: 32, policy: "standard" })
 Panel(contentKey: selectedId, contentTransition: ContentMotion) { SelectedDetails() }
-Button(onClick: action("layer.push", name: "details", transition: ContentMotion))
+Button(label: "Details", onClick: action("layer.push", name: "details", transition: ContentMotion))
 ```
 
 Animation timing properties, triggers, and animatable values are catalog-derived in the generated

@@ -35,31 +35,6 @@ std::uint64_t RuntimeServices::begin_frame() {
     }
     pending_diagnostics_.clear();
 
-    std::vector<ScheduledTask> tasks;
-    tasks.swap(pending_tasks_);
-    for (ScheduledTask& task : tasks) {
-        try {
-            task.callback();
-        } catch (const std::exception& exception) {
-            publish_active_diagnostic(RuntimeDiagnostic{
-                "STRATA.RUNTIME.FRAME_BOUNDARY_TASK_FAILED",
-                "Frame boundary task '" + task.id + "' failed: " + exception.what(),
-                {},
-                std::nullopt,
-                DiagnosticSeverity::error,
-                std::nullopt,
-            });
-        } catch (...) {
-            publish_active_diagnostic(RuntimeDiagnostic{
-                "STRATA.RUNTIME.FRAME_BOUNDARY_TASK_FAILED",
-                "Frame boundary task '" + task.id + "' failed: unknown native exception",
-                {},
-                std::nullopt,
-                DiagnosticSeverity::error,
-                std::nullopt,
-            });
-        }
-    }
     return frame_index_;
 }
 
@@ -87,39 +62,11 @@ void RuntimeServices::clear_diagnostics() noexcept {
     diagnostics_.clear();
 }
 
-void RuntimeServices::schedule_frame_boundary_task(std::string id, FrameBoundaryTask task) {
-    if (id.empty())
-        throw std::invalid_argument("frame boundary task id must not be empty");
-    if (!task)
-        throw std::invalid_argument("frame boundary task callback must not be empty");
-    pending_tasks_.push_back(ScheduledTask{std::move(id), std::move(task)});
-}
-
-bool RuntimeServices::open_profile_section(const std::string_view name) {
-    if (name.empty())
-        throw std::invalid_argument("profiler section name must not be empty");
-    if (frame_active_)
-        return true;
-    report(RuntimeDiagnostic{
-        "STRATA.PROFILER.MISUSE",
-        "section '" + std::string(name) +
-            "' opened outside the active profiler frame owner thread; sample was ignored",
-        {},
-        std::nullopt,
-        DiagnosticSeverity::warning,
-        std::nullopt,
-    });
-    return false;
-}
-
 std::uint64_t RuntimeServices::frame_index() const noexcept {
     return frame_index_;
 }
-bool RuntimeServices::frame_active() const noexcept {
-    return frame_active_;
-}
 bool RuntimeServices::has_pending_frame_work() const noexcept {
-    return !pending_diagnostics_.empty() || !pending_tasks_.empty();
+    return !pending_diagnostics_.empty();
 }
 
 } // namespace strata::runtime

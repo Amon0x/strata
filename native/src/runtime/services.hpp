@@ -12,18 +12,17 @@ namespace strata::runtime {
 
 /**
  * Per-runtime service state shared by every surface owned by an application context.
- * Diagnostics and frame-boundary work live here so opening a second surface cannot create a
+ * Diagnostics live here so opening a second surface cannot create a
  * hidden process-global channel or a second, disconnected diagnostic history.
  */
 class RuntimeServices final {
   public:
-    using FrameBoundaryTask = std::function<void()>;
     using PublishedDiagnosticSink =
         std::function<void(const RuntimeDiagnosticRecord&, std::uint64_t dropped_count)>;
 
     explicit RuntimeServices(PublishedDiagnosticSink diagnostic_sink = {});
 
-    /** Begins the next runtime frame, publishes queued diagnostics, and runs queued tasks. */
+    /** Begins the next runtime frame and publishes queued diagnostics. */
     [[nodiscard]] std::uint64_t begin_frame();
     void end_frame() noexcept;
 
@@ -35,26 +34,15 @@ class RuntimeServices final {
     /** Clears both retained history and diagnostics waiting for the next frame boundary. */
     void clear_diagnostics() noexcept;
 
-    void schedule_frame_boundary_task(std::string id, FrameBoundaryTask task);
-    /** Returns false and reports misuse when no runtime frame is active. */
-    [[nodiscard]] bool open_profile_section(std::string_view name);
-
     [[nodiscard]] std::uint64_t frame_index() const noexcept;
-    [[nodiscard]] bool frame_active() const noexcept;
-    /** Pending diagnostics/tasks require the next Surface frame boundary to run. */
+    /** Pending diagnostics require the next Surface frame boundary to publish. */
     [[nodiscard]] bool has_pending_frame_work() const noexcept;
 
   private:
     void publish_active_diagnostic(RuntimeDiagnostic diagnostic);
 
-    struct ScheduledTask final {
-        std::string id;
-        FrameBoundaryTask callback;
-    };
-
     RuntimeDiagnosticStore diagnostics_;
     std::vector<RuntimeDiagnostic> pending_diagnostics_;
-    std::vector<ScheduledTask> pending_tasks_;
     PublishedDiagnosticSink diagnostic_sink_;
     std::uint64_t frame_index_ = 0U;
     bool frame_active_ = false;

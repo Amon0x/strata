@@ -65,6 +65,76 @@ constexpr std::size_t maximum_lazy_loop_items = 100'000U;
     return output;
 }
 
+/**
+ * Edit distance between two names, case-insensitively, counting a swapped pair of adjacent letters
+ * as one edit (the commonest typo); stops counting past `limit`.
+ */
+[[nodiscard]] std::size_t name_distance(const std::string_view left, const std::string_view right,
+                                        const std::size_t limit) {
+    const std::size_t length_gap =
+        left.size() > right.size() ? left.size() - right.size() : right.size() - left.size();
+    if (length_gap > limit)
+        return limit + 1U;
+    const auto folded = [](const char character) {
+        return std::tolower(static_cast<unsigned char>(character));
+    };
+    std::vector<std::size_t> before_previous(right.size() + 1U);
+    std::vector<std::size_t> previous(right.size() + 1U);
+    std::vector<std::size_t> current(right.size() + 1U);
+    for (std::size_t column = 0U; column <= right.size(); ++column)
+        previous[column] = column;
+    for (std::size_t row = 1U; row <= left.size(); ++row) {
+        current[0] = row;
+        std::size_t row_minimum = current[0];
+        for (std::size_t column = 1U; column <= right.size(); ++column) {
+            const bool same = folded(left[row - 1U]) == folded(right[column - 1U]);
+            current[column] = std::min({previous[column] + 1U, current[column - 1U] + 1U,
+                                        previous[column - 1U] + (same ? 0U : 1U)});
+            if (row > 1U && column > 1U && folded(left[row - 1U]) == folded(right[column - 2U]) &&
+                folded(left[row - 2U]) == folded(right[column - 1U])) {
+                current[column] = std::min(current[column], before_previous[column - 2U] + 1U);
+            }
+            row_minimum = std::min(row_minimum, current[column]);
+        }
+        if (row_minimum > limit)
+            return limit + 1U;
+        std::swap(before_previous, previous);
+        std::swap(previous, current);
+    }
+    return previous[right.size()];
+}
+
+/**
+ * The candidate a misspelled `name` most likely meant: the closest one within one edit for short
+ * names and two otherwise. Ties go to the alphabetically first so suggestions are stable.
+ */
+[[nodiscard]] std::optional<std::string> nearest_name(const std::string_view name,
+                                                      const std::vector<std::string>& candidates) {
+    const std::size_t limit = name.size() <= 4U ? 1U : 2U;
+    std::optional<std::string> best;
+    std::size_t best_distance = limit + 1U;
+    for (const std::string& candidate : candidates) {
+        if (candidate == name)
+            continue;
+        const std::size_t distance = name_distance(name, candidate, limit);
+        if (distance < best_distance ||
+            (distance == best_distance && best.has_value() && candidate < *best)) {
+            best = candidate;
+            best_distance = distance;
+        }
+    }
+    if (best_distance > limit)
+        return std::nullopt;
+    return best;
+}
+
+/** " Did you mean 'x'?" for a likely misspelling, or nothing. */
+[[nodiscard]] std::string did_you_mean(const std::string_view name,
+                                       const std::vector<std::string>& candidates) {
+    const std::optional<std::string> suggestion = nearest_name(name, candidates);
+    return suggestion.has_value() ? " Did you mean '" + *suggestion + "'?" : std::string{};
+}
+
 [[nodiscard]] const std::string* string_literal_value(const Expression& expression) {
     const auto* literal = std::get_if<LiteralExpression>(&expression.node);
     if (literal == nullptr)
@@ -251,6 +321,15 @@ class Validator final {
             };
             if (const auto* component = std::get_if<ComponentDeclaration>(&declaration.node)) {
                 note_declaration("component", component->name);
+                // A call resolves to the built-in first, so a same-named component is unreachable.
+                if (registry_.widget(component->name) != nullptr) {
+                    report("STRATA.DSL.SEMANTIC_DUPLICATE_DECLARATION",
+                           "Component '" + component->name +
+                               "' has the name of a built-in widget, which calls would use "
+                               "instead; give the component its own name.",
+                           declaration.span, "component " + component->name,
+                           "component name distinct from built-in widgets");
+                }
                 ComponentSchema schema;
                 std::set<std::string, std::less<>> parameter_names;
                 for (const Parameter& parameter : component->parameters) {
@@ -903,7 +982,9 @@ class Validator final {
                 const SchemaParameter* schema = registry_.animation_timing_property(property.name);
                 if (schema == nullptr) {
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_PROPERTY",
-                           "Animation timing property '" + property.name + "' is not supported.",
+                           "Animation timing property '" + property.name + "' is not supported." +
+                               did_you_mean(property.name,
+                                            registry_.animation_timing_property_names()),
                            property.span, path,
                            expected_names(registry_.animation_timing_property_names()));
                     static_cast<void>(infer(*property.value, scope, path + "." + property.name));
@@ -935,7 +1016,8 @@ class Validator final {
                 const SchemaParameter* schema = registry_.animation_property(property.name);
                 if (schema == nullptr) {
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_PROPERTY",
-                           "Animation frame property '" + property.name + "' is not supported.",
+                           "Animation frame property '" + property.name + "' is not supported." +
+                               did_you_mean(property.name, registry_.animation_property_names()),
                            property.span, frame_path,
                            expected_names(registry_.animation_property_names()));
                     static_cast<void>(
@@ -1077,11 +1159,24 @@ class Validator final {
         }
     }
 
+    /** A screen or overlay draws exactly one root, whichever branch its conditions take. */
+    void validate_layer_root(const Block& body, const std::string& path) {
+        const RootCardinality roots = root_cardinality(body);
+        if (roots.minimum == 1U && roots.maximum == 1U)
+            return;
+        report("STRATA.DSL.SEMANTIC_LAYER_ROOT",
+               "'" + path + "' must declare exactly one root widget on every control-flow path" +
+                   (roots.maximum == 0U ? ", but declares none." : "."),
+               body.span, path, "single root widget");
+    }
+
     void validate_declaration(const Declaration& declaration) {
         Scope scope = registry_.host_types();
         if (const auto* screen = std::get_if<ScreenDeclaration>(&declaration.node)) {
+            validate_layer_root(*screen->body, "screen " + screen->name);
             validate_block(*screen->body, std::move(scope), "screen " + screen->name);
         } else if (const auto* overlay = std::get_if<OverlayDeclaration>(&declaration.node)) {
+            validate_layer_root(*overlay->body, "overlay " + overlay->name);
             validate_block(*overlay->body, std::move(scope), "overlay " + overlay->name);
         } else if (const auto* component = std::get_if<ComponentDeclaration>(&declaration.node)) {
             const ComponentSchema& schema = components_.at(component->name);
@@ -1139,7 +1234,8 @@ class Validator final {
                 const SchemaParameter* schema = registry_.style_property(property.name);
                 if (schema == nullptr) {
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_PROPERTY",
-                           "Style property '" + property.name + "' is not supported.",
+                           "Style property '" + property.name + "' is not supported." +
+                               did_you_mean(property.name, registry_.style_property_names()),
                            property.span, path, expected_names(registry_.style_property_names()));
                     static_cast<void>(infer(*property.value, scope, path + "." + property.name));
                 } else {
@@ -1174,7 +1270,8 @@ class Validator final {
                 }
                 if (!style_declarations_.contains(base.name)) {
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_STYLE_BASE",
-                           "Style '" + style->name + "' extends unknown style '" + base.name + "'.",
+                           "Style '" + style->name + "' extends unknown style '" + base.name + "'." +
+                               did_you_mean(base.name, styles_),
                            base.span, "style " + style->name, expected_names(styles_));
                 }
             }
@@ -1316,8 +1413,9 @@ class Validator final {
         const SchemaParameter* schema = registry_.style_property(property.name);
         if (schema == nullptr) {
             report("STRATA.DSL.SEMANTIC_UNKNOWN_PROPERTY",
-                   "Style property '" + property.name + "' is not supported.", property.span, path,
-                   expected_names(registry_.style_property_names()));
+                   "Style property '" + property.name + "' is not supported." +
+                       did_you_mean(property.name, registry_.style_property_names()),
+                   property.span, path, expected_names(registry_.style_property_names()));
             static_cast<void>(infer(*property.value, scope, path + "." + property.name));
             return;
         }
@@ -1342,7 +1440,10 @@ class Validator final {
                 report("STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET_DEFAULT",
                        "Widget default '" +
                            (widget_name != nullptr ? *widget_name : std::string("<dynamic>")) +
-                           "' does not name a registered widget.",
+                           "' does not name a registered widget." +
+                           (widget_name != nullptr
+                                ? did_you_mean(*widget_name, registry_.widget_names())
+                                : std::string{}),
                        map_key_span(entry.key), path, expected_names(registry_.widget_names()));
                 static_cast<void>(infer(*entry.value, scope, path + "/defaults"));
                 continue;
@@ -1385,11 +1486,48 @@ class Validator final {
         }
     }
 
+    /** The string-literal `key:` a widget call is given, when it has one. */
+    [[nodiscard]] static const Argument* literal_key_argument(const WidgetCall& call) {
+        for (const Argument& argument : call.arguments) {
+            if (argument.name == "key" && argument.value != nullptr &&
+                string_literal_value(*argument.value) != nullptr) {
+                return &argument;
+            }
+        }
+        return nullptr;
+    }
+
+    /**
+     * Widgets written side by side in one block are siblings, so their literal keys must differ;
+     * the surface rejects a duplicate on its first frame. Branches of an if/when are not compared
+     * with each other, since only one of them is drawn.
+     */
+    void validate_sibling_keys(const Block& block, const std::string& path) {
+        std::set<std::string, std::less<>> seen;
+        for (const StatementPtr& statement : block.statements) {
+            const WidgetCall* call = nullptr;
+            if (const auto* widget = std::get_if<WidgetStatement>(&statement->node))
+                call = &widget->call;
+            else if (const auto* root = std::get_if<RootStatement>(&statement->node))
+                call = &root->call;
+            const Argument* key = call != nullptr ? literal_key_argument(*call) : nullptr;
+            if (key == nullptr)
+                continue;
+            const std::string& value = *string_literal_value(*key->value);
+            if (!seen.insert(value).second) {
+                report("STRATA.DSL.SEMANTIC_DUPLICATE_KEY",
+                       "Key '" + value + "' is already used by a sibling widget.",
+                       key->value->span, path + "/" + call->name, "unique sibling key");
+            }
+        }
+    }
+
     void validate_block(const Block& block, Scope scope, const std::string& path,
                         RetainedStateNames retained_states = {}, LocalNames local_names = {},
                         const std::size_t maximum_loop_items = maximum_eager_loop_items,
                         const BlockContext context = BlockContext::ui) {
         validate_derived_cycles(block, path);
+        validate_sibling_keys(block, path);
         for (const StatementPtr& statement : block.statements) {
             if (const auto* derived = std::get_if<DerivedStatement>(&statement->node)) {
                 scope.try_emplace(derived->name, simple(SemanticTypeKind::unknown));
@@ -1570,6 +1708,20 @@ class Validator final {
                     validate_expected(*loop->filter, *simple(SemanticTypeKind::boolean), false,
                                       path + "/for/filter", loop_scope);
                 }
+                // Every item draws the loop body, so a literal key there repeats per item.
+                for (const StatementPtr& body_statement : loop->block->statements) {
+                    const auto* row = std::get_if<WidgetStatement>(&body_statement->node);
+                    const Argument* key = row != nullptr ? literal_key_argument(row->call) : nullptr;
+                    if (key != nullptr) {
+                        report("STRATA.DSL.SEMANTIC_LOOP_CONSTANT_KEY",
+                               "Key '" + *string_literal_value(*key->value) +
+                                   "' is the same for every '" + loop->item_name +
+                                   "'; derive it from the item, for example key: " +
+                                   loop->item_name + ".id.",
+                               key->value->span, path + "/" + loop->item_name,
+                               "key derived from the loop item");
+                    }
+                }
                 validate_block(*loop->block, std::move(loop_scope), path + "/" + loop->item_name,
                                retained_states, local_names, maximum_loop_items,
                                nested_context(context));
@@ -1710,8 +1862,9 @@ class Validator final {
                     for (const ComponentSchema::Slot& slot : component.slots)
                         names.push_back(slot.name);
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_SLOT",
-                           "Component does not declare slot '" + *name + "'.", widget->call.span,
-                           call_path, expected_names(std::move(names)));
+                           "Component does not declare slot '" + *name + "'." +
+                               did_you_mean(*name, names),
+                           widget->call.span, call_path, expected_names(names));
                 } else if (!occupied.insert(*name).second) {
                     report("STRATA.DSL.SEMANTIC_DUPLICATE_SLOT_FILL",
                            "Slot '" + *name + "' is filled more than once.", widget->call.span,
@@ -1769,8 +1922,9 @@ class Validator final {
                 names.push_back(name);
             }
             report("STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET",
-                   "Widget or component '" + call.name + "' is not declared.", call.span, call_path,
-                   expected_names(std::move(names)));
+                   "Widget or component '" + call.name + "' is not declared." +
+                       did_you_mean(call.name, names),
+                   call.span, call_path, expected_names(names));
             if (call.body != nullptr) {
                 validate_block(*call.body, scope, call_path, retained_states, {},
                                maximum_loop_items, nested_context(context));
@@ -1793,6 +1947,9 @@ class Validator final {
         }
         std::vector<const SchemaParameter*> resolved_parameters(call.arguments.size(), nullptr);
         std::set<std::string, std::less<>> consumed_parameters;
+        // Parameters a misspelled argument was matched to; their "missing" error would only repeat
+        // the suggestion.
+        std::set<std::string, std::less<>> suggested_parameters;
         std::size_t positional_index = 0U;
         bool seen_named = false;
         for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
@@ -1852,9 +2009,15 @@ class Validator final {
                 const std::string display_name = argument.name.has_value()
                                                      ? *argument.name
                                                      : "#" + std::to_string(positional_index);
+                const std::optional<std::string> suggestion =
+                    argument.name.has_value() ? nearest_name(*argument.name, names) : std::nullopt;
+                if (suggestion.has_value())
+                    suggested_parameters.insert(*suggestion);
                 report(argument.name.has_value() ? "STRATA.DSL.SEMANTIC_UNKNOWN_ARGUMENT"
                                                  : "STRATA.DSL.SEMANTIC_TOO_MANY_ARGUMENTS",
-                       "Argument '" + display_name + "' is not accepted by '" + call.name + "'.",
+                       "Argument '" + display_name + "' is not accepted by '" + call.name + "'." +
+                           (suggestion.has_value() ? " Did you mean '" + *suggestion + "'?"
+                                                   : std::string{}),
                        argument.span, call_path, expected_names(std::move(names)));
                 continue;
             }
@@ -1962,7 +2125,8 @@ class Validator final {
                               call_path + "." + parameter->name, scope);
         }
         for (const SchemaParameter& parameter : parameters) {
-            if (parameter.required && !consumed_parameters.contains(parameter.name)) {
+            if (parameter.required && !consumed_parameters.contains(parameter.name) &&
+                !suggested_parameters.contains(parameter.name)) {
                 report("STRATA.DSL.SEMANTIC_MISSING_ARGUMENT",
                        "Required argument '" + parameter.name + "' is missing for '" + call.name +
                            "'.",
@@ -2025,8 +2189,10 @@ class Validator final {
                 }
                 report("STRATA.DSL.SEMANTIC_UNKNOWN_ARGUMENT",
                        "Helper '" + helper.name + "' does not accept argument '" +
-                           argument.name.value_or("#" + std::to_string(positional_index)) + "'.",
-                       argument.span, component_path, expected_names(std::move(names)));
+                           argument.name.value_or("#" + std::to_string(positional_index)) + "'." +
+                           (argument.name.has_value() ? did_you_mean(*argument.name, names)
+                                                      : std::string{}),
+                       argument.span, component_path, expected_names(names));
                 static_cast<void>(infer(*argument.value, scope, component_path));
                 continue;
             }
@@ -2074,10 +2240,13 @@ class Validator final {
         }
         const ActionSchema* action = id != nullptr ? registry_.action(*id) : nullptr;
         if (id != nullptr && action == nullptr) {
-            report("STRATA.DSL.SEMANTIC_UNKNOWN_ACTION", "Action '" + *id + "' is not registered.",
+            report("STRATA.DSL.SEMANTIC_UNKNOWN_ACTION",
+                   "Action '" + *id + "' is not registered." +
+                       did_you_mean(*id, registry_.action_names()),
                    first.span, component_path, expected_names(registry_.action_names()));
         }
         std::set<std::string, std::less<>> consumed;
+        std::set<std::string, std::less<>> suggested;
         for (std::size_t index = 1U; index < call.arguments.size(); ++index) {
             const Argument& argument = call.arguments[index];
             if (!argument.name.has_value()) {
@@ -2109,8 +2278,13 @@ class Validator final {
                     }
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_ACTION_ARGUMENT",
                            "Action '" + *id + "' does not define argument '" + *argument.name +
-                               "'.",
-                           argument.span, component_path, expected_names(std::move(names)));
+                               "'." + did_you_mean(*argument.name, names),
+                           argument.span, component_path, expected_names(names));
+                    if (const std::optional<std::string> suggestion =
+                            nearest_name(*argument.name, names);
+                        suggestion.has_value()) {
+                        suggested.insert(*suggestion);
+                    }
                 }
                 static_cast<void>(infer(*argument.value, scope, component_path));
                 continue;
@@ -2129,7 +2303,8 @@ class Validator final {
         }
         if (action != nullptr) {
             for (const SchemaParameter& parameter : action->parameters) {
-                if (parameter.required && !consumed.contains(parameter.name)) {
+                if (parameter.required && !consumed.contains(parameter.name) &&
+                    !suggested.contains(parameter.name)) {
                     report("STRATA.DSL.SEMANTIC_MISSING_ACTION_ARGUMENT",
                            "Action '" + *id + "' requires argument '" + parameter.name + "'.",
                            call.target.span, component_path,
@@ -2208,10 +2383,12 @@ class Validator final {
                         : "STRATA.DSL.SEMANTIC_TOO_MANY_ARGUMENTS",
                     "Argument '" +
                         argument.name.value_or("#" + std::to_string(positional_index)) +
-                        "' is not accepted by component template '" + template_name + "'.",
+                        "' is not accepted by component template '" + template_name + "'." +
+                        (argument.name.has_value() ? did_you_mean(*argument.name, names)
+                                                   : std::string{}),
                     argument.span,
                     component_path,
-                    expected_names(std::move(names))
+                    expected_names(names)
                 );
                 static_cast<void>(infer(*argument.value, scope, component_path));
                 continue;
@@ -2276,10 +2453,11 @@ class Validator final {
             }
             report(
                 "STRATA.DSL.SEMANTIC_UNKNOWN_COMPONENT_TEMPLATE",
-                "Component template '" + template_name + "' is not declared.",
+                "Component template '" + template_name + "' is not declared." +
+                    did_you_mean(template_name, names),
                 expression.span,
                 component_path,
-                expected_names(std::move(names))
+                expected_names(names)
             );
             return;
         }
@@ -2370,8 +2548,10 @@ class Validator final {
                 const ActionSchema* action = registry_.action(*id);
                 if (action == nullptr) {
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_ACTION",
-                           "Action '" + *id + "' is not registered.", expression.span,
-                           component_path, expected_names(registry_.action_names()));
+                           "Action '" + *id + "' is not registered." +
+                               did_you_mean(*id, registry_.action_names()),
+                           expression.span, component_path,
+                           expected_names(registry_.action_names()));
                 } else {
                     for (const SchemaParameter& parameter : action->parameters) {
                         if (parameter.required) {
@@ -2400,8 +2580,9 @@ class Validator final {
                 if (!registry_.has_material(*id)) {
                     const std::string names = expected_names(registry_.material_ids());
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_MATERIAL",
-                           "Material '" + *id + "' is not a built-in material.", expression.span,
-                           component_path, names);
+                           "Material '" + *id + "' is not a built-in material." +
+                               did_you_mean(*id, registry_.material_ids()),
+                           expression.span, component_path, names);
                     report_lowering("STRATA.DSL.COMPILE_UNKNOWN_MATERIAL",
                                     "Material '" + *id + "' is not a built-in material.",
                                     expression.span, component_path, names);
@@ -2426,7 +2607,8 @@ class Validator final {
                 if (material == nullptr) {
                     const std::string names = expected_names(registry_.material_ids());
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_MATERIAL",
-                           "Material '" + *id + "' is not a built-in material.",
+                           "Material '" + *id + "' is not a built-in material." +
+                               did_you_mean(*id, registry_.material_ids()),
                            call->arguments.front().span, component_path, names);
                     report_lowering("STRATA.DSL.COMPILE_UNKNOWN_MATERIAL",
                                     "Material '" + *id + "' is not a built-in material.",
@@ -2461,9 +2643,10 @@ class Validator final {
                         }
                         report("STRATA.DSL.SEMANTIC_UNKNOWN_MATERIAL_PARAMETER",
                                "Material '" + *id + "' does not define parameter '" +
-                                   *argument.name + "'.",
+                                   *argument.name + "'." +
+                                   did_you_mean(*argument.name, parameter_names),
                                argument.span, component_path + "." + *argument.name,
-                               expected_names(std::move(parameter_names)));
+                               expected_names(parameter_names));
                         static_cast<void>(infer(*argument.value, scope, component_path));
                         continue;
                     }
@@ -2485,8 +2668,9 @@ class Validator final {
                 if (std::ranges::find(animations_, *name) == animations_.end()) {
                     const std::string names = expected_names(animations_);
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_ANIMATION",
-                           "Animation '" + *name + "' is not declared.", expression.span,
-                           component_path, names);
+                           "Animation '" + *name + "' is not declared." +
+                               did_you_mean(*name, animations_),
+                           expression.span, component_path, names);
                     report_lowering("STRATA.DSL.COMPILE_UNKNOWN_ANIMATION",
                                     "Animation '" + *name + "' is not declared.", expression.span,
                                     component_path, names);
@@ -2504,7 +2688,8 @@ class Validator final {
                 if (animation_name != nullptr &&
                     std::ranges::find(animations_, *animation_name) == animations_.end()) {
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_ANIMATION",
-                           "Animation '" + *animation_name + "' is not declared.",
+                           "Animation '" + *animation_name + "' is not declared." +
+                               did_you_mean(*animation_name, animations_),
                            call->arguments.front().span, component_path,
                            expected_names(animations_));
                 }
@@ -2520,12 +2705,13 @@ class Validator final {
             if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
                 identifier != nullptr && scope.find(identifier->name) == scope.end()) {
                 report("STRATA.DSL.SEMANTIC_UNKNOWN_STYLE",
-                       "Style '" + identifier->name + "' is not declared.", expression.span,
-                       component_path, expected_names(styles_));
+                       "Style '" + identifier->name + "' is not declared." +
+                           did_you_mean(identifier->name, styles_),
+                       expression.span, component_path, expected_names(styles_));
                 return;
             }
             if (const auto* style = std::get_if<MapExpression>(&expression.node)) {
-                std::set<std::string, std::less<>> seen;
+                // The parser already reports a key written twice in a map literal.
                 std::vector<LayoutPropertyRef> layout_properties;
                 for (const MapEntry& entry : style->entries) {
                     std::string name;
@@ -2540,11 +2726,6 @@ class Validator final {
                         static_cast<void>(infer(*entry.value, scope, component_path));
                         continue;
                     }
-                    if (!seen.insert(name).second) {
-                        report("STRATA.DSL.SEMANTIC_DUPLICATE_PROPERTY",
-                               "Style property '" + name + "' is declared more than once.",
-                               entry.span, component_path + "." + name, "unique style property");
-                    }
                     layout_properties.push_back(LayoutPropertyRef{
                         name,
                         entry.value.get(),
@@ -2553,7 +2734,9 @@ class Validator final {
                     const SchemaParameter* property = registry_.style_property(name);
                     if (property == nullptr) {
                         report("STRATA.DSL.SEMANTIC_UNKNOWN_PROPERTY",
-                               "Style property '" + name + "' is not supported.", entry.span,
+                               "Style property '" + name + "' is not supported." +
+                                   did_you_mean(name, registry_.style_property_names()),
+                               entry.span,
                                component_path + "." + name,
                                expected_names(registry_.style_property_names()));
                         static_cast<void>(infer(*entry.value, scope, component_path));
@@ -2598,7 +2781,9 @@ class Validator final {
                     const SchemaParameter* property = registry_.style_property(name);
                     if (property == nullptr) {
                         report("STRATA.DSL.SEMANTIC_UNKNOWN_PROPERTY",
-                               "Style property '" + name + "' is not supported.", argument.span,
+                               "Style property '" + name + "' is not supported." +
+                                   did_you_mean(name, registry_.style_property_names()),
+                               argument.span,
                                component_path + "." + name,
                                expected_names(registry_.style_property_names()));
                         static_cast<void>(infer(*argument.value, scope, component_path));
@@ -2615,7 +2800,9 @@ class Validator final {
             if (const std::string* name = string_literal_value(expression); name != nullptr) {
                 if (registry_.effect(*name) == nullptr) {
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_EFFECT",
-                           "Effect '" + *name + "' is not declared.", expression.span,
+                           "Effect '" + *name + "' is not declared." +
+                               did_you_mean(*name, registry_.effect_names()),
+                           expression.span,
                            component_path, expected_names(registry_.effect_names()));
                 }
                 return;
@@ -2633,7 +2820,9 @@ class Validator final {
                 const EffectSchema* effect = name != nullptr ? registry_.effect(*name) : nullptr;
                 if (name != nullptr && effect == nullptr) {
                     report("STRATA.DSL.SEMANTIC_UNKNOWN_EFFECT",
-                           "Effect '" + *name + "' is not declared.", call->arguments.front().span,
+                           "Effect '" + *name + "' is not declared." +
+                               did_you_mean(*name, registry_.effect_names()),
+                           call->arguments.front().span,
                            component_path, expected_names(registry_.effect_names()));
                 }
                 std::set<std::string, std::less<>> seen;
@@ -2704,8 +2893,9 @@ class Validator final {
                             }
                             report("STRATA.DSL.SEMANTIC_UNKNOWN_ARGUMENT",
                                    "Effect '" + *name + "' does not define parameter '" +
-                                       *argument.name + "'.",
-                                   argument.span, component_path, expected_names(std::move(names)));
+                                       *argument.name + "'." +
+                                       did_you_mean(*argument.name, names),
+                                   argument.span, component_path, expected_names(names));
                         }
                         static_cast<void>(infer(*argument.value, scope, component_path));
                     } else {
@@ -2744,7 +2934,9 @@ class Validator final {
                     const SchemaParameter* property = registry_.layout_property(name);
                     if (property == nullptr) {
                         report("STRATA.DSL.SEMANTIC_UNKNOWN_LAYOUT_PROPERTY",
-                               "Layout property '" + name + "' is not declared.", entry.span,
+                               "Layout property '" + name + "' is not declared." +
+                                   did_you_mean(name, registry_.layout_property_names()),
+                               entry.span,
                                component_path + "." + name,
                                expected_names(registry_.layout_property_names()));
                         static_cast<void>(infer(*entry.value, scope, component_path + "." + name));
@@ -2883,7 +3075,8 @@ class Validator final {
                 for (const ObjectField& declared : expected.fields)
                     names.push_back(declared.name);
                 report("STRATA.DSL.SEMANTIC_UNKNOWN_FIELD",
-                       "Field '" + name + "' is not part of " + expected.diagnostic_name() + ".",
+                       "Field '" + name + "' is not part of " + expected.diagnostic_name() + "." +
+                           did_you_mean(name, names),
                        entry.span, path, expected_names(names));
                 static_cast<void>(infer(*entry.value, scope, path));
                 continue;
@@ -2904,8 +3097,49 @@ class Validator final {
                        const Expression& expression, const std::string& component_path) {
         report("STRATA.DSL.SEMANTIC_TYPE_MISMATCH",
                "Expected " + expected.diagnostic_name() + ", but found " +
-                   actual.diagnostic_name() + ".",
+                   actual.diagnostic_name() + "." + mismatch_hint(expected, actual),
                expression.span, component_path, expected.diagnostic_name());
+    }
+
+    /** The enumeration values a type accepts, through any unions it is made of. */
+    static void collect_enumeration_values(const SemanticType& type,
+                                           std::vector<std::string>& values) {
+        if (type.kind == SemanticTypeKind::enumeration)
+            values.insert(values.end(), type.values.begin(), type.values.end());
+        for (const SemanticTypePtr& option : type.options) {
+            if (option != nullptr)
+                collect_enumeration_values(*option, values);
+        }
+    }
+
+    /** A likely intended value for a mismatched string literal, or nothing. */
+    [[nodiscard]] static std::string mismatch_hint(const SemanticType& expected,
+                                                   const SemanticType& actual) {
+        if (actual.kind != SemanticTypeKind::string_literal)
+            return {};
+        if (expected.label == "layout size" &&
+            (actual.literal == "fill" || actual.literal == "FILL")) {
+            return " Use { weight: 1 } to fill the remaining space.";
+        }
+        std::vector<std::string> values;
+        collect_enumeration_values(expected, values);
+        return did_you_mean(actual.literal, values);
+    }
+
+    /** The type of a `theme.<name>` read; an unknown token would silently resolve to nothing. */
+    [[nodiscard]] SemanticTypePtr theme_token_type(const std::string& name,
+                                                   const Expression& expression,
+                                                   const std::string& component_path) {
+        if (std::ranges::contains(theme_color_tokens, name))
+            return simple(SemanticTypeKind::color);
+        if (std::ranges::contains(theme_number_tokens, name))
+            return simple(SemanticTypeKind::number);
+        std::vector<std::string> names(theme_color_tokens.begin(), theme_color_tokens.end());
+        names.insert(names.end(), theme_number_tokens.begin(), theme_number_tokens.end());
+        report("STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN",
+               "Theme token '" + name + "' is not defined." + did_you_mean(name, names),
+               expression.span, component_path, expected_names(names));
+        return simple(SemanticTypeKind::unknown);
     }
 
     [[nodiscard]] SemanticTypePtr infer(const Expression& expression, const Scope& scope,
@@ -3006,6 +3240,11 @@ class Validator final {
             return then_type;
         }
         if (const auto* property = std::get_if<PropertyAccessExpression>(&expression.node)) {
+            // `theme.<token>` lowers to a theme token read whatever else is in scope.
+            if (const auto* receiver = std::get_if<IdentifierExpression>(&property->receiver->node);
+                receiver != nullptr && receiver->name == "theme") {
+                return theme_token_type(property->property_name, expression, component_path);
+            }
             SemanticTypePtr receiver = infer(*property->receiver, scope, component_path);
             if (receiver->kind == SemanticTypeKind::async_value &&
                 property->property_name == "value") {

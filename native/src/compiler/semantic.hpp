@@ -1,9 +1,11 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -46,6 +48,19 @@ struct ValidatedAnimation final {
     ValidatedAnimationRepeat repeat;
     bool reverse = false;
     std::string trigger = "ANIMATE";
+};
+
+/**
+ * Tokens `theme.<name>` can read, as ui::ThemeTokens resolves them; a runtime test keeps the two in
+ * step.
+ */
+inline constexpr std::array<std::string_view, 7U> theme_color_tokens{
+    "surface", "surfaceRaised", "foreground", "mutedForeground", "accent", "danger", "focus",
+};
+inline constexpr std::array<std::string_view, 3U> theme_number_tokens{
+    "spacingUnit",
+    "radius",
+    "density",
 };
 
 struct SemanticResult final {
