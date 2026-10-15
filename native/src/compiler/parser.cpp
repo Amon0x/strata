@@ -333,7 +333,7 @@ BlockPtr Parser::parse_block(const BodyKind kind) {
     const Token right = consume(
         TokenType::right_brace,
         "STRATA.DSL.PARSE_BLOCK_CLOSE",
-        "Expected '}' after block."
+        unclosed_message("block", left)
     );
     return std::make_shared<const Block>(Block{
         std::move(statements),
@@ -563,7 +563,7 @@ std::pair<std::vector<Property>, SourceSpan> Parser::parse_property_block() {
     const Token right = consume(
         TokenType::right_brace,
         "STRATA.DSL.PARSE_BLOCK_CLOSE",
-        "Expected '}' after property block."
+        unclosed_message("property block", left)
     );
     return {std::move(properties), covering(left.span, right.span)};
 }
@@ -623,12 +623,28 @@ std::vector<Argument> Parser::parse_arguments(const TokenType terminator) {
             check_collection_size(arguments.size());
         } while (match(TokenType::comma) && !check(terminator));
     }
+    const std::string close(close_lexeme(terminator));
+    // A named argument right after another one is almost always a missing comma.
+    if (!check(terminator) && name_token() && check_next(TokenType::colon)) {
+        throw error(peek(), "STRATA.DSL.PARSE_ARGUMENT_LIST",
+                    "Expected ',' before argument '" + peek().lexeme + "'.");
+    }
     static_cast<void>(consume(
         terminator,
         "STRATA.DSL.PARSE_ARGUMENT_LIST",
-        "Expected '" + std::string(close_lexeme(terminator)) + "' after arguments."
+        arguments.empty() ? "Expected '" + close + "' after arguments."
+                          : "Expected ',' or '" + close + "' after argument."
     ));
     return arguments;
+}
+
+std::string Parser::unclosed_message(const std::string_view what, const Token& open) const {
+    // At the end of the file the brace that was never closed is the useful location.
+    if (at_end()) {
+        return "Expected '}' to close the " + std::string(what) + " opened at line " +
+               std::to_string(open.span.range().start.line) + ".";
+    }
+    return "Expected '}' after " + std::string(what) + ".";
 }
 
 Argument Parser::parse_argument() {

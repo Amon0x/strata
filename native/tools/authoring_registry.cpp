@@ -71,15 +71,41 @@ class TypeResolver final {
         return *found->second;
     }
 
-    [[nodiscard]] std::string label(const JsonValue& raw) const {
+    /**
+     * A type as an author writes it: enum values as the string literals they are, a union as its
+     * alternatives joined by `|`, and an object with declared fields as `{ field: type }`. A union
+     * inside an object field keeps its own label so one row stays readable.
+     */
+    [[nodiscard]] std::string label(const JsonValue& raw, const bool nested = false) const {
         const JsonValue& type = resolve(raw);
         const std::string& kind = string_field(type, "kind");
-        if (kind == "enum")
-            return "one of (" + join_strings(array_field(type, "values")) + ')';
-        if (kind == "list")
-            return "list of " + label(required(type, "element"));
-        if (kind == "map")
-            return "map of " + label(required(type, "value"));
+        if (kind == "enum") {
+            std::vector<std::string> literals;
+            for (const JsonValue& value : array_field(type, "values")) {
+                if (value.string() != nullptr)
+                    literals.push_back('"' + *value.string() + '"');
+            }
+            return join_with(literals, " | ");
+        }
+        if (kind == "list") {
+            const std::string element = label(required(type, "element"), nested);
+            return "list of " + (element.contains(" | ") ? '(' + element + ')' : element);
+        }
+        if (kind == "map") {
+            const JsonValue* fields = type.find("fields");
+            if (fields == nullptr || fields->array() == nullptr || fields->array()->empty())
+                return "map of " + label(required(type, "value"), nested);
+            std::vector<std::string> entries;
+            for (const JsonValue& field : *fields->array()) {
+                const JsonValue* required_value = field.find("required");
+                const bool optional = required_value == nullptr ||
+                                      required_value->boolean() == nullptr ||
+                                      !*required_value->boolean();
+                entries.push_back(string_field(field, "name") + (optional ? "?: " : ": ") +
+                                  label(required(field, "type"), true));
+            }
+            return "{ " + join_with(entries, ", ") + " }";
+        }
         if (kind == "collection")
             return "collection of " + label(required(type, "item"));
         if (kind == "componentTemplate") {
@@ -103,13 +129,37 @@ class TypeResolver final {
             return "component (" + join(labels) + ')';
         }
         if (kind == "union") {
+            const JsonValue* named = type.find("label");
+            if (nested && named != nullptr && named->string() != nullptr && !named->string()->empty())
+                return *named->string();
             std::vector<std::string> labels;
-            for (const JsonValue& option : array_field(type, "options"))
-                labels.push_back(label(option));
-            return "one of (" + join(labels) + ')';
+            append_union_options(type, labels);
+            return join_with(labels, " | ");
         }
         const JsonValue* named = type.find("label");
         return named != nullptr && named->string() != nullptr ? *named->string() : kind;
+    }
+
+    /** A union's alternatives, with nested unions flattened into it. */
+    void append_union_options(const JsonValue& type, std::vector<std::string>& labels) const {
+        for (const JsonValue& option : array_field(type, "options")) {
+            const JsonValue& resolved = resolve(option);
+            if (string_field(resolved, "kind") == "union")
+                append_union_options(resolved, labels);
+            else
+                labels.push_back(label(option, false));
+        }
+    }
+
+    [[nodiscard]] static std::string join_with(const std::vector<std::string>& values,
+                                               const std::string_view separator) {
+        std::string result;
+        for (std::size_t index = 0U; index < values.size(); ++index) {
+            if (index != 0U)
+                result += separator;
+            result += values[index];
+        }
+        return result;
     }
 
     [[nodiscard]] std::vector<std::string> enum_values(const JsonValue& raw) const {

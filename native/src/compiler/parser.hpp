@@ -144,6 +144,8 @@ private:
     [[nodiscard]] bool match(TokenType first, TokenType second);
     [[nodiscard]] bool check(TokenType type) const noexcept;
     [[nodiscard]] bool check_next(TokenType type) const noexcept;
+    /** The message for a missing '}', naming the opening line when the file ended first. */
+    [[nodiscard]] std::string unclosed_message(std::string_view what, const Token& open) const;
     [[nodiscard]] Token advance();
     [[nodiscard]] bool at_end() const noexcept;
     [[nodiscard]] const Token& peek() const noexcept;

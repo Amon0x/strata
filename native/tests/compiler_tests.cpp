@@ -93,6 +93,25 @@ void test_recovery_diagnostics() {
     );
 }
 
+// Syntax errors name what is missing where the author can act on it: the comma between two
+// named arguments, and the line of a brace the file never closed.
+void test_parser_errors_point_at_the_missing_token() {
+    const auto message = [](const std::string_view source) {
+        const auto result = strata::compiler::parse_source("syntax.strata", std::string(source));
+        return result.diagnostics.empty() ? std::string("<none>")
+                                          : result.diagnostics.front().message;
+    };
+    check(message("overlay Main { root Button(label: \"x\" variant: \"primary\") }") ==
+              "Expected ',' before argument 'variant'.",
+          "a missing comma between named arguments was not named");
+    check(message("overlay Main { root Button(label: \"x\" 3) }") ==
+              "Expected ',' or ')' after argument.",
+          "a stray token after an argument did not name both continuations");
+    check(message("overlay Main {\n  root Panel {\n    Text(text: \"a\")\n") ==
+              "Expected '}' to close the block opened at line 2.",
+          "an unclosed block was not traced to its opening line");
+}
+
 void test_parser_and_security_recovery_match_the_corpus_contract() {
     const std::string source =
         "/* Runtime.getRuntime is deliberately prohibited in source, including comments. */\n"
@@ -455,6 +474,7 @@ int strata_test_compiler() {
         test_utf8_source_positions_use_kotlin_compatible_utf16_offsets();
         test_lexer_contract();
         test_recovery_diagnostics();
+        test_parser_errors_point_at_the_missing_token();
         test_parser_and_security_recovery_match_the_corpus_contract();
         test_full_language_ast();
         test_compiler_limits_are_structured_and_terminal();
