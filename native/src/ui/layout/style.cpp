@@ -109,20 +109,6 @@ std::size_t VirtualListSpec::item_count() const noexcept {
     return items != nullptr ? items->count() : 0U;
 }
 
-double VirtualListSpec::total_item_extent() const noexcept {
-    return item_extents.has_value() ? item_extents->total()
-                                    : item_extent * static_cast<double>(item_count());
-}
-
-double VirtualListSpec::item_start(const std::size_t index) const {
-    return item_extents.has_value() ? item_extents->start(index)
-                                    : item_extent * static_cast<double>(index);
-}
-
-double VirtualListSpec::extent_at(const std::size_t index) const {
-    return item_extents.has_value() ? item_extents->extent(index) : item_extent;
-}
-
 LayoutStyle layout_style(const DescriptionNode& description) {
     LayoutStyle style;
     style.participates = boolean(scalar_property(description, "$layoutParticipates"), true);

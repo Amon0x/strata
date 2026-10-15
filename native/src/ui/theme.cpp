@@ -530,6 +530,7 @@ void disable_motion(ValueFields& fields, const std::string_view presence) {
              "hover",
              "pressed",
              "focus",
+             "focusVisible",
              "checked",
              "move",
              "animate",

@@ -980,7 +980,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             std::move(ordered_child_layout_generations),
             child_render_clip,
             effective_transform,
-            body_descendant_opacity,
+            child_descendant_opacity,
             local_overlay_rendered,
         };
         Impl::CachedFragment::CompositionPlan& composition = *found->second.composition;

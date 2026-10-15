@@ -110,7 +110,6 @@ public:
 
     void mark_owned_scope(std::string scope);
     [[nodiscard]] bool retain_owned_scopes(const StateScopeSet& attached_scopes);
-    [[nodiscard]] bool retain_declaration_scopes(const StateScopeSet& attached_scopes);
 
     [[nodiscard]] std::uint64_t generation() const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;

@@ -32,8 +32,10 @@ namespace {
 using Microsoft::WRL::ComPtr;
 
 void require_hresult(const HRESULT result, const char* const operation) {
-    if (FAILED(result))
-        throw std::runtime_error(std::string(operation) + " failed");
+    if (FAILED(result)) {
+        throw std::runtime_error(std::string(operation) + " failed with HRESULT " +
+                                 std::to_string(result));
+    }
 }
 
 [[nodiscard]] ComPtr<ID3DBlob> compile_shader(const std::string_view source,

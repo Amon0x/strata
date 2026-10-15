@@ -305,9 +305,6 @@ class ExpressionDependencyObserver {
     virtual void host(const ExpressionHostDependency& dependency) = 0;
 };
 
-[[nodiscard]] std::optional<ExpressionDependencyValue>
-expression_scope_dependency(const ExpressionScope& scope, Symbol name);
-
 /** Decodes the canonical authored range retained on a portable expression, when present. */
 [[nodiscard]] std::optional<DiagnosticRange> portable_expression_range(data::JsonView expression);
 

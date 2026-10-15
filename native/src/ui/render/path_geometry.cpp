@@ -74,10 +74,6 @@ class PaintSampler final {
   public:
     PaintSampler(const Paint& paint, const Size shape) noexcept : paint_(&paint), shape_(shape) {}
 
-    [[nodiscard]] bool varies() const noexcept {
-        return paint_->is_gradient();
-    }
-
     [[nodiscard]] RenderColor at(const Point normalized_point) const noexcept {
         const Gradient* gradient = paint_->gradient();
         if (gradient == nullptr)

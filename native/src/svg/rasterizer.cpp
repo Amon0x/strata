@@ -169,6 +169,11 @@ void flatten_cubic(std::vector<Point>& points, const Point first, const Point co
             current_contour = {};
         }
     };
+    // A drawing command right after a close starts a new subpath at the closed one's start.
+    const auto continue_contour = [&] {
+        if (current_contour.points.empty())
+            append_flat_point(current_contour.points, current, flattened_point_count);
+    };
     for (const PathSegment& segment : path.segments) {
         if (segment.verb == PathVerb::move) {
             finish_contour();
@@ -179,18 +184,23 @@ void flatten_cubic(std::vector<Point>& points, const Point first, const Point co
         } else if (segment.verb == PathVerb::line) {
             if (!has_current)
                 continue;
+            continue_contour();
             append_flat_point(current_contour.points, segment.to, flattened_point_count);
             current = segment.to;
         } else if (segment.verb == PathVerb::cubic) {
             if (!has_current)
                 continue;
+            continue_contour();
             flatten_cubic(current_contour.points, current, segment.control_a, segment.control_b,
                           segment.to, device_transform, 0U, flattened_point_count);
             current = segment.to;
         } else if (segment.verb == PathVerb::close) {
             if (!has_current)
                 continue;
-            current_contour.closed = true;
+            if (!current_contour.points.empty()) {
+                current_contour.closed = true;
+                finish_contour();
+            }
             current = subpath_start;
         }
     }

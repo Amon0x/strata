@@ -51,9 +51,12 @@ AssetLoadResult AssetResolver::load_bytes(
 ) const {
     for (const std::filesystem::path& root : roots_) {
         try {
-            const std::filesystem::path relative = id.relative_path();
+            // Rebuild the id from the path's UTF-8 form; generic_string() would go through the
+            // ANSI code page on Windows and mangle non-ASCII names.
+            const std::u8string generic = id.relative_path().generic_u8string();
+            const std::string relative(generic.begin(), generic.end());
             return AssetLoadResult{
-                load_binary_resource(root, ResourceId::parse(relative.generic_string())),
+                load_binary_resource(root, ResourceId::parse(relative)),
                 {},
             };
         } catch (const ResourceError&) {

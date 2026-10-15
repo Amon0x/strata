@@ -227,7 +227,7 @@ retained_invalidation(const strata_widget_invalidation value, const std::string_
     default:
         break;
     }
-    throw std::invalid_argument("paint and input invalidation do not use the dirty scheduler");
+    throw std::invalid_argument("unknown widget invalidation class");
 }
 
 /** Shared buffer-out convention for every extension text read. */

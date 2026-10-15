@@ -1,6 +1,7 @@
 #include "runtime/layer.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -37,11 +38,15 @@ void LayerStack::push_screen(std::string id, std::optional<std::string> transiti
 void LayerStack::replace_screen(std::string id, std::optional<std::string> transition) {
     validate_id(id);
     if (transition.has_value()) validate_text(*transition, "layer transition");
-    if (screens_.empty()) root_replaced_ = true;
-    else screens_.pop_back();
-    if (std::ranges::find(screens_, id, &Entry::id) != screens_.end()) {
+    // Only the screen being replaced may share the id; check before the stack changes so a
+    // rejected replacement leaves it intact.
+    const auto below_top = screens_.empty() ? screens_.end() : std::prev(screens_.end());
+    if (std::find_if(screens_.begin(), below_top,
+                     [&id](const Entry& entry) { return entry.id == id; }) != below_top) {
         throw std::invalid_argument("replacement screen layer is already in the stack");
     }
+    if (screens_.empty()) root_replaced_ = true;
+    else screens_.pop_back();
     screens_.push_back(Entry{std::move(id), std::move(transition)});
     changed();
 }

@@ -122,9 +122,6 @@ enum class HelperKind : std::uint8_t {
     unknown,
 };
 
-/** Whether a helper derives a collection view (and so is cached with its dependencies). */
-[[nodiscard]] bool collection_helper(HelperKind helper) noexcept;
-
 /** A named or positional argument of a helper, action, component template or material. */
 struct ProgramArgument final {
     /** Empty for a positional argument. */

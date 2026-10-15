@@ -1403,10 +1403,11 @@ struct OpenTypeFont::Impl final {
                 );
                 break;
             }
-            const std::uint16_t format = static_cast<std::uint16_t>(coverage >> 8U);
-            const bool vertical = (coverage & 0x0001U) != 0U;
-            const bool cross_stream = (coverage & 0x0004U) != 0U;
-            const bool variation = (coverage & 0x0008U) != 0U;
+            // Apple's version 1 coverage word: flags in the high bits, format in the low byte.
+            const std::uint16_t format = static_cast<std::uint16_t>(coverage & 0x00FFU);
+            const bool vertical = (coverage & 0x8000U) != 0U;
+            const bool cross_stream = (coverage & 0x4000U) != 0U;
+            const bool variation = (coverage & 0x2000U) != 0U;
             if (format == 0U && !vertical && !cross_stream && !variation) {
                 const auto before = kern_pairs;
                 try {

@@ -200,25 +200,6 @@ struct Transform final {
     return result;
 }
 
-[[nodiscard]] std::optional<GlyphBounds> bounds_from_points(
-    const std::vector<GlyphContour>& contours
-) {
-    std::optional<GlyphBounds> result;
-    for (const GlyphContour& contour : contours) {
-        for (const GlyphPoint& point : contour.points) {
-            if (!result.has_value()) {
-                result = GlyphBounds{point.x, point.y, point.x, point.y};
-            } else {
-                result->left = std::min(result->left, point.x);
-                result->bottom = std::min(result->bottom, point.y);
-                result->right = std::max(result->right, point.x);
-                result->top = std::max(result->top, point.y);
-            }
-        }
-    }
-    return result;
-}
-
 } // namespace
 
 struct TrueTypeOutlineSource::Impl final {
@@ -540,7 +521,6 @@ struct TrueTypeOutlineSource::Impl final {
             cursor += 2U;
             require_absolute(end, cursor, instruction_length);
         }
-        if (!result.bounds.has_value()) result.bounds = bounds_from_points(result.contours);
         return std::make_shared<const GlyphOutline>(std::move(result));
     }
 

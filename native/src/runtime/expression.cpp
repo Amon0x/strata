@@ -571,14 +571,6 @@ ExpressionValue restore_expression_dependency(const ExpressionDependencyValue& v
     return value.value;
 }
 
-std::optional<ExpressionDependencyValue> expression_scope_dependency(const ExpressionScope& scope,
-                                                                     const Symbol name) {
-    const ExpressionValue* value = scope.find(name);
-    return value != nullptr
-               ? std::optional<ExpressionDependencyValue>(ExpressionDependencyValue{*value})
-               : std::nullopt;
-}
-
 std::string canonical_host_dependency_path(const std::span<const HostPathSegment> path) {
     std::string result;
     for (const HostPathSegment& segment : path) {

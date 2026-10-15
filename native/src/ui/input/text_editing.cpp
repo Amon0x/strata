@@ -133,7 +133,7 @@ effective_number_field_value(const RetainedNode& node) noexcept {
     if (command_key(modifiers)) {
         return key == "a" || key == "c" || key == "x" || key == "v" || key == "z" || key == "y";
     }
-    if (modifiers.control || modifiers.super_key || modifiers.alt)
+    if (modifiers.alt)
         return false;
     return key == "left" || key == "right" || key == "up" || key == "down" || key == "home" ||
            key == "end" || key == "backspace" || key == "delete" || key == "enter" ||

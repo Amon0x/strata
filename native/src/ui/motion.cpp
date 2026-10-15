@@ -367,7 +367,6 @@ MotionFrameCounters MotionRuntime::evaluate(
 
             if (const std::optional<DisclosureMotionSpec> disclosure = disclosure_motion(node);
                 disclosure.has_value() && node.lifecycle() == RetainedLifecycle::attached) {
-                retained_targets.insert("strata.disclosure");
                 motion_detail::TargetPlayer& player =
                     implementation_->disclosure_players[node.identity()];
                 const motion_detail::TargetSample sample = player.advance(

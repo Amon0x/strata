@@ -118,7 +118,7 @@ ResourceBytes load_binary_resource(
         reinterpret_cast<char*>(bytes.data()),
         static_cast<std::streamsize>(bytes.size())
     );
-    if (!stream && !stream.eof()) {
+    if (stream.gcount() != static_cast<std::streamsize>(bytes.size())) {
         throw ResourceError("resource could not be read completely");
     }
     return bytes;

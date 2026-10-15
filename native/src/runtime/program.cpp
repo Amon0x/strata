@@ -205,23 +205,6 @@ using JsonObject = data::JsonObjectView;
 
 } // namespace
 
-bool collection_helper(const HelperKind helper) noexcept {
-    switch (helper) {
-    case HelperKind::filter:
-    case HelperKind::map:
-    case HelperKind::sort_by:
-    case HelperKind::distinct_by:
-    case HelperKind::group_by:
-    case HelperKind::flatten:
-    case HelperKind::take_while:
-    case HelperKind::window:
-    case HelperKind::page:
-        return true;
-    default:
-        return false;
-    }
-}
-
 /** Builds one Program from portable IR, in the order its tables need. */
 class ProgramLowering final {
   public:

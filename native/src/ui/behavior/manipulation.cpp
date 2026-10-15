@@ -671,7 +671,9 @@ void set_runtime_size(BehaviorInputScope& scope, const double width, const doubl
     if (scope.phase() != BehaviorInputEventPhase::target)
         return false;
     if (scope.key() == "escape") {
-        if (scope.retained(resize_session) == nullptr)
+        // An ended session is stored as null, so test for a live one, not for the entry.
+        const runtime::Value* session = scope.retained(resize_session);
+        if (session == nullptr || session->object() == nullptr)
             return false;
         scope.set_retained(std::string(resize_session), runtime::Value{}, DirtyReason::input);
         return true;
@@ -942,6 +944,9 @@ void change_split(BehaviorInputScope& scope, RetainedNode& pane, double value) {
     if (pane == nullptr)
         return false;
     if (scope.key() == "escape") {
+        const runtime::Value* session = scope.retained(split_session);
+        if (session == nullptr || session->object() == nullptr)
+            return false;
         scope.set_retained(std::string(split_session), runtime::Value{}, DirtyReason::input);
         return true;
     }

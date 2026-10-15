@@ -1,8 +1,6 @@
 #include "ui/text_geometry.hpp"
 
 #include <algorithm>
-#include <cmath>
-#include <cstdint>
 
 #include "ui/text.hpp"
 
@@ -55,43 +53,6 @@ std::size_t utf8_byte_for_utf16_offset(
     return std::min(bytes, text.size());
 }
 
-std::vector<TextLineRange> text_line_ranges(const std::string_view text) {
-    std::vector<TextLineRange> result;
-    std::size_t line_start = 0U;
-    std::size_t utf16 = 0U;
-    std::size_t bytes = 0U;
-    while (bytes < text.size()) {
-        const auto lead = static_cast<unsigned char>(text[bytes]);
-        const std::size_t width = utf8_width(lead);
-        if (lead == '\n') {
-            result.push_back(TextLineRange{line_start, utf16});
-            ++utf16;
-            line_start = utf16;
-        } else {
-            utf16 += utf16_width(lead);
-        }
-        bytes += width;
-    }
-    result.push_back(TextLineRange{line_start, utf16});
-    return result;
-}
-
-double shaped_text_line_height(const font::ShapedText& shaped) noexcept {
-    return shaped.metrics.line_count == 0U
-               ? shaped.metrics.natural_line_height
-               : shaped.metrics.height / static_cast<double>(shaped.metrics.line_count);
-}
-
-std::size_t text_line_for_offset(
-    const std::vector<TextLineRange>& lines,
-    const std::size_t utf16_offset
-) noexcept {
-    for (std::size_t line = 0U; line < lines.size(); ++line) {
-        if (utf16_offset <= lines[line].end) return line;
-    }
-    return lines.empty() ? 0U : lines.size() - 1U;
-}
-
 double shaped_caret_x(
     const font::ShapedText& shaped,
     const std::size_t line,
@@ -103,79 +64,6 @@ double shaped_caret_x(
         if (utf16_offset <= cluster.text_start_offset) return cluster.x;
         result = cluster.x + cluster.advance;
         if (utf16_offset < cluster.text_end_offset) return result;
-    }
-    return result;
-}
-
-std::size_t shaped_text_hit_offset(
-    const font::ShapedText& shaped,
-    const std::vector<TextLineRange>& lines,
-    const Point relative_position
-) noexcept {
-    if (lines.empty()) return 0U;
-    const double height = std::max(shaped_text_line_height(shaped), 1.0);
-    const auto raw_line = static_cast<std::int64_t>(std::floor(relative_position.y / height));
-    const std::size_t line = static_cast<std::size_t>(std::clamp<std::int64_t>(
-        raw_line, 0, static_cast<std::int64_t>(lines.size() - 1U)
-    ));
-    std::size_t result = lines[line].start;
-    for (const font::ShapedCluster& cluster : shaped.clusters) {
-        if (cluster.line_index != line) continue;
-        const double midpoint = cluster.x + cluster.advance * 0.5;
-        if (relative_position.x < midpoint) return cluster.text_start_offset;
-        result = cluster.text_end_offset;
-    }
-    return std::min(result, lines[line].end);
-}
-
-Point text_input_origin(
-    const LayoutRecord& layout,
-    const font::ShapedText& shaped,
-    const bool multiline
-) noexcept {
-    return Point{
-        layout.content_bounds.x,
-        multiline
-            ? layout.content_bounds.y
-            : layout.content_bounds.y +
-                  std::max(0.0, layout.content_bounds.height - shaped.metrics.height) * 0.5,
-    };
-}
-
-std::vector<Rect> shaped_selection_rects(
-    const font::ShapedText& shaped,
-    const std::vector<TextLineRange>& lines,
-    const Point origin,
-    const std::size_t first,
-    const std::size_t second
-) {
-    const std::size_t start = std::min(first, second);
-    const std::size_t end = std::max(first, second);
-    std::vector<Rect> result;
-    if (start == end) return result;
-    const double line_height = shaped_text_line_height(shaped);
-    for (std::size_t line = 0U; line < lines.size(); ++line) {
-        const TextLineRange range = lines[line];
-        const std::size_t from = std::max(start, range.start);
-        const std::size_t to = std::min(end, range.end);
-        if (from >= to) continue;
-        const double left = shaped_caret_x(shaped, line, from);
-        const double right = shaped_caret_x(shaped, line, to);
-        result.push_back(Rect{
-            origin.x + left,
-            origin.y + static_cast<double>(line) * line_height,
-            std::max(0.0, right - left),
-            line_height,
-        });
-    }
-    return result;
-}
-
-std::vector<TextLineRange> text_layout_line_ranges(const TextLayout& layout) {
-    std::vector<TextLineRange> result;
-    result.reserve(layout.lines.size());
-    for (const TextLayoutLine& line : layout.lines) {
-        result.push_back(TextLineRange{line.text_start_offset, line.text_end_offset});
     }
     return result;
 }
@@ -263,14 +151,6 @@ std::size_t text_layout_line_offset_at_x(
         result = cluster.text_end_offset;
     }
     return std::min(result, layout.lines[selected].text_end_offset);
-}
-
-Point text_input_origin(
-    const LayoutRecord& layout,
-    const TextLayout& text,
-    const bool multiline
-) noexcept {
-    return text_input_origin(layout.content_bounds, text, multiline);
 }
 
 Point text_input_origin(

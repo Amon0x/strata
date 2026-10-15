@@ -140,9 +140,6 @@ struct VirtualListSpec final {
     bool reset_anchor_on_change = false;
 
     [[nodiscard]] std::size_t item_count() const noexcept;
-    [[nodiscard]] double total_item_extent() const noexcept;
-    [[nodiscard]] double item_start(std::size_t index) const;
-    [[nodiscard]] double extent_at(std::size_t index) const;
     [[nodiscard]] friend bool operator==(const VirtualListSpec&, const VirtualListSpec&) = default;
 };
 

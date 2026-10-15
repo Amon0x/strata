@@ -200,6 +200,28 @@ struct WindowApplication final {
     return GetForegroundWindow() == window;
 }
 
+// Dispatches every queued message, collapsing a run of mouse moves to one window into its latest.
+// Returns false once WM_QUIT is dequeued, leaving its exit code in `exit_code`.
+[[nodiscard]] bool dispatch_pending_messages(int& exit_code) {
+    MSG message{};
+    while (PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE)) {
+        if (message.message == WM_MOUSEMOVE) {
+            MSG next{};
+            while (PeekMessageW(&next, nullptr, 0U, 0U, PM_NOREMOVE) &&
+                   next.message == WM_MOUSEMOVE && next.hwnd == message.hwnd) {
+                static_cast<void>(PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE));
+            }
+        }
+        if (message.message == WM_QUIT) {
+            exit_code = static_cast<int>(message.wParam);
+            return false;
+        }
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+    return true;
+}
+
 LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const WPARAM word,
                                   const LPARAM long_value) {
     if (message == WM_NCCREATE) {
@@ -322,13 +344,10 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
             // Bare F10 is a Win32 system key that normally enters menu-key modality. Strata owns
             // it as an application shortcut, so forwarding it to DefWindowProc would logically
             // toggle the surface and then stall visible presentation until menu mode is dismissed.
-            if (word == VK_F10) {
-                app->key(VK_F10, (HIWORD(long_value) & KF_REPEAT) != 0U ? STRATA_KEY_REPEAT
-                                                                        : STRATA_KEY_PRESS);
-                return 0;
-            }
             app->key(static_cast<std::uint32_t>(word),
                      (HIWORD(long_value) & KF_REPEAT) != 0U ? STRATA_KEY_REPEAT : STRATA_KEY_PRESS);
+            if (word == VK_F10)
+                return 0;
             return DefWindowProcW(window, message, word, long_value);
         case WM_SYSKEYUP:
             app->key(static_cast<std::uint32_t>(word), STRATA_KEY_RELEASE);
@@ -718,21 +737,8 @@ int wmain(const int argument_count, wchar_t** const arguments) {
             }
             auto pump_messages = [&applications, &exit_code]() {
                 MSG message{};
-                while (PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE)) {
-                    if (message.message == WM_MOUSEMOVE) {
-                        MSG next{};
-                        while (PeekMessageW(&next, nullptr, 0U, 0U, PM_NOREMOVE) &&
-                               next.message == WM_MOUSEMOVE && next.hwnd == message.hwnd) {
-                            static_cast<void>(PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE));
-                        }
-                    }
-                    if (message.message == WM_QUIT) {
-                        exit_code = static_cast<int>(message.wParam);
-                        return false;
-                    }
-                    TranslateMessage(&message);
-                    DispatchMessageW(&message);
-                }
+                if (!dispatch_pending_messages(exit_code))
+                    return false;
                 return std::ranges::all_of(applications, [](const auto& app) {
                     return app->failure.empty() && app->host != nullptr;
                 });
@@ -760,24 +766,7 @@ int wmain(const int argument_count, wchar_t** const arguments) {
         auto frame_time_window_started = std::chrono::steady_clock::now();
         std::size_t frame_time_window_frames = 0U;
         while (running) {
-            MSG message{};
-            while (PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE)) {
-                if (message.message == WM_MOUSEMOVE) {
-                    MSG next{};
-                    while (PeekMessageW(&next, nullptr, 0U, 0U, PM_NOREMOVE) &&
-                           next.message == WM_MOUSEMOVE && next.hwnd == message.hwnd) {
-                        static_cast<void>(PeekMessageW(&message, nullptr, 0U, 0U, PM_REMOVE));
-                    }
-                }
-                if (message.message == WM_QUIT) {
-                    exit_code = static_cast<int>(message.wParam);
-                    running = false;
-                    break;
-                }
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
-            if (!running)
+            if (!dispatch_pending_messages(exit_code))
                 break;
             for (const auto& app : applications) {
                 if (!app->has_host())

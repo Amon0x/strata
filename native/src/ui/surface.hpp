@@ -310,8 +310,6 @@ class Surface final {
 
   private:
     void advance_environment_generation();
-    void queue_resource_invalidation() noexcept;
-    void apply_pending_resource_invalidation();
     void invalidate_frame() noexcept;
     void invalidate_description() noexcept;
     [[nodiscard]] std::shared_ptr<const DescriptionNode> describe(DescriptionBuildResult& result);

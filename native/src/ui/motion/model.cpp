@@ -375,16 +375,4 @@ double motion_terminal_progress(
     return terminal_direction == MotionDirection::reverse ? 0.0 : 1.0;
 }
 
-MotionTransform motion_transform(const MotionComputedValues& values) noexcept {
-    const double uniform = values.number(MotionProperty::scale).value_or(1.0);
-    return MotionTransform{
-        values.number(MotionProperty::x)
-            .value_or(values.number(MotionProperty::translate_x).value_or(0.0)),
-        values.number(MotionProperty::y)
-            .value_or(values.number(MotionProperty::translate_y).value_or(0.0)),
-        values.number(MotionProperty::scale_x).value_or(uniform),
-        values.number(MotionProperty::scale_y).value_or(uniform),
-    };
-}
-
 } // namespace strata::ui

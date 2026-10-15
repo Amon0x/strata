@@ -185,6 +185,5 @@ struct MotionTransform final {
     const CompiledMotion& animation,
     MotionDirection direction
 ) noexcept;
-[[nodiscard]] MotionTransform motion_transform(const MotionComputedValues& values) noexcept;
 
 } // namespace strata::ui

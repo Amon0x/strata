@@ -239,25 +239,6 @@ bool StateStore::retain_owned_scopes(const StateScopeSet& attached_scopes) {
     return removed;
 }
 
-bool StateStore::retain_declaration_scopes(const StateScopeSet& attached_scopes) {
-    bool removed = false;
-    for (const std::string& scope : declaration_scopes_) {
-        if (attached_scopes.contains(scope)) continue;
-        for (auto value = values_.begin(); value != values_.end();) {
-            if (value->second.declaration_scope == scope) {
-                initial_values_.erase(value->first);
-                value = values_.erase(value);
-                removed = true;
-            } else {
-                ++value;
-            }
-        }
-    }
-    declaration_scopes_ = attached_scopes;
-    if (removed) changed();
-    return removed;
-}
-
 std::uint64_t StateStore::generation() const noexcept { return generation_; }
 std::size_t StateStore::size() const noexcept { return values_.size(); }
 
