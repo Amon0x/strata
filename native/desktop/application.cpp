@@ -27,6 +27,7 @@
 #include "host/system_fonts.hpp"
 #include "host_services.hpp"
 #include "ime.hpp"
+#include "window_input.hpp"
 #include "renderer.hpp"
 #include <strata/render_packet.hpp>
 
@@ -556,11 +557,9 @@ struct ApplicationHost::Impl final {
     std::uint64_t activation_generation = 0U;
     std::uint32_t framebuffer_width = 1U;
     std::uint32_t framebuffer_height = 1U;
-    std::uint32_t captured_buttons = 0U;
     double scale = 1.0;
-    wchar_t high_surrogate = 0;
     bool frame_available = false;
-    bool tracking_mouse_leave = false;
+    win32::WindowInputState input;
 };
 
 ApplicationHost::ApplicationHost(HWND window, std::filesystem::path resource_root,
@@ -686,163 +685,12 @@ ApplicationHost::handle_window_message(const std::uint32_t message, const std::u
         }
         return 0;
     }
-    case WM_MOUSEMOVE: {
-        if (!impl_->tracking_mouse_leave) {
-            TRACKMOUSEEVENT tracking{
-                sizeof(TRACKMOUSEEVENT),
-                TME_LEAVE,
-                impl_->window,
-                HOVER_DEFAULT,
-            };
-            impl_->tracking_mouse_leave = TrackMouseEvent(&tracking) != FALSE;
-        }
-        pointer(STRATA_INPUT_POINTER_MOVE, 0, GET_X_LPARAM(long_parameter),
-                GET_Y_LPARAM(long_parameter));
-        return 0;
-    }
-    case WM_MOUSELEAVE:
-        impl_->tracking_mouse_leave = false;
-        if (impl_->captured_buttons == 0U) {
-            pointer(STRATA_INPUT_POINTER_CANCEL, 0, 0.0, 0.0);
-        }
-        return 0;
-    case WM_XBUTTONDOWN: {
-        const bool first = GET_XBUTTON_WPARAM(word_parameter) == XBUTTON1;
-        impl_->captured_buttons |= first ? 8U : 16U;
-        SetFocus(impl_->window);
-        SetCapture(impl_->window);
-        pointer(STRATA_INPUT_POINTER_PRESS, first ? 3 : 4, GET_X_LPARAM(long_parameter),
-                GET_Y_LPARAM(long_parameter));
-        return 1;
-    }
-    case WM_LBUTTONDOWN:
-    case WM_RBUTTONDOWN:
-    case WM_MBUTTONDOWN:
-        impl_->captured_buttons |= message == WM_LBUTTONDOWN   ? 1U
-                                   : message == WM_RBUTTONDOWN ? 2U
-                                                               : 4U;
-        SetFocus(impl_->window);
-        SetCapture(impl_->window);
-        pointer(STRATA_INPUT_POINTER_PRESS,
-                message == WM_LBUTTONDOWN   ? 0
-                : message == WM_RBUTTONDOWN ? 1
-                                            : 2,
-                GET_X_LPARAM(long_parameter), GET_Y_LPARAM(long_parameter));
-        return 0;
-    case WM_XBUTTONUP: {
-        const bool first = GET_XBUTTON_WPARAM(word_parameter) == XBUTTON1;
-        pointer(STRATA_INPUT_POINTER_RELEASE, first ? 3 : 4, GET_X_LPARAM(long_parameter),
-                GET_Y_LPARAM(long_parameter));
-        impl_->captured_buttons &= first ? ~8U : ~16U;
-        if (impl_->captured_buttons == 0U && GetCapture() == impl_->window)
-            ReleaseCapture();
-        return 1;
-    }
-    case WM_LBUTTONUP:
-    case WM_RBUTTONUP:
-    case WM_MBUTTONUP:
-        pointer(STRATA_INPUT_POINTER_RELEASE,
-                message == WM_LBUTTONUP   ? 0
-                : message == WM_RBUTTONUP ? 1
-                                          : 2,
-                GET_X_LPARAM(long_parameter), GET_Y_LPARAM(long_parameter));
-        impl_->captured_buttons &= message == WM_LBUTTONUP   ? ~1U
-                                   : message == WM_RBUTTONUP ? ~2U
-                                                             : ~4U;
-        if (impl_->captured_buttons == 0U && GetCapture() == impl_->window)
-            ReleaseCapture();
-        return 0;
-    case WM_MOUSEWHEEL:
-    case WM_MOUSEHWHEEL: {
-        POINT point{GET_X_LPARAM(long_parameter), GET_Y_LPARAM(long_parameter)};
-        ScreenToClient(impl_->window, &point);
-        const double delta =
-            static_cast<double>(GET_WHEEL_DELTA_WPARAM(word_parameter)) / WHEEL_DELTA;
-        scroll(point.x, point.y, message == WM_MOUSEHWHEEL ? delta : 0.0,
-               message == WM_MOUSEWHEEL ? delta : 0.0);
-        return 0;
-    }
-    case WM_KEYDOWN:
-    case WM_KEYUP:
-        key(static_cast<std::uint32_t>(word_parameter), message == WM_KEYUP ? STRATA_KEY_RELEASE
-                                                        : (HIWORD(long_parameter) & KF_REPEAT) != 0U
-                                                            ? STRATA_KEY_REPEAT
-                                                            : STRATA_KEY_PRESS);
-        return 0;
-    case WM_SYSKEYDOWN:
-    case WM_SYSKEYUP:
-        key(static_cast<std::uint32_t>(word_parameter), message == WM_SYSKEYUP ? STRATA_KEY_RELEASE
-                                                        : (HIWORD(long_parameter) & KF_REPEAT) != 0U
-                                                            ? STRATA_KEY_REPEAT
-                                                            : STRATA_KEY_PRESS);
-        if (word_parameter == VK_F10)
-            return 0;
-        return std::nullopt;
-    case WM_CHAR: {
-        const wchar_t value = static_cast<wchar_t>(word_parameter);
-        if (value >= 0xD800 && value <= 0xDBFF) {
-            impl_->high_surrogate = value;
-            return 0;
-        }
-        if (value >= 0xDC00 && value <= 0xDFFF) {
-            if (impl_->high_surrogate != 0) {
-                text(win32::utf8_character(impl_->high_surrogate, value));
-            }
-            impl_->high_surrogate = 0;
-            return 0;
-        }
-        impl_->high_surrogate = 0;
-        if (value >= 0x20 && value != 0x7F) {
-            text(win32::utf8_character(value));
-        }
-        return 0;
-    }
-    case WM_UNICHAR:
-        if (word_parameter == UNICODE_NOCHAR)
-            return 1;
-        if (word_parameter < 0x20U || word_parameter == 0x7FU)
-            return 0;
-        if (const std::string value =
-                win32::utf8_code_point(static_cast<std::uint32_t>(word_parameter));
-            !value.empty()) {
-            text(value);
-        }
-        return 0;
-    case WM_IME_STARTCOMPOSITION:
-        ime_preedit({}, 0U, 0U);
-        return 0;
-    case WM_IME_COMPOSITION: {
-        const win32::ImeUpdate update = win32::read_ime_update(impl_->window, long_value);
-        if (update.committed.has_value() && !update.committed->empty())
-            text(*update.committed);
-        if (update.preedit.has_value()) {
-            ime_preedit(*update.preedit, update.selection_start, update.selection_end);
-        }
-        return 0;
-    }
-    case WM_IME_ENDCOMPOSITION:
-        ime_preedit({}, 0U, 0U);
-        return 0;
-    case WM_IME_CHAR:
-        return 0;
-    case WM_KILLFOCUS:
-    case WM_CANCELMODE:
-        impl_->captured_buttons = 0U;
-        impl_->high_surrogate = 0;
-        ime_preedit({}, 0U, 0U);
-        cancel_interactions();
-        if (GetCapture() == impl_->window)
-            ReleaseCapture();
-        return 0;
-    case WM_CAPTURECHANGED:
-        if (impl_->captured_buttons != 0U) {
-            impl_->captured_buttons = 0U;
-            cancel_interactions();
-        }
-        return 0;
     default:
-        return std::nullopt;
+        break;
     }
+    const std::optional<LRESULT> handled = win32::translate_window_input(
+        *this, impl_->input, impl_->window, message, word_parameter, long_parameter);
+    return handled.has_value() ? std::optional<std::intptr_t>(*handled) : std::nullopt;
 }
 
 void ApplicationHost::cancel_interactions() noexcept {

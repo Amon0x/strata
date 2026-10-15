@@ -23,6 +23,7 @@
 #include "headless/scenario.hpp"
 #include "host.hpp"
 #include "ime.hpp"
+#include "window_input.hpp"
 #include "launch.hpp"
 #include "performance.hpp"
 #include "preview.hpp"
@@ -53,9 +54,7 @@ struct WindowApplication final {
     std::unique_ptr<strata::desktop::PreviewSession> preview;
     std::string failure;
     HWND window_handle = nullptr;
-    wchar_t high_surrogate = 0;
-    std::uint32_t captured_buttons = 0U;
-    bool tracking_mouse_leave = false;
+    strata::desktop::win32::WindowInputState input;
     bool registered = false;
 
     [[nodiscard]] bool has_host() const noexcept {
@@ -125,16 +124,6 @@ struct WindowApplication final {
         }
     }
 
-    void ime_composition(const std::intptr_t flags) {
-        const strata::desktop::win32::ImeUpdate update =
-            strata::desktop::win32::read_ime_update(window_handle, flags);
-        if (update.committed.has_value() && !update.committed->empty())
-            text(*update.committed);
-        if (update.preedit.has_value()) {
-            ime_preedit(*update.preedit, update.selection_start, update.selection_end);
-        }
-    }
-
     void cancel_interactions() noexcept {
         if (host != nullptr)
             host->cancel_interactions();
@@ -155,24 +144,6 @@ struct WindowApplication final {
         preview.reset();
         application_host.reset();
         host.reset();
-    }
-
-    void character(const wchar_t value) {
-        if (value >= 0xD800 && value <= 0xDBFF) {
-            high_surrogate = value;
-            return;
-        }
-        if (value >= 0xDC00 && value <= 0xDFFF) {
-            if (high_surrogate == 0)
-                return;
-            text(strata::desktop::win32::utf8_character(high_surrogate, value));
-            high_surrogate = 0;
-            return;
-        }
-        high_surrogate = 0;
-        if (value >= 0x20 && value != 0x7f) {
-            text(strata::desktop::win32::utf8_character(value));
-        }
     }
 };
 
@@ -239,6 +210,11 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
             return handled.has_value() ? static_cast<LRESULT>(*handled)
                                        : DefWindowProcW(window, message, word, long_value);
         }
+        if (const std::optional<LRESULT> handled = strata::desktop::win32::translate_window_input(
+                *app, app->input, window, message, word, long_value);
+            handled.has_value()) {
+            return *handled;
+        }
         switch (message) {
         case WM_SIZE:
             app->resize(window, long_value);
@@ -254,147 +230,6 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
                          SWP_NOACTIVATE | SWP_NOZORDER);
             return 0;
         }
-        case WM_MOUSEMOVE:
-            if (!app->tracking_mouse_leave) {
-                TRACKMOUSEEVENT tracking{
-                    sizeof(TRACKMOUSEEVENT),
-                    TME_LEAVE,
-                    window,
-                    HOVER_DEFAULT,
-                };
-                app->tracking_mouse_leave = TrackMouseEvent(&tracking) != FALSE;
-            }
-            app->pointer(STRATA_INPUT_POINTER_MOVE, 0, GET_X_LPARAM(long_value),
-                         GET_Y_LPARAM(long_value));
-            return 0;
-        case WM_MOUSELEAVE:
-            app->tracking_mouse_leave = false;
-            if (app->captured_buttons == 0U) {
-                app->pointer(STRATA_INPUT_POINTER_CANCEL, 0, 0.0, 0.0);
-            }
-            return 0;
-        case WM_XBUTTONDOWN: {
-            const bool first = GET_XBUTTON_WPARAM(word) == XBUTTON1;
-            app->captured_buttons |= first ? 8U : 16U;
-            SetFocus(window);
-            SetCapture(window);
-            app->pointer(STRATA_INPUT_POINTER_PRESS, first ? 3 : 4, GET_X_LPARAM(long_value),
-                         GET_Y_LPARAM(long_value));
-            return 1;
-        }
-        case WM_LBUTTONDOWN:
-        case WM_RBUTTONDOWN:
-        case WM_MBUTTONDOWN:
-            app->captured_buttons |= message == WM_LBUTTONDOWN   ? 1U
-                                     : message == WM_RBUTTONDOWN ? 2U
-                                                                 : 4U;
-            SetFocus(window);
-            SetCapture(window);
-            app->pointer(STRATA_INPUT_POINTER_PRESS,
-                         message == WM_LBUTTONDOWN   ? 0
-                         : message == WM_RBUTTONDOWN ? 1
-                                                     : 2,
-                         GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value));
-            return 0;
-        case WM_XBUTTONUP: {
-            const bool first = GET_XBUTTON_WPARAM(word) == XBUTTON1;
-            app->pointer(STRATA_INPUT_POINTER_RELEASE, first ? 3 : 4, GET_X_LPARAM(long_value),
-                         GET_Y_LPARAM(long_value));
-            app->captured_buttons &= first ? ~8U : ~16U;
-            if (app->captured_buttons == 0U && GetCapture() == window)
-                ReleaseCapture();
-            return 1;
-        }
-        case WM_LBUTTONUP:
-        case WM_RBUTTONUP:
-        case WM_MBUTTONUP:
-            app->pointer(STRATA_INPUT_POINTER_RELEASE,
-                         message == WM_LBUTTONUP   ? 0
-                         : message == WM_RBUTTONUP ? 1
-                                                   : 2,
-                         GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value));
-            app->captured_buttons &= message == WM_LBUTTONUP   ? ~1U
-                                     : message == WM_RBUTTONUP ? ~2U
-                                                               : ~4U;
-            if (app->captured_buttons == 0U && GetCapture() == window)
-                ReleaseCapture();
-            return 0;
-        case WM_MOUSEWHEEL: {
-            POINT point{GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value)};
-            ScreenToClient(window, &point);
-            app->scroll(point.x, point.y, 0.0,
-                        static_cast<double>(GET_WHEEL_DELTA_WPARAM(word)) / WHEEL_DELTA);
-            return 0;
-        }
-        case WM_MOUSEHWHEEL: {
-            POINT point{GET_X_LPARAM(long_value), GET_Y_LPARAM(long_value)};
-            ScreenToClient(window, &point);
-            app->scroll(point.x, point.y,
-                        static_cast<double>(GET_WHEEL_DELTA_WPARAM(word)) / WHEEL_DELTA, 0.0);
-            return 0;
-        }
-        case WM_KEYDOWN:
-            app->key(static_cast<std::uint32_t>(word),
-                     (HIWORD(long_value) & KF_REPEAT) != 0U ? STRATA_KEY_REPEAT : STRATA_KEY_PRESS);
-            return 0;
-        case WM_KEYUP:
-            app->key(static_cast<std::uint32_t>(word), STRATA_KEY_RELEASE);
-            return 0;
-        case WM_SYSKEYDOWN:
-            // Bare F10 is a Win32 system key that normally enters menu-key modality. Strata owns
-            // it as an application shortcut, so forwarding it to DefWindowProc would logically
-            // toggle the surface and then stall visible presentation until menu mode is dismissed.
-            app->key(static_cast<std::uint32_t>(word),
-                     (HIWORD(long_value) & KF_REPEAT) != 0U ? STRATA_KEY_REPEAT : STRATA_KEY_PRESS);
-            if (word == VK_F10)
-                return 0;
-            return DefWindowProcW(window, message, word, long_value);
-        case WM_SYSKEYUP:
-            app->key(static_cast<std::uint32_t>(word), STRATA_KEY_RELEASE);
-            if (word == VK_F10)
-                return 0;
-            return DefWindowProcW(window, message, word, long_value);
-        case WM_CHAR:
-            if (app->host != nullptr)
-                app->character(static_cast<wchar_t>(word));
-            return 0;
-        case WM_UNICHAR:
-            if (word == UNICODE_NOCHAR)
-                return 1;
-            if (word < 0x20U || word == 0x7FU)
-                return 0;
-            if (const std::string value =
-                    strata::desktop::win32::utf8_code_point(static_cast<std::uint32_t>(word));
-                !value.empty()) {
-                app->text(value);
-            }
-            return 0;
-        case WM_IME_STARTCOMPOSITION:
-            app->ime_preedit({}, 0U, 0U);
-            return 0;
-        case WM_IME_COMPOSITION:
-            app->ime_composition(long_value);
-            return 0;
-        case WM_IME_ENDCOMPOSITION:
-            app->ime_preedit({}, 0U, 0U);
-            return 0;
-        case WM_IME_CHAR:
-            return 0;
-        case WM_KILLFOCUS:
-        case WM_CANCELMODE:
-            app->captured_buttons = 0U;
-            app->high_surrogate = 0;
-            app->ime_preedit({}, 0U, 0U);
-            app->cancel_interactions();
-            if (GetCapture() == window)
-                ReleaseCapture();
-            return 0;
-        case WM_CAPTURECHANGED:
-            if (app->captured_buttons != 0U) {
-                app->captured_buttons = 0U;
-                app->cancel_interactions();
-            }
-            return 0;
         case WM_CLOSE:
             DestroyWindow(window);
             return 0;

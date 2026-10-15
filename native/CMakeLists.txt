@@ -763,6 +763,18 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             POSITION_INDEPENDENT_CODE ON
     )
     strata_target_defaults(strata_desktop_host)
+
+    if(STRATA_BUILD_TESTS)
+        # Drives the shared Win32 input translation with recorded messages on a real window.
+        add_executable(strata_window_input_tests tests/window_input_tests.cpp desktop/ime.cpp)
+        target_include_directories(
+            strata_window_input_tests
+            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop ${CMAKE_CURRENT_SOURCE_DIR}/include
+        )
+        target_link_libraries(strata_window_input_tests PRIVATE imm32 user32)
+        strata_target_defaults(strata_window_input_tests)
+        add_test(NAME strata.desktop.window_input COMMAND strata_window_input_tests)
+    endif()
 endif()
 
 if(STRATA_BUILD_TOOLS OR STRATA_BUILD_AUTHORING)
