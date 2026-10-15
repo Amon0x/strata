@@ -224,6 +224,36 @@ void test_surface_backdrop_inside_content(strata::headless::CaptureRenderer& ren
           "SURFACE backdrop inside CONTENT did not sample the incoming framebuffer");
 }
 
+/**
+ * A retained frame that only moves a presentation group keeps its geometry epoch and reports the
+ * moved bounds as dirty regions. A rate-limited effect over that region has to resample then
+ * rather than show the content where it used to be until its next refresh.
+ */
+void test_group_move_refreshes_effect(strata::headless::CaptureRenderer& renderer) {
+    using namespace strata;
+    renderer.resize(4U, 4U, 4.0, 4.0);
+    host::RenderPacket packet = surface_backdrop_packet(host::EffectBackdropSource::current, 7U);
+    packet.batches.erase(packet.batches.begin());
+    renderer.set_clear_color({255U, 0U, 0U, 255U});
+    renderer.render(packet, 0);
+    renderer.set_clear_color({0U, 0U, 255U, 255U});
+    renderer.render(packet, 1'000'000);
+    check(center(renderer) == std::array<std::uint8_t, 4U>{255U, 0U, 0U, 255U},
+          "rate-limited effect refreshed before its deadline");
+
+    packet.geometry_dirty_regions.push_back(host::GeometryDirtyRegion{1.0, 1.0, 2.0, 2.0});
+    renderer.set_clear_color({0U, 255U, 0U, 255U});
+    renderer.render(packet, 2'000'000);
+    check(center(renderer) == std::array<std::uint8_t, 4U>{0U, 255U, 0U, 255U},
+          "a group move under a rate-limited effect reused the sample from before it");
+
+    packet.geometry_dirty_regions.clear();
+    renderer.set_clear_color({255U, 255U, 0U, 255U});
+    renderer.render(packet, 3'000'000);
+    check(center(renderer) == std::array<std::uint8_t, 4U>{0U, 255U, 0U, 255U},
+          "an unchanged retained frame resampled a rate-limited effect");
+}
+
 void test_temporal_refresh_contract() {
     using namespace strata;
     headless::SoftwareRenderer renderer(headless::platform_image_codec());
@@ -416,11 +446,13 @@ int main() {
         test_surface_backdrop_source(software);
         test_surface_backdrop_inside_content(software);
         test_subpixel_snapping(software);
+        test_group_move_refreshes_effect(software);
 #ifdef _WIN32
         strata::headless::D3D11Renderer d3d11;
         test_surface_backdrop_source(d3d11);
         test_surface_backdrop_inside_content(d3d11);
         test_subpixel_snapping(d3d11);
+        test_group_move_refreshes_effect(d3d11);
         test_downsampled_blur_matches_d3d11();
 #endif
         test_temporal_refresh_contract();

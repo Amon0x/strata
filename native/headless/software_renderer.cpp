@@ -1174,9 +1174,10 @@ void SoftwareRenderer::render(const host::RenderPacket& packet,
         throw std::logic_error("headless renderer must be sized before rendering");
     }
     consume_resources(packet);
-    // A changed group table (geometry_dirty_all) moves content beneath cached effects too.
+    // A changed group table moves content beneath cached effects without a new epoch; the decoder
+    // reports where in geometry_dirty_regions.
     if (!has_cached_effect_epoch_ || cached_effect_epoch_ != packet.geometry_epoch ||
-        packet.geometry_dirty_all) {
+        packet.geometry_dirty_all || !packet.geometry_dirty_regions.empty()) {
         cached_effects_.clear();
         cached_effect_epoch_ = packet.geometry_epoch;
         has_cached_effect_epoch_ = true;

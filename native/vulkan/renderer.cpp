@@ -30,10 +30,11 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
     active_epoch = packet.geometry_epoch;
     effect_index = 0;
     begin();
-    // A changed group table moves content without changing geometry (geometry_dirty_all).
+    // A changed group table moves content without changing geometry; the decoder reports where
+    // in geometry_dirty_regions, so cached effect samples are dropped for those frames too.
     if (packet.full_geometry_payload || packet.geometry_dirty_all ||
-        !packet.vertex_patches.empty() || !packet.index_patches.empty() ||
-        !packet.resources.empty())
+        !packet.geometry_dirty_regions.empty() || !packet.vertex_patches.empty() ||
+        !packet.index_patches.empty() || !packet.resources.empty())
         drop_effects(active_layer);
     try {
         resources(packet);

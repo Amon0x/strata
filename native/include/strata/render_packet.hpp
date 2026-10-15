@@ -238,8 +238,9 @@ struct RenderPacket final {
     std::vector<GeometryDirtyRegion> geometry_dirty_regions;
     /**
      * Presentation groups indexed by vertex group, through the highest index in use (empty when
-     * none; entry zero and absent indices are the identity). A changed table marks
-     * geometry_dirty_all, since grouped content moves without a geometry change.
+     * none; entry zero and absent indices are the identity). A changed table moves grouped
+     * content without a geometry change: the epoch stays, and the moved groups' old and new
+     * bounds are reported in geometry_dirty_regions.
      */
     std::vector<PresentationGroup> groups;
 };

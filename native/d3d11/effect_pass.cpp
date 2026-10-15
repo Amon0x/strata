@@ -348,8 +348,12 @@ struct EffectPassRenderer::Impl final {
     ) {
         const std::string layer(layer_id);
         const auto found = layer_epochs.find(layer);
-        if (found != layer_epochs.end() && found->second == geometry_epoch)
+        // A presentation-group move keeps the epoch but still reports the regions it uncovered.
+        const bool same_epoch = found != layer_epochs.end() && found->second == geometry_epoch;
+        if (same_epoch && !dirty_all && dirty_regions.empty())
             return;
+        const std::optional<std::uint64_t> previous_epoch =
+            found != layer_epochs.end() ? std::optional(found->second) : std::nullopt;
         layer_epochs.insert_or_assign(layer, geometry_epoch);
         const auto intersects = [](const host::EffectBatch& effect,
                                    const host::GeometryDirtyRegion& dirty) {
@@ -368,7 +372,14 @@ struct EffectPassRenderer::Impl final {
                     return intersects(sample.effect, region);
                 }
             );
-            if (!dirty) sample.geometry_epoch = geometry_epoch;
+            if (dirty) {
+                // Stale against this epoch, whether or not the epoch moved.
+                if (sample.geometry_epoch == geometry_epoch)
+                    sample.geometry_epoch = geometry_epoch - 1U;
+            } else if (sample.geometry_epoch == previous_epoch) {
+                // Untouched and current until now: carry it into the new epoch.
+                sample.geometry_epoch = geometry_epoch;
+            }
         }
     }
 
