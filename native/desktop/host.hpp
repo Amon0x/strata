@@ -49,7 +49,6 @@ struct DesktopHostInfo final {
 
 struct HostOptions final {
     bool vsync = true;
-    bool restore_window_geometry = true;
     bool performance_hud = true;
     bool profile_sampling = true;
 };
@@ -78,8 +77,6 @@ public:
     void text(std::string utf8);
     void ime_preedit(std::string utf8, std::size_t selection_start, std::size_t selection_end);
     void cancel_interactions() noexcept;
-    /** Persists the completed native move/resize immediately instead of relying on shutdown. */
-    void persist_window_geometry();
     void frame();
 
     [[nodiscard]] double scale() const noexcept;

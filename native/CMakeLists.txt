@@ -991,6 +991,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         desktop/performance.cpp
         desktop/preview.cpp
         desktop/showcase.cpp
+        desktop/window_placement.cpp
         headless/scenario.cpp
     )
     target_link_libraries(

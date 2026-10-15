@@ -24,6 +24,7 @@
 #include "host.hpp"
 #include "ime.hpp"
 #include "window_input.hpp"
+#include "window_placement.hpp"
 #include "launch.hpp"
 #include "performance.hpp"
 #include "preview.hpp"
@@ -55,7 +56,14 @@ struct WindowApplication final {
     std::string failure;
     HWND window_handle = nullptr;
     strata::desktop::win32::WindowInputState input;
+    /** Where this window's bounds are remembered; empty for benchmark and hidden windows. */
+    std::filesystem::path placement_path;
     bool registered = false;
+
+    void remember_placement() const noexcept {
+        if (!placement_path.empty())
+            strata::desktop::win32::save_window_placement(window_handle, placement_path);
+    }
 
     [[nodiscard]] bool has_host() const noexcept {
         return host != nullptr || application_host != nullptr;
@@ -204,6 +212,8 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
     if (app == nullptr)
         return DefWindowProcW(window, message, word, long_value);
     try {
+        if (message == WM_EXITSIZEMOVE || message == WM_DESTROY)
+            app->remember_placement();
         if (app->application_host != nullptr && message != WM_CLOSE && message != WM_DESTROY) {
             const std::optional<std::intptr_t> handled =
                 app->application_host->handle_window_message(message, word, long_value);
@@ -218,10 +228,6 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
         switch (message) {
         case WM_SIZE:
             app->resize(window, long_value);
-            return 0;
-        case WM_EXITSIZEMOVE:
-            if (app->host != nullptr)
-                app->host->persist_window_geometry();
             return 0;
         case WM_DPICHANGED: {
             const auto* const suggested = reinterpret_cast<const RECT*>(long_value);
@@ -435,6 +441,16 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                         .count();
             }
             app->window_handle = window;
+            bool start_maximized = false;
+            if (!performance && !headless) {
+                app->placement_path = strata::desktop::win32::window_placement_path(
+                    application_launch.has_value()
+                        ? "application:" + application_launch->application_id + "#" +
+                              std::to_string(index)
+                        : "showcase#" + std::to_string(index));
+                start_maximized =
+                    strata::desktop::win32::restore_window_placement(window, app->placement_path);
+            }
             if (performance_scenario.has_value()) {
                 RECT exact_bounds{
                     0,
@@ -532,7 +548,6 @@ int wmain(const int argument_count, wchar_t** const arguments) {
                         window, resources, instance_label,
                         strata::desktop::HostOptions{
                             .vsync = !uncapped && !headless,
-                            .restore_window_geometry = !performance,
                             .performance_hud = !performance,
                             .profile_sampling = !performance,
                         });
@@ -552,7 +567,9 @@ int wmain(const int argument_count, wchar_t** const arguments) {
             app->registered = true;
             ++active_window_count;
             if (!headless && (!performance || performance_scenario->require_visible)) {
-                ShowWindow(window, performance ? SW_SHOWNOACTIVATE : SW_SHOW);
+                ShowWindow(window, performance       ? SW_SHOWNOACTIVATE
+                                   : start_maximized ? SW_SHOWMAXIMIZED
+                                                     : SW_SHOW);
                 UpdateWindow(window);
                 if (performance_scenario.has_value() && performance_scenario->require_foreground) {
                     static_cast<void>(activate_foreground_window(window));

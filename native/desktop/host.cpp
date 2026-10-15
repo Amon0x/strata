@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cctype>
@@ -406,29 +405,9 @@ struct Host::Impl final {
                 ).count()
             );
         }
-        if (options.restore_window_geometry) restore_window_geometry();
-        RECT restored_client{};
-        if (GetClientRect(window, &restored_client)) {
-            framebuffer_width = static_cast<std::uint32_t>(
-                std::max<LONG>(1L, restored_client.right - restored_client.left)
-            );
-            framebuffer_height = static_cast<std::uint32_t>(
-                std::max<LONG>(1L, restored_client.bottom - restored_client.top)
-            );
-            display_scale = desktop_display_scale(
-                framebuffer_width, framebuffer_height, dpi_scale
-            );
-            renderer.resize(
-                framebuffer_width, framebuffer_height, logical_width(), logical_height()
-            );
-        }
     }
 
     ~Impl() noexcept {
-        try {
-            remember_window_geometry();
-        } catch (...) {
-        }
         close_session(hub);
         close_session(performance_hud);
         close_session(debug);
@@ -576,13 +555,6 @@ struct Host::Impl final {
         }
     }
 
-    static void capture_value(void* const user_data, const strata_string_view value) noexcept {
-        try {
-            *static_cast<std::string*>(user_data) = copy(value);
-        } catch (...) {
-        }
-    }
-
     static std::string query_text(const std::string_view payload_json) {
         std::istringstream input{std::string(payload_json)};
         std::string value;
@@ -597,104 +569,6 @@ struct Host::Impl final {
             return static_cast<char>(std::tolower(character));
         });
         return value;
-    }
-
-    static std::optional<std::int64_t> json_integer(
-        const std::string_view json,
-        const std::string_view name
-    ) {
-        const std::string marker = "\"" + std::string(name) + "\":";
-        const std::size_t start = json.find(marker);
-        if (start == std::string_view::npos) return std::nullopt;
-        std::int64_t value = 0;
-        const char* first = json.data() + start + marker.size();
-        const char* last = json.data() + json.size();
-        const auto parsed = std::from_chars(first, last, value);
-        return parsed.ec == std::errc{} ? std::optional<std::int64_t>(value) : std::nullopt;
-    }
-
-    static std::optional<bool> json_boolean(
-        const std::string_view json,
-        const std::string_view name
-    ) {
-        const std::string marker = "\"" + std::string(name) + "\":";
-        const std::size_t start = json.find(marker);
-        if (start == std::string_view::npos) return std::nullopt;
-        const std::string_view value = json.substr(start + marker.size());
-        if (value.starts_with("true")) return true;
-        if (value.starts_with("false")) return false;
-        return std::nullopt;
-    }
-
-    void restore_window_geometry() {
-        if (performance_hud.runtime == nullptr) return;
-        std::string json;
-        const strata_value_json_sink sink{
-            sizeof(strata_value_json_sink), &json, &Impl::capture_value,
-        };
-        const strata_result read = strata_runtime_read_durable_shell_value_json(
-            performance_hud.runtime->native_handle(),
-            strata::view("desktop.window.geometry"),
-            &sink
-        );
-        if (read.status == STRATA_STATUS_NOT_FOUND) return;
-        strata::require_ok(read, "desktop window geometry restoration");
-        const auto x = json_integer(json, "x");
-        const auto y = json_integer(json, "y");
-        const auto width = json_integer(json, "width");
-        const auto height = json_integer(json, "height");
-        const bool maximized = json_boolean(json, "maximized").value_or(false);
-        if (!x.has_value() || !y.has_value() || !width.has_value() || !height.has_value() ||
-            *width < 320 || *height < 240 || *width > 16'384 || *height > 16'384) {
-            return;
-        }
-        RECT placement{
-            static_cast<LONG>(*x), static_cast<LONG>(*y),
-            static_cast<LONG>(*x + *width), static_cast<LONG>(*y + *height),
-        };
-        const HMONITOR monitor = MonitorFromRect(&placement, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO info{sizeof(MONITORINFO)};
-        if (monitor != nullptr && GetMonitorInfoW(monitor, &info)) {
-            const LONG width_value = placement.right - placement.left;
-            placement.left = std::clamp(
-                placement.left,
-                info.rcWork.left - width_value + 80L,
-                info.rcWork.right - 80L
-            );
-            placement.top = std::clamp(
-                placement.top,
-                info.rcWork.top,
-                info.rcWork.bottom - 80L
-            );
-        }
-        SetWindowPos(
-            window, nullptr, placement.left, placement.top,
-            placement.right - placement.left, placement.bottom - placement.top,
-            SWP_NOACTIVATE | SWP_NOZORDER
-        );
-        if (maximized) ShowWindow(window, SW_MAXIMIZE);
-    }
-
-    void remember_window_geometry() {
-        if (performance_hud.runtime == nullptr || !IsWindow(window)) return;
-        WINDOWPLACEMENT placement{sizeof(WINDOWPLACEMENT)};
-        if (!GetWindowPlacement(window, &placement)) return;
-        const RECT& normal = placement.rcNormalPosition;
-        const bool maximized = placement.showCmd == SW_SHOWMAXIMIZED;
-        const std::string json = strata::host::Value::object({
-            {"height", normal.bottom - normal.top},
-            {"maximized", maximized},
-            {"width", normal.right - normal.left},
-            {"x", normal.left},
-            {"y", normal.top},
-        }).json();
-        performance_hud.runtime->write_durable_shell_value_json(
-            "desktop.window.geometry", json
-        );
-        strata::require_ok(
-            strata_runtime_flush_durable_state(performance_hud.runtime->native_handle()),
-            "desktop durable state flush"
-        );
     }
 
     void advance_async(Session& session) {
@@ -2423,11 +2297,6 @@ void Host::cancel_interactions() noexcept {
             ));
         }
     }
-}
-
-void Host::persist_window_geometry() {
-    impl_->remember_window_geometry();
-    impl_->durable_writer.flush();
 }
 
 void Host::frame() { impl_->frame(); }
