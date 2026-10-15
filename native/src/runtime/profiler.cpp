@@ -631,8 +631,8 @@ void Profiler::close_section(const std::uint64_t generation, const std::uint64_t
 std::optional<std::uint64_t>
 Profiler::find_or_create_section_locked(const std::string_view name,
                                         const std::optional<std::uint64_t> parent_id) {
-    SectionKey key{parent_id, std::string(name)};
-    if (const auto found = section_ids_.find(key); found != section_ids_.end()) {
+    if (const auto found = section_ids_.find(SectionKeyView{parent_id, name});
+        found != section_ids_.end()) {
         return found->second;
     }
     if (sections_.size() == config_.maximum_sections ||
@@ -656,7 +656,7 @@ Profiler::find_or_create_section_locked(const std::string_view name,
         RollingWindow(config_.timing_window_size),
         0U,
     });
-    section_ids_.emplace(std::move(key), id);
+    section_ids_.emplace(SectionKey{parent_id, std::string(name)}, id);
     return id;
 }
 

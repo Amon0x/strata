@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -78,7 +79,8 @@ public:
     );
     void queue_anchor(VirtualAnchorUpdate update);
     [[nodiscard]] std::vector<VirtualAnchorUpdate> take_anchor_updates();
-    void retain(const std::set<std::uint64_t>& identities);
+    /** Drops entries for collections `retained` no longer reports. */
+    void retain(const std::function<bool(std::uint64_t)>& retained);
     void clear() noexcept;
 
 private:

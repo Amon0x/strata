@@ -587,7 +587,7 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
             static_cast<void>(tree.mark(identity, DirtyReason::input));
         }
     }
-    for (const std::string& type : widgets_.text_editable_types()) {
+    for (const std::string_view type : widgets_.text_editable_types()) {
         const std::vector<RetainedNode*>* editable_nodes = tree.find_type(type);
         if (editable_nodes == nullptr)
             continue;
@@ -602,7 +602,8 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
                 continue;
             }
             const runtime::Value* controlled = nullptr;
-            std::string next;
+            std::string numeric_text;
+            std::string_view next;
             if (lifecycle->input.text_edit_mode == WidgetTextEditMode::numeric) {
                 controlled = scalar_property(*node, "value");
                 if (controlled == nullptr || controlled->number() == nullptr) {
@@ -612,7 +613,8 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
                     controlled = scalar_property(*node, "defaultValue");
                 }
                 if (controlled != nullptr && controlled->number() != nullptr) {
-                    next = runtime::display_string(*controlled);
+                    numeric_text = runtime::display_string(*controlled);
+                    next = numeric_text;
                 }
             } else {
                 controlled = scalar_property(*node, "text");
@@ -623,7 +625,7 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
                     next = *controlled->string();
                 }
             }
-            auto [editor, inserted] = editors_.try_emplace(node->identity(), next);
+            auto [editor, inserted] = editors_.try_emplace(node->identity(), std::string(next));
             TextEditorMutation mutation;
             if (!inserted)
                 mutation = editor->second.reconcile_controlled(next);

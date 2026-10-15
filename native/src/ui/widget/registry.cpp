@@ -203,6 +203,7 @@ WidgetRegistry::WidgetRegistry(WidgetRegistry&& other) noexcept
       command_declaration_types_(std::move(other.command_declaration_types_)),
       authored_presentation_types_(std::move(other.authored_presentation_types_)),
       detached_overlay_types_(std::move(other.detached_overlay_types_)),
+      text_editable_types_(std::move(other.text_editable_types_)),
       revision_(next_registry_revision()) {
     other.revision_ = next_registry_revision();
 }
@@ -213,6 +214,7 @@ WidgetRegistry& WidgetRegistry::operator=(WidgetRegistry&& other) noexcept {
         command_declaration_types_ = std::move(other.command_declaration_types_);
         authored_presentation_types_ = std::move(other.authored_presentation_types_);
         detached_overlay_types_ = std::move(other.detached_overlay_types_);
+        text_editable_types_ = std::move(other.text_editable_types_);
         revision_ = next_registry_revision();
         other.revision_ = next_registry_revision();
     }
@@ -224,6 +226,7 @@ void WidgetRegistry::refresh_trait_types() {
     command_declaration_types_.clear();
     authored_presentation_types_.clear();
     detached_overlay_types_.clear();
+    text_editable_types_.clear();
     for (const auto& [type, lifecycle] : lifecycles_) {
         if (lifecycle.command.declaration)
             command_declaration_types_.push_back(type);
@@ -231,10 +234,13 @@ void WidgetRegistry::refresh_trait_types() {
             authored_presentation_types_.push_back(type);
         if (lifecycle.present.overlay != nullptr && lifecycle.present.detached_overlay)
             detached_overlay_types_.push_back(type);
+        if (lifecycle.input.text_edit_mode != WidgetTextEditMode::none)
+            text_editable_types_.push_back(type);
     }
     std::ranges::sort(command_declaration_types_);
     std::ranges::sort(authored_presentation_types_);
     std::ranges::sort(detached_overlay_types_);
+    std::ranges::sort(text_editable_types_);
 }
 
 std::span<const std::string_view> WidgetRegistry::command_declaration_types() const noexcept {
@@ -247,15 +253,8 @@ std::span<const std::string_view> WidgetRegistry::detached_overlay_types() const
     return detached_overlay_types_;
 }
 
-std::vector<std::string> WidgetRegistry::text_editable_types() const {
-    std::vector<std::string> result;
-    for (const auto& [type, lifecycle] : lifecycles_) {
-        if (lifecycle.input.text_edit_mode != WidgetTextEditMode::none) {
-            result.push_back(type);
-        }
-    }
-    std::ranges::sort(result);
-    return result;
+std::span<const std::string_view> WidgetRegistry::text_editable_types() const noexcept {
+    return text_editable_types_;
 }
 
 } // namespace strata::ui

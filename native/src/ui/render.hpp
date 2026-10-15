@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -61,8 +62,37 @@ struct TextureRegion final {
     [[nodiscard]] friend bool operator==(const TextureRegion&, const TextureRegion&) = default;
 };
 
+/**
+ * A font id shared by the glyphs that name it. Every glyph of a run carries its font, and ids such
+ * as "strata:fonts/default" are too long to store inline, so copies share one immutable string
+ * rather than allocating per glyph. Compares by content, like the string it stands for.
+ */
+class SharedFontId final {
+  public:
+    SharedFontId() = default;
+    SharedFontId(const std::string_view value)
+        : value_(value.empty() ? nullptr : std::make_shared<const std::string>(value)) {}
+    SharedFontId(const std::string& value) : SharedFontId(std::string_view(value)) {}
+    SharedFontId(const char* const value) : SharedFontId(std::string_view(value)) {}
+
+    [[nodiscard]] std::string_view view() const noexcept {
+        return value_ != nullptr ? std::string_view(*value_) : std::string_view{};
+    }
+    [[nodiscard]] std::string str() const { return std::string(view()); }
+    [[nodiscard]] bool empty() const noexcept { return value_ == nullptr; }
+    operator std::string_view() const noexcept { return view(); }
+
+    [[nodiscard]] friend bool operator==(const SharedFontId& left,
+                                         const SharedFontId& right) noexcept {
+        return left.value_ == right.value_ || left.view() == right.view();
+    }
+
+  private:
+    std::shared_ptr<const std::string> value_;
+};
+
 struct LogicalGlyph final {
-    std::string font_id;
+    SharedFontId font_id;
     std::uint32_t glyph_id = 0U;
     std::uint32_t code_point = 0U;
     std::size_t text_start_offset = 0U;
@@ -369,6 +399,8 @@ class RenderCommandBuffer final {
     [[nodiscard]] const std::vector<RenderGroup>& groups() const noexcept;
 
   private:
+    void make_unique_storage();
+
     /**
      * Command streams are immutable once handed to submission planning. Copy-on-write storage
      * lets the renderer, its settled-frame cache, and the packet cache retain the same stream
@@ -377,6 +409,8 @@ class RenderCommandBuffer final {
     std::shared_ptr<std::vector<RenderCommand>> commands_ =
         std::make_shared<std::vector<RenderCommand>>();
     std::shared_ptr<const std::vector<RenderGroup>> groups_;
+    /** Length of the stream last released to a retainer; sizes the next stream's storage. */
+    std::size_t reserve_hint_ = 0U;
 };
 
 struct RenderOperationCounters final {

@@ -206,31 +206,37 @@ CornerRadii CornerRadii::all(const double value) noexcept {
     return CornerRadii{value, value, value, value};
 }
 
-void RenderCommandBuffer::append(RenderCommand command) {
+void RenderCommandBuffer::make_unique_storage() {
     if (commands_ == nullptr) {
+        // A frame's stream is usually as long as the last one, so start at that size rather than
+        // regrowing a vector of large variants from empty.
         commands_ = std::make_shared<std::vector<RenderCommand>>();
+        commands_->reserve(reserve_hint_);
     } else if (commands_.use_count() != 1L) {
         commands_ = std::make_shared<std::vector<RenderCommand>>(*commands_);
     }
+}
+
+void RenderCommandBuffer::append(RenderCommand command) {
+    make_unique_storage();
     commands_->push_back(std::move(command));
 }
 
 void RenderCommandBuffer::append(const std::vector<RenderCommand>& commands) {
     if (commands.empty())
         return;
-    if (commands_ == nullptr) {
-        commands_ = std::make_shared<std::vector<RenderCommand>>();
-    } else if (commands_.use_count() != 1L) {
-        commands_ = std::make_shared<std::vector<RenderCommand>>(*commands_);
-    }
+    make_unique_storage();
     commands_->insert(commands_->end(), commands.begin(), commands.end());
 }
 
 void RenderCommandBuffer::clear() noexcept {
-    if (commands_ != nullptr && commands_.use_count() == 1L)
+    if (commands_ != nullptr && commands_.use_count() == 1L) {
         commands_->clear();
-    else
+    } else {
+        // Shared with a retained frame, so the next stream needs storage of its own.
+        reserve_hint_ = commands_ != nullptr ? commands_->size() : 0U;
         commands_.reset();
+    }
     groups_.reset();
 }
 
@@ -305,7 +311,7 @@ JsonValue render_command_json(const RenderCommand& command) {
                         {"advance", JsonValue(glyph.advance)},
                         {"baseline", JsonValue(glyph.baseline)},
                         {"codePoint", JsonValue(static_cast<std::int64_t>(glyph.code_point))},
-                        {"fontId", JsonValue(glyph.font_id)},
+                        {"fontId", JsonValue(glyph.font_id.str())},
                         {"glyphId", JsonValue(static_cast<std::int64_t>(glyph.glyph_id))},
                         {"textEndOffset",
                          JsonValue(static_cast<std::int64_t>(glyph.text_end_offset))},

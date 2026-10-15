@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <string>
 #include <utility>
 #include <variant>
@@ -74,7 +75,6 @@ struct PreparedDraw final {
     std::optional<std::string> texture;
     SubmissionScissor scissor;
     std::vector<SubmissionRoundedClip> rounded_clips;
-    bool texture_sampled = false;
     /** Presentation group whose per-frame transform places this draw (vertex z); zero is none. */
     std::uint32_t group = 0U;
     [[nodiscard]] friend bool operator==(const PreparedDraw&, const PreparedDraw&) = default;
@@ -270,6 +270,8 @@ struct CommandRange final {
  * effect), -1 for one that closes it, 0 otherwise. */
 [[nodiscard]] int scope_step(const RenderCommand& command) noexcept;
 
+/** The built-in material a command draws with, unless it is authored otherwise. */
+[[nodiscard]] std::string_view default_material_id(const PreparedCommand& command);
 [[nodiscard]] MaterialState default_material(const PreparedCommand& command);
 [[nodiscard]] bool unified_material(std::string_view material) noexcept;
 [[nodiscard]] float unified_draw_mode(std::string_view material) noexcept;

@@ -744,9 +744,25 @@ void TextEditor::clear_composition() noexcept {
 }
 
 void TextEditor::clamp_offsets() {
-    caret_ = floor_boundary(text_, std::min(caret_, text_.size()));
-    selection_start_ = floor_boundary(text_, std::min(selection_start_, text_.size()));
-    selection_end_ = floor_boundary(text_, std::min(selection_end_, text_.size()));
+    // Runs every frame for every editor. Plain ASCII without CR has a grapheme boundary at every
+    // byte, so only the end needs clamping; anything else is segmented once for all three offsets.
+    if (std::ranges::all_of(text_, [](const char byte) {
+            return static_cast<unsigned char>(byte) < 0x80U && byte != '\r';
+        })) {
+        caret_ = std::min(caret_, text_.size());
+        selection_start_ = std::min(selection_start_, text_.size());
+        selection_end_ = std::min(selection_end_, text_.size());
+        return;
+    }
+    const std::vector<std::size_t> boundaries = grapheme_boundaries(text_);
+    const auto floor = [this, &boundaries](const std::size_t offset) {
+        const auto found =
+            std::upper_bound(boundaries.begin(), boundaries.end(), std::min(offset, text_.size()));
+        return found == boundaries.begin() ? std::size_t{0U} : *std::prev(found);
+    };
+    caret_ = floor(caret_);
+    selection_start_ = floor(selection_start_);
+    selection_end_ = floor(selection_end_);
 }
 
 } // namespace strata::ui

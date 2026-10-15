@@ -29,20 +29,38 @@ constexpr std::size_t draw_data_float_count = 16U;
 constexpr std::size_t vertex_bytes = 24U + draw_data_float_count * sizeof(float);
 constexpr TextureRegion full_uv{0.0, 0.0, 1.0, 1.0};
 
+/**
+ * What a draw must share with its neighbours to join their batch. Keys live only while one pass
+ * batches its draws, so they borrow the draw's strings and clips rather than copying them.
+ */
 struct BatchKey final {
-    std::string material;
-    std::string blend_mode;
-    std::optional<std::string> texture;
+    std::string_view material;
+    std::string_view blend_mode;
+    std::optional<std::string_view> texture;
     SubmissionScissor scissor;
-    std::vector<SubmissionRoundedClip> rounded_clips;
+    std::span<const SubmissionRoundedClip> rounded_clips;
     bool texture_sampled = false;
-    [[nodiscard]] friend bool operator==(const BatchKey&, const BatchKey&) = default;
 };
+
+[[nodiscard]] bool same_clips(const BatchKey& left, const BatchKey& right) noexcept {
+    return left.scissor == right.scissor &&
+           std::ranges::equal(left.rounded_clips, right.rounded_clips);
+}
+
+[[nodiscard]] bool operator==(const BatchKey& left, const BatchKey& right) noexcept {
+    return left.material == right.material && left.blend_mode == right.blend_mode &&
+           left.texture == right.texture && same_clips(left, right) &&
+           left.texture_sampled == right.texture_sampled;
+}
 
 [[nodiscard]] bool compatible(const BatchKey& left, const BatchKey& right) noexcept {
     if (left.material != right.material || left.blend_mode != right.blend_mode ||
-        left.scissor != right.scissor || left.rounded_clips != right.rounded_clips) return false;
+        !same_clips(left, right)) return false;
     return !(left.texture_sampled && right.texture_sampled && left.texture != right.texture);
+}
+
+[[nodiscard]] std::optional<std::string> owned(const std::optional<std::string_view> value) {
+    return value.has_value() ? std::optional<std::string>(std::string(*value)) : std::nullopt;
 }
 
 void write_u32(std::uint8_t*& output, const std::uint32_t value) noexcept {
@@ -118,15 +136,13 @@ void parameter_data(
         number_at(slot);
         return;
     }
-    if (parameter.name == "opacity") number_at(15U);
-    else if (parameter.name == "softness") number_at(2U);
+    if (parameter.name == "softness") number_at(2U);
     else if (parameter.name == "borderWidth") number_at(3U);
     else if (parameter.name == "blurRadius") number_at(2U);
     else if (parameter.name == "spread") number_at(3U);
     else if (parameter.name == "msdfDistanceScale") number_at(0U);
     else if (parameter.name == "msdfLayoutPixelRange") number_at(1U);
     else if (parameter.name == "textPixelSize") number_at(2U);
-    else if (parameter.name == "drawMode") number_at(14U);
     else if (parameter.name == "rectSize") vector_at(0U, 2U);
     else if (parameter.name == "cornerRadii") vector_at(4U, 4U);
     else if (parameter.name == "borderColor") {
@@ -181,7 +197,7 @@ void parameter_data(
     for (const MaterialParameter& parameter : draw.material.parameters) parameter_data(values, parameter);
     // An authored fill material replaces shading, not geometry semantics. Preserve the command's
     // native draw mode so rounded coverage and any fallback path still see the actual primitive.
-    values[14] = unified_draw_mode(default_material(draw.command).id);
+    values[14] = unified_draw_mode(default_material_id(draw.command));
     values[15] = static_cast<float>(draw.material.opacity);
     return values;
 }
@@ -268,6 +284,9 @@ void text_geometry(
                 context.scale - draw.transform.m12 - baseline;
         }
     }
+    // Geometry is encoded into a fresh per-draw fragment, so size it for every glyph's quad.
+    output.vertex_bytes.reserve(output.vertex_bytes.size() + text.glyphs.size() * 4U * vertex_bytes);
+    output.indices.reserve(output.indices.size() + text.glyphs.size() * 6U);
     for (const PreparedGlyph& glyph : text.glyphs) {
         const Rect bounds{
             origin.x + glyph.bounds.x,
@@ -529,9 +548,11 @@ void geometry(
 [[nodiscard]] BatchKey key(const PreparedDraw& draw) {
     const bool sampled = samples_texture(draw.material.id);
     return BatchKey{
-        unified_material(draw.material.id) ? "strata:unified_ui" : draw.material.id,
+        unified_material(draw.material.id) ? std::string_view("strata:unified_ui")
+                                           : std::string_view(draw.material.id),
         draw.material.blend_mode,
-        sampled ? draw.texture : std::nullopt,
+        sampled && draw.texture.has_value() ? std::optional<std::string_view>(*draw.texture)
+                                            : std::nullopt,
         draw.scissor,
         draw.rounded_clips,
         sampled,
@@ -766,6 +787,9 @@ void translate_vertex_positions(
         return updated;
     }
     RenderSubmission fragment;
+    // Most draws are one quad; text and meshes reserve the rest themselves.
+    fragment.vertex_bytes.reserve(4U * vertex_bytes);
+    fragment.indices.reserve(6U);
     geometry(fragment, draw, 0U, context);
     return EncodedDrawCacheEntry{
         draw,
@@ -955,8 +979,7 @@ void encode(
                     open_key->blend_mode != next.blend_mode) {
                     ++output.material_batch_breaks;
                 }
-                if (open_key->scissor != next.scissor ||
-                    open_key->rounded_clips != next.rounded_clips) {
+                if (!same_clips(*open_key, next)) {
                     ++output.clip_batch_breaks;
                 }
                 if (open_key->texture_sampled && next.texture_sampled &&
@@ -973,9 +996,9 @@ void encode(
             batch_base_vertex = static_cast<std::uint32_t>(vertex_count);
             next_batches.push_back(SubmissionBatch{
                 SubmissionBatchKind::draw,
-                next.material,
-                next.blend_mode,
-                next.texture,
+                std::string(next.material),
+                std::string(next.blend_mode),
+                owned(next.texture),
                 next.scissor,
                 batch_base_vertex,
                 static_cast<std::uint32_t>(index_count),
@@ -983,14 +1006,15 @@ void encode(
                 draw.source_order,
                 {}, 0.0, 1U,
                 {}, std::nullopt,
-                next.rounded_clips,
+                std::vector<SubmissionRoundedClip>(next.rounded_clips.begin(),
+                                                   next.rounded_clips.end()),
             });
             open_batch_index = next_batches.size() - 1U;
             open_key = std::move(next);
         } else if (!open_key->texture_sampled && next.texture_sampled) {
             open_key->texture_sampled = true;
             open_key->texture = next.texture;
-            next_batches[open_batch_index].texture = next.texture;
+            next_batches[open_batch_index].texture = owned(next.texture);
         }
         std::optional<EncodedDrawCacheEntry>& retained = cache.geometry[item_index];
         if (!retained.has_value() || retained->source != draw) {

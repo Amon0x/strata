@@ -487,7 +487,6 @@ void append_draw(
         std::move(texture.host_id),
         resolved_scissor,
         rounded_clips,
-        false,
         group,
     });
 }
@@ -878,37 +877,44 @@ bool Transform::axis_aligned_translation() const noexcept {
            std::abs(m01) <= transform_epsilon && std::abs(m10) <= transform_epsilon;
 }
 
-MaterialState default_material(const PreparedCommand& command) {
-    return std::visit([](const auto& value) -> MaterialState {
+std::string_view default_material_id(const PreparedCommand& command) {
+    return std::visit([](const auto& value) -> std::string_view {
         using Type = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<Type, SolidRectRenderCommand>) {
             // A gradient is tessellated geometry, and the rounded-rect material is what masks that
             // geometry to the shape. A plain rectangle keeps the cheaper solid material.
-            return MaterialState{value.fill.is_gradient() ? "strata:rounded_rect" : "strata:solid"};
+            return value.fill.is_gradient() ? "strata:rounded_rect" : "strata:solid";
         } else if constexpr (std::is_same_v<Type, RoundedRectRenderCommand>) {
-            return MaterialState{"strata:rounded_rect"};
+            return "strata:rounded_rect";
         } else if constexpr (std::is_same_v<Type, BorderRenderCommand>) {
-            return MaterialState{"strata:border"};
+            return "strata:border";
         } else if constexpr (std::is_same_v<Type, ImageRenderCommand>) {
-            return MaterialState{"strata:textured"};
+            return "strata:textured";
         } else if constexpr (std::is_same_v<Type, NinePatchRenderCommand>) {
-            return MaterialState{"strata:nine_patch"};
+            return "strata:nine_patch";
         } else if constexpr (std::is_same_v<Type, PreparedTextPtr>) {
-            return MaterialState{value != nullptr &&
-                    value->mode == font::GlyphRasterMode::coverage
-                ? "strata:coverage_text" : "strata:msdf_text"};
+            return value != nullptr && value->mode == font::GlyphRasterMode::coverage
+                ? "strata:coverage_text" : "strata:msdf_text";
         } else if constexpr (std::is_same_v<Type, PathRenderCommand>) {
             // Shape geometry is its own silhouette, so it needs no signed-distance mask.
-            return MaterialState{"strata:solid"};
+            return "strata:solid";
         } else if constexpr (std::is_same_v<Type, CustomMeshRenderCommand>) {
-            MaterialState material = value.material.value_or(MaterialState{"strata:custom_mesh"});
-            material.opacity *= value.opacity;
-            return material;
+            return value.material.has_value() ? std::string_view(value.material->id)
+                                              : std::string_view("strata:custom_mesh");
         } else {
             static_assert(std::is_same_v<Type, ShadowRenderCommand>);
-            return MaterialState{"strata:shadow"};
+            return "strata:shadow";
         }
     }, command);
+}
+
+MaterialState default_material(const PreparedCommand& command) {
+    if (const auto* mesh = std::get_if<CustomMeshRenderCommand>(&command)) {
+        MaterialState material = mesh->material.value_or(MaterialState{"strata:custom_mesh"});
+        material.opacity *= mesh->opacity;
+        return material;
+    }
+    return MaterialState{std::string(default_material_id(command))};
 }
 
 bool unified_material(const std::string_view material) noexcept {

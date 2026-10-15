@@ -586,12 +586,8 @@ const LayoutResult& LayoutEngine::layout(RetainedTree& tree, const LayoutEnviron
                   [&next](const auto& entry) { return !next.records.contains(entry.first); });
     std::erase_if(arrangement_cache_,
                   [&next](const auto& entry) { return !next.records.contains(entry.first); });
-    std::set<std::uint64_t> retained_identities;
-    for (const auto& [identity, record] : next.records) {
-        static_cast<void>(record);
-        retained_identities.insert(identity);
-    }
-    collection_virtualization_.retain(retained_identities);
+    collection_virtualization_.retain(
+        [&next](const std::uint64_t identity) { return next.records.contains(identity); });
     content_size_transitions_.retain(next.records);
     next.maintenance_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                  std::chrono::steady_clock::now() - maintenance_started)

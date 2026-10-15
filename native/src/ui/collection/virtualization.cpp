@@ -176,13 +176,10 @@ std::vector<VirtualAnchorUpdate> VirtualizationCache::take_anchor_updates() {
     return result;
 }
 
-void VirtualizationCache::retain(const std::set<std::uint64_t>& identities) {
-    std::erase_if(entries_, [&identities](const auto& value) {
-        return !identities.contains(value.first);
-    });
-    std::erase_if(pending_anchor_updates_, [&identities](const auto& value) {
-        return !identities.contains(value.first);
-    });
+void VirtualizationCache::retain(const std::function<bool(std::uint64_t)>& retained) {
+    std::erase_if(entries_, [&retained](const auto& value) { return !retained(value.first); });
+    std::erase_if(pending_anchor_updates_,
+                  [&retained](const auto& value) { return !retained(value.first); });
 }
 
 void VirtualizationCache::clear() noexcept {

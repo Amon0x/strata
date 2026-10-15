@@ -239,7 +239,8 @@ class WidgetRegistry final {
     void register_command_phase(std::string type, WidgetCommandPhase phase);
     void register_persistence_phase(std::string type, WidgetPersistencePhase phase);
     void register_present_phase(std::string type, WidgetPresentPhase phase);
-    [[nodiscard]] std::vector<std::string> text_editable_types() const;
+    /** Types with a text edit mode, sorted; input preparation walks them every frame. */
+    [[nodiscard]] std::span<const std::string_view> text_editable_types() const noexcept;
     /** Types whose nodes declare commands. */
     [[nodiscard]] std::span<const std::string_view> command_declaration_types() const noexcept;
     /** Types with an authored presentation property the input router keeps current. */
@@ -271,6 +272,7 @@ class WidgetRegistry final {
     std::vector<std::string_view> command_declaration_types_;
     std::vector<std::string_view> authored_presentation_types_;
     std::vector<std::string_view> detached_overlay_types_;
+    std::vector<std::string_view> text_editable_types_;
     std::uint64_t revision_ = 0U;
 };
 

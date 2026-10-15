@@ -807,13 +807,16 @@ void InputRouter::prepare_pointer_geometry() const {
         children.reserve(node.children().size());
         for (const auto& child : node.children())
             children.push_back(child.get());
-        std::ranges::stable_sort(
-            children, [this](const RetainedNode* left, const RetainedNode* right) {
-                const LayoutRecord* left_layout = layout_->find(left->identity());
-                const LayoutRecord* right_layout = layout_->find(right->identity());
-                return (left_layout != nullptr ? left_layout->z_index : 0) <
-                       (right_layout != nullptr ? right_layout->z_index : 0);
-            });
+        const auto z_order = [this](const RetainedNode* left, const RetainedNode* right) {
+            const LayoutRecord* left_layout = layout_->find(left->identity());
+            const LayoutRecord* right_layout = layout_->find(right->identity());
+            return (left_layout != nullptr ? left_layout->z_index : 0) <
+                   (right_layout != nullptr ? right_layout->z_index : 0);
+        };
+        // Children are almost always already in z-order; a stable sort would leave them as they
+        // are, so skip it and its temporary buffer.
+        if (!std::ranges::is_sorted(children, z_order))
+            std::ranges::stable_sort(children, z_order);
         for (auto child = children.rbegin(); child != children.rend(); ++child) {
             self(self, **child, visit_portals, transform, opacity, child_clip);
         }

@@ -635,6 +635,7 @@ void WidgetRenderScope::draw_text_layout(const TextLayout& layout_value, const P
     }
     color = widget_opacity(color, alpha());
     for (const TextResolvedRun& resolved_run : layout_value.resolved_runs) {
+        const SharedFontId run_font(resolved_run.font_id);
         std::vector<LogicalGlyph> glyphs;
         glyphs.reserve(resolved_run.glyph_end_index - resolved_run.glyph_start_index);
         for (std::size_t glyph_index = resolved_run.glyph_start_index;
@@ -643,7 +644,7 @@ void WidgetRenderScope::draw_text_layout(const TextLayout& layout_value, const P
             if (glyph.glyph_id == 0U)
                 continue;
             glyphs.push_back(LogicalGlyph{
-                resolved_run.font_id,
+                run_font,
                 glyph.glyph_id,
                 glyph.code_point,
                 glyph.text_start_offset,
@@ -693,6 +694,7 @@ void WidgetRenderScope::rich_text(const Point origin, const RenderColor fallback
         shaped.metrics.height,
     };
     for (const TextResolvedRun& resolved_run : layout_value.resolved_runs) {
+        const SharedFontId run_font(resolved_run.font_id);
         RenderColor color = widget_opacity(
             resolved_run.color.has_value()
                 ? RenderColor{
@@ -714,7 +716,7 @@ void WidgetRenderScope::rich_text(const Point origin, const RenderColor fallback
             if (glyph.glyph_id == 0U)
                 continue;
             glyphs.push_back(LogicalGlyph{
-                resolved_run.font_id,
+                run_font,
                 glyph.glyph_id,
                 glyph.code_point,
                 glyph.text_start_offset,

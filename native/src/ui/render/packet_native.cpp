@@ -130,7 +130,9 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
 [[nodiscard]] std::uint32_t checked_count(std::size_t value, const char* label);
 
 [[nodiscard]] Bytes batch_payload(const SubmissionBatch& batch) {
-    Writer output;
+    // Room for the fixed fields, short ids and each clip's rect, radii and inverse transform, so
+    // the byte-at-a-time writes do not regrow the buffer.
+    Writer output(256U + batch.rounded_clips.size() * 112U);
     output.integer(batch.source_order);
     output.integer(batch.scissor.x);
     output.integer(batch.scissor.y);

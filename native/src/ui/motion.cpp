@@ -193,6 +193,15 @@ MotionFrameCounters MotionRuntime::evaluate(
     std::set<std::uint64_t> next_active = advance_active_players
         ? std::set<std::uint64_t>{}
         : implementation_->active_nodes;
+    // Bindings each scheduled node still declares, so its players for dropped bindings can go.
+    // Reused across nodes: they hold views into the node's config and are cleared per node.
+    std::vector<MotionTrigger> retained_triggers;
+    std::vector<std::string_view> retained_timelines;
+    std::vector<std::string_view> retained_motion_timelines;
+    std::vector<std::string_view> retained_targets;
+    const auto retains = [](const auto& retained, const auto& key) {
+        return std::ranges::find(retained, key) != retained.end();
+    };
     for (const std::uint64_t identity : scheduled) {
         RetainedNode* scheduled_node = tree.find_identity(identity);
         if (scheduled_node == nullptr) continue;
@@ -216,10 +225,10 @@ MotionFrameCounters MotionRuntime::evaluate(
             } else {
                 state.move_template.reset();
             }
-            std::set<MotionTrigger> retained_triggers;
-            std::set<std::string, std::less<>> retained_timelines;
-            std::set<std::string, std::less<>> retained_motion_timelines;
-            std::set<std::string, std::less<>> retained_targets;
+            retained_triggers.clear();
+            retained_timelines.clear();
+            retained_motion_timelines.clear();
+            retained_targets.clear();
             MotionComputedValues next;
             bool running = false;
             bool motion_timeline_affects_layout = false;
@@ -234,7 +243,7 @@ MotionFrameCounters MotionRuntime::evaluate(
                     (binding.trigger != MotionTrigger::exit || !binding.cancel_on_detach)) {
                     continue;
                 }
-                retained_triggers.insert(binding.trigger);
+                retained_triggers.push_back(binding.trigger);
                 const CompiledMotion* animation =
                     binding.trigger == MotionTrigger::move && state.move_animation.has_value()
                         ? &*state.move_animation
@@ -284,13 +293,13 @@ MotionFrameCounters MotionRuntime::evaluate(
                 }
                 running = running || sample.running;
             }
-            std::erase_if(state.trigger_players, [&retained_triggers](const auto& entry) {
-                return !retained_triggers.contains(entry.first);
+            std::erase_if(state.trigger_players, [&](const auto& entry) {
+                return !retains(retained_triggers, entry.first);
             });
 
             for (const motion_detail::TimelineBinding& binding : config.timelines) {
                 if (node.lifecycle() == RetainedLifecycle::exiting) continue;
-                retained_timelines.insert(binding.id);
+                retained_timelines.push_back(binding.id);
                 const bool active = channel_active(binding, node, input);
                 auto [player, inserted] = state.timeline_players.try_emplace(binding.id);
                 const motion_detail::TimelineSample sample = inserted
@@ -313,13 +322,13 @@ MotionFrameCounters MotionRuntime::evaluate(
                 }
                 running = running || sample.running;
             }
-            std::erase_if(state.timeline_players, [&retained_timelines](const auto& entry) {
-                return !retained_timelines.contains(entry.first);
+            std::erase_if(state.timeline_players, [&](const auto& entry) {
+                return !retains(retained_timelines, std::string_view(entry.first));
             });
 
             for (const motion_detail::MotionTimelineBinding& binding : config.motion_timelines) {
                 if (node.lifecycle() == RetainedLifecycle::exiting) continue;
-                retained_motion_timelines.insert(binding.id);
+                retained_motion_timelines.push_back(binding.id);
                 motion_detail::MotionTimelinePlayer& player =
                     state.motion_timeline_players[binding.id];
                 const motion_detail::MotionTimelineSample sample = player.advance(
@@ -332,14 +341,14 @@ MotionFrameCounters MotionRuntime::evaluate(
             }
             std::erase_if(
                 state.motion_timeline_players,
-                [&retained_motion_timelines](const auto& entry) {
-                    return !retained_motion_timelines.contains(entry.first);
+                [&](const auto& entry) {
+                    return !retains(retained_motion_timelines, std::string_view(entry.first));
                 }
             );
 
             for (const motion_detail::TargetBinding& binding : config.targets) {
                 if (node.lifecycle() == RetainedLifecycle::exiting) continue;
-                retained_targets.insert(binding.id);
+                retained_targets.push_back(binding.id);
                 motion_detail::TargetPlayer& player = state.target_players[binding.id];
                 const motion_detail::TargetSample sample = player.advance(
                     binding.target,
@@ -351,8 +360,8 @@ MotionFrameCounters MotionRuntime::evaluate(
                 next.values.insert_or_assign(binding.property, sample.value);
                 running = running || sample.running;
             }
-            std::erase_if(state.target_players, [&retained_targets](const auto& entry) {
-                return !retained_targets.contains(entry.first);
+            std::erase_if(state.target_players, [&](const auto& entry) {
+                return !retains(retained_targets, std::string_view(entry.first));
             });
 
             bool mutated = state.computed != next;

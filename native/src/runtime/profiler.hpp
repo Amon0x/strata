@@ -276,6 +276,21 @@ class Profiler final {
         std::string name;
         [[nodiscard]] friend auto operator<=>(const SectionKey&, const SectionKey&) = default;
     };
+    /** A lookup key over a borrowed name, so opening a known section allocates nothing. */
+    struct SectionKeyView final {
+        std::optional<std::uint64_t> parent_id;
+        std::string_view name;
+    };
+    /** SectionKey's order, accepting either key form. */
+    struct SectionKeyOrder final {
+        using is_transparent = void;
+        template <typename Left, typename Right>
+        [[nodiscard]] bool operator()(const Left& left, const Right& right) const noexcept {
+            if (left.parent_id != right.parent_id)
+                return left.parent_id < right.parent_id;
+            return std::string_view(left.name) < std::string_view(right.name);
+        }
+    };
 
     struct OpenSection final {
         std::uint64_t token = 0U;
@@ -318,7 +333,7 @@ class Profiler final {
     std::uint64_t next_token_ = 1U;
     std::optional<std::uint64_t> frame_root_id_;
     std::vector<SectionRecord> sections_;
-    std::map<SectionKey, std::uint64_t> section_ids_;
+    std::map<SectionKey, std::uint64_t, SectionKeyOrder> section_ids_;
     std::vector<OpenSection> open_sections_;
     std::array<std::uint64_t, static_cast<std::size_t>(ProfilerCounter::count)> counters_{};
     std::deque<ProfilerSpikeSnapshot> spikes_;
