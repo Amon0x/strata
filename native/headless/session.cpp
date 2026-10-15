@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <algorithm>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -22,6 +23,26 @@
 
 namespace strata::headless {
 namespace {
+
+/**
+ * The framebuffer holds premultiplied colour, while a PNG stores straight alpha: a white panel at
+ * 50% on a transparent background is (128,128,128,128) in memory but must be written as
+ * (255,255,255,128), or every viewer shows it as grey.
+ */
+[[nodiscard]] std::vector<std::uint8_t> straight_alpha(const std::span<const std::uint8_t> rgba) {
+    std::vector<std::uint8_t> result(rgba.begin(), rgba.end());
+    for (std::size_t offset = 0U; offset + 3U < result.size(); offset += 4U) {
+        const unsigned alpha = result[offset + 3U];
+        if (alpha == 255U)
+            continue;
+        for (std::size_t channel = 0U; channel < 3U; ++channel) {
+            const unsigned value = result[offset + channel];
+            result[offset + channel] = static_cast<std::uint8_t>(
+                alpha == 0U ? 0U : std::min(255U, (value * 255U + alpha / 2U) / alpha));
+        }
+    }
+    return result;
+}
 
 using data::JsonValue;
 
@@ -178,7 +199,7 @@ struct Session::Impl final {
 
     void write_snapshot(const std::string_view name) const {
         write_png(output_root_ / (std::string(name) + ".png"), host_.framebuffer_width(),
-                  host_.framebuffer_height(), host_.pixels());
+                  host_.framebuffer_height(), straight_alpha(host_.pixels()));
         std::ofstream json(output_root_ / (std::string(name) + ".json"),
                            std::ios::binary | std::ios::trunc);
         // Captures are read by people and diffed as text: keep them indented and canonical.
