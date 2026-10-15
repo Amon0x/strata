@@ -121,11 +121,21 @@ struct PixelRect final {
         if (mode == 2)
             host::tone_color(result.data[8U], result.data[9U], result.data[10U], tone);
     }
+    // The rasterizer sees positions on the 1/256 subpixel grid D3D11 hardware snaps to, so a
+    // vertex a hair either side of a pixel centre covers the same pixels as on the GPU.
+    result.x = std::round(result.x * 256.0F) / 256.0F;
+    result.y = std::round(result.y * 256.0F) / 256.0F;
     return result;
 }
 
-[[nodiscard]] float cross(const float ax, const float ay, const float bx, const float by) noexcept {
-    return ax * by - ay * bx;
+/**
+ * The edge function of `p` against a->b. With snapped positions every term is exact in double, so
+ * the two triangles sharing an edge agree on which side each pixel centre lies and nothing cracks.
+ */
+[[nodiscard]] double edge_function(const Vertex& a, const Vertex& b, const double px,
+                                   const double py) noexcept {
+    return (static_cast<double>(b.x) - a.x) * (py - a.y) -
+           (static_cast<double>(b.y) - a.y) * (px - a.x);
 }
 
 [[nodiscard]] bool top_left(const Vertex& a, const Vertex& b) noexcept {
@@ -134,8 +144,8 @@ struct PixelRect final {
     return dy < 0.0F || (dy == 0.0F && dx > 0.0F);
 }
 
-[[nodiscard]] bool covered(const float edge, const bool includes_edge) noexcept {
-    return edge > 0.0F || (edge == 0.0F && includes_edge);
+[[nodiscard]] bool covered(const double edge, const bool includes_edge) noexcept {
+    return edge > 0.0 || (edge == 0.0 && includes_edge);
 }
 
 [[nodiscard]] float saturate(const float value) noexcept {
@@ -509,13 +519,14 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
         Vertex a = read_vertex(packet.vertices, ia, scale_x, scale_y, packet.groups);
         Vertex b = read_vertex(packet.vertices, ib, scale_x, scale_y, packet.groups);
         Vertex c = read_vertex(packet.vertices, ic, scale_x, scale_y, packet.groups);
-        float area = cross(b.x - a.x, b.y - a.y, c.x - a.x, c.y - a.y);
-        if (area == 0.0F)
+        double exact_area = edge_function(a, b, c.x, c.y);
+        if (exact_area == 0.0)
             continue;
-        if (area < 0.0F) {
+        if (exact_area < 0.0) {
             std::swap(b, c);
-            area = -area;
+            exact_area = -exact_area;
         }
+        const auto area = static_cast<float>(exact_area);
         const std::int64_t minimum_x = std::max<std::int64_t>(
             scissor_left, static_cast<std::int64_t>(std::floor(std::min({a.x, b.x, c.x}))));
         const std::int64_t minimum_y = std::max<std::int64_t>(
@@ -548,18 +559,18 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
 
         for (std::int64_t y = minimum_y; y < maximum_y; ++y) {
             for (std::int64_t x = minimum_x; x < maximum_x; ++x) {
-                const float sample_x = static_cast<float>(x) + 0.5F;
-                const float sample_y = static_cast<float>(y) + 0.5F;
-                const float edge_ab = cross(b.x - a.x, b.y - a.y, sample_x - a.x, sample_y - a.y);
-                const float edge_bc = cross(c.x - b.x, c.y - b.y, sample_x - b.x, sample_y - b.y);
-                const float edge_ca = cross(a.x - c.x, a.y - c.y, sample_x - c.x, sample_y - c.y);
+                const double sample_x = static_cast<double>(x) + 0.5;
+                const double sample_y = static_cast<double>(y) + 0.5;
+                const double edge_ab = edge_function(a, b, sample_x, sample_y);
+                const double edge_bc = edge_function(b, c, sample_x, sample_y);
+                const double edge_ca = edge_function(c, a, sample_x, sample_y);
                 if (!covered(edge_ab, include_ab) || !covered(edge_bc, include_bc) ||
                     !covered(edge_ca, include_ca)) {
                     continue;
                 }
-                const float wa = edge_bc * inverse_area;
-                const float wb = edge_ca * inverse_area;
-                const float wc = edge_ab * inverse_area;
+                const float wa = static_cast<float>(edge_bc) * inverse_area;
+                const float wb = static_cast<float>(edge_ca) * inverse_area;
+                const float wc = static_cast<float>(edge_ab) * inverse_area;
                 const float u = a.u * wa + b.u * wb + c.u * wc;
                 const float v = a.v * wa + b.v * wb + c.v * wc;
                 Color source = interpolate_color(a, b, c, wa, wb, wc);

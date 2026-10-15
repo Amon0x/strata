@@ -335,6 +335,57 @@ void test_temporal_refresh_contract() {
     return packet;
 }
 
+/**
+ * A rectangle whose right and bottom edges sit a hair past pixel centres. GPUs snap vertices to a
+ * 1/256 grid first, which moves those edges onto the centres, so the pixels stay uncovered.
+ */
+[[nodiscard]] strata::host::RenderPacket subpixel_edge_packet() {
+    using namespace strata;
+    constexpr std::size_t vertex_size = 88U;
+    host::RenderPacket packet;
+    packet.geometry_epoch = 1U;
+    packet.vertices.resize(4U * vertex_size);
+    constexpr float edge = 2.5F + 1.0F / 2048.0F;
+    constexpr std::array<std::array<float, 2U>, 4U> positions{{
+        {0.0F, 0.0F},
+        {edge, 0.0F},
+        {edge, edge},
+        {0.0F, edge},
+    }};
+    for (std::size_t vertex = 0U; vertex < positions.size(); ++vertex) {
+        write_float(packet.vertices, vertex, 0U, positions[vertex][0U]);
+        write_float(packet.vertices, vertex, 4U, positions[vertex][1U]);
+        packet.vertices[vertex * vertex_size + 20U] = 255U;
+        packet.vertices[vertex * vertex_size + 23U] = 255U;
+        write_float(packet.vertices, vertex, 84U, 1.0F);
+    }
+    packet.indices = {0U, 1U, 2U, 0U, 2U, 3U};
+    packet.batches.emplace_back(host::DrawBatch{
+        .source_order = 0U,
+        .scissor = host::Scissor{0U, 0U, 4U, 4U},
+        .material = "strata:unified_ui",
+        .blend_mode = "opaque",
+        .base_vertex = 0U,
+        .first_index = 0U,
+        .index_count = 6U,
+    });
+    return packet;
+}
+
+void test_subpixel_snapping(strata::headless::CaptureRenderer& renderer) {
+    renderer.resize(4U, 4U, 4.0, 4.0);
+    renderer.set_clear_color({0U, 0U, 0U, 255U});
+    renderer.render(subpixel_edge_packet(), 0);
+    const std::span<const std::uint8_t> pixels = renderer.pixels();
+    for (std::size_t y = 0U; y < 4U; ++y) {
+        for (std::size_t x = 0U; x < 4U; ++x) {
+            const bool inside = x < 2U && y < 2U;
+            check(pixels[(y * 4U + x) * 4U] == (inside ? 255U : 0U),
+                  "a vertex a hair past a pixel centre was not snapped to the subpixel grid");
+        }
+    }
+}
+
 #ifdef _WIN32
 void test_downsampled_blur_matches_d3d11() {
     using namespace strata;
@@ -364,10 +415,12 @@ int main() {
         strata::headless::SoftwareRenderer software(strata::headless::platform_image_codec());
         test_surface_backdrop_source(software);
         test_surface_backdrop_inside_content(software);
+        test_subpixel_snapping(software);
 #ifdef _WIN32
         strata::headless::D3D11Renderer d3d11;
         test_surface_backdrop_source(d3d11);
         test_surface_backdrop_inside_content(d3d11);
+        test_subpixel_snapping(d3d11);
         test_downsampled_blur_matches_d3d11();
 #endif
         test_temporal_refresh_contract();
