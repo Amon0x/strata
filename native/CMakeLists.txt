@@ -803,6 +803,29 @@ if(STRATA_BUILD_TOOLS OR STRATA_BUILD_AUTHORING)
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/tools
     )
     strata_target_defaults(strata_authoring)
+
+    if(STRATA_BUILD_TESTS)
+        # Generates a contract from a schema full of names that collide once made into C++, and
+        # compiles code against it: a generator regression fails the build of this test.
+        set(strata_edge_contract "${CMAKE_CURRENT_BINARY_DIR}/contract-edge-cases/contract_edge_cases.hpp")
+        add_custom_command(
+            OUTPUT ${strata_edge_contract}
+            COMMAND strata_authoring --write-cpp-contract
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/contract_edge_cases.schemas.json
+                acme::strata::std ${strata_edge_contract}
+            DEPENDS strata_authoring
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/contract_edge_cases.schemas.json
+            COMMENT "Generating the edge-case C++ contract"
+            VERBATIM
+        )
+        add_executable(strata_contract_edge_cases_tests
+            tests/contract_edge_cases_tests.cpp ${strata_edge_contract})
+        target_include_directories(strata_contract_edge_cases_tests
+            PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/contract-edge-cases)
+        target_link_libraries(strata_contract_edge_cases_tests PRIVATE Strata::host)
+        strata_target_defaults(strata_contract_edge_cases_tests)
+        add_test(NAME strata.authoring.contract_edge_cases COMMAND strata_contract_edge_cases_tests)
+    endif()
 endif()
 
 if(STRATA_BUILD_TOOLS)

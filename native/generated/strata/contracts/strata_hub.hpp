@@ -19,160 +19,160 @@ namespace strata::contracts::strata_hub {
 
 namespace detail {
 
-[[noreturn]] inline void contract_error(const std::string_view context, const std::string_view expected) {
-    throw std::invalid_argument(std::string(context) + " must be " + std::string(expected));
+[[noreturn]] inline void contract_error(const ::std::string_view context, const ::std::string_view expected) {
+    throw ::std::invalid_argument(::std::string(context) + " must be " + ::std::string(expected));
 }
 
-[[nodiscard]] inline const strata::host::Value::Object& decode_object(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value::Object& decode_object(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     const auto* object = value.object();
     if (object == nullptr) contract_error(context, "an object");
     return *object;
 }
 
-[[nodiscard]] inline const strata::host::Value& required_field(
-    const strata::host::Value& value,
-    const std::string_view name,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value& required_field(
+    const ::strata::host::Value& value,
+    const ::std::string_view name,
+    const ::std::string_view context
 ) {
     static_cast<void>(decode_object(value, context));
-    const strata::host::Value* field = value.find(name);
+    const ::strata::host::Value* field = value.find(name);
     if (field == nullptr) {
-        throw std::invalid_argument(std::string(context) + " is missing required field '" +
-                                    std::string(name) + "'");
+        throw ::std::invalid_argument(::std::string(context) + " is missing required field '" +
+                                    ::std::string(name) + "'");
     }
     return *field;
 }
 
 [[nodiscard]] inline bool decode_boolean(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const bool* boolean = value.boolean(); boolean != nullptr) return *boolean;
     contract_error(context, "a boolean");
 }
 
 [[nodiscard]] inline double decode_number(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const double* number = value.number(); number != nullptr) return *number;
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) {
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) {
         return static_cast<double>(*integer);
     }
     contract_error(context, "a number");
 }
 
-[[nodiscard]] inline std::int64_t decode_integer(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::int64_t decode_integer(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
     contract_error(context, "an integer");
 }
 
-[[nodiscard]] inline std::string decode_string(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_string(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::string* text = value.string(); text != nullptr) return *text;
+    if (const ::std::string* text = value.string(); text != nullptr) return *text;
     contract_error(context, "a string");
 }
 
-[[nodiscard]] inline std::string decode_literal(
-    const strata::host::Value& value,
-    const std::string_view literal,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_literal(
+    const ::strata::host::Value& value,
+    const ::std::string_view literal,
+    const ::std::string_view context
 ) {
-    std::string result = decode_string(value, context);
+    ::std::string result = decode_string(value, context);
     if (result != literal) contract_error(context, literal);
     return result;
 }
 
-[[nodiscard]] inline std::monostate decode_null(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::monostate decode_null(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (!value.is_null()) contract_error(context, "null");
     return {};
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::vector<T> decode_list(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::vector<T> decode_list(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto* values = value.array();
     if (values == nullptr) contract_error(context, "a list");
-    std::vector<T> result;
+    ::std::vector<T> result;
     result.reserve(values->size());
-    for (const strata::host::Value& item : *values) result.push_back(decode(item));
+    for (const ::strata::host::Value& item : *values) result.push_back(decode(item));
     return result;
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::map<std::string, T> decode_map(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::map<::std::string, T> decode_map(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto& fields = decode_object(value, context);
-    std::map<std::string, T> result;
+    ::std::map<::std::string, T> result;
     for (const auto& [name, item] : fields) result.emplace(name, decode(item));
     return result;
 }
 
 template <typename Variant, typename... Decode>
 [[nodiscard]] Variant decode_union(
-    const strata::host::Value& value,
-    const std::string_view context,
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&&... decode
 ) {
-    std::optional<Variant> result;
+    ::std::optional<Variant> result;
     const auto attempt = [&value, &result](auto&& candidate) {
         if (result.has_value()) return;
         try {
             result = candidate(value);
-        } catch (const std::invalid_argument&) {
+        } catch (const ::std::invalid_argument&) {
         }
     };
-    (attempt(std::forward<Decode>(decode)), ...);
+    (attempt(::std::forward<Decode>(decode)), ...);
     if (!result.has_value()) contract_error(context, "one of the declared union options");
-    return std::move(*result);
+    return ::std::move(*result);
 }
 
 } // namespace detail
 
-[[nodiscard]] inline strata::host::Value to_value(const strata::host::Value& value) { return value; }
-[[nodiscard]] inline strata::host::Value to_value(const bool value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const double value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::int64_t value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::string& value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::monostate) { return strata::host::Value(); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::strata::host::Value& value) { return value; }
+[[nodiscard]] inline ::strata::host::Value to_value(const bool value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const double value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::int64_t value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::string& value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::monostate) { return ::strata::host::Value(); }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::optional<T>& value) {
-    return value.has_value() ? to_value(*value) : strata::host::Value();
+[[nodiscard]] ::strata::host::Value to_value(const ::std::optional<T>& value) {
+    return value.has_value() ? to_value(*value) : ::strata::host::Value();
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::vector<T>& values) {
-    return strata::host::Value::array(values, [](const T& value) { return to_value(value); });
+[[nodiscard]] ::strata::host::Value to_value(const ::std::vector<T>& values) {
+    return ::strata::host::Value::array(values, [](const T& value) { return to_value(value); });
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::map<std::string, T>& values) {
-    strata::host::Value::Object fields;
+[[nodiscard]] ::strata::host::Value to_value(const ::std::map<::std::string, T>& values) {
+    ::strata::host::Value::Object fields;
     for (const auto& [name, value] : values) fields.emplace(name, to_value(value));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 template <typename... T>
-[[nodiscard]] strata::host::Value to_value(const std::variant<T...>& value) {
-    return std::visit([](const auto& item) { return to_value(item); }, value);
+[[nodiscard]] ::strata::host::Value to_value(const ::std::variant<T...>& value) {
+    return ::std::visit([](const auto& item) { return to_value(item); }, value);
 }
 
 struct HubFrameHistoryItem final {
@@ -181,14 +181,14 @@ struct HubFrameHistoryItem final {
     [[nodiscard]] friend bool operator==(const HubFrameHistoryItem&, const HubFrameHistoryItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const HubFrameHistoryItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const HubFrameHistoryItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("x", to_value(value.x));
     fields.emplace("y", to_value(value.y));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline HubFrameHistoryItem decode_hub_frame_history_item(const strata::host::Value& value) {
+[[nodiscard]] inline HubFrameHistoryItem decode_hub_frame_history_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "HubFrameHistoryItem"));
     HubFrameHistoryItem result;
     result.x = detail::decode_number(detail::required_field(value, "x", "HubFrameHistoryItem"), "HubFrameHistoryItem.x");
@@ -202,14 +202,14 @@ struct HubFrameAreaItem final {
     [[nodiscard]] friend bool operator==(const HubFrameAreaItem&, const HubFrameAreaItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const HubFrameAreaItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const HubFrameAreaItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("x", to_value(value.x));
     fields.emplace("y", to_value(value.y));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline HubFrameAreaItem decode_hub_frame_area_item(const strata::host::Value& value) {
+[[nodiscard]] inline HubFrameAreaItem decode_hub_frame_area_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "HubFrameAreaItem"));
     HubFrameAreaItem result;
     result.x = detail::decode_number(detail::required_field(value, "x", "HubFrameAreaItem"), "HubFrameAreaItem.x");
@@ -218,25 +218,25 @@ struct HubFrameAreaItem final {
 }
 
 struct HubSurfacesItem final {
-    std::string key{};
-    std::string name{};
-    std::string detail{};
-    std::string shortcut{};
+    ::std::string key{};
+    ::std::string name{};
+    ::std::string detail{};
+    ::std::string shortcut{};
     bool active{};
     [[nodiscard]] friend bool operator==(const HubSurfacesItem&, const HubSurfacesItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const HubSurfacesItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const HubSurfacesItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("key", to_value(value.key));
     fields.emplace("name", to_value(value.name));
     fields.emplace("detail", to_value(value.detail));
     fields.emplace("shortcut", to_value(value.shortcut));
     fields.emplace("active", to_value(value.active));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline HubSurfacesItem decode_hub_surfaces_item(const strata::host::Value& value) {
+[[nodiscard]] inline HubSurfacesItem decode_hub_surfaces_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "HubSurfacesItem"));
     HubSurfacesItem result;
     result.key = detail::decode_string(detail::required_field(value, "key", "HubSurfacesItem"), "HubSurfacesItem.key");
@@ -248,18 +248,18 @@ struct HubSurfacesItem final {
 }
 
 struct Hub final {
-    std::string frame_summary{};
+    ::std::string frame_summary{};
     double frame_millis{};
-    std::vector<HubFrameHistoryItem> frame_history{};
-    std::vector<HubFrameAreaItem> frame_area{};
-    std::string frame_scale{};
-    std::string status{};
-    std::vector<HubSurfacesItem> surfaces{};
+    ::std::vector<HubFrameHistoryItem> frame_history{};
+    ::std::vector<HubFrameAreaItem> frame_area{};
+    ::std::string frame_scale{};
+    ::std::string status{};
+    ::std::vector<HubSurfacesItem> surfaces{};
     [[nodiscard]] friend bool operator==(const Hub&, const Hub&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const Hub& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const Hub& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("frameSummary", to_value(value.frame_summary));
     fields.emplace("frameMillis", to_value(value.frame_millis));
     fields.emplace("frameHistory", to_value(value.frame_history));
@@ -267,52 +267,52 @@ struct Hub final {
     fields.emplace("frameScale", to_value(value.frame_scale));
     fields.emplace("status", to_value(value.status));
     fields.emplace("surfaces", to_value(value.surfaces));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline Hub decode_hub(const strata::host::Value& value) {
+[[nodiscard]] inline Hub decode_hub(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "Hub"));
     Hub result;
     result.frame_summary = detail::decode_string(detail::required_field(value, "frameSummary", "Hub"), "Hub.frameSummary");
     result.frame_millis = detail::decode_number(detail::required_field(value, "frameMillis", "Hub"), "Hub.frameMillis");
-    result.frame_history = detail::decode_list<HubFrameHistoryItem>(detail::required_field(value, "frameHistory", "Hub"), "Hub.frameHistory", [](const strata::host::Value& item) { return decode_hub_frame_history_item(item); });
-    result.frame_area = detail::decode_list<HubFrameAreaItem>(detail::required_field(value, "frameArea", "Hub"), "Hub.frameArea", [](const strata::host::Value& item) { return decode_hub_frame_area_item(item); });
+    result.frame_history = detail::decode_list<HubFrameHistoryItem>(detail::required_field(value, "frameHistory", "Hub"), "Hub.frameHistory", [](const ::strata::host::Value& item) { return decode_hub_frame_history_item(item); });
+    result.frame_area = detail::decode_list<HubFrameAreaItem>(detail::required_field(value, "frameArea", "Hub"), "Hub.frameArea", [](const ::strata::host::Value& item) { return decode_hub_frame_area_item(item); });
     result.frame_scale = detail::decode_string(detail::required_field(value, "frameScale", "Hub"), "Hub.frameScale");
     result.status = detail::decode_string(detail::required_field(value, "status", "Hub"), "Hub.status");
-    result.surfaces = detail::decode_list<HubSurfacesItem>(detail::required_field(value, "surfaces", "Hub"), "Hub.surfaces", [](const strata::host::Value& item) { return decode_hub_surfaces_item(item); });
+    result.surfaces = detail::decode_list<HubSurfacesItem>(detail::required_field(value, "surfaces", "Hub"), "Hub.surfaces", [](const ::strata::host::Value& item) { return decode_hub_surfaces_item(item); });
     return result;
 }
 
-[[nodiscard]] inline strata::host::Value encode_hub(const Hub& value) {
-    return strata::host::Value::object({{"hub", to_value(value)}});
+[[nodiscard]] inline ::strata::host::Value encode_hub(const Hub& value) {
+    return ::strata::host::Value::object({{"hub", to_value(value)}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_hub_frame_summary(const std::string& value) {
-    return strata::host::Value::object({{"hub", strata::host::Value::object({{"frameSummary", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_hub_frame_summary(const ::std::string& value) {
+    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"frameSummary", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_hub_frame_millis(const double& value) {
-    return strata::host::Value::object({{"hub", strata::host::Value::object({{"frameMillis", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_hub_frame_millis(const double& value) {
+    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"frameMillis", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_hub_frame_history(const std::vector<HubFrameHistoryItem>& value) {
-    return strata::host::Value::object({{"hub", strata::host::Value::object({{"frameHistory", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_hub_frame_history(const ::std::vector<HubFrameHistoryItem>& value) {
+    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"frameHistory", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_hub_frame_area(const std::vector<HubFrameAreaItem>& value) {
-    return strata::host::Value::object({{"hub", strata::host::Value::object({{"frameArea", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_hub_frame_area(const ::std::vector<HubFrameAreaItem>& value) {
+    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"frameArea", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_hub_frame_scale(const std::string& value) {
-    return strata::host::Value::object({{"hub", strata::host::Value::object({{"frameScale", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_hub_frame_scale(const ::std::string& value) {
+    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"frameScale", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_hub_status(const std::string& value) {
-    return strata::host::Value::object({{"hub", strata::host::Value::object({{"status", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_hub_status(const ::std::string& value) {
+    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"status", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_hub_surfaces(const std::vector<HubSurfacesItem>& value) {
-    return strata::host::Value::object({{"hub", strata::host::Value::object({{"surfaces", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_hub_surfaces(const ::std::vector<HubSurfacesItem>& value) {
+    return ::strata::host::Value::object({{"hub", ::strata::host::Value::object({{"surfaces", to_value(value)}})}});
 }
 
 class HubModel final {
@@ -325,114 +325,114 @@ public:
 
     [[nodiscard]] bool set(Hub value) {
         bool changed = false;
-        changed = set_frame_summary(std::move(value.frame_summary)) || changed;
-        changed = set_frame_millis(std::move(value.frame_millis)) || changed;
-        changed = set_frame_history(std::move(value.frame_history)) || changed;
-        changed = set_frame_area(std::move(value.frame_area)) || changed;
-        changed = set_frame_scale(std::move(value.frame_scale)) || changed;
-        changed = set_status(std::move(value.status)) || changed;
-        changed = set_surfaces(std::move(value.surfaces)) || changed;
+        changed = set_frame_summary(::std::move(value.frame_summary)) || changed;
+        changed = set_frame_millis(::std::move(value.frame_millis)) || changed;
+        changed = set_frame_history(::std::move(value.frame_history)) || changed;
+        changed = set_frame_area(::std::move(value.frame_area)) || changed;
+        changed = set_frame_scale(::std::move(value.frame_scale)) || changed;
+        changed = set_status(::std::move(value.status)) || changed;
+        changed = set_surfaces(::std::move(value.surfaces)) || changed;
         return changed;
     }
 
-    [[nodiscard]] bool set_frame_summary(std::string value) {
-        return frame_summary_.set(std::move(value));
+    [[nodiscard]] bool set_frame_summary(::std::string value) {
+        return frame_summary_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& frame_summary() const noexcept {
+    [[nodiscard]] const ::std::string& frame_summary() const noexcept {
         return frame_summary_.get();
     }
     [[nodiscard]] bool set_frame_millis(double value) {
-        return frame_millis_.set(std::move(value));
+        return frame_millis_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& frame_millis() const noexcept {
         return frame_millis_.get();
     }
-    [[nodiscard]] bool set_frame_history(std::vector<HubFrameHistoryItem> value) {
-        return frame_history_.set(std::move(value));
+    [[nodiscard]] bool set_frame_history(::std::vector<HubFrameHistoryItem> value) {
+        return frame_history_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<HubFrameHistoryItem>& frame_history() const noexcept {
+    [[nodiscard]] const ::std::vector<HubFrameHistoryItem>& frame_history() const noexcept {
         return frame_history_.get();
     }
-    [[nodiscard]] bool set_frame_area(std::vector<HubFrameAreaItem> value) {
-        return frame_area_.set(std::move(value));
+    [[nodiscard]] bool set_frame_area(::std::vector<HubFrameAreaItem> value) {
+        return frame_area_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<HubFrameAreaItem>& frame_area() const noexcept {
+    [[nodiscard]] const ::std::vector<HubFrameAreaItem>& frame_area() const noexcept {
         return frame_area_.get();
     }
-    [[nodiscard]] bool set_frame_scale(std::string value) {
-        return frame_scale_.set(std::move(value));
+    [[nodiscard]] bool set_frame_scale(::std::string value) {
+        return frame_scale_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& frame_scale() const noexcept {
+    [[nodiscard]] const ::std::string& frame_scale() const noexcept {
         return frame_scale_.get();
     }
-    [[nodiscard]] bool set_status(std::string value) {
-        return status_.set(std::move(value));
+    [[nodiscard]] bool set_status(::std::string value) {
+        return status_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& status() const noexcept {
+    [[nodiscard]] const ::std::string& status() const noexcept {
         return status_.get();
     }
-    [[nodiscard]] bool set_surfaces(std::vector<HubSurfacesItem> value) {
-        return surfaces_.set(std::move(value));
+    [[nodiscard]] bool set_surfaces(::std::vector<HubSurfacesItem> value) {
+        return surfaces_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<HubSurfacesItem>& surfaces() const noexcept {
+    [[nodiscard]] const ::std::vector<HubSurfacesItem>& surfaces() const noexcept {
         return surfaces_.get();
     }
 
-    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+    void bind(::strata::host::Bindings& bindings, const ::std::string_view id) const {
         if (id.empty()) {
-            throw std::invalid_argument("HubModel binding id must not be empty");
+            throw ::std::invalid_argument("HubModel binding id must not be empty");
         }
         bindings.snapshot(
-            std::string(id) + ".frame_summary",
+            ::std::string(id) + ".frame_summary",
             frame_summary_,
             [](const auto& model) {
                 return encode_hub_frame_summary(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".frame_millis",
+            ::std::string(id) + ".frame_millis",
             frame_millis_,
             [](const auto& model) {
                 return encode_hub_frame_millis(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".frame_history",
+            ::std::string(id) + ".frame_history",
             frame_history_,
             [](const auto& model) {
                 return encode_hub_frame_history(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".frame_area",
+            ::std::string(id) + ".frame_area",
             frame_area_,
             [](const auto& model) {
                 return encode_hub_frame_area(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".frame_scale",
+            ::std::string(id) + ".frame_scale",
             frame_scale_,
             [](const auto& model) {
                 return encode_hub_frame_scale(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".status",
+            ::std::string(id) + ".status",
             status_,
             [](const auto& model) {
                 return encode_hub_status(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".surfaces",
+            ::std::string(id) + ".surfaces",
             surfaces_,
             [](const auto& model) {
                 return encode_hub_surfaces(model.get());
@@ -441,22 +441,22 @@ public:
     }
 
 private:
-    strata::host::Observable<std::string> frame_summary_{};
-    strata::host::Observable<double> frame_millis_{};
-    strata::host::Observable<std::vector<HubFrameHistoryItem>> frame_history_{};
-    strata::host::Observable<std::vector<HubFrameAreaItem>> frame_area_{};
-    strata::host::Observable<std::string> frame_scale_{};
-    strata::host::Observable<std::string> status_{};
-    strata::host::Observable<std::vector<HubSurfacesItem>> surfaces_{};
+    ::strata::host::Observable<::std::string> frame_summary_{};
+    ::strata::host::Observable<double> frame_millis_{};
+    ::strata::host::Observable<::std::vector<HubFrameHistoryItem>> frame_history_{};
+    ::strata::host::Observable<::std::vector<HubFrameAreaItem>> frame_area_{};
+    ::strata::host::Observable<::std::string> frame_scale_{};
+    ::strata::host::Observable<::std::string> status_{};
+    ::strata::host::Observable<::std::vector<HubSurfacesItem>> surfaces_{};
 };
 
 struct HubLaunchAction final {
-    static inline constexpr std::string_view id = "hub.launch";
-    std::string target{};
+    static inline constexpr ::std::string_view id = "hub.launch";
+    ::std::string target{};
 
-    [[nodiscard]] static HubLaunchAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static HubLaunchAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match hub.launch");
+            throw ::std::invalid_argument("action event does not match hub.launch");
         }
         static_cast<void>(detail::decode_object(event.payload, id));
         HubLaunchAction result;
@@ -465,19 +465,19 @@ struct HubLaunchAction final {
     }
 };
 
-inline constexpr std::array<std::string_view, 1U> action_ids{
+inline constexpr ::std::array<::std::string_view, 1U> action_ids{
     HubLaunchAction::id,
 };
 
-using Action = std::variant<
+using Action = ::std::variant<
     HubLaunchAction
 >;
 
-[[nodiscard]] inline std::optional<Action> decode_action(
-    const strata::host::ActionEvent& event
+[[nodiscard]] inline ::std::optional<Action> decode_action(
+    const ::strata::host::ActionEvent& event
 ) {
     if (event.id == HubLaunchAction::id) return Action(HubLaunchAction::decode(event));
-    return std::nullopt;
+    return ::std::nullopt;
 }
 
 } // namespace strata::contracts::strata_hub

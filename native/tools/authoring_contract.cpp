@@ -162,6 +162,29 @@ void write_text(const std::filesystem::path& path, const std::string_view text) 
     return result;
 }
 
+/**
+ * `name`, or `name_2`, `name_3`... when the scope already holds it. Distinct wire names can map to
+ * one identifier ("fooBar" and "foo_bar", "on" and "ON"), and a generated member may already
+ * own a name ("id", "decode"); each scope keeps its identifiers unique this way.
+ */
+[[nodiscard]] std::string unique_in(std::set<std::string, std::less<>>& scope,
+                                    const std::string& name) {
+    std::string candidate = name;
+    for (std::size_t suffix = 2U; !scope.insert(candidate).second; ++suffix)
+        candidate = name + "_" + std::to_string(suffix);
+    return candidate;
+}
+
+/** The enumerators of an enum, in declaration order, unique within it. */
+[[nodiscard]] std::vector<std::string> enum_members(const std::vector<std::string>& values) {
+    std::set<std::string, std::less<>> scope;
+    std::vector<std::string> members;
+    members.reserve(values.size());
+    for (const std::string& value : values)
+        members.push_back(unique_in(scope, snake_identifier(value)));
+    return members;
+}
+
 [[nodiscard]] std::string cpp_quote(const std::string_view value) {
     std::ostringstream output;
     output << '"';
@@ -290,12 +313,12 @@ public:
             if (!root.wrapper) continue;
             output << "struct " << root.wrapper_name << " final {\n    "
                    << root.type.cpp << " value{};\n};\n\n"
-                   << "[[nodiscard]] inline strata::host::Value to_value(const "
+                   << "[[nodiscard]] inline ::strata::host::Value to_value(const "
                    << root.wrapper_name << "& value) {\n"
                    << "    return to_value(value.value);\n}\n\n"
                    << "[[nodiscard]] inline " << root.wrapper_name << " decode_"
                    << snake_identifier(root.wrapper_name)
-                   << "(const strata::host::Value& value) {\n"
+                   << "(const ::strata::host::Value& value) {\n"
                    << "    return " << root.wrapper_name << "{"
                    << decode_expression(root.semantic, "value", root.path) << "};\n}\n\n";
         }
@@ -334,18 +357,18 @@ private:
     [[nodiscard]] TypeName type_name(const SemanticTypePtr& type, const std::string_view hint) {
         if (type == nullptr) throw std::runtime_error("host contract contains a null semantic type");
         switch (type->kind) {
-        case SemanticTypeKind::null_value: return {"std::monostate", false};
+        case SemanticTypeKind::null_value: return {"::std::monostate", false};
         case SemanticTypeKind::boolean: return {"bool", false};
         case SemanticTypeKind::number: return {"double", false};
-        case SemanticTypeKind::duration: return {"std::int64_t", false};
+        case SemanticTypeKind::duration: return {"::std::int64_t", false};
         case SemanticTypeKind::string:
         case SemanticTypeKind::string_literal:
         case SemanticTypeKind::color:
         case SemanticTypeKind::path:
         case SemanticTypeKind::image:
-        case SemanticTypeKind::key: return {"std::string", false};
+        case SemanticTypeKind::key: return {"::std::string", false};
         case SemanticTypeKind::unknown:
-        case SemanticTypeKind::any: return {"strata::host::Value", false};
+        case SemanticTypeKind::any: return {"::strata::host::Value", false};
         case SemanticTypeKind::state_binding:
             throw std::runtime_error("state bindings cannot cross a host contract");
         case SemanticTypeKind::enumeration:
@@ -356,30 +379,30 @@ private:
             {
                 TypeName value = type_name(type->value, std::string(hint) + "Value");
                 if (type->value_nullable && !value.optional) {
-                    value.cpp = "std::optional<" + value.cpp + ">";
+                    value.cpp = "::std::optional<" + value.cpp + ">";
                     value.optional = true;
                 }
-                return {"std::map<std::string, " + value.cpp + ">", false};
+                return {"::std::map<::std::string, " + value.cpp + ">", false};
             }
         case SemanticTypeKind::list:
         case SemanticTypeKind::collection: {
             if (type->element == nullptr) throw std::runtime_error("host list has no element type");
             TypeName element = type_name(type->element, std::string(hint) + "Item");
             if (type->element_nullable && !element.optional) {
-                element.cpp = "std::optional<" + element.cpp + ">";
+                element.cpp = "::std::optional<" + element.cpp + ">";
                 element.optional = true;
             }
-            return {"std::vector<" + element.cpp + ">", false};
+            return {"::std::vector<" + element.cpp + ">", false};
         }
         case SemanticTypeKind::union_value: {
             if (nullable_union(*type)) {
                 TypeName value = type_name(non_null_union_option(*type), hint);
-                if (!value.optional) value.cpp = "std::optional<" + value.cpp + ">";
+                if (!value.optional) value.cpp = "::std::optional<" + value.cpp + ">";
                 value.optional = true;
                 return value;
             }
             if (type->options.empty()) throw std::runtime_error("host union has no options");
-            std::string result = "std::variant<";
+            std::string result = "::std::variant<";
             for (std::size_t index = 0U; index < type->options.size(); ++index) {
                 if (index != 0U) result += ", ";
                 result += type_name(
@@ -428,15 +451,16 @@ private:
         }
         std::vector<FieldDefinition> fields;
         fields.reserve(type->fields.size());
+        std::set<std::string, std::less<>> members;
         for (const ObjectField& field : type->fields) {
             TypeName field_type = type_name(field.type, name + pascal_identifier(field.name));
             if ((!field.required || field.nullable) && !field_type.optional) {
-                field_type.cpp = "std::optional<" + field_type.cpp + ">";
+                field_type.cpp = "::std::optional<" + field_type.cpp + ">";
                 field_type.optional = true;
             }
             fields.push_back(FieldDefinition{
                 field.name,
-                snake_identifier(field.name),
+                unique_in(members, snake_identifier(field.name)),
                 std::move(field_type),
                 field.type,
                 field.required,
@@ -465,7 +489,7 @@ private:
                 semantic->kind == SemanticTypeKind::host_object;
             RootDefinition root{
                 path,
-                snake_identifier(path),
+                unique_in(root_functions_, snake_identifier(path)),
                 type,
                 semantic,
                 !named_object,
@@ -500,17 +524,19 @@ private:
             const std::string name = unique_name(name_hint);
             std::vector<ActionParameter> parameters;
             parameters.reserve(schema->parameters.size());
+            // The struct's own static members.
+            std::set<std::string, std::less<>> members{"id", "decode"};
             for (const SchemaParameter& parameter : schema->parameters) {
                 const JsonValue* default_value = action_parameter_default(declared, parameter.name);
                 TypeName type = type_name(parameter.type, name + pascal_identifier(parameter.name));
                 if ((!parameter.required || parameter.nullable) && default_value == nullptr &&
                     !type.optional) {
-                    type.cpp = "std::optional<" + type.cpp + ">";
+                    type.cpp = "::std::optional<" + type.cpp + ">";
                     type.optional = true;
                 }
                 parameters.push_back(ActionParameter{
                     parameter.name,
-                    snake_identifier(parameter.name),
+                    unique_in(members, snake_identifier(parameter.name)),
                     std::move(type),
                     parameter.type,
                     default_value,
@@ -530,18 +556,18 @@ private:
 
     [[nodiscard]] TypeName resolved_type_name(const SemanticTypePtr& type) const {
         switch (type->kind) {
-        case SemanticTypeKind::null_value: return {"std::monostate", false};
+        case SemanticTypeKind::null_value: return {"::std::monostate", false};
         case SemanticTypeKind::boolean: return {"bool", false};
         case SemanticTypeKind::number: return {"double", false};
-        case SemanticTypeKind::duration: return {"std::int64_t", false};
+        case SemanticTypeKind::duration: return {"::std::int64_t", false};
         case SemanticTypeKind::string:
         case SemanticTypeKind::string_literal:
         case SemanticTypeKind::color:
         case SemanticTypeKind::path:
         case SemanticTypeKind::image:
-        case SemanticTypeKind::key: return {"std::string", false};
+        case SemanticTypeKind::key: return {"::std::string", false};
         case SemanticTypeKind::unknown:
-        case SemanticTypeKind::any: return {"strata::host::Value", false};
+        case SemanticTypeKind::any: return {"::strata::host::Value", false};
         case SemanticTypeKind::enumeration:
         case SemanticTypeKind::host_object: return {custom_name(type), false};
         case SemanticTypeKind::map:
@@ -549,28 +575,28 @@ private:
             {
                 TypeName value = resolved_type_name(type->value);
                 if (type->value_nullable && !value.optional) {
-                    value.cpp = "std::optional<" + value.cpp + ">";
+                    value.cpp = "::std::optional<" + value.cpp + ">";
                     value.optional = true;
                 }
-                return {"std::map<std::string, " + value.cpp + ">", false};
+                return {"::std::map<::std::string, " + value.cpp + ">", false};
             }
         case SemanticTypeKind::list:
         case SemanticTypeKind::collection: {
             TypeName element = resolved_type_name(type->element);
             if (type->element_nullable && !element.optional) {
-                element.cpp = "std::optional<" + element.cpp + ">";
+                element.cpp = "::std::optional<" + element.cpp + ">";
                 element.optional = true;
             }
-            return {"std::vector<" + element.cpp + ">", false};
+            return {"::std::vector<" + element.cpp + ">", false};
         }
         case SemanticTypeKind::union_value: {
             if (nullable_union(*type)) {
                 TypeName value = resolved_type_name(non_null_union_option(*type));
-                if (!value.optional) value.cpp = "std::optional<" + value.cpp + ">";
+                if (!value.optional) value.cpp = "::std::optional<" + value.cpp + ">";
                 value.optional = true;
                 return value;
             }
-            std::string result = "std::variant<";
+            std::string result = "::std::variant<";
             for (std::size_t index = 0U; index < type->options.size(); ++index) {
                 if (index != 0U) result += ", ";
                 result += resolved_type_name(type->options[index]).cpp;
@@ -623,13 +649,13 @@ private:
                     type->value, "item", std::string(context) + ".value"
                 );
                 if (type->value_nullable && !value.optional) {
-                    decoded = "item.is_null() ? std::optional<" + value.cpp +
-                        ">{} : std::optional<" + value.cpp + ">{" + decoded + "}";
-                    value.cpp = "std::optional<" + value.cpp + ">";
+                    decoded = "item.is_null() ? ::std::optional<" + value.cpp +
+                        ">{} : ::std::optional<" + value.cpp + ">{" + decoded + "}";
+                    value.cpp = "::std::optional<" + value.cpp + ">";
                 }
                 return "detail::decode_map<" + value.cpp + ">(" + std::string(input) +
                     ", " + context_literal +
-                    ", [](const strata::host::Value& item) { return " + decoded + "; })";
+                    ", [](const ::strata::host::Value& item) { return " + decoded + "; })";
             }
         case SemanticTypeKind::list:
         case SemanticTypeKind::collection: {
@@ -638,29 +664,29 @@ private:
                 type->element, "item", std::string(context) + "[]"
             );
             if (type->element_nullable && !element.optional) {
-                item = "item.is_null() ? std::optional<" + element.cpp +
-                    ">{} : std::optional<" + element.cpp + ">{" + item + "}";
-                element.cpp = "std::optional<" + element.cpp + ">";
+                item = "item.is_null() ? ::std::optional<" + element.cpp +
+                    ">{} : ::std::optional<" + element.cpp + ">{" + item + "}";
+                element.cpp = "::std::optional<" + element.cpp + ">";
                 element.optional = true;
             }
             return "detail::decode_list<" + element.cpp + ">(" +
                 std::string(input) + ", " + context_literal +
-                ", [](const strata::host::Value& item) { return " + item + "; })";
+                ", [](const ::strata::host::Value& item) { return " + item + "; })";
         }
         case SemanticTypeKind::union_value: {
             if (nullable_union(*type)) {
                 const SemanticTypePtr value = non_null_union_option(*type);
                 const std::string decoded = decode_expression(value, input, context);
                 TypeName value_type = resolved_type_name(value);
-                return std::string(input) + ".is_null() ? std::optional<" + value_type.cpp +
-                    ">{} : std::optional<" + value_type.cpp + ">{" + decoded + "}";
+                return std::string(input) + ".is_null() ? ::std::optional<" + value_type.cpp +
+                    ">{} : ::std::optional<" + value_type.cpp + ">{" + decoded + "}";
             }
             const TypeName union_type = resolved_type_name(type);
             std::string result = "detail::decode_union<" + union_type.cpp + ">(" +
                 std::string(input) + ", " + context_literal;
             for (std::size_t index = 0U; index < type->options.size(); ++index) {
-                result += ", [](const strata::host::Value& option) { return " + union_type.cpp +
-                    "(std::in_place_index<" + std::to_string(index) + "U>, " +
+                result += ", [](const ::strata::host::Value& option) { return " + union_type.cpp +
+                    "(::std::in_place_index<" + std::to_string(index) + "U>, " +
                     decode_expression(type->options[index], "option", context) + "); }";
             }
             result += ')';
@@ -695,9 +721,13 @@ private:
             if (payload.integer() != nullptr) return std::to_string(*payload.integer());
             break;
         case SemanticTypeKind::enumeration:
-            if (payload.string() != nullptr &&
-                std::ranges::find(type->values, *payload.string()) != type->values.end()) {
-                return custom_name(type) + "::" + snake_identifier(*payload.string());
+            if (payload.string() != nullptr) {
+                const auto found = std::ranges::find(type->values, *payload.string());
+                if (found != type->values.end()) {
+                    return custom_name(type) + "::" +
+                           enum_members(type->values)[static_cast<std::size_t>(
+                               found - type->values.begin())];
+                }
             }
             break;
         case SemanticTypeKind::string:
@@ -715,160 +745,160 @@ private:
     void render_support(std::ostringstream& output) const {
         output << R"CPP(namespace detail {
 
-[[noreturn]] inline void contract_error(const std::string_view context, const std::string_view expected) {
-    throw std::invalid_argument(std::string(context) + " must be " + std::string(expected));
+[[noreturn]] inline void contract_error(const ::std::string_view context, const ::std::string_view expected) {
+    throw ::std::invalid_argument(::std::string(context) + " must be " + ::std::string(expected));
 }
 
-[[nodiscard]] inline const strata::host::Value::Object& decode_object(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value::Object& decode_object(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     const auto* object = value.object();
     if (object == nullptr) contract_error(context, "an object");
     return *object;
 }
 
-[[nodiscard]] inline const strata::host::Value& required_field(
-    const strata::host::Value& value,
-    const std::string_view name,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value& required_field(
+    const ::strata::host::Value& value,
+    const ::std::string_view name,
+    const ::std::string_view context
 ) {
     static_cast<void>(decode_object(value, context));
-    const strata::host::Value* field = value.find(name);
+    const ::strata::host::Value* field = value.find(name);
     if (field == nullptr) {
-        throw std::invalid_argument(std::string(context) + " is missing required field '" +
-                                    std::string(name) + "'");
+        throw ::std::invalid_argument(::std::string(context) + " is missing required field '" +
+                                    ::std::string(name) + "'");
     }
     return *field;
 }
 
 [[nodiscard]] inline bool decode_boolean(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const bool* boolean = value.boolean(); boolean != nullptr) return *boolean;
     contract_error(context, "a boolean");
 }
 
 [[nodiscard]] inline double decode_number(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const double* number = value.number(); number != nullptr) return *number;
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) {
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) {
         return static_cast<double>(*integer);
     }
     contract_error(context, "a number");
 }
 
-[[nodiscard]] inline std::int64_t decode_integer(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::int64_t decode_integer(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
     contract_error(context, "an integer");
 }
 
-[[nodiscard]] inline std::string decode_string(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_string(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::string* text = value.string(); text != nullptr) return *text;
+    if (const ::std::string* text = value.string(); text != nullptr) return *text;
     contract_error(context, "a string");
 }
 
-[[nodiscard]] inline std::string decode_literal(
-    const strata::host::Value& value,
-    const std::string_view literal,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_literal(
+    const ::strata::host::Value& value,
+    const ::std::string_view literal,
+    const ::std::string_view context
 ) {
-    std::string result = decode_string(value, context);
+    ::std::string result = decode_string(value, context);
     if (result != literal) contract_error(context, literal);
     return result;
 }
 
-[[nodiscard]] inline std::monostate decode_null(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::monostate decode_null(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (!value.is_null()) contract_error(context, "null");
     return {};
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::vector<T> decode_list(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::vector<T> decode_list(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto* values = value.array();
     if (values == nullptr) contract_error(context, "a list");
-    std::vector<T> result;
+    ::std::vector<T> result;
     result.reserve(values->size());
-    for (const strata::host::Value& item : *values) result.push_back(decode(item));
+    for (const ::strata::host::Value& item : *values) result.push_back(decode(item));
     return result;
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::map<std::string, T> decode_map(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::map<::std::string, T> decode_map(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto& fields = decode_object(value, context);
-    std::map<std::string, T> result;
+    ::std::map<::std::string, T> result;
     for (const auto& [name, item] : fields) result.emplace(name, decode(item));
     return result;
 }
 
 template <typename Variant, typename... Decode>
 [[nodiscard]] Variant decode_union(
-    const strata::host::Value& value,
-    const std::string_view context,
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&&... decode
 ) {
-    std::optional<Variant> result;
+    ::std::optional<Variant> result;
     const auto attempt = [&value, &result](auto&& candidate) {
         if (result.has_value()) return;
         try {
             result = candidate(value);
-        } catch (const std::invalid_argument&) {
+        } catch (const ::std::invalid_argument&) {
         }
     };
-    (attempt(std::forward<Decode>(decode)), ...);
+    (attempt(::std::forward<Decode>(decode)), ...);
     if (!result.has_value()) contract_error(context, "one of the declared union options");
-    return std::move(*result);
+    return ::std::move(*result);
 }
 
 } // namespace detail
 
-[[nodiscard]] inline strata::host::Value to_value(const strata::host::Value& value) { return value; }
-[[nodiscard]] inline strata::host::Value to_value(const bool value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const double value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::int64_t value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::string& value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::monostate) { return strata::host::Value(); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::strata::host::Value& value) { return value; }
+[[nodiscard]] inline ::strata::host::Value to_value(const bool value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const double value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::int64_t value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::string& value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::monostate) { return ::strata::host::Value(); }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::optional<T>& value) {
-    return value.has_value() ? to_value(*value) : strata::host::Value();
+[[nodiscard]] ::strata::host::Value to_value(const ::std::optional<T>& value) {
+    return value.has_value() ? to_value(*value) : ::strata::host::Value();
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::vector<T>& values) {
-    return strata::host::Value::array(values, [](const T& value) { return to_value(value); });
+[[nodiscard]] ::strata::host::Value to_value(const ::std::vector<T>& values) {
+    return ::strata::host::Value::array(values, [](const T& value) { return to_value(value); });
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::map<std::string, T>& values) {
-    strata::host::Value::Object fields;
+[[nodiscard]] ::strata::host::Value to_value(const ::std::map<::std::string, T>& values) {
+    ::strata::host::Value::Object fields;
     for (const auto& [name, value] : values) fields.emplace(name, to_value(value));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 template <typename... T>
-[[nodiscard]] strata::host::Value to_value(const std::variant<T...>& value) {
-    return std::visit([](const auto& item) { return to_value(item); }, value);
+[[nodiscard]] ::strata::host::Value to_value(const ::std::variant<T...>& value) {
+    return ::std::visit([](const auto& item) { return to_value(item); }, value);
 }
 
 )CPP";
@@ -876,28 +906,29 @@ template <typename... T>
 
     void render_definition(std::ostringstream& output, const Definition& definition) const {
         if (definition.kind == Definition::Kind::enumeration) {
+            const std::vector<std::string> members = enum_members(definition.enum_values);
             output << "enum class " << definition.name << " {\n";
-            for (const std::string& value : definition.enum_values) {
-                output << "    " << snake_identifier(value) << ",\n";
+            for (const std::string& member : members) {
+                output << "    " << member << ",\n";
             }
-            output << "};\n\n[[nodiscard]] inline std::string_view wire_name(const "
+            output << "};\n\n[[nodiscard]] inline ::std::string_view wire_name(const "
                    << definition.name << " value) noexcept {\n    switch (value) {\n";
-            for (const std::string& value : definition.enum_values) {
-                output << "    case " << definition.name << "::" << snake_identifier(value)
-                       << ": return " << cpp_quote(value) << ";\n";
+            for (std::size_t index = 0U; index < members.size(); ++index) {
+                output << "    case " << definition.name << "::" << members[index]
+                       << ": return " << cpp_quote(definition.enum_values[index]) << ";\n";
             }
             output << "    }\n    return {};\n}\n\n"
-                   << "[[nodiscard]] inline strata::host::Value to_value(const "
+                   << "[[nodiscard]] inline ::strata::host::Value to_value(const "
                    << definition.name << " value) {\n"
-                   << "    return strata::host::Value(wire_name(value));\n}\n\n"
+                   << "    return ::strata::host::Value(wire_name(value));\n}\n\n"
                    << "[[nodiscard]] inline " << definition.name << " decode_"
                    << snake_identifier(definition.name)
-                   << "(const strata::host::Value& value) {\n"
-                   << "    const std::string decoded = detail::decode_string(value, "
+                   << "(const ::strata::host::Value& value) {\n"
+                   << "    const ::std::string decoded = detail::decode_string(value, "
                    << cpp_quote(definition.name) << ");\n";
-            for (const std::string& value : definition.enum_values) {
-                output << "    if (decoded == " << cpp_quote(value) << ") return "
-                       << definition.name << "::" << snake_identifier(value) << ";\n";
+            for (std::size_t index = 0U; index < members.size(); ++index) {
+                output << "    if (decoded == " << cpp_quote(definition.enum_values[index])
+                       << ") return " << definition.name << "::" << members[index] << ";\n";
             }
             output << "    detail::contract_error(" << cpp_quote(definition.name)
                    << ", \"a declared enum value\");\n}\n\n";
@@ -910,9 +941,9 @@ template <typename... T>
         output << "    [[nodiscard]] friend bool operator==(const "
                << definition.name << "&, const " << definition.name
                << "&) = default;\n";
-        output << "};\n\n[[nodiscard]] inline strata::host::Value to_value(const "
+        output << "};\n\n[[nodiscard]] inline ::strata::host::Value to_value(const "
                << definition.name << "& value) {\n"
-               << "    strata::host::Value::Object fields;\n";
+               << "    ::strata::host::Value::Object fields;\n";
         for (const FieldDefinition& field : definition.fields) {
             if (!field.required && field.type.optional) {
                 output << "    if (value." << field.member_name << ".has_value()) {\n"
@@ -923,24 +954,24 @@ template <typename... T>
                        << field.member_name << "));\n";
             }
         }
-        output << "    return strata::host::Value(std::move(fields));\n}\n\n"
+        output << "    return ::strata::host::Value(::std::move(fields));\n}\n\n"
                << "[[nodiscard]] inline " << definition.name << " decode_"
                << snake_identifier(definition.name)
-               << "(const strata::host::Value& value) {\n"
+               << "(const ::strata::host::Value& value) {\n"
                << "    static_cast<void>(detail::decode_object(value, "
                << cpp_quote(definition.name) << "));\n"
                << "    " << definition.name << " result;\n";
         for (const FieldDefinition& field : definition.fields) {
             const std::string context = definition.name + "." + field.wire_name;
             if (!field.required) {
-                output << "    if (const strata::host::Value* field = value.find("
+                output << "    if (const ::strata::host::Value* field = value.find("
                        << cpp_quote(field.wire_name) << "); field != nullptr && !field->is_null()) {\n"
                        << "        result." << field.member_name << " = "
                        << decode_expression(field.semantic, "*field", context) << ";\n"
                        << "    }\n";
             } else if (field.type.optional) {
                 output << "    {\n"
-                       << "        const strata::host::Value& field = detail::required_field(value, "
+                       << "        const ::strata::host::Value& field = detail::required_field(value, "
                        << cpp_quote(field.wire_name) << ", " << cpp_quote(definition.name) << ");\n"
                        << "        if (!field.is_null()) result." << field.member_name << " = "
                        << decode_expression(field.semantic, "field", context) << ";\n"
@@ -962,9 +993,9 @@ template <typename... T>
     void render_roots(std::ostringstream& output) const {
         for (const RootDefinition& root : roots_) {
             const std::string type = root.wrapper ? root.wrapper_name : root.type.cpp;
-            output << "[[nodiscard]] inline strata::host::Value encode_" << root.function_name
+            output << "[[nodiscard]] inline ::strata::host::Value encode_" << root.function_name
                    << "(const " << type << "& value) {\n"
-                   << "    return strata::host::Value::object({{"
+                   << "    return ::strata::host::Value::object({{"
                    << cpp_quote(root.path) << ", to_value(value)}});\n}\n\n";
             if ((root.semantic->kind != SemanticTypeKind::map ||
                  root.semantic->fields.empty()) &&
@@ -980,10 +1011,10 @@ template <typename... T>
             }
             if (definition == nullptr) throw std::logic_error("root object definition is missing");
             for (const FieldDefinition& field : definition->fields) {
-                output << "[[nodiscard]] inline strata::host::Value encode_" << root.function_name
+                output << "[[nodiscard]] inline ::strata::host::Value encode_" << root.function_name
                        << '_' << field.member_name << "(const " << field.type.cpp << "& value) {\n"
-                       << "    return strata::host::Value::object({{"
-                       << cpp_quote(root.path) << ", strata::host::Value::object({{"
+                       << "    return ::strata::host::Value::object({{"
+                       << cpp_quote(root.path) << ", ::strata::host::Value::object({{"
                        << cpp_quote(field.wire_name) << ", to_value(value)}})}});\n}\n\n";
             }
             output << "class " << root.model_name << " final {\n"
@@ -1001,7 +1032,7 @@ template <typename... T>
                    << "        bool changed = false;\n";
             for (const FieldDefinition& field : definition->fields) {
                 output << "        changed = set_" << field.member_name
-                       << "(std::move(value." << field.member_name
+                       << "(::std::move(value." << field.member_name
                        << ")) || changed;\n";
             }
             output << "        return changed;\n"
@@ -1010,7 +1041,7 @@ template <typename... T>
                 output << "    [[nodiscard]] bool set_" << field.member_name << "("
                        << field.type.cpp << " value) {\n"
                        << "        return " << field.member_name
-                       << "_.set(std::move(value));\n"
+                       << "_.set(::std::move(value));\n"
                        << "    }\n"
                        << "\n";
                 output << "    [[nodiscard]] const " << field.type.cpp << "& "
@@ -1018,16 +1049,16 @@ template <typename... T>
                        << "        return " << field.member_name << "_.get();\n"
                        << "    }\n";
             }
-            output << "\n    void bind(strata::host::Bindings& bindings, "
-                      "const std::string_view id) const {\n"
+            output << "\n    void bind(::strata::host::Bindings& bindings, "
+                      "const ::std::string_view id) const {\n"
                    << "        if (id.empty()) {\n"
-                   << "            throw std::invalid_argument("
+                   << "            throw ::std::invalid_argument("
                    << cpp_quote(root.model_name + " binding id must not be empty")
                    << ");\n"
                    << "        }\n";
             for (const FieldDefinition& field : definition->fields) {
                 output << "        bindings.snapshot(\n"
-                       << "            std::string(id) + "
+                       << "            ::std::string(id) + "
                        << cpp_quote("." + field.member_name) << ",\n"
                        << "            " << field.member_name << "_,\n"
                        << "            [](const auto& model) {\n"
@@ -1038,7 +1069,7 @@ template <typename... T>
             }
             output << "    }\n\nprivate:\n";
             for (const FieldDefinition& field : definition->fields) {
-                output << "    strata::host::Observable<" << field.type.cpp << "> "
+                output << "    ::strata::host::Observable<" << field.type.cpp << "> "
                        << field.member_name << "_{};\n";
             }
             output << "};\n\n";
@@ -1048,7 +1079,7 @@ template <typename... T>
     void render_actions(std::ostringstream& output) const {
         for (const ActionDefinition& action : actions_) {
             output << "struct " << action.name << " final {\n"
-                   << "    static inline constexpr std::string_view id = "
+                   << "    static inline constexpr ::std::string_view id = "
                    << cpp_quote(action.id) << ";\n";
             for (const ActionParameter& parameter : action.parameters) {
                 output << "    " << parameter.type.cpp << ' ' << parameter.member_name;
@@ -1060,10 +1091,10 @@ template <typename... T>
                 output << ";\n";
             }
             output << "\n    [[nodiscard]] static " << action.name
-                   << " decode(const strata::host::ActionEvent& event) {\n"
+                   << " decode(const ::strata::host::ActionEvent& event) {\n"
                    << "        if (event.id != id) {\n"
-                   << "            throw std::invalid_argument(\"action event does not match "
-                   << action.id << "\");\n        }\n";
+                   << "            throw ::std::invalid_argument("
+                   << cpp_quote("action event does not match " + action.id) << ");\n        }\n";
             if (!action.parameters.empty()) {
                 output << "        static_cast<void>(detail::decode_object(event.payload, id));\n";
             }
@@ -1071,14 +1102,14 @@ template <typename... T>
             for (const ActionParameter& parameter : action.parameters) {
                 const std::string context = action.id + "." + parameter.wire_name;
                 if (parameter.default_value != nullptr) {
-                    output << "        if (const strata::host::Value* field = event.payload.find("
+                    output << "        if (const ::strata::host::Value* field = event.payload.find("
                            << cpp_quote(parameter.wire_name)
                            << "); field != nullptr && !field->is_null()) {\n"
                            << "            result." << parameter.member_name << " = "
                            << decode_expression(parameter.semantic, "*field", context)
                            << ";\n        }\n";
                 } else if (!parameter.required) {
-                    output << "        if (const strata::host::Value* field = event.payload.find("
+                    output << "        if (const ::strata::host::Value* field = event.payload.find("
                            << cpp_quote(parameter.wire_name)
                            << "); field != nullptr && !field->is_null()) {\n"
                            << "            result." << parameter.member_name << " = "
@@ -1086,7 +1117,7 @@ template <typename... T>
                            << ";\n        }\n";
                 } else if (parameter.type.optional) {
                     output << "        {\n"
-                           << "            const strata::host::Value& field = "
+                           << "            const ::strata::host::Value& field = "
                               "detail::required_field(event.payload, "
                            << cpp_quote(parameter.wire_name) << ", id);\n"
                            << "            if (!field.is_null()) result." << parameter.member_name
@@ -1105,32 +1136,34 @@ template <typename... T>
             }
             output << "        return result;\n    }\n};\n\n";
         }
-        output << "inline constexpr std::array<std::string_view, " << actions_.size()
+        output << "inline constexpr ::std::array<::std::string_view, " << actions_.size()
                << "U> action_ids{\n";
         for (const ActionDefinition& action : actions_) {
             output << "    " << action.name << "::id,\n";
         }
         output << "};\n\n";
         if (actions_.empty()) return;
-        output << "using Action = std::variant<\n";
+        output << "using Action = ::std::variant<\n";
         for (std::size_t index = 0U; index < actions_.size(); ++index) {
             output << "    " << actions_[index].name
                    << (index + 1U == actions_.size() ? "\n" : ",\n");
         }
-        output << ">;\n\n[[nodiscard]] inline std::optional<Action> decode_action(\n"
-                  "    const strata::host::ActionEvent& event\n) {\n";
+        output << ">;\n\n[[nodiscard]] inline ::std::optional<Action> decode_action(\n"
+                  "    const ::strata::host::ActionEvent& event\n) {\n";
         for (const ActionDefinition& action : actions_) {
             output << "    if (event.id == " << action.name << "::id) return Action("
                    << action.name << "::decode(event));\n";
         }
-        output << "    return std::nullopt;\n}\n\n";
+        output << "    return ::std::nullopt;\n}\n\n";
     }
 
     const JsonValue& application_schema_;
     SchemaRegistry registry_;
     std::string cpp_namespace_;
     std::string source_name_;
-    std::set<std::string, std::less<>> used_names_;
+    /** Type names in use; the alias `Action` is emitted by the generator itself. */
+    std::set<std::string, std::less<>> used_names_{"Action"};
+    std::set<std::string, std::less<>> root_functions_;
     std::unordered_map<const SemanticType*, std::string> named_types_;
     std::vector<Definition> definitions_;
     std::vector<RootDefinition> roots_;

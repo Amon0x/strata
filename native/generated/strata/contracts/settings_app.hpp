@@ -19,180 +19,180 @@ namespace strata::contracts::settings_app {
 
 namespace detail {
 
-[[noreturn]] inline void contract_error(const std::string_view context, const std::string_view expected) {
-    throw std::invalid_argument(std::string(context) + " must be " + std::string(expected));
+[[noreturn]] inline void contract_error(const ::std::string_view context, const ::std::string_view expected) {
+    throw ::std::invalid_argument(::std::string(context) + " must be " + ::std::string(expected));
 }
 
-[[nodiscard]] inline const strata::host::Value::Object& decode_object(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value::Object& decode_object(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     const auto* object = value.object();
     if (object == nullptr) contract_error(context, "an object");
     return *object;
 }
 
-[[nodiscard]] inline const strata::host::Value& required_field(
-    const strata::host::Value& value,
-    const std::string_view name,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value& required_field(
+    const ::strata::host::Value& value,
+    const ::std::string_view name,
+    const ::std::string_view context
 ) {
     static_cast<void>(decode_object(value, context));
-    const strata::host::Value* field = value.find(name);
+    const ::strata::host::Value* field = value.find(name);
     if (field == nullptr) {
-        throw std::invalid_argument(std::string(context) + " is missing required field '" +
-                                    std::string(name) + "'");
+        throw ::std::invalid_argument(::std::string(context) + " is missing required field '" +
+                                    ::std::string(name) + "'");
     }
     return *field;
 }
 
 [[nodiscard]] inline bool decode_boolean(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const bool* boolean = value.boolean(); boolean != nullptr) return *boolean;
     contract_error(context, "a boolean");
 }
 
 [[nodiscard]] inline double decode_number(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const double* number = value.number(); number != nullptr) return *number;
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) {
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) {
         return static_cast<double>(*integer);
     }
     contract_error(context, "a number");
 }
 
-[[nodiscard]] inline std::int64_t decode_integer(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::int64_t decode_integer(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
     contract_error(context, "an integer");
 }
 
-[[nodiscard]] inline std::string decode_string(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_string(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::string* text = value.string(); text != nullptr) return *text;
+    if (const ::std::string* text = value.string(); text != nullptr) return *text;
     contract_error(context, "a string");
 }
 
-[[nodiscard]] inline std::string decode_literal(
-    const strata::host::Value& value,
-    const std::string_view literal,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_literal(
+    const ::strata::host::Value& value,
+    const ::std::string_view literal,
+    const ::std::string_view context
 ) {
-    std::string result = decode_string(value, context);
+    ::std::string result = decode_string(value, context);
     if (result != literal) contract_error(context, literal);
     return result;
 }
 
-[[nodiscard]] inline std::monostate decode_null(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::monostate decode_null(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (!value.is_null()) contract_error(context, "null");
     return {};
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::vector<T> decode_list(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::vector<T> decode_list(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto* values = value.array();
     if (values == nullptr) contract_error(context, "a list");
-    std::vector<T> result;
+    ::std::vector<T> result;
     result.reserve(values->size());
-    for (const strata::host::Value& item : *values) result.push_back(decode(item));
+    for (const ::strata::host::Value& item : *values) result.push_back(decode(item));
     return result;
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::map<std::string, T> decode_map(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::map<::std::string, T> decode_map(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto& fields = decode_object(value, context);
-    std::map<std::string, T> result;
+    ::std::map<::std::string, T> result;
     for (const auto& [name, item] : fields) result.emplace(name, decode(item));
     return result;
 }
 
 template <typename Variant, typename... Decode>
 [[nodiscard]] Variant decode_union(
-    const strata::host::Value& value,
-    const std::string_view context,
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&&... decode
 ) {
-    std::optional<Variant> result;
+    ::std::optional<Variant> result;
     const auto attempt = [&value, &result](auto&& candidate) {
         if (result.has_value()) return;
         try {
             result = candidate(value);
-        } catch (const std::invalid_argument&) {
+        } catch (const ::std::invalid_argument&) {
         }
     };
-    (attempt(std::forward<Decode>(decode)), ...);
+    (attempt(::std::forward<Decode>(decode)), ...);
     if (!result.has_value()) contract_error(context, "one of the declared union options");
-    return std::move(*result);
+    return ::std::move(*result);
 }
 
 } // namespace detail
 
-[[nodiscard]] inline strata::host::Value to_value(const strata::host::Value& value) { return value; }
-[[nodiscard]] inline strata::host::Value to_value(const bool value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const double value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::int64_t value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::string& value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::monostate) { return strata::host::Value(); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::strata::host::Value& value) { return value; }
+[[nodiscard]] inline ::strata::host::Value to_value(const bool value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const double value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::int64_t value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::string& value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::monostate) { return ::strata::host::Value(); }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::optional<T>& value) {
-    return value.has_value() ? to_value(*value) : strata::host::Value();
+[[nodiscard]] ::strata::host::Value to_value(const ::std::optional<T>& value) {
+    return value.has_value() ? to_value(*value) : ::strata::host::Value();
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::vector<T>& values) {
-    return strata::host::Value::array(values, [](const T& value) { return to_value(value); });
+[[nodiscard]] ::strata::host::Value to_value(const ::std::vector<T>& values) {
+    return ::strata::host::Value::array(values, [](const T& value) { return to_value(value); });
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::map<std::string, T>& values) {
-    strata::host::Value::Object fields;
+[[nodiscard]] ::strata::host::Value to_value(const ::std::map<::std::string, T>& values) {
+    ::strata::host::Value::Object fields;
     for (const auto& [name, value] : values) fields.emplace(name, to_value(value));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 template <typename... T>
-[[nodiscard]] strata::host::Value to_value(const std::variant<T...>& value) {
-    return std::visit([](const auto& item) { return to_value(item); }, value);
+[[nodiscard]] ::strata::host::Value to_value(const ::std::variant<T...>& value) {
+    return ::std::visit([](const auto& item) { return to_value(item); }, value);
 }
 
 struct SettingsProfileTreeItem final {
-    std::string key{};
-    std::string label{};
+    ::std::string key{};
+    ::std::string label{};
     bool may_have_children{};
     bool children_loaded{};
     [[nodiscard]] friend bool operator==(const SettingsProfileTreeItem&, const SettingsProfileTreeItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const SettingsProfileTreeItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const SettingsProfileTreeItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("key", to_value(value.key));
     fields.emplace("label", to_value(value.label));
     fields.emplace("mayHaveChildren", to_value(value.may_have_children));
     fields.emplace("childrenLoaded", to_value(value.children_loaded));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline SettingsProfileTreeItem decode_settings_profile_tree_item(const strata::host::Value& value) {
+[[nodiscard]] inline SettingsProfileTreeItem decode_settings_profile_tree_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "SettingsProfileTreeItem"));
     SettingsProfileTreeItem result;
     result.key = detail::decode_string(detail::required_field(value, "key", "SettingsProfileTreeItem"), "SettingsProfileTreeItem.key");
@@ -203,36 +203,36 @@ struct SettingsProfileTreeItem final {
 }
 
 struct Settings final {
-    std::string saved_message{};
-    std::vector<SettingsProfileTreeItem> profile_tree{};
+    ::std::string saved_message{};
+    ::std::vector<SettingsProfileTreeItem> profile_tree{};
     [[nodiscard]] friend bool operator==(const Settings&, const Settings&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const Settings& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const Settings& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("savedMessage", to_value(value.saved_message));
     fields.emplace("profileTree", to_value(value.profile_tree));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline Settings decode_settings(const strata::host::Value& value) {
+[[nodiscard]] inline Settings decode_settings(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "Settings"));
     Settings result;
     result.saved_message = detail::decode_string(detail::required_field(value, "savedMessage", "Settings"), "Settings.savedMessage");
-    result.profile_tree = detail::decode_list<SettingsProfileTreeItem>(detail::required_field(value, "profileTree", "Settings"), "Settings.profileTree", [](const strata::host::Value& item) { return decode_settings_profile_tree_item(item); });
+    result.profile_tree = detail::decode_list<SettingsProfileTreeItem>(detail::required_field(value, "profileTree", "Settings"), "Settings.profileTree", [](const ::strata::host::Value& item) { return decode_settings_profile_tree_item(item); });
     return result;
 }
 
-[[nodiscard]] inline strata::host::Value encode_settings(const Settings& value) {
-    return strata::host::Value::object({{"settings", to_value(value)}});
+[[nodiscard]] inline ::strata::host::Value encode_settings(const Settings& value) {
+    return ::strata::host::Value::object({{"settings", to_value(value)}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_settings_saved_message(const std::string& value) {
-    return strata::host::Value::object({{"settings", strata::host::Value::object({{"savedMessage", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_settings_saved_message(const ::std::string& value) {
+    return ::strata::host::Value::object({{"settings", ::strata::host::Value::object({{"savedMessage", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_settings_profile_tree(const std::vector<SettingsProfileTreeItem>& value) {
-    return strata::host::Value::object({{"settings", strata::host::Value::object({{"profileTree", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_settings_profile_tree(const ::std::vector<SettingsProfileTreeItem>& value) {
+    return ::strata::host::Value::object({{"settings", ::strata::host::Value::object({{"profileTree", to_value(value)}})}});
 }
 
 class SettingsModel final {
@@ -245,39 +245,39 @@ public:
 
     [[nodiscard]] bool set(Settings value) {
         bool changed = false;
-        changed = set_saved_message(std::move(value.saved_message)) || changed;
-        changed = set_profile_tree(std::move(value.profile_tree)) || changed;
+        changed = set_saved_message(::std::move(value.saved_message)) || changed;
+        changed = set_profile_tree(::std::move(value.profile_tree)) || changed;
         return changed;
     }
 
-    [[nodiscard]] bool set_saved_message(std::string value) {
-        return saved_message_.set(std::move(value));
+    [[nodiscard]] bool set_saved_message(::std::string value) {
+        return saved_message_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& saved_message() const noexcept {
+    [[nodiscard]] const ::std::string& saved_message() const noexcept {
         return saved_message_.get();
     }
-    [[nodiscard]] bool set_profile_tree(std::vector<SettingsProfileTreeItem> value) {
-        return profile_tree_.set(std::move(value));
+    [[nodiscard]] bool set_profile_tree(::std::vector<SettingsProfileTreeItem> value) {
+        return profile_tree_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<SettingsProfileTreeItem>& profile_tree() const noexcept {
+    [[nodiscard]] const ::std::vector<SettingsProfileTreeItem>& profile_tree() const noexcept {
         return profile_tree_.get();
     }
 
-    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+    void bind(::strata::host::Bindings& bindings, const ::std::string_view id) const {
         if (id.empty()) {
-            throw std::invalid_argument("SettingsModel binding id must not be empty");
+            throw ::std::invalid_argument("SettingsModel binding id must not be empty");
         }
         bindings.snapshot(
-            std::string(id) + ".saved_message",
+            ::std::string(id) + ".saved_message",
             saved_message_,
             [](const auto& model) {
                 return encode_settings_saved_message(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".profile_tree",
+            ::std::string(id) + ".profile_tree",
             profile_tree_,
             [](const auto& model) {
                 return encode_settings_profile_tree(model.get());
@@ -286,18 +286,18 @@ public:
     }
 
 private:
-    strata::host::Observable<std::string> saved_message_{};
-    strata::host::Observable<std::vector<SettingsProfileTreeItem>> profile_tree_{};
+    ::strata::host::Observable<::std::string> saved_message_{};
+    ::strata::host::Observable<::std::vector<SettingsProfileTreeItem>> profile_tree_{};
 };
 
 struct SettingsSaveAction final {
-    static inline constexpr std::string_view id = "settings.save";
-    std::string display_name{};
+    static inline constexpr ::std::string_view id = "settings.save";
+    ::std::string display_name{};
     bool telemetry{};
 
-    [[nodiscard]] static SettingsSaveAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static SettingsSaveAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match settings.save");
+            throw ::std::invalid_argument("action event does not match settings.save");
         }
         static_cast<void>(detail::decode_object(event.payload, id));
         SettingsSaveAction result;
@@ -307,19 +307,19 @@ struct SettingsSaveAction final {
     }
 };
 
-inline constexpr std::array<std::string_view, 1U> action_ids{
+inline constexpr ::std::array<::std::string_view, 1U> action_ids{
     SettingsSaveAction::id,
 };
 
-using Action = std::variant<
+using Action = ::std::variant<
     SettingsSaveAction
 >;
 
-[[nodiscard]] inline std::optional<Action> decode_action(
-    const strata::host::ActionEvent& event
+[[nodiscard]] inline ::std::optional<Action> decode_action(
+    const ::strata::host::ActionEvent& event
 ) {
     if (event.id == SettingsSaveAction::id) return Action(SettingsSaveAction::decode(event));
-    return std::nullopt;
+    return ::std::nullopt;
 }
 
 } // namespace strata::contracts::settings_app

@@ -14,6 +14,8 @@ execute_process(
     RESULT_VARIABLE status
     OUTPUT_VARIABLE output
     ERROR_VARIABLE error
+    # The compiler writes UTF-8; without this CMake decodes it with the console's code page.
+    ENCODING UTF8
 )
 if(NOT status EQUAL 0)
     message(FATAL_ERROR "compiling from a non-ASCII folder failed (${status})\n${output}\n${error}")

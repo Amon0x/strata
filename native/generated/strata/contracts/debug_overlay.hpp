@@ -19,176 +19,176 @@ namespace strata::contracts::debug_overlay {
 
 namespace detail {
 
-[[noreturn]] inline void contract_error(const std::string_view context, const std::string_view expected) {
-    throw std::invalid_argument(std::string(context) + " must be " + std::string(expected));
+[[noreturn]] inline void contract_error(const ::std::string_view context, const ::std::string_view expected) {
+    throw ::std::invalid_argument(::std::string(context) + " must be " + ::std::string(expected));
 }
 
-[[nodiscard]] inline const strata::host::Value::Object& decode_object(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value::Object& decode_object(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     const auto* object = value.object();
     if (object == nullptr) contract_error(context, "an object");
     return *object;
 }
 
-[[nodiscard]] inline const strata::host::Value& required_field(
-    const strata::host::Value& value,
-    const std::string_view name,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value& required_field(
+    const ::strata::host::Value& value,
+    const ::std::string_view name,
+    const ::std::string_view context
 ) {
     static_cast<void>(decode_object(value, context));
-    const strata::host::Value* field = value.find(name);
+    const ::strata::host::Value* field = value.find(name);
     if (field == nullptr) {
-        throw std::invalid_argument(std::string(context) + " is missing required field '" +
-                                    std::string(name) + "'");
+        throw ::std::invalid_argument(::std::string(context) + " is missing required field '" +
+                                    ::std::string(name) + "'");
     }
     return *field;
 }
 
 [[nodiscard]] inline bool decode_boolean(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const bool* boolean = value.boolean(); boolean != nullptr) return *boolean;
     contract_error(context, "a boolean");
 }
 
 [[nodiscard]] inline double decode_number(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const double* number = value.number(); number != nullptr) return *number;
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) {
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) {
         return static_cast<double>(*integer);
     }
     contract_error(context, "a number");
 }
 
-[[nodiscard]] inline std::int64_t decode_integer(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::int64_t decode_integer(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
     contract_error(context, "an integer");
 }
 
-[[nodiscard]] inline std::string decode_string(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_string(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::string* text = value.string(); text != nullptr) return *text;
+    if (const ::std::string* text = value.string(); text != nullptr) return *text;
     contract_error(context, "a string");
 }
 
-[[nodiscard]] inline std::string decode_literal(
-    const strata::host::Value& value,
-    const std::string_view literal,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_literal(
+    const ::strata::host::Value& value,
+    const ::std::string_view literal,
+    const ::std::string_view context
 ) {
-    std::string result = decode_string(value, context);
+    ::std::string result = decode_string(value, context);
     if (result != literal) contract_error(context, literal);
     return result;
 }
 
-[[nodiscard]] inline std::monostate decode_null(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::monostate decode_null(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (!value.is_null()) contract_error(context, "null");
     return {};
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::vector<T> decode_list(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::vector<T> decode_list(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto* values = value.array();
     if (values == nullptr) contract_error(context, "a list");
-    std::vector<T> result;
+    ::std::vector<T> result;
     result.reserve(values->size());
-    for (const strata::host::Value& item : *values) result.push_back(decode(item));
+    for (const ::strata::host::Value& item : *values) result.push_back(decode(item));
     return result;
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::map<std::string, T> decode_map(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::map<::std::string, T> decode_map(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto& fields = decode_object(value, context);
-    std::map<std::string, T> result;
+    ::std::map<::std::string, T> result;
     for (const auto& [name, item] : fields) result.emplace(name, decode(item));
     return result;
 }
 
 template <typename Variant, typename... Decode>
 [[nodiscard]] Variant decode_union(
-    const strata::host::Value& value,
-    const std::string_view context,
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&&... decode
 ) {
-    std::optional<Variant> result;
+    ::std::optional<Variant> result;
     const auto attempt = [&value, &result](auto&& candidate) {
         if (result.has_value()) return;
         try {
             result = candidate(value);
-        } catch (const std::invalid_argument&) {
+        } catch (const ::std::invalid_argument&) {
         }
     };
-    (attempt(std::forward<Decode>(decode)), ...);
+    (attempt(::std::forward<Decode>(decode)), ...);
     if (!result.has_value()) contract_error(context, "one of the declared union options");
-    return std::move(*result);
+    return ::std::move(*result);
 }
 
 } // namespace detail
 
-[[nodiscard]] inline strata::host::Value to_value(const strata::host::Value& value) { return value; }
-[[nodiscard]] inline strata::host::Value to_value(const bool value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const double value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::int64_t value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::string& value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::monostate) { return strata::host::Value(); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::strata::host::Value& value) { return value; }
+[[nodiscard]] inline ::strata::host::Value to_value(const bool value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const double value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::int64_t value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::string& value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::monostate) { return ::strata::host::Value(); }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::optional<T>& value) {
-    return value.has_value() ? to_value(*value) : strata::host::Value();
+[[nodiscard]] ::strata::host::Value to_value(const ::std::optional<T>& value) {
+    return value.has_value() ? to_value(*value) : ::strata::host::Value();
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::vector<T>& values) {
-    return strata::host::Value::array(values, [](const T& value) { return to_value(value); });
+[[nodiscard]] ::strata::host::Value to_value(const ::std::vector<T>& values) {
+    return ::strata::host::Value::array(values, [](const T& value) { return to_value(value); });
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::map<std::string, T>& values) {
-    strata::host::Value::Object fields;
+[[nodiscard]] ::strata::host::Value to_value(const ::std::map<::std::string, T>& values) {
+    ::strata::host::Value::Object fields;
     for (const auto& [name, value] : values) fields.emplace(name, to_value(value));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 template <typename... T>
-[[nodiscard]] strata::host::Value to_value(const std::variant<T...>& value) {
-    return std::visit([](const auto& item) { return to_value(item); }, value);
+[[nodiscard]] ::strata::host::Value to_value(const ::std::variant<T...>& value) {
+    return ::std::visit([](const auto& item) { return to_value(item); }, value);
 }
 
 struct DebugSummaryMetricsItem final {
-    std::string label{};
-    std::string value{};
+    ::std::string label{};
+    ::std::string value{};
     [[nodiscard]] friend bool operator==(const DebugSummaryMetricsItem&, const DebugSummaryMetricsItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DebugSummaryMetricsItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DebugSummaryMetricsItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("label", to_value(value.label));
     fields.emplace("value", to_value(value.value));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DebugSummaryMetricsItem decode_debug_summary_metrics_item(const strata::host::Value& value) {
+[[nodiscard]] inline DebugSummaryMetricsItem decode_debug_summary_metrics_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DebugSummaryMetricsItem"));
     DebugSummaryMetricsItem result;
     result.label = detail::decode_string(detail::required_field(value, "label", "DebugSummaryMetricsItem"), "DebugSummaryMetricsItem.label");
@@ -197,19 +197,19 @@ struct DebugSummaryMetricsItem final {
 }
 
 struct DebugCountersItem final {
-    std::string label{};
-    std::string value{};
+    ::std::string label{};
+    ::std::string value{};
     [[nodiscard]] friend bool operator==(const DebugCountersItem&, const DebugCountersItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DebugCountersItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DebugCountersItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("label", to_value(value.label));
     fields.emplace("value", to_value(value.value));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DebugCountersItem decode_debug_counters_item(const strata::host::Value& value) {
+[[nodiscard]] inline DebugCountersItem decode_debug_counters_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DebugCountersItem"));
     DebugCountersItem result;
     result.label = detail::decode_string(detail::required_field(value, "label", "DebugCountersItem"), "DebugCountersItem.label");
@@ -218,7 +218,7 @@ struct DebugCountersItem final {
 }
 
 struct DebugHotPathsItem final {
-    std::string path{};
+    ::std::string path{};
     double last_millis{};
     double p95_millis{};
     double p99_millis{};
@@ -226,17 +226,17 @@ struct DebugHotPathsItem final {
     [[nodiscard]] friend bool operator==(const DebugHotPathsItem&, const DebugHotPathsItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DebugHotPathsItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DebugHotPathsItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("path", to_value(value.path));
     fields.emplace("lastMillis", to_value(value.last_millis));
     fields.emplace("p95Millis", to_value(value.p95_millis));
     fields.emplace("p99Millis", to_value(value.p99_millis));
     fields.emplace("maxMillis", to_value(value.max_millis));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DebugHotPathsItem decode_debug_hot_paths_item(const strata::host::Value& value) {
+[[nodiscard]] inline DebugHotPathsItem decode_debug_hot_paths_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DebugHotPathsItem"));
     DebugHotPathsItem result;
     result.path = detail::decode_string(detail::required_field(value, "path", "DebugHotPathsItem"), "DebugHotPathsItem.path");
@@ -249,22 +249,22 @@ struct DebugHotPathsItem final {
 
 struct DebugSpikesItem final {
     double frame{};
-    std::string stack{};
+    ::std::string stack{};
     double duration_millis{};
     double threshold_millis{};
     [[nodiscard]] friend bool operator==(const DebugSpikesItem&, const DebugSpikesItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DebugSpikesItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DebugSpikesItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("frame", to_value(value.frame));
     fields.emplace("stack", to_value(value.stack));
     fields.emplace("durationMillis", to_value(value.duration_millis));
     fields.emplace("thresholdMillis", to_value(value.threshold_millis));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DebugSpikesItem decode_debug_spikes_item(const strata::host::Value& value) {
+[[nodiscard]] inline DebugSpikesItem decode_debug_spikes_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DebugSpikesItem"));
     DebugSpikesItem result;
     result.frame = detail::decode_number(detail::required_field(value, "frame", "DebugSpikesItem"), "DebugSpikesItem.frame");
@@ -278,17 +278,17 @@ struct DebugDiagnosticsItem final {
     double sequence{};
     double frame{};
     double occurrence_count{};
-    std::string severity{};
-    std::string code{};
-    std::string message{};
-    std::string source{};
-    std::string component_path{};
-    std::string expected{};
+    ::std::string severity{};
+    ::std::string code{};
+    ::std::string message{};
+    ::std::string source{};
+    ::std::string component_path{};
+    ::std::string expected{};
     [[nodiscard]] friend bool operator==(const DebugDiagnosticsItem&, const DebugDiagnosticsItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DebugDiagnosticsItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DebugDiagnosticsItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("sequence", to_value(value.sequence));
     fields.emplace("frame", to_value(value.frame));
     fields.emplace("occurrenceCount", to_value(value.occurrence_count));
@@ -298,10 +298,10 @@ struct DebugDiagnosticsItem final {
     fields.emplace("source", to_value(value.source));
     fields.emplace("componentPath", to_value(value.component_path));
     fields.emplace("expected", to_value(value.expected));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DebugDiagnosticsItem decode_debug_diagnostics_item(const strata::host::Value& value) {
+[[nodiscard]] inline DebugDiagnosticsItem decode_debug_diagnostics_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DebugDiagnosticsItem"));
     DebugDiagnosticsItem result;
     result.sequence = detail::decode_number(detail::required_field(value, "sequence", "DebugDiagnosticsItem"), "DebugDiagnosticsItem.sequence");
@@ -317,21 +317,21 @@ struct DebugDiagnosticsItem final {
 }
 
 struct DebugMotionsItem final {
-    std::string surface{};
-    std::string node{};
-    std::string channel{};
-    std::string source{};
-    std::string direction{};
+    ::std::string surface{};
+    ::std::string node{};
+    ::std::string channel{};
+    ::std::string source{};
+    ::std::string direction{};
     double progress{};
-    std::string current_value{};
-    std::string target_value{};
-    std::string properties{};
-    std::string status{};
+    ::std::string current_value{};
+    ::std::string target_value{};
+    ::std::string properties{};
+    ::std::string status{};
     [[nodiscard]] friend bool operator==(const DebugMotionsItem&, const DebugMotionsItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DebugMotionsItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DebugMotionsItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("surface", to_value(value.surface));
     fields.emplace("node", to_value(value.node));
     fields.emplace("channel", to_value(value.channel));
@@ -342,10 +342,10 @@ struct DebugMotionsItem final {
     fields.emplace("targetValue", to_value(value.target_value));
     fields.emplace("properties", to_value(value.properties));
     fields.emplace("status", to_value(value.status));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DebugMotionsItem decode_debug_motions_item(const strata::host::Value& value) {
+[[nodiscard]] inline DebugMotionsItem decode_debug_motions_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DebugMotionsItem"));
     DebugMotionsItem result;
     result.surface = detail::decode_string(detail::required_field(value, "surface", "DebugMotionsItem"), "DebugMotionsItem.surface");
@@ -362,22 +362,22 @@ struct DebugMotionsItem final {
 }
 
 struct DebugSemanticsItem final {
-    std::string row_key{};
-    std::string source_key{};
-    std::string surface{};
-    std::string node{};
-    std::string path{};
-    std::string indent{};
-    std::string role{};
-    std::string name{};
-    std::string state_summary{};
-    std::string actions{};
+    ::std::string row_key{};
+    ::std::string source_key{};
+    ::std::string surface{};
+    ::std::string node{};
+    ::std::string path{};
+    ::std::string indent{};
+    ::std::string role{};
+    ::std::string name{};
+    ::std::string state_summary{};
+    ::std::string actions{};
     bool selected{};
     [[nodiscard]] friend bool operator==(const DebugSemanticsItem&, const DebugSemanticsItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DebugSemanticsItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DebugSemanticsItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("rowKey", to_value(value.row_key));
     fields.emplace("sourceKey", to_value(value.source_key));
     fields.emplace("surface", to_value(value.surface));
@@ -389,10 +389,10 @@ struct DebugSemanticsItem final {
     fields.emplace("stateSummary", to_value(value.state_summary));
     fields.emplace("actions", to_value(value.actions));
     fields.emplace("selected", to_value(value.selected));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DebugSemanticsItem decode_debug_semantics_item(const strata::host::Value& value) {
+[[nodiscard]] inline DebugSemanticsItem decode_debug_semantics_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DebugSemanticsItem"));
     DebugSemanticsItem result;
     result.row_key = detail::decode_string(detail::required_field(value, "rowKey", "DebugSemanticsItem"), "DebugSemanticsItem.rowKey");
@@ -410,23 +410,23 @@ struct DebugSemanticsItem final {
 }
 
 struct DebugCollectionsItem final {
-    std::string key{};
-    std::string surface{};
-    std::string node{};
-    std::string operation{};
+    ::std::string key{};
+    ::std::string surface{};
+    ::std::string node{};
+    ::std::string operation{};
     double source_count{};
     double match_count{};
-    std::string derived_range{};
-    std::string materialized_range{};
+    ::std::string derived_range{};
+    ::std::string materialized_range{};
     double cache_hits{};
     double rebuilds{};
-    std::string active_anchor{};
-    std::string pending_navigation{};
+    ::std::string active_anchor{};
+    ::std::string pending_navigation{};
     [[nodiscard]] friend bool operator==(const DebugCollectionsItem&, const DebugCollectionsItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DebugCollectionsItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DebugCollectionsItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("key", to_value(value.key));
     fields.emplace("surface", to_value(value.surface));
     fields.emplace("node", to_value(value.node));
@@ -439,10 +439,10 @@ struct DebugCollectionsItem final {
     fields.emplace("rebuilds", to_value(value.rebuilds));
     fields.emplace("activeAnchor", to_value(value.active_anchor));
     fields.emplace("pendingNavigation", to_value(value.pending_navigation));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DebugCollectionsItem decode_debug_collections_item(const strata::host::Value& value) {
+[[nodiscard]] inline DebugCollectionsItem decode_debug_collections_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DebugCollectionsItem"));
     DebugCollectionsItem result;
     result.key = detail::decode_string(detail::required_field(value, "key", "DebugCollectionsItem"), "DebugCollectionsItem.key");
@@ -461,7 +461,7 @@ struct DebugCollectionsItem final {
 }
 
 struct Debug final {
-    std::string mode{};
+    ::std::string mode{};
     double frame{};
     double errors{};
     double warnings{};
@@ -474,19 +474,19 @@ struct Debug final {
     double running_motion_count{};
     double semantic_count{};
     double collection_count{};
-    std::vector<DebugSummaryMetricsItem> summary_metrics{};
-    std::vector<DebugCountersItem> counters{};
-    std::vector<DebugHotPathsItem> hot_paths{};
-    std::vector<DebugSpikesItem> spikes{};
-    std::vector<DebugDiagnosticsItem> diagnostics{};
-    std::vector<DebugMotionsItem> motions{};
-    std::vector<DebugSemanticsItem> semantics{};
-    std::vector<DebugCollectionsItem> collections{};
+    ::std::vector<DebugSummaryMetricsItem> summary_metrics{};
+    ::std::vector<DebugCountersItem> counters{};
+    ::std::vector<DebugHotPathsItem> hot_paths{};
+    ::std::vector<DebugSpikesItem> spikes{};
+    ::std::vector<DebugDiagnosticsItem> diagnostics{};
+    ::std::vector<DebugMotionsItem> motions{};
+    ::std::vector<DebugSemanticsItem> semantics{};
+    ::std::vector<DebugCollectionsItem> collections{};
     [[nodiscard]] friend bool operator==(const Debug&, const Debug&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const Debug& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const Debug& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("mode", to_value(value.mode));
     fields.emplace("frame", to_value(value.frame));
     fields.emplace("errors", to_value(value.errors));
@@ -508,10 +508,10 @@ struct Debug final {
     fields.emplace("motions", to_value(value.motions));
     fields.emplace("semantics", to_value(value.semantics));
     fields.emplace("collections", to_value(value.collections));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline Debug decode_debug(const strata::host::Value& value) {
+[[nodiscard]] inline Debug decode_debug(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "Debug"));
     Debug result;
     result.mode = detail::decode_string(detail::required_field(value, "mode", "Debug"), "Debug.mode");
@@ -527,14 +527,14 @@ struct Debug final {
     result.running_motion_count = detail::decode_number(detail::required_field(value, "runningMotionCount", "Debug"), "Debug.runningMotionCount");
     result.semantic_count = detail::decode_number(detail::required_field(value, "semanticCount", "Debug"), "Debug.semanticCount");
     result.collection_count = detail::decode_number(detail::required_field(value, "collectionCount", "Debug"), "Debug.collectionCount");
-    result.summary_metrics = detail::decode_list<DebugSummaryMetricsItem>(detail::required_field(value, "summaryMetrics", "Debug"), "Debug.summaryMetrics", [](const strata::host::Value& item) { return decode_debug_summary_metrics_item(item); });
-    result.counters = detail::decode_list<DebugCountersItem>(detail::required_field(value, "counters", "Debug"), "Debug.counters", [](const strata::host::Value& item) { return decode_debug_counters_item(item); });
-    result.hot_paths = detail::decode_list<DebugHotPathsItem>(detail::required_field(value, "hotPaths", "Debug"), "Debug.hotPaths", [](const strata::host::Value& item) { return decode_debug_hot_paths_item(item); });
-    result.spikes = detail::decode_list<DebugSpikesItem>(detail::required_field(value, "spikes", "Debug"), "Debug.spikes", [](const strata::host::Value& item) { return decode_debug_spikes_item(item); });
-    result.diagnostics = detail::decode_list<DebugDiagnosticsItem>(detail::required_field(value, "diagnostics", "Debug"), "Debug.diagnostics", [](const strata::host::Value& item) { return decode_debug_diagnostics_item(item); });
-    result.motions = detail::decode_list<DebugMotionsItem>(detail::required_field(value, "motions", "Debug"), "Debug.motions", [](const strata::host::Value& item) { return decode_debug_motions_item(item); });
-    result.semantics = detail::decode_list<DebugSemanticsItem>(detail::required_field(value, "semantics", "Debug"), "Debug.semantics", [](const strata::host::Value& item) { return decode_debug_semantics_item(item); });
-    result.collections = detail::decode_list<DebugCollectionsItem>(detail::required_field(value, "collections", "Debug"), "Debug.collections", [](const strata::host::Value& item) { return decode_debug_collections_item(item); });
+    result.summary_metrics = detail::decode_list<DebugSummaryMetricsItem>(detail::required_field(value, "summaryMetrics", "Debug"), "Debug.summaryMetrics", [](const ::strata::host::Value& item) { return decode_debug_summary_metrics_item(item); });
+    result.counters = detail::decode_list<DebugCountersItem>(detail::required_field(value, "counters", "Debug"), "Debug.counters", [](const ::strata::host::Value& item) { return decode_debug_counters_item(item); });
+    result.hot_paths = detail::decode_list<DebugHotPathsItem>(detail::required_field(value, "hotPaths", "Debug"), "Debug.hotPaths", [](const ::strata::host::Value& item) { return decode_debug_hot_paths_item(item); });
+    result.spikes = detail::decode_list<DebugSpikesItem>(detail::required_field(value, "spikes", "Debug"), "Debug.spikes", [](const ::strata::host::Value& item) { return decode_debug_spikes_item(item); });
+    result.diagnostics = detail::decode_list<DebugDiagnosticsItem>(detail::required_field(value, "diagnostics", "Debug"), "Debug.diagnostics", [](const ::strata::host::Value& item) { return decode_debug_diagnostics_item(item); });
+    result.motions = detail::decode_list<DebugMotionsItem>(detail::required_field(value, "motions", "Debug"), "Debug.motions", [](const ::strata::host::Value& item) { return decode_debug_motions_item(item); });
+    result.semantics = detail::decode_list<DebugSemanticsItem>(detail::required_field(value, "semantics", "Debug"), "Debug.semantics", [](const ::strata::host::Value& item) { return decode_debug_semantics_item(item); });
+    result.collections = detail::decode_list<DebugCollectionsItem>(detail::required_field(value, "collections", "Debug"), "Debug.collections", [](const ::strata::host::Value& item) { return decode_debug_collections_item(item); });
     return result;
 }
 
@@ -547,7 +547,7 @@ enum class StrataDebugSelectModeActionMode {
     summary,
 };
 
-[[nodiscard]] inline std::string_view wire_name(const StrataDebugSelectModeActionMode value) noexcept {
+[[nodiscard]] inline ::std::string_view wire_name(const StrataDebugSelectModeActionMode value) noexcept {
     switch (value) {
     case StrataDebugSelectModeActionMode::diagnostics: return "DIAGNOSTICS";
     case StrataDebugSelectModeActionMode::hot_tree: return "HOT_TREE";
@@ -559,12 +559,12 @@ enum class StrataDebugSelectModeActionMode {
     return {};
 }
 
-[[nodiscard]] inline strata::host::Value to_value(const StrataDebugSelectModeActionMode value) {
-    return strata::host::Value(wire_name(value));
+[[nodiscard]] inline ::strata::host::Value to_value(const StrataDebugSelectModeActionMode value) {
+    return ::strata::host::Value(wire_name(value));
 }
 
-[[nodiscard]] inline StrataDebugSelectModeActionMode decode_strata_debug_select_mode_action_mode(const strata::host::Value& value) {
-    const std::string decoded = detail::decode_string(value, "StrataDebugSelectModeActionMode");
+[[nodiscard]] inline StrataDebugSelectModeActionMode decode_strata_debug_select_mode_action_mode(const ::strata::host::Value& value) {
+    const ::std::string decoded = detail::decode_string(value, "StrataDebugSelectModeActionMode");
     if (decoded == "DIAGNOSTICS") return StrataDebugSelectModeActionMode::diagnostics;
     if (decoded == "HOT_TREE") return StrataDebugSelectModeActionMode::hot_tree;
     if (decoded == "MOTION") return StrataDebugSelectModeActionMode::motion;
@@ -574,92 +574,92 @@ enum class StrataDebugSelectModeActionMode {
     detail::contract_error("StrataDebugSelectModeActionMode", "a declared enum value");
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug(const Debug& value) {
-    return strata::host::Value::object({{"debug", to_value(value)}});
+[[nodiscard]] inline ::strata::host::Value encode_debug(const Debug& value) {
+    return ::strata::host::Value::object({{"debug", to_value(value)}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_mode(const std::string& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"mode", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_mode(const ::std::string& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"mode", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_frame(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"frame", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_frame(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"frame", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_errors(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"errors", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_errors(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"errors", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_warnings(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"warnings", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_warnings(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"warnings", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_infos(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"infos", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_infos(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"infos", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_diagnostic_count(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"diagnosticCount", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_diagnostic_count(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"diagnosticCount", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_dropped_diagnostics(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"droppedDiagnostics", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_dropped_diagnostics(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"droppedDiagnostics", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_hot_path_count(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"hotPathCount", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_hot_path_count(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"hotPathCount", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_spike_count(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"spikeCount", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_spike_count(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"spikeCount", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_motion_count(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"motionCount", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_motion_count(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"motionCount", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_running_motion_count(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"runningMotionCount", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_running_motion_count(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"runningMotionCount", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_semantic_count(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"semanticCount", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_semantic_count(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"semanticCount", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_collection_count(const double& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"collectionCount", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_collection_count(const double& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"collectionCount", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_summary_metrics(const std::vector<DebugSummaryMetricsItem>& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"summaryMetrics", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_summary_metrics(const ::std::vector<DebugSummaryMetricsItem>& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"summaryMetrics", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_counters(const std::vector<DebugCountersItem>& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"counters", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_counters(const ::std::vector<DebugCountersItem>& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"counters", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_hot_paths(const std::vector<DebugHotPathsItem>& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"hotPaths", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_hot_paths(const ::std::vector<DebugHotPathsItem>& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"hotPaths", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_spikes(const std::vector<DebugSpikesItem>& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"spikes", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_spikes(const ::std::vector<DebugSpikesItem>& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"spikes", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_diagnostics(const std::vector<DebugDiagnosticsItem>& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"diagnostics", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_diagnostics(const ::std::vector<DebugDiagnosticsItem>& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"diagnostics", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_motions(const std::vector<DebugMotionsItem>& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"motions", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_motions(const ::std::vector<DebugMotionsItem>& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"motions", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_semantics(const std::vector<DebugSemanticsItem>& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"semantics", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_semantics(const ::std::vector<DebugSemanticsItem>& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"semantics", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_debug_collections(const std::vector<DebugCollectionsItem>& value) {
-    return strata::host::Value::object({{"debug", strata::host::Value::object({{"collections", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_debug_collections(const ::std::vector<DebugCollectionsItem>& value) {
+    return ::strata::host::Value::object({{"debug", ::strata::host::Value::object({{"collections", to_value(value)}})}});
 }
 
 class DebugModel final {
@@ -672,324 +672,324 @@ public:
 
     [[nodiscard]] bool set(Debug value) {
         bool changed = false;
-        changed = set_mode(std::move(value.mode)) || changed;
-        changed = set_frame(std::move(value.frame)) || changed;
-        changed = set_errors(std::move(value.errors)) || changed;
-        changed = set_warnings(std::move(value.warnings)) || changed;
-        changed = set_infos(std::move(value.infos)) || changed;
-        changed = set_diagnostic_count(std::move(value.diagnostic_count)) || changed;
-        changed = set_dropped_diagnostics(std::move(value.dropped_diagnostics)) || changed;
-        changed = set_hot_path_count(std::move(value.hot_path_count)) || changed;
-        changed = set_spike_count(std::move(value.spike_count)) || changed;
-        changed = set_motion_count(std::move(value.motion_count)) || changed;
-        changed = set_running_motion_count(std::move(value.running_motion_count)) || changed;
-        changed = set_semantic_count(std::move(value.semantic_count)) || changed;
-        changed = set_collection_count(std::move(value.collection_count)) || changed;
-        changed = set_summary_metrics(std::move(value.summary_metrics)) || changed;
-        changed = set_counters(std::move(value.counters)) || changed;
-        changed = set_hot_paths(std::move(value.hot_paths)) || changed;
-        changed = set_spikes(std::move(value.spikes)) || changed;
-        changed = set_diagnostics(std::move(value.diagnostics)) || changed;
-        changed = set_motions(std::move(value.motions)) || changed;
-        changed = set_semantics(std::move(value.semantics)) || changed;
-        changed = set_collections(std::move(value.collections)) || changed;
+        changed = set_mode(::std::move(value.mode)) || changed;
+        changed = set_frame(::std::move(value.frame)) || changed;
+        changed = set_errors(::std::move(value.errors)) || changed;
+        changed = set_warnings(::std::move(value.warnings)) || changed;
+        changed = set_infos(::std::move(value.infos)) || changed;
+        changed = set_diagnostic_count(::std::move(value.diagnostic_count)) || changed;
+        changed = set_dropped_diagnostics(::std::move(value.dropped_diagnostics)) || changed;
+        changed = set_hot_path_count(::std::move(value.hot_path_count)) || changed;
+        changed = set_spike_count(::std::move(value.spike_count)) || changed;
+        changed = set_motion_count(::std::move(value.motion_count)) || changed;
+        changed = set_running_motion_count(::std::move(value.running_motion_count)) || changed;
+        changed = set_semantic_count(::std::move(value.semantic_count)) || changed;
+        changed = set_collection_count(::std::move(value.collection_count)) || changed;
+        changed = set_summary_metrics(::std::move(value.summary_metrics)) || changed;
+        changed = set_counters(::std::move(value.counters)) || changed;
+        changed = set_hot_paths(::std::move(value.hot_paths)) || changed;
+        changed = set_spikes(::std::move(value.spikes)) || changed;
+        changed = set_diagnostics(::std::move(value.diagnostics)) || changed;
+        changed = set_motions(::std::move(value.motions)) || changed;
+        changed = set_semantics(::std::move(value.semantics)) || changed;
+        changed = set_collections(::std::move(value.collections)) || changed;
         return changed;
     }
 
-    [[nodiscard]] bool set_mode(std::string value) {
-        return mode_.set(std::move(value));
+    [[nodiscard]] bool set_mode(::std::string value) {
+        return mode_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& mode() const noexcept {
+    [[nodiscard]] const ::std::string& mode() const noexcept {
         return mode_.get();
     }
     [[nodiscard]] bool set_frame(double value) {
-        return frame_.set(std::move(value));
+        return frame_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& frame() const noexcept {
         return frame_.get();
     }
     [[nodiscard]] bool set_errors(double value) {
-        return errors_.set(std::move(value));
+        return errors_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& errors() const noexcept {
         return errors_.get();
     }
     [[nodiscard]] bool set_warnings(double value) {
-        return warnings_.set(std::move(value));
+        return warnings_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& warnings() const noexcept {
         return warnings_.get();
     }
     [[nodiscard]] bool set_infos(double value) {
-        return infos_.set(std::move(value));
+        return infos_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& infos() const noexcept {
         return infos_.get();
     }
     [[nodiscard]] bool set_diagnostic_count(double value) {
-        return diagnostic_count_.set(std::move(value));
+        return diagnostic_count_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& diagnostic_count() const noexcept {
         return diagnostic_count_.get();
     }
     [[nodiscard]] bool set_dropped_diagnostics(double value) {
-        return dropped_diagnostics_.set(std::move(value));
+        return dropped_diagnostics_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& dropped_diagnostics() const noexcept {
         return dropped_diagnostics_.get();
     }
     [[nodiscard]] bool set_hot_path_count(double value) {
-        return hot_path_count_.set(std::move(value));
+        return hot_path_count_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& hot_path_count() const noexcept {
         return hot_path_count_.get();
     }
     [[nodiscard]] bool set_spike_count(double value) {
-        return spike_count_.set(std::move(value));
+        return spike_count_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& spike_count() const noexcept {
         return spike_count_.get();
     }
     [[nodiscard]] bool set_motion_count(double value) {
-        return motion_count_.set(std::move(value));
+        return motion_count_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& motion_count() const noexcept {
         return motion_count_.get();
     }
     [[nodiscard]] bool set_running_motion_count(double value) {
-        return running_motion_count_.set(std::move(value));
+        return running_motion_count_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& running_motion_count() const noexcept {
         return running_motion_count_.get();
     }
     [[nodiscard]] bool set_semantic_count(double value) {
-        return semantic_count_.set(std::move(value));
+        return semantic_count_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& semantic_count() const noexcept {
         return semantic_count_.get();
     }
     [[nodiscard]] bool set_collection_count(double value) {
-        return collection_count_.set(std::move(value));
+        return collection_count_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& collection_count() const noexcept {
         return collection_count_.get();
     }
-    [[nodiscard]] bool set_summary_metrics(std::vector<DebugSummaryMetricsItem> value) {
-        return summary_metrics_.set(std::move(value));
+    [[nodiscard]] bool set_summary_metrics(::std::vector<DebugSummaryMetricsItem> value) {
+        return summary_metrics_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DebugSummaryMetricsItem>& summary_metrics() const noexcept {
+    [[nodiscard]] const ::std::vector<DebugSummaryMetricsItem>& summary_metrics() const noexcept {
         return summary_metrics_.get();
     }
-    [[nodiscard]] bool set_counters(std::vector<DebugCountersItem> value) {
-        return counters_.set(std::move(value));
+    [[nodiscard]] bool set_counters(::std::vector<DebugCountersItem> value) {
+        return counters_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DebugCountersItem>& counters() const noexcept {
+    [[nodiscard]] const ::std::vector<DebugCountersItem>& counters() const noexcept {
         return counters_.get();
     }
-    [[nodiscard]] bool set_hot_paths(std::vector<DebugHotPathsItem> value) {
-        return hot_paths_.set(std::move(value));
+    [[nodiscard]] bool set_hot_paths(::std::vector<DebugHotPathsItem> value) {
+        return hot_paths_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DebugHotPathsItem>& hot_paths() const noexcept {
+    [[nodiscard]] const ::std::vector<DebugHotPathsItem>& hot_paths() const noexcept {
         return hot_paths_.get();
     }
-    [[nodiscard]] bool set_spikes(std::vector<DebugSpikesItem> value) {
-        return spikes_.set(std::move(value));
+    [[nodiscard]] bool set_spikes(::std::vector<DebugSpikesItem> value) {
+        return spikes_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DebugSpikesItem>& spikes() const noexcept {
+    [[nodiscard]] const ::std::vector<DebugSpikesItem>& spikes() const noexcept {
         return spikes_.get();
     }
-    [[nodiscard]] bool set_diagnostics(std::vector<DebugDiagnosticsItem> value) {
-        return diagnostics_.set(std::move(value));
+    [[nodiscard]] bool set_diagnostics(::std::vector<DebugDiagnosticsItem> value) {
+        return diagnostics_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DebugDiagnosticsItem>& diagnostics() const noexcept {
+    [[nodiscard]] const ::std::vector<DebugDiagnosticsItem>& diagnostics() const noexcept {
         return diagnostics_.get();
     }
-    [[nodiscard]] bool set_motions(std::vector<DebugMotionsItem> value) {
-        return motions_.set(std::move(value));
+    [[nodiscard]] bool set_motions(::std::vector<DebugMotionsItem> value) {
+        return motions_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DebugMotionsItem>& motions() const noexcept {
+    [[nodiscard]] const ::std::vector<DebugMotionsItem>& motions() const noexcept {
         return motions_.get();
     }
-    [[nodiscard]] bool set_semantics(std::vector<DebugSemanticsItem> value) {
-        return semantics_.set(std::move(value));
+    [[nodiscard]] bool set_semantics(::std::vector<DebugSemanticsItem> value) {
+        return semantics_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DebugSemanticsItem>& semantics() const noexcept {
+    [[nodiscard]] const ::std::vector<DebugSemanticsItem>& semantics() const noexcept {
         return semantics_.get();
     }
-    [[nodiscard]] bool set_collections(std::vector<DebugCollectionsItem> value) {
-        return collections_.set(std::move(value));
+    [[nodiscard]] bool set_collections(::std::vector<DebugCollectionsItem> value) {
+        return collections_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DebugCollectionsItem>& collections() const noexcept {
+    [[nodiscard]] const ::std::vector<DebugCollectionsItem>& collections() const noexcept {
         return collections_.get();
     }
 
-    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+    void bind(::strata::host::Bindings& bindings, const ::std::string_view id) const {
         if (id.empty()) {
-            throw std::invalid_argument("DebugModel binding id must not be empty");
+            throw ::std::invalid_argument("DebugModel binding id must not be empty");
         }
         bindings.snapshot(
-            std::string(id) + ".mode",
+            ::std::string(id) + ".mode",
             mode_,
             [](const auto& model) {
                 return encode_debug_mode(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".frame",
+            ::std::string(id) + ".frame",
             frame_,
             [](const auto& model) {
                 return encode_debug_frame(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".errors",
+            ::std::string(id) + ".errors",
             errors_,
             [](const auto& model) {
                 return encode_debug_errors(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".warnings",
+            ::std::string(id) + ".warnings",
             warnings_,
             [](const auto& model) {
                 return encode_debug_warnings(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".infos",
+            ::std::string(id) + ".infos",
             infos_,
             [](const auto& model) {
                 return encode_debug_infos(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".diagnostic_count",
+            ::std::string(id) + ".diagnostic_count",
             diagnostic_count_,
             [](const auto& model) {
                 return encode_debug_diagnostic_count(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".dropped_diagnostics",
+            ::std::string(id) + ".dropped_diagnostics",
             dropped_diagnostics_,
             [](const auto& model) {
                 return encode_debug_dropped_diagnostics(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".hot_path_count",
+            ::std::string(id) + ".hot_path_count",
             hot_path_count_,
             [](const auto& model) {
                 return encode_debug_hot_path_count(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".spike_count",
+            ::std::string(id) + ".spike_count",
             spike_count_,
             [](const auto& model) {
                 return encode_debug_spike_count(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".motion_count",
+            ::std::string(id) + ".motion_count",
             motion_count_,
             [](const auto& model) {
                 return encode_debug_motion_count(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".running_motion_count",
+            ::std::string(id) + ".running_motion_count",
             running_motion_count_,
             [](const auto& model) {
                 return encode_debug_running_motion_count(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".semantic_count",
+            ::std::string(id) + ".semantic_count",
             semantic_count_,
             [](const auto& model) {
                 return encode_debug_semantic_count(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".collection_count",
+            ::std::string(id) + ".collection_count",
             collection_count_,
             [](const auto& model) {
                 return encode_debug_collection_count(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".summary_metrics",
+            ::std::string(id) + ".summary_metrics",
             summary_metrics_,
             [](const auto& model) {
                 return encode_debug_summary_metrics(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".counters",
+            ::std::string(id) + ".counters",
             counters_,
             [](const auto& model) {
                 return encode_debug_counters(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".hot_paths",
+            ::std::string(id) + ".hot_paths",
             hot_paths_,
             [](const auto& model) {
                 return encode_debug_hot_paths(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".spikes",
+            ::std::string(id) + ".spikes",
             spikes_,
             [](const auto& model) {
                 return encode_debug_spikes(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".diagnostics",
+            ::std::string(id) + ".diagnostics",
             diagnostics_,
             [](const auto& model) {
                 return encode_debug_diagnostics(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".motions",
+            ::std::string(id) + ".motions",
             motions_,
             [](const auto& model) {
                 return encode_debug_motions(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".semantics",
+            ::std::string(id) + ".semantics",
             semantics_,
             [](const auto& model) {
                 return encode_debug_semantics(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".collections",
+            ::std::string(id) + ".collections",
             collections_,
             [](const auto& model) {
                 return encode_debug_collections(model.get());
@@ -998,35 +998,35 @@ public:
     }
 
 private:
-    strata::host::Observable<std::string> mode_{};
-    strata::host::Observable<double> frame_{};
-    strata::host::Observable<double> errors_{};
-    strata::host::Observable<double> warnings_{};
-    strata::host::Observable<double> infos_{};
-    strata::host::Observable<double> diagnostic_count_{};
-    strata::host::Observable<double> dropped_diagnostics_{};
-    strata::host::Observable<double> hot_path_count_{};
-    strata::host::Observable<double> spike_count_{};
-    strata::host::Observable<double> motion_count_{};
-    strata::host::Observable<double> running_motion_count_{};
-    strata::host::Observable<double> semantic_count_{};
-    strata::host::Observable<double> collection_count_{};
-    strata::host::Observable<std::vector<DebugSummaryMetricsItem>> summary_metrics_{};
-    strata::host::Observable<std::vector<DebugCountersItem>> counters_{};
-    strata::host::Observable<std::vector<DebugHotPathsItem>> hot_paths_{};
-    strata::host::Observable<std::vector<DebugSpikesItem>> spikes_{};
-    strata::host::Observable<std::vector<DebugDiagnosticsItem>> diagnostics_{};
-    strata::host::Observable<std::vector<DebugMotionsItem>> motions_{};
-    strata::host::Observable<std::vector<DebugSemanticsItem>> semantics_{};
-    strata::host::Observable<std::vector<DebugCollectionsItem>> collections_{};
+    ::strata::host::Observable<::std::string> mode_{};
+    ::strata::host::Observable<double> frame_{};
+    ::strata::host::Observable<double> errors_{};
+    ::strata::host::Observable<double> warnings_{};
+    ::strata::host::Observable<double> infos_{};
+    ::strata::host::Observable<double> diagnostic_count_{};
+    ::strata::host::Observable<double> dropped_diagnostics_{};
+    ::strata::host::Observable<double> hot_path_count_{};
+    ::strata::host::Observable<double> spike_count_{};
+    ::strata::host::Observable<double> motion_count_{};
+    ::strata::host::Observable<double> running_motion_count_{};
+    ::strata::host::Observable<double> semantic_count_{};
+    ::strata::host::Observable<double> collection_count_{};
+    ::strata::host::Observable<::std::vector<DebugSummaryMetricsItem>> summary_metrics_{};
+    ::strata::host::Observable<::std::vector<DebugCountersItem>> counters_{};
+    ::strata::host::Observable<::std::vector<DebugHotPathsItem>> hot_paths_{};
+    ::strata::host::Observable<::std::vector<DebugSpikesItem>> spikes_{};
+    ::strata::host::Observable<::std::vector<DebugDiagnosticsItem>> diagnostics_{};
+    ::strata::host::Observable<::std::vector<DebugMotionsItem>> motions_{};
+    ::strata::host::Observable<::std::vector<DebugSemanticsItem>> semantics_{};
+    ::strata::host::Observable<::std::vector<DebugCollectionsItem>> collections_{};
 };
 
 struct StrataDebugClearDiagnosticsAction final {
-    static inline constexpr std::string_view id = "strata.debug.clear-diagnostics";
+    static inline constexpr ::std::string_view id = "strata.debug.clear-diagnostics";
 
-    [[nodiscard]] static StrataDebugClearDiagnosticsAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static StrataDebugClearDiagnosticsAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match strata.debug.clear-diagnostics");
+            throw ::std::invalid_argument("action event does not match strata.debug.clear-diagnostics");
         }
         StrataDebugClearDiagnosticsAction result;
         return result;
@@ -1034,11 +1034,11 @@ struct StrataDebugClearDiagnosticsAction final {
 };
 
 struct StrataDebugCloseAction final {
-    static inline constexpr std::string_view id = "strata.debug.close";
+    static inline constexpr ::std::string_view id = "strata.debug.close";
 
-    [[nodiscard]] static StrataDebugCloseAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static StrataDebugCloseAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match strata.debug.close");
+            throw ::std::invalid_argument("action event does not match strata.debug.close");
         }
         StrataDebugCloseAction result;
         return result;
@@ -1046,11 +1046,11 @@ struct StrataDebugCloseAction final {
 };
 
 struct StrataDebugCopyProfileAction final {
-    static inline constexpr std::string_view id = "strata.debug.copy-profile";
+    static inline constexpr ::std::string_view id = "strata.debug.copy-profile";
 
-    [[nodiscard]] static StrataDebugCopyProfileAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static StrataDebugCopyProfileAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match strata.debug.copy-profile");
+            throw ::std::invalid_argument("action event does not match strata.debug.copy-profile");
         }
         StrataDebugCopyProfileAction result;
         return result;
@@ -1058,12 +1058,12 @@ struct StrataDebugCopyProfileAction final {
 };
 
 struct StrataDebugSelectModeAction final {
-    static inline constexpr std::string_view id = "strata.debug.select-mode";
+    static inline constexpr ::std::string_view id = "strata.debug.select-mode";
     StrataDebugSelectModeActionMode mode{};
 
-    [[nodiscard]] static StrataDebugSelectModeAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static StrataDebugSelectModeAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match strata.debug.select-mode");
+            throw ::std::invalid_argument("action event does not match strata.debug.select-mode");
         }
         static_cast<void>(detail::decode_object(event.payload, id));
         StrataDebugSelectModeAction result;
@@ -1072,28 +1072,28 @@ struct StrataDebugSelectModeAction final {
     }
 };
 
-inline constexpr std::array<std::string_view, 4U> action_ids{
+inline constexpr ::std::array<::std::string_view, 4U> action_ids{
     StrataDebugClearDiagnosticsAction::id,
     StrataDebugCloseAction::id,
     StrataDebugCopyProfileAction::id,
     StrataDebugSelectModeAction::id,
 };
 
-using Action = std::variant<
+using Action = ::std::variant<
     StrataDebugClearDiagnosticsAction,
     StrataDebugCloseAction,
     StrataDebugCopyProfileAction,
     StrataDebugSelectModeAction
 >;
 
-[[nodiscard]] inline std::optional<Action> decode_action(
-    const strata::host::ActionEvent& event
+[[nodiscard]] inline ::std::optional<Action> decode_action(
+    const ::strata::host::ActionEvent& event
 ) {
     if (event.id == StrataDebugClearDiagnosticsAction::id) return Action(StrataDebugClearDiagnosticsAction::decode(event));
     if (event.id == StrataDebugCloseAction::id) return Action(StrataDebugCloseAction::decode(event));
     if (event.id == StrataDebugCopyProfileAction::id) return Action(StrataDebugCopyProfileAction::decode(event));
     if (event.id == StrataDebugSelectModeAction::id) return Action(StrataDebugSelectModeAction::decode(event));
-    return std::nullopt;
+    return ::std::nullopt;
 }
 
 } // namespace strata::contracts::debug_overlay

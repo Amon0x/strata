@@ -1,0 +1,192 @@
+{
+  "widgets": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "behaviors": {
+    "registry": "strata.builtins.v1",
+    "required": [],
+    "definitions": []
+  },
+  "actions": {
+    "registry": "strata.builtins+edge.v1",
+    "required": [
+      "todo.remove",
+      "todo.edit",
+      "action",
+      "todo.a\"b"
+    ],
+    "definitions": [
+      {
+        "id": "todo.remove",
+        "dispatchPolicy": "required",
+        "summary": "s",
+        "payloadContract": "strata.action-payload/todo.remove@1",
+        "arguments": [
+          {
+            "name": "id",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ]
+      },
+      {
+        "id": "todo.edit",
+        "dispatchPolicy": "required",
+        "summary": "s",
+        "payloadContract": "strata.action-payload/todo.edit@1",
+        "arguments": [
+          {
+            "name": "decode",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ]
+      },
+      {
+        "id": "action",
+        "dispatchPolicy": "required",
+        "summary": "s",
+        "payloadContract": "strata.action-payload/action@1",
+        "arguments": [
+          {
+            "name": "x",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ]
+      },
+      {
+        "id": "todo.a\"b",
+        "dispatchPolicy": "required",
+        "summary": "s",
+        "payloadContract": "strata.action-payload/todo.a\"b@1",
+        "arguments": [
+          {
+            "name": "x",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ]
+      }
+    ]
+  },
+  "host": [
+    {
+      "path": "app",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "app view",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          {
+            "name": "fooBar",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "foo_bar",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "café",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          },
+          {
+            "name": "caf",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          }
+        ]
+      }
+    },
+    {
+      "path": "appSettings",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "settings",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          {
+            "name": "title",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          }
+        ]
+      }
+    },
+    {
+      "path": "app_settings",
+      "nullable": false,
+      "type": {
+        "kind": "object",
+        "label": "settings copy",
+        "allowUnknownFields": false,
+        "valueNullable": false,
+        "fields": [
+          {
+            "name": "title",
+            "type": {
+              "kind": "string"
+            },
+            "required": true,
+            "nullable": false
+          }
+        ]
+      }
+    },
+    {
+      "path": "mode",
+      "nullable": false,
+      "type": {
+        "kind": "enum",
+        "values": [
+          "on",
+          "ON"
+        ]
+      }
+    }
+  ]
+}

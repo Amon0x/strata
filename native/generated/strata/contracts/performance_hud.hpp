@@ -19,164 +19,164 @@ namespace strata::contracts::performance_hud {
 
 namespace detail {
 
-[[noreturn]] inline void contract_error(const std::string_view context, const std::string_view expected) {
-    throw std::invalid_argument(std::string(context) + " must be " + std::string(expected));
+[[noreturn]] inline void contract_error(const ::std::string_view context, const ::std::string_view expected) {
+    throw ::std::invalid_argument(::std::string(context) + " must be " + ::std::string(expected));
 }
 
-[[nodiscard]] inline const strata::host::Value::Object& decode_object(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value::Object& decode_object(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     const auto* object = value.object();
     if (object == nullptr) contract_error(context, "an object");
     return *object;
 }
 
-[[nodiscard]] inline const strata::host::Value& required_field(
-    const strata::host::Value& value,
-    const std::string_view name,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value& required_field(
+    const ::strata::host::Value& value,
+    const ::std::string_view name,
+    const ::std::string_view context
 ) {
     static_cast<void>(decode_object(value, context));
-    const strata::host::Value* field = value.find(name);
+    const ::strata::host::Value* field = value.find(name);
     if (field == nullptr) {
-        throw std::invalid_argument(std::string(context) + " is missing required field '" +
-                                    std::string(name) + "'");
+        throw ::std::invalid_argument(::std::string(context) + " is missing required field '" +
+                                    ::std::string(name) + "'");
     }
     return *field;
 }
 
 [[nodiscard]] inline bool decode_boolean(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const bool* boolean = value.boolean(); boolean != nullptr) return *boolean;
     contract_error(context, "a boolean");
 }
 
 [[nodiscard]] inline double decode_number(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const double* number = value.number(); number != nullptr) return *number;
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) {
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) {
         return static_cast<double>(*integer);
     }
     contract_error(context, "a number");
 }
 
-[[nodiscard]] inline std::int64_t decode_integer(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::int64_t decode_integer(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
     contract_error(context, "an integer");
 }
 
-[[nodiscard]] inline std::string decode_string(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_string(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::string* text = value.string(); text != nullptr) return *text;
+    if (const ::std::string* text = value.string(); text != nullptr) return *text;
     contract_error(context, "a string");
 }
 
-[[nodiscard]] inline std::string decode_literal(
-    const strata::host::Value& value,
-    const std::string_view literal,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_literal(
+    const ::strata::host::Value& value,
+    const ::std::string_view literal,
+    const ::std::string_view context
 ) {
-    std::string result = decode_string(value, context);
+    ::std::string result = decode_string(value, context);
     if (result != literal) contract_error(context, literal);
     return result;
 }
 
-[[nodiscard]] inline std::monostate decode_null(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::monostate decode_null(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (!value.is_null()) contract_error(context, "null");
     return {};
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::vector<T> decode_list(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::vector<T> decode_list(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto* values = value.array();
     if (values == nullptr) contract_error(context, "a list");
-    std::vector<T> result;
+    ::std::vector<T> result;
     result.reserve(values->size());
-    for (const strata::host::Value& item : *values) result.push_back(decode(item));
+    for (const ::strata::host::Value& item : *values) result.push_back(decode(item));
     return result;
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::map<std::string, T> decode_map(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::map<::std::string, T> decode_map(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto& fields = decode_object(value, context);
-    std::map<std::string, T> result;
+    ::std::map<::std::string, T> result;
     for (const auto& [name, item] : fields) result.emplace(name, decode(item));
     return result;
 }
 
 template <typename Variant, typename... Decode>
 [[nodiscard]] Variant decode_union(
-    const strata::host::Value& value,
-    const std::string_view context,
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&&... decode
 ) {
-    std::optional<Variant> result;
+    ::std::optional<Variant> result;
     const auto attempt = [&value, &result](auto&& candidate) {
         if (result.has_value()) return;
         try {
             result = candidate(value);
-        } catch (const std::invalid_argument&) {
+        } catch (const ::std::invalid_argument&) {
         }
     };
-    (attempt(std::forward<Decode>(decode)), ...);
+    (attempt(::std::forward<Decode>(decode)), ...);
     if (!result.has_value()) contract_error(context, "one of the declared union options");
-    return std::move(*result);
+    return ::std::move(*result);
 }
 
 } // namespace detail
 
-[[nodiscard]] inline strata::host::Value to_value(const strata::host::Value& value) { return value; }
-[[nodiscard]] inline strata::host::Value to_value(const bool value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const double value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::int64_t value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::string& value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::monostate) { return strata::host::Value(); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::strata::host::Value& value) { return value; }
+[[nodiscard]] inline ::strata::host::Value to_value(const bool value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const double value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::int64_t value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::string& value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::monostate) { return ::strata::host::Value(); }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::optional<T>& value) {
-    return value.has_value() ? to_value(*value) : strata::host::Value();
+[[nodiscard]] ::strata::host::Value to_value(const ::std::optional<T>& value) {
+    return value.has_value() ? to_value(*value) : ::strata::host::Value();
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::vector<T>& values) {
-    return strata::host::Value::array(values, [](const T& value) { return to_value(value); });
+[[nodiscard]] ::strata::host::Value to_value(const ::std::vector<T>& values) {
+    return ::strata::host::Value::array(values, [](const T& value) { return to_value(value); });
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::map<std::string, T>& values) {
-    strata::host::Value::Object fields;
+[[nodiscard]] ::strata::host::Value to_value(const ::std::map<::std::string, T>& values) {
+    ::strata::host::Value::Object fields;
     for (const auto& [name, value] : values) fields.emplace(name, to_value(value));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 template <typename... T>
-[[nodiscard]] strata::host::Value to_value(const std::variant<T...>& value) {
-    return std::visit([](const auto& item) { return to_value(item); }, value);
+[[nodiscard]] ::strata::host::Value to_value(const ::std::variant<T...>& value) {
+    return ::std::visit([](const auto& item) { return to_value(item); }, value);
 }
 
 struct PerformanceSamplesItem final {
-    std::string key{};
+    ::std::string key{};
     double total_height{};
     double native_height{};
     bool severe{};
@@ -184,17 +184,17 @@ struct PerformanceSamplesItem final {
     [[nodiscard]] friend bool operator==(const PerformanceSamplesItem&, const PerformanceSamplesItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const PerformanceSamplesItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const PerformanceSamplesItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("key", to_value(value.key));
     fields.emplace("totalHeight", to_value(value.total_height));
     fields.emplace("nativeHeight", to_value(value.native_height));
     fields.emplace("severe", to_value(value.severe));
     fields.emplace("slow", to_value(value.slow));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline PerformanceSamplesItem decode_performance_samples_item(const strata::host::Value& value) {
+[[nodiscard]] inline PerformanceSamplesItem decode_performance_samples_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "PerformanceSamplesItem"));
     PerformanceSamplesItem result;
     result.key = detail::decode_string(detail::required_field(value, "key", "PerformanceSamplesItem"), "PerformanceSamplesItem.key");
@@ -206,50 +206,50 @@ struct PerformanceSamplesItem final {
 }
 
 struct Performance final {
-    std::string fps{};
-    std::string total_millis{};
-    std::string native_millis{};
-    std::vector<PerformanceSamplesItem> samples{};
+    ::std::string fps{};
+    ::std::string total_millis{};
+    ::std::string native_millis{};
+    ::std::vector<PerformanceSamplesItem> samples{};
     [[nodiscard]] friend bool operator==(const Performance&, const Performance&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const Performance& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const Performance& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("fps", to_value(value.fps));
     fields.emplace("totalMillis", to_value(value.total_millis));
     fields.emplace("nativeMillis", to_value(value.native_millis));
     fields.emplace("samples", to_value(value.samples));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline Performance decode_performance(const strata::host::Value& value) {
+[[nodiscard]] inline Performance decode_performance(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "Performance"));
     Performance result;
     result.fps = detail::decode_string(detail::required_field(value, "fps", "Performance"), "Performance.fps");
     result.total_millis = detail::decode_string(detail::required_field(value, "totalMillis", "Performance"), "Performance.totalMillis");
     result.native_millis = detail::decode_string(detail::required_field(value, "nativeMillis", "Performance"), "Performance.nativeMillis");
-    result.samples = detail::decode_list<PerformanceSamplesItem>(detail::required_field(value, "samples", "Performance"), "Performance.samples", [](const strata::host::Value& item) { return decode_performance_samples_item(item); });
+    result.samples = detail::decode_list<PerformanceSamplesItem>(detail::required_field(value, "samples", "Performance"), "Performance.samples", [](const ::strata::host::Value& item) { return decode_performance_samples_item(item); });
     return result;
 }
 
-[[nodiscard]] inline strata::host::Value encode_performance(const Performance& value) {
-    return strata::host::Value::object({{"performance", to_value(value)}});
+[[nodiscard]] inline ::strata::host::Value encode_performance(const Performance& value) {
+    return ::strata::host::Value::object({{"performance", to_value(value)}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_performance_fps(const std::string& value) {
-    return strata::host::Value::object({{"performance", strata::host::Value::object({{"fps", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_performance_fps(const ::std::string& value) {
+    return ::strata::host::Value::object({{"performance", ::strata::host::Value::object({{"fps", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_performance_total_millis(const std::string& value) {
-    return strata::host::Value::object({{"performance", strata::host::Value::object({{"totalMillis", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_performance_total_millis(const ::std::string& value) {
+    return ::strata::host::Value::object({{"performance", ::strata::host::Value::object({{"totalMillis", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_performance_native_millis(const std::string& value) {
-    return strata::host::Value::object({{"performance", strata::host::Value::object({{"nativeMillis", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_performance_native_millis(const ::std::string& value) {
+    return ::strata::host::Value::object({{"performance", ::strata::host::Value::object({{"nativeMillis", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_performance_samples(const std::vector<PerformanceSamplesItem>& value) {
-    return strata::host::Value::object({{"performance", strata::host::Value::object({{"samples", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_performance_samples(const ::std::vector<PerformanceSamplesItem>& value) {
+    return ::strata::host::Value::object({{"performance", ::strata::host::Value::object({{"samples", to_value(value)}})}});
 }
 
 class PerformanceModel final {
@@ -262,69 +262,69 @@ public:
 
     [[nodiscard]] bool set(Performance value) {
         bool changed = false;
-        changed = set_fps(std::move(value.fps)) || changed;
-        changed = set_total_millis(std::move(value.total_millis)) || changed;
-        changed = set_native_millis(std::move(value.native_millis)) || changed;
-        changed = set_samples(std::move(value.samples)) || changed;
+        changed = set_fps(::std::move(value.fps)) || changed;
+        changed = set_total_millis(::std::move(value.total_millis)) || changed;
+        changed = set_native_millis(::std::move(value.native_millis)) || changed;
+        changed = set_samples(::std::move(value.samples)) || changed;
         return changed;
     }
 
-    [[nodiscard]] bool set_fps(std::string value) {
-        return fps_.set(std::move(value));
+    [[nodiscard]] bool set_fps(::std::string value) {
+        return fps_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& fps() const noexcept {
+    [[nodiscard]] const ::std::string& fps() const noexcept {
         return fps_.get();
     }
-    [[nodiscard]] bool set_total_millis(std::string value) {
-        return total_millis_.set(std::move(value));
+    [[nodiscard]] bool set_total_millis(::std::string value) {
+        return total_millis_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& total_millis() const noexcept {
+    [[nodiscard]] const ::std::string& total_millis() const noexcept {
         return total_millis_.get();
     }
-    [[nodiscard]] bool set_native_millis(std::string value) {
-        return native_millis_.set(std::move(value));
+    [[nodiscard]] bool set_native_millis(::std::string value) {
+        return native_millis_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& native_millis() const noexcept {
+    [[nodiscard]] const ::std::string& native_millis() const noexcept {
         return native_millis_.get();
     }
-    [[nodiscard]] bool set_samples(std::vector<PerformanceSamplesItem> value) {
-        return samples_.set(std::move(value));
+    [[nodiscard]] bool set_samples(::std::vector<PerformanceSamplesItem> value) {
+        return samples_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<PerformanceSamplesItem>& samples() const noexcept {
+    [[nodiscard]] const ::std::vector<PerformanceSamplesItem>& samples() const noexcept {
         return samples_.get();
     }
 
-    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+    void bind(::strata::host::Bindings& bindings, const ::std::string_view id) const {
         if (id.empty()) {
-            throw std::invalid_argument("PerformanceModel binding id must not be empty");
+            throw ::std::invalid_argument("PerformanceModel binding id must not be empty");
         }
         bindings.snapshot(
-            std::string(id) + ".fps",
+            ::std::string(id) + ".fps",
             fps_,
             [](const auto& model) {
                 return encode_performance_fps(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".total_millis",
+            ::std::string(id) + ".total_millis",
             total_millis_,
             [](const auto& model) {
                 return encode_performance_total_millis(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".native_millis",
+            ::std::string(id) + ".native_millis",
             native_millis_,
             [](const auto& model) {
                 return encode_performance_native_millis(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".samples",
+            ::std::string(id) + ".samples",
             samples_,
             [](const auto& model) {
                 return encode_performance_samples(model.get());
@@ -333,13 +333,13 @@ public:
     }
 
 private:
-    strata::host::Observable<std::string> fps_{};
-    strata::host::Observable<std::string> total_millis_{};
-    strata::host::Observable<std::string> native_millis_{};
-    strata::host::Observable<std::vector<PerformanceSamplesItem>> samples_{};
+    ::strata::host::Observable<::std::string> fps_{};
+    ::strata::host::Observable<::std::string> total_millis_{};
+    ::strata::host::Observable<::std::string> native_millis_{};
+    ::strata::host::Observable<::std::vector<PerformanceSamplesItem>> samples_{};
 };
 
-inline constexpr std::array<std::string_view, 0U> action_ids{
+inline constexpr ::std::array<::std::string_view, 0U> action_ids{
 };
 
 } // namespace strata::contracts::performance_hud

@@ -19,176 +19,176 @@ namespace strata::contracts::demo_surface {
 
 namespace detail {
 
-[[noreturn]] inline void contract_error(const std::string_view context, const std::string_view expected) {
-    throw std::invalid_argument(std::string(context) + " must be " + std::string(expected));
+[[noreturn]] inline void contract_error(const ::std::string_view context, const ::std::string_view expected) {
+    throw ::std::invalid_argument(::std::string(context) + " must be " + ::std::string(expected));
 }
 
-[[nodiscard]] inline const strata::host::Value::Object& decode_object(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value::Object& decode_object(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     const auto* object = value.object();
     if (object == nullptr) contract_error(context, "an object");
     return *object;
 }
 
-[[nodiscard]] inline const strata::host::Value& required_field(
-    const strata::host::Value& value,
-    const std::string_view name,
-    const std::string_view context
+[[nodiscard]] inline const ::strata::host::Value& required_field(
+    const ::strata::host::Value& value,
+    const ::std::string_view name,
+    const ::std::string_view context
 ) {
     static_cast<void>(decode_object(value, context));
-    const strata::host::Value* field = value.find(name);
+    const ::strata::host::Value* field = value.find(name);
     if (field == nullptr) {
-        throw std::invalid_argument(std::string(context) + " is missing required field '" +
-                                    std::string(name) + "'");
+        throw ::std::invalid_argument(::std::string(context) + " is missing required field '" +
+                                    ::std::string(name) + "'");
     }
     return *field;
 }
 
 [[nodiscard]] inline bool decode_boolean(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const bool* boolean = value.boolean(); boolean != nullptr) return *boolean;
     contract_error(context, "a boolean");
 }
 
 [[nodiscard]] inline double decode_number(
-    const strata::host::Value& value,
-    const std::string_view context
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (const double* number = value.number(); number != nullptr) return *number;
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) {
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) {
         return static_cast<double>(*integer);
     }
     contract_error(context, "a number");
 }
 
-[[nodiscard]] inline std::int64_t decode_integer(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::int64_t decode_integer(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
+    if (const ::std::int64_t* integer = value.integer(); integer != nullptr) return *integer;
     contract_error(context, "an integer");
 }
 
-[[nodiscard]] inline std::string decode_string(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_string(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
-    if (const std::string* text = value.string(); text != nullptr) return *text;
+    if (const ::std::string* text = value.string(); text != nullptr) return *text;
     contract_error(context, "a string");
 }
 
-[[nodiscard]] inline std::string decode_literal(
-    const strata::host::Value& value,
-    const std::string_view literal,
-    const std::string_view context
+[[nodiscard]] inline ::std::string decode_literal(
+    const ::strata::host::Value& value,
+    const ::std::string_view literal,
+    const ::std::string_view context
 ) {
-    std::string result = decode_string(value, context);
+    ::std::string result = decode_string(value, context);
     if (result != literal) contract_error(context, literal);
     return result;
 }
 
-[[nodiscard]] inline std::monostate decode_null(
-    const strata::host::Value& value,
-    const std::string_view context
+[[nodiscard]] inline ::std::monostate decode_null(
+    const ::strata::host::Value& value,
+    const ::std::string_view context
 ) {
     if (!value.is_null()) contract_error(context, "null");
     return {};
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::vector<T> decode_list(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::vector<T> decode_list(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto* values = value.array();
     if (values == nullptr) contract_error(context, "a list");
-    std::vector<T> result;
+    ::std::vector<T> result;
     result.reserve(values->size());
-    for (const strata::host::Value& item : *values) result.push_back(decode(item));
+    for (const ::strata::host::Value& item : *values) result.push_back(decode(item));
     return result;
 }
 
 template <typename T, typename Decode>
-[[nodiscard]] std::map<std::string, T> decode_map(
-    const strata::host::Value& value,
-    const std::string_view context,
+[[nodiscard]] ::std::map<::std::string, T> decode_map(
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&& decode
 ) {
     const auto& fields = decode_object(value, context);
-    std::map<std::string, T> result;
+    ::std::map<::std::string, T> result;
     for (const auto& [name, item] : fields) result.emplace(name, decode(item));
     return result;
 }
 
 template <typename Variant, typename... Decode>
 [[nodiscard]] Variant decode_union(
-    const strata::host::Value& value,
-    const std::string_view context,
+    const ::strata::host::Value& value,
+    const ::std::string_view context,
     Decode&&... decode
 ) {
-    std::optional<Variant> result;
+    ::std::optional<Variant> result;
     const auto attempt = [&value, &result](auto&& candidate) {
         if (result.has_value()) return;
         try {
             result = candidate(value);
-        } catch (const std::invalid_argument&) {
+        } catch (const ::std::invalid_argument&) {
         }
     };
-    (attempt(std::forward<Decode>(decode)), ...);
+    (attempt(::std::forward<Decode>(decode)), ...);
     if (!result.has_value()) contract_error(context, "one of the declared union options");
-    return std::move(*result);
+    return ::std::move(*result);
 }
 
 } // namespace detail
 
-[[nodiscard]] inline strata::host::Value to_value(const strata::host::Value& value) { return value; }
-[[nodiscard]] inline strata::host::Value to_value(const bool value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const double value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::int64_t value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::string& value) { return strata::host::Value(value); }
-[[nodiscard]] inline strata::host::Value to_value(const std::monostate) { return strata::host::Value(); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::strata::host::Value& value) { return value; }
+[[nodiscard]] inline ::strata::host::Value to_value(const bool value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const double value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::int64_t value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::string& value) { return ::strata::host::Value(value); }
+[[nodiscard]] inline ::strata::host::Value to_value(const ::std::monostate) { return ::strata::host::Value(); }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::optional<T>& value) {
-    return value.has_value() ? to_value(*value) : strata::host::Value();
+[[nodiscard]] ::strata::host::Value to_value(const ::std::optional<T>& value) {
+    return value.has_value() ? to_value(*value) : ::strata::host::Value();
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::vector<T>& values) {
-    return strata::host::Value::array(values, [](const T& value) { return to_value(value); });
+[[nodiscard]] ::strata::host::Value to_value(const ::std::vector<T>& values) {
+    return ::strata::host::Value::array(values, [](const T& value) { return to_value(value); });
 }
 
 template <typename T>
-[[nodiscard]] strata::host::Value to_value(const std::map<std::string, T>& values) {
-    strata::host::Value::Object fields;
+[[nodiscard]] ::strata::host::Value to_value(const ::std::map<::std::string, T>& values) {
+    ::strata::host::Value::Object fields;
     for (const auto& [name, value] : values) fields.emplace(name, to_value(value));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
 template <typename... T>
-[[nodiscard]] strata::host::Value to_value(const std::variant<T...>& value) {
-    return std::visit([](const auto& item) { return to_value(item); }, value);
+[[nodiscard]] ::strata::host::Value to_value(const ::std::variant<T...>& value) {
+    return ::std::visit([](const auto& item) { return to_value(item); }, value);
 }
 
 struct AsyncResultsValueItem final {
-    std::string key{};
-    std::string label{};
+    ::std::string key{};
+    ::std::string label{};
     [[nodiscard]] friend bool operator==(const AsyncResultsValueItem&, const AsyncResultsValueItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const AsyncResultsValueItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const AsyncResultsValueItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("key", to_value(value.key));
     fields.emplace("label", to_value(value.label));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline AsyncResultsValueItem decode_async_results_value_item(const strata::host::Value& value) {
+[[nodiscard]] inline AsyncResultsValueItem decode_async_results_value_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "AsyncResultsValueItem"));
     AsyncResultsValueItem result;
     result.key = detail::decode_string(detail::required_field(value, "key", "AsyncResultsValueItem"), "AsyncResultsValueItem.key");
@@ -197,32 +197,32 @@ struct AsyncResultsValueItem final {
 }
 
 struct AsyncTreeChildrenValueItem final {
-    std::string key{};
-    std::string label{};
-    std::optional<std::string> parent_key{};
+    ::std::string key{};
+    ::std::string label{};
+    ::std::optional<::std::string> parent_key{};
     bool may_have_children{};
     bool children_loaded{};
     [[nodiscard]] friend bool operator==(const AsyncTreeChildrenValueItem&, const AsyncTreeChildrenValueItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const AsyncTreeChildrenValueItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const AsyncTreeChildrenValueItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("key", to_value(value.key));
     fields.emplace("label", to_value(value.label));
     fields.emplace("parentKey", to_value(value.parent_key));
     fields.emplace("mayHaveChildren", to_value(value.may_have_children));
     fields.emplace("childrenLoaded", to_value(value.children_loaded));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline AsyncTreeChildrenValueItem decode_async_tree_children_value_item(const strata::host::Value& value) {
+[[nodiscard]] inline AsyncTreeChildrenValueItem decode_async_tree_children_value_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "AsyncTreeChildrenValueItem"));
     AsyncTreeChildrenValueItem result;
     result.key = detail::decode_string(detail::required_field(value, "key", "AsyncTreeChildrenValueItem"), "AsyncTreeChildrenValueItem.key");
     result.label = detail::decode_string(detail::required_field(value, "label", "AsyncTreeChildrenValueItem"), "AsyncTreeChildrenValueItem.label");
     {
-        const strata::host::Value& field = detail::required_field(value, "parentKey", "AsyncTreeChildrenValueItem");
-        if (!field.is_null()) result.parent_key = field.is_null() ? std::optional<std::string>{} : std::optional<std::string>{detail::decode_string(field, "AsyncTreeChildrenValueItem.parentKey")};
+        const ::strata::host::Value& field = detail::required_field(value, "parentKey", "AsyncTreeChildrenValueItem");
+        if (!field.is_null()) result.parent_key = field.is_null() ? ::std::optional<::std::string>{} : ::std::optional<::std::string>{detail::decode_string(field, "AsyncTreeChildrenValueItem.parentKey")};
     }
     result.may_have_children = detail::decode_boolean(detail::required_field(value, "mayHaveChildren", "AsyncTreeChildrenValueItem"), "AsyncTreeChildrenValueItem.mayHaveChildren");
     result.children_loaded = detail::decode_boolean(detail::required_field(value, "childrenLoaded", "AsyncTreeChildrenValueItem"), "AsyncTreeChildrenValueItem.childrenLoaded");
@@ -230,32 +230,32 @@ struct AsyncTreeChildrenValueItem final {
 }
 
 struct DataTreeItemsItem final {
-    std::string key{};
-    std::string label{};
-    std::optional<std::string> parent_key{};
+    ::std::string key{};
+    ::std::string label{};
+    ::std::optional<::std::string> parent_key{};
     bool may_have_children{};
     bool children_loaded{};
     [[nodiscard]] friend bool operator==(const DataTreeItemsItem&, const DataTreeItemsItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DataTreeItemsItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DataTreeItemsItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("key", to_value(value.key));
     fields.emplace("label", to_value(value.label));
     fields.emplace("parentKey", to_value(value.parent_key));
     fields.emplace("mayHaveChildren", to_value(value.may_have_children));
     fields.emplace("childrenLoaded", to_value(value.children_loaded));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DataTreeItemsItem decode_data_tree_items_item(const strata::host::Value& value) {
+[[nodiscard]] inline DataTreeItemsItem decode_data_tree_items_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DataTreeItemsItem"));
     DataTreeItemsItem result;
     result.key = detail::decode_string(detail::required_field(value, "key", "DataTreeItemsItem"), "DataTreeItemsItem.key");
     result.label = detail::decode_string(detail::required_field(value, "label", "DataTreeItemsItem"), "DataTreeItemsItem.label");
     {
-        const strata::host::Value& field = detail::required_field(value, "parentKey", "DataTreeItemsItem");
-        if (!field.is_null()) result.parent_key = field.is_null() ? std::optional<std::string>{} : std::optional<std::string>{detail::decode_string(field, "DataTreeItemsItem.parentKey")};
+        const ::strata::host::Value& field = detail::required_field(value, "parentKey", "DataTreeItemsItem");
+        if (!field.is_null()) result.parent_key = field.is_null() ? ::std::optional<::std::string>{} : ::std::optional<::std::string>{detail::decode_string(field, "DataTreeItemsItem.parentKey")};
     }
     result.may_have_children = detail::decode_boolean(detail::required_field(value, "mayHaveChildren", "DataTreeItemsItem"), "DataTreeItemsItem.mayHaveChildren");
     result.children_loaded = detail::decode_boolean(detail::required_field(value, "childrenLoaded", "DataTreeItemsItem"), "DataTreeItemsItem.childrenLoaded");
@@ -263,21 +263,21 @@ struct DataTreeItemsItem final {
 }
 
 struct DataTableRowsItemCells final {
-    std::string name{};
-    std::string status{};
+    ::std::string name{};
+    ::std::string status{};
     double progress{};
     [[nodiscard]] friend bool operator==(const DataTableRowsItemCells&, const DataTableRowsItemCells&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DataTableRowsItemCells& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DataTableRowsItemCells& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("name", to_value(value.name));
     fields.emplace("status", to_value(value.status));
     fields.emplace("progress", to_value(value.progress));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DataTableRowsItemCells decode_data_table_rows_item_cells(const strata::host::Value& value) {
+[[nodiscard]] inline DataTableRowsItemCells decode_data_table_rows_item_cells(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DataTableRowsItemCells"));
     DataTableRowsItemCells result;
     result.name = detail::decode_string(detail::required_field(value, "name", "DataTableRowsItemCells"), "DataTableRowsItemCells.name");
@@ -287,19 +287,19 @@ struct DataTableRowsItemCells final {
 }
 
 struct DataTableRowsItem final {
-    std::string key{};
+    ::std::string key{};
     DataTableRowsItemCells cells{};
     [[nodiscard]] friend bool operator==(const DataTableRowsItem&, const DataTableRowsItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DataTableRowsItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DataTableRowsItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("key", to_value(value.key));
     fields.emplace("cells", to_value(value.cells));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DataTableRowsItem decode_data_table_rows_item(const strata::host::Value& value) {
+[[nodiscard]] inline DataTableRowsItem decode_data_table_rows_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DataTableRowsItem"));
     DataTableRowsItem result;
     result.key = detail::decode_string(detail::required_field(value, "key", "DataTableRowsItem"), "DataTableRowsItem.key");
@@ -308,21 +308,21 @@ struct DataTableRowsItem final {
 }
 
 struct DataGridEntriesItem final {
-    std::string kind{};
-    std::string key{};
-    std::string label{};
+    ::std::string kind{};
+    ::std::string key{};
+    ::std::string label{};
     [[nodiscard]] friend bool operator==(const DataGridEntriesItem&, const DataGridEntriesItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DataGridEntriesItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DataGridEntriesItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("kind", to_value(value.kind));
     fields.emplace("key", to_value(value.key));
     fields.emplace("label", to_value(value.label));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DataGridEntriesItem decode_data_grid_entries_item(const strata::host::Value& value) {
+[[nodiscard]] inline DataGridEntriesItem decode_data_grid_entries_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DataGridEntriesItem"));
     DataGridEntriesItem result;
     result.kind = detail::decode_string(detail::required_field(value, "kind", "DataGridEntriesItem"), "DataGridEntriesItem.kind");
@@ -332,45 +332,45 @@ struct DataGridEntriesItem final {
 }
 
 struct Data final {
-    std::vector<DataTreeItemsItem> tree_items{};
-    std::vector<DataTableRowsItem> table_rows{};
-    std::vector<DataGridEntriesItem> grid_entries{};
+    ::std::vector<DataTreeItemsItem> tree_items{};
+    ::std::vector<DataTableRowsItem> table_rows{};
+    ::std::vector<DataGridEntriesItem> grid_entries{};
     [[nodiscard]] friend bool operator==(const Data&, const Data&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const Data& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const Data& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("treeItems", to_value(value.tree_items));
     fields.emplace("tableRows", to_value(value.table_rows));
     fields.emplace("gridEntries", to_value(value.grid_entries));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline Data decode_data(const strata::host::Value& value) {
+[[nodiscard]] inline Data decode_data(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "Data"));
     Data result;
-    result.tree_items = detail::decode_list<DataTreeItemsItem>(detail::required_field(value, "treeItems", "Data"), "Data.treeItems", [](const strata::host::Value& item) { return decode_data_tree_items_item(item); });
-    result.table_rows = detail::decode_list<DataTableRowsItem>(detail::required_field(value, "tableRows", "Data"), "Data.tableRows", [](const strata::host::Value& item) { return decode_data_table_rows_item(item); });
-    result.grid_entries = detail::decode_list<DataGridEntriesItem>(detail::required_field(value, "gridEntries", "Data"), "Data.gridEntries", [](const strata::host::Value& item) { return decode_data_grid_entries_item(item); });
+    result.tree_items = detail::decode_list<DataTreeItemsItem>(detail::required_field(value, "treeItems", "Data"), "Data.treeItems", [](const ::strata::host::Value& item) { return decode_data_tree_items_item(item); });
+    result.table_rows = detail::decode_list<DataTableRowsItem>(detail::required_field(value, "tableRows", "Data"), "Data.tableRows", [](const ::strata::host::Value& item) { return decode_data_table_rows_item(item); });
+    result.grid_entries = detail::decode_list<DataGridEntriesItem>(detail::required_field(value, "gridEntries", "Data"), "Data.gridEntries", [](const ::strata::host::Value& item) { return decode_data_grid_entries_item(item); });
     return result;
 }
 
 struct DemoEventsItem final {
-    std::string key{};
+    ::std::string key{};
     double sequence{};
-    std::string description{};
+    ::std::string description{};
     [[nodiscard]] friend bool operator==(const DemoEventsItem&, const DemoEventsItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DemoEventsItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DemoEventsItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("key", to_value(value.key));
     fields.emplace("sequence", to_value(value.sequence));
     fields.emplace("description", to_value(value.description));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DemoEventsItem decode_demo_events_item(const strata::host::Value& value) {
+[[nodiscard]] inline DemoEventsItem decode_demo_events_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DemoEventsItem"));
     DemoEventsItem result;
     result.key = detail::decode_string(detail::required_field(value, "key", "DemoEventsItem"), "DemoEventsItem.key");
@@ -380,21 +380,21 @@ struct DemoEventsItem final {
 }
 
 struct DemoReorderItemsItem final {
-    std::string id{};
-    std::string key{};
-    std::string label{};
+    ::std::string id{};
+    ::std::string key{};
+    ::std::string label{};
     [[nodiscard]] friend bool operator==(const DemoReorderItemsItem&, const DemoReorderItemsItem&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const DemoReorderItemsItem& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const DemoReorderItemsItem& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("id", to_value(value.id));
     fields.emplace("key", to_value(value.key));
     fields.emplace("label", to_value(value.label));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline DemoReorderItemsItem decode_demo_reorder_items_item(const strata::host::Value& value) {
+[[nodiscard]] inline DemoReorderItemsItem decode_demo_reorder_items_item(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "DemoReorderItemsItem"));
     DemoReorderItemsItem result;
     result.id = detail::decode_string(detail::required_field(value, "id", "DemoReorderItemsItem"), "DemoReorderItemsItem.id");
@@ -406,28 +406,28 @@ struct DemoReorderItemsItem final {
 struct Demo final {
     double event_total{};
     double retained_event_count{};
-    std::vector<DemoEventsItem> events{};
-    std::string coalescing_result{};
-    std::string deterministic_result{};
+    ::std::vector<DemoEventsItem> events{};
+    ::std::string coalescing_result{};
+    ::std::string deterministic_result{};
     bool focus_contained{};
     bool inspector_pick_armed{};
-    std::vector<DemoReorderItemsItem> reorder_items{};
+    ::std::vector<DemoReorderItemsItem> reorder_items{};
     double controlled_split_ratio{};
-    std::string host_value{};
-    std::string host_message{};
-    std::string data_activity{};
+    ::std::string host_value{};
+    ::std::string host_message{};
+    ::std::string data_activity{};
     bool form_valid{};
     bool form_dirty{};
     bool form_touched{};
-    std::string combo_query{};
-    std::optional<std::string> combo_selection{};
+    ::std::string combo_query{};
+    ::std::optional<::std::string> combo_selection{};
     double inspector_node_count{};
-    std::string inspector_selected_key{};
-    std::string inspector_selected_type{};
-    std::string inspector_bounds{};
-    std::string inspector_actions{};
-    std::string inspector_handler_owners{};
-    std::string inspector_motion{};
+    ::std::string inspector_selected_key{};
+    ::std::string inspector_selected_type{};
+    ::std::string inspector_bounds{};
+    ::std::string inspector_actions{};
+    ::std::string inspector_handler_owners{};
+    ::std::string inspector_motion{};
     double measured_nodes{};
     double reused_nodes{};
     double arranged_nodes{};
@@ -435,8 +435,8 @@ struct Demo final {
     [[nodiscard]] friend bool operator==(const Demo&, const Demo&) = default;
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const Demo& value) {
-    strata::host::Value::Object fields;
+[[nodiscard]] inline ::strata::host::Value to_value(const Demo& value) {
+    ::strata::host::Value::Object fields;
     fields.emplace("eventTotal", to_value(value.event_total));
     fields.emplace("retainedEventCount", to_value(value.retained_event_count));
     fields.emplace("events", to_value(value.events));
@@ -465,20 +465,20 @@ struct Demo final {
     fields.emplace("reusedNodes", to_value(value.reused_nodes));
     fields.emplace("arrangedNodes", to_value(value.arranged_nodes));
     fields.emplace("surfaceVisible", to_value(value.surface_visible));
-    return strata::host::Value(std::move(fields));
+    return ::strata::host::Value(::std::move(fields));
 }
 
-[[nodiscard]] inline Demo decode_demo(const strata::host::Value& value) {
+[[nodiscard]] inline Demo decode_demo(const ::strata::host::Value& value) {
     static_cast<void>(detail::decode_object(value, "Demo"));
     Demo result;
     result.event_total = detail::decode_number(detail::required_field(value, "eventTotal", "Demo"), "Demo.eventTotal");
     result.retained_event_count = detail::decode_number(detail::required_field(value, "retainedEventCount", "Demo"), "Demo.retainedEventCount");
-    result.events = detail::decode_list<DemoEventsItem>(detail::required_field(value, "events", "Demo"), "Demo.events", [](const strata::host::Value& item) { return decode_demo_events_item(item); });
+    result.events = detail::decode_list<DemoEventsItem>(detail::required_field(value, "events", "Demo"), "Demo.events", [](const ::strata::host::Value& item) { return decode_demo_events_item(item); });
     result.coalescing_result = detail::decode_string(detail::required_field(value, "coalescingResult", "Demo"), "Demo.coalescingResult");
     result.deterministic_result = detail::decode_string(detail::required_field(value, "deterministicResult", "Demo"), "Demo.deterministicResult");
     result.focus_contained = detail::decode_boolean(detail::required_field(value, "focusContained", "Demo"), "Demo.focusContained");
     result.inspector_pick_armed = detail::decode_boolean(detail::required_field(value, "inspectorPickArmed", "Demo"), "Demo.inspectorPickArmed");
-    result.reorder_items = detail::decode_list<DemoReorderItemsItem>(detail::required_field(value, "reorderItems", "Demo"), "Demo.reorderItems", [](const strata::host::Value& item) { return decode_demo_reorder_items_item(item); });
+    result.reorder_items = detail::decode_list<DemoReorderItemsItem>(detail::required_field(value, "reorderItems", "Demo"), "Demo.reorderItems", [](const ::strata::host::Value& item) { return decode_demo_reorder_items_item(item); });
     result.controlled_split_ratio = detail::decode_number(detail::required_field(value, "controlledSplitRatio", "Demo"), "Demo.controlledSplitRatio");
     result.host_value = detail::decode_string(detail::required_field(value, "hostValue", "Demo"), "Demo.hostValue");
     result.host_message = detail::decode_string(detail::required_field(value, "hostMessage", "Demo"), "Demo.hostMessage");
@@ -488,8 +488,8 @@ struct Demo final {
     result.form_touched = detail::decode_boolean(detail::required_field(value, "formTouched", "Demo"), "Demo.formTouched");
     result.combo_query = detail::decode_string(detail::required_field(value, "comboQuery", "Demo"), "Demo.comboQuery");
     {
-        const strata::host::Value& field = detail::required_field(value, "comboSelection", "Demo");
-        if (!field.is_null()) result.combo_selection = field.is_null() ? std::optional<std::string>{} : std::optional<std::string>{detail::decode_string(field, "Demo.comboSelection")};
+        const ::strata::host::Value& field = detail::required_field(value, "comboSelection", "Demo");
+        if (!field.is_null()) result.combo_selection = field.is_null() ? ::std::optional<::std::string>{} : ::std::optional<::std::string>{detail::decode_string(field, "Demo.comboSelection")};
     }
     result.inspector_node_count = detail::decode_number(detail::required_field(value, "inspectorNodeCount", "Demo"), "Demo.inspectorNodeCount");
     result.inspector_selected_key = detail::decode_string(detail::required_field(value, "inspectorSelectedKey", "Demo"), "Demo.inspectorSelectedKey");
@@ -506,51 +506,51 @@ struct Demo final {
 }
 
 struct AsyncResults final {
-    std::vector<AsyncResultsValueItem> value{};
+    ::std::vector<AsyncResultsValueItem> value{};
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const AsyncResults& value) {
+[[nodiscard]] inline ::strata::host::Value to_value(const AsyncResults& value) {
     return to_value(value.value);
 }
 
-[[nodiscard]] inline AsyncResults decode_async_results(const strata::host::Value& value) {
-    return AsyncResults{detail::decode_list<AsyncResultsValueItem>(value, "asyncResults", [](const strata::host::Value& item) { return decode_async_results_value_item(item); })};
+[[nodiscard]] inline AsyncResults decode_async_results(const ::strata::host::Value& value) {
+    return AsyncResults{detail::decode_list<AsyncResultsValueItem>(value, "asyncResults", [](const ::strata::host::Value& item) { return decode_async_results_value_item(item); })};
 }
 
 struct AsyncTreeChildren final {
-    std::vector<AsyncTreeChildrenValueItem> value{};
+    ::std::vector<AsyncTreeChildrenValueItem> value{};
 };
 
-[[nodiscard]] inline strata::host::Value to_value(const AsyncTreeChildren& value) {
+[[nodiscard]] inline ::strata::host::Value to_value(const AsyncTreeChildren& value) {
     return to_value(value.value);
 }
 
-[[nodiscard]] inline AsyncTreeChildren decode_async_tree_children(const strata::host::Value& value) {
-    return AsyncTreeChildren{detail::decode_list<AsyncTreeChildrenValueItem>(value, "asyncTreeChildren", [](const strata::host::Value& item) { return decode_async_tree_children_value_item(item); })};
+[[nodiscard]] inline AsyncTreeChildren decode_async_tree_children(const ::strata::host::Value& value) {
+    return AsyncTreeChildren{detail::decode_list<AsyncTreeChildrenValueItem>(value, "asyncTreeChildren", [](const ::strata::host::Value& item) { return decode_async_tree_children_value_item(item); })};
 }
 
-[[nodiscard]] inline strata::host::Value encode_async_results(const AsyncResults& value) {
-    return strata::host::Value::object({{"asyncResults", to_value(value)}});
+[[nodiscard]] inline ::strata::host::Value encode_async_results(const AsyncResults& value) {
+    return ::strata::host::Value::object({{"asyncResults", to_value(value)}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_async_tree_children(const AsyncTreeChildren& value) {
-    return strata::host::Value::object({{"asyncTreeChildren", to_value(value)}});
+[[nodiscard]] inline ::strata::host::Value encode_async_tree_children(const AsyncTreeChildren& value) {
+    return ::strata::host::Value::object({{"asyncTreeChildren", to_value(value)}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_data(const Data& value) {
-    return strata::host::Value::object({{"data", to_value(value)}});
+[[nodiscard]] inline ::strata::host::Value encode_data(const Data& value) {
+    return ::strata::host::Value::object({{"data", to_value(value)}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_data_tree_items(const std::vector<DataTreeItemsItem>& value) {
-    return strata::host::Value::object({{"data", strata::host::Value::object({{"treeItems", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_data_tree_items(const ::std::vector<DataTreeItemsItem>& value) {
+    return ::strata::host::Value::object({{"data", ::strata::host::Value::object({{"treeItems", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_data_table_rows(const std::vector<DataTableRowsItem>& value) {
-    return strata::host::Value::object({{"data", strata::host::Value::object({{"tableRows", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_data_table_rows(const ::std::vector<DataTableRowsItem>& value) {
+    return ::strata::host::Value::object({{"data", ::strata::host::Value::object({{"tableRows", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_data_grid_entries(const std::vector<DataGridEntriesItem>& value) {
-    return strata::host::Value::object({{"data", strata::host::Value::object({{"gridEntries", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_data_grid_entries(const ::std::vector<DataGridEntriesItem>& value) {
+    return ::strata::host::Value::object({{"data", ::strata::host::Value::object({{"gridEntries", to_value(value)}})}});
 }
 
 class DataModel final {
@@ -563,54 +563,54 @@ public:
 
     [[nodiscard]] bool set(Data value) {
         bool changed = false;
-        changed = set_tree_items(std::move(value.tree_items)) || changed;
-        changed = set_table_rows(std::move(value.table_rows)) || changed;
-        changed = set_grid_entries(std::move(value.grid_entries)) || changed;
+        changed = set_tree_items(::std::move(value.tree_items)) || changed;
+        changed = set_table_rows(::std::move(value.table_rows)) || changed;
+        changed = set_grid_entries(::std::move(value.grid_entries)) || changed;
         return changed;
     }
 
-    [[nodiscard]] bool set_tree_items(std::vector<DataTreeItemsItem> value) {
-        return tree_items_.set(std::move(value));
+    [[nodiscard]] bool set_tree_items(::std::vector<DataTreeItemsItem> value) {
+        return tree_items_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DataTreeItemsItem>& tree_items() const noexcept {
+    [[nodiscard]] const ::std::vector<DataTreeItemsItem>& tree_items() const noexcept {
         return tree_items_.get();
     }
-    [[nodiscard]] bool set_table_rows(std::vector<DataTableRowsItem> value) {
-        return table_rows_.set(std::move(value));
+    [[nodiscard]] bool set_table_rows(::std::vector<DataTableRowsItem> value) {
+        return table_rows_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DataTableRowsItem>& table_rows() const noexcept {
+    [[nodiscard]] const ::std::vector<DataTableRowsItem>& table_rows() const noexcept {
         return table_rows_.get();
     }
-    [[nodiscard]] bool set_grid_entries(std::vector<DataGridEntriesItem> value) {
-        return grid_entries_.set(std::move(value));
+    [[nodiscard]] bool set_grid_entries(::std::vector<DataGridEntriesItem> value) {
+        return grid_entries_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DataGridEntriesItem>& grid_entries() const noexcept {
+    [[nodiscard]] const ::std::vector<DataGridEntriesItem>& grid_entries() const noexcept {
         return grid_entries_.get();
     }
 
-    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+    void bind(::strata::host::Bindings& bindings, const ::std::string_view id) const {
         if (id.empty()) {
-            throw std::invalid_argument("DataModel binding id must not be empty");
+            throw ::std::invalid_argument("DataModel binding id must not be empty");
         }
         bindings.snapshot(
-            std::string(id) + ".tree_items",
+            ::std::string(id) + ".tree_items",
             tree_items_,
             [](const auto& model) {
                 return encode_data_tree_items(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".table_rows",
+            ::std::string(id) + ".table_rows",
             table_rows_,
             [](const auto& model) {
                 return encode_data_table_rows(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".grid_entries",
+            ::std::string(id) + ".grid_entries",
             grid_entries_,
             [](const auto& model) {
                 return encode_data_grid_entries(model.get());
@@ -619,125 +619,125 @@ public:
     }
 
 private:
-    strata::host::Observable<std::vector<DataTreeItemsItem>> tree_items_{};
-    strata::host::Observable<std::vector<DataTableRowsItem>> table_rows_{};
-    strata::host::Observable<std::vector<DataGridEntriesItem>> grid_entries_{};
+    ::strata::host::Observable<::std::vector<DataTreeItemsItem>> tree_items_{};
+    ::strata::host::Observable<::std::vector<DataTableRowsItem>> table_rows_{};
+    ::strata::host::Observable<::std::vector<DataGridEntriesItem>> grid_entries_{};
 };
 
-[[nodiscard]] inline strata::host::Value encode_demo(const Demo& value) {
-    return strata::host::Value::object({{"demo", to_value(value)}});
+[[nodiscard]] inline ::strata::host::Value encode_demo(const Demo& value) {
+    return ::strata::host::Value::object({{"demo", to_value(value)}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_event_total(const double& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"eventTotal", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_event_total(const double& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"eventTotal", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_retained_event_count(const double& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"retainedEventCount", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_retained_event_count(const double& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"retainedEventCount", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_events(const std::vector<DemoEventsItem>& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"events", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_events(const ::std::vector<DemoEventsItem>& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"events", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_coalescing_result(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"coalescingResult", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_coalescing_result(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"coalescingResult", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_deterministic_result(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"deterministicResult", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_deterministic_result(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"deterministicResult", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_focus_contained(const bool& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"focusContained", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_focus_contained(const bool& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"focusContained", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_inspector_pick_armed(const bool& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"inspectorPickArmed", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_inspector_pick_armed(const bool& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorPickArmed", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_reorder_items(const std::vector<DemoReorderItemsItem>& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"reorderItems", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_reorder_items(const ::std::vector<DemoReorderItemsItem>& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"reorderItems", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_controlled_split_ratio(const double& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"controlledSplitRatio", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_controlled_split_ratio(const double& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"controlledSplitRatio", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_host_value(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"hostValue", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_host_value(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"hostValue", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_host_message(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"hostMessage", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_host_message(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"hostMessage", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_data_activity(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"dataActivity", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_data_activity(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"dataActivity", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_form_valid(const bool& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"formValid", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_form_valid(const bool& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"formValid", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_form_dirty(const bool& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"formDirty", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_form_dirty(const bool& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"formDirty", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_form_touched(const bool& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"formTouched", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_form_touched(const bool& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"formTouched", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_combo_query(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"comboQuery", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_combo_query(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"comboQuery", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_combo_selection(const std::optional<std::string>& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"comboSelection", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_combo_selection(const ::std::optional<::std::string>& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"comboSelection", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_inspector_node_count(const double& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"inspectorNodeCount", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_inspector_node_count(const double& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorNodeCount", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_inspector_selected_key(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"inspectorSelectedKey", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_inspector_selected_key(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorSelectedKey", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_inspector_selected_type(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"inspectorSelectedType", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_inspector_selected_type(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorSelectedType", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_inspector_bounds(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"inspectorBounds", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_inspector_bounds(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorBounds", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_inspector_actions(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"inspectorActions", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_inspector_actions(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorActions", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_inspector_handler_owners(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"inspectorHandlerOwners", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_inspector_handler_owners(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorHandlerOwners", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_inspector_motion(const std::string& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"inspectorMotion", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_inspector_motion(const ::std::string& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"inspectorMotion", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_measured_nodes(const double& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"measuredNodes", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_measured_nodes(const double& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"measuredNodes", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_reused_nodes(const double& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"reusedNodes", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_reused_nodes(const double& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"reusedNodes", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_arranged_nodes(const double& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"arrangedNodes", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_arranged_nodes(const double& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"arrangedNodes", to_value(value)}})}});
 }
 
-[[nodiscard]] inline strata::host::Value encode_demo_surface_visible(const bool& value) {
-    return strata::host::Value::object({{"demo", strata::host::Value::object({{"surfaceVisible", to_value(value)}})}});
+[[nodiscard]] inline ::strata::host::Value encode_demo_surface_visible(const bool& value) {
+    return ::strata::host::Value::object({{"demo", ::strata::host::Value::object({{"surfaceVisible", to_value(value)}})}});
 }
 
 class DemoModel final {
@@ -750,429 +750,429 @@ public:
 
     [[nodiscard]] bool set(Demo value) {
         bool changed = false;
-        changed = set_event_total(std::move(value.event_total)) || changed;
-        changed = set_retained_event_count(std::move(value.retained_event_count)) || changed;
-        changed = set_events(std::move(value.events)) || changed;
-        changed = set_coalescing_result(std::move(value.coalescing_result)) || changed;
-        changed = set_deterministic_result(std::move(value.deterministic_result)) || changed;
-        changed = set_focus_contained(std::move(value.focus_contained)) || changed;
-        changed = set_inspector_pick_armed(std::move(value.inspector_pick_armed)) || changed;
-        changed = set_reorder_items(std::move(value.reorder_items)) || changed;
-        changed = set_controlled_split_ratio(std::move(value.controlled_split_ratio)) || changed;
-        changed = set_host_value(std::move(value.host_value)) || changed;
-        changed = set_host_message(std::move(value.host_message)) || changed;
-        changed = set_data_activity(std::move(value.data_activity)) || changed;
-        changed = set_form_valid(std::move(value.form_valid)) || changed;
-        changed = set_form_dirty(std::move(value.form_dirty)) || changed;
-        changed = set_form_touched(std::move(value.form_touched)) || changed;
-        changed = set_combo_query(std::move(value.combo_query)) || changed;
-        changed = set_combo_selection(std::move(value.combo_selection)) || changed;
-        changed = set_inspector_node_count(std::move(value.inspector_node_count)) || changed;
-        changed = set_inspector_selected_key(std::move(value.inspector_selected_key)) || changed;
-        changed = set_inspector_selected_type(std::move(value.inspector_selected_type)) || changed;
-        changed = set_inspector_bounds(std::move(value.inspector_bounds)) || changed;
-        changed = set_inspector_actions(std::move(value.inspector_actions)) || changed;
-        changed = set_inspector_handler_owners(std::move(value.inspector_handler_owners)) || changed;
-        changed = set_inspector_motion(std::move(value.inspector_motion)) || changed;
-        changed = set_measured_nodes(std::move(value.measured_nodes)) || changed;
-        changed = set_reused_nodes(std::move(value.reused_nodes)) || changed;
-        changed = set_arranged_nodes(std::move(value.arranged_nodes)) || changed;
-        changed = set_surface_visible(std::move(value.surface_visible)) || changed;
+        changed = set_event_total(::std::move(value.event_total)) || changed;
+        changed = set_retained_event_count(::std::move(value.retained_event_count)) || changed;
+        changed = set_events(::std::move(value.events)) || changed;
+        changed = set_coalescing_result(::std::move(value.coalescing_result)) || changed;
+        changed = set_deterministic_result(::std::move(value.deterministic_result)) || changed;
+        changed = set_focus_contained(::std::move(value.focus_contained)) || changed;
+        changed = set_inspector_pick_armed(::std::move(value.inspector_pick_armed)) || changed;
+        changed = set_reorder_items(::std::move(value.reorder_items)) || changed;
+        changed = set_controlled_split_ratio(::std::move(value.controlled_split_ratio)) || changed;
+        changed = set_host_value(::std::move(value.host_value)) || changed;
+        changed = set_host_message(::std::move(value.host_message)) || changed;
+        changed = set_data_activity(::std::move(value.data_activity)) || changed;
+        changed = set_form_valid(::std::move(value.form_valid)) || changed;
+        changed = set_form_dirty(::std::move(value.form_dirty)) || changed;
+        changed = set_form_touched(::std::move(value.form_touched)) || changed;
+        changed = set_combo_query(::std::move(value.combo_query)) || changed;
+        changed = set_combo_selection(::std::move(value.combo_selection)) || changed;
+        changed = set_inspector_node_count(::std::move(value.inspector_node_count)) || changed;
+        changed = set_inspector_selected_key(::std::move(value.inspector_selected_key)) || changed;
+        changed = set_inspector_selected_type(::std::move(value.inspector_selected_type)) || changed;
+        changed = set_inspector_bounds(::std::move(value.inspector_bounds)) || changed;
+        changed = set_inspector_actions(::std::move(value.inspector_actions)) || changed;
+        changed = set_inspector_handler_owners(::std::move(value.inspector_handler_owners)) || changed;
+        changed = set_inspector_motion(::std::move(value.inspector_motion)) || changed;
+        changed = set_measured_nodes(::std::move(value.measured_nodes)) || changed;
+        changed = set_reused_nodes(::std::move(value.reused_nodes)) || changed;
+        changed = set_arranged_nodes(::std::move(value.arranged_nodes)) || changed;
+        changed = set_surface_visible(::std::move(value.surface_visible)) || changed;
         return changed;
     }
 
     [[nodiscard]] bool set_event_total(double value) {
-        return event_total_.set(std::move(value));
+        return event_total_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& event_total() const noexcept {
         return event_total_.get();
     }
     [[nodiscard]] bool set_retained_event_count(double value) {
-        return retained_event_count_.set(std::move(value));
+        return retained_event_count_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& retained_event_count() const noexcept {
         return retained_event_count_.get();
     }
-    [[nodiscard]] bool set_events(std::vector<DemoEventsItem> value) {
-        return events_.set(std::move(value));
+    [[nodiscard]] bool set_events(::std::vector<DemoEventsItem> value) {
+        return events_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DemoEventsItem>& events() const noexcept {
+    [[nodiscard]] const ::std::vector<DemoEventsItem>& events() const noexcept {
         return events_.get();
     }
-    [[nodiscard]] bool set_coalescing_result(std::string value) {
-        return coalescing_result_.set(std::move(value));
+    [[nodiscard]] bool set_coalescing_result(::std::string value) {
+        return coalescing_result_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& coalescing_result() const noexcept {
+    [[nodiscard]] const ::std::string& coalescing_result() const noexcept {
         return coalescing_result_.get();
     }
-    [[nodiscard]] bool set_deterministic_result(std::string value) {
-        return deterministic_result_.set(std::move(value));
+    [[nodiscard]] bool set_deterministic_result(::std::string value) {
+        return deterministic_result_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& deterministic_result() const noexcept {
+    [[nodiscard]] const ::std::string& deterministic_result() const noexcept {
         return deterministic_result_.get();
     }
     [[nodiscard]] bool set_focus_contained(bool value) {
-        return focus_contained_.set(std::move(value));
+        return focus_contained_.set(::std::move(value));
     }
 
     [[nodiscard]] const bool& focus_contained() const noexcept {
         return focus_contained_.get();
     }
     [[nodiscard]] bool set_inspector_pick_armed(bool value) {
-        return inspector_pick_armed_.set(std::move(value));
+        return inspector_pick_armed_.set(::std::move(value));
     }
 
     [[nodiscard]] const bool& inspector_pick_armed() const noexcept {
         return inspector_pick_armed_.get();
     }
-    [[nodiscard]] bool set_reorder_items(std::vector<DemoReorderItemsItem> value) {
-        return reorder_items_.set(std::move(value));
+    [[nodiscard]] bool set_reorder_items(::std::vector<DemoReorderItemsItem> value) {
+        return reorder_items_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::vector<DemoReorderItemsItem>& reorder_items() const noexcept {
+    [[nodiscard]] const ::std::vector<DemoReorderItemsItem>& reorder_items() const noexcept {
         return reorder_items_.get();
     }
     [[nodiscard]] bool set_controlled_split_ratio(double value) {
-        return controlled_split_ratio_.set(std::move(value));
+        return controlled_split_ratio_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& controlled_split_ratio() const noexcept {
         return controlled_split_ratio_.get();
     }
-    [[nodiscard]] bool set_host_value(std::string value) {
-        return host_value_.set(std::move(value));
+    [[nodiscard]] bool set_host_value(::std::string value) {
+        return host_value_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& host_value() const noexcept {
+    [[nodiscard]] const ::std::string& host_value() const noexcept {
         return host_value_.get();
     }
-    [[nodiscard]] bool set_host_message(std::string value) {
-        return host_message_.set(std::move(value));
+    [[nodiscard]] bool set_host_message(::std::string value) {
+        return host_message_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& host_message() const noexcept {
+    [[nodiscard]] const ::std::string& host_message() const noexcept {
         return host_message_.get();
     }
-    [[nodiscard]] bool set_data_activity(std::string value) {
-        return data_activity_.set(std::move(value));
+    [[nodiscard]] bool set_data_activity(::std::string value) {
+        return data_activity_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& data_activity() const noexcept {
+    [[nodiscard]] const ::std::string& data_activity() const noexcept {
         return data_activity_.get();
     }
     [[nodiscard]] bool set_form_valid(bool value) {
-        return form_valid_.set(std::move(value));
+        return form_valid_.set(::std::move(value));
     }
 
     [[nodiscard]] const bool& form_valid() const noexcept {
         return form_valid_.get();
     }
     [[nodiscard]] bool set_form_dirty(bool value) {
-        return form_dirty_.set(std::move(value));
+        return form_dirty_.set(::std::move(value));
     }
 
     [[nodiscard]] const bool& form_dirty() const noexcept {
         return form_dirty_.get();
     }
     [[nodiscard]] bool set_form_touched(bool value) {
-        return form_touched_.set(std::move(value));
+        return form_touched_.set(::std::move(value));
     }
 
     [[nodiscard]] const bool& form_touched() const noexcept {
         return form_touched_.get();
     }
-    [[nodiscard]] bool set_combo_query(std::string value) {
-        return combo_query_.set(std::move(value));
+    [[nodiscard]] bool set_combo_query(::std::string value) {
+        return combo_query_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& combo_query() const noexcept {
+    [[nodiscard]] const ::std::string& combo_query() const noexcept {
         return combo_query_.get();
     }
-    [[nodiscard]] bool set_combo_selection(std::optional<std::string> value) {
-        return combo_selection_.set(std::move(value));
+    [[nodiscard]] bool set_combo_selection(::std::optional<::std::string> value) {
+        return combo_selection_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::optional<std::string>& combo_selection() const noexcept {
+    [[nodiscard]] const ::std::optional<::std::string>& combo_selection() const noexcept {
         return combo_selection_.get();
     }
     [[nodiscard]] bool set_inspector_node_count(double value) {
-        return inspector_node_count_.set(std::move(value));
+        return inspector_node_count_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& inspector_node_count() const noexcept {
         return inspector_node_count_.get();
     }
-    [[nodiscard]] bool set_inspector_selected_key(std::string value) {
-        return inspector_selected_key_.set(std::move(value));
+    [[nodiscard]] bool set_inspector_selected_key(::std::string value) {
+        return inspector_selected_key_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& inspector_selected_key() const noexcept {
+    [[nodiscard]] const ::std::string& inspector_selected_key() const noexcept {
         return inspector_selected_key_.get();
     }
-    [[nodiscard]] bool set_inspector_selected_type(std::string value) {
-        return inspector_selected_type_.set(std::move(value));
+    [[nodiscard]] bool set_inspector_selected_type(::std::string value) {
+        return inspector_selected_type_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& inspector_selected_type() const noexcept {
+    [[nodiscard]] const ::std::string& inspector_selected_type() const noexcept {
         return inspector_selected_type_.get();
     }
-    [[nodiscard]] bool set_inspector_bounds(std::string value) {
-        return inspector_bounds_.set(std::move(value));
+    [[nodiscard]] bool set_inspector_bounds(::std::string value) {
+        return inspector_bounds_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& inspector_bounds() const noexcept {
+    [[nodiscard]] const ::std::string& inspector_bounds() const noexcept {
         return inspector_bounds_.get();
     }
-    [[nodiscard]] bool set_inspector_actions(std::string value) {
-        return inspector_actions_.set(std::move(value));
+    [[nodiscard]] bool set_inspector_actions(::std::string value) {
+        return inspector_actions_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& inspector_actions() const noexcept {
+    [[nodiscard]] const ::std::string& inspector_actions() const noexcept {
         return inspector_actions_.get();
     }
-    [[nodiscard]] bool set_inspector_handler_owners(std::string value) {
-        return inspector_handler_owners_.set(std::move(value));
+    [[nodiscard]] bool set_inspector_handler_owners(::std::string value) {
+        return inspector_handler_owners_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& inspector_handler_owners() const noexcept {
+    [[nodiscard]] const ::std::string& inspector_handler_owners() const noexcept {
         return inspector_handler_owners_.get();
     }
-    [[nodiscard]] bool set_inspector_motion(std::string value) {
-        return inspector_motion_.set(std::move(value));
+    [[nodiscard]] bool set_inspector_motion(::std::string value) {
+        return inspector_motion_.set(::std::move(value));
     }
 
-    [[nodiscard]] const std::string& inspector_motion() const noexcept {
+    [[nodiscard]] const ::std::string& inspector_motion() const noexcept {
         return inspector_motion_.get();
     }
     [[nodiscard]] bool set_measured_nodes(double value) {
-        return measured_nodes_.set(std::move(value));
+        return measured_nodes_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& measured_nodes() const noexcept {
         return measured_nodes_.get();
     }
     [[nodiscard]] bool set_reused_nodes(double value) {
-        return reused_nodes_.set(std::move(value));
+        return reused_nodes_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& reused_nodes() const noexcept {
         return reused_nodes_.get();
     }
     [[nodiscard]] bool set_arranged_nodes(double value) {
-        return arranged_nodes_.set(std::move(value));
+        return arranged_nodes_.set(::std::move(value));
     }
 
     [[nodiscard]] const double& arranged_nodes() const noexcept {
         return arranged_nodes_.get();
     }
     [[nodiscard]] bool set_surface_visible(bool value) {
-        return surface_visible_.set(std::move(value));
+        return surface_visible_.set(::std::move(value));
     }
 
     [[nodiscard]] const bool& surface_visible() const noexcept {
         return surface_visible_.get();
     }
 
-    void bind(strata::host::Bindings& bindings, const std::string_view id) const {
+    void bind(::strata::host::Bindings& bindings, const ::std::string_view id) const {
         if (id.empty()) {
-            throw std::invalid_argument("DemoModel binding id must not be empty");
+            throw ::std::invalid_argument("DemoModel binding id must not be empty");
         }
         bindings.snapshot(
-            std::string(id) + ".event_total",
+            ::std::string(id) + ".event_total",
             event_total_,
             [](const auto& model) {
                 return encode_demo_event_total(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".retained_event_count",
+            ::std::string(id) + ".retained_event_count",
             retained_event_count_,
             [](const auto& model) {
                 return encode_demo_retained_event_count(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".events",
+            ::std::string(id) + ".events",
             events_,
             [](const auto& model) {
                 return encode_demo_events(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".coalescing_result",
+            ::std::string(id) + ".coalescing_result",
             coalescing_result_,
             [](const auto& model) {
                 return encode_demo_coalescing_result(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".deterministic_result",
+            ::std::string(id) + ".deterministic_result",
             deterministic_result_,
             [](const auto& model) {
                 return encode_demo_deterministic_result(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".focus_contained",
+            ::std::string(id) + ".focus_contained",
             focus_contained_,
             [](const auto& model) {
                 return encode_demo_focus_contained(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".inspector_pick_armed",
+            ::std::string(id) + ".inspector_pick_armed",
             inspector_pick_armed_,
             [](const auto& model) {
                 return encode_demo_inspector_pick_armed(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".reorder_items",
+            ::std::string(id) + ".reorder_items",
             reorder_items_,
             [](const auto& model) {
                 return encode_demo_reorder_items(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".controlled_split_ratio",
+            ::std::string(id) + ".controlled_split_ratio",
             controlled_split_ratio_,
             [](const auto& model) {
                 return encode_demo_controlled_split_ratio(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".host_value",
+            ::std::string(id) + ".host_value",
             host_value_,
             [](const auto& model) {
                 return encode_demo_host_value(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".host_message",
+            ::std::string(id) + ".host_message",
             host_message_,
             [](const auto& model) {
                 return encode_demo_host_message(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".data_activity",
+            ::std::string(id) + ".data_activity",
             data_activity_,
             [](const auto& model) {
                 return encode_demo_data_activity(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".form_valid",
+            ::std::string(id) + ".form_valid",
             form_valid_,
             [](const auto& model) {
                 return encode_demo_form_valid(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".form_dirty",
+            ::std::string(id) + ".form_dirty",
             form_dirty_,
             [](const auto& model) {
                 return encode_demo_form_dirty(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".form_touched",
+            ::std::string(id) + ".form_touched",
             form_touched_,
             [](const auto& model) {
                 return encode_demo_form_touched(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".combo_query",
+            ::std::string(id) + ".combo_query",
             combo_query_,
             [](const auto& model) {
                 return encode_demo_combo_query(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".combo_selection",
+            ::std::string(id) + ".combo_selection",
             combo_selection_,
             [](const auto& model) {
                 return encode_demo_combo_selection(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".inspector_node_count",
+            ::std::string(id) + ".inspector_node_count",
             inspector_node_count_,
             [](const auto& model) {
                 return encode_demo_inspector_node_count(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".inspector_selected_key",
+            ::std::string(id) + ".inspector_selected_key",
             inspector_selected_key_,
             [](const auto& model) {
                 return encode_demo_inspector_selected_key(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".inspector_selected_type",
+            ::std::string(id) + ".inspector_selected_type",
             inspector_selected_type_,
             [](const auto& model) {
                 return encode_demo_inspector_selected_type(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".inspector_bounds",
+            ::std::string(id) + ".inspector_bounds",
             inspector_bounds_,
             [](const auto& model) {
                 return encode_demo_inspector_bounds(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".inspector_actions",
+            ::std::string(id) + ".inspector_actions",
             inspector_actions_,
             [](const auto& model) {
                 return encode_demo_inspector_actions(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".inspector_handler_owners",
+            ::std::string(id) + ".inspector_handler_owners",
             inspector_handler_owners_,
             [](const auto& model) {
                 return encode_demo_inspector_handler_owners(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".inspector_motion",
+            ::std::string(id) + ".inspector_motion",
             inspector_motion_,
             [](const auto& model) {
                 return encode_demo_inspector_motion(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".measured_nodes",
+            ::std::string(id) + ".measured_nodes",
             measured_nodes_,
             [](const auto& model) {
                 return encode_demo_measured_nodes(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".reused_nodes",
+            ::std::string(id) + ".reused_nodes",
             reused_nodes_,
             [](const auto& model) {
                 return encode_demo_reused_nodes(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".arranged_nodes",
+            ::std::string(id) + ".arranged_nodes",
             arranged_nodes_,
             [](const auto& model) {
                 return encode_demo_arranged_nodes(model.get());
             }
         );
         bindings.snapshot(
-            std::string(id) + ".surface_visible",
+            ::std::string(id) + ".surface_visible",
             surface_visible_,
             [](const auto& model) {
                 return encode_demo_surface_visible(model.get());
@@ -1181,42 +1181,42 @@ public:
     }
 
 private:
-    strata::host::Observable<double> event_total_{};
-    strata::host::Observable<double> retained_event_count_{};
-    strata::host::Observable<std::vector<DemoEventsItem>> events_{};
-    strata::host::Observable<std::string> coalescing_result_{};
-    strata::host::Observable<std::string> deterministic_result_{};
-    strata::host::Observable<bool> focus_contained_{};
-    strata::host::Observable<bool> inspector_pick_armed_{};
-    strata::host::Observable<std::vector<DemoReorderItemsItem>> reorder_items_{};
-    strata::host::Observable<double> controlled_split_ratio_{};
-    strata::host::Observable<std::string> host_value_{};
-    strata::host::Observable<std::string> host_message_{};
-    strata::host::Observable<std::string> data_activity_{};
-    strata::host::Observable<bool> form_valid_{};
-    strata::host::Observable<bool> form_dirty_{};
-    strata::host::Observable<bool> form_touched_{};
-    strata::host::Observable<std::string> combo_query_{};
-    strata::host::Observable<std::optional<std::string>> combo_selection_{};
-    strata::host::Observable<double> inspector_node_count_{};
-    strata::host::Observable<std::string> inspector_selected_key_{};
-    strata::host::Observable<std::string> inspector_selected_type_{};
-    strata::host::Observable<std::string> inspector_bounds_{};
-    strata::host::Observable<std::string> inspector_actions_{};
-    strata::host::Observable<std::string> inspector_handler_owners_{};
-    strata::host::Observable<std::string> inspector_motion_{};
-    strata::host::Observable<double> measured_nodes_{};
-    strata::host::Observable<double> reused_nodes_{};
-    strata::host::Observable<double> arranged_nodes_{};
-    strata::host::Observable<bool> surface_visible_{};
+    ::strata::host::Observable<double> event_total_{};
+    ::strata::host::Observable<double> retained_event_count_{};
+    ::strata::host::Observable<::std::vector<DemoEventsItem>> events_{};
+    ::strata::host::Observable<::std::string> coalescing_result_{};
+    ::strata::host::Observable<::std::string> deterministic_result_{};
+    ::strata::host::Observable<bool> focus_contained_{};
+    ::strata::host::Observable<bool> inspector_pick_armed_{};
+    ::strata::host::Observable<::std::vector<DemoReorderItemsItem>> reorder_items_{};
+    ::strata::host::Observable<double> controlled_split_ratio_{};
+    ::strata::host::Observable<::std::string> host_value_{};
+    ::strata::host::Observable<::std::string> host_message_{};
+    ::strata::host::Observable<::std::string> data_activity_{};
+    ::strata::host::Observable<bool> form_valid_{};
+    ::strata::host::Observable<bool> form_dirty_{};
+    ::strata::host::Observable<bool> form_touched_{};
+    ::strata::host::Observable<::std::string> combo_query_{};
+    ::strata::host::Observable<::std::optional<::std::string>> combo_selection_{};
+    ::strata::host::Observable<double> inspector_node_count_{};
+    ::strata::host::Observable<::std::string> inspector_selected_key_{};
+    ::strata::host::Observable<::std::string> inspector_selected_type_{};
+    ::strata::host::Observable<::std::string> inspector_bounds_{};
+    ::strata::host::Observable<::std::string> inspector_actions_{};
+    ::strata::host::Observable<::std::string> inspector_handler_owners_{};
+    ::strata::host::Observable<::std::string> inspector_motion_{};
+    ::strata::host::Observable<double> measured_nodes_{};
+    ::strata::host::Observable<double> reused_nodes_{};
+    ::strata::host::Observable<double> arranged_nodes_{};
+    ::strata::host::Observable<bool> surface_visible_{};
 };
 
 struct ControlAlphaAction final {
-    static inline constexpr std::string_view id = "control.alpha.action";
+    static inline constexpr ::std::string_view id = "control.alpha.action";
 
-    [[nodiscard]] static ControlAlphaAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static ControlAlphaAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match control.alpha.action");
+            throw ::std::invalid_argument("action event does not match control.alpha.action");
         }
         ControlAlphaAction result;
         return result;
@@ -1224,11 +1224,11 @@ struct ControlAlphaAction final {
 };
 
 struct ControlBetaAction final {
-    static inline constexpr std::string_view id = "control.beta.action";
+    static inline constexpr ::std::string_view id = "control.beta.action";
 
-    [[nodiscard]] static ControlBetaAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static ControlBetaAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match control.beta.action");
+            throw ::std::invalid_argument("action event does not match control.beta.action");
         }
         ControlBetaAction result;
         return result;
@@ -1236,11 +1236,11 @@ struct ControlBetaAction final {
 };
 
 struct ControlGammaAction final {
-    static inline constexpr std::string_view id = "control.gamma.action";
+    static inline constexpr ::std::string_view id = "control.gamma.action";
 
-    [[nodiscard]] static ControlGammaAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static ControlGammaAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match control.gamma.action");
+            throw ::std::invalid_argument("action event does not match control.gamma.action");
         }
         ControlGammaAction result;
         return result;
@@ -1248,11 +1248,11 @@ struct ControlGammaAction final {
 };
 
 struct DemoBehaviorActivateAction final {
-    static inline constexpr std::string_view id = "demo.behavior.activate";
+    static inline constexpr ::std::string_view id = "demo.behavior.activate";
 
-    [[nodiscard]] static DemoBehaviorActivateAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoBehaviorActivateAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.behavior.activate");
+            throw ::std::invalid_argument("action event does not match demo.behavior.activate");
         }
         DemoBehaviorActivateAction result;
         return result;
@@ -1260,11 +1260,11 @@ struct DemoBehaviorActivateAction final {
 };
 
 struct DemoBehaviorDisabledAction final {
-    static inline constexpr std::string_view id = "demo.behavior.disabled";
+    static inline constexpr ::std::string_view id = "demo.behavior.disabled";
 
-    [[nodiscard]] static DemoBehaviorDisabledAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoBehaviorDisabledAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.behavior.disabled");
+            throw ::std::invalid_argument("action event does not match demo.behavior.disabled");
         }
         DemoBehaviorDisabledAction result;
         return result;
@@ -1272,11 +1272,11 @@ struct DemoBehaviorDisabledAction final {
 };
 
 struct DemoComboQueryAction final {
-    static inline constexpr std::string_view id = "demo.combo.query";
+    static inline constexpr ::std::string_view id = "demo.combo.query";
 
-    [[nodiscard]] static DemoComboQueryAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoComboQueryAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.combo.query");
+            throw ::std::invalid_argument("action event does not match demo.combo.query");
         }
         DemoComboQueryAction result;
         return result;
@@ -1284,11 +1284,11 @@ struct DemoComboQueryAction final {
 };
 
 struct DemoComboSelectAction final {
-    static inline constexpr std::string_view id = "demo.combo.select";
+    static inline constexpr ::std::string_view id = "demo.combo.select";
 
-    [[nodiscard]] static DemoComboSelectAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoComboSelectAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.combo.select");
+            throw ::std::invalid_argument("action event does not match demo.combo.select");
         }
         DemoComboSelectAction result;
         return result;
@@ -1296,11 +1296,11 @@ struct DemoComboSelectAction final {
 };
 
 struct DemoCommandGlobalAction final {
-    static inline constexpr std::string_view id = "demo.command.global";
+    static inline constexpr ::std::string_view id = "demo.command.global";
 
-    [[nodiscard]] static DemoCommandGlobalAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoCommandGlobalAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.command.global");
+            throw ::std::invalid_argument("action event does not match demo.command.global");
         }
         DemoCommandGlobalAction result;
         return result;
@@ -1308,11 +1308,11 @@ struct DemoCommandGlobalAction final {
 };
 
 struct DemoCommandScopedAction final {
-    static inline constexpr std::string_view id = "demo.command.scoped";
+    static inline constexpr ::std::string_view id = "demo.command.scoped";
 
-    [[nodiscard]] static DemoCommandScopedAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoCommandScopedAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.command.scoped");
+            throw ::std::invalid_argument("action event does not match demo.command.scoped");
         }
         DemoCommandScopedAction result;
         return result;
@@ -1320,11 +1320,11 @@ struct DemoCommandScopedAction final {
 };
 
 struct DemoDataCollectionAction final {
-    static inline constexpr std::string_view id = "demo.data.collection";
+    static inline constexpr ::std::string_view id = "demo.data.collection";
 
-    [[nodiscard]] static DemoDataCollectionAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoDataCollectionAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.data.collection");
+            throw ::std::invalid_argument("action event does not match demo.data.collection");
         }
         DemoDataCollectionAction result;
         return result;
@@ -1332,11 +1332,11 @@ struct DemoDataCollectionAction final {
 };
 
 struct DemoDropTargetAction final {
-    static inline constexpr std::string_view id = "demo.drop.target";
+    static inline constexpr ::std::string_view id = "demo.drop.target";
 
-    [[nodiscard]] static DemoDropTargetAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoDropTargetAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.drop.target");
+            throw ::std::invalid_argument("action event does not match demo.drop.target");
         }
         DemoDropTargetAction result;
         return result;
@@ -1344,11 +1344,11 @@ struct DemoDropTargetAction final {
 };
 
 struct DemoEventsClearAction final {
-    static inline constexpr std::string_view id = "demo.events.clear";
+    static inline constexpr ::std::string_view id = "demo.events.clear";
 
-    [[nodiscard]] static DemoEventsClearAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoEventsClearAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.events.clear");
+            throw ::std::invalid_argument("action event does not match demo.events.clear");
         }
         DemoEventsClearAction result;
         return result;
@@ -1356,11 +1356,11 @@ struct DemoEventsClearAction final {
 };
 
 struct DemoFocusScopeAction final {
-    static inline constexpr std::string_view id = "demo.focus.scope";
+    static inline constexpr ::std::string_view id = "demo.focus.scope";
 
-    [[nodiscard]] static DemoFocusScopeAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoFocusScopeAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.focus.scope");
+            throw ::std::invalid_argument("action event does not match demo.focus.scope");
         }
         DemoFocusScopeAction result;
         return result;
@@ -1368,11 +1368,11 @@ struct DemoFocusScopeAction final {
 };
 
 struct DemoFormCompletedAction final {
-    static inline constexpr std::string_view id = "demo.form.completed";
+    static inline constexpr ::std::string_view id = "demo.form.completed";
 
-    [[nodiscard]] static DemoFormCompletedAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoFormCompletedAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.form.completed");
+            throw ::std::invalid_argument("action event does not match demo.form.completed");
         }
         DemoFormCompletedAction result;
         return result;
@@ -1380,11 +1380,11 @@ struct DemoFormCompletedAction final {
 };
 
 struct DemoHostBumpAction final {
-    static inline constexpr std::string_view id = "demo.host.bump";
+    static inline constexpr ::std::string_view id = "demo.host.bump";
 
-    [[nodiscard]] static DemoHostBumpAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoHostBumpAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.host.bump");
+            throw ::std::invalid_argument("action event does not match demo.host.bump");
         }
         DemoHostBumpAction result;
         return result;
@@ -1392,18 +1392,18 @@ struct DemoHostBumpAction final {
 };
 
 struct DemoHostMessageAction final {
-    static inline constexpr std::string_view id = "demo.host.message";
-    std::string message{};
+    static inline constexpr ::std::string_view id = "demo.host.message";
+    ::std::string message{};
     double priority = 0.0;
 
-    [[nodiscard]] static DemoHostMessageAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoHostMessageAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.host.message");
+            throw ::std::invalid_argument("action event does not match demo.host.message");
         }
         static_cast<void>(detail::decode_object(event.payload, id));
         DemoHostMessageAction result;
         result.message = detail::decode_string(detail::required_field(event.payload, "message", id), "demo.host.message.message");
-        if (const strata::host::Value* field = event.payload.find("priority"); field != nullptr && !field->is_null()) {
+        if (const ::strata::host::Value* field = event.payload.find("priority"); field != nullptr && !field->is_null()) {
             result.priority = detail::decode_number(*field, "demo.host.message.priority");
         }
         return result;
@@ -1411,11 +1411,11 @@ struct DemoHostMessageAction final {
 };
 
 struct DemoInspectArmAction final {
-    static inline constexpr std::string_view id = "demo.inspect.arm";
+    static inline constexpr ::std::string_view id = "demo.inspect.arm";
 
-    [[nodiscard]] static DemoInspectArmAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoInspectArmAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.inspect.arm");
+            throw ::std::invalid_argument("action event does not match demo.inspect.arm");
         }
         DemoInspectArmAction result;
         return result;
@@ -1423,11 +1423,11 @@ struct DemoInspectArmAction final {
 };
 
 struct DemoInspectClearAction final {
-    static inline constexpr std::string_view id = "demo.inspect.clear";
+    static inline constexpr ::std::string_view id = "demo.inspect.clear";
 
-    [[nodiscard]] static DemoInspectClearAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoInspectClearAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.inspect.clear");
+            throw ::std::invalid_argument("action event does not match demo.inspect.clear");
         }
         DemoInspectClearAction result;
         return result;
@@ -1435,11 +1435,11 @@ struct DemoInspectClearAction final {
 };
 
 struct DemoInspectCoalesceAction final {
-    static inline constexpr std::string_view id = "demo.inspect.coalesce";
+    static inline constexpr ::std::string_view id = "demo.inspect.coalesce";
 
-    [[nodiscard]] static DemoInspectCoalesceAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoInspectCoalesceAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.inspect.coalesce");
+            throw ::std::invalid_argument("action event does not match demo.inspect.coalesce");
         }
         DemoInspectCoalesceAction result;
         return result;
@@ -1447,11 +1447,11 @@ struct DemoInspectCoalesceAction final {
 };
 
 struct DemoInspectDriverAction final {
-    static inline constexpr std::string_view id = "demo.inspect.driver";
+    static inline constexpr ::std::string_view id = "demo.inspect.driver";
 
-    [[nodiscard]] static DemoInspectDriverAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoInspectDriverAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.inspect.driver");
+            throw ::std::invalid_argument("action event does not match demo.inspect.driver");
         }
         DemoInspectDriverAction result;
         return result;
@@ -1459,11 +1459,11 @@ struct DemoInspectDriverAction final {
 };
 
 struct DemoInspectDynamicProbeAction final {
-    static inline constexpr std::string_view id = "demo.inspect.dynamic-probe";
+    static inline constexpr ::std::string_view id = "demo.inspect.dynamic-probe";
 
-    [[nodiscard]] static DemoInspectDynamicProbeAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoInspectDynamicProbeAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.inspect.dynamic-probe");
+            throw ::std::invalid_argument("action event does not match demo.inspect.dynamic-probe");
         }
         DemoInspectDynamicProbeAction result;
         return result;
@@ -1471,11 +1471,11 @@ struct DemoInspectDynamicProbeAction final {
 };
 
 struct DemoInspectSelectAction final {
-    static inline constexpr std::string_view id = "demo.inspect.select";
+    static inline constexpr ::std::string_view id = "demo.inspect.select";
 
-    [[nodiscard]] static DemoInspectSelectAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoInspectSelectAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.inspect.select");
+            throw ::std::invalid_argument("action event does not match demo.inspect.select");
         }
         DemoInspectSelectAction result;
         return result;
@@ -1483,11 +1483,11 @@ struct DemoInspectSelectAction final {
 };
 
 struct DemoNavRightAction final {
-    static inline constexpr std::string_view id = "demo.nav.right";
+    static inline constexpr ::std::string_view id = "demo.nav.right";
 
-    [[nodiscard]] static DemoNavRightAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoNavRightAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.nav.right");
+            throw ::std::invalid_argument("action event does not match demo.nav.right");
         }
         DemoNavRightAction result;
         return result;
@@ -1495,11 +1495,11 @@ struct DemoNavRightAction final {
 };
 
 struct DemoReorderAction final {
-    static inline constexpr std::string_view id = "demo.reorder";
+    static inline constexpr ::std::string_view id = "demo.reorder";
 
-    [[nodiscard]] static DemoReorderAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoReorderAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.reorder");
+            throw ::std::invalid_argument("action event does not match demo.reorder");
         }
         DemoReorderAction result;
         return result;
@@ -1507,11 +1507,11 @@ struct DemoReorderAction final {
 };
 
 struct DemoSplitControlledAction final {
-    static inline constexpr std::string_view id = "demo.split.controlled";
+    static inline constexpr ::std::string_view id = "demo.split.controlled";
 
-    [[nodiscard]] static DemoSplitControlledAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoSplitControlledAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.split.controlled");
+            throw ::std::invalid_argument("action event does not match demo.split.controlled");
         }
         DemoSplitControlledAction result;
         return result;
@@ -1519,11 +1519,11 @@ struct DemoSplitControlledAction final {
 };
 
 struct DemoStateRestoreAction final {
-    static inline constexpr std::string_view id = "demo.state.restore";
+    static inline constexpr ::std::string_view id = "demo.state.restore";
 
-    [[nodiscard]] static DemoStateRestoreAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoStateRestoreAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.state.restore");
+            throw ::std::invalid_argument("action event does not match demo.state.restore");
         }
         DemoStateRestoreAction result;
         return result;
@@ -1531,18 +1531,18 @@ struct DemoStateRestoreAction final {
 };
 
 struct DemoStateSnapshotAction final {
-    static inline constexpr std::string_view id = "demo.state.snapshot";
+    static inline constexpr ::std::string_view id = "demo.state.snapshot";
 
-    [[nodiscard]] static DemoStateSnapshotAction decode(const strata::host::ActionEvent& event) {
+    [[nodiscard]] static DemoStateSnapshotAction decode(const ::strata::host::ActionEvent& event) {
         if (event.id != id) {
-            throw std::invalid_argument("action event does not match demo.state.snapshot");
+            throw ::std::invalid_argument("action event does not match demo.state.snapshot");
         }
         DemoStateSnapshotAction result;
         return result;
     }
 };
 
-inline constexpr std::array<std::string_view, 27U> action_ids{
+inline constexpr ::std::array<::std::string_view, 27U> action_ids{
     ControlAlphaAction::id,
     ControlBetaAction::id,
     ControlGammaAction::id,
@@ -1572,7 +1572,7 @@ inline constexpr std::array<std::string_view, 27U> action_ids{
     DemoStateSnapshotAction::id,
 };
 
-using Action = std::variant<
+using Action = ::std::variant<
     ControlAlphaAction,
     ControlBetaAction,
     ControlGammaAction,
@@ -1602,8 +1602,8 @@ using Action = std::variant<
     DemoStateSnapshotAction
 >;
 
-[[nodiscard]] inline std::optional<Action> decode_action(
-    const strata::host::ActionEvent& event
+[[nodiscard]] inline ::std::optional<Action> decode_action(
+    const ::strata::host::ActionEvent& event
 ) {
     if (event.id == ControlAlphaAction::id) return Action(ControlAlphaAction::decode(event));
     if (event.id == ControlBetaAction::id) return Action(ControlBetaAction::decode(event));
@@ -1632,7 +1632,7 @@ using Action = std::variant<
     if (event.id == DemoSplitControlledAction::id) return Action(DemoSplitControlledAction::decode(event));
     if (event.id == DemoStateRestoreAction::id) return Action(DemoStateRestoreAction::decode(event));
     if (event.id == DemoStateSnapshotAction::id) return Action(DemoStateSnapshotAction::decode(event));
-    return std::nullopt;
+    return ::std::nullopt;
 }
 
 } // namespace strata::contracts::demo_surface
