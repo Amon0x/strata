@@ -43,9 +43,9 @@ using data::JsonValue;
         return {"activate", "focus"};
     if (role == "switch" || role == "checkbox")
         return {"focus", "toggle"};
-    if (role == "text_field" || role == "spin_button")
+    if (role == "text_field")
         return {"activate", "focus"};
-    if (role == "slider")
+    if (role == "slider" || role == "spin_button")
         return {"decrement", "focus", "increment"};
     if (role == "tab" || role == "tab_list")
         return {"activate", "focus"};

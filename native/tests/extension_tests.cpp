@@ -1227,6 +1227,25 @@ screen Main {
               strata_surface_frame(surface, 16'000, &frame_info).status == STRATA_STATUS_OK,
           "a version-3 extension bundle prefix was rejected after behavior-input growth");
     strata_surface_release(surface);
+    // A scroll hook for a widget type no extension defines is rejected, like an input hook.
+    strata_surface_extension_bundle unknown_scroll_extensions = harness->bundle();
+    check(unknown_scroll_extensions.widget_scroll_count != 0U,
+          "the harness bundle lost its widget scroll extension");
+    std::vector<strata_widget_scroll_extension> unknown_scrolls(
+        unknown_scroll_extensions.widget_scrolls,
+        unknown_scroll_extensions.widget_scrolls + unknown_scroll_extensions.widget_scroll_count);
+    unknown_scrolls.push_back(unknown_scrolls.front());
+    unknown_scrolls.back().type = view("harness.missing-widget");
+    unknown_scroll_extensions.widget_scrolls = unknown_scrolls.data();
+    unknown_scroll_extensions.widget_scroll_count = unknown_scrolls.size();
+    surface_config.id = view("harness.unknown-scroll");
+    surface_config.extensions = &unknown_scroll_extensions;
+    surface = nullptr;
+    check(strata_runtime_create_surface(runtime, &surface_config, &surface).status !=
+              STRATA_STATUS_OK,
+          "a widget scroll extension for an unknown widget type was accepted");
+    if (surface != nullptr)
+        strata_surface_release(surface);
     strata_action_registration_release(activation_registration);
     strata_action_registration_release(observation_registration);
     strata_runtime_release(runtime);

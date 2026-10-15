@@ -30,7 +30,8 @@ constexpr std::int64_t default_hover_expand_delay = 650'000'000;
         ? text(found->second->field("parentKey"))
         : nullptr;
     std::set<std::string, std::less<>> visited;
-    while (parent != nullptr && visited.insert(*parent).second) {
+    // An empty or unknown parentKey ends the chain: the row is a root, as the description draws it.
+    while (parent != nullptr && model.items.contains(*parent) && visited.insert(*parent).second) {
         ++result;
         found = model.items.find(*parent);
         parent = found != model.items.end() ? text(found->second->field("parentKey")) : nullptr;

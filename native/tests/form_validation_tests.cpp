@@ -623,6 +623,127 @@ overlay Main { root SubmissionFixture() }
     );
 }
 
+// Length limits count characters, not UTF-8 bytes, and form.validate reports how many fields
+// failed, publishing that summary only when the action asks to notify. An unbounded NumberField
+// is described as a spin button with no range bounds.
+void test_form_lengths_and_validation_summary(
+    const std::filesystem::path& resource_root,
+    const std::shared_ptr<const strata::runtime::ApplicationBundle>& bundle
+) {
+    constexpr std::string_view source = R"(
+component LengthFixture() {
+  state short = "éé";
+  state fits = "éé";
+  state count = 42;
+  Form(key: "length.form") {
+    NumberField(key: "length.count", bind: count)
+    Field(key: "length.short-field", name: "short", label: "Short", inputKey: "length.short", minLength: 3) {
+      TextBox(key: "length.short", bind: short)
+    }
+    Field(key: "length.fits-field", name: "fits", label: "Fits", inputKey: "length.fits", maxLength: 2) {
+      TextBox(key: "length.fits", bind: fits)
+    }
+    Field(key: "length.required-field", name: "required", label: "Required", inputKey: "length.required", required: true) {
+      TextBox(key: "length.required", text: "")
+    }
+    Button(key: "length.quiet", label: "Quiet", onClick: action("form.validate", key: "length.form"))
+    Button(key: "length.notify", label: "Notify", onClick: action("form.validate", key: "length.form", notify: true))
+  }
+}
+overlay Main { root LengthFixture() }
+)";
+    strata::runtime::ApplicationContext application("form-lengths", bundle);
+    const strata::runtime::ActivationResult activation = application.compile_and_activate(
+        strata::compiler::ModuleSource{"form-lengths.strata", std::string(source)},
+        no_imports(),
+        0U
+    );
+    check(activation.activated(), "form length fixture did not activate");
+    strata::ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 480;
+    environment.framebuffer_height = 360;
+    environment.logical_width = 480.0;
+    environment.logical_height = 360.0;
+    environment.reduced_motion = true;
+    environment.input = strata::ui::SurfaceInputCapabilities{
+        true, strata::ui::PointerPrecision::fine, true, false, true, true, false,
+    };
+    strata::ui::Surface surface(
+        "form-lengths",
+        application,
+        strata::runtime::LayerRole::overlay,
+        "Main",
+        environment,
+        strata::ui::TextEngine::load_control_font(
+            resource_root,
+            strata::resource::ResourceId::parse("assets/strata/fonts/medium.ttf")
+        )
+    );
+    static_cast<void>(surface.frame(1'000'000));
+
+    const strata::data::JsonValue* count_semantics =
+        surface.semantics().find(surface.tree().find_key("length.count")->identity());
+    const strata::data::JsonValue* count_role =
+        count_semantics != nullptr ? count_semantics->find("role") : nullptr;
+    const strata::data::JsonValue* count_state =
+        count_semantics != nullptr ? count_semantics->find("state") : nullptr;
+    const strata::data::JsonValue* count_range =
+        count_state != nullptr ? count_state->find("value") : nullptr;
+    const strata::data::JsonValue* count_actions =
+        count_semantics != nullptr ? count_semantics->find("actions") : nullptr;
+    check(
+        count_role != nullptr && count_role->string() != nullptr &&
+            *count_role->string() == "spin_button",
+        "NumberField was not described as a spin button"
+    );
+    check(
+        count_range != nullptr && count_range->find("maximum") != nullptr &&
+            count_range->find("maximum")->is_null() && count_range->find("minimum") != nullptr &&
+            count_range->find("minimum")->is_null() && count_range->find("current") != nullptr &&
+            count_range->find("current")->number() != nullptr &&
+            *count_range->find("current")->number() == 42.0,
+        "an unbounded NumberField published invented range bounds"
+    );
+    check(
+        count_actions != nullptr && count_actions->array() != nullptr &&
+            std::ranges::any_of(*count_actions->array(), [](const strata::data::JsonValue& action) {
+                return action.string() != nullptr && *action.string() == "increment";
+            }),
+        "a NumberField spin button lost its increment action"
+    );
+
+    const strata::ui::InputOperationResult quiet = surface.input().click("length.quiet");
+    check(!quiet.action_outcomes.empty(), "form.validate did not produce an outcome");
+    for (const strata::data::JsonValue& outcome : quiet.action_outcomes) {
+        check(
+            !contains_field_value(outcome, "message", "2 validation errors require attention.") &&
+                !contains_field_value(outcome, "message", "1 validation error requires attention."),
+            "form.validate published a summary without notify"
+        );
+    }
+    static_cast<void>(surface.frame(2'000'000));
+    check(
+        retained_string(surface.tree().find_key("length.short-field"), "strata.form.error") !=
+            nullptr,
+        "minLength counted UTF-8 bytes instead of characters"
+    );
+    check(
+        retained_string(surface.tree().find_key("length.fits-field"), "strata.form.error") ==
+            nullptr,
+        "maxLength rejected a value that fits in characters"
+    );
+
+    const strata::ui::InputOperationResult notified = surface.input().click("length.notify");
+    check(
+        std::ranges::any_of(notified.action_outcomes, [](const strata::data::JsonValue& outcome) {
+            return contains_field_value(
+                outcome, "message", "2 validation errors require attention."
+            );
+        }),
+        "form.validate with notify did not report its invalid field count"
+    );
+}
+
 } // namespace
 
 int strata_test_form_validation(const int argument_count, const char* const* const arguments) {
@@ -632,6 +753,7 @@ int strata_test_form_validation(const int argument_count, const char* const* con
         const auto bundle = load_bundle();
         test_visible_form_validation(resource_root, bundle);
         test_canonical_form_submission(resource_root, bundle);
+        test_form_lengths_and_validation_summary(resource_root, bundle);
         std::cout << "strata_form_validation_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

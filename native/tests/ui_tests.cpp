@@ -2067,6 +2067,56 @@ void test_variable_virtual_extents_and_stable_anchor() {
           "virtual layout retained an all-item key snapshot instead of an observed key window");
 }
 
+// A horizontal virtual list places its items side by side in one row: each item starts at its
+// extent along x, all share the row's top, and the content is only as tall as the tallest item.
+void test_horizontal_virtual_list_lays_items_in_a_row() {
+    using namespace strata;
+    using namespace strata::ui;
+
+    std::vector<std::shared_ptr<const DescriptionNode>> children;
+    std::vector<runtime::Value> keys;
+    for (const auto& [key, height] :
+         std::vector<std::pair<std::string, double>>{{"a", 10.0}, {"b", 30.0}, {"c", 20.0}}) {
+        children.push_back(node("Panel", key, {},
+                                layout_properties(object({
+                                    {"height", runtime::Value(height)},
+                                    {"width", runtime::Value(40.0)},
+                                }))));
+        keys.emplace_back(runtime::KeyValue{key});
+    }
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(
+        node("VirtualList", "row.virtual", std::move(children),
+             layout_properties(object({
+                 {"kind", runtime::Value("SCROLL")},
+                 {"virtualAxis", runtime::Value("HORIZONTAL")},
+                 {"virtualItemCount", runtime::Value(3.0)},
+                 {"virtualItemExtent", runtime::Value(40.0)},
+                 {"virtualItemKeys", runtime::Value(std::move(keys))},
+                 {"virtualOverscan", runtime::Value(0.0)},
+             })))));
+    LayoutEngine layout;
+    const LayoutEnvironment environment{
+        0U,    Rect{0.0, 0.0, 200.0, 50.0}, 1.0,
+        {},    PointSnapPolicy::nearest,    RectangleSnapPolicy::outward,
+        false,
+    };
+    const auto& result = layout.layout(tree, environment);
+    const LayoutRecord* list = result.find(tree.root()->identity());
+    check(list != nullptr, "horizontal virtual list was not arranged");
+    check_near(list->content_size.width, 120.0, "horizontal virtual content width changed");
+    check_near(list->content_size.height, 30.0,
+               "horizontal virtual content height summed its items instead of taking the row");
+    double expected_x = 0.0;
+    for (const std::string_view key : {"a", "b", "c"}) {
+        const LayoutRecord* item = result.find(tree.find_key(key)->identity());
+        check(item != nullptr, "horizontal virtual item was not arranged");
+        check_near(item->bounds.x, expected_x, "horizontal virtual item left its extent slot");
+        check_near(item->bounds.y, 0.0, "horizontal virtual item was stacked below its siblings");
+        expected_x += 40.0;
+    }
+}
+
 void test_layered_layout_uses_independent_axes() {
     using namespace strata;
     using namespace strata::ui;
@@ -2365,6 +2415,48 @@ void test_zero_fill_weight_collapses_without_stealing_space() {
     check(grid_zero != nullptr && grid_one != nullptr && grid_zero->bounds.width == 0.0 &&
               grid_one->bounds.width == 100.0,
           "grid track resolution reassigned default weight to an explicit zero");
+}
+
+// Changing only a grid's tracks in $layout is a layout change: the retained layout must rerun
+// rather than keep the old column widths.
+void test_grid_track_change_invalidates_layout() {
+    using namespace strata;
+    using namespace strata::ui;
+
+    const auto grid = [](const double second_weight) {
+        return node("Panel", "tracks.grid",
+                    {
+                        node("Panel", "tracks.first"),
+                        node("Panel", "tracks.second"),
+                    },
+                    layout_properties(object({
+                        {"columns", runtime::Value(std::vector<runtime::Value>{
+                                        object({{"weight", runtime::Value(1.0)}}),
+                                        object({{"weight", runtime::Value(second_weight)}}),
+                                    })},
+                        {"height", runtime::Value(10.0)},
+                        {"kind", runtime::Value("GRID")},
+                        {"width", runtime::Value(100.0)},
+                    })));
+    };
+    const LayoutEnvironment environment{
+        0U,    Rect{0.0, 0.0, 100.0, 10.0}, 1.0,
+        {},    PointSnapPolicy::nearest,    RectangleSnapPolicy::outward,
+        false,
+    };
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(grid(1.0)));
+    LayoutEngine layout;
+    const LayoutRecord* before =
+        layout.layout(tree, environment).find(tree.find_key("tracks.second")->identity());
+    check(before != nullptr, "grid child was not arranged");
+    check_near(before->bounds.width, 50.0, "equal grid tracks did not split evenly");
+
+    static_cast<void>(tree.reconcile(grid(3.0)));
+    const LayoutRecord* after =
+        layout.layout(tree, environment).find(tree.find_key("tracks.second")->identity());
+    check(after != nullptr, "grid child was not rearranged");
+    check_near(after->bounds.width, 75.0, "a grid track change did not rerun layout");
 }
 
 void test_layout_motion_preserves_relative_units() {
@@ -4784,6 +4876,90 @@ overlay AsyncCollections {
     check(!requests.empty() && requests.back().payload.string() != nullptr &&
               *requests.back().payload.string() == "empty",
           "bound TextBox query action retained the previous authored value");
+}
+
+// A TreeView row whose parentKey is empty or names no item is drawn as a root, so keyboard
+// navigation must reach it too.
+void test_tree_rows_without_a_parent_are_reachable(const std::filesystem::path& resource_root) {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("orphan-tree", bundle);
+    const std::string source = R"(
+component OrphanTreeRow(key: key, label: string, selected: boolean, expanded: boolean, loading: boolean) {
+  Panel(key: key, layout: { kind: "ROW", width: { weight: 1 }, height: { weight: 1 } }) {
+    Text(text: label)
+  }
+}
+overlay Orphans {
+  TreeView(
+    key: "orphans.tree",
+    items: [
+      { key: "orphan.root", label: "Apple", parentKey: null, mayHaveChildren: false, childrenLoaded: true },
+      { key: "orphan.empty", label: "Banana", parentKey: "", mayHaveChildren: false, childrenLoaded: true },
+      { key: "orphan.dangling", label: "Cherry", parentKey: "missing", mayHaveChildren: false, childrenLoaded: true }
+    ],
+    rowTemplate: OrphanTreeRow,
+    layout: { kind: "SCROLL", width: 300, height: 200 }
+  )
+}
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    const runtime::ActivationResult activation = application.compile_and_activate(
+        compiler::ModuleSource{"orphans.strata", source}, no_imports, 0U);
+    if (!activation.activated()) {
+        std::string message = "orphan tree fixture did not activate";
+        for (const runtime::ActivationDiagnostic& diagnostic : activation.diagnostics) {
+            message += " [" + diagnostic.code + ": " + diagnostic.message + "]";
+        }
+        throw std::runtime_error(message);
+    }
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 220;
+    environment.logical_width = 320.0;
+    environment.logical_height = 220.0;
+    environment.input = ui::SurfaceInputCapabilities{
+        true, ui::PointerPrecision::fine, true, false, true, true, false,
+    };
+    ui::Surface surface(
+        "orphan-tree", application, runtime::LayerRole::overlay, "Orphans", environment,
+        ui::TextEngine::load_control_font(
+            resource_root, resource::ResourceId::parse("assets/strata/fonts/medium.ttf")));
+    std::int64_t frame_time = 1'000'000'000;
+    static_cast<void>(surface.frame(frame_time));
+    for (const std::string_view key : {"orphan.root", "orphan.empty", "orphan.dangling"}) {
+        check(surface.tree().find_key(key) != nullptr, "an orphan tree row was not drawn");
+    }
+
+    const ui::RetainedNode* root = surface.tree().find_key("orphan.root");
+    const ui::LayoutRecord* root_layout = surface.layout().find(root->identity());
+    check(root_layout != nullptr, "orphan tree root row was not arranged");
+    const ui::Point center{root_layout->bounds.x + root_layout->bounds.width * 0.5,
+                           root_layout->bounds.y + root_layout->bounds.height * 0.5};
+    static_cast<void>(surface.input().enqueue_pointer(
+        ui::PointerInputEvent{center, ui::PointerEventType::press, 7, 0}));
+    static_cast<void>(surface.input().enqueue_pointer(
+        ui::PointerInputEvent{center, ui::PointerEventType::release, 7, 0}));
+    frame_time += 16'666'667;
+    static_cast<void>(surface.frame(frame_time));
+
+    const auto active = [&surface]() -> std::string {
+        const runtime::Value* value =
+            surface.tree().find_key("orphans.tree")->retained_value("strata.collection.active");
+        return value != nullptr && value->key() != nullptr ? value->key()->value
+                                                           : std::string("<none>");
+    };
+    static_cast<void>(surface.input().key("C"));
+    check(active() == "orphan.dangling",
+          "typeahead could not reach a row whose parent does not exist; active=" + active());
+    frame_time += 2'000'000'000;
+    static_cast<void>(surface.frame(frame_time));
+    static_cast<void>(surface.input().key("B"));
+    check(active() == "orphan.empty",
+          "typeahead could not reach a row with an empty parentKey; active=" + active());
 }
 
 void test_native_collection_interaction_and_templates(const std::filesystem::path& resource_root) {
@@ -7429,6 +7605,8 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_lazy_range_convergence_state_machine();
         test_materialization_publication_identity_and_eviction();
         test_variable_virtual_extents_and_stable_anchor();
+        test_horizontal_virtual_list_lays_items_in_a_row();
+        test_grid_track_change_invalidates_layout();
         test_layered_layout_uses_independent_axes();
         test_layer_placement_and_sibling_anchors();
         test_zero_fill_weight_collapses_without_stealing_space();
@@ -7484,6 +7662,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_surface_contextual_environment(arguments[1]);
             test_async_collection_key_isolation_and_lazy_tree_publication(arguments[1]);
             test_native_collection_interaction_and_templates(arguments[1]);
+            test_tree_rows_without_a_parent_are_reachable(arguments[1]);
         }
         std::cout << "strata_ui_tests: OK\n";
         return 0;

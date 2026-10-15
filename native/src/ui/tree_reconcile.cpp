@@ -76,6 +76,12 @@ struct SiblingKey final {
         }
     }
     for (const std::string_view field : {
+             "columns",
+             "rows",
+             "scrollOffset",
+             "scrollPin",
+             "border",
+             "virtualAnchorPolicy",
              "portalTarget",
              "detachFromParentClip",
              "anchorTarget",

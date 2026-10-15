@@ -620,7 +620,9 @@ bool indexed_key(WidgetInputScope& scope) {
     } else if (scope.key() == "end") {
         index = targets.size() - 1U;
     } else if (scope.key() == "escape") {
-        if (menu_bar) {
+        // Escape closes this widget's own popup; with none open it belongs to an ancestor, such
+        // as the dialog or menu the widget sits in.
+        if (menu_open) {
             scope.set_retained("$menuCategory", runtime::Value{}, DirtyReason::properties);
             scope.set_retained(
                 "$shellIndex", runtime::Value(static_cast<double>(category_index)),
@@ -628,11 +630,12 @@ bool indexed_key(WidgetInputScope& scope) {
             );
             return true;
         }
-        if (toolbar) {
+        if (toolbar_open) {
             scope.set_retained("$toolbarOverflow", runtime::Value(false), DirtyReason::properties);
             scope.set_retained("$toolbarOverflowOffset", runtime::Value(0.0), DirtyReason::input);
             return true;
         }
+        return false;
     } else if (scope.key() == "enter" || scope.key() == "space") {
         const WidgetSubtarget& target = targets[index];
         if (target.kind == WidgetSubtargetKind::command) {

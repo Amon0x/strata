@@ -765,8 +765,17 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
     const auto opentype_started = std::chrono::steady_clock::now();
     std::vector<Unit> shaped_units;
     shaped_units.reserve(units.size());
+    // Spacing goes before every glyph of one style. A run that a font fallback or a missing glyph
+    // split off still continues that style, so its first glyph keeps the spacing; a new authored
+    // style starts clean, so spacing never crosses a span boundary.
+    const auto continues_style = [&shaped_units](const Unit& unit) {
+        return !shaped_units.empty() && !shaped_units.back().newline &&
+               shaped_units.back().style_identity == unit.style_identity;
+    };
     for (std::size_t begin = 0U; begin < units.size();) {
         if (units[begin].newline || units[begin].glyph_id == 0U) {
+            if (!units[begin].newline && continues_style(units[begin]))
+                units[begin].leading = units[begin].letter_spacing;
             shaped_units.push_back(std::move(units[begin]));
             ++begin;
             continue;
@@ -810,7 +819,7 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
                 unit.whitespace = false;
             const font::GlyphPositionAdjustment& position = glyph.position;
             const double scale = unit.pixel_size / static_cast<double>(face.units_per_em());
-            unit.leading = shaped_index == 0U ? 0.0 : unit.letter_spacing;
+            unit.leading = shaped_index != 0U || continues_style(unit) ? unit.letter_spacing : 0.0;
             unit.advance = static_cast<double>(face.horizontal_advance(unit.glyph_id)) * scale +
                            position.x_advance * scale;
             unit.x_placement = position.x_placement * scale;

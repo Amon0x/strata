@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -23,6 +25,23 @@
 namespace strata::ui {
 using namespace input_detail;
 namespace {
+
+/** Characters in valid UTF-8 text: every byte that is not a continuation byte starts one. */
+[[nodiscard]] std::size_t code_point_count(const std::string_view text) noexcept {
+    return static_cast<std::size_t>(std::ranges::count_if(text, [](const char byte) {
+        return (static_cast<unsigned char>(byte) & 0xC0U) != 0x80U;
+    }));
+}
+
+/** A minLength/maxLength bound, ignored when it is not a usable count (as TextBox does). */
+[[nodiscard]] std::optional<std::size_t> length_bound(const runtime::Value* value) noexcept {
+    if (value == nullptr || value->number() == nullptr || !std::isfinite(*value->number()) ||
+        *value->number() < 0.0 ||
+        *value->number() > static_cast<double>(std::numeric_limits<std::size_t>::max())) {
+        return std::nullopt;
+    }
+    return static_cast<std::size_t>(*value->number());
+}
 
 [[nodiscard]] std::string validation_message(
     const RetainedNode& field,
@@ -98,15 +117,15 @@ bool InputRouter::validate_field(RetainedNode& field, const bool mark_touched) {
          (text.has_value() && (text->empty() || blank(*text))))) {
         error = validation_message(field, "requiredMessage", "This field is required.");
     }
-    const runtime::Value* minimum = scalar_property(field, "minLength");
-    if (!error.has_value() && minimum != nullptr && minimum->number() != nullptr &&
-        text.has_value() && !text->empty() &&
-        text->size() < static_cast<std::size_t>(*minimum->number())) {
+    // Lengths count characters, matching the TextBox maxLength that limits what can be typed.
+    const std::optional<std::size_t> minimum = length_bound(scalar_property(field, "minLength"));
+    if (!error.has_value() && minimum.has_value() && text.has_value() && !text->empty() &&
+        code_point_count(*text) < *minimum) {
         error = validation_message(field, "minLengthMessage", "Value is too short.");
     }
-    const runtime::Value* maximum = scalar_property(field, "maxLength");
-    if (!error.has_value() && maximum != nullptr && maximum->number() != nullptr &&
-        text.has_value() && text->size() > static_cast<std::size_t>(*maximum->number())) {
+    const std::optional<std::size_t> maximum = length_bound(scalar_property(field, "maxLength"));
+    if (!error.has_value() && maximum.has_value() && text.has_value() &&
+        code_point_count(*text) > *maximum) {
         error = validation_message(field, "maxLengthMessage", "Value is too long.");
     }
     const runtime::Value* minimum_number = scalar_property(field, "min");
@@ -136,7 +155,7 @@ bool InputRouter::validate_field(RetainedNode& field, const bool mark_touched) {
     return !error.has_value();
 }
 
-bool InputRouter::validate_form(
+std::size_t InputRouter::validate_form(
     RetainedNode& form,
     const bool focus_first_invalid,
     InputOperationResult& result
@@ -144,8 +163,11 @@ bool InputRouter::validate_form(
     std::vector<RetainedNode*> fields;
     collect_type(form, "Field", fields);
     RetainedNode* first_invalid = nullptr;
+    std::size_t invalid_count = 0U;
     for (RetainedNode* field : fields) {
-        if (!validate_field(*field, true) && first_invalid == nullptr) first_invalid = field;
+        if (validate_field(*field, true)) continue;
+        ++invalid_count;
+        if (first_invalid == nullptr) first_invalid = field;
     }
     if (focus_first_invalid && first_invalid != nullptr) {
         const std::string* input_key = string_value(scalar_property(*first_invalid, "inputKey"));
@@ -155,7 +177,7 @@ bool InputRouter::validate_form(
             }
         }
     }
-    return first_invalid == nullptr;
+    return invalid_count;
 }
 
 void InputRouter::note_field_change(RetainedNode& node) {
@@ -212,20 +234,30 @@ runtime::ActionDispatchOutcome InputRouter::execute_form_action(
         const runtime::Value* focus_value = action.payload.field("focusFirstInvalid");
         const bool focus_first = focus_value == nullptr || focus_value->boolean() == nullptr ||
                                  *focus_value->boolean();
-        const bool valid = validate_form(*form, focus_first, result);
+        const std::size_t invalid = validate_form(*form, focus_first, result);
+        // The summary is published as status feedback, so it is only produced when asked for.
+        const runtime::Value* notify_value = action.payload.field("notify");
+        const bool notify = notify_value != nullptr && notify_value->boolean() != nullptr &&
+                            *notify_value->boolean();
+        std::optional<std::string> message;
+        if (notify) {
+            message = invalid == 0U ? std::string("Form is valid.")
+                      : invalid == 1U
+                          ? std::string("1 validation error requires attention.")
+                          : std::to_string(invalid) + " validation errors require attention.";
+        }
         return runtime::ActionDispatchOutcome{
             runtime::ActionDispatchStatus::handled,
             action.id(),
             {"strata.surface.declarative"},
-            valid ? std::optional<std::string>("Form is valid.")
-                  : std::optional<std::string>("1 validation error requires attention."),
+            std::move(message),
         };
     }
 
     const runtime::Value* validate_on_submit = scalar_property(*form, "validateOnSubmit");
     const bool should_validate = validate_on_submit == nullptr || validate_on_submit->boolean() == nullptr ||
                                  *validate_on_submit->boolean();
-    const bool valid = !should_validate || validate_form(*form, true, result);
+    const bool valid = !should_validate || validate_form(*form, true, result) == 0U;
     if (valid) {
         std::shared_ptr<const runtime::ActionValue> submit;
         const auto authored = form->description().properties.find("onSubmit");

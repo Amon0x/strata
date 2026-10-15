@@ -455,8 +455,9 @@ class InputRouter final {
                                const RetainedNode& node);
     [[nodiscard]] runtime::ActionDispatchOutcome execute_form_action(const runtime::Action& action,
                                                                      InputOperationResult& result);
-    [[nodiscard]] bool validate_form(RetainedNode& form, bool focus_first_invalid,
-                                     InputOperationResult& result);
+    /** Validates every field of a form and returns how many are invalid. */
+    [[nodiscard]] std::size_t validate_form(RetainedNode& form, bool focus_first_invalid,
+                                            InputOperationResult& result);
     [[nodiscard]] bool validate_field(RetainedNode& field, bool mark_touched);
     void note_field_change(RetainedNode& node);
     void note_field_blur(RetainedNode& node);

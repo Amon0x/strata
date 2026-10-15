@@ -1279,6 +1279,30 @@ void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resour
               rich.resolved_runs.back().font_rasterization == ui::FontRasterization::msdf,
           "resolved rich runs lost style identity, fallback face, mixed metrics, or raster mode");
 
+    // Within one style, a font fallback splits the shaping run but not the spacing: every glyph
+    // after the first still sits letterSpacing past its predecessor's advance.
+    ui::RetainedTree spaced_tree;
+    const ui::RetainedNode& spaced_node = *retain(spaced_tree, text_node("Text", object({
+        {"fallbackFonts", runtime::Value(std::vector<runtime::Value>{runtime::Value("explicit")})},
+        {"font", runtime::Value("primary")},
+        {"letterSpacing", runtime::Value(4.0)},
+        {"pixelSize", runtime::Value(10.0)},
+    })));
+    const ui::TextLayout spaced = engine.layout(spaced_node, "A\xC4\xB2" "A");
+    check(spaced.shaped.glyphs.size() == 3U &&
+              spaced.glyph_font_ids ==
+                  std::vector<std::string>{"primary", "explicit", "primary"},
+          "fallback spacing fixture did not split into three font runs");
+    const double mono_a = static_cast<double>(mono.horizontal_advance(mono.glyph_id('A'))) *
+                          10.0 / static_cast<double>(mono.units_per_em());
+    const double medium_ij =
+        static_cast<double>(medium.horizontal_advance(medium.glyph_id(0x0132U))) * 10.0 /
+        static_cast<double>(medium.units_per_em());
+    check_near(spaced.shaped.glyphs[1].x - spaced.shaped.glyphs[0].x, mono_a + 4.0,
+               "letter spacing was dropped before a fallback glyph");
+    check_near(spaced.shaped.glyphs[2].x - spaced.shaped.glyphs[1].x, medium_ij + 4.0,
+               "letter spacing was dropped after a fallback glyph");
+
     const runtime::Value flag_spans(std::vector<runtime::Value>{
         object({
             {"style", object({{"fontStyleFlags", runtime::Value(1.0)}})},

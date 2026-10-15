@@ -498,12 +498,18 @@ void LayoutEngine::arrange(
             record.virtual_axis = virtual_list.axis;
             record.virtual_overscan = virtual_list.overscan;
         }
+        // A horizontal virtual list lays its items side by side, so they share one row's height
+        // instead of stacking.
+        const bool horizontal_virtual =
+            style.virtual_list.has_value() && style.virtual_list->axis == LayoutAxis::horizontal;
         Size scroll_content;
         for (const MeasuredNodePtr& child : flow_children) {
             scroll_content.width = std::max(scroll_content.width, child->measured_size.width);
-            scroll_content.height += child->measured_size.height;
+            scroll_content.height = horizontal_virtual
+                                        ? std::max(scroll_content.height, child->measured_size.height)
+                                        : scroll_content.height + child->measured_size.height;
         }
-        if (!flow_children.empty()) scroll_content.height += style.gap.y * static_cast<double>(flow_children.size() - 1U);
+        if (!flow_children.empty() && !horizontal_virtual) scroll_content.height += style.gap.y * static_cast<double>(flow_children.size() - 1U);
         if (style.virtual_list.has_value()) {
             const VirtualListSpec& virtual_list = *style.virtual_list;
             const double virtual_extent = virtual_extents->extents.total();
@@ -548,6 +554,7 @@ void LayoutEngine::arrange(
                     child_y = content_bounds.y + position - record.scroll_offset.y;
                 } else if (virtual_list.axis == LayoutAxis::horizontal) {
                     child_x = content_bounds.x + position - record.scroll_offset.x;
+                    child_y = content_bounds.y - record.scroll_offset.y;
                 }
             }
             double child_width = child->measured_size.width;

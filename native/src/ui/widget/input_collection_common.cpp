@@ -242,7 +242,9 @@ Model model(WidgetInputScope& scope) {
         if (tree) {
             std::optional<std::string> parent = parents[*key];
             std::set<std::string, std::less<>> visited;
-            while (parent.has_value() && visited.insert(*parent).second) {
+            // An empty or unknown parentKey makes the row a root, as the description draws it.
+            while (parent.has_value() && parents.contains(*parent) &&
+                   visited.insert(*parent).second) {
                 if (!open.contains(*parent)) {
                     visible = false;
                     break;

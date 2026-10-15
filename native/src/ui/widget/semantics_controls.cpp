@@ -54,7 +54,8 @@ void text_field(WidgetSemanticsScope& scope) {
     return value;
 }
 
-void numeric_range(WidgetSemanticsScope& scope) {
+void publish_value_range(WidgetSemanticsScope& scope, JsonValue unset_minimum,
+                         JsonValue unset_maximum) {
     label_or_key(scope);
     const runtime::Value* current = effective_number_value(scope);
     const runtime::Value* minimum = scope.property("min");
@@ -63,11 +64,21 @@ void numeric_range(WidgetSemanticsScope& scope) {
         {"current", current != nullptr && current->number() != nullptr
                         ? JsonValue(*current->number()) : JsonValue(0.0)},
         {"maximum", maximum != nullptr && maximum->number() != nullptr
-                        ? JsonValue(*maximum->number()) : JsonValue(1.0)},
+                        ? JsonValue(*maximum->number()) : std::move(unset_maximum)},
         {"minimum", minimum != nullptr && minimum->number() != nullptr
-                        ? JsonValue(*minimum->number()) : JsonValue(0.0)},
+                        ? JsonValue(*minimum->number()) : std::move(unset_minimum)},
         {"text", JsonValue{}},
     }));
+}
+
+void numeric_range(WidgetSemanticsScope& scope) {
+    publish_value_range(scope, JsonValue(0.0), JsonValue(1.0));
+}
+
+// A NumberField without min/max is unbounded (its input clamps to nothing), so its range
+// publishes no bounds rather than a slider's 0..1.
+void number_field(WidgetSemanticsScope& scope) {
+    publish_value_range(scope, JsonValue{}, JsonValue{});
 }
 
 void tabs(WidgetSemanticsScope& scope) {
@@ -171,7 +182,7 @@ void register_control_widget_semantics(WidgetRegistry& registry) {
     add(registry, "Switch", "switch", &label_or_key);
     add(registry, "TextBox", "text_field", &text_field);
     add(registry, "TextArea", "text_field", &text_field);
-    add(registry, "NumberField", "slider", &numeric_range);
+    add(registry, "NumberField", "spin_button", &number_field);
     add(registry, "Slider", "slider", &numeric_range);
     add(registry, "Progress", "progress_bar", &numeric_range);
     add(registry, "Tabs", "tab_list", &tabs);

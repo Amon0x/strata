@@ -693,6 +693,10 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
         throw std::invalid_argument("widget input extension names unknown widget type '" +
                                     widget_inputs.begin()->first + "'");
     }
+    if (!widget_scrolls.empty()) {
+        throw std::invalid_argument("widget scroll extension names unknown widget type '" +
+                                    widget_scrolls.begin()->first + "'");
+    }
     for (std::size_t index = 0U; index < bundle->behavior_count; ++index) {
         const strata_behavior_extension descriptor = bundle->behaviors[index];
         if (descriptor.struct_size < STRATA_BEHAVIOR_EXTENSION_VERSION_1_SIZE) {
