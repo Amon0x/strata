@@ -14,7 +14,7 @@ set(staging "${package_directory}/vscode-extension-staging")
 file(REMOVE_RECURSE "${staging}")
 file(MAKE_DIRECTORY "${staging}/extension/syntaxes")
 
-foreach(file IN ITEMS package.json language-configuration.json extension.js compiler_arguments.js README.md strata-completions.json)
+foreach(file IN ITEMS package.json language-configuration.json extension.js compiler_arguments.js quick_fix.js README.md strata-completions.json)
     file(COPY_FILE
         "${STRATA_EDITOR_SOURCE}/${file}"
         "${staging}/extension/${file}"
@@ -58,6 +58,7 @@ execute_process(
 if(NOT list_status EQUAL 0 OR
    NOT package_contents MATCHES "extension/extension.js" OR
    NOT package_contents MATCHES "extension/compiler_arguments.js" OR
+   NOT package_contents MATCHES "extension/quick_fix.js" OR
    NOT package_contents MATCHES "extension/strata-completions.json" OR
    NOT package_contents MATCHES "extension/syntaxes/strata.tmLanguage.json")
     message(FATAL_ERROR

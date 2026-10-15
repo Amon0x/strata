@@ -8,6 +8,7 @@ It provides:
 - hovers and signature help from generated type/dispatch metadata;
 - document symbols and local/import definition navigation;
 - exact source-ranged diagnostics from the production `strata_compile` executable;
+- one-click quick fixes for diagnostics that suggest a name ("Did you mean 'label'?");
 - manifest-driven application preview with compatible `.strata` and predeclared-HLSL watching;
 - automatic adjacent `*.schemas.json` discovery plus explicit workspace settings.
 

@@ -1005,6 +1005,7 @@ if(STRATA_BUILD_TOOLS)
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/language-configuration.json
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/extension.js
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/compiler_arguments.js
+            ${STRATA_REPOSITORY_ROOT}/editor/vscode/quick_fix.js
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/README.md
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/strata-completions.json
             ${STRATA_REPOSITORY_ROOT}/editor/vscode/syntaxes/strata.tmLanguage.json
@@ -1183,6 +1184,11 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                 NAME strata.editor.vscode.compiler_arguments
                 COMMAND ${strata_node_executable}
                     ${CMAKE_CURRENT_SOURCE_DIR}/../editor/vscode/compiler_arguments.test.js
+            )
+            add_test(
+                NAME strata.editor.vscode.quick_fix
+                COMMAND ${strata_node_executable}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../editor/vscode/quick_fix.test.js
             )
         endif()
     endif()

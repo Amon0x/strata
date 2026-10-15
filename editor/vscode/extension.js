@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
 const { compilerArguments } = require('./compiler_arguments');
+const { suggestedReplacement } = require('./quick_fix');
 
 const selector = { language: 'strata', scheme: 'file' };
 const core = require('./strata-completions.json');
@@ -501,6 +502,31 @@ function definitionProvider() {
     };
 }
 
+// Offers the compiler's "Did you mean" suggestion as a one-click fix on its diagnostic.
+function quickFixProvider() {
+    return {
+        provideCodeActions(document, _range, context) {
+            const actions = [];
+            for (const diagnostic of context.diagnostics) {
+                if (diagnostic.source !== 'strata') continue;
+                const edit = suggestedReplacement(diagnostic.message, document.getText(diagnostic.range));
+                if (!edit) continue;
+                const start = document.offsetAt(diagnostic.range.start) + edit.offset;
+                const target = new vscode.Range(
+                    document.positionAt(start), document.positionAt(start + edit.length));
+                const action = new vscode.CodeAction(
+                    `Change to '${edit.replacement}'`, vscode.CodeActionKind.QuickFix);
+                action.edit = new vscode.WorkspaceEdit();
+                action.edit.replace(document.uri, target, edit.replacement);
+                action.diagnostics = [diagnostic];
+                action.isPreferred = true;
+                actions.push(action);
+            }
+            return actions;
+        },
+    };
+}
+
 function diagnosticSeverity(value) {
     if (value === 'warning') return vscode.DiagnosticSeverity.Warning;
     if (value === 'info') return vscode.DiagnosticSeverity.Information;
@@ -616,6 +642,9 @@ function activate(context) {
         vscode.languages.registerSignatureHelpProvider(selector, signatureProvider(), '(', ','),
         vscode.languages.registerDocumentSymbolProvider(selector, symbolProvider()),
         vscode.languages.registerDefinitionProvider(selector, definitionProvider()),
+        vscode.languages.registerCodeActionsProvider(selector, quickFixProvider(), {
+            providedCodeActionKinds: [vscode.CodeActionKind.QuickFix],
+        }),
         vscode.commands.registerCommand('strata.validateModule', async () => {
             const document = vscode.window.activeTextEditor?.document;
             if (document) await validateDocument(document, diagnostics, output, true);
