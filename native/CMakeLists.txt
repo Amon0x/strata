@@ -112,6 +112,11 @@ endif()
 
 function(strata_target_defaults target)
     target_compile_features(${target} PRIVATE cxx_std_23)
+    # Windows executables run with a UTF-8 process code page so non-ASCII paths and arguments work.
+    get_target_property(strata_target_type ${target} TYPE)
+    if(WIN32 AND strata_target_type STREQUAL "EXECUTABLE")
+        target_sources(${target} PRIVATE ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/windows/utf8.manifest)
+    endif()
     set_target_properties(
         ${target}
         PROPERTIES
@@ -1171,6 +1176,13 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         add_test(
             NAME strata.authoring.generated
             COMMAND strata_authoring --check "${CMAKE_CURRENT_SOURCE_DIR}/.."
+        )
+        add_test(
+            NAME strata.compiler.non_ascii_paths
+            COMMAND ${CMAKE_COMMAND}
+                -DSTRATA_COMPILER=$<TARGET_FILE:strata_compile>
+                -DSTRATA_TEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/compiler-non-ascii
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/non_ascii_paths.cmake
         )
         add_test(
             NAME strata.compiler.diagnostics_json

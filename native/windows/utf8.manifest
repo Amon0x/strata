@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Runs a Strata executable with UTF-8 as its process code page (Windows 10 1903 and later), so
+  narrow command-line arguments and std::filesystem paths built from UTF-8 strings keep characters
+  outside the system ANSI code page. Without it a user name such as "Şükrü" or a CJK project folder
+  cannot be passed to strata_compile, strata_headless or strata_desktop.
+-->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
