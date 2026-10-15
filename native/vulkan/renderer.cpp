@@ -89,27 +89,17 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                     if (static_cast<std::uint64_t>(packet.indices[i]) + batch->base_vertex >=
                         packet.vertices.size() / 88)
                         throw std::invalid_argument("Vulkan draw vertex index is invalid");
+                // As on D3D11, a texture that has not arrived samples white and a material without
+                // a program draws with the built-in shader (whose mode comes from each vertex), so
+                // one missing resource costs a draw its look rather than the renderer.
                 Image* texture = white.get();
                 if (batch->texture) {
-                    auto it = textures.find(*batch->texture);
-                    if (it == textures.end())
-                        throw std::invalid_argument("missing Vulkan texture: " + *batch->texture);
-                    texture = it->second.get();
+                    if (auto it = textures.find(*batch->texture); it != textures.end())
+                        texture = it->second.get();
                 }
                 std::string program = "builtin";
                 if (auto it = materials.find(batch->material); it != materials.end())
                     program = it->second;
-                // Built-in material ids are represented by the fixed draw mode in each vertex.
-                else if (!batch->material.empty() && batch->material != "strata:unified_ui" &&
-                         batch->material != "strata:solid" &&
-                         batch->material != "strata:textured" &&
-                         batch->material != "strata:rounded_rect" &&
-                         batch->material != "strata:border" &&
-                         batch->material != "strata:coverage_text" &&
-                         batch->material != "strata:msdf_text" &&
-                         batch->material != "strata:custom_mesh" &&
-                         batch->material != "strata:shadow")
-                    throw std::invalid_argument("undeclared Vulkan material: " + batch->material);
                 const bool clipped = !batch->rounded_clips.empty();
                 const std::string blend =
                     clipped && batch->blend_mode == "opaque"     ? "straight_alpha"

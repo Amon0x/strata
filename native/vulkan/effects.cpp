@@ -91,23 +91,19 @@ void Renderer::Impl::effect(Target& destination, Image& source, Image& backdrop,
              *cached.output, *cached.output, bounds(batch, destination));
         return;
     }
+    // An effect with no declared passes composites its input unchanged, as D3D11 does, and a
+    // parameter the batch does not carry leaves the pass's declared value in place.
     const auto found = effects.find(batch.effect);
-    if (found == effects.end())
-        throw std::invalid_argument("undeclared Vulkan effect: " + batch.effect);
+    static const decltype(found->second) no_passes;
     Image* current = &source;
-    for (const auto& [index, pass] : found->second) {
+    for (const auto& [index, pass] : found != effects.end() ? found->second : no_passes) {
         (void)index;
         if (pass.kind == 0) {
             double radius = pass.radius;
             auto downsample = pass.downsample;
-            if (pass.radius_parameter != UINT32_MAX) {
-                if (pass.radius_parameter >= batch.parameter_count)
-                    throw std::invalid_argument("effect radius parameter out of range");
+            if (pass.radius_parameter < batch.parameter_count)
                 radius = batch.parameters[pass.radius_parameter];
-            }
-            if (pass.downsample_parameter != UINT32_MAX) {
-                if (pass.downsample_parameter >= batch.parameter_count)
-                    throw std::invalid_argument("effect downsample parameter out of range");
+            if (pass.downsample_parameter < batch.parameter_count) {
                 downsample = static_cast<std::uint32_t>(
                     std::clamp(batch.parameters[pass.downsample_parameter], 1.0, 8.0));
             }

@@ -121,6 +121,21 @@ void run() {
         near(pixel(image, 32, 8, 8), {0, 0, 0, 0}, "presentation group moved its draw");
         near(pixel(image, 32, 24, 24), {0, 0, 0, 0}, "presentation group scaled its draw");
         near(pixel(image, 32, 24, 8), {128, 0, 0, 128}, "presentation group placement and opacity");
+        // A texture that never arrived, a material without a program and an undeclared effect
+        // fall back as on D3D11 instead of leaving the renderer unable to draw another frame.
+        packet = quad({255, 255, 255, 255});
+        std::get<host::DrawBatch>(packet.batches[0]).texture = "test.never-uploaded";
+        std::get<host::DrawBatch>(packet.batches[0]).material = "test:undeclared-material";
+        host::EffectBatch undeclared;
+        undeclared.source_order = 1;
+        undeclared.scissor = {0, 0, 32, 32};
+        undeclared.width = undeclared.height = 32;
+        undeclared.effect = "test:undeclared-effect";
+        packet.batches.emplace_back(undeclared);
+        near(pixel(render(packet), 32, 16, 16), {255, 255, 255, 255},
+             "missing texture, material and effect fall back");
+        near(pixel(render(quad()), 32, 16, 16), {255, 0, 0, 255},
+             "renderer draws after a frame with missing resources");
         packet = quad({255, 255, 255, 255});
         packet.resources.push_back({host::resource_create,
                                     "test.texture",
