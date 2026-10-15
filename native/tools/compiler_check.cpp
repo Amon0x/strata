@@ -345,8 +345,12 @@ int write_module_artifact(
         compilation.result.source_map
     );
     if (check_only) {
-        if (load_bytes(canonical_file(artifact_path, "compiled module artifact")) != artifact) {
-            std::cerr << "compiled module artifact is stale: "
+        // A missing artifact is out of date like a stale one: both need --emit-artifact.
+        std::error_code ignored;
+        const bool present = std::filesystem::is_regular_file(artifact_path, ignored);
+        if (!present ||
+            load_bytes(canonical_file(artifact_path, "compiled module artifact")) != artifact) {
+            std::cerr << "compiled module artifact is " << (present ? "stale" : "missing") << ": "
                       << artifact_path.generic_string() << '\n';
             return 3;
         }

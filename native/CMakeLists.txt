@@ -1208,6 +1208,16 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/non_ascii_paths.cmake
         )
         add_test(
+            NAME strata.compiler.cli
+            COMMAND ${CMAKE_COMMAND}
+                -DSTRATA_COMPILER=$<TARGET_FILE:strata_compile>
+                -DSTRATA_SOURCE=${STRATA_RESOURCE_ROOT}/assets/strata/ui/settings_app.strata
+                -DSTRATA_SCHEMAS=${STRATA_RESOURCE_ROOT}/assets/strata/ui/settings_app.schemas.json
+                -DSTRATA_RESOURCE_ROOT=${STRATA_RESOURCE_ROOT}
+                -DSTRATA_TEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/compiler-cli
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/compiler_cli.cmake
+        )
+        add_test(
             NAME strata.compiler.diagnostics_json
             COMMAND ${CMAKE_COMMAND}
                 -DSTRATA_COMPILER=$<TARGET_FILE:strata_compile>
@@ -1437,6 +1447,15 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
                 -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/portable.json
                 -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-portable-interactive
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_portable_interactive.cmake
+        )
+        add_test(
+            NAME strata.headless.surface_limits
+            COMMAND ${CMAKE_COMMAND}
+                -DSTRATA_HEADLESS=$<TARGET_FILE:strata_headless>
+                -DSTRATA_RESOURCES=${CMAKE_CURRENT_SOURCE_DIR}/../src/main/resources
+                -DSTRATA_SCENARIO=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/portable.json
+                -DSTRATA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/headless-surface-limits
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/headless_surface_limits.cmake
         )
         if(WIN32)
             add_test(

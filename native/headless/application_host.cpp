@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -28,6 +29,24 @@
 
 namespace strata::headless {
 namespace {
+
+/** The largest side a headless framebuffer may have: D3D11's texture limit, for every backend. */
+constexpr double maximum_framebuffer_side = 16384.0;
+
+/**
+ * Rejects a surface whose framebuffer would be empty or larger than any backend can render, before
+ * anything allocates it. Both the scenario's surface and a later resize step come through here.
+ */
+void require_renderable_surface(const double width, const double height, const double scale) {
+    const double pixel_width = std::round(width * scale);
+    const double pixel_height = std::round(height * scale);
+    if (!(pixel_width >= 1.0 && pixel_height >= 1.0 && pixel_width <= maximum_framebuffer_side &&
+          pixel_height <= maximum_framebuffer_side)) {
+        throw std::invalid_argument(std::format(
+            "headless surface must be 1 to 16384 device pixels on each side, not {:g} x {:g}",
+            pixel_width, pixel_height));
+    }
+}
 
 [[nodiscard]] std::string copy(const strata_string_view value) {
     return value.size == 0U ? std::string{} : std::string(value.data, value.size);
@@ -342,6 +361,7 @@ struct ApplicationHost::Impl final {
         if (!std::filesystem::is_directory(resource_root)) {
             throw std::invalid_argument("headless resource root is not a directory");
         }
+        require_renderable_surface(scenario.width, scenario.height, scenario.scale);
         logical_width = scenario.width;
         logical_height = scenario.height;
         display_scale = scenario.scale;
@@ -594,6 +614,7 @@ struct ApplicationHost::Impl final {
 
     void resize(const double width, const double height, const double scale,
                 const std::int64_t time_nanoseconds) {
+        require_renderable_surface(width, height, scale);
         logical_width = width;
         logical_height = height;
         display_scale = scale;

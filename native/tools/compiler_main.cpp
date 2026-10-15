@@ -17,8 +17,8 @@ int main(const int argument_count, const char* const* const arguments) {
             extension_paths.emplace_back(arguments[command_index + 1]);
             command_index += 2;
         }
-        if (command_index >= argument_count) throw std::invalid_argument("missing compiler command");
-        const std::string_view command(arguments[command_index]);
+        const std::string_view command =
+            command_index < argument_count ? arguments[command_index] : std::string_view{};
         const int remaining = argument_count - command_index;
         if ((remaining == 2 || remaining == 3) &&
             (command == "--check-module" || command == "--check-module-json")) {
