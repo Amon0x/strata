@@ -1771,4 +1771,8 @@ if(STRATA_BUILD_FUZZERS)
     endfunction()
     strata_add_fuzzer(strata_opentype_fuzzer tests/fuzz/opentype_fuzzer.cpp Strata::core)
     strata_add_fuzzer(strata_png_fuzzer tests/fuzz/png_fuzzer.cpp Strata::core)
+    strata_add_fuzzer(strata_svg_fuzzer tests/fuzz/svg_fuzzer.cpp Strata::svg)
+    strata_add_fuzzer(
+        strata_render_packet_fuzzer tests/fuzz/render_packet_fuzzer.cpp Strata::render_host
+    )
 endif()

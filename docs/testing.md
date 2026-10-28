@@ -32,6 +32,8 @@ parser of untrusted input (add `-DSTRATA_ENABLE_ASAN=ON` to catch memory errors 
 | --- | --- | --- |
 | `strata_opentype_fuzzer` | an OpenType font, parsed and shaped | the bundled fonts |
 | `strata_png_fuzzer` | a mode byte, then a PNG (CRCs rewritten) or a header and scanlines | the bundled PNGs, each prefixed with a 0 byte |
+| `strata_svg_fuzzer` | an SVG document, parsed and rasterized small | the bundled SVGs |
+| `strata_render_packet_fuzzer` | length-prefixed packets decoded in order by one decoder | frames of a `packets.strp` headless recording |
 
 Each harness's header comment gives its input format and a typical command line. Run them with
 `-malloc_limit_mb` and `-rss_limit_mb` so an unbounded allocation is a finding.
