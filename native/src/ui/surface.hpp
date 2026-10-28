@@ -107,9 +107,23 @@ struct SurfaceFrame final {
     InputOperationResult lifecycle_input;
 };
 
+/** The phases a frame runs, in the order Surface::frame runs them. */
+enum class FramePhase : std::uint8_t {
+    /** Drain one queued input batch. */
+    input,
+    /** Re-describe a stale description and reconcile it; bring input onto the tree. */
+    build,
+    /** Lay out to a fixed point, converging virtual realization. */
+    layout,
+    /** Effects that need the final layout: reveals, gesture synchronization. */
+    post_layout,
+    semantics,
+    render,
+};
+
 /** Why the input router was prepared against the tree during a frame. */
 enum class InputPrepareReason : std::uint8_t {
-    /** The description was rebuilt and reconciled at the start of the frame. */
+    /** The frame's build phase; the router reconciles with the tree even when nothing changed. */
     rebuilt,
     /** Scrolling attached a predicted virtual window before the frame's layout. */
     predicted_realization,
@@ -119,6 +133,8 @@ enum class InputPrepareReason : std::uint8_t {
     lazy_realization,
     /** A queued event re-described the tree mid-batch; the batch continues against it. */
     input_rebuild,
+    /** A post-layout effect re-invalidated the description; the frame built again. */
+    post_layout_rebuild,
 };
 
 /**
@@ -355,11 +371,13 @@ class Surface final {
     [[nodiscard]] bool set_focus_containment(std::optional<std::string_view> key);
     [[nodiscard]] bool focus_contained() const noexcept;
     /**
-     * Each time the last frame prepared input against the tree, and why. Every entry follows a
-     * tree change; the count is bounded by one rebuild, the layout convergence rounds, exit
-     * pruning and the bounded mid-batch input rounds.
+     * Each time the last frame prepared input against the tree, and why: once for its build
+     * phase, then once per tree change after it. The count is bounded by the layout convergence
+     * rounds, exit pruning, the bounded mid-batch input rounds and post-layout repeats.
      */
     [[nodiscard]] std::span<const InputPrepareReason> last_frame_input_prepares() const noexcept;
+    /** The phases the last frame ran, in order; empty for a frame with nothing to do. */
+    [[nodiscard]] std::span<const FramePhase> last_frame_phases() const noexcept;
 
   private:
     [[nodiscard]] FrameDirtyModel observe_dirty(std::int64_t frame_time_nanos, bool requested,
@@ -448,6 +466,7 @@ class Surface final {
     std::uint64_t motion_sampled_frame_index_ = 0U;
     bool advancing_scroll_animation_ = false;
     std::vector<InputPrepareReason> input_prepares_;
+    std::vector<FramePhase> frame_phases_;
     bool frame_invalidated_ = true;
     bool description_invalidated_ = true;
     InputOperationResult pending_lifecycle_input_;

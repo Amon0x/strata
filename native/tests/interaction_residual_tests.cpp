@@ -2648,8 +2648,8 @@ overlay ChoiceFrame {
     check(!first.empty() && first.front() == ui::InputPrepareReason::rebuilt,
           "the first frame did not prepare input once for its rebuilt tree");
     static_cast<void>(surface->frame(2'000'000));
-    check(surface->last_frame_input_prepares().empty(),
-          "a settled frame prepared input although nothing changed");
+    check(surface->last_frame_input_prepares().empty() && surface->last_frame_phases().empty(),
+          "a settled frame ran phases although nothing changed");
 
     const ui::RetainedNode* tabs = surface->tree().find_key("choice.tabs");
     const std::vector<ui::WidgetSubtarget> targets = surface->input().subtargets(tabs->identity());
@@ -2671,6 +2671,20 @@ overlay ChoiceFrame {
                                              reason == ui::InputPrepareReason::input_rebuild;
                                   }),
           "a state-changing click prepared input an unexplained number of times");
+    // The click's frame runs the phases in their fixed order: input is drained before the build
+    // it invalidates, layout follows every build, and semantics and render close the frame once.
+    const std::span<const ui::FramePhase> phases = surface->last_frame_phases();
+    const auto position = [&phases](const ui::FramePhase phase) {
+        return static_cast<std::size_t>(std::ranges::find(phases, phase) - phases.begin());
+    };
+    check(!phases.empty() && phases.front() == ui::FramePhase::input &&
+              phases.back() == ui::FramePhase::render &&
+              position(ui::FramePhase::input) < position(ui::FramePhase::build) &&
+              position(ui::FramePhase::build) < position(ui::FramePhase::layout) &&
+              position(ui::FramePhase::layout) < position(ui::FramePhase::post_layout) &&
+              position(ui::FramePhase::post_layout) < position(ui::FramePhase::semantics) &&
+              std::ranges::count(phases, ui::FramePhase::render) == 1,
+          "a click's frame did not run its phases in order");
     static_cast<void>(surface->frame(4'000'000));
     static_cast<void>(surface->frame(5'000'000));
     check(surface->last_frame_input_prepares().empty(),

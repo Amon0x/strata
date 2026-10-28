@@ -1446,6 +1446,10 @@ std::span<const InputPrepareReason> Surface::last_frame_input_prepares() const n
     return input_prepares_;
 }
 
+std::span<const FramePhase> Surface::last_frame_phases() const noexcept {
+    return frame_phases_;
+}
+
 void Surface::commit_lazy_materializations(SurfaceFrame& frame) {
     for (const std::shared_ptr<const DescriptionMaterialization>& transaction :
          pending_lazy_materializations_) {
@@ -1613,6 +1617,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
                                    pending_lifecycle_input_.injected_events != 0U ||
                                    pending_lifecycle_input_.processed_events != 0U;
     input_prepares_.clear();
+    frame_phases_.clear();
     const bool requested_frame = std::exchange(frame_invalidated_, false);
     const bool settled_except_input =
         last_frame_.frame_index != 0U && tree_.root() != nullptr &&
@@ -1646,9 +1651,14 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         next.diagnostics = application_.services().diagnostics_snapshot();
         record_profiler_counters(next);
     }
-    bool input_processed_before_layout = false;
+    // Phases, in order: drain one input batch, build, layout to a fixed point, post-layout
+    // effects, a bounded repeat of build/layout/post-layout for whatever those re-invalidated,
+    // then semantics and render. Each phase asks the dirty model whether it has work.
+    bool input_drained = false;
     bool processed_queued_input = false;
-    const auto process_queued_input = [this, &next, &processed_queued_input] {
+    const auto drain_input = [this, &next, &processed_queued_input, &input_drained] {
+        frame_phases_.push_back(FramePhase::input);
+        input_drained = true;
         const auto input_started = std::chrono::steady_clock::now();
         const std::size_t dirty_before = tree_.dirty_count();
         auto input_profile = profiler_.section("input");
@@ -1669,9 +1679,35 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         record_profiler_counters(next);
         input_profile.close();
     };
+    const auto layout = [this, &next, frame_time_nanos] {
+        frame_phases_.push_back(FramePhase::layout);
+        layout_tree(next, frame_time_nanos);
+        input_.publish_layout(layout_engine_.result());
+    };
+    const auto post_layout = [this, &next] {
+        frame_phases_.push_back(FramePhase::post_layout);
+        tree_.consume_layout_dirty();
+        input_.publish_motion(motion_);
+        input_.publish_layout(layout_engine_.result());
+        const auto input_started = std::chrono::steady_clock::now();
+        const std::size_t dirty_before = tree_.dirty_count();
+        auto after_layout_profile = profiler_.section("input");
+        append_input(next.lifecycle_input, input_.after_layout());
+        const std::size_t dirty_after = tree_.dirty_count();
+        next.operations.input_mutated_nodes +=
+            dirty_after > dirty_before ? dirty_after - dirty_before : 0U;
+        next.operations.input_nanos +=
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now() - input_started)
+                                           .count());
+        collect_input_profiler_counters(next);
+        record_profiler_counters(next);
+        after_layout_profile.close();
+    };
+
+    // Input: a frame whose only work is queued input routes it against the tree as drawn.
     if (settled_except_input) {
-        input_processed_before_layout = true;
-        process_queued_input();
+        drain_input();
         // Input alone changed nothing the frame draws: finish without the other phases.
         if (processed_queued_input &&
             observe_dirty(frame_time_nanos, frame_invalidated_, false).settled()) {
@@ -1680,11 +1716,14 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
             return complete_frame(std::move(next));
         }
     }
+
+    // Build: re-describe when the description is stale, then bring input onto the tree.
     advance_scroll_animations(frame_time_nanos);
     motion_.bind(application_.active_unit());
-    std::optional<std::string_view> restore_focus;
-    static_cast<void>(rebuild_tree(next, restore_focus));
     {
+        frame_phases_.push_back(FramePhase::build);
+        std::optional<std::string_view> restore_focus;
+        static_cast<void>(rebuild_tree(next, restore_focus));
         const auto input_started = std::chrono::steady_clock::now();
         const std::size_t dirty_before = tree_.dirty_count();
         auto input_profile = profiler_.section("input");
@@ -1703,58 +1742,62 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         record_profiler_counters(next);
         input_profile.close();
     }
-    layout_tree(next, frame_time_nanos);
-    input_.publish_layout(layout_engine_.result());
-    // A queued event that invalidates the description ends its batch; the rest of the batch is
-    // routed against the rebuilt and laid out tree, in this frame for a bounded number of rounds.
+
+    // Layout to a fixed point: layout_tree converges virtual realization itself.
+    layout();
+
+    // Input against the laid-out tree. A queued event that invalidates the description ends its
+    // batch; the rest of the batch routes against the rebuilt and laid out tree, for a bounded
+    // number of rounds.
     constexpr std::size_t maximum_input_rounds = 4U;
-    bool process_input = !input_processed_before_layout;
     for (std::size_t round = 1U;; ++round) {
         const std::uint64_t pre_input_layout_generation = tree_.layout_invalidation_generation();
-        if (process_input)
-            process_queued_input();
-
+        const bool drains = !input_drained || round > 1U;
+        if (drains)
+            drain_input();
         std::optional<std::string_view> input_restore_focus;
         const bool input_rebuilt = rebuild_tree(next, input_restore_focus);
-        if (input_rebuilt)
+        if (input_rebuilt) {
+            frame_phases_.push_back(FramePhase::build);
             prepare_input(next, InputPrepareReason::input_rebuild, input_restore_focus);
+        }
         // Queued pointer/key processing can change interaction channels after the first layout
         // pass. Discover those targets at the current timestamp without advancing active
         // animation clocks.
-        if ((process_input && processed_queued_input) || input_rebuilt) {
+        if ((drains && processed_queued_input) || input_rebuilt)
             sample_motion(next, frame_time_nanos, false);
-        }
-        if (input_rebuilt || (process_input && tree_.layout_invalidation_generation() !=
-                                                   pre_input_layout_generation)) {
-            layout_tree(next, frame_time_nanos);
-            input_.publish_layout(layout_engine_.result());
+        if (input_rebuilt ||
+            (drains && tree_.layout_invalidation_generation() != pre_input_layout_generation)) {
+            layout();
         }
         if (!input_.input_batch_split() || input_.queued_event_count() == 0U ||
             round == maximum_input_rounds) {
             break;
         }
-        process_input = true;
     }
-    tree_.consume_layout_dirty();
+
+    // Post-layout effects (reveals, gesture synchronization), then a bounded repeat for what they
+    // re-invalidated, so a reveal's scroll is laid out and drawn in the frame that made it.
+    // Running motion or content-size transitions keep the layout engine busy every frame; only
+    // what the post-layout effects themselves invalidated is repeated here.
+    std::uint64_t laid_out_generation = tree_.layout_invalidation_generation();
+    post_layout();
+    constexpr std::size_t maximum_post_layout_repeats = 2U;
+    for (std::size_t repeat = 0U; repeat < maximum_post_layout_repeats; ++repeat) {
+        const FrameDirtyModel after = observe_dirty(frame_time_nanos, false, false);
+        if (!after.description && tree_.layout_invalidation_generation() == laid_out_generation)
+            break;
+        std::optional<std::string_view> repeat_restore_focus;
+        if (after.description && rebuild_tree(next, repeat_restore_focus)) {
+            frame_phases_.push_back(FramePhase::build);
+            prepare_input(next, InputPrepareReason::post_layout_rebuild, repeat_restore_focus);
+        }
+        layout();
+        laid_out_generation = tree_.layout_invalidation_generation();
+        post_layout();
+    }
     const LayoutResult& laid_out = layout_engine_.result();
-    input_.publish_motion(motion_);
-    input_.publish_layout(laid_out);
-    {
-        const auto input_started = std::chrono::steady_clock::now();
-        const std::size_t dirty_before = tree_.dirty_count();
-        auto after_layout_profile = profiler_.section("input");
-        append_input(next.lifecycle_input, input_.after_layout());
-        const std::size_t dirty_after = tree_.dirty_count();
-        next.operations.input_mutated_nodes +=
-            dirty_after > dirty_before ? dirty_after - dirty_before : 0U;
-        next.operations.input_nanos +=
-            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                           std::chrono::steady_clock::now() - input_started)
-                                           .count());
-        collect_input_profiler_counters(next);
-        record_profiler_counters(next);
-        after_layout_profile.close();
-    }
+    frame_phases_.push_back(FramePhase::semantics);
     next.operations.injected_events = next.lifecycle_input.injected_events;
     {
         auto semantics_profile = profiler_.section("semantics");
@@ -1763,6 +1806,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         static_cast<void>(semantics_.update(tree_, commands_, input_, id_));
         record_profiler_counters(next);
     }
+    frame_phases_.push_back(FramePhase::render);
     {
         auto render_profile = profiler_.section("render");
         next.operations.render =
