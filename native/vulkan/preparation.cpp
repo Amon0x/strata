@@ -28,8 +28,6 @@ std::size_t Renderer::prepare(VkFormat format) {
         format != VK_FORMAT_R16G16B16A16_SFLOAT)
         throw std::invalid_argument("Vulkan target requires RGBA8/BGRA8 UNORM or RGBA16F");
     const auto before = pipeline_count();
-    constexpr std::array blends{"opaque",   "straight_alpha", "premultiplied_alpha",
-                                "additive", "multiply",       "rounded_multiply"};
     for (const auto blend : blends) {
         impl_->pipeline("builtin", blend, format, false);
         for (const auto& [id, program] : impl_->materials) {
@@ -37,15 +35,15 @@ std::size_t Renderer::prepare(VkFormat format) {
             impl_->pipeline(program, blend, format, false);
         }
     }
-    impl_->pipeline("blur", "opaque", format, true);
-    impl_->pipeline("composite", "premultiplied_alpha", format, true);
-    impl_->pipeline("cached_composite", "premultiplied_alpha", format, true);
+    impl_->pipeline("blur", Blend::opaque, format, true);
+    impl_->pipeline("composite", Blend::premultiplied_alpha, format, true);
+    impl_->pipeline("cached_composite", Blend::premultiplied_alpha, format, true);
     for (const auto& [id, passes] : impl_->effects) {
         (void)id;
         for (const auto& [index, pass] : passes) {
             (void)index;
             if (pass.kind == STRATA_EFFECT_PASS_SHADER)
-                impl_->pipeline(pass.program, "opaque", format, true);
+                impl_->pipeline(pass.program, Blend::opaque, format, true);
         }
     }
     return pipeline_count() - before;

@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "gpu/blend.hpp"
 #include "gpu/effect_policy.hpp"
 
 namespace strata::headless {
@@ -428,6 +429,13 @@ void SoftwareRenderer::consume_resources(const host::RenderPacket& packet) {
 void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPacket& packet) {
     if (batch.index_count == 0U)
         return;
+    // Resolved once per batch; the pixel loop below only branches on the enum.
+    const std::optional<gpu::BlendMode> resolved_blend = gpu::blend_mode(batch.blend_mode);
+    if (!resolved_blend.has_value())
+        throw std::invalid_argument("headless renderer received an unknown blend mode");
+    using gpu::BlendMode;
+    const BlendMode blend = *resolved_blend;
+    const bool clipped = !batch.rounded_clips.empty();
     if (batch.material != "strata:unified_ui" &&
         std::ranges::find(material_fallbacks_, batch.material) == material_fallbacks_.end()) {
         material_fallbacks_.push_back(batch.material);
@@ -682,17 +690,16 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                     1.0F / scale_x,
                     1.0F / scale_y
                 );
-                const bool clipped = !batch.rounded_clips.empty();
-                if (clipped && batch.blend_mode == "multiply") {
+                if (clipped && blend == BlendMode::multiply) {
                     source.red *= clip_mask;
                     source.green *= clip_mask;
                     source.blue *= clip_mask;
                     source.alpha = clip_mask;
-                } else if (clipped && batch.blend_mode == "opaque") {
+                } else if (clipped && blend == BlendMode::opaque) {
                     source.alpha *= clip_mask;
-                } else if (batch.blend_mode == "opaque" || batch.blend_mode == "multiply") {
+                } else if (blend == BlendMode::opaque || blend == BlendMode::multiply) {
                     if (clip_mask < 0.5F) continue;
-                } else if (batch.blend_mode == "premultiplied_alpha") {
+                } else if (blend == BlendMode::premultiplied_alpha) {
                     source.red *= clip_mask;
                     source.green *= clip_mask;
                     source.blue *= clip_mask;
@@ -712,10 +719,10 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                     static_cast<float>(pixels_[pixel + 3U]) / 255.0F,
                 };
                 Color output;
-                if (batch.blend_mode == "opaque" && !clipped) {
+                if (blend == BlendMode::opaque && !clipped) {
                     output = source;
-                } else if (batch.blend_mode == "straight_alpha" ||
-                           (batch.blend_mode == "opaque" && clipped)) {
+                } else if (blend == BlendMode::straight_alpha ||
+                           (blend == BlendMode::opaque && clipped)) {
                     const float inverse = 1.0F - source.alpha;
                     output = Color{
                         source.red * source.alpha + destination.red * inverse,
@@ -723,7 +730,7 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.blue * source.alpha + destination.blue * inverse,
                         source.alpha + destination.alpha * inverse,
                     };
-                } else if (batch.blend_mode == "premultiplied_alpha") {
+                } else if (blend == BlendMode::premultiplied_alpha) {
                     const float inverse = 1.0F - source.alpha;
                     output = Color{
                         source.red + destination.red * inverse,
@@ -731,21 +738,21 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.blue + destination.blue * inverse,
                         source.alpha + destination.alpha * inverse,
                     };
-                } else if (batch.blend_mode == "additive") {
+                } else if (blend == BlendMode::additive) {
                     output = Color{
                         source.red * source.alpha + destination.red,
                         source.green * source.alpha + destination.green,
                         source.blue * source.alpha + destination.blue,
                         source.alpha + destination.alpha * (1.0F - source.alpha),
                     };
-                } else if (batch.blend_mode == "multiply" && !clipped) {
+                } else if (blend == BlendMode::multiply && !clipped) {
                     output = Color{
                         source.red * destination.red,
                         source.green * destination.green,
                         source.blue * destination.blue,
                         source.alpha + destination.alpha * (1.0F - source.alpha),
                     };
-                } else if (batch.blend_mode == "multiply" && clipped) {
+                } else {
                     output = Color{
                         source.red * destination.red +
                             destination.red * (1.0F - source.alpha),
@@ -755,8 +762,6 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                             destination.blue * (1.0F - source.alpha),
                         source.alpha + destination.alpha * (1.0F - source.alpha),
                     };
-                } else {
-                    throw std::invalid_argument("headless renderer received an unknown blend mode");
                 }
                 pixels_[pixel] = channel(output.red);
                 pixels_[pixel + 1U] = channel(output.green);

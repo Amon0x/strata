@@ -105,17 +105,35 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                     if (auto it = textures.find(*batch->texture); it != textures.end())
                         texture = it->second.get();
                 }
-                std::string program = "builtin";
+                std::string_view program = "builtin";
                 if (auto it = materials.find(batch->material); it != materials.end())
                     program = it->second;
+                // Names resolve once per batch; the pipeline lookup allocates nothing.
+                const auto requested = gpu::blend_mode(batch->blend_mode);
+                if (!requested)
+                    throw std::invalid_argument("unknown Vulkan blend mode: " + batch->blend_mode);
                 const bool clipped = !batch->rounded_clips.empty();
-                const std::string blend =
-                    clipped && batch->blend_mode == "opaque"     ? "straight_alpha"
-                    : clipped && batch->blend_mode == "multiply" ? "rounded_multiply"
-                                                                 : batch->blend_mode;
-                const auto mode = batch->blend_mode == "premultiplied_alpha"
+                Blend blend = Blend::opaque;
+                switch (*requested) {
+                case gpu::BlendMode::opaque:
+                    blend = clipped ? Blend::straight_alpha : Blend::opaque;
+                    break;
+                case gpu::BlendMode::straight_alpha:
+                    blend = Blend::straight_alpha;
+                    break;
+                case gpu::BlendMode::premultiplied_alpha:
+                    blend = Blend::premultiplied_alpha;
+                    break;
+                case gpu::BlendMode::additive:
+                    blend = Blend::additive;
+                    break;
+                case gpu::BlendMode::multiply:
+                    blend = clipped ? Blend::rounded_multiply : Blend::multiply;
+                    break;
+                }
+                const auto mode = *requested == gpu::BlendMode::premultiplied_alpha
                                       ? gpu::RoundedClipMode::premultiplied_alpha
-                                  : clipped && batch->blend_mode == "multiply"
+                                  : clipped && *requested == gpu::BlendMode::multiply
                                       ? gpu::RoundedClipMode::multiply
                                   : !clipped ? gpu::RoundedClipMode::hard
                                              : gpu::RoundedClipMode::straight_alpha;
@@ -151,7 +169,8 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                 } else if (effect_batch->backdrop_source == host::EffectBackdropSource::surface) {
                     if (!surface_backdrop && !reusable(*effect_batch, false, target) &&
                         bounds(*effect_batch, target).width && bounds(*effect_batch, target).height)
-                        throw std::logic_error("Vulkan SURFACE effect refresh has no captured input");
+                        throw std::logic_error(
+                            "Vulkan SURFACE effect refresh has no captured input");
                     effect(target, *effect_batch, false, surface_backdrop, nullptr);
                 } else
                     effect(target, *effect_batch, false, nullptr, nullptr);

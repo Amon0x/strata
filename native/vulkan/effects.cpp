@@ -22,7 +22,8 @@ void place(float (&output)[4], const double u, const double v, const double widt
 } // namespace
 
 void Renderer::Impl::blur(Target& image, const host::Scissor area, const double physical_radius,
-                          std::uint32_t downsample, const std::span<const host::RoundedClip> clips) {
+                          std::uint32_t downsample,
+                          const std::span<const host::RoundedClip> clips) {
     if (!std::isfinite(physical_radius) || physical_radius < 0)
         throw std::invalid_argument("invalid blur radius");
     if (physical_radius <= 0 || !area.width || !area.height)
@@ -34,20 +35,17 @@ void Renderer::Impl::blur(Target& image, const host::Scissor area, const double 
         static_cast<std::uint32_t>(std::clamp(std::ceil(physical_radius), 1.0, 256.0));
     const auto source_left = area.x > padding ? area.x - padding : 0U;
     const auto source_top = area.y > padding ? area.y - padding : 0U;
-    const auto source_right = static_cast<std::uint32_t>(
-        std::min<std::uint64_t>(static_cast<std::uint64_t>(area.x) + area.width + padding,
-                                image.width));
-    const auto source_bottom = static_cast<std::uint32_t>(
-        std::min<std::uint64_t>(static_cast<std::uint64_t>(area.y) + area.height + padding,
-                                image.height));
+    const auto source_right = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+        static_cast<std::uint64_t>(area.x) + area.width + padding, image.width));
+    const auto source_bottom = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+        static_cast<std::uint64_t>(area.y) + area.height + padding, image.height));
     const host::Scissor source_area{source_left, source_top, source_right - source_left,
                                     source_bottom - source_top};
     const auto reduced = [downsample](std::uint32_t extent) {
         return std::max(1U, extent / downsample + (extent % downsample == 0U ? 0U : 1U));
     };
     const auto width = reduced(source_area.width), height = reduced(source_area.height);
-    const float radius =
-        static_cast<float>(std::clamp(physical_radius / downsample, 0.5, 32.0));
+    const float radius = static_cast<float>(std::clamp(physical_radius / downsample, 0.5, 32.0));
 
     Image& source = temporary(source_area.width, source_area.height, image.format);
     copy(image, source, source_area, 0, 0);
@@ -62,7 +60,7 @@ void Renderer::Impl::blur(Target& image, const host::Scissor area, const double 
         data.direction[1] = direction_y;
         data.radius = pass_radius;
         auto target = target_of(output);
-        draw(target, "blur", "opaque", arena->upload(&data, sizeof(data)), {}, input, input,
+        draw(target, "blur", Blend::opaque, arena->upload(&data, sizeof(data)), {}, input, input,
              {0, 0, output.width, output.height});
         output.layout = target.layout;
     };
@@ -81,13 +79,12 @@ void Renderer::Impl::blur(Target& image, const host::Scissor area, const double 
     place(data.original_uv, static_cast<double>(area.x - source_area.x) / source_area.width,
           static_cast<double>(area.y - source_area.y) / source_area.height,
           static_cast<double>(area.width) / source_area.width,
-          static_cast<double>(area.height) / source_area.height, area, image.width,
-          image.height);
+          static_cast<double>(area.height) / source_area.height, area, image.width, image.height);
     data.logical[0] = static_cast<float>(logical_width);
     data.logical[1] = static_cast<float>(logical_height);
     data.target[0] = static_cast<float>(image.width);
     data.target[1] = static_cast<float>(image.height);
-    draw(image, "blur", "opaque", arena->upload(&data, sizeof(data)),
+    draw(image, "blur", Blend::opaque, arena->upload(&data, sizeof(data)),
          clip_constants(clips, gpu::RoundedClipMode::premultiplied_alpha), read, source, area);
     telemetry.blur_passes += 4;
 }
@@ -156,8 +153,8 @@ double Renderer::Impl::widest_blur(const host::EffectBatch& effect) const {
 
 double Renderer::Impl::read_reach(const host::EffectBatch& effect) const {
     const auto& declared = passes(effect);
-    const bool shaders = std::ranges::any_of(
-        declared, [](const auto& entry) { return entry.second.kind == 1; });
+    const bool shaders =
+        std::ranges::any_of(declared, [](const auto& entry) { return entry.second.kind == 1; });
     return gpu::effect_read_reach(shaders, widest_blur(effect));
 }
 
@@ -180,40 +177,39 @@ host::Scissor Renderer::Impl::sample_region(const host::EffectBatch& effect,
 }
 
 Renderer::Impl::CachedEffect* Renderer::Impl::reusable(const host::EffectBatch& batch,
-                                                        const bool content,
-                                                        const Target& destination) {
+                                                       const bool content,
+                                                       const Target& destination) {
     if (!(batch.refresh_rate > 0))
         return nullptr;
     const auto found = cached_effects.find(EffectKey{active_layer, batch.source_order, content});
     if (found == cached_effects.end())
         return nullptr;
     CachedEffect& cached = found->second;
-    const bool due = !cached.output || cached.stale || !(cached.batch == batch) ||
-                     !(cached.clip == bounds(batch, destination)) ||
-                     cached.width != destination.width || cached.height != destination.height ||
-                     cached.output->format != destination.format ||
-                     cached.logical_width != logical_width ||
-                     cached.logical_height != logical_height || seconds < cached.time ||
-                     seconds - cached.time + 1.0e-9 >= 1.0 / batch.refresh_rate;
+    const bool due =
+        !cached.output || cached.stale || !(cached.batch == batch) ||
+        !(cached.clip == bounds(batch, destination)) || cached.width != destination.width ||
+        cached.height != destination.height || cached.output->format != destination.format ||
+        cached.logical_width != logical_width || cached.logical_height != logical_height ||
+        seconds < cached.time || seconds - cached.time + 1.0e-9 >= 1.0 / batch.refresh_rate;
     return due ? nullptr : &cached;
 }
 
 void Renderer::Impl::invalidate_effects(const host::RenderPacket& packet) {
     const auto retained = geometry.find(active_layer);
-    const gpu::EffectChanges changes(
-        packet, retained != geometry.end() && retained->second.seen
-                    ? std::optional(retained->second.epoch)
-                    : std::nullopt);
+    const gpu::EffectChanges changes(packet, retained != geometry.end() && retained->second.seen
+                                                 ? std::optional(retained->second.epoch)
+                                                 : std::nullopt);
     if (changes.none())
         return;
     for (auto& [key, cached] : cached_effects) {
-        if (std::get<0>(key) == active_layer && changes.touch(cached.batch, read_reach(cached.batch)))
+        if (std::get<0>(key) == active_layer &&
+            changes.touch(cached.batch, read_reach(cached.batch)))
             cached.stale = true;
     }
 }
 
-void Renderer::Impl::effect(Target& destination, const host::EffectBatch& batch,
-                            const bool content, Image* source, Image* backdrop) {
+void Renderer::Impl::effect(Target& destination, const host::EffectBatch& batch, const bool content,
+                            Image* source, Image* backdrop) {
     const host::Scissor clip = bounds(batch, destination);
     if (!clip.width || !clip.height)
         return;
@@ -225,7 +221,7 @@ void Renderer::Impl::effect(Target& destination, const host::EffectBatch& batch,
         auto placed = constants;
         placed.padding[0] = static_cast<float>(cached.clip.x);
         placed.padding[1] = static_cast<float>(cached.clip.y);
-        draw(destination, "cached_composite", "premultiplied_alpha",
+        draw(destination, "cached_composite", Blend::premultiplied_alpha,
              arena->upload(&placed, sizeof(placed)),
              clip_constants(batch.rounded_clips, gpu::RoundedClipMode::premultiplied_alpha),
              *cached.output, *cached.output, clip);
@@ -277,8 +273,8 @@ void Renderer::Impl::effect(Target& destination, const host::EffectBatch& batch,
             auto& next = temporary(destination.width, destination.height, destination.format);
             clear(next);
             auto target = target_of(next);
-            draw(target, pass.program, "opaque", arena->upload(&constants, sizeof(constants)), {},
-                 *current, sampled_backdrop ? *sampled_backdrop : *current, clip);
+            draw(target, pass.program, Blend::opaque, arena->upload(&constants, sizeof(constants)),
+                 {}, *current, sampled_backdrop ? *sampled_backdrop : *current, clip);
             next.layout = target.layout;
             current = &next;
             ++telemetry.effect_passes;
@@ -289,7 +285,7 @@ void Renderer::Impl::effect(Target& destination, const host::EffectBatch& batch,
             retire(std::move(found->second.output));
             cached_effects.erase(found);
         }
-        draw(destination, "composite", "premultiplied_alpha",
+        draw(destination, "composite", Blend::premultiplied_alpha,
              arena->upload(&constants, sizeof(constants)),
              clip_constants(batch.rounded_clips, gpu::RoundedClipMode::premultiplied_alpha),
              *current, *current, clip);
@@ -301,8 +297,8 @@ void Renderer::Impl::effect(Target& destination, const host::EffectBatch& batch,
     if (!cached.output || cached.output->width != clip.width ||
         cached.output->height != clip.height || cached.output->format != destination.format) {
         retire(std::move(cached.output));
-        cached.output = std::make_unique<Image>(device, clip.width, clip.height,
-                                                destination.format);
+        cached.output =
+            std::make_unique<Image>(device, clip.width, clip.height, destination.format);
     }
     auto processed = target_of(*current);
     copy(processed, *cached.output, clip, 0, 0);

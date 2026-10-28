@@ -29,13 +29,15 @@ VkRenderPass Renderer::Impl::render_pass(VkFormat format) {
     return result;
 }
 
-VkPipeline Renderer::Impl::pipeline(const std::string& program, const std::string& blend,
-                                    VkFormat format, bool full) {
-    auto key = std::tuple{program, blend, format, full};
-    if (auto it = pipelines.find(key); it != pipelines.end())
+VkPipeline Renderer::Impl::pipeline(std::string_view program, Blend blend, VkFormat format,
+                                    bool full) {
+    if (auto it = pipelines.find(std::tuple{program, blend, format, full}); it != pipelines.end())
         return it->second;
     const auto& vs = full ? fullscreen : vertex;
-    const auto& ps = programs.at(program);
+    const auto found = programs.find(program);
+    if (found == programs.end())
+        throw std::out_of_range("Vulkan program is not declared: " + std::string(program));
+    const auto& ps = found->second;
     VkShaderModule modules[2]{};
     struct Modules {
         VkDevice device;
@@ -94,23 +96,22 @@ VkPipeline Renderer::Impl::pipeline(const std::string& program, const std::strin
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     VkPipelineColorBlendAttachmentState ba{};
     ba.colorWriteMask = 0xf;
-    if (blend != "opaque") {
+    if (blend != Blend::opaque) {
         ba.blendEnable = VK_TRUE;
         ba.colorBlendOp = ba.alphaBlendOp = VK_BLEND_OP_ADD;
         ba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         ba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         ba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         ba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        if (blend == "premultiplied_alpha")
+        if (blend == Blend::premultiplied_alpha)
             ba.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        else if (blend == "additive")
+        else if (blend == Blend::additive)
             ba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        else if (blend == "multiply" || blend == "rounded_multiply") {
+        else if (blend == Blend::multiply || blend == Blend::rounded_multiply) {
             ba.srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
-            ba.dstColorBlendFactor =
-                blend == "multiply" ? VK_BLEND_FACTOR_ZERO : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        } else if (blend != "straight_alpha")
-            throw std::invalid_argument("unknown Vulkan blend mode: " + blend);
+            ba.dstColorBlendFactor = blend == Blend::multiply ? VK_BLEND_FACTOR_ZERO
+                                                              : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        }
     }
     VkPipelineColorBlendStateCreateInfo cb{
         VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
@@ -135,7 +136,7 @@ VkPipeline Renderer::Impl::pipeline(const std::string& program, const std::strin
     VkPipeline result{};
     check(vkCreateGraphicsPipelines(device.device, pipeline_cache, 1, &pi, nullptr, &result),
           "create graphics pipeline");
-    pipelines.emplace(std::move(key), result);
+    pipelines.emplace(std::tuple{std::string(program), blend, format, full}, result);
     return result;
 }
 
@@ -206,10 +207,10 @@ VkDescriptorSet Renderer::Impl::descriptor_set(Slice constants,
     return set;
 }
 
-void Renderer::Impl::draw(Target& target, const std::string& program, const std::string& blend,
-                          Slice constants, const gpu::RoundedClipConstants& clips, Image& source,
-                          Image& backdrop, host::Scissor scissor, const host::DrawBatch* batch,
-                          Slice vertices, Slice indices) {
+void Renderer::Impl::draw(Target& target, std::string_view program, Blend blend, Slice constants,
+                          const gpu::RoundedClipConstants& clips, Image& source, Image& backdrop,
+                          host::Scissor scissor, const host::DrawBatch* batch, Slice vertices,
+                          Slice indices) {
     const std::uint32_t x = std::min(scissor.x, target.width),
                         y = std::min(scissor.y, target.height);
     const std::uint32_t width = std::min(scissor.width, target.width - x),

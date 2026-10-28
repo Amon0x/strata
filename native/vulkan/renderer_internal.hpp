@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gpu/blend.hpp"
 #include "gpu/blur_shaders.hpp"
 #include "gpu/clip.hpp"
 #include "gpu/effect_policy.hpp"
@@ -75,6 +76,22 @@ inline constexpr VkDescriptorType descriptor_type(std::uint32_t binding) noexcep
 inline Target target_of(Image& image) {
     return {image.image, image.view, image.format, image.width, image.height, image.layout};
 }
+/**
+ * A pipeline's blend state: the packet modes, plus multiply over a rounded clip, which composites
+ * the clip coverage like straight alpha.
+ */
+enum class Blend : std::uint8_t {
+    opaque,
+    straight_alpha,
+    premultiplied_alpha,
+    additive,
+    multiply,
+    rounded_multiply,
+};
+inline constexpr std::array<Blend, 6> blends{
+    Blend::opaque,   Blend::straight_alpha, Blend::premultiplied_alpha,
+    Blend::additive, Blend::multiply,       Blend::rounded_multiply,
+};
 } // namespace detail
 
 struct Renderer::Impl {
@@ -117,7 +134,8 @@ struct Renderer::Impl {
     VkPipelineLayout layout{};
     VkSampler nearest{}, linear{};
     std::map<VkFormat, VkRenderPass> render_passes;
-    std::map<std::tuple<std::string, std::string, VkFormat, bool>, VkPipeline> pipelines;
+    /** Keyed by program, blend, format and whether it draws a full-target triangle. */
+    std::map<std::tuple<std::string, Blend, VkFormat, bool>, VkPipeline, std::less<>> pipelines;
     std::map<std::string, std::vector<std::uint32_t>, std::less<>> programs;
     std::map<std::string, std::string, std::less<>> materials;
     struct Pass {
@@ -206,17 +224,16 @@ struct Renderer::Impl {
     Image& temporary(std::uint32_t width, std::uint32_t height, VkFormat format);
     void barrier(Target& target, VkImageLayout next);
     /** Copies `region` of `source` into the same place of `destination`. */
-    void copy(Target& source, Image& destination, host::Scissor region,
-              std::int32_t destination_x, std::int32_t destination_y);
+    void copy(Target& source, Image& destination, host::Scissor region, std::int32_t destination_x,
+              std::int32_t destination_y);
     /** A target-sized copy of `source` holding only `region`, which is all its reader samples. */
     Image& capture(Target& source, host::Scissor region);
     void resources(const host::RenderPacket& packet);
     VkRenderPass render_pass(VkFormat format);
-    VkPipeline pipeline(const std::string& program, const std::string& blend, VkFormat format,
-                        bool full);
+    VkPipeline pipeline(std::string_view program, Blend blend, VkFormat format, bool full);
     VkDescriptorSet descriptor_set(Slice constants, const gpu::RoundedClipConstants& clips,
                                    Image& source, Image& backdrop);
-    void draw(Target& target, const std::string& program, const std::string& blend, Slice constants,
+    void draw(Target& target, std::string_view program, Blend blend, Slice constants,
               const gpu::RoundedClipConstants& clips, Image& source, Image& backdrop,
               host::Scissor scissor, const host::DrawBatch* batch = nullptr, Slice vertices = {},
               Slice indices = {});
