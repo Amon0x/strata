@@ -178,6 +178,8 @@ constexpr std::size_t maximum_lazy_loop_items = 100'000U;
 }
 
 struct ComponentSchema final {
+    /** The declaration calls resolve to; a later one with the same name is a duplicate. */
+    const ComponentDeclaration* declaration = nullptr;
     std::vector<SchemaParameter> parameters;
     struct Slot final {
         std::string name;
@@ -331,6 +333,7 @@ class Validator final {
                            "component name distinct from built-in widgets");
                 }
                 ComponentSchema schema;
+                schema.declaration = component;
                 std::set<std::string, std::less<>> parameter_names;
                 for (const Parameter& parameter : component->parameters) {
                     if (!parameter_names.insert(parameter.name).second) {
@@ -1180,6 +1183,9 @@ class Validator final {
             validate_block(*overlay->body, std::move(scope), "overlay " + overlay->name);
         } else if (const auto* component = std::get_if<ComponentDeclaration>(&declaration.node)) {
             const ComponentSchema& schema = components_.at(component->name);
+            // A duplicate is already reported; its parameters are not the schema's.
+            if (schema.declaration != component)
+                return;
             for (std::size_t index = 0U; index < component->parameters.size(); ++index) {
                 const Parameter& authored = component->parameters[index];
                 const SchemaParameter& parameter = schema.parameters[index];

@@ -11,9 +11,11 @@
 #include <vector>
 
 #include "compiler/artifact.hpp"
+#include "compiler/compile.hpp"
 #include "compiler/lexer.hpp"
 #include "compiler/parser.hpp"
 #include "compiler/portable_ir.hpp"
+#include "compiler/schema.hpp"
 #include "compiler/source.hpp"
 #include "resource/resource.hpp"
 
@@ -25,14 +27,52 @@ void check(const bool condition, const std::string_view message) {
     }
 }
 
-bool has_diagnostic(
-    const strata::compiler::ParseResult& result,
-    const std::string_view code
-) {
+template <typename Result>
+bool has_diagnostic(const Result& result, const std::string_view code) {
     for (const auto& diagnostic : result.diagnostics) {
         if (diagnostic.code == code) return true;
     }
     return false;
+}
+
+template <typename Result>
+std::size_t diagnostic_count(const Result& result, const std::string_view code) {
+    return static_cast<std::size_t>(std::ranges::count(
+        result.diagnostics, code, &strata::compiler::Diagnostic::code
+    ));
+}
+
+/** Compiles `source` as app/main.strata against the built-in schemas; `modules` serve imports. */
+strata::compiler::CompileResult compile_source(
+    const std::string_view source,
+    const std::vector<strata::compiler::ModuleSource>& modules = {}
+) {
+    static const strata::compiler::SchemaRegistry registry =
+        strata::compiler::SchemaRegistry::builtins();
+    const strata::compiler::ModuleLoader loader =
+        [&modules](const std::string_view, const std::string_view path) {
+            const auto found = std::ranges::find(
+                modules, path, &strata::compiler::ModuleSource::source_id
+            );
+            if (found == modules.end()) {
+                throw strata::compiler::ModuleLoadError("test module is missing");
+            }
+            return *found;
+        };
+    return strata::compiler::compile_program(
+        strata::compiler::ModuleSource{"app/main.strata", std::string(source)},
+        loader,
+        registry
+    );
+}
+
+/** Every diagnostic of a compile, one per line, for failure messages. */
+std::string describe(const strata::compiler::CompileResult& result) {
+    std::string output;
+    for (const auto& diagnostic : result.diagnostics) {
+        output += "\n  " + diagnostic.code + ": " + diagnostic.message;
+    }
+    return output;
 }
 
 void test_utf8_source_positions_use_kotlin_compatible_utf16_offsets() {
@@ -467,6 +507,32 @@ void test_portable_ir_rejects_duplicate_fields_in_narrow_and_wide_objects() {
     );
 }
 
+// Calls resolve to the first of two same-named components, so the second is reported and never
+// validated against the first one's parameters, whether it is declared alongside or imported.
+void test_duplicate_components_are_reported_without_reading_the_other_schema() {
+    const std::string duplicate =
+        "component Card(a: string, b: string = \"x\", c: string = \"x\", d: string = \"x\", "
+        "e: string = \"x\", f: string = \"x\", g: string = \"x\", h: string = \"x\") "
+        "{ Text(text: a) }\n";
+    const auto local = compile_source(
+        "component Card(a: string) { Text(text: a) }\n" + duplicate +
+        "screen Main { root Card(a: \"x\") }"
+    );
+    check(diagnostic_count(local, "STRATA.DSL.SEMANTIC_DUPLICATE_DECLARATION") == 1U &&
+              local.diagnostics.size() == 1U,
+          "a duplicate component was not reported exactly once:" + describe(local));
+
+    const auto imported = compile_source(
+        "import \"app/card.strata\";\n"
+        "component Card(a: string) { Text(text: a) }\n"
+        "screen Main { root Card(a: \"x\") }",
+        {strata::compiler::ModuleSource{"app/card.strata", duplicate}}
+    );
+    check(diagnostic_count(imported, "STRATA.DSL.SEMANTIC_DUPLICATE_DECLARATION") == 1U &&
+              imported.diagnostics.size() == 1U,
+          "an imported duplicate component was not reported exactly once:" + describe(imported));
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -481,6 +547,7 @@ int strata_test_compiler() {
         test_fixed_seed_malformed_programs_terminate_with_valid_spans();
         test_compiled_artifact_binary_round_trip_and_validation();
         test_portable_ir_rejects_duplicate_fields_in_narrow_and_wide_objects();
+        test_duplicate_components_are_reported_without_reading_the_other_schema();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {
