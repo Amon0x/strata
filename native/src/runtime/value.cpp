@@ -46,8 +46,9 @@ Value::Value(const double value) : storage_(value) {
 
 Value::Value(const DurationValue value) noexcept : storage_(value) {}
 
-Value::Value(std::string value) : storage_(std::move(value)) {
-    validate_text(*std::get_if<std::string>(&storage_), "runtime string", false);
+Value::Value(std::string value) {
+    validate_text(value, "runtime string", false);
+    storage_ = std::make_shared<const std::string>(std::move(value));
 }
 
 Value::Value(const char* const value) : Value(std::string(value != nullptr ? value : "")) {
@@ -115,7 +116,8 @@ const DurationValue* Value::duration() const noexcept {
 }
 
 const std::string* Value::string() const noexcept {
-    return std::get_if<std::string>(&storage_);
+    const auto* pointer = std::get_if<StringPtr>(&storage_);
+    return pointer != nullptr ? pointer->get() : nullptr;
 }
 
 const ColorValue* Value::color() const noexcept {
@@ -190,6 +192,9 @@ bool operator==(const Value& left, const Value& right) {
     }
     if (const auto* left_object = std::get_if<Value::ObjectPtr>(&left.storage_)) {
         return pointer_equal(*left_object, std::get<Value::ObjectPtr>(right.storage_));
+    }
+    if (const auto* left_string = std::get_if<Value::StringPtr>(&left.storage_)) {
+        return pointer_equal(*left_string, std::get<Value::StringPtr>(right.storage_));
     }
     return left.storage_ == right.storage_;
 }

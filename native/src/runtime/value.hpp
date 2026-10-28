@@ -89,9 +89,11 @@ enum class ValueKind {
 /**
  * Immutable runtime value. Composite storage is shared so snapshots and retained state can reuse
  * values without process-global identities, copy-on-write mutation, or allocator ambiguity.
+ * Strings are shared the same way: reading a variable or a literal copies a reference, not text.
  */
 class Value final {
 public:
+    using StringPtr = std::shared_ptr<const std::string>;
     using ListPtr = std::shared_ptr<const ValueList>;
     using ObjectPtr = std::shared_ptr<const ValueObject>;
     using Storage = std::variant<
@@ -99,7 +101,7 @@ public:
         bool,
         double,
         DurationValue,
-        std::string,
+        StringPtr,
         ColorValue,
         ImageValue,
         KeyValue,
