@@ -8006,6 +8006,34 @@ overlay Rows { root Rows() }
     static_cast<void>(first_row);
 }
 
+void test_surfaces_keep_their_own_state_scope_bindings() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("surface-bindings", bundle);
+    activate_description_fixture(application, "surface-bindings", R"(
+overlay First {
+  state first = 1;
+  root Text(key: "first.text", text: format("{0}", first))
+}
+overlay Second {
+  state second = 2;
+  root Text(key: "second.text", text: format("{0}", second))
+}
+)");
+    // Two surfaces of one runtime each describe their own layers: building one leaves the
+    // scopes the other bound, so actions in the other still resolve their state.
+    ui::DescriptionBuilder first_surface(application);
+    ui::DescriptionBuilder second_surface(application);
+    static_cast<void>(first_surface.build(runtime::LayerRole::overlay, "First"));
+    static_cast<void>(second_surface.build(runtime::LayerRole::overlay, "Second"));
+    check(application.resolve_state_scope("overlay First", "first").has_value() &&
+              application.resolve_state_scope("overlay Second", "second").has_value(),
+          "describing one surface unbound the state scopes of another");
+    static_cast<void>(second_surface.build(runtime::LayerRole::overlay, "Second"));
+    check(application.resolve_state_scope("overlay First", "first").has_value(),
+          "describing one surface again unbound the state scopes of another");
+}
+
 int strata_test_ui(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--collections") {
@@ -8085,6 +8113,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_component_refresh_checks_the_body_before_its_components();
             test_repeater_keys_are_kept_by_their_generation();
             test_lazy_rows_follow_what_they_read();
+            test_surfaces_keep_their_own_state_scope_bindings();
         }
         std::cout << "strata_ui_tests: OK\n";
         return 0;

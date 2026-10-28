@@ -493,9 +493,9 @@ struct DescriptionBuilder::GeneratedRowEvaluationContext final {
             if (row.node.expired())
                 continue;
             for (const auto& [address, binding] : row.effects.state_bindings) {
-                evaluator->application_.bind_state_scope(address.scope, address.name,
-                                                         binding.declaration_scope,
-                                                         binding.address_scope);
+                evaluator->application_.bind_state_scope(
+                    evaluator->binding_owner_, address.scope, address.name,
+                    binding.declaration_scope, binding.address_scope);
             }
             evaluator->rebind_generated_rows(row.effects);
         }
@@ -748,7 +748,7 @@ DescriptionBuilder::build_layers(const std::span<const LayerDescriptionRequest> 
     diagnostics_.clear();
     evaluated_expressions_ = 0U;
     described_nodes_ = 0U;
-    application_.clear_state_scope_bindings();
+    application_.clear_state_scope_bindings(binding_owner_);
     std::vector<std::shared_ptr<const DescriptionNode>> roots;
     std::vector<runtime::StateScopeSet> layer_state_scopes;
     roots.reserve(layers.size());
@@ -1843,7 +1843,8 @@ void DescriptionBuilder::bind_state_scope(const std::string_view runtime_scope,
     if (!replayed && !component_effect_stack_.empty()) {
         record(component_effect_stack_.back()->local_state_bindings);
     }
-    application_.bind_state_scope(runtime_scope, state_name, declaration_scope, address_scope);
+    application_.bind_state_scope(binding_owner_, runtime_scope, state_name, declaration_scope,
+                                 address_scope);
 }
 
 void DescriptionBuilder::own_state_scope(const std::string_view scope, const bool replayed) {
@@ -2074,9 +2075,11 @@ void DescriptionBuilder::replay_component_effects(const ComponentEffects& effect
 }
 
 void DescriptionBuilder::hold_generated_rows(
-    std::shared_ptr<const GeneratedRowEvaluationContext> rows) {
+    const std::shared_ptr<GeneratedRowEvaluationContext>& rows) {
+    // Rows bind on behalf of the surface this builder describes, which clears them.
+    rows->evaluator->binding_owner_ = binding_owner_;
     if (!component_effect_stack_.empty())
-        component_effect_stack_.back()->generated_rows.push_back(std::move(rows));
+        component_effect_stack_.back()->generated_rows.push_back(rows);
 }
 
 void DescriptionBuilder::rebind_generated_rows(const ComponentEffects& effects) const {

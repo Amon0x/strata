@@ -242,7 +242,7 @@ class DescriptionBuilder final {
     void capture_retained_snapshot();
     void replay_component_effects(const ComponentEffects& effects);
     /** Makes the body being described the holder of a generated child provider's rows. */
-    void hold_generated_rows(std::shared_ptr<const GeneratedRowEvaluationContext> rows);
+    void hold_generated_rows(const std::shared_ptr<GeneratedRowEvaluationContext>& rows);
     /** Binds again what the rows realized in `effects` and its cached components bound. */
     void rebind_generated_rows(const ComponentEffects& effects) const;
     /** Whether a body and the cached components it called would be described the same now. */
@@ -326,6 +326,11 @@ class DescriptionBuilder final {
     void normalize_layout(DescriptionNode::Properties& properties);
 
     runtime::ApplicationContext& application_;
+    /**
+     * Who the state scope bindings this builder makes belong to: the surface it describes. The
+     * builders that describe generated rows for it bind on its behalf.
+     */
+    const void* binding_owner_ = this;
     std::unique_ptr<WidgetRegistry> owned_widgets_;
     const WidgetRegistry& widgets_;
     std::vector<runtime::RuntimeDiagnostic> diagnostics_;

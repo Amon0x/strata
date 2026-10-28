@@ -162,12 +162,25 @@ public:
     [[nodiscard]] const std::shared_ptr<const RuntimeUnit>& active_unit() const noexcept;
     [[nodiscard]] std::optional<std::uint64_t> active_generation() const noexcept;
     [[nodiscard]] std::optional<std::uint64_t> last_attempted_generation() const noexcept;
+    /**
+     * Binds a state name in a runtime scope on behalf of `owner` (a surface's description, say).
+     * The binding lasts until every owner that made it clears its bindings.
+     */
+    void bind_state_scope(
+        const void* owner,
+        std::string_view runtime_scope,
+        std::string_view state_name,
+        std::string_view declaration_scope,
+        std::string_view address_scope
+    );
     void bind_state_scope(
         std::string_view runtime_scope,
         std::string_view state_name,
         std::string_view declaration_scope,
         std::string_view address_scope
     );
+    /** Drops the bindings `owner` made; another owner's stay. */
+    void clear_state_scope_bindings(const void* owner) noexcept;
     void clear_state_scope_bindings() noexcept;
     /** The state a name means in a runtime scope: its nearest declaration along the scope path. */
     [[nodiscard]] std::optional<StateScopeResolution> resolve_state_scope(
@@ -216,6 +229,8 @@ private:
     struct StateScopeBinding final {
         std::string declaration_scope;
         std::string address_scope;
+        /** Whoever bound it: several surfaces may describe the same scope. */
+        std::set<const void*> owners;
     };
     std::map<StateAddress, StateScopeBinding, std::less<>> state_scope_bindings_;
     bool batching_invalidations_ = false;

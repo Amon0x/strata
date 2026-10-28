@@ -582,8 +582,18 @@ void ApplicationContext::bind_state_scope(
     const std::string_view declaration_scope,
     const std::string_view address_scope
 ) {
+    bind_state_scope(nullptr, runtime_scope, state_name, declaration_scope, address_scope);
+}
+
+void ApplicationContext::bind_state_scope(
+    const void* const owner,
+    const std::string_view runtime_scope,
+    const std::string_view state_name,
+    const std::string_view declaration_scope,
+    const std::string_view address_scope
+) {
     // Every description rebinds the scopes it walks: a known binding was validated when it was
-    // first made, so only its owners are compared.
+    // first made, so only its declaration owners are compared.
     const StateAddressView address{runtime_scope, state_name};
     const auto existing = state_scope_bindings_.lower_bound(address);
     if (existing != state_scope_bindings_.end() && existing->first == address) {
@@ -591,6 +601,7 @@ void ApplicationContext::bind_state_scope(
             existing->second.address_scope != address_scope) {
             throw std::invalid_argument("runtime state scope has conflicting declaration owners");
         }
+        existing->second.owners.insert(owner);
         return;
     }
     if (runtime_scope.empty() || state_name.empty() || declaration_scope.empty() ||
@@ -602,8 +613,16 @@ void ApplicationContext::bind_state_scope(
     state_scope_bindings_.emplace_hint(
         existing,
         StateAddress{std::string(runtime_scope), std::string(state_name)},
-        StateScopeBinding{std::string(declaration_scope), std::string(address_scope)}
+        StateScopeBinding{std::string(declaration_scope), std::string(address_scope), {owner}}
     );
+}
+
+void ApplicationContext::clear_state_scope_bindings(const void* const owner) noexcept {
+    for (auto binding = state_scope_bindings_.begin(); binding != state_scope_bindings_.end();) {
+        binding->second.owners.erase(owner);
+        binding = binding->second.owners.empty() ? state_scope_bindings_.erase(binding)
+                                                 : std::next(binding);
+    }
 }
 
 void ApplicationContext::clear_state_scope_bindings() noexcept { state_scope_bindings_.clear(); }
