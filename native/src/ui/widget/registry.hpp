@@ -14,6 +14,7 @@
 
 #include "runtime/expression.hpp"
 #include "ui/layout.hpp"
+#include "ui/theme.hpp"
 #include "ui/widget/subtarget.hpp"
 
 namespace strata::runtime {
@@ -237,6 +238,8 @@ struct WidgetPresentPhase final {
     int overlay_z = detached_overlay_menu_z;
     /** Presents the surface's notifications, so their changes repaint and re-describe it. */
     bool observes_notifications = false;
+    /** Shape of the default themed style (chrome, raised surface, body text). */
+    ThemeStyleSchema style{};
     /** When set, the overlay is presented only while this holds: a detached overlay that shows
      * rarely (a hover tooltip) costs nothing on the frames it does not. */
     WidgetOverlayShown overlay_shown = nullptr;
@@ -317,6 +320,8 @@ class WidgetRegistry final {
     void register_subtargets(std::string type, WidgetSubtargetsHook subtargets,
                              bool detached = false);
     void register_async_owners(std::string type, WidgetAsyncOwnersHook owners);
+    /** Sets only the theme style schema of a type, keeping the rest of its present phase. */
+    void register_style_schema(std::string type, ThemeStyleSchema schema);
 
     void apply_layout_defaults(std::string_view type,
                                DescriptionNode::Properties& properties) const;

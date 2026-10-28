@@ -43,8 +43,6 @@ list(FILTER generic_sources EXCLUDE REGEX "/ui/widget/registry\\.cpp$")
 # ComponentInstance scheduler, which owns these files.
 list(FILTER generic_sources EXCLUDE REGEX "/ui/description\\.cpp$")
 list(FILTER generic_sources EXCLUDE REGEX "/ui/tree\\.cpp$")
-# Theme defaults still classify widgets by name until widgets declare their style schema.
-list(FILTER generic_sources EXCLUDE REGEX "/ui/theme\\.cpp$")
 
 # Single lines that a concurrent change removes; each names its owner.
 set(exempt_lines

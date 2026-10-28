@@ -172,6 +172,11 @@ void WidgetRegistry::register_async_owners(std::string type, WidgetAsyncOwnersHo
     refresh_trait_types();
 }
 
+void WidgetRegistry::register_style_schema(std::string type, const ThemeStyleSchema schema) {
+    lifecycle(std::move(type)).present.style = schema;
+    refresh_trait_types();
+}
+
 void WidgetRegistry::register_command_phase(std::string type, WidgetCommandPhase phase) {
     lifecycle(std::move(type)).command = std::move(phase);
     refresh_trait_types();

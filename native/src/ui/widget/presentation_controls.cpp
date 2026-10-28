@@ -649,6 +649,8 @@ void register_control_widget_presenters(WidgetRegistry& registry) {
     add(registry, "Select", &select_content, nullptr, &select_overlay, true, {false, true, false});
     add(registry, "RadioGroup", nullptr, &radio_foreground, nullptr, false, {true, false, false});
     add(registry, "ComboBox", nullptr);
+    registry.register_style_schema("RadioGroup", ThemeStyleSchema{.chromeless = true});
+    registry.register_style_schema("Select", ThemeStyleSchema{.raised = true});
 }
 
 } // namespace strata::ui

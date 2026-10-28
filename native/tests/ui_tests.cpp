@@ -6821,7 +6821,9 @@ overlay Main { root Root() }
         return nullptr;
     };
     const std::vector<ui::LayerDescriptionRequest> main{{runtime::LayerRole::overlay, "Main"}};
-    const auto themed = [](const std::string_view type) { return type != "$overlay"; };
+    const auto themed = [](const std::string_view type) -> std::optional<ui::ThemeStyleSchema> {
+        return type != "$overlay" ? std::optional(ui::ThemeStyleSchema{}) : std::nullopt;
+    };
 
     ui::DescriptionBuilder builder(application);
     ui::ThemeMaterializationCache theme_cache;

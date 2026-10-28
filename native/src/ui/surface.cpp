@@ -1102,10 +1102,22 @@ bool Surface::rebuild_tree(SurfaceFrame& frame, std::optional<std::string_view>&
     return true;
 }
 
+namespace {
+
+/** Each widget's lifecycle declares its themed style schema; unregistered types stay unthemed. */
+[[nodiscard]] ThemeStyleSchemaResolver widget_style_schemas(const WidgetRegistry& widgets) {
+    return [&widgets](const std::string_view type) -> std::optional<ThemeStyleSchema> {
+        const WidgetLifecycle* lifecycle = widgets.find(type);
+        return lifecycle != nullptr ? std::optional(lifecycle->present.style) : std::nullopt;
+    };
+}
+
+} // namespace
+
 std::shared_ptr<const DescriptionNode> Surface::project_description_theme() {
     return materialize_theme_tree(
                raw_description_, themes_,
-               [this](const std::string_view type) { return widgets_.find(type) != nullptr; },
+               widget_style_schemas(widgets_),
                [this](const std::string_view name, const DescriptionNode& node) {
                    report_unknown_theme_timing(name, node);
                },
@@ -1178,9 +1190,7 @@ ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
                     materialize_theme_subtree(
                         row.description, themes_, projected.projected_theme,
                         projected.projected_theme_scope,
-                        [this](const std::string_view type) {
-                            return widgets_.find(type) != nullptr;
-                        },
+                        widget_style_schemas(widgets_),
                         [this](const std::string_view name, const DescriptionNode& node) {
                             report_unknown_theme_timing(name, node);
                         },

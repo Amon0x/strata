@@ -734,8 +734,9 @@ void report_unknown_timings(const Theme& theme, const DescriptionNode& node,
 
 [[nodiscard]] ThemeWidgetContribution
 widget_contribution(const Theme& theme, const std::string_view type, const std::string_view variant,
-                    const std::optional<std::string>& scope_namespace) {
-    const ResolvedThemeWidgetStyle themed = theme.resolved_style(type, variant);
+                    const std::optional<std::string>& scope_namespace,
+                    const ThemeStyleSchema& schema) {
+    const ResolvedThemeWidgetStyle themed = theme.resolved_style(type, variant, schema);
     const std::string motion_prefix = qualified_animation_prefix(
         animation_owner_namespace(themed.owner_theme, scope_namespace), themed.key);
     ThemeWidgetContribution result;
@@ -769,7 +770,7 @@ widget_contribution(const Theme& theme, const std::string_view type, const std::
 resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCatalog& catalog,
              const std::shared_ptr<const Theme>& inherited,
              const std::optional<std::string>& inherited_scope_namespace,
-             const ThemeTypePredicate& themed_type, const UnknownThemeTiming& unknown_timing,
+             const ThemeStyleSchemaResolver& themed_type, const UnknownThemeTiming& unknown_timing,
              ThemeMaterializationStats& stats, ThemeMaterializationCache* const cache) {
     if (source == nullptr)
         return nullptr;
@@ -823,14 +824,15 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
     DescriptionNode::Properties properties = source->properties;
     const ThemeWidgetContribution* themed = nullptr;
     std::optional<ThemeWidgetContribution> uncached;
-    if (themed_type(source->type)) {
+    if (const std::optional<ThemeStyleSchema> schema = themed_type(source->type);
+        schema.has_value()) {
         std::string variant = node_variant(*source);
         themed = cache != nullptr
                      ? cache->widget_contribution(effective, source->type, variant, scope_namespace)
                      : nullptr;
         if (themed == nullptr) {
             ThemeWidgetContribution contribution =
-                widget_contribution(*effective, source->type, variant, scope_namespace);
+                widget_contribution(*effective, source->type, variant, scope_namespace, *schema);
             if (cache != nullptr) {
                 themed = &cache->store_widget_contribution(effective, source->type,
                                                            std::move(variant), scope_namespace,
@@ -1204,32 +1206,79 @@ void ThemeTokens::validate() const {
     }
 }
 
+namespace {
+
+struct StandardColorToken final {
+    std::string_view name;
+    runtime::ColorValue ThemeTokens::* field;
+};
+struct StandardNumberToken final {
+    std::string_view name;
+    double ThemeTokens::* field;
+};
+
+constexpr StandardColorToken standard_color_tokens[] = {
+    {"surface", &ThemeTokens::surface},
+    {"surfaceRaised", &ThemeTokens::surface_raised},
+    {"foreground", &ThemeTokens::foreground},
+    {"mutedForeground", &ThemeTokens::muted_foreground},
+    {"accent", &ThemeTokens::accent},
+    {"danger", &ThemeTokens::danger},
+    {"focus", &ThemeTokens::focus},
+};
+constexpr StandardNumberToken standard_number_tokens[] = {
+    {"spacingUnit", &ThemeTokens::spacing_unit},
+    {"radius", &ThemeTokens::radius},
+    {"density", &ThemeTokens::density},
+};
+
+} // namespace
+
 const runtime::ColorValue* ThemeTokens::color(const std::string_view name) const noexcept {
-    if (name == "surface")
-        return &surface;
-    if (name == "surfaceRaised")
-        return &surface_raised;
-    if (name == "foreground")
-        return &foreground;
-    if (name == "mutedForeground")
-        return &muted_foreground;
-    if (name == "accent")
-        return &accent;
-    if (name == "danger")
-        return &danger;
-    if (name == "focus")
-        return &focus;
-    return nullptr;
+    for (const StandardColorToken& token : standard_color_tokens) {
+        if (token.name == name)
+            return &(this->*token.field);
+    }
+    const auto found = custom.find(name);
+    return found != custom.end() ? std::get_if<runtime::ColorValue>(&found->second) : nullptr;
 }
 
 std::optional<double> ThemeTokens::number(const std::string_view name) const noexcept {
-    if (name == "spacingUnit")
-        return spacing_unit;
-    if (name == "radius")
-        return radius;
-    if (name == "density")
-        return density;
-    return std::nullopt;
+    for (const StandardNumberToken& token : standard_number_tokens) {
+        if (token.name == name)
+            return this->*token.field;
+    }
+    const auto found = custom.find(name);
+    const double* value = found != custom.end() ? std::get_if<double>(&found->second) : nullptr;
+    return value != nullptr ? std::optional<double>(*value) : std::nullopt;
+}
+
+void ThemeTokens::set(std::string name, ThemeTokenValue value) {
+    if (name.empty() || !core::valid_utf8(name))
+        throw std::invalid_argument("theme token name must be non-empty valid UTF-8");
+    for (const StandardColorToken& token : standard_color_tokens) {
+        if (token.name != name)
+            continue;
+        const runtime::ColorValue* color = std::get_if<runtime::ColorValue>(&value);
+        if (color == nullptr)
+            throw std::invalid_argument("theme token '" + name + "' is a color");
+        this->*token.field = *color;
+        return;
+    }
+    for (const StandardNumberToken& token : standard_number_tokens) {
+        if (token.name != name)
+            continue;
+        const double* number = std::get_if<double>(&value);
+        if (number == nullptr)
+            throw std::invalid_argument("theme token '" + name + "' is a number");
+        this->*token.field = *number;
+        return;
+    }
+    if (const double* number = std::get_if<double>(&value); number != nullptr &&
+                                                             !std::isfinite(*number)) {
+        throw std::invalid_argument("theme token '" + name + "' must be finite");
+    }
+    custom.insert_or_assign(std::move(name), std::move(value));
 }
 
 void ThemeBorder::validate() const {
@@ -1606,16 +1655,11 @@ Theme::explicit_style(const std::string_view component_type, const std::string_v
     return parent_ != nullptr ? parent_->explicit_style(component_type, variant) : std::nullopt;
 }
 
-ThemedWidgetStyle Theme::semantic_style(const std::string_view component_type,
+ThemedWidgetStyle Theme::semantic_style(const ThemeStyleSchema& schema,
                                         const std::string_view raw_variant) const {
     const std::string variant(raw_variant.empty() ? default_widget_variant : raw_variant);
-    const bool text_only = component_type == "Text" || component_type == "RichText";
-    const bool structural = component_type == "Slot";
-    // A Draw paints the shapes it is given and nothing else: no theme surface or border behind them.
-    const bool authored_drawing = component_type == "Draw";
-    const bool choice_group = component_type == "RadioGroup";
-    const bool raised =
-        component_type == "Modal" || component_type == "Select" || component_type == "Tooltip";
+    const bool text_only = schema.body_text;
+    const bool raised = schema.raised;
     const runtime::ColorValue accent = variant == "danger" ? tokens_.danger : tokens_.accent;
     const runtime::ColorValue text_foreground = text_only && variant == "primary"  ? tokens_.accent
                                                 : text_only && variant == "danger" ? tokens_.danger
@@ -1623,7 +1667,7 @@ ThemedWidgetStyle Theme::semantic_style(const std::string_view component_type,
                                                     ? tokens_.muted_foreground
                                                     : tokens_.foreground;
     ThemeWidgetVisualStyle visual;
-    if (text_only || structural || choice_group || authored_drawing || variant == "subtle") {
+    if (text_only || schema.chromeless || variant == "subtle") {
         visual.background.reset();
         visual.border.reset();
     } else {
@@ -1641,8 +1685,10 @@ ThemedWidgetStyle Theme::semantic_style(const std::string_view component_type,
     const bool filled_action = !text_only && (variant == "primary" || variant == "danger");
     visual.foreground = filled_action ? tokens_.surface : text_foreground;
     visual.radius = variant == "compact" ? tokens_.radius * 0.75 : tokens_.radius;
-    visual.hover_overlay =
-        std::optional<runtime::ColorValue>(runtime::ColorValue{255U, 255U, 255U, 18U});
+    // Hover lightens a dark theme and darkens a light one: it is the foreground, faintly. A white
+    // overlay was invisible on light surfaces.
+    visual.hover_overlay = std::optional<runtime::ColorValue>(runtime::ColorValue{
+        tokens_.foreground.red, tokens_.foreground.green, tokens_.foreground.blue, 18U});
     visual.active_overlay =
         std::optional<runtime::ColorValue>(runtime::ColorValue{0U, 0U, 0U, 32U});
     visual.focus_ring = std::optional<ThemeBorder>(ThemeBorder{2.0, tokens_.focus, true});
@@ -1674,12 +1720,14 @@ ThemedWidgetStyle Theme::semantic_style(const std::string_view component_type,
 }
 
 ThemedWidgetStyle Theme::style(const std::string_view component_type,
-                               const std::string_view variant) const {
-    return resolved_style(component_type, variant).style;
+                               const std::string_view variant,
+                               const ThemeStyleSchema& schema) const {
+    return resolved_style(component_type, variant, schema).style;
 }
 
 ResolvedThemeWidgetStyle Theme::resolved_style(const std::string_view component_type,
-                                               const std::string_view variant) const {
+                                               const std::string_view variant,
+                                               const ThemeStyleSchema& schema) const {
     if (blank(component_type) || (!variant.empty() && blank(variant)) ||
         !core::valid_utf8(component_type) || !core::valid_utf8(variant)) {
         throw std::invalid_argument(
@@ -1692,7 +1740,7 @@ ResolvedThemeWidgetStyle Theme::resolved_style(const std::string_view component_
         return std::move(*explicit_value);
     }
     return ResolvedThemeWidgetStyle{
-        semantic_style(component_type, variant),
+        semantic_style(schema, variant),
         name_,
         ThemeWidgetKey{std::string(component_type), std::string(effective_variant)},
         false,
@@ -1960,7 +2008,7 @@ void ThemeMaterializationCache::clear() noexcept {
 
 ThemeMaterializationResult
 materialize_theme_tree(const std::shared_ptr<const DescriptionNode>& root,
-                       const ThemeCatalog& catalog, const ThemeTypePredicate& themed_type,
+                       const ThemeCatalog& catalog, const ThemeStyleSchemaResolver& themed_type,
                        const UnknownThemeTiming& unknown_timing,
                        ThemeMaterializationCache* const cache) {
     if (root == nullptr)
@@ -1980,7 +2028,7 @@ ThemeMaterializationResult materialize_theme_subtree(
     const std::shared_ptr<const DescriptionNode>& root, const ThemeCatalog& catalog,
     const std::shared_ptr<const Theme>& inherited_theme,
     const std::optional<std::string>& inherited_scope_namespace,
-    const ThemeTypePredicate& themed_type, const UnknownThemeTiming& unknown_timing,
+    const ThemeStyleSchemaResolver& themed_type, const UnknownThemeTiming& unknown_timing,
     ThemeMaterializationCache* const cache) {
     if (root == nullptr)
         return {};

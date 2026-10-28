@@ -24,12 +24,25 @@
 #include "compiler/semantic.hpp"
 #include "ui/theme.hpp"
 #include "ui/tree.hpp"
+#include "ui/widget/registry.hpp"
 
 namespace {
 
 void check(const bool condition, const std::string_view message) {
     if (!condition)
         throw std::runtime_error(std::string(message));
+}
+
+/** Theme every type but `unthemed` with the style schema its widget lifecycle declares. */
+[[nodiscard]] strata::ui::ThemeStyleSchemaResolver
+widget_schemas(const std::string_view unthemed = "ThemeScope") {
+    static const strata::ui::WidgetRegistry widgets;
+    return [unthemed](const std::string_view type) -> std::optional<strata::ui::ThemeStyleSchema> {
+        if (!unthemed.empty() && type == unthemed)
+            return std::nullopt;
+        const strata::ui::WidgetLifecycle* lifecycle = widgets.find(type);
+        return lifecycle != nullptr ? lifecycle->present.style : strata::ui::ThemeStyleSchema{};
+    };
 }
 
 [[nodiscard]] std::shared_ptr<const strata::ui::DescriptionChildren>
@@ -93,21 +106,59 @@ void test_defaults_and_validation() {
     check(rejected, "non-positive theme density was accepted");
 
     const ui::Theme default_theme;
-    const ui::ThemedWidgetStyle text = default_theme.style("Text", "subtle");
+    // Default themed styles take their shape from each widget's lifecycle schema, not its name.
+    const ui::WidgetRegistry widgets;
+    const auto schema = [&widgets](const std::string_view type) {
+        const ui::WidgetLifecycle* lifecycle = widgets.find(type);
+        check(lifecycle != nullptr, "built-in widget has no lifecycle");
+        return lifecycle->present.style;
+    };
+    check(default_theme.style("Text").visual->background.has_value(),
+          "a schema-less style lost its control chrome");
+    const ui::ThemedWidgetStyle text = default_theme.style("Text", "subtle", schema("Text"));
     check(text.visual.has_value() && !text.visual->background.has_value(),
           "text semantic chrome is not transparent");
     check(text.text_layout.has_value() && text.text_layout->primary_font == "strata:fonts/default",
           "ordinary text no longer defaults to the Regular face");
     // A Draw paints only its shapes: on a tinted parent a themed surface behind them shows as a box.
-    const ui::ThemedWidgetStyle drawing = default_theme.style("Draw");
+    const ui::ThemedWidgetStyle drawing =
+        default_theme.style("Draw", ui::default_widget_variant, schema("Draw"));
     check(drawing.visual.has_value() && !drawing.visual->background.has_value() &&
               !drawing.visual->border.has_value(),
           "a Draw gets theme chrome behind its shapes");
-    const ui::ThemedWidgetStyle raised = default_theme.style("Tooltip");
+    const ui::ThemedWidgetStyle raised =
+        default_theme.style("Tooltip", ui::default_widget_variant, schema("Tooltip"));
     check(raised.visual.has_value() && raised.visual->background.has_value() &&
               *raised.visual->background == default_theme.tokens().surface_raised,
           "raised widget semantic background changed");
-    const ui::ThemedWidgetStyle compact = default_theme.style("Button", "compact");
+    const ui::ThemedWidgetStyle compact =
+        default_theme.style("Button", "compact", schema("Button"));
+    // Hover is the foreground, faintly: it lightens a dark theme and darkens a light one.
+    ui::ThemeTokens light;
+    light.surface = runtime::ColorValue{250U, 250U, 250U, 255U};
+    light.foreground = runtime::ColorValue{20U, 22U, 26U, 255U};
+    const ui::Theme light_theme("light", light);
+    const std::optional<runtime::ColorValue> hover =
+        light_theme.style("Button", ui::default_widget_variant, schema("Button"))
+            .visual->hover_overlay;
+    check(hover.has_value() && hover->red == 20U && hover->alpha > 0U,
+          "the hover overlay is invisible on a light theme");
+    // Tokens beyond the standard set are typed and found by name like the standard ones.
+    ui::ThemeTokens open = light;
+    open.set("selectionStroke", runtime::ColorValue{1U, 2U, 3U, 4U});
+    open.set("rowHeight", 28.0);
+    open.set("accent", runtime::ColorValue{9U, 9U, 9U, 255U});
+    check(open.color("selectionStroke") != nullptr && open.color("selectionStroke")->alpha == 4U &&
+              open.number("rowHeight") == 28.0 && open.accent.red == 9U &&
+              open.color("rowHeight") == nullptr,
+          "the open theme token map did not keep typed custom tokens");
+    bool mistyped = false;
+    try {
+        open.set("radius", runtime::ColorValue{1U, 1U, 1U, 1U});
+    } catch (const std::invalid_argument&) {
+        mistyped = true;
+    }
+    check(mistyped, "a standard token accepted a value of the wrong type");
     check(compact.visual->radius == 0.0 && compact.text_layout->pixel_size == 10.8 &&
               compact.text_layout->primary_font == "strata:fonts/default-medium",
           "compact control typography or theme semantics changed");
@@ -172,7 +223,7 @@ void test_scopes_styles_tokens_and_lazy_ranges() {
                  {node("Text", "fallback", properties(std::nullopt, {}, "primary"))}),
         });
     const ui::ThemeMaterializationResult resolved = ui::materialize_theme_tree(
-        scoped, catalog, [](const std::string_view type) { return type != "ThemeScope"; });
+        scoped, catalog, widget_schemas());
     check(field(*resolved.root, "padding") != nullptr &&
               *field(*resolved.root, "padding")->number() == 11.0,
           "structural theme scope did not resolve its symbolic layout token");
@@ -206,7 +257,7 @@ void test_scopes_styles_tokens_and_lazy_ranges() {
                         {{"color", runtime::Value(runtime::ThemeTokenValue{"accent"})}},
                         "primary")),
         catalog, resolved.root->projected_theme, resolved.root->projected_theme_scope,
-        [](const std::string_view type) { return type != "ThemeScope"; });
+        widget_schemas());
     check(entering.root != nullptr &&
               entering.root->projected_theme == resolved.root->projected_theme &&
               entering.root->projected_theme_generation == catalog.generation() &&
@@ -217,10 +268,10 @@ void test_scopes_styles_tokens_and_lazy_ranges() {
 
     ui::ThemeMaterializationCache materialization_cache;
     const ui::ThemeMaterializationResult cached_first = ui::materialize_theme_tree(
-        scoped, catalog, [](const std::string_view type) { return type != "ThemeScope"; }, {},
+        scoped, catalog, widget_schemas(), {},
         &materialization_cache);
     const ui::ThemeMaterializationResult cached_second = ui::materialize_theme_tree(
-        scoped, catalog, [](const std::string_view type) { return type != "ThemeScope"; }, {},
+        scoped, catalog, widget_schemas(), {},
         &materialization_cache);
     check(cached_second.root == cached_first.root && cached_second.stats.resolved_nodes == 0U,
           "unchanged immutable theme input did not reuse its materialized subtree");
@@ -234,7 +285,7 @@ void test_scopes_styles_tokens_and_lazy_ranges() {
         });
     lazy->materialization = ui::MaterializationRange{40U, 43U};
     const ui::ThemeMaterializationResult lazy_result =
-        ui::materialize_theme_tree(lazy, catalog, [](const std::string_view) { return true; });
+        ui::materialize_theme_tree(lazy, catalog, widget_schemas(""));
     check(lazy_resolver_calls == 3U && lazy_result.stats.resolved_nodes == 4U,
           "theme resolution requested an offscreen lazy child");
 }
@@ -275,7 +326,7 @@ void test_catalog_and_motion_policy() {
     std::size_t unknown = 0U;
     const ui::ThemeMaterializationResult resolved = ui::materialize_theme_tree(
         node("Button", "animated", std::move(animated_properties)), catalog,
-        [](const std::string_view) { return true; },
+        widget_schemas(""),
         [&unknown](const std::string_view name, const ui::DescriptionNode&) {
             check(name == "missing", "unknown motion callback reported the wrong name");
             ++unknown;
@@ -366,7 +417,7 @@ void test_exact_resolution_validation_and_local_scope() {
     const ui::ThemeMaterializationResult local = ui::materialize_theme_tree(
         node("Panel", "local.scope", {},
              {node("Text", "local.text", properties(std::nullopt, {}, "primary"))}),
-        catalog, [](const std::string_view type) { return type != "Panel"; });
+        catalog, widget_schemas("Panel"));
     check(field(*local.root->children->at(0U), "foreground") != nullptr &&
               *field(*local.root->children->at(0U), "foreground")->color() == local_tokens.accent,
           "typed local scope did not inherit into descendants");
@@ -514,7 +565,7 @@ void test_full_style_round_trip_and_nullability() {
     check(catalog.register_theme(theme), "round-trip theme did not register");
     const ui::ThemeMaterializationResult materialized = ui::materialize_theme_tree(
         node("Panel", "roundtrip.node", properties("roundtrip", {}, "ExactCase")), catalog,
-        [](const std::string_view) { return true; });
+        widget_schemas(""));
     check(field(*materialized.root, "background") != nullptr &&
               field(*materialized.root, "background")->kind() == runtime::ValueKind::null_value,
           "nullable visual background did not round-trip as explicit null");
@@ -590,7 +641,7 @@ void test_full_style_round_trip_and_nullability() {
                                  {"expanded", runtime::Value(true)},
                              })},
                         })),
-        disabled_catalog, [](const std::string_view) { return true; });
+        disabled_catalog, widget_schemas(""));
     check(field(*empty_materialized.root, "$themeAnimationSet") != nullptr &&
               *field(*empty_materialized.root, "$themeAnimationSet")->string() == "present-empty" &&
               !ui::content_size_motion(*empty_materialized.root).has_value(),
@@ -604,7 +655,7 @@ void test_full_style_round_trip_and_nullability() {
         })));
     const ui::ThemeMaterializationResult authored_materialized =
         ui::materialize_theme_tree(node("Panel", "authored", std::move(authored_motion)),
-                                   disabled_catalog, [](const std::string_view) { return true; });
+                                   disabled_catalog, widget_schemas(""));
     check(ui::content_size_motion(*authored_materialized.root).has_value(),
           "authored content-size motion did not retain precedence over present-empty theme motion");
 }
@@ -686,7 +737,7 @@ void test_unicode_recursive_layout_and_typed_motion_contracts() {
         check(catalog.register_theme(theme), "inline exit theme did not register");
         const ui::ThemeMaterializationResult materialized =
             ui::materialize_theme_tree(node("Panel", "exit.node", properties(name)), catalog,
-                                       [](const std::string_view) { return true; });
+                                       widget_schemas(""));
         ui::RetainedTree tree;
         static_cast<void>(tree.reconcile(materialized.root));
         ui::MotionRuntime runtime;
@@ -787,7 +838,7 @@ void test_unicode_recursive_layout_and_typed_motion_contracts() {
           "all-null style theme did not register");
     const ui::ThemeMaterializationResult empty_style_materialized = ui::materialize_theme_tree(
         node("Panel", "empty-style.node", properties("empty-style")), empty_style_catalog,
-        [](const std::string_view) { return true; });
+        widget_schemas(""));
     check(field(*empty_style_materialized.root, "background") == nullptr &&
               field(*empty_style_materialized.root, "foreground") == nullptr &&
               empty_style_materialized.root->properties.contains("$layout"),
@@ -812,7 +863,7 @@ void test_unicode_recursive_layout_and_typed_motion_contracts() {
     check(inside_catalog.register_theme(inside_theme), "inside-border theme did not register");
     const ui::ThemeMaterializationResult inside =
         ui::materialize_theme_tree(node("Panel", "inside.node", properties("inside")),
-                                   inside_catalog, [](const std::string_view) { return true; });
+                                   inside_catalog, widget_schemas(""));
     const ui::LayoutStyle resolved_inside = ui::layout_style(*inside.root);
     check(field(*inside.root, "border") != nullptr &&
               field(*inside.root, "border")->field("width") != nullptr &&
@@ -834,7 +885,7 @@ void test_unicode_recursive_layout_and_typed_motion_contracts() {
                                     {"width", runtime::Value(5.0)},
                                 })},
                  })),
-        inside_catalog, [](const std::string_view) { return true; });
+        inside_catalog, widget_schemas(""));
     check(ui::layout_style(*authored_inside.root).scroll_viewport_insets ==
               ui::Edges{5.0, 5.0, 5.0, 5.0},
           "authored border did not retain precedence over themed viewport insets");

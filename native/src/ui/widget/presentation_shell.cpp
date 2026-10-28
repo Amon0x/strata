@@ -650,6 +650,8 @@ void register_shell_widget_presenters(WidgetRegistry& registry) {
     add(registry, "Modal", &modal_content);
     add(registry, "Tooltip", nullptr, &tooltip_overlay, true, {false, true, false},
         &tooltip_overlay_shown, detached_overlay_tooltip_z);
+    registry.register_style_schema("Modal", ThemeStyleSchema{.raised = true});
+    registry.register_style_schema("Tooltip", ThemeStyleSchema{.raised = true});
 }
 
 } // namespace strata::ui

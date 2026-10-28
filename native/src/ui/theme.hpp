@@ -24,6 +24,14 @@ inline constexpr std::string_view default_theme_name = "strata-default";
 inline constexpr std::string_view default_widget_variant = "default";
 inline constexpr std::string_view default_motion_timing_name = "standard";
 
+/** A theme token's typed value: a color or a number. */
+using ThemeTokenValue = std::variant<runtime::ColorValue, double>;
+
+/**
+ * The tokens a theme defines. The standard tokens are fields (the C ABI and `theme.<name>` read
+ * them); any other named token lives in `custom`, typed, so presentation can name values the
+ * standard set lacks. Lookup by name is table-driven over both.
+ */
 struct ThemeTokens final {
     runtime::ColorValue surface{24U, 26U, 30U, 255U};
     runtime::ColorValue surface_raised{30U, 33U, 38U, 255U};
@@ -35,10 +43,13 @@ struct ThemeTokens final {
     double spacing_unit = 4.0;
     double radius = 0.0;
     double density = 1.0;
+    std::map<std::string, ThemeTokenValue, std::less<>> custom;
 
     void validate() const;
     [[nodiscard]] const runtime::ColorValue* color(std::string_view name) const noexcept;
     [[nodiscard]] std::optional<double> number(std::string_view name) const noexcept;
+    /** Sets a token by name: a standard token must keep its type; any other name is custom. */
+    void set(std::string name, ThemeTokenValue value);
     [[nodiscard]] friend bool operator==(const ThemeTokens&, const ThemeTokens&) = default;
 };
 
@@ -49,6 +60,21 @@ struct ThemeBorder final {
 
     void validate() const;
     [[nodiscard]] friend bool operator==(const ThemeBorder&, const ThemeBorder&) = default;
+};
+
+/**
+ * How a widget's default themed style is shaped. Each widget lifecycle declares its own
+ * (present.style); the theme never classifies widgets by name.
+ */
+struct ThemeStyleSchema final {
+    /** No theme surface or border: text, structural slots, authored drawings, choice groups. */
+    bool chromeless = false;
+    /** Above the page (dialogs, dropdowns, tooltips): the raised surface. */
+    bool raised = false;
+    /** Body copy: variants recolor the text rather than fill a surface, in the regular face. */
+    bool body_text = false;
+
+    [[nodiscard]] friend bool operator==(const ThemeStyleSchema&, const ThemeStyleSchema&) = default;
 };
 
 /** An engaged outer optional is authored; an empty inner optional explicitly removes the value. */
@@ -272,13 +298,16 @@ public:
     [[nodiscard]] const std::shared_ptr<const Theme>& parent() const noexcept;
     [[nodiscard]] const ThemeMotionPolicy& motion_policy() const noexcept;
     [[nodiscard]] const std::map<ThemeWidgetKey, ThemedWidgetStyle>& widget_styles() const noexcept;
+    /** The style a widget of this type gets; `schema` shapes the defaults a theme leaves open. */
     [[nodiscard]] ThemedWidgetStyle style(
         std::string_view component_type,
-        std::string_view variant = default_widget_variant
+        std::string_view variant = default_widget_variant,
+        const ThemeStyleSchema& schema = {}
     ) const;
     [[nodiscard]] ResolvedThemeWidgetStyle resolved_style(
         std::string_view component_type,
-        std::string_view variant = default_widget_variant
+        std::string_view variant = default_widget_variant,
+        const ThemeStyleSchema& schema = {}
     ) const;
     [[nodiscard]] std::shared_ptr<const Theme> derive(
         std::string name,
@@ -293,7 +322,7 @@ private:
         std::string_view variant
     ) const;
     [[nodiscard]] ThemedWidgetStyle semantic_style(
-        std::string_view component_type,
+        const ThemeStyleSchema& schema,
         std::string_view variant
     ) const;
 
@@ -420,7 +449,9 @@ private:
     std::map<const DescriptionNode*, Entry> entries_;
 };
 
-using ThemeTypePredicate = std::function<bool(std::string_view)>;
+/** The style schema of a themed widget type; nullopt leaves the type unthemed. */
+using ThemeStyleSchemaResolver =
+    std::function<std::optional<ThemeStyleSchema>(std::string_view type)>;
 using UnknownThemeTiming = std::function<void(
     std::string_view,
     const DescriptionNode&
@@ -433,10 +464,11 @@ using UnknownThemeTiming = std::function<void(
 [[nodiscard]] ThemeMaterializationResult materialize_theme_tree(
     const std::shared_ptr<const DescriptionNode>& root,
     const ThemeCatalog& catalog,
-    const ThemeTypePredicate& themed_type,
+    const ThemeStyleSchemaResolver& themed_type,
     const UnknownThemeTiming& unknown_timing = {},
     ThemeMaterializationCache* cache = nullptr
 );
+
 /**
  * Projects one entering retained virtual subtree from its collection parent's already-resolved
  * inherited context. This avoids reconstructing and re-theming the description path above it.
@@ -446,10 +478,11 @@ using UnknownThemeTiming = std::function<void(
     const ThemeCatalog& catalog,
     const std::shared_ptr<const Theme>& inherited_theme,
     const std::optional<std::string>& inherited_scope_namespace,
-    const ThemeTypePredicate& themed_type,
+    const ThemeStyleSchemaResolver& themed_type,
     const UnknownThemeTiming& unknown_timing = {},
     ThemeMaterializationCache* cache = nullptr
 );
+
 
 /** Reads the policy annotation installed by materialize_theme_tree. */
 [[nodiscard]] bool theme_motion_reduced(

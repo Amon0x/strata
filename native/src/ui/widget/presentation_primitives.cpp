@@ -357,6 +357,13 @@ void register_primitive_widget_presenters(WidgetRegistry& registry) {
     status.content = &status_content;
     status.depends_on_status_feedback = true;
     registry.register_present_phase("StatusBar", std::move(status));
+    // Body copy recolors its text by variant; slots and drawings get no theme chrome at all
+    // (a Draw paints only the shapes it is given); dialogs sit on the raised surface.
+    registry.register_style_schema("Text", ThemeStyleSchema{.chromeless = true, .body_text = true});
+    registry.register_style_schema("RichText",
+                                   ThemeStyleSchema{.chromeless = true, .body_text = true});
+    registry.register_style_schema("Slot", ThemeStyleSchema{.chromeless = true});
+    registry.register_style_schema("Draw", ThemeStyleSchema{.chromeless = true});
 }
 
 } // namespace strata::ui
