@@ -103,10 +103,8 @@ void Renderer::Impl::effect(Target& destination, Image& source, Image& backdrop,
             auto downsample = pass.downsample;
             if (pass.radius_parameter < batch.parameter_count)
                 radius = batch.parameters[pass.radius_parameter];
-            if (pass.downsample_parameter < batch.parameter_count) {
-                downsample = static_cast<std::uint32_t>(
-                    std::clamp(batch.parameters[pass.downsample_parameter], 1.0, 8.0));
-            }
+            if (pass.downsample_parameter < batch.parameter_count)
+                downsample = gpu::blur_downsample(batch.parameters[pass.downsample_parameter]);
             current = &blur(*current, radius * pixel_scale(destination), downsample);
         } else if (pass.kind == 1) {
             auto& next = temporary(destination.width, destination.height, destination.format);

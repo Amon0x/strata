@@ -241,6 +241,30 @@ void run() {
         image = render(packet);
         require(pixel(image, 32, 17, 16)[3] > 0 && pixel(image, 32, 17, 16)[3] < 200,
                 "blur must spread edge coverage");
+        // A downsample parameter rounds to the nearest factor, as on D3D11 and the reference
+        // renderer: 2.6 blurs exactly as a declared downsample of 3.
+        renderer.declare_effect_pass("test.blur-parameter", 0, STRATA_EFFECT_PASS_BLUR, 6, 1,
+                                     UINT32_MAX, 0, {});
+        renderer.declare_effect_pass("test.blur-three", 0, STRATA_EFFECT_PASS_BLUR, 6, 3,
+                                     UINT32_MAX, UINT32_MAX, {});
+        const auto blurred_by = [&](const char* id, std::uint32_t count, double value) {
+            auto edge = quad();
+            std::get<host::DrawBatch>(edge.batches[0]).scissor = {0, 0, 16, 32};
+            host::EffectBatch blurred;
+            blurred.source_order = 1;
+            blurred.width = blurred.height = 32;
+            blurred.scissor = {0, 0, 32, 32};
+            blurred.effect = id;
+            blurred.parameter_count = count;
+            blurred.parameters[0] = value;
+            edge.batches.emplace_back(blurred);
+            return render(edge);
+        };
+        const auto parameter_blur = blurred_by("test.blur-parameter", 1, 2.6);
+        const auto declared_blur = blurred_by("test.blur-three", 0, 0);
+        for (std::uint32_t x = 8; x < 24; ++x)
+            near(pixel(parameter_blur, 32, x, 16), pixel(declared_blur, 32, x, 16),
+                 "blur downsample parameter rounds to the nearest factor", 1);
         renderer.release_target();
         context.resize(64, 64);
         auto resized = quad();

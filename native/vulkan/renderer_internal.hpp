@@ -2,6 +2,7 @@
 
 #include "gpu/blur_shaders.hpp"
 #include "gpu/clip.hpp"
+#include "gpu/effect_policy.hpp"
 #include "gpu/groups.hpp"
 #include "gpu/effect_shaders.hpp"
 #include "gpu/png.hpp"

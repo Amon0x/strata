@@ -3,6 +3,7 @@
 #endif
 
 #include "effect_pass.hpp"
+#include "gpu/effect_policy.hpp"
 #include "gpu/effect_shaders.hpp"
 
 #include <algorithm>
@@ -825,10 +826,8 @@ struct EffectPassRenderer::Impl final {
                 if (pass.kind == 0U) {
                     const double radius =
                         std::max(0.0, parameter(effect, pass.radius_parameter, pass.radius));
-                    const std::uint32_t downsample = static_cast<std::uint32_t>(
-                        std::clamp(std::llround(parameter(effect, pass.downsample_parameter,
-                                                          static_cast<double>(pass.downsample))),
-                                   1LL, 8LL));
+                    const std::uint32_t downsample = gpu::blur_downsample(parameter(
+                        effect, pass.downsample_parameter, static_cast<double>(pass.downsample)));
                     const host::BlurBatch batch{
                         effect.source_order, effect.scissor, effect.x, effect.y,
                         effect.width,        effect.height,  radius,   downsample,

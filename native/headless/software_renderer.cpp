@@ -16,6 +16,8 @@
 #include <utility>
 #include <vector>
 
+#include "gpu/effect_policy.hpp"
+
 namespace strata::headless {
 namespace {
 
@@ -1091,7 +1093,7 @@ void SoftwareRenderer::apply_effect(const host::EffectBatch& effect) {
             effect.width,
             effect.height,
             std::max(0.0, radius),
-            static_cast<std::uint32_t>(std::clamp(std::llround(requested_downsample), 1LL, 8LL)),
+            gpu::blur_downsample(requested_downsample),
         });
     }
 }
