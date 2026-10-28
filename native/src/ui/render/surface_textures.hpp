@@ -14,7 +14,10 @@ namespace strata::ui {
 
 struct RenderSubmission;
 
-/** One texture the host creates from this packet before drawing with it. */
+/**
+ * One texture the host creates from this packet before drawing with it: always decoded,
+ * straight-alpha RGBA8 rows of the descriptor's dimensions (see resource::decode_png_rgba8).
+ */
 struct TextureUpload final {
     const resource::TextureResourceDescriptor* descriptor = nullptr;
     std::span<const std::uint8_t> bytes;
@@ -52,6 +55,8 @@ class SurfaceTextures final {
     struct Source final {
         std::span<const std::uint8_t> bytes;
         std::uint64_t revision = 0U;
+        /** The bytes are a PNG the core decodes when it uploads them, not RGBA8 rows. */
+        bool encoded = false;
     };
     void rebuild();
     void upload(std::size_t index);
@@ -67,6 +72,8 @@ class SurfaceTextures final {
     /** Host id -> revision the host holds. */
     std::map<std::string, std::uint64_t, std::less<>> resident_;
     std::vector<TextureUpload> uploads_;
+    /** RGBA8 decoded for this packet's uploads; dropped once the packet has copied it. */
+    std::vector<std::vector<std::uint8_t>> decoded_;
     std::vector<std::string> releases_;
     std::uint64_t store_generation_ = 0U;
     bool synced_ = false;

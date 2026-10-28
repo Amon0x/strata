@@ -1,6 +1,8 @@
 #include "ui/render/surface_textures.hpp"
 
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 #include "ui/render/submission.hpp"
@@ -41,7 +43,8 @@ void SurfaceTextures::rebuild() {
     sources_.reserve(static_.size() + runtime_.size());
     for (const resource::EncodedTextureResource& texture : static_) {
         descriptors_.push_back(texture.descriptor());
-        sources_.push_back(Source{texture.bytes, 0U});
+        sources_.push_back(
+            Source{texture.bytes, 0U, texture.encoding == resource::ImageEncoding::png});
     }
     for (const std::shared_ptr<const resource::RuntimeImage>& image : runtime_) {
         const bool shadowed = std::ranges::any_of(static_, [&image](const auto& texture) {
@@ -56,7 +59,7 @@ void SurfaceTextures::rebuild() {
             resource::ImageEncoding::rgba8,
             image->dimensions,
         });
-        sources_.push_back(Source{image->pixels, image->revision});
+        sources_.push_back(Source{image->pixels, image->revision, false});
     }
     for (std::size_t index = 0U; index < descriptors_.size(); ++index)
         by_host_id_.emplace(descriptors_[index].host_id, index);
@@ -69,12 +72,30 @@ void SurfaceTextures::upload(const std::size_t index) {
         })) {
         return;
     }
-    uploads_.push_back(TextureUpload{descriptor, sources_[index].bytes});
+    const Source& source = sources_[index];
+    if (!source.encoded) {
+        if (source.bytes.size() != static_cast<std::size_t>(descriptor->dimensions.width) *
+                                       descriptor->dimensions.height * 4U) {
+            throw std::invalid_argument("image '" + descriptor->logical_id +
+                                        "' has RGBA8 pixels that differ from its dimensions");
+        }
+        uploads_.push_back(TextureUpload{descriptor, source.bytes});
+        return;
+    }
+    // Images are decoded here, once, so every backend samples the same texels and none needs a
+    // codec. The pixels live only until the packet that carries them is retained.
+    try {
+        decoded_.push_back(resource::decode_png_rgba8(source.bytes, descriptor->dimensions));
+    } catch (const std::invalid_argument& error) {
+        throw std::invalid_argument("image '" + descriptor->logical_id + "': " + error.what());
+    }
+    uploads_.push_back(TextureUpload{descriptor, decoded_.back()});
 }
 
 void SurfaceTextures::plan(const RenderSubmission& submission, const bool batches_changed) {
     uploads_.clear();
     releases_.clear();
+    decoded_.clear();
     // Unchanged images leave every resident texture current.
     if (changed_) {
         for (const auto& [host_id, revision] : resident_) {
@@ -105,6 +126,7 @@ void SurfaceTextures::commit() {
     }
     uploads_.clear();
     releases_.clear();
+    decoded_.clear();
     changed_ = false;
 }
 

@@ -93,7 +93,8 @@ class Writer final {
     const resource::TextureResourceDescriptor& texture = *upload.descriptor;
     Writer output;
     output.text(texture.host_id);
-    output.integer(static_cast<std::uint32_t>(texture.encoding));
+    // The core decodes every image before it uploads it (see SurfaceTextures).
+    output.integer(static_cast<std::uint32_t>(resource::ImageEncoding::rgba8));
     output.integer(static_cast<std::uint32_t>(texture.sampling));
     output.integer(texture.dimensions.width);
     output.integer(texture.dimensions.height);

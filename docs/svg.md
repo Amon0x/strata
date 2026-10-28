@@ -40,7 +40,8 @@ authoring and render packets carry only logical or Surface-scoped ids.
 ## Rendering model
 
 PNG bytes are inspected at Surface creation, reach the host through packet v13 the first time a
-frame samples them, are decoded by the host, and are sampled as ordinary textures. SVG documents are parsed at Surface creation into immutable
+frame samples them as straight-alpha RGBA8 the core decoded once, and are sampled as ordinary
+textures; no backend needs an image codec. SVG documents are parsed at Surface creation into immutable
 display lists. During widget presentation, Strata projects their curves, fills, strokes,
 transforms, `viewBox`, and `preserveAspectRatio` into ordinary clipped path commands. Submission
 then tessellates those paths at the current logical size and device scale.

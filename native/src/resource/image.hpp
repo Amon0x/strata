@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -61,5 +62,15 @@ void validate_image_dimensions(ImageDimensions dimensions);
 
 /** Validates the bounded PNG envelope and reads its mandatory IHDR dimensions. */
 [[nodiscard]] ImageDimensions inspect_png(const std::vector<std::uint8_t>& bytes);
+
+/**
+ * Decodes a PNG into tightly packed, top-down RGBA8 rows with straight (unpremultiplied) alpha:
+ * the texel convention every packet image carries. Samples are taken as stored, with no gamma,
+ * sRGB or ICC conversion; 16-bit samples keep their high byte; low bit depths expand by bit
+ * replication; palette and tRNS transparency become alpha, and images without alpha are opaque.
+ * Throws std::invalid_argument for a malformed stream or dimensions other than `expected`.
+ */
+[[nodiscard]] std::vector<std::uint8_t> decode_png_rgba8(std::span<const std::uint8_t> bytes,
+                                                         ImageDimensions expected);
 
 } // namespace strata::resource

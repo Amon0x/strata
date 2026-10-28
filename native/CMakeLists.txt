@@ -1226,6 +1226,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         tests/resource_host_residual_tests.cpp
         tests/ui_tests.cpp
         tests/render_packet_tests.cpp
+        tests/png_decode_tests.cpp
         tests/text_font_residual_tests.cpp
         tests/theme_tests.cpp
         tests/input_editor_tests.cpp
@@ -1241,7 +1242,14 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         strata_core_tests
         PRIVATE Strata::core Strata::render_host Strata::svg
     )
-    target_include_directories(strata_core_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_include_directories(
+        strata_core_tests
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    if(WIN32)
+        # The PNG decoder is checked against WIC, which D3D11 decoded with before the core did.
+        target_link_libraries(strata_core_tests PRIVATE windowscodecs ole32)
+    endif()
     strata_target_defaults(strata_core_tests)
     add_test(
         NAME strata.svg
@@ -1280,6 +1288,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         NAME strata.render_packet
         COMMAND strata_core_tests render_packet ${STRATA_RESOURCE_ROOT}
     )
+    add_test(NAME strata.png_decode COMMAND strata_core_tests png_decode)
 
     if(TARGET strata_headless_host)
         add_executable(strata_effect_refresh_tests tests/effect_refresh_tests.cpp)

@@ -1283,9 +1283,9 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
             "fixture:nine-patch",
             "fixture/nine-patch.png",
             resource::TextureSampling::linear,
-            resource::ImageEncoding::png,
+            resource::ImageEncoding::rgba8,
             resource::ImageDimensions{16U, 16U},
-            {0U},
+            std::vector<std::uint8_t>(16U * 16U * 4U, 255U),
         },
     };
     std::vector<resource::TextureResourceDescriptor> texture_descriptors{
@@ -1315,6 +1315,7 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
 
     ui::HostRenderPacketCache packet_cache;
     textures.front().dimensions = texture_descriptors.front().dimensions;
+    textures.front().bytes.assign(32U * 16U * 4U, 255U);
     ui::SurfaceTextures surface_textures("fixture", textures);
     static_cast<void>(packet_cache.encode(commands, 1U, &surface_textures, atlas, *text_engine, 1.0,
                                           640, 480, 640.0, 480.0));
