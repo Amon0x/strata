@@ -144,12 +144,14 @@ struct D3D11Renderer::Impl final {
         }
         for (const host::SubmissionBatch& batch : packet.batches) {
             const auto* draw = std::get_if<host::DrawBatch>(&batch);
-            if (draw == nullptr || draw->material == "strata:unified_ui" ||
-                declared_materials.contains(draw->material) ||
-                std::ranges::find(material_fallbacks, draw->material) != material_fallbacks.end()) {
+            if (draw == nullptr)
+                continue;
+            const std::string& material = packet.materials[draw->material];
+            if (material == "strata:unified_ui" || declared_materials.contains(material) ||
+                std::ranges::find(material_fallbacks, material) != material_fallbacks.end()) {
                 continue;
             }
-            material_fallbacks.push_back(draw->material);
+            material_fallbacks.push_back(material);
         }
         std::array<float, 4U> clear_float{};
         for (std::size_t index = 0U; index < clear.size(); ++index) {

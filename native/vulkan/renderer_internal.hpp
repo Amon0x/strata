@@ -1,12 +1,10 @@
 #pragma once
 
-#include "gpu/blend.hpp"
 #include "gpu/blur_shaders.hpp"
 #include "gpu/clip.hpp"
 #include "gpu/effect_policy.hpp"
 #include "gpu/groups.hpp"
 #include "gpu/effect_shaders.hpp"
-#include "gpu/png.hpp"
 #include "gpu/shaders.hpp"
 #include "resources.hpp"
 #include "shader.hpp"
@@ -76,21 +74,11 @@ inline constexpr VkDescriptorType descriptor_type(std::uint32_t binding) noexcep
 inline Target target_of(Image& image) {
     return {image.image, image.view, image.format, image.width, image.height, image.layout};
 }
-/**
- * A pipeline's blend state: the packet modes, plus multiply over a rounded clip, which composites
- * the clip coverage like straight alpha.
- */
-enum class Blend : std::uint8_t {
-    opaque,
-    straight_alpha,
-    premultiplied_alpha,
-    additive,
-    multiply,
-    rounded_multiply,
-};
-inline constexpr std::array<Blend, 6> blends{
+/** A pipeline's blend state is a packet draw blend (already adapted to rounded clips). */
+using Blend = host::DrawBlend;
+inline constexpr std::array<Blend, host::draw_blend_count> blends{
     Blend::opaque,   Blend::straight_alpha, Blend::premultiplied_alpha,
-    Blend::additive, Blend::multiply,       Blend::rounded_multiply,
+    Blend::additive, Blend::multiply,       Blend::clipped_multiply,
 };
 } // namespace detail
 
@@ -146,6 +134,9 @@ struct Renderer::Impl {
         std::string program;
     };
     std::map<std::string, std::map<std::uint32_t, Pass>, std::less<>> effects;
+    /** The packet's material and effect tables resolved for the layer being rendered. */
+    std::vector<std::string_view> layer_materials;
+    std::vector<const std::map<std::uint32_t, Pass>*> layer_effects;
     std::map<std::string, std::unique_ptr<Image>, std::less<>> textures;
     /** Host-written geometry: one copy per frame slot, refreshed when the layer's content moves. */
     struct SlotGeometry {
@@ -164,13 +155,12 @@ struct Renderer::Impl {
     std::map<std::string, Geometry, std::less<>> geometry;
     /** One effect's retained output: only its clipped bounds, at their device-pixel origin. */
     struct CachedEffect {
-        host::EffectBatch batch;
+        /** The decoder's sample revision (host::EffectBatch::sample_revision) it was taken at. */
+        std::uint64_t revision = 0;
         host::Scissor clip;
         double time = 0;
         double logical_width = 0, logical_height = 0;
         std::uint32_t width = 0, height = 0;
-        /** Something the sample read has changed since it was taken (see gpu::EffectChanges). */
-        bool stale = false;
         /** The render() call that last composited this sample; others are evicted after it. */
         std::uint64_t used = 0;
         std::unique_ptr<Image> output;
@@ -254,8 +244,6 @@ struct Renderer::Impl {
     host::Scissor bounds(const host::EffectBatch& effect, const Target& target);
     const std::map<std::uint32_t, Pass>& passes(const host::EffectBatch& effect) const;
     [[nodiscard]] double widest_blur(const host::EffectBatch& effect) const;
-    /** How far outside its bounds, in logical pixels, the effect's output depends on its input. */
-    [[nodiscard]] double read_reach(const host::EffectBatch& effect) const;
     /** Device pixels of `target` the effect samples: its bounds grown by the D3D11 reach. */
     [[nodiscard]] host::Scissor sample_region(const host::EffectBatch& effect,
                                               const Target& target) const;
@@ -270,8 +258,6 @@ struct Renderer::Impl {
      */
     void effect(Target& destination, const host::EffectBatch& batch, bool content, Image* source,
                 Image* backdrop);
-    /** Marks this layer's retained samples stale where the packet's changes reach them. */
-    void invalidate_effects(const host::RenderPacket& packet);
     std::pair<Slice, Slice> upload_geometry(const host::RenderPacket& packet);
     RenderLayerTelemetry render(const host::RenderPacket& packet, const RenderTarget& output,
                                 FrameOptions options);

@@ -13,7 +13,25 @@
 namespace strata::ui {
 
 /** Packet format the encoder writes. The C ABI pins it to STRATA_RENDER_PACKET_VERSION_CURRENT. */
-inline constexpr std::uint32_t render_packet_version = 13U;
+inline constexpr std::uint32_t render_packet_version = 14U;
+
+/** A draw batch's clip-adapted blend; the C ABI pins these to STRATA_RENDER_BLEND_*. */
+enum class PacketBlend : std::uint8_t {
+    opaque = 0U,
+    straight_alpha = 1U,
+    premultiplied_alpha = 2U,
+    additive = 3U,
+    multiply = 4U,
+    clipped_multiply = 5U,
+};
+
+/** How a draw applies rounded-clip coverage; pinned to STRATA_RENDER_CLIP_COVERAGE_*. */
+enum class PacketClipCoverage : std::uint8_t {
+    straight_alpha = 0U,
+    premultiplied_alpha = 1U,
+    hard = 2U,
+    multiply = 3U,
+};
 
 struct HostRenderPacketTelemetry final {
     std::size_t vertices = 0U;
@@ -61,9 +79,10 @@ class TextEngine;
 namespace strata::ui {
 
 /**
- * Packet v13: retained geometry epochs, incremental geometry patches, GPU presentation groups,
+ * Packet v14: retained geometry epochs, incremental geometry patches, GPU presentation groups,
  * rate-limited effects, explicit current/surface backdrop sources, ordered application effect
- * programs, and rounded descendant masks. The logical v3 encoder remains available only to command-stream inspection tooling.
+ * programs, rounded descendant masks, interned material/effect ids with clip-adapted blends, and
+ * decoded RGBA8 images. The logical v3 encoder remains available only to command-stream inspection tooling.
  */
 class HostRenderPacketCache final {
   public:
@@ -74,7 +93,7 @@ class HostRenderPacketCache final {
     HostRenderPacketCache& operator=(HostRenderPacketCache&&) = delete;
 
     /**
-     * A null TextEngine selects the packet-v13 non-text path; text runs are then rejected. Null
+     * A null TextEngine selects the packet-v14 non-text path; text runs are then rejected. Null
      * textures means the stream draws no raster images.
      */
     [[nodiscard]] const std::vector<std::uint8_t>&

@@ -63,9 +63,8 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
             }
             continue;
         }
-        if (operation.kind == host::resource_create ||
-            operation.kind == host::resource_encoded_image) {
-            // An encoded image's format field is its encoding; its texels are always RGBA8.
+        if (operation.kind == host::resource_create || operation.kind == host::resource_image) {
+            // An image's texels are always RGBA8, decoded by the core.
             const bool r8 = operation.kind == host::resource_create &&
                             operation.format == host::texture_format_r8;
             auto image = std::make_unique<Image>(device, operation.width, operation.height,
@@ -85,20 +84,13 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
         }
         if (operation.kind == host::resource_create)
             continue;
-        if (operation.kind != host::resource_upload &&
-            operation.kind != host::resource_encoded_image)
+        if (operation.kind != host::resource_upload && operation.kind != host::resource_image)
             throw std::invalid_argument("unknown Vulkan resource operation");
         auto it = textures.find(id);
         if (it == textures.end())
             throw std::invalid_argument("upload references missing texture: " + id);
         auto& image = *it->second;
-        std::vector<std::uint8_t> decoded;
-        std::span<const std::uint8_t> bytes = operation.bytes;
-        if (operation.kind == host::resource_encoded_image &&
-            operation.format == host::texture_encoding_png) {
-            decoded = gpu::decode_png(bytes, operation.width, operation.height);
-            bytes = decoded;
-        }
+        const std::span<const std::uint8_t> bytes = operation.bytes;
         const std::size_t channels = image.format == VK_FORMAT_R8_UNORM ? 1U : 4U;
         if (operation.x > image.width || operation.y > image.height ||
             operation.width > image.width - operation.x ||

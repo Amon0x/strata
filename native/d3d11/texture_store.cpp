@@ -14,7 +14,6 @@
 #define NOMINMAX
 #include <Windows.h>
 #include <d3d11.h>
-#include <wincodec.h>
 #include <wrl/client.h>
 
 #include <strata/render_packet.hpp>
@@ -27,24 +26,6 @@ using host::ResourceOperation;
 namespace {
 
 using Microsoft::WRL::ComPtr;
-
-/**
- * Initialises COM for one call when the thread has not, and undoes only its own initialisation.
- * A thread already initialised in another apartment (RPC_E_CHANGED_MODE) can use WIC as it is.
- */
-class ComScope final {
-  public:
-    ComScope() noexcept : result_(CoInitializeEx(nullptr, COINIT_MULTITHREADED)) {}
-    ~ComScope() {
-        if (SUCCEEDED(result_))
-            CoUninitialize();
-    }
-    ComScope(const ComScope&) = delete;
-    ComScope& operator=(const ComScope&) = delete;
-
-  private:
-    HRESULT result_;
-};
 
 void require_hresult(const HRESULT result, const std::string_view operation) {
     if (FAILED(result)) {
@@ -125,54 +106,6 @@ struct TextureStore::Impl final {
         return result;
     }
 
-    [[nodiscard]] std::vector<std::uint8_t> decode_png(const ResourceOperation& operation) const {
-        // WIC needs COM on the calling thread, and an embedding engine's render thread may not
-        // have initialised it. Declared first, so every WIC object is released before it ends.
-        const ComScope com;
-        ComPtr<IWICImagingFactory> factory;
-        require_hresult(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                         IID_PPV_ARGS(&factory)),
-                        "WIC imaging factory creation");
-        ComPtr<IWICStream> stream;
-        require_hresult(factory->CreateStream(&stream), "WIC stream creation");
-        if (operation.bytes.size() > std::numeric_limits<DWORD>::max()) {
-            throw std::length_error("encoded D3D11 texture exceeds WIC's byte limit");
-        }
-        require_hresult(stream->InitializeFromMemory(const_cast<BYTE*>(operation.bytes.data()),
-                                                     static_cast<DWORD>(operation.bytes.size())),
-                        "WIC stream initialization");
-        ComPtr<IWICBitmapDecoder> decoder;
-        require_hresult(factory->CreateDecoderFromStream(stream.Get(), nullptr,
-                                                         WICDecodeMetadataCacheOnLoad, &decoder),
-                        "PNG decoder creation");
-        ComPtr<IWICBitmapFrameDecode> frame;
-        require_hresult(decoder->GetFrame(0U, &frame), "PNG frame decode");
-        UINT decoded_width = 0U;
-        UINT decoded_height = 0U;
-        require_hresult(frame->GetSize(&decoded_width, &decoded_height), "PNG size read");
-        if (decoded_width != operation.width || decoded_height != operation.height) {
-            throw std::invalid_argument("decoded PNG dimensions differ from the native descriptor");
-        }
-        ComPtr<IWICFormatConverter> converter;
-        require_hresult(factory->CreateFormatConverter(&converter),
-                        "WIC format converter creation");
-        require_hresult(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA,
-                                              WICBitmapDitherTypeNone, nullptr, 0.0,
-                                              WICBitmapPaletteTypeCustom),
-                        "PNG RGBA conversion");
-        const std::uint64_t row_pitch = static_cast<std::uint64_t>(decoded_width) * 4U;
-        const std::uint64_t byte_count = row_pitch * decoded_height;
-        if (row_pitch > std::numeric_limits<UINT>::max() ||
-            byte_count > std::numeric_limits<UINT>::max()) {
-            throw std::length_error("decoded D3D11 texture exceeds WIC's output limit");
-        }
-        std::vector<std::uint8_t> pixels(static_cast<std::size_t>(byte_count));
-        require_hresult(converter->CopyPixels(nullptr, static_cast<UINT>(row_pitch),
-                                              static_cast<UINT>(byte_count), pixels.data()),
-                        "PNG pixel copy");
-        return pixels;
-    }
-
     void apply(const ResourceOperation& operation) {
         if (operation.kind == 2U) {
             textures.erase(operation.texture);
@@ -185,15 +118,12 @@ struct TextureStore::Impl final {
                                                      operation.format == 0U ? 0U : 1U));
             return;
         }
-        if (operation.kind == 3U) {
-            const bool raw = operation.format == host::texture_encoding_rgba8;
-            const std::vector<std::uint8_t> decoded = raw ? std::vector<std::uint8_t>{}
-                                                          : decode_png(operation);
+        if (operation.kind == host::resource_image) {
+            // The core decoded the image: straight-alpha RGBA8 rows, sampled as stored.
             textures.insert_or_assign(operation.texture,
                                       create_texture(operation.width, operation.height,
                                                      DXGI_FORMAT_R8G8B8A8_UNORM, operation.sampling,
-                                                     raw ? operation.bytes.data() : decoded.data(),
-                                                     operation.width * 4U));
+                                                     operation.bytes.data(), operation.width * 4U));
             return;
         }
         Texture& destination = textures.at(operation.texture);

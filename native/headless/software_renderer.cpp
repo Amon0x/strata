@@ -16,7 +16,6 @@
 #include <utility>
 #include <vector>
 
-#include "gpu/blend.hpp"
 #include "gpu/effect_policy.hpp"
 
 namespace strata::headless {
@@ -314,7 +313,7 @@ void composite_filtered_pixels(std::vector<std::uint8_t>& destination,
 
 } // namespace
 
-SoftwareRenderer::SoftwareRenderer(const ImageCodec& image_codec) : image_codec_(image_codec) {}
+SoftwareRenderer::SoftwareRenderer() = default;
 
 void SoftwareRenderer::resize(const std::uint32_t framebuffer_width,
                               const std::uint32_t framebuffer_height, const double logical_width,
@@ -334,7 +333,6 @@ void SoftwareRenderer::resize(const std::uint32_t framebuffer_width,
     logical_height_ = logical_height;
     pixels_.resize(static_cast<std::size_t>(byte_count));
     cached_effects_.clear();
-    cached_effect_epoch_.reset();
 }
 
 void SoftwareRenderer::set_clear_color(const std::array<std::uint8_t, 4U> rgba) noexcept {
@@ -380,17 +378,14 @@ void SoftwareRenderer::apply(const host::ResourceOperation& operation) {
                                    });
         return;
     }
-    if (operation.kind == 3U) {
-        DecodedImage image =
-            operation.format == host::texture_encoding_rgba8
-                ? DecodedImage{operation.width, operation.height, operation.bytes}
-                : image_codec_.decode_png(operation.bytes, operation.width, operation.height);
+    if (operation.kind == host::resource_image) {
+        // The core decoded the image: straight-alpha RGBA8 rows, sampled as stored.
         textures_.insert_or_assign(operation.texture, Texture{
-                                                          image.width,
-                                                          image.height,
+                                                          operation.width,
+                                                          operation.height,
                                                           4U,
                                                           operation.sampling,
-                                                          std::move(image.rgba),
+                                                          operation.bytes,
                                                       });
         return;
     }
@@ -429,16 +424,14 @@ void SoftwareRenderer::consume_resources(const host::RenderPacket& packet) {
 void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPacket& packet) {
     if (batch.index_count == 0U)
         return;
-    // Resolved once per batch; the pixel loop below only branches on the enum.
-    const std::optional<gpu::BlendMode> resolved_blend = gpu::blend_mode(batch.blend_mode);
-    if (!resolved_blend.has_value())
-        throw std::invalid_argument("headless renderer received an unknown blend mode");
-    using gpu::BlendMode;
-    const BlendMode blend = *resolved_blend;
-    const bool clipped = !batch.rounded_clips.empty();
-    if (batch.material != "strata:unified_ui" &&
-        std::ranges::find(material_fallbacks_, batch.material) == material_fallbacks_.end()) {
-        material_fallbacks_.push_back(batch.material);
+    // The core already adapted blend and clip coverage to the rounded clips; the pixel loop
+    // below only branches on the two enums, exactly as the GPU pipelines are configured.
+    const host::DrawBlend blend = batch.blend;
+    const host::ClipCoverage coverage_mode = batch.clip_coverage;
+    const std::string& material = packet.materials[batch.material];
+    if (material != "strata:unified_ui" &&
+        std::ranges::find(material_fallbacks_, material) == material_fallbacks_.end()) {
+        material_fallbacks_.push_back(material);
     }
     const Texture* texture = nullptr;
     if (batch.texture.has_value()) {
@@ -690,22 +683,26 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                     1.0F / scale_x,
                     1.0F / scale_y
                 );
-                if (clipped && blend == BlendMode::multiply) {
+                switch (coverage_mode) {
+                case host::ClipCoverage::multiply:
                     source.red *= clip_mask;
                     source.green *= clip_mask;
                     source.blue *= clip_mask;
                     source.alpha = clip_mask;
-                } else if (clipped && blend == BlendMode::opaque) {
-                    source.alpha *= clip_mask;
-                } else if (blend == BlendMode::opaque || blend == BlendMode::multiply) {
-                    if (clip_mask < 0.5F) continue;
-                } else if (blend == BlendMode::premultiplied_alpha) {
+                    break;
+                case host::ClipCoverage::hard:
+                    if (clip_mask < 0.5F)
+                        continue;
+                    break;
+                case host::ClipCoverage::premultiplied_alpha:
                     source.red *= clip_mask;
                     source.green *= clip_mask;
                     source.blue *= clip_mask;
                     source.alpha *= clip_mask;
-                } else {
+                    break;
+                case host::ClipCoverage::straight_alpha:
                     source.alpha *= clip_mask;
+                    break;
                 }
                 if (source.alpha <= 0.000001F)
                     continue;
@@ -719,10 +716,9 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                     static_cast<float>(pixels_[pixel + 3U]) / 255.0F,
                 };
                 Color output;
-                if (blend == BlendMode::opaque && !clipped) {
+                if (blend == host::DrawBlend::opaque) {
                     output = source;
-                } else if (blend == BlendMode::straight_alpha ||
-                           (blend == BlendMode::opaque && clipped)) {
+                } else if (blend == host::DrawBlend::straight_alpha) {
                     const float inverse = 1.0F - source.alpha;
                     output = Color{
                         source.red * source.alpha + destination.red * inverse,
@@ -730,7 +726,7 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.blue * source.alpha + destination.blue * inverse,
                         source.alpha + destination.alpha * inverse,
                     };
-                } else if (blend == BlendMode::premultiplied_alpha) {
+                } else if (blend == host::DrawBlend::premultiplied_alpha) {
                     const float inverse = 1.0F - source.alpha;
                     output = Color{
                         source.red + destination.red * inverse,
@@ -738,14 +734,14 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                         source.blue + destination.blue * inverse,
                         source.alpha + destination.alpha * inverse,
                     };
-                } else if (blend == BlendMode::additive) {
+                } else if (blend == host::DrawBlend::additive) {
                     output = Color{
                         source.red * source.alpha + destination.red,
                         source.green * source.alpha + destination.green,
                         source.blue * source.alpha + destination.blue,
                         source.alpha + destination.alpha * (1.0F - source.alpha),
                     };
-                } else if (blend == BlendMode::multiply && !clipped) {
+                } else if (blend == host::DrawBlend::multiply) {
                     output = Color{
                         source.red * destination.red,
                         source.green * destination.green,
@@ -1077,11 +1073,16 @@ void SoftwareRenderer::blur_downsampled(const host::BlurBatch& batch, const std:
     }
 }
 
+const std::vector<SoftwareRenderer::EffectPass>*
+SoftwareRenderer::program_of(const host::EffectBatch& effect) const noexcept {
+    return effect.effect < layer_effects_.size() ? layer_effects_[effect.effect] : nullptr;
+}
+
 void SoftwareRenderer::apply_effect(const host::EffectBatch& effect) {
-    const auto program = effects_.find(effect.effect);
-    if (program == effects_.end())
+    const std::vector<EffectPass>* const program = program_of(effect);
+    if (program == nullptr)
         return;
-    for (const EffectPass& pass : program->second) {
+    for (const EffectPass& pass : *program) {
         if (pass.kind != 0U)
             continue;
         const double radius = pass.radius_parameter < effect.parameter_count
@@ -1103,35 +1104,18 @@ void SoftwareRenderer::apply_effect(const host::EffectBatch& effect) {
     }
 }
 
-double SoftwareRenderer::read_reach(const host::EffectBatch& effect) const noexcept {
-    // The reference renderer runs blur passes only, so only they read beyond the bounds here.
-    double widest = 0.0;
-    if (const auto program = effects_.find(effect.effect); program != effects_.end()) {
-        for (const EffectPass& pass : program->second) {
-            if (pass.kind != 0U)
-                continue;
-            widest = std::max(widest, pass.radius_parameter < effect.parameter_count
-                                          ? effect.parameters[pass.radius_parameter]
-                                          : pass.radius);
-        }
-    }
-    return gpu::effect_read_reach(false, widest);
-}
-
 bool SoftwareRenderer::effect_refresh_due(const host::EffectBatch& effect, const bool content,
                                           const std::int64_t time_nanoseconds) const {
-    if (effect.refresh_rate <= 0.0)
-        return true;
     const std::uint64_t key = static_cast<std::uint64_t>(effect.source_order) |
                               (static_cast<std::uint64_t>(content) << 32U);
     const auto cached = cached_effects_.find(key);
-    if (cached == cached_effects_.end() || cached->second.effect != effect ||
-        time_nanoseconds < cached->second.sampled_nanoseconds) {
-        return true;
-    }
-    const long double interval = 1'000'000'000.0L / static_cast<long double>(effect.refresh_rate);
-    return static_cast<long double>(time_nanoseconds - cached->second.sampled_nanoseconds) + 0.5L >=
-           interval;
+    // Whether anything the sample read changed is the decoder's revision; only the refresh
+    // interval is this renderer's to check.
+    return cached == cached_effects_.end() ||
+           cached->second.revision != effect.sample_revision ||
+           gpu::effect_refresh_due(effect.refresh_rate,
+                                   static_cast<double>(cached->second.sampled_nanoseconds) * 1.0e-9,
+                                   static_cast<double>(time_nanoseconds) * 1.0e-9);
 }
 
 void SoftwareRenderer::capture_effect(const host::EffectBatch& effect, const bool content,
@@ -1144,7 +1128,7 @@ void SoftwareRenderer::capture_effect(const host::EffectBatch& effect, const boo
     sample.width = region.right >= region.left ? region.right - region.left : 0U;
     sample.height = region.bottom >= region.top ? region.bottom - region.top : 0U;
     sample.sampled_nanoseconds = time_nanoseconds;
-    sample.effect = effect;
+    sample.revision = effect.sample_revision;
     sample.pixels.resize(static_cast<std::size_t>(sample.width) * sample.height * 4U);
     for (std::uint32_t row = 0U; row < sample.height; ++row) {
         const std::size_t source =
@@ -1196,15 +1180,12 @@ void SoftwareRenderer::render(const host::RenderPacket& packet,
         throw std::logic_error("headless renderer must be sized before rendering");
     }
     consume_resources(packet);
-    // The decoder reports what changed since the previous packet (patched geometry, moved groups,
-    // replaced texels); only samples whose inputs it reaches are stale, as on the GPU backends.
-    const gpu::EffectChanges changes(packet, cached_effect_epoch_);
-    if (!changes.none()) {
-        std::erase_if(cached_effects_, [this, &changes](const auto& entry) {
-            return changes.touch(entry.second.effect, read_reach(entry.second.effect));
-        });
+    layer_effects_.clear();
+    layer_effects_.reserve(packet.effects.size());
+    for (const std::string& id : packet.effects) {
+        const auto found = effects_.find(id);
+        layer_effects_.push_back(found != effects_.end() ? &found->second : nullptr);
     }
-    cached_effect_epoch_ = packet.geometry_epoch;
     pixels_.resize(static_cast<std::size_t>(width_) * height_ * 4U);
     for (std::size_t pixel = 0U; pixel < pixels_.size(); pixel += 4U) {
         std::copy(clear_.begin(), clear_.end(),

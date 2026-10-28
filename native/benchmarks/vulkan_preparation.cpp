@@ -36,8 +36,9 @@ host::RenderPacket quad(std::array<std::uint8_t, 4> color = {255, 0, 0, 255}) {
     packet.indices = {0, 1, 2, 0, 2, 3};
     host::DrawBatch batch;
     batch.scissor = {0, 0, 32, 32};
-    batch.material = "strata:unified_ui";
-    batch.blend_mode = "straight_alpha";
+    packet.materials = {"strata:unified_ui"};
+    batch.material = 0;
+    batch.blend = host::DrawBlend::straight_alpha;
     batch.index_count = 6;
     packet.batches.emplace_back(batch);
     return packet;
@@ -61,7 +62,7 @@ int main(int argc, char** argv) {
                                      "float4 effect(EffectInput input) { return "
                                      "sampleEffectSource(input.uv) * float4(0.8,1,1,1); }");
         auto packet = quad();
-        std::get<host::DrawBatch>(packet.batches[0]).material = "bench";
+        packet.materials = {"bench"};
         std::get<host::DrawBatch>(packet.batches[0]).scissor = {0, 0, 1280, 800};
         host::BlurBatch blur;
         blur.width = blur.height = 32;
@@ -70,7 +71,8 @@ int main(int argc, char** argv) {
         blur.scissor = {0, 0, 1280, 800};
         packet.batches.emplace_back(blur);
         host::EffectBatch effect;
-        effect.effect = "tint";
+        effect.effect = 0;
+        packet.effects = {"tint"};
         effect.width = effect.height = 32;
         effect.scissor = blur.scissor;
         packet.batches.emplace_back(effect);

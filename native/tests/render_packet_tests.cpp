@@ -100,6 +100,13 @@ std::vector<std::size_t> batch_kind_offsets(const std::vector<std::uint8_t>& byt
         offset += sizeof(std::uint32_t) + record_size;
     }
     offset += vertex_bytes + static_cast<std::size_t>(index_count) * sizeof(std::uint32_t);
+    // The material and effect id tables precede the batch records.
+    for (int table = 0; table < 2; ++table) {
+        const std::uint32_t count = u32(bytes, offset);
+        offset += sizeof(std::uint32_t);
+        for (std::uint32_t id = 0U; id < count; ++id)
+            offset += sizeof(std::uint32_t) + u32(bytes, offset);
+    }
     std::vector<std::size_t> result;
     result.reserve(batch_count);
     for (std::uint32_t index = 0U; index < batch_count; ++index) {
@@ -141,7 +148,8 @@ void test_effect_batches_round_trip(const std::filesystem::path& resources) {
     const auto* content = std::get_if<host::EffectBatch>(&packet.batches[1U]);
     check(backdrop != nullptr && backdrop->kind == host::EffectBatchKind::backdrop &&
               backdrop->backdrop_source == host::EffectBackdropSource::surface &&
-              backdrop->effect == "test:effect" && backdrop->parameter_count == 1U &&
+              packet.effects[backdrop->effect] == "test:effect" &&
+              backdrop->parameter_count == 1U &&
               backdrop->parameters[0U] == 12.0 && backdrop->refresh_rate == 120.0,
           "backdrop effect batch lost its typed program state");
     check(backdrop->probe == 0x1'0000'002AU && backdrop->tone == 0.0 && content != nullptr &&
@@ -263,8 +271,8 @@ void test_invalid_effect_refresh_rate_is_rejected(const std::filesystem::path& r
     const std::size_t effect_id_length_offset =
         effect_record + 3U * sizeof(std::uint32_t) +
         4U * sizeof(std::uint32_t) + 8U * sizeof(double);
-    const std::size_t opacity_offset =
-        effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
+    // The effect is named by a u16 table index and a reserved u16.
+    const std::size_t opacity_offset = effect_id_length_offset + 2U * sizeof(std::uint16_t);
     const double invalid_refresh_rate = -1.0;
     std::memcpy(encoded.data() + opacity_offset + sizeof(double), &invalid_refresh_rate,
                 sizeof(invalid_refresh_rate));
@@ -293,8 +301,8 @@ void test_invalid_effect_backdrop_source_is_rejected(const std::filesystem::path
     const std::size_t effect_id_length_offset =
         effect_record + 3U * sizeof(std::uint32_t) +
         4U * sizeof(std::uint32_t) + 8U * sizeof(double);
-    const std::size_t opacity_offset =
-        effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
+    // The effect is named by a u16 table index and a reserved u16.
+    const std::size_t opacity_offset = effect_id_length_offset + 2U * sizeof(std::uint16_t);
     const std::uint32_t invalid_backdrop_source = 2U;
     std::memcpy(
         encoded.data() + opacity_offset + 2U * sizeof(double),
@@ -327,8 +335,8 @@ void test_content_effect_backdrop_source_is_rejected(const std::filesystem::path
     const std::size_t effect_id_length_offset =
         effect_record + 3U * sizeof(std::uint32_t) +
         4U * sizeof(std::uint32_t) + 8U * sizeof(double);
-    const std::size_t opacity_offset =
-        effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
+    // The effect is named by a u16 table index and a reserved u16.
+    const std::size_t opacity_offset = effect_id_length_offset + 2U * sizeof(std::uint16_t);
     const std::uint32_t surface_backdrop_source =
         static_cast<std::uint32_t>(host::EffectBackdropSource::surface);
     std::memcpy(
@@ -382,8 +390,8 @@ void test_repeated_epoch_still_validates_batches(const std::filesystem::path& re
     const std::size_t effect_id_length_offset =
         effect_record + 3U * sizeof(std::uint32_t) +
         4U * sizeof(std::uint32_t) + 8U * sizeof(double);
-    const std::size_t opacity_offset =
-        effect_id_length_offset + sizeof(std::uint32_t) + u32(encoded, effect_id_length_offset);
+    // The effect is named by a u16 table index and a reserved u16.
+    const std::size_t opacity_offset = effect_id_length_offset + 2U * sizeof(std::uint16_t);
     const double changed_opacity = 0.25;
     std::memcpy(encoded.data() + opacity_offset, &changed_opacity, sizeof(changed_opacity));
     const host::RenderPacket& changed = decoder.decode(encoded);
@@ -675,14 +683,20 @@ std::vector<std::uint8_t> textured_packet(
         for (const std::uint32_t index : {0U, 1U, 2U, 0U, 2U, 3U})
             packet.u32(index);
     }
+    packet.u32(1U);
+    packet.text("strata:unified_ui");
+    packet.u32(0U);
     for (std::uint32_t quad = 0U; quad < quads.size(); ++quad) {
         PacketWriter draw;
         draw.u32(quad);
         for (const std::uint32_t value : {0U, 0U, 64U, 64U})
             draw.u32(value);
         draw.u32(0U);
-        draw.text("strata:unified_ui");
-        draw.text("straight_alpha");
+        // Material 0, straight alpha, hard clip coverage.
+        draw.bytes.insert(draw.bytes.end(), {0U, 0U, static_cast<std::uint8_t>(
+                                                       STRATA_RENDER_BLEND_STRAIGHT_ALPHA),
+                                             static_cast<std::uint8_t>(
+                                                 STRATA_RENDER_CLIP_COVERAGE_HARD)});
         draw.u32(1U);
         draw.text(quads[quad].texture);
         draw.u32(quad * 4U);
@@ -714,7 +728,6 @@ PacketWriter atlas_record(const std::string_view texture, const std::uint32_t x,
 PacketWriter image_record(const std::string_view texture) {
     PacketWriter record;
     record.text(texture);
-    record.u32(strata::host::texture_encoding_rgba8);
     record.u32(strata::host::texture_sampling_linear);
     record.u32(1U);
     record.u32(1U);
@@ -738,7 +751,7 @@ void test_texture_changes_report_dirty_regions() {
     host::RenderPacketDecoder decoder;
     const host::RenderPacket& first = decoder.decode(textured_packet(
         1U, true, quads,
-        {{host::resource_encoded_image, image_record("image")},
+        {{host::resource_image, image_record("image")},
          {host::resource_create, atlas_record("atlas", 0U, 0U, 8U, 8U, false)}}));
     check(first.geometry_dirty_all, "a full geometry payload did not dirty everything");
 
@@ -749,7 +762,7 @@ void test_texture_changes_report_dirty_regions() {
                region.y > y - 2.0 && region.width < size + 4.0 && region.height < size + 4.0;
     };
     const host::RenderPacket& replaced = decoder.decode(textured_packet(
-        1U, false, quads, {{host::resource_encoded_image, image_record("image")}}));
+        1U, false, quads, {{host::resource_image, image_record("image")}}));
     check(!replaced.geometry_dirty_all && replaced.geometry_dirty_regions.size() == 1U &&
               covers(replaced.geometry_dirty_regions.front(), 4.0, 4.0, 8.0),
           "a replaced image did not dirty exactly the draw that samples it");
@@ -854,6 +867,134 @@ void test_surface_frames_encode_complete_packets(const std::filesystem::path& re
     check(refused, "a released Surface encoded another packet");
 }
 
+/**
+ * The core resolves a draw's blend against its rounded clips and interns material ids; the
+ * packet carries the result, so a backend applies it without a name or a rule of its own.
+ */
+void test_blend_and_clip_coverage_are_resolved_in_the_core(const std::filesystem::path& resources) {
+    using namespace strata;
+    ui::RenderCommandBuffer commands;
+    const auto material = [](const std::string_view blend) {
+        ui::MaterialState state;
+        state.id = "test:material";
+        state.blend_mode = std::string(blend);
+        return ui::MaterialPushRenderCommand{state};
+    };
+    const auto rect = [](const double x) {
+        return ui::SolidRectRenderCommand{ui::Rect{x, 0.0, 10.0, 10.0},
+                                          ui::RenderColor{10U, 20U, 30U, 255U}};
+    };
+    commands.append(material("opaque"));
+    commands.append(rect(0.0));
+    commands.append(ui::MaterialPopRenderCommand{});
+    commands.append(ui::ClipPushRenderCommand{ui::Rect{0.0, 0.0, 200.0, 200.0},
+                                              ui::CornerRadii::all(8.0)});
+    commands.append(material("opaque"));
+    commands.append(rect(20.0));
+    commands.append(ui::MaterialPopRenderCommand{});
+    commands.append(material("multiply"));
+    commands.append(rect(40.0));
+    commands.append(ui::MaterialPopRenderCommand{});
+    commands.append(material("premultiplied_alpha"));
+    commands.append(rect(60.0));
+    commands.append(ui::MaterialPopRenderCommand{});
+    commands.append(ui::ClipPopRenderCommand{});
+    commands.append(material("multiply"));
+    commands.append(rect(80.0));
+    commands.append(ui::MaterialPopRenderCommand{});
+    host::RenderPacketDecoder decoder;
+    const host::RenderPacket packet = decoder.decode(encode(commands, resources));
+    std::vector<std::pair<host::DrawBlend, host::ClipCoverage>> resolved;
+    for (const host::SubmissionBatch& batch : packet.batches) {
+        const auto* draw = std::get_if<host::DrawBatch>(&batch);
+        check(draw != nullptr && packet.materials[draw->material] == "test:material",
+              "a draw lost its interned material id");
+        resolved.emplace_back(draw->blend, draw->clip_coverage);
+    }
+    check(packet.materials.size() == 1U, "a material id was interned more than once");
+    using host::ClipCoverage;
+    using host::DrawBlend;
+    check(resolved == std::vector<std::pair<DrawBlend, ClipCoverage>>{
+                          {DrawBlend::opaque, ClipCoverage::hard},
+                          {DrawBlend::straight_alpha, ClipCoverage::straight_alpha},
+                          {DrawBlend::clipped_multiply, ClipCoverage::multiply},
+                          {DrawBlend::premultiplied_alpha, ClipCoverage::premultiplied_alpha},
+                          {DrawBlend::multiply, ClipCoverage::hard},
+                      },
+          "the core did not adapt each blend to its rounded clips");
+}
+
+/** A typed field outside its domain is rejected, not reinterpreted. */
+void test_typed_draw_fields_are_validated(const std::filesystem::path& resources) {
+    using namespace strata;
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::SolidRectRenderCommand{ui::Rect{0.0, 0.0, 10.0, 10.0},
+                                               ui::RenderColor{10U, 20U, 30U, 255U}});
+    const std::vector<std::uint8_t> encoded = encode(commands, resources);
+    const std::vector<std::size_t> offsets = batch_kind_offsets(encoded);
+    check(offsets.size() == 1U, "typed-field fixture changed its batch shape");
+    // Kind, size, source order, scissor and the (empty) rounded clip count precede the material.
+    const std::size_t material_offset = offsets.front() + 8U * sizeof(std::uint32_t);
+    const auto rejects = [&encoded](const std::size_t offset, const std::uint8_t value) {
+        std::vector<std::uint8_t> corrupted = encoded;
+        corrupted[offset] = value;
+        try {
+            host::RenderPacketDecoder decoder;
+            static_cast<void>(decoder.decode(corrupted));
+        } catch (const std::invalid_argument&) {
+            return true;
+        }
+        return false;
+    };
+    check(!rejects(material_offset, 0U), "the typed-field fixture itself was rejected");
+    check(rejects(material_offset, 1U), "a material index past the id table was accepted");
+    check(rejects(material_offset + 2U, 6U), "an unknown draw blend was accepted");
+    check(rejects(material_offset + 3U, 4U), "an unknown clip coverage was accepted");
+}
+
+/**
+ * Whether a retained effect sample is current is decided once, by the decoder: the revision moves
+ * when the effect changes or anything within its read reach does, and holds otherwise.
+ */
+void test_decoder_assigns_effect_sample_revisions(const std::filesystem::path& resources) {
+    using namespace strata;
+    const std::shared_ptr<const ui::TextEngine> text = ui::TextEngine::load_control_font(
+        resources, resource::ResourceId::parse("assets/strata/fonts/medium.ttf"));
+    font::GlyphAtlas atlas("sample-revision-test");
+    ui::HostRenderPacketCache cache;
+    host::RenderPacketDecoder decoder;
+    ui::EffectState glass = effect(ui::EffectInput::backdrop);
+    glass.read_reach = 10.0;
+    std::uint64_t frame = 0U;
+    const auto revision = [&](const ui::RenderColor far, const ui::RenderColor near,
+                              const ui::EffectState& state) {
+        ui::RenderCommandBuffer commands;
+        // Far: 100px from the effect. Near: 6px right of its bounds, inside the 10px reach.
+        commands.append(ui::SolidRectRenderCommand{ui::Rect{200.0, 150.0, 10.0, 10.0}, far});
+        commands.append(ui::SolidRectRenderCommand{ui::Rect{86.0, 50.0, 10.0, 10.0}, near});
+        commands.append(ui::BackdropEffectRenderCommand{ui::Rect{50.0, 50.0, 30.0, 30.0}, {}, state});
+        const host::RenderPacket& packet = decoder.decode(
+            cache.encode(commands, ++frame, {}, atlas, *text, 1.0, 320, 200, 320.0, 200.0));
+        for (const host::SubmissionBatch& batch : packet.batches) {
+            if (const auto* effect_batch = std::get_if<host::EffectBatch>(&batch))
+                return std::pair{effect_batch->sample_revision, effect_batch->read_reach};
+        }
+        throw std::runtime_error("sample-revision fixture lost its effect");
+    };
+    const ui::RenderColor red{255U, 0U, 0U, 255U};
+    const ui::RenderColor blue{0U, 0U, 255U, 255U};
+    const auto [first, reach] = revision(red, red, glass);
+    check(first != 0U && reach == 10.0, "the effect did not carry its revision and read reach");
+    check(revision(red, red, glass).first == first, "an unchanged frame moved the revision");
+    check(revision(blue, red, glass).first == first,
+          "a change beyond the read reach moved the revision");
+    const std::uint64_t near_change = revision(blue, blue, glass).first;
+    check(near_change != first, "a change within the read reach kept the revision");
+    glass.opacity = 0.5;
+    check(revision(blue, blue, glass).first != near_change,
+          "a change to the effect itself kept the revision");
+}
+
 } // namespace
 
 int strata_test_render_packet(const int argument_count, const char* const* const arguments) {
@@ -875,6 +1016,9 @@ int strata_test_render_packet(const int argument_count, const char* const* const
         test_effect_refresh_defaults_to_unbounded(arguments[1]);
         test_texture_changes_report_dirty_regions();
         test_surface_frames_encode_complete_packets(arguments[1]);
+        test_blend_and_clip_coverage_are_resolved_in_the_core(arguments[1]);
+        test_typed_draw_fields_are_validated(arguments[1]);
+        test_decoder_assigns_effect_sample_revisions(arguments[1]);
         std::cout << "strata_render_packet_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

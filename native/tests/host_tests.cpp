@@ -561,9 +561,9 @@ void runtime_images_upload_only_when_sampled() {
     runtime.publish_image("test:unused", 1U, 1U, std::vector<std::uint8_t>(4U, 1U));
     const strata::host::RenderPacket& published = frame();
     check(published.resources.size() == 1U &&
-              published.resources.front().kind == strata::host::resource_encoded_image &&
+              published.resources.front().kind == strata::host::resource_image &&
               published.resources.front().texture.ends_with("/image/test:photo") &&
-              published.resources.front().format == strata::host::texture_encoding_rgba8 &&
+              published.resources.front().format == strata::host::texture_format_rgba8 &&
               published.resources.front().sampling == strata::host::texture_sampling_nearest &&
               published.resources.front().width == 2U && published.resources.front().bytes == pixels,
           "a published runtime image was not uploaded exactly once as RGBA8 when sampled");

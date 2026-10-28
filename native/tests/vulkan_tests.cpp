@@ -1,5 +1,4 @@
 #include "vulkan/offscreen.hpp"
-#include "tests/png_fixture.hpp"
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -40,8 +39,10 @@ host::RenderPacket quad(std::array<std::uint8_t, 4> color = {255, 0, 0, 255}) {
     packet.indices = {0, 1, 2, 0, 2, 3};
     host::DrawBatch batch;
     batch.scissor = {0, 0, 32, 32};
-    batch.material = "strata:unified_ui";
-    batch.blend_mode = "straight_alpha";
+    packet.materials = {"strata:unified_ui"};
+    batch.material = 0;
+    batch.blend = host::DrawBlend::straight_alpha;
+    batch.clip_coverage = host::ClipCoverage::hard;
     batch.index_count = 6;
     packet.batches.emplace_back(batch);
     return packet;
@@ -111,6 +112,9 @@ void run() {
         clip.width = clip.height = 32;
         clip.radii = {12, 12, 12, 12};
         std::get<host::DrawBatch>(packet.batches[0]).rounded_clips.push_back(clip);
+        // As the core resolves a clipped straight-alpha draw.
+        std::get<host::DrawBatch>(packet.batches[0]).clip_coverage =
+            host::ClipCoverage::straight_alpha;
         image = render(packet);
         near(pixel(image, 32, 0, 0), {0, 0, 0, 0}, "rounded clip corner");
         near(pixel(image, 32, 16, 16), {255, 0, 0, 255}, "rounded clip center");
@@ -127,12 +131,13 @@ void run() {
         // fall back as on D3D11 instead of leaving the renderer unable to draw another frame.
         packet = quad({255, 255, 255, 255});
         std::get<host::DrawBatch>(packet.batches[0]).texture = "test.never-uploaded";
-        std::get<host::DrawBatch>(packet.batches[0]).material = "test:undeclared-material";
+        packet.materials = {"test:undeclared-material"};
+        packet.effects = {"test:undeclared-effect"};
         host::EffectBatch undeclared;
         undeclared.source_order = 1;
         undeclared.scissor = {0, 0, 32, 32};
         undeclared.width = undeclared.height = 32;
-        undeclared.effect = "test:undeclared-effect";
+        undeclared.effect = 0;
         packet.batches.emplace_back(undeclared);
         near(pixel(render(packet), 32, 16, 16), {255, 255, 255, 255},
              "missing texture, material and effect fall back");
@@ -177,31 +182,27 @@ void run() {
         packet.resources.clear();
         image = render(packet);
         near(pixel(image, 32, 4, 16), {0, 255, 0, 255}, "retained resources");
-        // PNG textures decode as on D3D11 (WIC): each 16-bit sample narrowed to its high byte,
-        // with no gamma conversion whether or not the file declares gAMA.
-        for (const std::optional<std::uint32_t> gamma :
-             {std::optional<std::uint32_t>{}, std::optional<std::uint32_t>{100000U},
-              std::optional<std::uint32_t>{45455U}}) {
-            constexpr std::array<std::uint16_t, 4> sample{0x00FFU, 0xFF00U, 0x8080U, 0xFFFFU};
-            auto encoded = packet;
-            encoded.resources = {{host::resource_encoded_image,
-                                  "test.png",
-                                  host::texture_encoding_png,
+        // Images arrive decoded by the core as straight-alpha RGBA8 and are sampled as uploaded.
+        {
+            auto decoded = packet;
+            decoded.resources = {{host::resource_image,
+                                  "test.image",
+                                  host::texture_format_rgba8,
                                   host::texture_sampling_nearest,
                                   0,
                                   0,
                                   1,
                                   1,
-                                  test::rgba16_png(1, 1, sample, gamma)}};
-            std::get<host::DrawBatch>(encoded.batches[0]).texture = "test.png";
-            near(pixel(render(encoded), 32, 16, 16), {0, 255, 128, 255},
-                 "16-bit PNG texels match the D3D11 decode", 0);
+                                  {0, 255, 128, 255}}};
+            std::get<host::DrawBatch>(decoded.batches[0]).texture = "test.image";
+            near(pixel(render(decoded), 32, 16, 16), {0, 255, 128, 255},
+                 "RGBA8 image texels are sampled as uploaded", 0);
         }
         host::RenderPacket release;
         release.resources.push_back({host::resource_release, "test.texture"});
         renderer.consume_resources(release);
         packet = quad();
-        std::get<host::DrawBatch>(packet.batches[0]).material = "test.material";
+        packet.materials = {"test.material"};
         renderer.declare_material("test.material",
                                   "float4 material(PixelInput input) { return float4(0,1,0,1); }");
         near(pixel(render(packet), 32, 16, 16), {0, 255, 0, 255}, "authored HLSL material");
@@ -221,11 +222,12 @@ void run() {
         host::EffectBatch effect;
         effect.width = effect.height = 32;
         effect.scissor = {0, 0, 32, 32};
-        effect.effect = "test.effect";
+        effect.effect = 0;
         renderer.declare_effect_pass(
             "test.effect", 0, STRATA_EFFECT_PASS_SHADER, 0, 1, UINT32_MAX, UINT32_MAX,
             "float4 effect(EffectInput input) { float4 c=sampleEffectSource(input.uv); return "
             "float4(c.b,c.r,c.g,c.a); }");
+        packet.effects = {"test.effect"};
         packet.batches.emplace_back(effect);
         near(pixel(render(packet), 32, 16, 16), {0, 255, 0, 255}, "backdrop HLSL effect");
         packet.batches.clear();
@@ -244,8 +246,9 @@ void run() {
             "float4 effect(EffectInput input) { return sampleEffectBackdrop(input.uv); }");
         packet = quad();
         effect.kind = host::EffectBatchKind::backdrop;
-        effect.effect = "test.identity";
+        effect.effect = 0;
         effect.backdrop_source = host::EffectBackdropSource::surface;
+        packet.effects = {"test.identity"};
         packet.batches.emplace_back(effect);
         auto target = context.target(32, 32);
         (void)renderer.render("surface", packet, target,
@@ -276,9 +279,10 @@ void run() {
             blurred.source_order = 1;
             blurred.width = blurred.height = 32;
             blurred.scissor = {0, 0, 32, 32};
-            blurred.effect = id;
+            blurred.effect = 0;
             blurred.parameter_count = count;
             blurred.parameters[0] = value;
+            edge.effects = {id};
             edge.batches.emplace_back(blurred);
             return render(edge);
         };
@@ -294,15 +298,16 @@ void run() {
         (void)renderer.render("resized", resized, context.target(32, 32),
                               {vulkan::TargetLoadAction::clear, {}, 0});
         near(pixel(context.pixels(), 64, 32, 32), {255, 0, 0, 255}, "resize and logical scale");
-        // A retained effect respects refresh rate and invalidates on geometry patches.
+        // A retained effect respects its refresh rate and resamples when its revision moves.
         renderer.release_target();
         context.resize(32, 32);
         auto cached = quad();
         host::EffectBatch timed;
         timed.width = timed.height = 32;
         timed.scissor = {0, 0, 32, 32};
-        timed.effect = "test.clock";
+        timed.effect = 0;
         timed.refresh_rate = 1;
+        cached.effects = {"test.clock"};
         renderer.declare_effect_pass(
             "test.clock", 0, STRATA_EFFECT_PASS_SHADER, 0, 1, UINT32_MAX, UINT32_MAX,
             "float4 effect(EffectInput input) { return float4(effectTime(),0,0,1); }");
@@ -322,12 +327,11 @@ void run() {
         // complete arrays, so this packet's complete arrays deliberately omit the patch.
         cached.geometry_epoch = 2;
         cached.vertex_patches.push_back({20, {0, 255, 0, 255}});
-        // The decoder reports the patched vertex's bounds, which the effect covers.
-        cached.geometry_dirty_regions = {{0, 0, 0, 0}};
-        near(at(0.6), {153, 0, 0, 255}, "geometry patch invalidates effect cache");
+        // The decoder finds the patched vertex within what the effect read: a new revision.
+        std::get<host::EffectBatch>(cached.batches[1]).sample_revision = 1;
+        near(at(0.6), {153, 0, 0, 255}, "a new sample revision invalidates the effect cache");
         cached.batches.resize(1);
         cached.vertex_patches.clear();
-        cached.geometry_dirty_regions.clear();
         // The retained epoch-2 frame draws the patched geometry the renderer kept.
         (void)renderer.render("clock", cached, context.target(32, 32),
                               {vulkan::TargetLoadAction::clear, {}, 0});
@@ -363,8 +367,9 @@ void run() {
         pane.x = pane.y = 200;
         pane.width = pane.height = 16;
         pane.scissor = {0, 0, 512, 512};
-        pane.effect = "test.glass";
+        pane.effect = 0;
         pane.refresh_rate = 1;
+        glass.effects = {"test.glass"};
         glass.batches.emplace_back(pane);
         const auto glass_at = [&](double seconds) {
             const auto measured =
@@ -387,13 +392,11 @@ void run() {
         for (std::uint32_t x = 196; x < 220; x += 3)
             near(pixel(retained, 512, x, 208), pixel(fresh, 512, x, 208),
                  "the retained sample composited elsewhere than it was taken", 1);
-        // Only changes within what the pane sampled (its bounds plus the blur reach) resample it.
-        glass.geometry_dirty_regions = {{0, 0, 4, 4}};
-        require(glass_at(0.6).first.blur_passes == 0, "a change far from the pane resampled it");
-        glass.geometry_dirty_regions = {{218, 200, 2, 16}};
+        // Only a new sample revision (the decoder's verdict on what changed) resamples it.
+        require(glass_at(0.6).first.blur_passes == 0, "an unchanged revision resampled the pane");
+        std::get<host::EffectBatch>(glass.batches[1]).sample_revision = 7;
         require(glass_at(0.7).first.blur_passes == 4,
-                "a change within the pane's blur reach reused its stale sample");
-        glass.geometry_dirty_regions.clear();
+                "a new sample revision reused the pane's stale sample");
         renderer.release_layer("glass");
         renderer.release_target();
         context.resize(32, 32);

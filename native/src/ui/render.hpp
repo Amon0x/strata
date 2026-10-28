@@ -176,6 +176,12 @@ struct EffectState final {
      * token (Surface::report_backdrop). Only BACKDROP effects carry one.
      */
     std::uint64_t probe = 0U;
+    /**
+     * How far outside its bounds, in logical pixels, the effect's output depends on what was drawn
+     * before it, from its declared passes (see effect_read_reach). Hosts retain an effect's sample
+     * only while nothing within this reach changes.
+     */
+    double read_reach = 0.0;
     [[nodiscard]] friend bool operator==(const EffectState&, const EffectState&) = default;
 };
 

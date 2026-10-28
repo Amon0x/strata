@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -42,13 +43,11 @@ class EffectPassRenderer final {
     void invalidate_cache() noexcept;
     /** Retained effect samples of one layer; end_layer drops those the frame did not use. */
     [[nodiscard]] std::size_t cached_sample_count(std::string_view layer_id) const noexcept;
-    /** Advances one ordered layer stream and invalidates only samples touched by geometry patches. */
-    void begin_layer(
-        std::string_view layer_id,
-        std::uint64_t geometry_epoch,
-        bool dirty_all,
-        std::span<const host::GeometryDirtyRegion> dirty_regions
-    );
+    /**
+     * Starts one frame of a layer whose effect batches name `effect_ids` (the packet's effect
+     * table). Whether a retained sample is still current is the decoder's sample revision.
+     */
+    void begin_layer(std::string_view layer_id, std::span<const std::string> effect_ids);
     /** Returns whether any SURFACE effect must refresh rather than reuse its retained sample. */
     [[nodiscard]] bool surface_backdrop_required(
         std::string_view layer_id,

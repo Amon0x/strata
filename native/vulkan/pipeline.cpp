@@ -108,7 +108,7 @@ VkPipeline Renderer::Impl::pipeline(std::string_view program, Blend blend, VkFor
             ba.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
         else if (blend == Blend::additive)
             ba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        else if (blend == Blend::multiply || blend == Blend::rounded_multiply) {
+        else if (blend == Blend::multiply || blend == Blend::clipped_multiply) {
             ba.srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
             ba.dstColorBlendFactor = blend == Blend::multiply ? VK_BLEND_FACTOR_ZERO
                                                               : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;

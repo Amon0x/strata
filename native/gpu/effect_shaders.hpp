@@ -2,10 +2,12 @@
 
 #include <string_view>
 
+#include <strata/strata.h>
+
 namespace strata::gpu {
 // How far outside its bounds, in logical pixels, an effect's source and backdrop stay defined. The
 // prelude's effectSampleReach clamps samples to the same distance; the two must agree.
-inline constexpr double effect_sample_reach = 64.0;
+inline constexpr double effect_sample_reach = STRATA_EFFECT_SAMPLE_REACH;
 
 constexpr std::string_view effect_prelude = R"hlsl(
 cbuffer EffectData : register(b0) {

@@ -549,15 +549,6 @@ strata_add_extension_package(
 strata_target_defaults(strata_control_deck_extension)
 
 
-if(NOT WIN32 OR STRATA_BUILD_VULKAN)
-    find_package(PNG REQUIRED)
-    add_library(strata_png STATIC gpu/png.cpp)
-    target_link_libraries(strata_png PUBLIC PNG::PNG)
-    target_include_directories(strata_png PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    set_target_properties(strata_png PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    strata_target_defaults(strata_png)
-endif()
-
 if(STRATA_BUILD_VULKAN)
     find_package(Vulkan 1.1 REQUIRED)
     include(cmake/StrataShaderc.cmake)
@@ -576,7 +567,7 @@ if(STRATA_BUILD_VULKAN)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(strata_vulkan PUBLIC Vulkan::Vulkan Strata::render_host Strata::host
-        PRIVATE strata_png StrataShaderc::shaderc)
+        PRIVATE StrataShaderc::shaderc)
     set_target_properties(strata_vulkan PROPERTIES EXPORT_NAME vulkan POSITION_INDEPENDENT_CODE ON)
     target_compile_features(strata_vulkan PUBLIC cxx_std_23)
     strata_target_defaults(strata_vulkan)
@@ -607,7 +598,6 @@ if(WIN32)
             d3d11
             d3dcompiler
             ole32
-            windowscodecs
     )
     target_include_directories(
         strata_d3d11
@@ -668,7 +658,6 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             imm32
             ole32
             user32
-            windowscodecs
     )
     target_include_directories(
         strata_desktop_host
@@ -767,13 +756,9 @@ if(STRATA_BUILD_TOOLS)
     )
     strata_target_defaults(strata_compile)
 
-    set(strata_headless_platform_sources headless/png_image_codec.cpp)
+    set(strata_headless_platform_sources)
     if(WIN32)
-        set(
-            strata_headless_platform_sources
-            headless/d3d11_renderer.cpp
-            headless/wic_image_codec.cpp
-        )
+        set(strata_headless_platform_sources headless/d3d11_renderer.cpp)
     endif()
     add_library(
         strata_headless_host
@@ -802,9 +787,6 @@ if(STRATA_BUILD_TOOLS)
     )
     if(WIN32)
         target_link_libraries(strata_headless_host PRIVATE strata_d3d11)
-    endif()
-    if(TARGET strata_png)
-        target_link_libraries(strata_headless_host PRIVATE strata_png)
     endif()
     if(STRATA_BUILD_VULKAN)
         target_link_libraries(strata_headless_host PRIVATE strata_vulkan_offscreen)
@@ -929,7 +911,6 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             dxgi
             ole32
             user32
-            windowscodecs
     )
     strata_target_defaults(strata_desktop)
 endif()
@@ -1563,9 +1544,6 @@ install(
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
-if(TARGET strata_png)
-    install(TARGETS strata_png EXPORT StrataTargets ARCHIVE DESTINATION lib)
-endif()
 if(STRATA_BUILD_VULKAN)
     install(TARGETS strata_vulkan EXPORT StrataTargets ARCHIVE DESTINATION lib)
 endif()

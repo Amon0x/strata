@@ -134,10 +134,10 @@ struct EffectPassRenderer::Impl final {
         LONG left = 0;
         LONG top = 0;
         double sampled_seconds = 0.0;
-        std::uint64_t geometry_epoch = 0U;
+        /** The decoder's sample revision (host::EffectBatch::sample_revision) it was taken at. */
+        std::uint64_t revision = 0U;
         /** The layer frame (see layer_frames) that last composited this sample. */
         std::uint64_t used_frame = 0U;
-        host::EffectBatch effect;
     };
     /** One queued readback of the probe strip: which layer measured it, and which probes. */
     struct ProbeReadback final {
@@ -317,7 +317,6 @@ struct EffectPassRenderer::Impl final {
         surface_backdrop.reset();
         surface_backdrop_available = false;
         cached_samples.clear();
-        layer_epochs.clear();
         blur.resize(width, height, format);
     }
 
@@ -343,36 +342,20 @@ struct EffectPassRenderer::Impl final {
         surface_backdrop_available = true;
     }
 
-    void begin_layer(
-        const std::string_view layer_id,
-        const std::uint64_t geometry_epoch,
-        const bool dirty_all,
-        const std::span<const host::GeometryDirtyRegion> dirty_regions
-    ) {
-        const std::string layer(layer_id);
-        ++layer_frames[layer];
-        const auto found = layer_epochs.find(layer);
-        // A presentation-group move keeps the epoch but still reports the regions it uncovered.
-        const bool same_epoch = found != layer_epochs.end() && found->second == geometry_epoch;
-        if (same_epoch && !dirty_all && dirty_regions.empty())
-            return;
-        const std::optional<std::uint64_t> previous_epoch =
-            found != layer_epochs.end() ? std::optional(found->second) : std::nullopt;
-        layer_epochs.insert_or_assign(layer, geometry_epoch);
-        const gpu::EffectChanges changes(geometry_epoch, previous_epoch, dirty_all, dirty_regions);
-        for (auto& [key, sample] : cached_samples) {
-            if (key.layer != layer) continue;
-            // A sample read beyond its bounds by its blur or shader reach, so a change just
-            // outside a panel still reaches the glass edge sampled over it.
-            if (changes.touch(sample.effect, read_reach(sample.effect))) {
-                // Stale against this epoch, whether or not the epoch moved.
-                if (sample.geometry_epoch == geometry_epoch)
-                    sample.geometry_epoch = geometry_epoch - 1U;
-            } else if (sample.geometry_epoch == previous_epoch) {
-                // Untouched and current until now: carry it into the new epoch.
-                sample.geometry_epoch = geometry_epoch;
-            }
+    void begin_layer(const std::string_view layer_id, const std::span<const std::string> effect_ids) {
+        ++layer_frames[std::string(layer_id)];
+        // The packet names effects by index; resolve its table once rather than per batch.
+        layer_programs.clear();
+        layer_programs.reserve(effect_ids.size());
+        for (const std::string& id : effect_ids) {
+            const auto program = programs.find(id);
+            layer_programs.push_back(program != programs.end() ? &program->second : nullptr);
         }
+    }
+
+    /** The passes of an effect batch of the layer being rendered; null when undeclared. */
+    [[nodiscard]] const std::vector<Pass>* program_of(const host::EffectBatch& effect) const noexcept {
+        return effect.effect < layer_programs.size() ? layer_programs[effect.effect] : nullptr;
     }
 
     [[nodiscard]] bool surface_backdrop_required(
@@ -383,7 +366,6 @@ struct EffectPassRenderer::Impl final {
         const double frame_seconds
     ) {
         complete_shader_programs();
-        const auto layer_epoch = layer_epochs.find(std::string(layer_id));
         for (const host::SubmissionBatch& batch : batches) {
             const auto* effect = std::get_if<host::EffectBatch>(&batch);
             if (effect == nullptr ||
@@ -399,24 +381,16 @@ struct EffectPassRenderer::Impl final {
                 static_cast<std::uint32_t>(std::max<LONG>(0, clip.bottom - clip.top));
             if (sample_width == 0U || sample_height == 0U)
                 continue;
-            if (effect->refresh_rate <= 0.0)
-                return true;
             const CacheKey key{std::string(layer_id), effect->source_order, false};
             const auto cached = cached_samples.find(key);
-            if (cached == cached_samples.end() ||
-                cached->second.width != sample_width ||
-                cached->second.height != sample_height ||
-                cached->second.left != clip.left ||
+            if (cached == cached_samples.end() || cached->second.width != sample_width ||
+                cached->second.height != sample_height || cached->second.left != clip.left ||
                 cached->second.top != clip.top ||
-                cached->second.effect != *effect ||
-                layer_epoch == layer_epochs.end() ||
-                cached->second.geometry_epoch != layer_epoch->second ||
-                frame_seconds < cached->second.sampled_seconds) {
+                cached->second.revision != effect->sample_revision ||
+                gpu::effect_refresh_due(effect->refresh_rate, cached->second.sampled_seconds,
+                                        frame_seconds)) {
                 return true;
             }
-            const double interval = 1.0 / effect->refresh_rate;
-            if (frame_seconds - cached->second.sampled_seconds + 1.0e-9 >= interval)
-                return true;
         }
         return false;
     }
@@ -696,22 +670,13 @@ struct EffectPassRenderer::Impl final {
     /** The widest blur radius among the effect's passes, in logical pixels. */
     [[nodiscard]] double widest_blur(const host::EffectBatch& effect) const noexcept {
         double widest = 0.0;
-        if (const auto program = programs.find(effect.effect); program != programs.end()) {
-            for (const Pass& pass : program->second) {
+        if (const std::vector<Pass>* const program = program_of(effect); program != nullptr) {
+            for (const Pass& pass : *program) {
                 if (pass.kind == 0U)
                     widest = std::max(widest, parameter(effect, pass.radius_parameter, pass.radius));
             }
         }
         return widest;
-    }
-
-    /** How far outside its bounds the effect's output depends on its inputs; see gpu policy. */
-    [[nodiscard]] double read_reach(const host::EffectBatch& effect) const noexcept {
-        const auto program = programs.find(effect.effect);
-        const bool shader_passes =
-            program != programs.end() &&
-            std::ranges::any_of(program->second, [](const Pass& pass) { return pass.kind == 1U; });
-        return gpu::effect_read_reach(shader_passes, widest_blur(effect));
     }
 
     // The framebuffer region one effect can read: its bounds extended by the prelude's sample reach,
@@ -772,16 +737,13 @@ struct EffectPassRenderer::Impl final {
             cached != cached_samples.end() && cached->second.width == sample_width &&
             cached->second.height == sample_height && cached->second.left == clip.left &&
             cached->second.top == clip.top;
-        const bool signature_matches = dimensions_match && cached->second.effect == effect;
-        const auto layer_epoch = layer_epochs.find(std::string(layer_id));
-        const bool geometry_matches =
-            cached != cached_samples.end() && layer_epoch != layer_epochs.end() &&
-            cached->second.geometry_epoch == layer_epoch->second;
-        const double interval = rate_limited ? 1.0 / effect.refresh_rate : 0.0;
+        // The decoder decides whether anything the sample read has changed; this host only checks
+        // that the sample covers the same pixels and that the effect's refresh interval holds.
         const bool refresh_due =
-            !rate_limited || !signature_matches || !geometry_matches ||
-            frame_seconds < cached->second.sampled_seconds ||
-            frame_seconds - cached->second.sampled_seconds + 1.0e-9 >= interval;
+            !rate_limited || !dimensions_match ||
+            cached->second.revision != effect.sample_revision ||
+            gpu::effect_refresh_due(effect.refresh_rate, cached->second.sampled_seconds,
+                                    frame_seconds);
         if (!refresh_due) {
             cached->second.used_frame = layer_frame(layer_id);
             draw_cached(cached->second, destination, effect, logical_width, logical_height,
@@ -812,13 +774,13 @@ struct EffectPassRenderer::Impl final {
         context->OMSetRenderTargets(0U, nullptr, nullptr);
         ID3D11ShaderResourceView* cleared[]{nullptr, nullptr};
         context->PSSetShaderResources(0U, 2U, cleared);
-        const auto program = programs.find(effect.effect);
+        const std::vector<Pass>* const program = program_of(effect);
         // An effect reads its inputs only inside its bounds extended by the sample reach and by its
         // widest blur, so that region is all the workspace has to hold. Capturing the whole
         // framebuffer instead makes every effect cost the window's area rather than its own.
         const bool samples_backdrop =
-            program != programs.end() &&
-            std::ranges::any_of(program->second, [](const Pass& pass) { return pass.kind == 1U; });
+            program != nullptr &&
+            std::ranges::any_of(*program, [](const Pass& pass) { return pass.kind == 1U; });
         const D3D11_BOX region = sample_region(effect, logical_width, logical_height);
         Target* current = &work.capture;
         if (resolved_source != current->texture.Get()) {
@@ -834,8 +796,8 @@ struct EffectPassRenderer::Impl final {
             measure_backdrop(effect, current->view.Get(), logical_width, logical_height,
                              frame_seconds);
         EffectPassTelemetry telemetry;
-        if (program != programs.end()) {
-            for (const Pass& pass : program->second) {
+        if (program != nullptr) {
+            for (const Pass& pass : *program) {
                 if (pass.kind == 0U) {
                     const double radius =
                         std::max(0.0, parameter(effect, pass.radius_parameter, pass.radius));
@@ -884,9 +846,7 @@ struct EffectPassRenderer::Impl final {
                                            current->texture.Get(), 0U, &source_box);
             cached->second.sampled_seconds = frame_seconds;
             cached->second.used_frame = layer_frame(layer_id);
-            cached->second.geometry_epoch =
-                layer_epoch != layer_epochs.end() ? layer_epoch->second : 0U;
-            cached->second.effect = effect;
+            cached->second.revision = effect.sample_revision;
             draw_cached(cached->second, destination, effect, logical_width, logical_height,
                         frame_seconds);
         } else {
@@ -925,7 +885,8 @@ struct EffectPassRenderer::Impl final {
     std::map<std::string, std::vector<Pass>, std::less<>> programs;
     std::map<std::string, ShaderProgram, std::less<>> shader_programs;
     std::map<CacheKey, CachedSample> cached_samples;
-    std::map<std::string, std::uint64_t, std::less<>> layer_epochs;
+    /** The current layer's effect table, resolved to declared programs (see begin_layer). */
+    std::vector<const std::vector<Pass>*> layer_programs;
     /** Frames rendered per layer, counted by begin_layer; cache entries record the last use. */
     std::map<std::string, std::uint64_t, std::less<>> layer_frames;
     bool surface_backdrop_available = false;
@@ -995,16 +956,11 @@ std::size_t EffectPassRenderer::cached_sample_count(const std::string_view layer
 
 void EffectPassRenderer::invalidate_cache() noexcept {
     impl_->cached_samples.clear();
-    impl_->layer_epochs.clear();
 }
 
-void EffectPassRenderer::begin_layer(
-    const std::string_view layer_id,
-    const std::uint64_t geometry_epoch,
-    const bool dirty_all,
-    const std::span<const host::GeometryDirtyRegion> dirty_regions
-) {
-    impl_->begin_layer(layer_id, geometry_epoch, dirty_all, dirty_regions);
+void EffectPassRenderer::begin_layer(const std::string_view layer_id,
+                                     const std::span<const std::string> effect_ids) {
+    impl_->begin_layer(layer_id, effect_ids);
 }
 
 bool EffectPassRenderer::surface_backdrop_required(
@@ -1031,9 +987,6 @@ void EffectPassRenderer::begin_surface(
 }
 
 void EffectPassRenderer::release_layer(const std::string_view layer_id) noexcept {
-    const auto epoch = impl_->layer_epochs.find(layer_id);
-    if (epoch != impl_->layer_epochs.end())
-        impl_->layer_epochs.erase(epoch);
     if (const auto frames = impl_->layer_frames.find(layer_id);
         frames != impl_->layer_frames.end()) {
         impl_->layer_frames.erase(frames);

@@ -30,9 +30,21 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
     ++render_count;
     begin();
     try {
-        // Before upload_geometry advances the layer's epoch, which the change report is against.
-        invalidate_effects(packet);
         resources(packet);
+        // The packet names materials and effects by index; resolve each table once.
+        layer_materials.clear();
+        layer_materials.reserve(packet.materials.size());
+        for (const std::string& material : packet.materials) {
+            const auto found = materials.find(material);
+            layer_materials.push_back(found != materials.end() ? std::string_view(found->second)
+                                                               : std::string_view("builtin"));
+        }
+        layer_effects.clear();
+        layer_effects.reserve(packet.effects.size());
+        for (const std::string& effect : packet.effects) {
+            const auto found = effects.find(effect);
+            layer_effects.push_back(found != effects.end() ? &found->second : nullptr);
+        }
         Target target{output.image,
                       output.view,
                       output.format,
@@ -88,15 +100,9 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
         std::vector<Content> stack;
         for (const auto& submission : packet.batches) {
             if (const auto* batch = std::get_if<host::DrawBatch>(&submission)) {
-                if (static_cast<std::uint64_t>(batch->first_index) + batch->index_count >
-                        packet.indices.size() ||
-                    batch->base_vertex > INT32_MAX)
-                    throw std::invalid_argument("Vulkan draw index range is invalid");
-                for (std::size_t i = batch->first_index;
-                     i < static_cast<std::size_t>(batch->first_index) + batch->index_count; ++i)
-                    if (static_cast<std::uint64_t>(packet.indices[i]) + batch->base_vertex >=
-                        packet.vertices.size() / 88)
-                        throw std::invalid_argument("Vulkan draw vertex index is invalid");
+                // The decoder has checked every index against the vertex payload.
+                if (batch->base_vertex > INT32_MAX)
+                    throw std::invalid_argument("Vulkan draw base vertex is invalid");
                 // As on D3D11, a texture that has not arrived samples white and a material without
                 // a program draws with the built-in shader (whose mode comes from each vertex), so
                 // one missing resource costs a draw its look rather than the renderer.
@@ -105,40 +111,13 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                     if (auto it = textures.find(*batch->texture); it != textures.end())
                         texture = it->second.get();
                 }
-                std::string_view program = "builtin";
-                if (auto it = materials.find(batch->material); it != materials.end())
-                    program = it->second;
-                // Names resolve once per batch; the pipeline lookup allocates nothing.
-                const auto requested = gpu::blend_mode(batch->blend_mode);
-                if (!requested)
-                    throw std::invalid_argument("unknown Vulkan blend mode: " + batch->blend_mode);
-                const bool clipped = !batch->rounded_clips.empty();
-                Blend blend = Blend::opaque;
-                switch (*requested) {
-                case gpu::BlendMode::opaque:
-                    blend = clipped ? Blend::straight_alpha : Blend::opaque;
-                    break;
-                case gpu::BlendMode::straight_alpha:
-                    blend = Blend::straight_alpha;
-                    break;
-                case gpu::BlendMode::premultiplied_alpha:
-                    blend = Blend::premultiplied_alpha;
-                    break;
-                case gpu::BlendMode::additive:
-                    blend = Blend::additive;
-                    break;
-                case gpu::BlendMode::multiply:
-                    blend = clipped ? Blend::rounded_multiply : Blend::multiply;
-                    break;
-                }
-                const auto mode = *requested == gpu::BlendMode::premultiplied_alpha
-                                      ? gpu::RoundedClipMode::premultiplied_alpha
-                                  : clipped && *requested == gpu::BlendMode::multiply
-                                      ? gpu::RoundedClipMode::multiply
-                                  : !clipped ? gpu::RoundedClipMode::hard
-                                             : gpu::RoundedClipMode::straight_alpha;
-                draw(target, program, blend, constants, clip_constants(batch->rounded_clips, mode),
-                     *texture, *texture, batch->scissor, batch, vertices, indices);
+                const std::string_view program = batch->material < layer_materials.size()
+                                                     ? layer_materials[batch->material]
+                                                     : std::string_view("builtin");
+                // The core already adapted the blend and clip coverage to the rounded clips.
+                draw(target, program, batch->blend, constants,
+                     clip_constants(batch->rounded_clips, batch->clip_coverage), *texture, *texture,
+                     batch->scissor, batch, vertices, indices);
             } else if (const auto* blur_batch = std::get_if<host::BlurBatch>(&submission)) {
                 host::EffectBatch region;
                 region.x = blur_batch->x;

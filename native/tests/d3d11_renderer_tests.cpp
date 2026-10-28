@@ -20,7 +20,6 @@
 #include <strata/render_packet.hpp>
 
 #include "d3d11/effect_pass.hpp"
-#include "tests/png_fixture.hpp"
 
 namespace {
 
@@ -54,11 +53,13 @@ void write_float(std::vector<std::uint8_t>& bytes, const std::size_t vertex,
         write_float(packet.vertices, vertex, 84U, 1.0F);
     }
     packet.indices = {0U, 1U, 2U, 0U, 2U, 3U};
+    packet.materials = {"strata:unified_ui"};
     packet.batches.emplace_back(host::DrawBatch{
         .source_order = 0U,
         .scissor = host::Scissor{0U, 0U, 4U, 4U},
-        .material = "strata:unified_ui",
-        .blend_mode = "opaque",
+        .material = 0U,
+        .blend = host::DrawBlend::opaque,
+        .clip_coverage = host::ClipCoverage::hard,
         .base_vertex = 0U,
         .first_index = 0U,
         .index_count = 6U,
@@ -167,39 +168,6 @@ void test_target_is_validated_on_its_own() {
     check(rejected, "a target whose size disagrees with its texture was accepted");
 }
 
-// An embedding engine's render thread may never have initialised COM; PNG textures still decode.
-void test_png_upload_without_com() {
-    Fixture fixture;
-    static constexpr std::array<std::uint8_t, 70> png{
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
-        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
-        0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78,
-        0x9C, 0x63, 0x10, 0x50, 0x30, 0xF8, 0x0F, 0x00, 0x02, 0x04, 0x01, 0x60, 0x8D, 0xBC,
-        0xBB, 0x71, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-    };
-    std::string failure;
-    std::thread worker([&fixture, &failure] {
-        try {
-            d3d11::Renderer renderer(fixture.device.Get(), fixture.context.Get());
-            host::RenderPacket packet;
-            host::ResourceOperation image;
-            image.kind = host::resource_encoded_image;
-            image.texture = "image";
-            image.format = host::texture_encoding_png;
-            image.sampling = 1U;
-            image.width = 1U;
-            image.height = 1U;
-            image.bytes.assign(png.begin(), png.end());
-            packet.resources.push_back(image);
-            renderer.consume_resources(packet);
-        } catch (const std::exception& error) {
-            failure = error.what();
-        }
-    });
-    worker.join();
-    check(failure.empty(), "a PNG upload on a thread without COM failed: " + failure);
-}
-
 /** Drives one layer frame of rate-limited backdrop effects through the effect renderer. */
 void effect_frame(const Fixture& fixture, d3d11::EffectPassRenderer& effects,
                   const std::uint32_t effect_count, const double seconds) {
@@ -210,11 +178,13 @@ void effect_frame(const Fixture& fixture, d3d11::EffectPassRenderer& effects,
         effect.scissor = host::Scissor{0U, 0U, 4U, 4U};
         effect.width = 4.0;
         effect.height = 4.0;
-        effect.effect = "fixture.unprogrammed";
+        effect.effect = 0U;
         effect.refresh_rate = 60.0;
+        effect.sample_revision = 1U + order;
         batches.emplace_back(std::move(effect));
     }
-    effects.begin_layer("layer", 1U, false, {});
+    const std::array<std::string, 1U> ids{"fixture.unprogrammed"};
+    effects.begin_layer("layer", ids);
     effects.begin_surface(fixture.texture.Get(),
                           effects.surface_backdrop_required("layer", batches, 4.0, 4.0, seconds));
     for (const host::SubmissionBatch& batch : batches) {
@@ -240,41 +210,35 @@ void test_unused_effect_samples_are_evicted() {
           "samples of effects the frame no longer draws were retained");
 }
 
-// PNG textures decode to the same texels on every backend: the 8-bit value nearest each 16-bit
-// sample, as stored, whatever gamma the file declares (the Vulkan test pins the same values).
-void test_sixteen_bit_png_texels() {
+// Images arrive decoded by the core as straight-alpha RGBA8, and are sampled exactly as uploaded.
+void test_image_texels_are_sampled_as_uploaded() {
     Fixture fixture;
     d3d11::Renderer renderer(fixture.device.Get(), fixture.context.Get());
     d3d11::FrameOptions options;
     options.load_action = d3d11::TargetLoadAction::clear;
-    constexpr std::array<std::uint16_t, 4> sample{0x00FFU, 0xFF00U, 0x8080U, 0xFFFFU};
-    for (const std::optional<std::uint32_t> gamma :
-         {std::optional<std::uint32_t>{}, std::optional<std::uint32_t>{100000U},
-          std::optional<std::uint32_t>{45455U}}) {
-        host::RenderPacket packet = quad(1U, 255U, 255U, 255U);
-        packet.full_geometry_payload = true;
-        packet.geometry_dirty_all = true;
-        for (std::size_t vertex = 0U; vertex < 4U; ++vertex) {
-            float position[2]{};
-            std::memcpy(position, packet.vertices.data() + vertex * 88U, sizeof(position));
-            write_float(packet.vertices, vertex, 12U, position[0] / 4.0F);
-            write_float(packet.vertices, vertex, 16U, position[1] / 4.0F);
-            write_float(packet.vertices, vertex, 80U, 1.0F);
-        }
-        std::get<host::DrawBatch>(packet.batches[0]).texture = "png";
-        host::ResourceOperation image;
-        image.kind = host::resource_encoded_image;
-        image.texture = "png";
-        image.format = host::texture_encoding_png;
-        image.sampling = host::texture_sampling_nearest;
-        image.width = 1U;
-        image.height = 1U;
-        image.bytes = test::rgba16_png(1U, 1U, sample, gamma);
-        packet.resources.push_back(std::move(image));
-        static_cast<void>(renderer.render("png", packet, fixture.target(), options));
-        check(fixture.center() == std::array<int, 4>{0, 255, 128, 255},
-              "a 16-bit PNG texture did not decode to the high byte of each sample");
+    host::RenderPacket packet = quad(1U, 255U, 255U, 255U);
+    packet.full_geometry_payload = true;
+    packet.geometry_dirty_all = true;
+    for (std::size_t vertex = 0U; vertex < 4U; ++vertex) {
+        float position[2]{};
+        std::memcpy(position, packet.vertices.data() + vertex * 88U, sizeof(position));
+        write_float(packet.vertices, vertex, 12U, position[0] / 4.0F);
+        write_float(packet.vertices, vertex, 16U, position[1] / 4.0F);
+        write_float(packet.vertices, vertex, 80U, 1.0F);
     }
+    std::get<host::DrawBatch>(packet.batches[0]).texture = "image";
+    host::ResourceOperation image;
+    image.kind = host::resource_image;
+    image.texture = "image";
+    image.format = host::texture_format_rgba8;
+    image.sampling = host::texture_sampling_nearest;
+    image.width = 1U;
+    image.height = 1U;
+    image.bytes = {0U, 255U, 128U, 255U};
+    packet.resources.push_back(std::move(image));
+    static_cast<void>(renderer.render("image", packet, fixture.target(), options));
+    check(fixture.center() == std::array<int, 4>{0, 255, 128, 255},
+          "an RGBA8 image texture was not sampled as uploaded");
 }
 
 } // namespace
@@ -282,10 +246,9 @@ void test_sixteen_bit_png_texels() {
 int main() {
     try {
         test_geometry_after_a_failed_frame();
-        test_png_upload_without_com();
         test_target_is_validated_on_its_own();
         test_unused_effect_samples_are_evicted();
-        test_sixteen_bit_png_texels();
+        test_image_texels_are_sampled_as_uploaded();
         std::cout << "strata_d3d11_renderer_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

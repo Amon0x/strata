@@ -557,7 +557,7 @@ the window's.
 The D3D11 desktop and headless hosts execute the full pass program. The reference software backend
 executes declared blur passes, ignores authored shader stages, and then applies the same rounded
 mask, opacity, and backdrop/content composition. This approximation is intentionally deterministic
-rather than a claim of shader fidelity. Packet v13 carries ordered backdrop/content batches,
+rather than a claim of shader fidelity. Packet v14 carries ordered backdrop/content batches,
 current/surface backdrop selection, active rounded-clip geometry, effect refresh-rate policy, a
 backdrop probe token, and a bounded sixteen-float parameter block; presentation groups carry tone
 beside their transform and opacity.

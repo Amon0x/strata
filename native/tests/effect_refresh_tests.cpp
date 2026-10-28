@@ -14,7 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include "image_codec.hpp"
 #ifdef _WIN32
 #include "d3d11_renderer.hpp"
 #endif
@@ -78,22 +77,27 @@ void write_float(
         write_float(packet.vertices, vertex, 84U, 1.0F);
     }
     packet.indices = {0U, 1U, 2U, 0U, 2U, 3U};
+    packet.materials = {"strata:unified_ui"};
+    packet.effects = {"fixture.identity"};
     packet.batches.emplace_back(host::DrawBatch{
         .source_order = 0U,
         .scissor = host::Scissor{0U, 0U, 4U, 4U},
-        .material = "strata:unified_ui",
-        .blend_mode = "opaque",
+        .material = 0U,
+        .blend = host::DrawBlend::opaque,
+        .clip_coverage = host::ClipCoverage::hard,
         .base_vertex = 0U,
         .first_index = 0U,
         .index_count = 6U,
     });
     host::EffectBatch effect;
     effect.backdrop_source = source;
+    // As the decoder would: the two sources sample different things, so their revisions differ.
+    effect.sample_revision = static_cast<std::uint64_t>(source) + 1U;
     effect.source_order = 1U;
     effect.scissor = host::Scissor{0U, 0U, 4U, 4U};
     effect.width = 4.0;
     effect.height = 4.0;
-    effect.effect = "fixture.identity";
+    effect.effect = 0U;
     effect.refresh_rate = 100.0;
     packet.batches.emplace_back(std::move(effect));
     return packet;
@@ -128,8 +132,9 @@ void write_float(
     packet.batches.emplace_back(host::DrawBatch{
         .source_order = 0U,
         .scissor = host::Scissor{0U, 0U, 4U, 4U},
-        .material = "strata:unified_ui",
-        .blend_mode = "opaque",
+        .material = 0U,
+        .blend = host::DrawBlend::opaque,
+        .clip_coverage = host::ClipCoverage::hard,
         .base_vertex = 0U,
         .first_index = 0U,
         .index_count = 6U,
@@ -140,14 +145,15 @@ void write_float(
     content.scissor = host::Scissor{0U, 0U, 4U, 4U};
     content.width = 4.0;
     content.height = 4.0;
-    content.effect = "fixture.identity";
+    content.effect = 0U;
     content.refresh_rate = 0.0;
     packet.batches.emplace_back(content);
     packet.batches.emplace_back(host::DrawBatch{
         .source_order = 2U,
         .scissor = host::Scissor{0U, 0U, 4U, 4U},
-        .material = "strata:unified_ui",
-        .blend_mode = "opaque",
+        .material = 0U,
+        .blend = host::DrawBlend::opaque,
+        .clip_coverage = host::ClipCoverage::hard,
         .base_vertex = 4U,
         .first_index = 6U,
         .index_count = 6U,
@@ -158,7 +164,7 @@ void write_float(
     backdrop.scissor = host::Scissor{0U, 0U, 4U, 4U};
     backdrop.width = 4.0;
     backdrop.height = 4.0;
-    backdrop.effect = "fixture.identity";
+    backdrop.effect = 0U;
     backdrop.refresh_rate = 0.0;
     packet.batches.emplace_back(backdrop);
     packet.batches.emplace_back(host::ContentEffectEndBatch{
@@ -225,15 +231,18 @@ void test_surface_backdrop_inside_content(strata::headless::CaptureRenderer& ren
 }
 
 /**
- * A retained frame that only moves a presentation group keeps its geometry epoch and reports the
- * moved bounds as dirty regions. A rate-limited effect over that region has to resample then
- * rather than show the content where it used to be until its next refresh.
+ * Whether anything a retained sample read has changed is the decoder's verdict, carried as the
+ * effect's sample revision (render_packet_tests pins how the decoder assigns it). A backend
+ * reuses its sample while the revision holds and the refresh interval has not elapsed, and
+ * resamples as soon as the revision moves, whatever its interval says.
  */
-void test_group_move_refreshes_effect(strata::headless::CaptureRenderer& renderer) {
+void test_sample_revision_decides_reuse(strata::headless::CaptureRenderer& renderer) {
     using namespace strata;
     renderer.resize(4U, 4U, 4.0, 4.0);
     host::RenderPacket packet = surface_backdrop_packet(host::EffectBackdropSource::current, 7U);
     packet.batches.erase(packet.batches.begin());
+    auto& effect = std::get<host::EffectBatch>(packet.batches.front());
+    effect.sample_revision = 11U;
     renderer.set_clear_color({255U, 0U, 0U, 255U});
     renderer.render(packet, 0);
     renderer.set_clear_color({0U, 0U, 255U, 255U});
@@ -241,70 +250,21 @@ void test_group_move_refreshes_effect(strata::headless::CaptureRenderer& rendere
     check(center(renderer) == std::array<std::uint8_t, 4U>{255U, 0U, 0U, 255U},
           "rate-limited effect refreshed before its deadline");
 
-    packet.geometry_dirty_regions.push_back(host::GeometryDirtyRegion{1.0, 1.0, 2.0, 2.0});
+    effect.sample_revision = 12U;
     renderer.set_clear_color({0U, 255U, 0U, 255U});
     renderer.render(packet, 2'000'000);
     check(center(renderer) == std::array<std::uint8_t, 4U>{0U, 255U, 0U, 255U},
-          "a group move under a rate-limited effect reused the sample from before it");
+          "a new sample revision reused the sample from before it");
 
-    packet.geometry_dirty_regions.clear();
     renderer.set_clear_color({255U, 255U, 0U, 255U});
     renderer.render(packet, 3'000'000);
     check(center(renderer) == std::array<std::uint8_t, 4U>{0U, 255U, 0U, 255U},
-          "an unchanged retained frame resampled a rate-limited effect");
-}
-
-/**
- * A blurred effect reads its radius beyond its own bounds. Content that changes just outside a
- * glass panel shows in the blurred edge, so the retained sample must be resampled even though the
- * change does not overlap the panel itself; a change beyond everything the effect read must not
- * cost a resample. A packet that skips an epoch carries no record of what the skipped one changed.
- */
-void test_changes_within_blur_reach_refresh_effect(strata::headless::CaptureRenderer& renderer) {
-    using namespace strata;
-    renderer.resize(32U, 32U, 32.0, 32.0);
-    renderer.declare_effect_pass("fixture.reach-blur", 0U, 0U, 4.0, 1U, UINT32_MAX, UINT32_MAX,
-                                 {});
-    host::EffectBatch effect;
-    effect.source_order = 0U;
-    effect.scissor = host::Scissor{0U, 0U, 32U, 32U};
-    effect.x = 12.0;
-    effect.y = 12.0;
-    effect.width = 8.0;
-    effect.height = 8.0;
-    effect.effect = "fixture.reach-blur";
-    effect.refresh_rate = 100.0;
-    host::RenderPacket packet;
-    packet.geometry_epoch = 1U;
-    packet.batches.emplace_back(effect);
-    renderer.set_clear_color({255U, 0U, 0U, 255U});
-    renderer.render(packet, 0);
-    check(center(renderer) == std::array<std::uint8_t, 4U>{255U, 0U, 0U, 255U},
-          "the blurred effect did not sample its backdrop");
-
-    packet.geometry_dirty_regions = {host::GeometryDirtyRegion{0.0, 0.0, 2.0, 2.0}};
-    renderer.set_clear_color({0U, 0U, 255U, 255U});
-    renderer.render(packet, 1'000'000);
-    check(center(renderer) == std::array<std::uint8_t, 4U>{255U, 0U, 0U, 255U},
-          "a change beyond the blur's reach resampled a rate-limited effect");
-
-    packet.geometry_dirty_regions = {host::GeometryDirtyRegion{22.0, 12.0, 2.0, 8.0}};
-    renderer.set_clear_color({0U, 255U, 0U, 255U});
-    renderer.render(packet, 2'000'000);
-    check(center(renderer) == std::array<std::uint8_t, 4U>{0U, 255U, 0U, 255U},
-          "a change within the blur's reach outside the bounds reused a stale sample");
-
-    packet.geometry_dirty_regions.clear();
-    packet.geometry_epoch = 3U;
-    renderer.set_clear_color({255U, 255U, 0U, 255U});
-    renderer.render(packet, 3'000'000);
-    check(center(renderer) == std::array<std::uint8_t, 4U>{255U, 255U, 0U, 255U},
-          "a packet after a skipped epoch reused a sample from before it");
+          "an unchanged sample revision resampled a rate-limited effect");
 }
 
 void test_temporal_refresh_contract() {
     using namespace strata;
-    headless::SoftwareRenderer renderer(headless::platform_image_codec());
+    headless::SoftwareRenderer renderer;
     renderer.resize(4U, 4U, 4.0, 4.0);
     renderer.declare_effect_pass("fixture.blur", 0U, 0U, 1.5, 1U, UINT32_MAX, UINT32_MAX, {});
 
@@ -313,11 +273,13 @@ void test_temporal_refresh_contract() {
     effect.scissor = host::Scissor{0U, 0U, 4U, 4U};
     effect.width = 4.0;
     effect.height = 4.0;
-    effect.effect = "fixture.blur";
+    effect.effect = 0U;
     effect.refresh_rate = 100.0;
+    effect.sample_revision = 1U;
 
     host::RenderPacket packet;
     packet.geometry_epoch = 1U;
+    packet.effects = {"fixture.blur"};
     packet.batches.emplace_back(effect);
 
     renderer.set_clear_color({255U, 0U, 0U, 255U});
@@ -331,6 +293,7 @@ void test_temporal_refresh_contract() {
           "rate-limited effect refreshed before its deadline");
 
     effect.opacity = 0.5;
+    effect.sample_revision = 2U;
     packet.batches.front() = effect;
     renderer.set_clear_color({0U, 255U, 0U, 255U});
     renderer.render(packet, 2'000'000);
@@ -339,6 +302,7 @@ void test_temporal_refresh_contract() {
 
     effect.opacity = 1.0;
     effect.refresh_rate = 0.0;
+    effect.sample_revision = 3U;
     packet.batches.front() = effect;
     renderer.set_clear_color({255U, 255U, 0U, 255U});
     renderer.render(packet, 3'000'000);
@@ -348,6 +312,7 @@ void test_temporal_refresh_contract() {
           "unbounded effect did not refresh on the next frame");
 
     effect.refresh_rate = 100.0;
+    effect.sample_revision = 4U;
     packet.batches.front() = effect;
     renderer.set_clear_color({255U, 0U, 0U, 255U});
     renderer.render(packet, 5'000'000);
@@ -391,11 +356,13 @@ void test_temporal_refresh_contract() {
         }
     }
     packet.indices = {0U, 1U, 2U, 0U, 2U, 3U, 4U, 5U, 6U, 4U, 6U, 7U};
+    packet.materials = {"strata:unified_ui"};
     packet.batches.emplace_back(host::DrawBatch{
         .source_order = 0U,
         .scissor = host::Scissor{0U, 0U, 48U, 48U},
-        .material = "strata:unified_ui",
-        .blend_mode = "opaque",
+        .material = 0U,
+        .blend = host::DrawBlend::opaque,
+        .clip_coverage = host::ClipCoverage::hard,
         .base_vertex = 0U,
         .first_index = 0U,
         .index_count = 12U,
@@ -438,11 +405,13 @@ void test_temporal_refresh_contract() {
         write_float(packet.vertices, vertex, 84U, 1.0F);
     }
     packet.indices = {0U, 1U, 2U, 0U, 2U, 3U};
+    packet.materials = {"strata:unified_ui"};
     packet.batches.emplace_back(host::DrawBatch{
         .source_order = 0U,
         .scissor = host::Scissor{0U, 0U, 4U, 4U},
-        .material = "strata:unified_ui",
-        .blend_mode = "opaque",
+        .material = 0U,
+        .blend = host::DrawBlend::opaque,
+        .clip_coverage = host::ClipCoverage::hard,
         .base_vertex = 0U,
         .first_index = 0U,
         .index_count = 6U,
@@ -467,7 +436,7 @@ void test_subpixel_snapping(strata::headless::CaptureRenderer& renderer) {
 #ifdef _WIN32
 void test_downsampled_blur_matches_d3d11() {
     using namespace strata;
-    headless::SoftwareRenderer software(headless::platform_image_codec());
+    headless::SoftwareRenderer software;
     headless::D3D11Renderer d3d11;
     for (headless::CaptureRenderer* renderer :
          std::array<headless::CaptureRenderer*, 2U>{&software, &d3d11}) {
@@ -490,19 +459,17 @@ void test_downsampled_blur_matches_d3d11() {
 
 int main() {
     try {
-        strata::headless::SoftwareRenderer software(strata::headless::platform_image_codec());
+        strata::headless::SoftwareRenderer software;
         test_surface_backdrop_source(software);
         test_surface_backdrop_inside_content(software);
         test_subpixel_snapping(software);
-        test_group_move_refreshes_effect(software);
-        test_changes_within_blur_reach_refresh_effect(software);
+        test_sample_revision_decides_reuse(software);
 #ifdef _WIN32
         strata::headless::D3D11Renderer d3d11;
         test_surface_backdrop_source(d3d11);
         test_surface_backdrop_inside_content(d3d11);
         test_subpixel_snapping(d3d11);
-        test_group_move_refreshes_effect(d3d11);
-        test_changes_within_blur_reach_refresh_effect(d3d11);
+        test_sample_revision_decides_reuse(d3d11);
         test_downsampled_blur_matches_d3d11();
 #endif
         test_temporal_refresh_contract();

@@ -56,7 +56,7 @@ Requirements:
 - GCC 13 or newer with C++23 support
 - Ninja
 - SDL 2.0.22 or newer development files for the interactive preview
-- libpng, Vulkan headers/loader and a GPU driver, shaderc, and Khronos validation layers
+- Vulkan headers/loader and a GPU driver, shaderc, and Khronos validation layers
 
 See [Vulkan hosting](docs/vulkan-hosting.md) for package names and CPU-only build options.
 

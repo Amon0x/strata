@@ -11,6 +11,20 @@
 
 namespace strata::ui {
 
+/**
+ * How far outside its bounds, in logical pixels, an effect's source and backdrop stay defined: the
+ * HLSL prelude's effectSampleReach. The C ABI pins it to STRATA_EFFECT_SAMPLE_REACH.
+ */
+inline constexpr double effect_sample_reach = 64.0;
+
+/**
+ * How far outside its bounds, in logical pixels, an effect's output depends on what was drawn
+ * before it. Authored shader passes may sample up to effect_sample_reach; a blur reads its
+ * radius around the bounds. Passes write inside the bounds only, so the widest pass decides. Two
+ * pixels of slack cover rounding the bounds and the blur padding to device pixels.
+ */
+[[nodiscard]] double effect_read_reach(bool shader_passes, double widest_blur_radius) noexcept;
+
 /** Instance-owned material contract registry used by render planning and host validation. */
 class MaterialRegistry final {
 public:

@@ -5,7 +5,6 @@
 #include <string>
 #include <string_view>
 
-#include "image_codec.hpp"
 #include "software_renderer.hpp"
 #if defined(STRATA_HAS_VULKAN)
 #include "vulkan_renderer.hpp"
@@ -25,7 +24,7 @@ std::unique_ptr<CaptureRenderer> create_capture_renderer(const std::string_view 
 #endif
     }
     if (backend == "reference") {
-        return std::make_unique<SoftwareRenderer>(platform_image_codec());
+        return std::make_unique<SoftwareRenderer>();
     }
     if (backend == "d3d11") {
 #if defined(_WIN32)

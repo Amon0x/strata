@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "capture_renderer.hpp"
-#include "image_codec.hpp"
 #include <strata/render_packet.hpp>
 
 namespace strata::headless {
@@ -18,7 +17,7 @@ namespace strata::headless {
 /** Deterministic CPU consumer for packet/geometry reference tests. */
 class SoftwareRenderer final : public CaptureRenderer {
   public:
-    explicit SoftwareRenderer(const ImageCodec& image_codec);
+    SoftwareRenderer();
 
     void resize(std::uint32_t framebuffer_width, std::uint32_t framebuffer_height,
                 double logical_width, double logical_height) override;
@@ -62,11 +61,11 @@ class SoftwareRenderer final : public CaptureRenderer {
         std::uint32_t width = 0U;
         std::uint32_t height = 0U;
         std::int64_t sampled_nanoseconds = 0;
-        host::EffectBatch effect;
+        /** The decoder's sample revision (host::EffectBatch::sample_revision) it was taken at. */
+        std::uint64_t revision = 0U;
         std::vector<std::uint8_t> pixels;
     };
 
-    const ImageCodec& image_codec_;
     std::uint32_t width_ = 0U;
     std::uint32_t height_ = 0U;
     double logical_width_ = 0.0;
@@ -77,8 +76,8 @@ class SoftwareRenderer final : public CaptureRenderer {
     std::vector<std::string> material_fallbacks_;
     std::map<std::string, std::vector<EffectPass>, std::less<>> effects_;
     std::map<std::uint64_t, CachedEffect> cached_effects_;
-    /** Geometry epoch of the last rendered packet; cached effects are current against it. */
-    std::optional<std::uint64_t> cached_effect_epoch_;
+    /** The packet's effect table resolved to declared passes for the frame being rendered. */
+    std::vector<const std::vector<EffectPass>*> layer_effects_;
 
     void apply(const host::ResourceOperation& operation);
     void draw(const host::DrawBatch& batch, const host::RenderPacket& packet);
@@ -87,7 +86,8 @@ class SoftwareRenderer final : public CaptureRenderer {
                           std::uint32_t right, std::uint32_t bottom, std::uint32_t downsample,
                           const std::vector<std::uint8_t>& clipped_original);
     void apply_effect(const host::EffectBatch& effect);
-    [[nodiscard]] double read_reach(const host::EffectBatch& effect) const noexcept;
+    [[nodiscard]] const std::vector<EffectPass>* program_of(
+        const host::EffectBatch& effect) const noexcept;
     [[nodiscard]] bool effect_refresh_due(const host::EffectBatch& effect, bool content,
                                           std::int64_t time_nanoseconds) const;
     void capture_effect(const host::EffectBatch& effect, bool content,

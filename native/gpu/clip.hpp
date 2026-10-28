@@ -73,12 +73,8 @@ float4 strataApplyRoundedClips(float4 color, float2 logicalPixel) {
 }
 )hlsl";
 
-enum class RoundedClipMode : std::uint32_t {
-    straight_alpha = 0U,
-    premultiplied_alpha = 1U,
-    hard = 2U,
-    multiply = 3U,
-};
+/** The shaders' roundedClipMode values are the packet's clip coverage modes. */
+using RoundedClipMode = host::ClipCoverage;
 
 struct RoundedClipConstants final {
     std::array<std::array<float, 4U>, host::maximum_rounded_clip_depth> bounds{};

@@ -32,6 +32,18 @@ class Reader final {
         return value;
     }
 
+    [[nodiscard]] std::uint8_t u8() {
+        require(1U);
+        return bytes_[offset_++];
+    }
+
+    [[nodiscard]] std::uint16_t u16() {
+        require(2U);
+        const auto value = static_cast<std::uint16_t>(bytes_[offset_] | bytes_[offset_ + 1U] << 8U);
+        offset_ += 2U;
+        return value;
+    }
+
     [[nodiscard]] std::uint64_t u64() {
         const std::uint64_t low = u32();
         const std::uint64_t high = u32();
@@ -112,25 +124,22 @@ class Reader final {
         input.exhausted("texture release");
         return result;
     }
-    if (kind == 3U) {
-        result.format = input.u32();
+    if (kind == resource_image) {
+        result.format = texture_format_rgba8;
         result.sampling = input.u32();
-        if (result.format != texture_encoding_png && result.format != texture_encoding_rgba8)
-            throw std::invalid_argument("encoded texture format is unknown");
         if (result.sampling > 1U)
             throw std::invalid_argument("texture sampling is unknown");
         result.width = input.count();
         result.height = input.count();
         const std::span<const std::uint8_t> bytes = input.raw(input.count());
-        if (result.width == 0U || result.height == 0U || bytes.empty()) {
-            throw std::invalid_argument("encoded texture dimensions and payload must be positive");
+        if (result.width == 0U || result.height == 0U) {
+            throw std::invalid_argument("image dimensions must be positive");
         }
-        if (result.format == texture_encoding_rgba8 &&
-            static_cast<std::uint64_t>(result.width) * result.height * 4U != bytes.size()) {
-            throw std::invalid_argument("RGBA8 texture payload differs from its dimensions");
+        if (static_cast<std::uint64_t>(result.width) * result.height * 4U != bytes.size()) {
+            throw std::invalid_argument("RGBA8 image payload differs from its dimensions");
         }
         result.bytes.assign(bytes.begin(), bytes.end());
-        input.exhausted("encoded texture");
+        input.exhausted("image");
         return result;
     }
     if (kind > 2U)
@@ -435,7 +444,7 @@ void append_texture_regions(const RenderPacket& packet,
         const auto changed = changes.find(*draw->texture);
         if (changed == changes.end())
             continue;
-        const bool exact = draw->material == "strata:unified_ui";
+        const bool exact = packet.materials[draw->material] == "strata:unified_ui";
         double margin_u = 0.0;
         double margin_v = 0.0;
         if (const auto size = sizes.find(*draw->texture); size != sizes.end()) {
@@ -538,6 +547,24 @@ void append_texture_regions(const RenderPacket& packet,
     return result;
 }
 
+/** A table of distinct, non-empty ids that batches name by u16 index. */
+[[nodiscard]] std::vector<std::string> id_table(Reader& input, const std::string_view label) {
+    const std::uint32_t count = input.count();
+    if (count > std::numeric_limits<std::uint16_t>::max())
+        throw std::invalid_argument("render " + std::string(label) + " table exceeds u16 indices");
+    std::vector<std::string> result;
+    result.reserve(input.plausible(count, 5U));
+    for (std::uint32_t index = 0U; index < count; ++index) {
+        std::string id = input.text();
+        if (id.empty() || std::ranges::find(result, id) != result.end()) {
+            throw std::invalid_argument("render " + std::string(label) +
+                                        " table holds an empty or repeated id");
+        }
+        result.push_back(std::move(id));
+    }
+    return result;
+}
+
 [[nodiscard]] std::uint32_t group_index(Reader& input) {
     const std::uint32_t index = input.u32();
     if (index > maximum_presentation_group)
@@ -572,13 +599,6 @@ void present(const SubmissionBatch& local, const std::vector<PresentationGroup>&
         output.opacity = effect->opacity * group.opacity;
         output.tone = group.tone;
     }
-}
-
-[[nodiscard]] bool batches_changed(
-    const std::vector<SubmissionBatch>& previous,
-    const std::vector<SubmissionBatch>& current
-) noexcept {
-    return previous != current;
 }
 
 class PatchDecodeTransaction final {
@@ -621,7 +641,11 @@ public:
                 patch.bytes.size()
             );
         }
-        if (batches_saved_) working_.batches = std::move(batches_);
+        if (batches_saved_) {
+            working_.batches = std::move(batches_);
+            working_.materials = std::move(materials_);
+            working_.effects = std::move(effects_);
+        }
         working_.frame_index = frame_index_;
         working_.geometry_epoch = geometry_epoch_;
         working_.planned_draw_count = planned_draw_count_;
@@ -637,6 +661,8 @@ public:
 
     void save_batches() {
         batches_ = std::move(working_.batches);
+        materials_ = std::move(working_.materials);
+        effects_ = std::move(working_.effects);
         batches_saved_ = true;
     }
 
@@ -677,8 +703,28 @@ public:
     }
 
     void commit() noexcept { committed_ = true; }
-    [[nodiscard]] const std::vector<SubmissionBatch>& previous_batches() const noexcept {
-        return batches_;
+    /**
+     * Whether the batches, or the ids they name, differ from the retained epoch's. Sample
+     * revisions are the decoder's own annotation, assigned after this comparison.
+     */
+    [[nodiscard]] bool batches_changed(const RenderPacket& current) const noexcept {
+        if (batches_.size() != current.batches.size() || materials_ != current.materials ||
+            effects_ != current.effects) {
+            return true;
+        }
+        for (std::size_t index = 0U; index < batches_.size(); ++index) {
+            const auto* previous = std::get_if<EffectBatch>(&batches_[index]);
+            const auto* next = std::get_if<EffectBatch>(&current.batches[index]);
+            if (previous != nullptr && next != nullptr) {
+                EffectBatch unannotated = *previous;
+                unannotated.sample_revision = next->sample_revision;
+                if (unannotated != *next)
+                    return true;
+            } else if (batches_[index] != current.batches[index]) {
+                return true;
+            }
+        }
+        return false;
     }
 
 private:
@@ -695,6 +741,8 @@ private:
     bool geometry_dirty_all_ = false;
     std::vector<GeometryDirtyRegion> geometry_dirty_regions_;
     std::vector<SubmissionBatch> batches_;
+    std::vector<std::string> materials_;
+    std::vector<std::string> effects_;
     std::vector<GeometryPatch> undo_vertices_;
     std::vector<GeometryPatch> undo_indices_;
     bool batches_saved_ = false;
@@ -708,7 +756,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
         input.u32() != STRATA_RENDER_PACKET_VERSION_CURRENT) {
-        throw std::invalid_argument("render packet decoder requires protocol v13");
+        throw std::invalid_argument("render packet decoder requires protocol v14");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();
@@ -771,6 +819,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         append_texture_regions(*retained_, retained_->groups, changed_textures, sizes,
                                retained_->geometry_dirty_regions);
         texture_sizes_.swap(sizes);
+        assign_sample_revisions(*retained_);
         return *retained_;
     }
 
@@ -829,6 +878,8 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         for (std::uint32_t index = 0U; index < index_count; ++index)
             result.indices.push_back(input.u32());
     }
+    result.materials = id_table(input, "material");
+    result.effects = id_table(input, "effect");
     result.batches.clear();
     result.batches.reserve(input.plausible(batch_count, 8U));
     for (std::uint32_t index = 0U; index < batch_count; ++index) {
@@ -842,12 +893,16 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             draw.source_order = source_order;
             draw.scissor = clip;
             draw.rounded_clips = std::move(rounded);
-            draw.material = batch.text();
-            draw.blend_mode = batch.text();
-            if (draw.material.empty() || draw.blend_mode.empty()) {
+            draw.material = batch.u16();
+            const std::uint8_t blend = batch.u8();
+            const std::uint8_t coverage = batch.u8();
+            if (draw.material >= result.materials.size() || blend >= draw_blend_count ||
+                coverage > STRATA_RENDER_CLIP_COVERAGE_MULTIPLY) {
                 throw std::invalid_argument(
-                    "render batch material and blend mode must not be empty");
+                    "render batch material, blend or clip coverage is outside its domain");
             }
+            draw.blend = static_cast<DrawBlend>(blend);
+            draw.clip_coverage = static_cast<ClipCoverage>(coverage);
             if (batch.boolean())
                 draw.texture = batch.text();
             draw.base_vertex = batch.u32();
@@ -885,7 +940,9 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             effect.height = batch.number();
             for (double& radius : effect.radii)
                 radius = batch.number();
-            effect.effect = batch.text();
+            effect.effect = batch.u16();
+            if (effect.effect >= result.effects.size() || batch.u16() != 0U)
+                throw std::invalid_argument("render effect batch names no declared effect");
             effect.opacity = batch.number();
             effect.refresh_rate = batch.number();
             const std::uint32_t backdrop_source = batch.u32();
@@ -894,8 +951,10 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             }
             effect.backdrop_source = static_cast<EffectBackdropSource>(backdrop_source);
             effect.probe = batch.u64();
+            effect.read_reach = batch.number();
             effect.parameter_count = batch.u32();
-            if (effect.effect.empty() || effect.parameter_count > effect.parameters.size() ||
+            if (effect.parameter_count > effect.parameters.size() ||
+                !std::isfinite(effect.read_reach) || effect.read_reach < 0.0 ||
                 !std::isfinite(effect.x) || !std::isfinite(effect.y) ||
                 !std::isfinite(effect.width) || !std::isfinite(effect.height) ||
                 effect.width < 0.0 || effect.height < 0.0 || !std::isfinite(effect.opacity) ||
@@ -961,11 +1020,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     if (effect_depth != 0U) {
         throw std::invalid_argument("render content effect stack is unbalanced");
     }
-    if (has_geometry_patches &&
-        batches_changed(
-            patch_transaction->previous_batches(),
-            result.batches
-        )) {
+    if (has_geometry_patches && patch_transaction->batches_changed(result)) {
         result.geometry_dirty_all = true;
         result.geometry_dirty_regions.clear();
     }
@@ -978,7 +1033,8 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             throw std::invalid_argument(
                 "retained render geometry epoch changed its vertex or index payload");
         }
-        if (!same_batch_shape(result.batches, retained_->batches)) {
+        if (!same_batch_shape(result.batches, retained_->batches) ||
+            result.materials != retained_->materials || result.effects != retained_->effects) {
             throw std::invalid_argument("retained render geometry epoch changed its batch shape");
         }
     }
@@ -994,7 +1050,44 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     grouped_batches_.swap(grouped);
     group_extents_.swap(extents);
     texture_sizes_.swap(sizes);
+    assign_sample_revisions(*retained_);
     return *retained_;
+}
+
+void RenderPacketDecoder::assign_sample_revisions(RenderPacket& packet) {
+    const auto touched = [&packet](const EffectBatch& effect) {
+        if (packet.geometry_dirty_all)
+            return true;
+        const double left = effect.x - effect.read_reach;
+        const double top = effect.y - effect.read_reach;
+        const double right = effect.x + effect.width + effect.read_reach;
+        const double bottom = effect.y + effect.height + effect.read_reach;
+        return std::ranges::any_of(packet.geometry_dirty_regions,
+                                   [&](const GeometryDirtyRegion& region) {
+                                       return region.x <= right &&
+                                              region.x + region.width >= left &&
+                                              region.y <= bottom &&
+                                              region.y + region.height >= top;
+                                   });
+    };
+    std::map<std::pair<std::uint32_t, bool>, EffectSample> next;
+    for (SubmissionBatch& batch : packet.batches) {
+        EffectBatch* const effect = std::get_if<EffectBatch>(&batch);
+        if (effect == nullptr)
+            continue;
+        EffectBatch signature = *effect;
+        signature.sample_revision = 0U;
+        const std::string& id = packet.effects[effect->effect];
+        const std::pair<std::uint32_t, bool> key{effect->source_order,
+                                                 effect->kind == EffectBatchKind::content_begin};
+        const auto prior = effect_samples_.find(key);
+        const bool current = prior != effect_samples_.end() &&
+                             prior->second.signature == signature && prior->second.id == id &&
+                             !touched(signature);
+        effect->sample_revision = current ? prior->second.revision : next_sample_revision_++;
+        next.insert_or_assign(key, EffectSample{std::move(signature), id, effect->sample_revision});
+    }
+    effect_samples_.swap(next);
 }
 
 void RenderPacketDecoder::reset() noexcept {
@@ -1002,6 +1095,8 @@ void RenderPacketDecoder::reset() noexcept {
     grouped_batches_.clear();
     group_extents_.clear();
     texture_sizes_.clear();
+    // Revisions keep counting, so no sample a backend retained before the reset can match.
+    effect_samples_.clear();
 }
 
 } // namespace strata::host

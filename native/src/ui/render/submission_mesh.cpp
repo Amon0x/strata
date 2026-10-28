@@ -997,7 +997,7 @@ void encode(
             next_batches.push_back(SubmissionBatch{
                 SubmissionBatchKind::draw,
                 std::string(next.material),
-                std::string(next.blend_mode),
+                submission_blend(next.blend_mode),
                 owned(next.texture),
                 next.scissor,
                 batch_base_vertex,

@@ -1377,6 +1377,9 @@ void test_native_nine_patch_geometry(const std::filesystem::path& resource_root)
             reinterpret_cast<const char*>(release_packet.data() + release_offset), texture_size);
         release_offset = payload_end;
     }
+    check(packet_u32(release_packet, release_offset) == 0U &&
+              packet_u32(release_packet, release_offset) == 0U,
+          "surface teardown packet named materials or effects");
     check(release_offset == release_packet.size() &&
               std::ranges::find(released_textures, textures.front().host_id) !=
                   released_textures.end() &&

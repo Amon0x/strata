@@ -27,7 +27,8 @@ inline constexpr std::size_t maximum_rounded_clip_depth = 16U;
 inline constexpr std::uint32_t resource_create = 0U;
 inline constexpr std::uint32_t resource_upload = 1U;
 inline constexpr std::uint32_t resource_release = 2U;
-inline constexpr std::uint32_t resource_encoded_image = 3U;
+/** Image creation: decoded, straight-alpha RGBA8 rows (see strata.h). */
+inline constexpr std::uint32_t resource_image = 3U;
 inline constexpr std::uint32_t packet_flag_geometry_payload = 1U;
 inline constexpr std::uint32_t packet_flag_geometry_patches = 2U;
 /**
@@ -41,13 +42,13 @@ inline constexpr std::uint32_t maximum_presentation_group = 511U;
 
 inline constexpr std::uint32_t texture_format_r8 = 0U;
 inline constexpr std::uint32_t texture_format_rgba8 = 1U;
-/** Encodings of a resource_encoded_image payload; either way the texture is RGBA8. */
-inline constexpr std::uint32_t texture_encoding_png = 0U;
-inline constexpr std::uint32_t texture_encoding_rgba8 = 1U;
 inline constexpr std::uint32_t texture_sampling_nearest = 0U;
 inline constexpr std::uint32_t texture_sampling_linear = 1U;
 
-/** One ordered GPU-resource mutation decoded from the current packet. */
+/**
+ * One ordered GPU-resource mutation decoded from the current packet. An image's format is
+ * texture_format_rgba8 and its bytes are width * height straight-alpha RGBA8 texels.
+ */
 struct ResourceOperation final {
     std::uint32_t kind = 0U;
     std::string texture;
@@ -82,12 +83,38 @@ struct RoundedClip final {
 /** Bytes of one packet vertex record; the vertex stream is a whole number of these. */
 inline constexpr std::size_t packet_vertex_bytes = 88U;
 
-/** Indexed geometry submission. Vertex records use the fixed packet_vertex_bytes layout. */
+/** How a draw batch blends, already adapted to its rounded clips (STRATA_RENDER_BLEND_*). */
+enum class DrawBlend : std::uint8_t {
+    opaque = STRATA_RENDER_BLEND_OPAQUE,
+    straight_alpha = STRATA_RENDER_BLEND_STRAIGHT_ALPHA,
+    premultiplied_alpha = STRATA_RENDER_BLEND_PREMULTIPLIED_ALPHA,
+    additive = STRATA_RENDER_BLEND_ADDITIVE,
+    multiply = STRATA_RENDER_BLEND_MULTIPLY,
+    clipped_multiply = STRATA_RENDER_BLEND_CLIPPED_MULTIPLY,
+};
+inline constexpr std::size_t draw_blend_count = 6U;
+
+/**
+ * How a draw applies its rounded-clip coverage (STRATA_RENDER_CLIP_COVERAGE_*). The values are
+ * the shaders' roundedClipMode.
+ */
+enum class ClipCoverage : std::uint8_t {
+    straight_alpha = STRATA_RENDER_CLIP_COVERAGE_STRAIGHT_ALPHA,
+    premultiplied_alpha = STRATA_RENDER_CLIP_COVERAGE_PREMULTIPLIED_ALPHA,
+    hard = STRATA_RENDER_CLIP_COVERAGE_HARD,
+    multiply = STRATA_RENDER_CLIP_COVERAGE_MULTIPLY,
+};
+
+/**
+ * Indexed geometry submission. Vertex records use the fixed packet_vertex_bytes layout. The
+ * material is an index into RenderPacket::materials.
+ */
 struct DrawBatch final {
     std::uint32_t source_order = 0U;
     Scissor scissor;
-    std::string material;
-    std::string blend_mode;
+    std::uint16_t material = 0U;
+    DrawBlend blend = DrawBlend::straight_alpha;
+    ClipCoverage clip_coverage = ClipCoverage::hard;
     std::optional<std::string> texture;
     std::uint32_t base_vertex = 0U;
     std::uint32_t first_index = 0U;
@@ -174,6 +201,7 @@ enum class EffectBackdropSource : std::uint32_t {
 
 /**
  * Bounds, radii, opacity and tone are already presented through `group` for the decoded frame.
+ * The effect is an index into RenderPacket::effects.
  */
 struct EffectBatch final {
     EffectBatchKind kind = EffectBatchKind::backdrop;
@@ -185,7 +213,7 @@ struct EffectBatch final {
     double width = 0.0;
     double height = 0.0;
     std::array<double, 4U> radii{};
-    std::string effect;
+    std::uint16_t effect = 0U;
     double opacity = 1.0;
     /** Maximum cached-result refresh rate; zero requests per-frame evaluation. */
     double refresh_rate = default_effect_refresh_rate;
@@ -201,6 +229,20 @@ struct EffectBatch final {
     std::uint64_t probe = 0U;
     /** The owning group's tone, exposed to authored passes as effectTone(). */
     double tone = 0.0;
+    /**
+     * How far outside its bounds, in logical pixels, the effect's output depends on what was drawn
+     * before it: the core's answer from the effect's declared passes.
+     */
+    double read_reach = 0.0;
+    /**
+     * The decoder's verdict on retained samples. It changes whenever anything this effect's output
+     * depends on changed since the previous packet: its id, parameters, bounds or presentation, or
+     * anything drawn within read_reach of its bounds (geometry, group moves, replaced texels). A
+     * backend may composite the sample it retained for this source order while the revision is
+     * unchanged and the effect's refresh interval has not elapsed (gpu::effect_refresh_due);
+     * otherwise it evaluates the effect again. Revisions are never reused within a decoder.
+     */
+    std::uint64_t sample_revision = 0U;
     [[nodiscard]] friend bool operator==(const EffectBatch&, const EffectBatch&) = default;
 };
 
@@ -243,6 +285,9 @@ struct RenderPacket final {
     std::vector<std::uint8_t> vertices;
     std::vector<std::uint32_t> indices;
     std::vector<SubmissionBatch> batches;
+    /** Material and effect ids the batches name by index; retained with the batches. */
+    std::vector<std::string> materials;
+    std::vector<std::string> effects;
     /** True only when this decoded frame supplied complete geometry rather than retained patches. */
     bool full_geometry_payload = false;
     std::vector<GeometryPatch> vertex_patches;
@@ -283,6 +328,15 @@ class RenderPacketDecoder final {
     std::vector<std::array<double, 4U>> group_extents_;
     /** Sizes of the stream's live textures, which place an upload within its texture. */
     TextureSizes texture_sizes_;
+    /** What each effect (by source order, and whether it filters content) last sampled. */
+    struct EffectSample final {
+        EffectBatch signature;
+        std::string id;
+        std::uint64_t revision = 0U;
+    };
+    std::map<std::pair<std::uint32_t, bool>, EffectSample> effect_samples_;
+    std::uint64_t next_sample_revision_ = 1U;
+    void assign_sample_revisions(RenderPacket& packet);
 };
 
 struct SurfacePacketFrame final {

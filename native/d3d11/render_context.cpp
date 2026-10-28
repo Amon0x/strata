@@ -344,44 +344,47 @@ struct RenderContext::Impl final {
         }
     }
 
-    [[nodiscard]] ID3D11BlendState* blend_state(const std::string_view id) {
-        const auto existing = blends.find(std::string(id));
-        if (existing != blends.end())
-            return existing->second.Get();
+    [[nodiscard]] ID3D11BlendState* blend_state(const host::DrawBlend blend) {
+        ComPtr<ID3D11BlendState>& cached = blends[static_cast<std::size_t>(blend)];
+        if (cached != nullptr)
+            return cached.Get();
         D3D11_BLEND_DESC descriptor{};
         descriptor.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
         auto& target_blend = descriptor.RenderTarget[0];
-        if (id != "opaque") {
+        if (blend != host::DrawBlend::opaque) {
             target_blend.BlendEnable = TRUE;
-            if (id == "straight_alpha") {
+            switch (blend) {
+            case host::DrawBlend::straight_alpha:
                 target_blend.SrcBlend = D3D11_BLEND_SRC_ALPHA;
                 target_blend.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-            } else if (id == "premultiplied_alpha") {
+                break;
+            case host::DrawBlend::premultiplied_alpha:
                 target_blend.SrcBlend = D3D11_BLEND_ONE;
                 target_blend.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-            } else if (id == "additive") {
+                break;
+            case host::DrawBlend::additive:
                 target_blend.SrcBlend = D3D11_BLEND_SRC_ALPHA;
                 target_blend.DestBlend = D3D11_BLEND_ONE;
-            } else if (id == "multiply") {
+                break;
+            case host::DrawBlend::multiply:
                 target_blend.SrcBlend = D3D11_BLEND_DEST_COLOR;
                 target_blend.DestBlend = D3D11_BLEND_ZERO;
-            } else if (id == "rounded_multiply") {
+                break;
+            case host::DrawBlend::clipped_multiply:
                 target_blend.SrcBlend = D3D11_BLEND_DEST_COLOR;
                 target_blend.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-            } else {
-                throw std::invalid_argument("D3D11 renderer received an unknown blend mode");
+                break;
+            case host::DrawBlend::opaque:
+                break;
             }
             target_blend.BlendOp = D3D11_BLEND_OP_ADD;
             target_blend.SrcBlendAlpha = D3D11_BLEND_ONE;
             target_blend.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
             target_blend.BlendOpAlpha = D3D11_BLEND_OP_ADD;
         }
-        ComPtr<ID3D11BlendState> result;
-        require_hresult(device->CreateBlendState(&descriptor, &result),
+        require_hresult(device->CreateBlendState(&descriptor, &cached),
                         "D3D11 blend state creation");
-        ID3D11BlendState* const raw = result.Get();
-        blends.emplace(std::string(id), std::move(result));
-        return raw;
+        return cached.Get();
     }
 
     void declare_material(const std::string_view id, const std::string_view hlsl_source) {
@@ -491,18 +494,32 @@ struct RenderContext::Impl final {
         effect_pass_declarations.insert_or_assign(key, declaration);
     }
 
+    /**
+     * Resolves the packet's material table to pixel shaders once per layer frame: a material
+     * without a compiled program draws with the built-in shader, whose mode comes from each vertex.
+     */
+    void resolve_materials(const std::span<const std::string> materials) {
+        layer_shaders.clear();
+        layer_shaders.reserve(materials.size());
+        for (const std::string& material : materials) {
+            ID3D11PixelShader* selected = pixel_shader.Get();
+            if (const auto id = material_program_ids.find(material);
+                id != material_program_ids.end()) {
+                if (const auto program = material_programs.find(id->second);
+                    program != material_programs.end() && program->second.shader != nullptr) {
+                    selected = program->second.shader.Get();
+                }
+            }
+            layer_shaders.push_back(selected);
+        }
+    }
+
     void draw(const DrawBatch& batch) {
         if (batch.index_count == 0U)
             return;
-        ID3D11PixelShader* selected_shader = pixel_shader.Get();
-        if (const auto id = material_program_ids.find(batch.material);
-            id != material_program_ids.end()) {
-            if (const auto program = material_programs.find(id->second);
-                program != material_programs.end() &&
-                program->second.shader != nullptr) {
-                selected_shader = program->second.shader.Get();
-            }
-        }
+        ID3D11PixelShader* const selected_shader = batch.material < layer_shaders.size()
+                                                       ? layer_shaders[batch.material]
+                                                       : pixel_shader.Get();
         context->PSSetShader(selected_shader, nullptr, 0U);
         const std::uint64_t right =
             static_cast<std::uint64_t>(batch.scissor.x) + batch.scissor.width;
@@ -515,23 +532,9 @@ struct RenderContext::Impl final {
             static_cast<LONG>(std::min<std::uint64_t>(bottom, height)),
         };
         context->RSSetScissorRects(1U, &scissor);
-        const bool clipped = !batch.rounded_clips.empty();
-        const std::string_view resolved_blend =
-            clipped && batch.blend_mode == "opaque"
-                ? std::string_view("straight_alpha")
-                : clipped && batch.blend_mode == "multiply"
-                    ? std::string_view("rounded_multiply")
-                    : std::string_view(batch.blend_mode);
-        context->OMSetBlendState(blend_state(resolved_blend), nullptr, 0xffffffffU);
-        const RoundedClipMode clip_mode =
-            batch.blend_mode == "premultiplied_alpha"
-                ? RoundedClipMode::premultiplied_alpha
-                : clipped && batch.blend_mode == "multiply"
-                    ? RoundedClipMode::multiply
-                    : !clipped || batch.blend_mode == "multiply"
-                        ? RoundedClipMode::hard
-                        : RoundedClipMode::straight_alpha;
-        rounded_clips->bind(batch.rounded_clips, clip_mode);
+        // The core already adapted the blend and clip coverage to the batch's rounded clips.
+        context->OMSetBlendState(blend_state(batch.blend), nullptr, 0xffffffffU);
+        rounded_clips->bind(batch.rounded_clips, batch.clip_coverage);
         textures->bind(batch);
         context->DrawIndexed(batch.index_count, batch.first_index,
                              static_cast<INT>(batch.base_vertex));
@@ -655,12 +658,8 @@ struct RenderContext::Impl final {
             context->Unmap(group_buffer.Get(), 0U);
             uploaded_group_table = packet.groups;
         }
-        effects->begin_layer(
-            id,
-            packet.geometry_epoch,
-            packet.geometry_dirty_all,
-            packet.geometry_dirty_regions
-        );
+        resolve_materials(packet.materials);
+        effects->begin_layer(id, packet.effects);
         const bool capture_surface_backdrop = effects->surface_backdrop_required(
             id,
             packet.batches,
@@ -777,7 +776,9 @@ struct RenderContext::Impl final {
     double logical_height = 0.0;
     double current_frame_seconds = 0.0;
     std::map<std::string, GeometryBuffers, std::less<>> geometry;
-    std::map<std::string, ComPtr<ID3D11BlendState>, std::less<>> blends;
+    std::array<ComPtr<ID3D11BlendState>, host::draw_blend_count> blends;
+    /** The current layer's material table resolved to pixel shaders (see resolve_materials). */
+    std::vector<ID3D11PixelShader*> layer_shaders;
     std::map<std::string, std::string, std::less<>> material_sources;
     std::map<std::string, std::string, std::less<>> material_program_ids;
     std::map<std::string, MaterialProgram, std::less<>> material_programs;

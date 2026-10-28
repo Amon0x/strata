@@ -135,8 +135,9 @@ const std::map<std::uint32_t, Renderer::Impl::Pass>&
 Renderer::Impl::passes(const host::EffectBatch& effect) const {
     // An effect with no declared passes composites its input unchanged, as D3D11 does.
     static const std::map<std::uint32_t, Pass> none;
-    const auto found = effects.find(effect.effect);
-    return found != effects.end() ? found->second : none;
+    const auto* const found =
+        effect.effect < layer_effects.size() ? layer_effects[effect.effect] : nullptr;
+    return found != nullptr ? *found : none;
 }
 
 double Renderer::Impl::widest_blur(const host::EffectBatch& effect) const {
@@ -149,13 +150,6 @@ double Renderer::Impl::widest_blur(const host::EffectBatch& effect) const {
                                           : pass.radius);
     }
     return widest;
-}
-
-double Renderer::Impl::read_reach(const host::EffectBatch& effect) const {
-    const auto& declared = passes(effect);
-    const bool shaders =
-        std::ranges::any_of(declared, [](const auto& entry) { return entry.second.kind == 1; });
-    return gpu::effect_read_reach(shaders, widest_blur(effect));
 }
 
 host::Scissor Renderer::Impl::sample_region(const host::EffectBatch& effect,
@@ -185,27 +179,15 @@ Renderer::Impl::CachedEffect* Renderer::Impl::reusable(const host::EffectBatch& 
     if (found == cached_effects.end())
         return nullptr;
     CachedEffect& cached = found->second;
+    // Whether anything the sample read changed is the decoder's revision; this host checks only
+    // that it covers the same pixels of the same target and that the refresh interval holds.
     const bool due =
-        !cached.output || cached.stale || !(cached.batch == batch) ||
+        !cached.output || cached.revision != batch.sample_revision ||
         !(cached.clip == bounds(batch, destination)) || cached.width != destination.width ||
         cached.height != destination.height || cached.output->format != destination.format ||
         cached.logical_width != logical_width || cached.logical_height != logical_height ||
-        seconds < cached.time || seconds - cached.time + 1.0e-9 >= 1.0 / batch.refresh_rate;
+        gpu::effect_refresh_due(batch.refresh_rate, cached.time, seconds);
     return due ? nullptr : &cached;
-}
-
-void Renderer::Impl::invalidate_effects(const host::RenderPacket& packet) {
-    const auto retained = geometry.find(active_layer);
-    const gpu::EffectChanges changes(packet, retained != geometry.end() && retained->second.seen
-                                                 ? std::optional(retained->second.epoch)
-                                                 : std::nullopt);
-    if (changes.none())
-        return;
-    for (auto& [key, cached] : cached_effects) {
-        if (std::get<0>(key) == active_layer &&
-            changes.touch(cached.batch, read_reach(cached.batch)))
-            cached.stale = true;
-    }
 }
 
 void Renderer::Impl::effect(Target& destination, const host::EffectBatch& batch, const bool content,
@@ -303,9 +285,8 @@ void Renderer::Impl::effect(Target& destination, const host::EffectBatch& batch,
     auto processed = target_of(*current);
     copy(processed, *cached.output, clip, 0, 0);
     current->layout = processed.layout;
-    cached.batch = batch;
+    cached.revision = batch.sample_revision;
     cached.clip = clip;
-    cached.stale = false;
     cached.time = seconds;
     cached.logical_width = logical_width;
     cached.logical_height = logical_height;

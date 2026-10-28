@@ -126,7 +126,7 @@ with the existing HLSL materials and effects. See [Vulkan hosting](vulkan-hostin
 image ownership, synchronous submission, and Surface release ordering.
 
 Custom renderers can instead link `Strata::render_host` and include `<strata/render_packet.hpp>`
-to consume packet-v13 without duplicating parsing:
+to consume packet-v14 without duplicating parsing:
 
 ```cpp
 strata::host::RenderPacketDecoder decoder;
@@ -158,11 +158,16 @@ The decoder is stateful because settled packets can retain an earlier geometry e
 the frame index and resource operations. Consume every framed packet in order with one decoder per
 Surface/backend stream. Compact packets are deltas and cannot initialize a fresh decoder; call
 `reset()` only when discarding the stream, not while continuing to consume it. `RenderPacket`
-exposes ordered texture mutations, fixed-layout vertex bytes, indices, scissors,
-material/blend/texture bindings, draw batches, blur batches, backdrop/content effect batches, and
-content stack markers. Effect batches carry a maximum refresh rate, zero (the default) for every
-frame; for a nonzero rate custom backends may retain the latest filtered sample between deadlines
-while continuing to composite every frame. A backdrop
+exposes ordered texture mutations (images arrive decoded, as straight-alpha RGBA8), fixed-layout
+vertex bytes, indices, scissors, draw batches, blur batches, backdrop/content effect batches, and
+content stack markers. Draw batches name their material by index into `RenderPacket::materials`
+and carry a `DrawBlend` and `ClipCoverage` the core already adapted to their rounded clips, so a
+backend maps enums to pipeline state and resolves the id table once per packet. Effect batches name
+their effect by index into `RenderPacket::effects` and carry a maximum refresh rate, zero (the
+default) for every frame; for a nonzero rate custom backends may retain the latest filtered sample
+and composite it while its `sample_revision` is unchanged and the rate is not yet due. The decoder
+moves the revision whenever anything the effect's output depends on changed, so a backend has no
+staleness rule of its own. A backdrop
 effect batch with a nonzero `probe` belongs to a node that observes its backdrop: a backend that can
 measure reports the mean luma of what that effect captured through
 `strata_surface_report_backdrop` (`Surface::report_backdrop`), in any later frame, and one that
@@ -344,7 +349,7 @@ runners and remote protocols whose schema is selected only at runtime.
 
 Adopt a complete Surface environment generation atomically: framebuffer and logical sizes, scale,
 safe insets, snapping, density, reduced-motion preference, and input capabilities. Enqueue input in
-ordered batches, call `strata_surface_frame`, then read packet v13 through a bytes sink.
+ordered batches, call `strata_surface_frame`, then read packet v14 through a bytes sink.
 
 The packet bytes are borrowed only during the sink callback. Copy them if the backend submits later;
 consume them directly if submission is synchronous. Packet-v10 full packets contain native geometry,

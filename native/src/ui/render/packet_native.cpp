@@ -92,9 +92,8 @@ class Writer final {
 [[nodiscard]] Bytes resource_payload(const TextureUpload& upload) {
     const resource::TextureResourceDescriptor& texture = *upload.descriptor;
     Writer output;
+    // An upload is always decoded, straight-alpha RGBA8 rows (see SurfaceTextures).
     output.text(texture.host_id);
-    // The core decodes every image before it uploads it (see SurfaceTextures).
-    output.integer(static_cast<std::uint32_t>(resource::ImageEncoding::rgba8));
     output.integer(static_cast<std::uint32_t>(texture.sampling));
     output.integer(texture.dimensions.width);
     output.integer(texture.dimensions.height);
@@ -128,7 +127,68 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
 
 [[nodiscard]] std::uint32_t checked_count(std::size_t value, const char* label);
 
-[[nodiscard]] Bytes batch_payload(const SubmissionBatch& batch) {
+/**
+ * The blend and clip coverage a draw batch is submitted with. Under a rounded clip an opaque draw
+ * blends as straight alpha so its antialiased edge composites, and multiply takes its clipped form,
+ * which leaves the destination where the clip covers nothing. Backends apply both as given.
+ */
+[[nodiscard]] std::pair<PacketBlend, PacketClipCoverage> packet_blend(const SubmissionBlend blend,
+                                                                     const bool clipped) noexcept {
+    const PacketClipCoverage edge =
+        clipped ? PacketClipCoverage::straight_alpha : PacketClipCoverage::hard;
+    switch (blend) {
+    case SubmissionBlend::opaque:
+        return {clipped ? PacketBlend::straight_alpha : PacketBlend::opaque, edge};
+    case SubmissionBlend::premultiplied_alpha:
+        return {PacketBlend::premultiplied_alpha, PacketClipCoverage::premultiplied_alpha};
+    case SubmissionBlend::additive:
+        return {PacketBlend::additive, edge};
+    case SubmissionBlend::multiply:
+        return clipped ? std::pair{PacketBlend::clipped_multiply, PacketClipCoverage::multiply}
+                       : std::pair{PacketBlend::multiply, edge};
+    case SubmissionBlend::straight_alpha:
+        break;
+    }
+    return {PacketBlend::straight_alpha, edge};
+}
+
+/** Material and effect ids in first-use order; batches name them by u16 index. */
+struct IdTables final {
+    std::vector<std::string_view> materials;
+    std::vector<std::string_view> effects;
+    /** Each batch's index into its table (zero for batches that name none). */
+    std::vector<std::uint16_t> indices;
+};
+
+[[nodiscard]] std::uint16_t intern(std::vector<std::string_view>& table, const std::string_view id) {
+    const auto found = std::ranges::find(table, id);
+    if (found != table.end())
+        return static_cast<std::uint16_t>(found - table.begin());
+    if (table.size() == std::numeric_limits<std::uint16_t>::max())
+        throw std::length_error("render packet id table exceeds u16 indices");
+    table.push_back(id);
+    return static_cast<std::uint16_t>(table.size() - 1U);
+}
+
+[[nodiscard]] IdTables id_tables(const std::span<const SubmissionBatch> batches) {
+    IdTables result;
+    result.indices.reserve(batches.size());
+    for (const SubmissionBatch& batch : batches) {
+        if (batch.kind == SubmissionBatchKind::draw) {
+            result.indices.push_back(intern(result.materials, batch.material));
+        } else if (batch.kind == SubmissionBatchKind::backdrop_effect ||
+                   batch.kind == SubmissionBatchKind::content_effect_begin) {
+            if (!batch.effect.has_value())
+                throw std::logic_error("render effect batch is missing effect state");
+            result.indices.push_back(intern(result.effects, batch.effect->id));
+        } else {
+            result.indices.push_back(0U);
+        }
+    }
+    return result;
+}
+
+[[nodiscard]] Bytes batch_payload(const SubmissionBatch& batch, const std::uint16_t id) {
     // Room for the fixed fields, short ids and each clip's rect, radii and inverse transform, so
     // the byte-at-a-time writes do not regrow the buffer.
     Writer output(256U + batch.rounded_clips.size() * 112U);
@@ -148,8 +208,10 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
             output.number(value);
     }
     if (batch.kind == SubmissionBatchKind::draw) {
-        output.text(batch.material);
-        output.text(batch.blend_mode);
+        const auto [blend, coverage] = packet_blend(batch.blend_mode, !batch.rounded_clips.empty());
+        output.integer(id);
+        output.integer(static_cast<std::uint8_t>(blend));
+        output.integer(static_cast<std::uint8_t>(coverage));
         output.integer(batch.texture.has_value() ? std::uint32_t{1U} : std::uint32_t{0U});
         if (batch.texture.has_value())
             output.text(*batch.texture);
@@ -171,11 +233,13 @@ void append_terminal_release(std::vector<font::AtlasOperation>& releases,
         output.number(batch.effect_radii.top_right);
         output.number(batch.effect_radii.bottom_right);
         output.number(batch.effect_radii.bottom_left);
-        output.text(batch.effect->id);
+        output.integer(id);
+        output.integer(std::uint16_t{0U});
         output.number(batch.effect->opacity);
         output.number(batch.effect->refresh_rate);
         output.integer(static_cast<std::uint32_t>(batch.effect->backdrop_source));
         output.integer(batch.effect->probe);
+        output.number(batch.effect->read_reach);
         output.integer(batch.effect->packed_parameter_count);
         for (std::uint32_t index = 0U; index < batch.effect->packed_parameter_count; ++index) {
             output.number(batch.effect->packed_parameters[index]);
@@ -356,8 +420,16 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
             for (const std::uint32_t index : submission.indices)
                 output.integer(index);
         }
-        for (const SubmissionBatch& batch : submission.batches) {
-            const Bytes payload = batch_payload(batch);
+        const IdTables tables = id_tables(submission.batches);
+        output.integer(checked_count(tables.materials.size(), "render material count"));
+        for (const std::string_view id : tables.materials)
+            output.text(id);
+        output.integer(checked_count(tables.effects.size(), "render effect count"));
+        for (const std::string_view id : tables.effects)
+            output.text(id);
+        for (std::size_t index = 0U; index < submission.batches.size(); ++index) {
+            const SubmissionBatch& batch = submission.batches[index];
+            const Bytes payload = batch_payload(batch, tables.indices[index]);
             record(output, static_cast<std::uint32_t>(batch.kind), payload);
         }
     }

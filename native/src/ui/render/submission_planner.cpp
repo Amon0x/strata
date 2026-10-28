@@ -655,7 +655,7 @@ class Planner final {
                 output_.emplace_back(SubmissionBatch{
                     SubmissionBatchKind::blur,
                     "strata:blur_region",
-                    "straight_alpha",
+                    SubmissionBlend::straight_alpha,
                     std::nullopt,
                     scissor(clip_, context_),
                     0U, 0U, 0U, source_order,

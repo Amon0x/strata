@@ -316,7 +316,41 @@ std::optional<EffectState> MaterialRegistry::sanitize_effect_state(const EffectS
     }
     result.packed_parameter_count =
         static_cast<std::uint32_t>(std::min(slot, result.packed_parameters.size()));
+    // What the host's passes read is decided here, once, from the same declarations and packed
+    // parameters the host runs them with.
+    const auto parameter_slot = [&schema](const std::optional<std::string>& name)
+        -> std::optional<std::size_t> {
+        if (!name.has_value())
+            return std::nullopt;
+        std::size_t offset = 0U;
+        for (const compiler::SchemaParameter& parameter : schema->parameters) {
+            if (parameter.name == *name)
+                return offset;
+            offset += compiler::material_parameter_width(parameter.material_type);
+        }
+        return std::nullopt;
+    };
+    bool shader_passes = false;
+    double widest_blur = 0.0;
+    for (const compiler::EffectSchema::Pass& pass : schema->passes) {
+        if (pass.kind == "SHADER") {
+            shader_passes = true;
+        } else if (pass.kind != "SHADOW") {
+            double radius = pass.radius;
+            if (const std::optional<std::size_t> at = parameter_slot(pass.radius_parameter);
+                at.has_value() && *at < result.packed_parameter_count) {
+                radius = result.packed_parameters[*at];
+            }
+            widest_blur = std::max(widest_blur, radius);
+        }
+    }
+    result.read_reach = effect_read_reach(shader_passes, widest_blur);
     return result;
+}
+
+double effect_read_reach(const bool shader_passes, const double widest_blur_radius) noexcept {
+    const double blur = std::isfinite(widest_blur_radius) ? std::max(0.0, widest_blur_radius) : 0.0;
+    return std::max(shader_passes ? effect_sample_reach : 0.0, blur) + 2.0;
 }
 
 void MaterialRegistry::clear_diagnostics() noexcept {

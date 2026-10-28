@@ -1,6 +1,6 @@
 # Rendering into a host-owned Vulkan target
 
-`Strata::vulkan` renders packet-v13 Surfaces with Vulkan 1.1 or newer. It provides a C++
+`Strata::vulkan` renders packet-v14 Surfaces with Vulkan 1.1 or newer. It provides a C++
 `Renderer` and `Presenter` in `<strata/vulkan.hpp>`, and an exception-contained C presenter API
 in `<strata/vulkan.h>`. The installed package exports the same target and headers. No Kitten or
 Minecraft dependency is introduced.
@@ -8,20 +8,21 @@ Minecraft dependency is introduced.
 ## Building on Linux
 
 The `linux-x64` preset enables the backend and GPU acceptance tests. Install a C++23 compiler,
-CMake, Ninja, libpng development files, Vulkan headers/loader, shaderc development files, a Vulkan
+CMake, Ninja, Vulkan headers/loader, shaderc development files, a Vulkan
 ICD for the GPU, and Khronos validation layers. On Arch Linux:
 
 ```sh
-sudo pacman -S --needed gcc cmake ninja libpng vulkan-headers vulkan-icd-loader shaderc vulkan-validation-layers sdl2-compat
+sudo pacman -S --needed gcc cmake ninja vulkan-headers vulkan-icd-loader shaderc vulkan-validation-layers sdl2-compat
 cmake --preset linux-x64
 cmake --build --preset linux-x64 --parallel 8
 ctest --preset linux-x64 --output-on-failure
 ```
 
 `-DSTRATA_TEST_VULKAN=OFF` disables driver-dependent tests while still building the renderer.
-`-DSTRATA_BUILD_VULKAN=OFF` builds the portable CPU lane without Vulkan or shaderc. Linux PNG
-support remains available in both lanes. Windows keeps D3D11 as its default; Vulkan can be enabled
-with `STRATA_BUILD_VULKAN=ON` and the Vulkan SDK's shaderc plus libpng available to CMake.
+`-DSTRATA_BUILD_VULKAN=OFF` builds the portable CPU lane without Vulkan or shaderc. PNG images
+are decoded by the core in both lanes, so no image library is needed. Windows keeps D3D11 as its
+default; Vulkan can be enabled with `STRATA_BUILD_VULKAN=ON` and the Vulkan SDK's shaderc available
+to CMake.
 
 The preset also builds the [SDL interactive preview](linux-preview.md). Set
 `-DSTRATA_BUILD_PREVIEW=OFF` to build without SDL.
@@ -101,9 +102,10 @@ Settled geometry stays in GPU buffers; compact packets apply their patches to th
 As on D3D11, an effect captures and filters only the region it samples (its bounds plus the shader
 sample reach or blur radius), and blurs run at the downsampled size of that region. An effect with a
 refresh rate retains only its clipped output and, until the rate is due, composites it without
-capturing or filtering anything. Parameter, bounds, layout and dimension changes, clock rollback and
-shader reload invalidate reuse, as do geometry, group and texture changes the decoder reports within
-the region the effect sampled (`native/gpu/effect_policy.hpp`). Intermediate images are matched by
+capturing or filtering anything. Whether anything the sample read changed (its parameters, bounds or
+presentation, and geometry, group or texture changes within its read reach) is the decoder's
+verdict, `EffectBatch::sample_revision`; the renderer itself checks only target dimensions, clock
+rollback, shader reload and the refresh interval (`gpu::effect_refresh_due`). Intermediate images are matched by
 size and reused across frames, as is upload/descriptor storage.
 Consecutive draws into one target share a render pass and framebuffer; a new pass orders itself
 after earlier writes through its attachment barrier, and textures already in a shader-readable

@@ -29,12 +29,37 @@
 #include "ui/frame_snapshot.hpp"
 #include "ui/input.hpp"
 #include "ui/layout.hpp"
+#include "ui/render/material_registry.hpp"
 #include "ui/render/packet.hpp"
 #include "ui/surface.hpp"
 #include "ui/svg_image.hpp"
 
 static_assert(strata::ui::render_packet_version == STRATA_RENDER_PACKET_VERSION_CURRENT,
               "the core encodes the packet version the C ABI publishes");
+static_assert(static_cast<std::uint32_t>(strata::ui::PacketBlend::opaque) ==
+                  STRATA_RENDER_BLEND_OPAQUE &&
+              static_cast<std::uint32_t>(strata::ui::PacketBlend::straight_alpha) ==
+                  STRATA_RENDER_BLEND_STRAIGHT_ALPHA &&
+              static_cast<std::uint32_t>(strata::ui::PacketBlend::premultiplied_alpha) ==
+                  STRATA_RENDER_BLEND_PREMULTIPLIED_ALPHA &&
+              static_cast<std::uint32_t>(strata::ui::PacketBlend::additive) ==
+                  STRATA_RENDER_BLEND_ADDITIVE &&
+              static_cast<std::uint32_t>(strata::ui::PacketBlend::multiply) ==
+                  STRATA_RENDER_BLEND_MULTIPLY &&
+              static_cast<std::uint32_t>(strata::ui::PacketBlend::clipped_multiply) ==
+                  STRATA_RENDER_BLEND_CLIPPED_MULTIPLY,
+              "the engine's packet blends must be the C ABI's");
+static_assert(static_cast<std::uint32_t>(strata::ui::PacketClipCoverage::straight_alpha) ==
+                  STRATA_RENDER_CLIP_COVERAGE_STRAIGHT_ALPHA &&
+              static_cast<std::uint32_t>(strata::ui::PacketClipCoverage::premultiplied_alpha) ==
+                  STRATA_RENDER_CLIP_COVERAGE_PREMULTIPLIED_ALPHA &&
+              static_cast<std::uint32_t>(strata::ui::PacketClipCoverage::hard) ==
+                  STRATA_RENDER_CLIP_COVERAGE_HARD &&
+              static_cast<std::uint32_t>(strata::ui::PacketClipCoverage::multiply) ==
+                  STRATA_RENDER_CLIP_COVERAGE_MULTIPLY,
+              "the engine's clip coverage modes must be the C ABI's");
+static_assert(strata::ui::effect_sample_reach == STRATA_EFFECT_SAMPLE_REACH,
+              "the engine's effect sample reach must be the C ABI's");
 
 namespace {
 

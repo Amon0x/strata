@@ -45,6 +45,18 @@ void validate_texture_descriptors(
 
 } // namespace
 
+SubmissionBlend submission_blend(const std::string_view name) noexcept {
+    if (name == "opaque")
+        return SubmissionBlend::opaque;
+    if (name == "premultiplied_alpha")
+        return SubmissionBlend::premultiplied_alpha;
+    if (name == "additive")
+        return SubmissionBlend::additive;
+    if (name == "multiply")
+        return SubmissionBlend::multiply;
+    return SubmissionBlend::straight_alpha;
+}
+
 namespace submission_detail {
 namespace {
 

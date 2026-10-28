@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "ui/layout.hpp"
@@ -45,6 +46,18 @@ struct SubmissionRoundedClip final {
                                          const SubmissionRoundedClip&) = default;
 };
 
+/** The blend a material requests, by its authored name; packets carry the clip-adapted form. */
+enum class SubmissionBlend : std::uint8_t {
+    opaque,
+    straight_alpha,
+    premultiplied_alpha,
+    additive,
+    multiply,
+};
+
+/** The blend an authored name requests; an unknown name blends as straight alpha (the default). */
+[[nodiscard]] SubmissionBlend submission_blend(std::string_view name) noexcept;
+
 enum class SubmissionBatchKind : std::uint32_t {
     draw = 0U,
     blur = 1U,
@@ -56,7 +69,7 @@ enum class SubmissionBatchKind : std::uint32_t {
 struct SubmissionBatch final {
     SubmissionBatchKind kind = SubmissionBatchKind::draw;
     std::string material;
-    std::string blend_mode = "straight_alpha";
+    SubmissionBlend blend_mode = SubmissionBlend::straight_alpha;
     std::optional<std::string> texture;
     SubmissionScissor scissor;
     std::uint32_t base_vertex = 0U;

@@ -1792,14 +1792,14 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Packet v13 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * Packet v14 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
  * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
  * [u32 kind, u32 payload byte count, payload]:
  *
  *   bytes[8] "STRATARP", u32 version, u32 resource count, u32 batch count,
  *   u64 frame index, u64 geometry epoch, u32 flags, u32 vertex byte count, u32 index count,
  *   u32 planned draw count, u32 skipped draw count, u32 group count, group records, resource
- *   records, vertex bytes, little-endian u32 indices, submission batch records.
+ *   records, vertex bytes, little-endian u32 indices, id tables, submission batch records.
  *
  * A vertex is 88 bytes: f32 x/y/z/u/v, u8 red/green/blue/alpha, then sixteen f32 material values.
  * z is the vertex's presentation group index (0 = none). Each group record is u32 index (1..511)
@@ -1808,40 +1808,51 @@ typedef struct strata_surface_frame_info {
  * translation rounded to whole framebuffer pixels), with material opacity (float 15) multiplied by
  * the group opacity. Tone in [0, 1] mirrors the lightness of light, unsaturated vertex colours
  * toward dark ink; textured-image and shadow draws are not toned. Every packet carries the frame's
- * complete
- * table, including packets that retain their geometry epoch; absent indices are the identity.
+ * complete table, including packets that retain their geometry epoch; absent indices are the
+ * identity.
+ *
+ * The id tables precede the batch records of every packet that carries batches: a u32 material
+ * count and that many material-id strings, then a u32 effect count and that many effect-id
+ * strings. Each table holds distinct, non-empty ids and at most 65535 entries; batches name ids by
+ * u16 index into them.
+ *
  * Every batch payload begins with source order, a u32 framebuffer scissor, and a u32 rounded-clip
  * count. Each rounded clip contains f64 x/y/width/height, four f64 corner radii, and a six-f64
  * inverse affine transform from presented logical pixels into that clip's local space. Draw
- * payloads continue with material/blend strings, optional texture id, and
- * base-vertex/first-index/index-count. Blur payloads continue with u32 group index, f64
- * x/y/width/height/radius and u32 downsample. Backdrop/content-begin effect payloads continue with
- * u32 group index; f64 x/y/width/height; four
- * f64 corner radii; the
- * effect-id string; f64 opacity; f64 maximum refresh rate (zero = unbounded); u32 backdrop source
- * (0 = current framebuffer, 1 = framebuffer before this Surface); a u64 backdrop probe token
- * (zero = none; a host that can measure reports the captured backdrop's mean luma back through
- * strata_surface_report_backdrop); a u32 packed-parameter count; and up to sixteen f64 values.
- * Content effects require backdrop source 0 and probe 0.
- * Content-end carries only the common prefix. Rounded clip stacks are limited to sixteen entries;
- * authored CONTENT effect isolation is limited to four layers.
- * Resource payloads begin
- * with a texture-id string. Atlas create/upload then carry u32 format (0 = R8, 1 = RGBA8) and u32
- * x/y/width/height; upload adds u32 byte count and raw texels. Release has no additional fields.
- * Encoded texture creation carries u32 encoding (0 = PNG, 1 = raw straight-alpha RGBA8 rows),
- * u32 sampling, u32 width/height, a u32 byte count, and the bytes; either way the texture is RGBA8. STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES advances the epoch
- * from the immediately preceding retained epoch. Header geometry counts describe the complete
- * retained arrays; resource records are followed by vertex and index patch lists. Each list is
- * u32 count followed by [u32 byte offset, u32 byte count, raw bytes], then the complete updated
- * batch records. Vertex patches are vertex-aligned and index patches are u32-aligned. When neither
- * geometry flag is present, batch and geometry counts are zero and the decoder retains the
+ * payloads continue with a u16 material index, a u8 STRATA_RENDER_BLEND_* and a u8
+ * STRATA_RENDER_CLIP_COVERAGE_* (both already adapted to the batch's rounded clips by the core),
+ * an optional texture id (u32 presence flag, string), and base-vertex/first-index/index-count.
+ * Blur payloads continue with u32 group index, f64 x/y/width/height/radius and u32 downsample.
+ * Backdrop/content-begin effect payloads continue with u32 group index; f64 x/y/width/height; four
+ * f64 corner radii; a u16 effect index and a u16 zero; f64 opacity; f64 maximum refresh rate (zero
+ * = unbounded); u32 backdrop source (0 = current framebuffer, 1 = framebuffer before this
+ * Surface); a u64 backdrop probe token (zero = none; a host that can measure reports the captured
+ * backdrop's mean luma back through strata_surface_report_backdrop); f64 read reach (how far
+ * outside its bounds, in logical pixels, the effect's output depends on what was drawn before it);
+ * a u32 packed-parameter count; and up to sixteen f64 values. Content effects require backdrop
+ * source 0 and probe 0. Content-end carries only the common prefix. Rounded clip stacks are
+ * limited to sixteen entries; authored CONTENT effect isolation is limited to four layers.
+ *
+ * Resource payloads begin with a texture-id string. Atlas create/upload then carry u32 format (0 =
+ * R8, 1 = RGBA8) and u32 x/y/width/height; upload adds u32 byte count and raw texels. Release has
+ * no additional fields. Image creation carries u32 sampling, u32 width/height, a u32 byte count and
+ * width * height * 4 bytes of top-down, tightly packed RGBA8 rows with straight (unpremultiplied)
+ * alpha, encoded as the source image stored them (no colour-space conversion). The core decodes
+ * every image; hosts need no codec.
+ *
+ * STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES advances the epoch from the immediately preceding
+ * retained epoch. Header geometry counts describe the complete retained arrays; resource records
+ * are followed by vertex and index patch lists. Each list is u32 count followed by [u32 byte
+ * offset, u32 byte count, raw bytes], then the id tables and the complete updated batch records.
+ * Vertex patches are vertex-aligned and index patches are u32-aligned. When neither geometry flag
+ * is present, batch and geometry counts are zero, no id tables follow, and the decoder retains the
  * complete geometry/batch plan for the repeated epoch while still applying this packet's resources
  * and frame index. Packets form one ordered Surface/backend stream: consume every framed packet
  * and discard decoder state only when discarding the stream.
  *
  * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
  * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
- * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v13 records.
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v14 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
@@ -1856,18 +1867,46 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_11 UINT32_C(11)
 #define STRATA_RENDER_PACKET_VERSION_12 UINT32_C(12)
 #define STRATA_RENDER_PACKET_VERSION_13 UINT32_C(13)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_13
+#define STRATA_RENDER_PACKET_VERSION_14 UINT32_C(14)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_14
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)
 #define STRATA_EFFECT_DEFAULT_REFRESH_RATE 0.0
 #define STRATA_EFFECT_BACKDROP_SOURCE_CURRENT UINT32_C(0)
 #define STRATA_EFFECT_BACKDROP_SOURCE_SURFACE UINT32_C(1)
+/*
+ * How far outside its bounds, in logical pixels, an effect's source and backdrop stay defined:
+ * authored effect passes clamp their samples to it (the HLSL prelude's effectSampleReach).
+ */
+#define STRATA_EFFECT_SAMPLE_REACH 64.0
+
+/*
+ * A draw batch's blend, already adapted to its rounded clips: an opaque draw under a rounded clip
+ * blends as straight alpha so its antialiased edge composites, and a clipped multiply keeps the
+ * destination where the clip covers nothing.
+ */
+#define STRATA_RENDER_BLEND_OPAQUE UINT32_C(0)
+#define STRATA_RENDER_BLEND_STRAIGHT_ALPHA UINT32_C(1)
+#define STRATA_RENDER_BLEND_PREMULTIPLIED_ALPHA UINT32_C(2)
+#define STRATA_RENDER_BLEND_ADDITIVE UINT32_C(3)
+#define STRATA_RENDER_BLEND_MULTIPLY UINT32_C(4)
+#define STRATA_RENDER_BLEND_CLIPPED_MULTIPLY UINT32_C(5)
+
+/*
+ * How a draw applies its rounded-clip coverage to its colour: alpha only, all four channels
+ * (premultiplied), a hard edge at half coverage, or the clipped-multiply form (colour scaled and
+ * alpha replaced by coverage). Without rounded clips coverage is one and the mode has no effect.
+ */
+#define STRATA_RENDER_CLIP_COVERAGE_STRAIGHT_ALPHA UINT32_C(0)
+#define STRATA_RENDER_CLIP_COVERAGE_PREMULTIPLIED_ALPHA UINT32_C(1)
+#define STRATA_RENDER_CLIP_COVERAGE_HARD UINT32_C(2)
+#define STRATA_RENDER_CLIP_COVERAGE_MULTIPLY UINT32_C(3)
 
 #define STRATA_RENDER_RESOURCE_ATLAS_CREATE UINT32_C(0)
 #define STRATA_RENDER_RESOURCE_ATLAS_UPLOAD UINT32_C(1)
 #define STRATA_RENDER_RESOURCE_TEXTURE_RELEASE UINT32_C(2)
-#define STRATA_RENDER_RESOURCE_ENCODED_TEXTURE UINT32_C(3)
+#define STRATA_RENDER_RESOURCE_IMAGE UINT32_C(3)
 
 #define STRATA_RENDER_BATCH_DRAW UINT32_C(0)
 #define STRATA_RENDER_BATCH_BLUR UINT32_C(1)
