@@ -1624,6 +1624,9 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         tree_.dirty_count() == 0U && !input_.requires_frame_advance() && !pending_lifecycle &&
         scroll_animations_.empty() && motion_.active_count() == 0U &&
         layout_engine_.active_transition_count() == 0U &&
+        // Work raised after the frame's last layout (a post-layout reveal scrolling) only bumps
+        // the layout generation: its dirty marks were cleared with the frame that raised it.
+        !layout_engine_.requires_layout(tree_, environment_.layout_environment(frame_time_nanos)) &&
         !application_.services().has_pending_frame_work();
     if (settled_except_input && input_.queued_event_count() == 0U) {
         SurfaceFrame next;

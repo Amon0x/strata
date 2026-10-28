@@ -741,9 +741,11 @@ InputOperationResult InputRouter::after_layout() {
             }
             continue;
         }
-        if (reveal.focus && focusable(*target)) {
-            focus(*target, "programmatic", result);
-        }
+        // A reveal scrolls its target into view with its padding whether or not it also
+        // focuses it; focusing leaves the scrolling to the reveal so the padding holds.
+        if (reveal.focus && focusable(*target))
+            focus(*target, "programmatic", result, false);
+        reveal_node(*target, reveal.padding, result);
     }
     route_active_lifecycle_hooks(true, result);
     update_editor_scroll();
@@ -870,7 +872,7 @@ void InputRouter::set_focus_visibility(const bool visible) {
 }
 
 void InputRouter::focus(const RetainedNode& node, const std::string_view reason,
-                        InputOperationResult& result) {
+                        InputOperationResult& result, const bool reveal) {
     if (inside_native_presentation(node))
         return;
     if (!within_focus_containment(node))
@@ -891,8 +893,8 @@ void InputRouter::focus(const RetainedNode& node, const std::string_view reason,
     static_cast<void>(tree_->mark(node.identity(), DirtyReason::input));
     static_cast<void>(route_event(const_cast<RetainedNode*>(&node), nullptr, InputEventKind::focus,
                                   nullptr, nullptr, nullptr, nullptr, nullptr, result));
-    if (reason != "pointer")
-        reveal_focus(node, result);
+    if (reveal && reason != "pointer")
+        reveal_node(node, 0.0, result);
     JsonValue event = object({
         {"action", JsonValue{}},
         {"focused", JsonValue(true)},

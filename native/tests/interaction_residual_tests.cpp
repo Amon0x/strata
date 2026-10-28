@@ -2310,6 +2310,80 @@ overlay VirtualRows {
           "a row kept for focus outlived the focus that kept it");
 }
 
+[[nodiscard]] runtime::Value reveal_payload(const std::string& key, const bool focus,
+                                            const double padding) {
+    return object({
+        {"focus", runtime::Value(focus)},
+        {"key", runtime::Value(runtime::KeyValue{key})},
+        {"padding", runtime::Value(padding)},
+    });
+}
+
+void test_post_layout_reveal_reaches_layout(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Reveal {
+  root Panel(key: "reveal.root", layout: { kind: "COLUMN", width: 320, height: 400 }) {
+    Scroll(key: "reveal.outer", vertical: true, horizontal: false, layout: { width: 220, height: 200 }) {
+      Panel(key: "reveal.outer.content", layout: { kind: "COLUMN", width: 200, height: 400 }) {
+        Scroll(key: "reveal.inner", vertical: true, horizontal: false, layout: { width: 200, height: 100 }) {
+          Panel(key: "reveal.inner.content", layout: { kind: "COLUMN", width: 180, height: 500 }) {
+            Panel(key: "reveal.spacer", layout: { width: 180, height: 300 })
+            TextBox(key: "reveal.target", text: "target", layout: { width: 160, height: 28 })
+            Panel(key: "reveal.after", layout: { width: 180, height: 172 })
+          }
+        }
+        Panel(key: "reveal.outer.after", layout: { width: 200, height: 300 })
+      }
+    }
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("post-layout-reveal", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Reveal", 320.0, 400.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const auto offset = [&surface](const std::string_view key) {
+        return surface->input().scroll_offset(key).value_or(ui::Point{-1.0, -1.0}).y;
+    };
+    check(offset("reveal.inner") == 0.0 && offset("reveal.outer") == 0.0,
+          "reveal fixture did not start unscrolled");
+
+    // A reveal without focus still scrolls its attached target into view, with its padding.
+    static_cast<void>(surface->dispatch_action("reveal.request",
+                                               reveal_payload("reveal.target", false, 10.0),
+                                               "test", std::nullopt, runtime::Value{}));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    // The reveal ran after the frame's layout; the next frame must lay out its scroll instead of
+    // settling on the stale layout.
+    static_cast<void>(surface->frame(now += 16'000'000));
+    const ui::LayoutRecord* target =
+        surface->layout().find(surface->tree().find_key("reveal.target")->identity());
+    const ui::LayoutRecord* inner =
+        surface->layout().find(surface->tree().find_key("reveal.inner")->identity());
+    check(target != nullptr && inner != nullptr && inner->viewport.has_value(),
+          "reveal fixture has no layout");
+    check(offset("reveal.inner") > 0.0, "a post-layout reveal never reached the layout");
+    check(std::abs(target->bounds.bottom() + 10.0 - inner->viewport->bottom()) < 0.5,
+          "a reveal ignored its padding");
+    // The inner scroller already brought the target into the outer viewport: the outer one, which
+    // must reveal where the inner scroll left the target, does not move.
+    check(offset("reveal.outer") == 0.0, "an outer scroller overshot a nested reveal");
+    check(!surface->input().focused_key().has_value(), "a reveal without focus took focus");
+
+    // A focusing reveal of a target already in view focuses it without scrolling.
+    const double inner_before = offset("reveal.inner");
+    static_cast<void>(surface->dispatch_action("reveal.request",
+                                               reveal_payload("reveal.target", true, 0.0), "test",
+                                               std::nullopt, runtime::Value{}));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(surface->input().focused_key() == std::optional<std::string_view>("reveal.target"),
+          "a focusing reveal did not focus its target");
+    check(offset("reveal.inner") == inner_before, "a reveal of a visible target scrolled");
+}
+
 } // namespace
 
 int strata_test_interaction_residual(const int argument_count, const char* const* const arguments) {
@@ -2343,6 +2417,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_event_outcome_pairing(fixture);
         test_removed_focused_editor_commits(fixture);
         test_virtual_focused_row_stays_realized(resources);
+        test_post_layout_reveal_reaches_layout(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

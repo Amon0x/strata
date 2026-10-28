@@ -444,7 +444,9 @@ class InputRouter final {
                                   bool include_modal = true, bool restore_modal_focus = true);
     void restore_popup_focus(const RetainedNode& popup, InputOperationResult& result);
     [[nodiscard]] data::JsonValue source(const RetainedNode& node) const;
-    void focus(const RetainedNode& node, std::string_view reason, InputOperationResult& result);
+    /** Focuses `node`; any reason but pointer also scrolls it into view unless `reveal` is off. */
+    void focus(const RetainedNode& node, std::string_view reason, InputOperationResult& result,
+               bool reveal = true);
     void clear_focus(std::string_view reason, InputOperationResult& result,
                      bool dismiss_popups = true);
     /** Routes the blur of the node losing focus, commits its editor and records the change. */
@@ -570,7 +572,8 @@ class InputRouter final {
     [[nodiscard]] std::optional<Point> scroll_limits(const RetainedNode& node) const;
     [[nodiscard]] bool set_scroll_offset(const RetainedNode& node, Point offset,
                                          InputOperationResult& result);
-    void reveal_focus(const RetainedNode& node, InputOperationResult& result);
+    /** Scrolls every scrolling ancestor so `node`, with `padding` around it, is in view. */
+    void reveal_node(const RetainedNode& node, double padding, InputOperationResult& result);
     [[nodiscard]] bool scroll_focused_ancestor(std::string_view key, InputOperationResult& result);
     void place_pointer_caret(RetainedNode& node, const PointerInputEvent& event,
                              bool extend_selection, InputOperationResult& result);

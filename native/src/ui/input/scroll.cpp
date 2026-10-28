@@ -269,27 +269,52 @@ InputOperationResult InputRouter::scroll(const ScrollInputEvent event) {
     return result;
 }
 
-void InputRouter::reveal_focus(const RetainedNode& node, InputOperationResult& result) {
+void InputRouter::reveal_node(
+    const RetainedNode& node,
+    const double padding,
+    InputOperationResult& result
+) {
     if (layout_ == nullptr) return;
     const LayoutRecord* target = layout_->find(node.identity());
     if (target == nullptr) return;
+    // Every scroller moves the target by its own change: an outer scroller brings into view where
+    // the inner ones left the target, not where this layout placed it.
+    Rect revealed = target->bounds;
+    const auto axis_offset = [](
+                                 const double offset,
+                                 const double start,
+                                 const double end,
+                                 const double viewport_start,
+                                 const double viewport_end,
+                                 const double inset
+                             ) {
+        const double margin = std::clamp(inset, 0.0, (viewport_end - viewport_start) * 0.5);
+        if (start - margin < viewport_start) return offset + start - margin - viewport_start;
+        if (end + margin > viewport_end) return offset + end + margin - viewport_end;
+        return offset;
+    };
     for (const RetainedNode* current = node.parent(); current != nullptr; current = current->parent()) {
         const LayoutRecord* scroll = layout_->find(current->identity());
         const std::optional<Point> limits = scroll_limits(*current);
         if (scroll == nullptr || !scroll->viewport.has_value() || !limits.has_value()) continue;
-        Point next = scroll->scroll_offset;
         const Rect& viewport = *scroll->viewport;
-        if (target->bounds.x < viewport.x) next.x += target->bounds.x - viewport.x;
-        if (target->bounds.right() > viewport.right()) {
-            next.x += target->bounds.right() - viewport.right();
-        }
-        if (target->bounds.y < viewport.y) next.y += target->bounds.y - viewport.y;
-        if (target->bounds.bottom() > viewport.bottom()) {
-            next.y += target->bounds.bottom() - viewport.bottom();
-        }
-        next.x = std::clamp(next.x, 0.0, limits->x);
-        next.y = std::clamp(next.y, 0.0, limits->y);
-        static_cast<void>(set_scroll_offset(*current, next, result));
+        const Point next{
+            std::clamp(
+                axis_offset(scroll->scroll_offset.x, revealed.x, revealed.right(), viewport.x,
+                            viewport.right(), padding),
+                0.0,
+                limits->x
+            ),
+            std::clamp(
+                axis_offset(scroll->scroll_offset.y, revealed.y, revealed.bottom(), viewport.y,
+                            viewport.bottom(), padding),
+                0.0,
+                limits->y
+            ),
+        };
+        if (!set_scroll_offset(*current, next, result)) continue;
+        revealed.x -= next.x - scroll->scroll_offset.x;
+        revealed.y -= next.y - scroll->scroll_offset.y;
     }
 }
 
