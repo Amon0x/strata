@@ -84,35 +84,51 @@ Ground rules:
 
 ### Phase 1 leftovers
 
-- [ ] ItemGrid's 28px descendant clip strip comes from real header geometry
+- [x] ItemGrid's 28px descendant clip strip comes from real header geometry
       (`description_item_grid.cpp`), not a constant.
-- [ ] `d3d11/render_context.cpp` uses `host::packet_vertex_bytes` instead of its own 88.
-- [ ] `SurfaceEnvironment::validate` checks `scale` against framebuffer/logical size.
-- [ ] Row builders are reused across Repeater generations; `for` loops stop cloning their first node
+- [x] `d3d11/render_context.cpp` uses `host::packet_vertex_bytes` instead of its own 88.
+- [x] `SurfaceEnvironment::validate` checks `scale` against framebuffer/logical size.
+- [x] Row builders are reused across Repeater generations; `for` loops stop cloning their first node
       to set `materialization_key`.
-- [ ] A stale lazy row re-describes only itself, not the body holding its Repeater.
-- [ ] A dedicated test pins `async_succeed_json` failure statuses.
+- [x] A stale lazy row re-describes only itself, not the body holding its Repeater.
+- [x] A dedicated test pins `async_succeed_json` failure statuses.
 
 ## Phase 2: one owner per fact
 
-- [ ] Compiler: semantic analysis emits a resolved, typed tree (node ids, type and symbol side
+- [x] Compiler: semantic analysis emits a resolved, typed tree (node ids, type and symbol side
       tables, resolved call schemas). Lowering and the source map are projections over it. `Validator`
       splits into collect, resolve, type-check and policy passes.
-- [ ] Compiler: declarative catalog with named types and capability flags; runtime helper table and
+- [x] Compiler: declarative catalog with named types and capability flags; runtime helper table and
       editor completions generated from it.
-- [ ] Runtime: `ComponentInstance` owns identity (numeric id), inputs, dependencies, output and
+- [x] Runtime: `ComponentInstance` owns identity (numeric id), inputs, dependencies, output and
       effects; lazy rows are child instances sharing builder and caches.
-- [ ] Runtime: push-based invalidation with reverse indexes (state address, host path, retained
+- [x] Runtime: push-based invalidation with reverse indexes (state address, host path, retained
       field) replacing the full validation walk and the retained-snapshot pointer.
-- [ ] Runtime: building is pure; persistence and durability writes happen in a commit phase.
-- [ ] UI: built-in subtargets, popup dismissal, modal priority and editor geometry move onto
+- [x] Runtime: building is pure; persistence and durability writes happen in a commit phase.
+- [x] UI: built-in subtargets, popup dismissal, modal priority and editor geometry move onto
       lifecycle hooks; generic code holds no widget names.
-- [ ] UI: render emits hit regions; hit testing consumes them.
-- [ ] UI: frame coordinator with explicit phases and a single dirty model.
-- [ ] Theme: open typed token map, per-widget style schemas, presentation colors as tokens.
-- [ ] Render: effect staleness computed once in the core/decoder; packet blend, clip and material
+- [x] UI: one hit-geometry pass records presented transforms and clips; every consumer reads it.
+      (Emitting it from `render.cpp` was rejected: input routes mid-batch against a rebuilt tree
+      before any render runs.)
+- [x] UI: frame coordinator with explicit phases and a single dirty model.
+- [x] Theme: open typed token map, per-widget style schemas, presentation colors as tokens.
+- [x] Render: effect staleness computed once in the core/decoder; packet blend, clip and material
       ids typed; images decoded once in the core; cross-backend differential tests.
-- [ ] ABI: extensions get their own versioned function table; real struct-size versioning.
-- [ ] Hosts: one portable `host::Session`; the showcase host and control deck move out of core.
-- [ ] Layering: `base`/`compiler`/`runtime`/`ui` targets with enforced include direction; the
+- [x] ABI: extensions get their own versioned function table; real struct-size versioning.
+- [x] Hosts: one portable `host::Session`; the showcase host and control deck move out of core.
+- [x] Layering: `base`/`compiler`/`runtime`/`ui` targets with enforced include direction; the
       compiler no longer depends on `ui`.
+
+### Phase 2 leftovers
+
+- [ ] `description.cpp` and `tree.cpp` read Repeater/VirtualList/Slot roles from catalog
+      capability flags; `widget_literals.cmake` drops their exclusions.
+- [ ] `.strata` code reads open and palette theme tokens (`theme.<name>` is no longer a closed set).
+- [ ] Interpreter: no string copies on variable reads, one list/map literal representation, cached
+      host-path segments, an explicit dependency recorder.
+- [ ] Slots inside a widget's own generated rows (tables) receive caller content.
+- [ ] The showcase `Host` runs its sessions on `host::Session`.
+- [ ] The core PNG decoder and inflate have a fuzzer and bounded output.
+- [ ] Lambda bodies beyond `map` are type-checked; cascade suppression on broken input is per
+      missing declaration, not global.
+- [ ] The runtime's evaluator-name table is generated from the catalog.
