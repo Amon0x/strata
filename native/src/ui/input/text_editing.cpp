@@ -297,8 +297,8 @@ std::optional<InputRouter::EditorView> InputRouter::editor_view(const RetainedNo
     const LayoutRecord* record = layout_->find(node.identity());
     if (record == nullptr)
         return std::nullopt;
-    const std::vector<WidgetSubtarget> targets = subtargets(node.identity());
-    const std::optional<Rect> viewport = editable_text_viewport(node, *record, targets);
+    const std::optional<Rect> viewport =
+        editable_text_viewport(node, *record, projected_subtargets(node));
     if (!viewport.has_value() || viewport->empty())
         return std::nullopt;
     const bool multiline = editable_text_multiline(widgets_, node);

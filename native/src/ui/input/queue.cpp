@@ -351,6 +351,7 @@ InputProfilerCounters InputRouter::take_profiler_counters() noexcept {
         std::exchange(coalesced_move_count_, 0U),
         std::exchange(behavior_dispatch_count_, 0U),
         std::exchange(pointer_geometry_rebuild_count_, 0U),
+        std::exchange(subtarget_projection_count_, 0U),
     };
 }
 

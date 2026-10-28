@@ -745,6 +745,12 @@ void InputRouter::prepare_pointer_geometry() const {
 
     pointer_geometry_ready_ = false;
     detached_subtargets_ready_ = false;
+    // Hooks run while the geometry is rebuilt project subtargets afresh rather than through it.
+    preparing_pointer_geometry_ = true;
+    struct Prepared final {
+        bool& preparing;
+        ~Prepared() { preparing = false; }
+    } prepared{preparing_pointer_geometry_};
     pointer_hit_entries_.clear();
     pointer_hit_index_.clear();
     projected_subtargets_.clear();
@@ -847,6 +853,9 @@ void InputRouter::prepare_pointer_geometry() const {
 
 const std::vector<WidgetSubtarget>&
 InputRouter::projected_subtargets(const RetainedNode& node) const {
+    static const std::vector<WidgetSubtarget> none;
+    if (tree_ == nullptr || layout_ == nullptr)
+        return none;
     prepare_pointer_geometry();
     const auto found = projected_subtargets_.find(node.identity());
     if (found != projected_subtargets_.end())
@@ -860,6 +869,7 @@ InputRouter::projected_subtargets(const RetainedNode& node) const {
             .first->second;
     }
     std::vector<WidgetSubtarget> targets;
+    ++subtarget_projection_count_;
     if (extension_subtargets) {
         const LayoutRecord* const record = layout_->find(node.identity());
         if (record != nullptr)
@@ -932,7 +942,12 @@ std::vector<WidgetSubtarget> InputRouter::subtargets(const std::uint64_t identit
     if (node == nullptr || inside_native_presentation(*node) || !node_participates(*node)) {
         return {};
     }
+    // Presentation, semantics and editor geometry ask every frame; a CommandPalette's projection
+    // ranks all of its commands, so it is reused until something it depends on changes.
+    if (!preparing_pointer_geometry_)
+        return projected_subtargets(*node);
     const WidgetLifecycle* const lifecycle = widgets_.find(node->description().type);
+    ++subtarget_projection_count_;
     if (lifecycle != nullptr && lifecycle->inspection.subtargets != nullptr) {
         const LayoutRecord* const record = layout_->find(identity);
         return record != nullptr ? lifecycle->inspection.subtargets(*node, *record)

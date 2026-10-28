@@ -88,6 +88,7 @@ struct SurfaceOperationCounters final {
     std::size_t input_coalesced_moves = 0U;
     std::size_t behavior_dispatches = 0U;
     std::size_t pointer_geometry_rebuilds = 0U;
+    std::size_t subtarget_projections = 0U;
     std::size_t input_fast_path_frames = 0U;
     std::uint64_t input_nanos = 0U;
     std::size_t motion_mutated_nodes = 0U;

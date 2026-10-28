@@ -59,6 +59,8 @@ struct InputProfilerCounters final {
     std::size_t coalesced_moves = 0U;
     std::size_t behavior_dispatches = 0U;
     std::size_t pointer_geometry_rebuilds = 0U;
+    /** Subtarget projections computed (a CommandPalette's projection fuzzy-ranks its commands). */
+    std::size_t subtarget_projections = 0U;
 };
 
 struct InjectedActionResult final {
@@ -390,6 +392,12 @@ class InputRouter final {
     [[nodiscard]] bool command_tooltip_ready(std::uint64_t identity) const noexcept;
     [[nodiscard]] bool active(std::uint64_t identity) const noexcept;
     [[nodiscard]] std::vector<WidgetSubtarget> subtargets(std::uint64_t identity) const;
+    /**
+     * The node's subtargets as hit testing projects them, kept until the tree, layout or
+     * notifications change. Per-frame consumers (editor geometry, IME placement) use these.
+     */
+    [[nodiscard]] const std::vector<WidgetSubtarget>&
+    projected_subtargets(const RetainedNode& node) const;
     [[nodiscard]] bool subtarget_hovered(std::uint64_t identity,
                                          std::string_view id) const noexcept;
     [[nodiscard]] bool subtarget_active(std::uint64_t identity, std::string_view id) const noexcept;
@@ -541,8 +549,6 @@ class InputRouter final {
         MotionTransform transform;
     };
     void prepare_pointer_geometry() const;
-    [[nodiscard]] const std::vector<WidgetSubtarget>&
-    projected_subtargets(const RetainedNode& node) const;
     void prepare_detached_subtargets() const;
     [[nodiscard]] RetainedNode* hit_test(Point position) const noexcept;
     [[nodiscard]] std::optional<WidgetSubtarget>
@@ -826,6 +832,8 @@ class InputRouter final {
     std::size_t coalesced_move_count_ = 0U;
     std::size_t behavior_dispatch_count_ = 0U;
     mutable std::size_t pointer_geometry_rebuild_count_ = 0U;
+    mutable std::size_t subtarget_projection_count_ = 0U;
+    mutable bool preparing_pointer_geometry_ = false;
     mutable const RetainedTree* pointer_geometry_tree_ = nullptr;
     mutable const LayoutResult* pointer_geometry_layout_ = nullptr;
     mutable const MotionRuntime* pointer_geometry_motion_ = nullptr;

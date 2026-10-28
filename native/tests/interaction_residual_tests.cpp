@@ -2607,6 +2607,71 @@ overlay HoverScroll {
           "a popup opened under a still pointer did not take its hover");
 }
 
+void test_palette_projection_is_cached_across_frames(const std::filesystem::path& resources) {
+    std::string commands;
+    for (int index = 0; index < 40; ++index) {
+        commands += "    Command(id: \"palette.command." + std::to_string(index) +
+                    "\", label: \"Command number " + std::to_string(index) +
+                    "\", action: action(\"notification.raise\", message: \"run\"))\n";
+    }
+    const std::string source = R"(
+overlay PaletteFrames {
+  root Panel(key: "palette.root", layout: { kind: "COLUMN", width: 400, height: 300 }) {
+)" + commands + R"(
+    CommandPalette(key: "palette.frames", maxVisibleRows: 8)
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("palette-frames", bundle);
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"palette-frames.strata", source},
+                                    no_imports, 0U)
+              .activated(),
+          "palette frames fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 400;
+    environment.framebuffer_height = 300;
+    environment.logical_width = 400.0;
+    environment.logical_height = 300.0;
+    environment.reduced_motion = true;
+    environment.input = ui::SurfaceInputCapabilities{
+        true, ui::PointerPrecision::fine, true, false, true, true, false,
+    };
+    check(environment.input.ime, "palette frames fixture needs IME placement");
+    ui::Surface surface(
+        "palette-frames", application, runtime::LayerRole::overlay, "PaletteFrames", environment,
+        ui::TextEngine::load_control_font(
+            resources, resource::ResourceId::parse("assets/strata/fonts/medium.ttf")));
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface.frame(now));
+    static_cast<void>(surface.dispatch_action(
+        "palette.set",
+        object({{"key", runtime::Value(runtime::KeyValue{"palette.frames"})},
+                {"open", runtime::Value(true)}}),
+        "test", std::nullopt, runtime::Value{}));
+    static_cast<void>(surface.frame(now += 16'000'000));
+    static_cast<void>(surface.input().text("number"));
+    static_cast<void>(surface.frame(now += 16'000'000));
+    check(surface.input().focused_key() == std::optional<std::string_view>("palette.frames"),
+          "palette frames fixture did not focus its open palette");
+
+    // Frames that change nothing the projection depends on reuse it: placing the IME caret and
+    // scrolling the query editor must not re-rank every command each frame.
+    std::size_t projections = 0U;
+    for (int frame = 0; frame < 6; ++frame) {
+        // Requests a frame without changing anything (focus stays uncontained).
+        static_cast<void>(surface.set_focus_containment(std::nullopt));
+        const ui::SurfaceFrame frame_result = surface.frame(now += 16'000'000);
+        projections += frame_result.operations.subtarget_projections;
+    }
+    check(projections == 0U, "an unchanged palette was re-projected every frame");
+}
+
 } // namespace
 
 int strata_test_interaction_residual(const int argument_count, const char* const* const arguments) {
@@ -2645,6 +2710,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_subtargets_hit_in_presented_space(resources);
         test_queued_batch_sees_rebuilt_tree(resources);
         test_hover_follows_content_under_still_pointer(resources);
+        test_palette_projection_is_cached_across_frames(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

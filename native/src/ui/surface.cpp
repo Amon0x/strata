@@ -466,8 +466,8 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
                  const Point position) -> std::optional<std::size_t> {
               if (text_engine_ == nullptr)
                   return std::nullopt;
-              const std::vector<WidgetSubtarget> targets = input_.subtargets(node.identity());
-              const std::optional<Rect> viewport = editable_text_viewport(node, layout, targets);
+              const std::optional<Rect> viewport =
+                  editable_text_viewport(node, layout, input_.projected_subtargets(node));
               if (!viewport.has_value() || viewport->empty())
                   return std::nullopt;
               const bool multiline = editable_text_multiline(widgets_, node);
@@ -493,8 +493,8 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
                  const TextEditorSnapshot& editor) -> std::optional<runtime::HostServiceRect> {
               if (text_engine_ == nullptr || !environment_.input.ime)
                   return std::nullopt;
-              const std::vector<WidgetSubtarget> targets = input_.subtargets(node.identity());
-              const std::optional<Rect> viewport = editable_text_viewport(node, layout, targets);
+              const std::optional<Rect> viewport =
+                  editable_text_viewport(node, layout, input_.projected_subtargets(node));
               if (!viewport.has_value() || viewport->empty())
                   return std::nullopt;
               const bool multiline = editable_text_multiline(widgets_, node);
@@ -1536,6 +1536,7 @@ void Surface::collect_input_profiler_counters(SurfaceFrame& frame) {
     frame.operations.input_coalesced_moves += input.coalesced_moves;
     frame.operations.behavior_dispatches += input.behavior_dispatches;
     frame.operations.pointer_geometry_rebuilds += input.pointer_geometry_rebuilds;
+    frame.operations.subtarget_projections += input.subtarget_projections;
     frame.operations.input_events_processed = frame.lifecycle_input.processed_events;
     frame.operations.input_events_deferred = input_.queued_event_count();
 }
