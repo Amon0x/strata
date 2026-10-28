@@ -21,66 +21,77 @@ Ground rules:
 
 ### Compiler
 
-- [ ] Duplicate component declarations no longer index the first schema with the second
+- [x] Duplicate component declarations no longer index the first schema with the second
       declaration's parameters (heap overflow in `semantic.cpp` `validate_declaration`).
-- [ ] Source spans stop copying whole lines: remove the unused `excerpt`, pass tokens by reference,
+- [x] Source spans stop copying whole lines: remove the unused `excerpt`, pass tokens by reference,
       so long single-line inputs are linear.
-- [ ] Animation- and style-typed slots resolve names with the same precedence in semantic analysis
+- [x] Animation- and style-typed slots resolve names with the same precedence in semantic analysis
       and lowering (an in-scope parameter is a variable, not a literal name).
-- [ ] Expression map keys are rejected with a diagnostic instead of lowering to `dynamic_N`.
-- [ ] `+` infers string when either operand is a string; operand types are checked.
-- [ ] Derived values used before their declaration are typed, not `unknown`.
-- [ ] Unknown parameter type names report an unknown-type diagnostic; lowering shares semantic's
+- [x] Expression map keys are rejected with a diagnostic instead of lowering to `dynamic_N`.
+- [x] `+` infers string when either operand is a string; operand types are checked.
+- [x] Derived values used before their declaration are typed, not `unknown`.
+- [x] Unknown parameter type names report an unknown-type diagnostic; lowering shares semantic's
       `resolve_type` (nullable list elements preserved).
-- [ ] Lowering diagnostics no longer duplicate semantic ones; `infer` diagnostics are reported once.
-- [ ] `from/to/in/where/state/root/if/derived` are contextual: usable as member names.
-- [ ] A `when` arm with a bare identifier match does not parse as a lambda.
-- [ ] `persistenceKey` uniqueness is enforced between siblings.
-- [ ] Slots declared inside a child component's fill are registered (slot forwarding).
-- [ ] Remove the JVM substring scan in `security.cpp`.
+- [x] Lowering diagnostics no longer duplicate semantic ones; `infer` diagnostics are reported once.
+- [x] `from/to/in/where/state/root/if/derived` are contextual: usable as member names.
+- [x] A `when` arm with a bare identifier match does not parse as a lambda.
+- [x] `persistenceKey` uniqueness is enforced between siblings.
+- [x] Slots declared inside a child component's fill are registered (slot forwarding).
+- [x] Remove the JVM substring scan in `security.cpp`.
 
 ### Runtime and description
 
-- [ ] Repeater dependency observer forwards host and lexical reads upstream.
-- [ ] Explicit `key:` replaces the loop segment in component instance paths.
-- [ ] A parent checks its own currency before refreshing children; diagnostics and side effects
+- [x] Repeater dependency observer forwards host and lexical reads upstream.
+- [x] Explicit `key:` replaces the loop segment in component instance paths.
+- [x] A parent checks its own currency before refreshing children; diagnostics and side effects
       from discarded builds are rolled back.
-- [ ] Cacheability depends on error-severity diagnostics raised by the component itself.
-- [ ] Repeater keys are memoized at generation time (O(1) `index_of_key`).
-- [ ] Lazy row bodies record dependencies and state-scope bindings.
-- [ ] Duplicate object fields produce a diagnostic, not `invalid_argument`.
+- [x] Cacheability depends on error-severity diagnostics raised by the component itself.
+- [x] Repeater keys are memoized at generation time (O(1) `index_of_key`).
+- [x] Lazy row bodies record dependencies and state-scope bindings.
+- [x] Duplicate object fields produce a diagnostic, not `invalid_argument`.
 
 ### Surface and input
 
-- [ ] Events and action outcomes are recorded as one pair.
-- [ ] Removing a focused node blurs and commits its editor first; virtualized lists keep the
+- [x] Events and action outcomes are recorded as one pair.
+- [x] Removing a focused node blurs and commits its editor first; virtualized lists keep the
       focused row realized.
-- [ ] Invalidation raised after layout (reveal/scroll) survives `complete_frame`; the settled check
+- [x] Invalidation raised after layout (reveal/scroll) survives `complete_frame`; the settled check
       includes the layout invalidation generation.
-- [ ] Grapheme segmentation follows UAX #29 (Indic, Thai, Hangul, emoji tags); boundaries cached per
+- [x] Grapheme segmentation follows UAX #29 (Indic, Thai, Hangul, emoji tags); boundaries cached per
       editor revision.
-- [ ] Sticky table and item-grid headers clip hit testing like rendering.
-- [ ] Ordinary subtargets are hit-tested in transformed space.
-- [ ] Hover is re-evaluated after wheel scroll, motion and popup changes.
+- [x] Sticky table and item-grid headers clip hit testing like rendering.
+- [x] Ordinary subtargets are hit-tested in transformed space.
+- [x] Hover is re-evaluated after wheel scroll, motion and popup changes.
 
 ### Rendering
 
-- [ ] Vulkan captures and blurs only the effect sample region, and only when a refresh is due.
-- [ ] Vulkan applies geometry patches (epoch is previous + 1).
-- [ ] OpenType PairPos/ligature expansion is bounded by table size; zero-format class pairs skipped.
-- [ ] Effect refresh default is unbounded; caches only engage when a material asks for a rate.
-- [ ] D3D11 effect staleness uses the sample region and resource uploads; cache entries are evicted.
-- [ ] Blur downsample rounding matches across backends.
-- [ ] Delete the unused `shaders/render2d`.
+- [x] Vulkan captures and blurs only the effect sample region, and only when a refresh is due.
+- [x] Vulkan applies geometry patches (epoch is previous + 1).
+- [x] OpenType PairPos/ligature expansion is bounded by table size; zero-format class pairs skipped.
+- [x] Effect refresh default is unbounded; caches only engage when a material asks for a rate.
+- [x] D3D11 effect staleness uses the sample region and resource uploads; cache entries are evicted.
+- [x] Blur downsample rounding matches across backends.
+- [x] Delete the unused `shaders/render2d`.
 
 ### ABI and hosts
 
-- [ ] Every C export is behind one exception firewall; authoring trampolines catch.
-- [ ] An extension fragment with unbalanced clips is dropped alone, not the frame.
-- [ ] Reentrant and wrong-thread calls into a runtime return a status instead of corrupting it.
-- [ ] Durable writer retries and isolates failures per path, flushing before rename.
-- [ ] Errors map to accurate statuses; missing resources are not cached forever.
-- [ ] Each source file compiles into exactly one CMake target.
+- [x] Every C export is behind one exception firewall; authoring trampolines catch.
+- [x] An extension fragment with unbalanced clips is dropped alone, not the frame.
+- [x] Reentrant and wrong-thread calls into a runtime return a status instead of corrupting it.
+- [x] Durable writer retries and isolates failures per path, flushing before rename.
+- [x] Errors map to accurate statuses; missing resources are not cached forever.
+- [x] Each source file compiles into exactly one CMake target.
+
+### Phase 1 leftovers
+
+- [ ] ItemGrid's 28px descendant clip strip comes from real header geometry
+      (`description_item_grid.cpp`), not a constant.
+- [ ] `d3d11/render_context.cpp` uses `host::packet_vertex_bytes` instead of its own 88.
+- [ ] `SurfaceEnvironment::validate` checks `scale` against framebuffer/logical size.
+- [ ] Row builders are reused across Repeater generations; `for` loops stop cloning their first node
+      to set `materialization_key`.
+- [ ] A stale lazy row re-describes only itself, not the body holding its Repeater.
+- [ ] A dedicated test pins `async_succeed_json` failure statuses.
 
 ## Phase 2: one owner per fact
 
