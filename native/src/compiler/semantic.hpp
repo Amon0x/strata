@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <functional>
 #include <map>
-#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -13,6 +12,7 @@
 #include "compiler/ast.hpp"
 #include "compiler/diagnostic.hpp"
 #include "compiler/schema.hpp"
+#include "compiler/semantic/model.hpp"
 
 namespace strata::compiler {
 
@@ -66,40 +66,12 @@ inline constexpr std::array<std::string_view, 3U> theme_number_tokens{
 /** Host roots every surface supplies itself, without an application schema declaring them. */
 inline constexpr std::array<std::string_view, 1U> contextual_host_roots{"env"};
 
-struct SemanticResult final {
-    std::vector<Diagnostic> diagnostics;
-    std::map<std::string, ValidatedAnimation, std::less<>> animations;
-};
-
-/** What a bare name in an expression denotes. */
-enum class NameBinding { local, host, component, style, animation, unresolved };
-
-/** The declarations of a module a bare name can refer to. */
-struct ModuleNames final {
-    explicit ModuleNames(const File& file);
-
-    /**
-     * What `name` denotes, where `local` says whether a local value or parameter of that name is in
-     * scope. Semantic analysis and lowering both resolve names here, so a name is typed and lowered
-     * as the same thing: locals shadow host roots, which shadow the module's declarations.
-     */
-    [[nodiscard]] NameBinding resolve(
-        std::string_view name,
-        bool local,
-        const SchemaRegistry& registry
-    ) const;
-
-    std::set<std::string, std::less<>> components;
-    std::set<std::string, std::less<>> styles;
-    std::set<std::string, std::less<>> animations;
-};
-
 /** Items an eagerly expanded loop may draw, and so the bound of a declared or retained list. */
 inline constexpr std::size_t maximum_eager_loop_items = 1'000U;
 
 /**
- * The type an authored type reference names. Semantic analysis and lowering both resolve through
- * here so a declaration means the same thing to each. A name the registry does not define resolves
+ * The type an authored type reference names. Analysis resolves every declared type through here,
+ * so a declaration means one thing wherever it is read. A name the registry does not define resolves
  * to `unknown` and is appended to `unresolved`, when given, for the caller to report.
  */
 [[nodiscard]] SemanticTypePtr resolve_type_reference(
@@ -115,6 +87,29 @@ inline constexpr std::size_t maximum_eager_loop_items = 1'000U;
     std::vector<const TypeReference*>* unresolved = nullptr
 );
 
-[[nodiscard]] SemanticResult validate_semantics(const File& file, const SchemaRegistry& registry);
+struct SemanticResult final {
+    std::vector<Diagnostic> diagnostics;
+    std::map<std::string, ValidatedAnimation, std::less<>> animations;
+    /**
+     * The resolved, typed module. It borrows the analysed file's nodes, so the file must outlive
+     * it; lowering and the source map project it.
+     */
+    SemanticModel model;
+};
+
+/** Whether every module parsed and loaded, so every declaration an author wrote is present. */
+enum class AnalysisInput { complete, incomplete };
+
+/**
+ * Analyses a module in passes: collect declarations, resolve names, type check, policy lints and
+ * placement. It runs on files with syntax errors too: a node the parser could not read types as
+ * unknown and draws no further diagnostics, and with `incomplete` input a name that resolves to
+ * nothing is not reported, since its declaration may be what failed to parse or load.
+ */
+[[nodiscard]] SemanticResult validate_semantics(
+    const File& file,
+    const SchemaRegistry& registry,
+    AnalysisInput input = AnalysisInput::complete
+);
 
 } // namespace strata::compiler

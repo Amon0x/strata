@@ -480,7 +480,7 @@ animation Validated {
               valid.animations.size() == 1U,
           "valid animation did not produce exactly one typed lowering payload");
     const compiler::PortableIrResult lowered =
-        compiler::lower_portable_ir(valid_parsed.file, schema, valid.animations);
+        compiler::lower_portable_ir(valid_parsed.file, schema, valid);
     const data::JsonValue* declarations =
         lowered.unit.has_value() ? lowered.unit->find("animations") : nullptr;
     const data::JsonValue* declaration = declarations != nullptr &&

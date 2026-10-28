@@ -2,10 +2,10 @@
 
 #include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "compiler/ast.hpp"
+#include "compiler/semantic/model.hpp"
 #include "compiler/source.hpp"
 
 namespace strata::compiler {
@@ -23,9 +23,10 @@ struct CompiledSourceMap final {
     std::vector<CompiledSourceMapEntry> entries;
 };
 
+/** The source map of an analysed file, projected from the placements analysis assigned. */
 [[nodiscard]] CompiledSourceMap build_compiled_source_map(
     const File& file,
-    const std::vector<std::string>& widget_names
+    const SemanticModel& model
 );
 
 } // namespace strata::compiler

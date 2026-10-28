@@ -19,16 +19,20 @@ CompileResult compile_program(
     std::pmr::memory_resource* const scratch
 ) {
     ModuleResult modules = load_modules(entry, loader, scratch);
+    // Analysis runs on what parsed even when a module or import failed, so tools see every problem
+    // at once; what a missing declaration would have resolved is not reported again.
+    SemanticResult semantic = validate_semantics(
+        modules.merged_file,
+        registry,
+        modules.diagnostics.empty() ? AnalysisInput::complete : AnalysisInput::incomplete
+    );
     CompileResult result{
         modules.entry_source_id,
         std::move(modules.dependencies),
-        build_compiled_source_map(modules.merged_file, registry.widget_names()),
+        build_compiled_source_map(modules.merged_file, semantic.model),
         std::nullopt,
         std::move(modules.diagnostics),
     };
-    if (!result.diagnostics.empty()) return result;
-
-    SemanticResult semantic = validate_semantics(modules.merged_file, registry);
     result.diagnostics.insert(
         result.diagnostics.end(),
         std::make_move_iterator(semantic.diagnostics.begin()),
@@ -36,11 +40,7 @@ CompileResult compile_program(
     );
     if (!result.diagnostics.empty()) return result;
 
-    PortableIrResult lowered = lower_portable_ir(
-        modules.merged_file,
-        registry,
-        semantic.animations
-    );
+    PortableIrResult lowered = lower_portable_ir(modules.merged_file, registry, semantic);
     result.diagnostics.insert(
         result.diagnostics.end(),
         std::make_move_iterator(lowered.diagnostics.begin()),

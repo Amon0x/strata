@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -10,6 +11,14 @@
 #include "compiler/source.hpp"
 
 namespace strata::compiler {
+
+/**
+ * Identifies one expression, statement, block or widget call of a compilation. The parser numbers nodes
+ * densely from the id it is given, and module loading hands each module the next free range, so
+ * ids are unique across the merged file and analysis can key its side tables by them. Recovery
+ * nodes are numbered like any other.
+ */
+using NodeId = std::uint32_t;
 
 struct Expression;
 struct Statement;
@@ -186,6 +195,7 @@ using ExpressionNode = std::variant<
 struct Expression final {
     ExpressionNode node;
     SourceSpan span;
+    NodeId id = 0U;
 };
 
 struct Property final {
@@ -199,6 +209,7 @@ struct WidgetCall final {
     std::vector<Argument> arguments;
     BlockPtr body;
     SourceSpan span;
+    NodeId id = 0U;
 };
 
 struct StateStatement final {
@@ -281,11 +292,13 @@ using StatementNode = std::variant<
 struct Statement final {
     StatementNode node;
     SourceSpan span;
+    NodeId id = 0U;
 };
 
 struct Block final {
     std::vector<StatementPtr> statements;
     SourceSpan span;
+    NodeId id = 0U;
 };
 
 struct ScreenDeclaration final {
@@ -352,6 +365,8 @@ struct File final {
     std::vector<Declaration> declarations;
     std::vector<SourceSpan> trivia;
     SourceSpan span;
+    /** One past the highest node id the file's nodes use; side tables size themselves by it. */
+    NodeId node_id_limit = 0U;
 };
 
 } // namespace strata::compiler

@@ -17,6 +17,7 @@
 #include "compiler/parser.hpp"
 #include "compiler/portable_ir.hpp"
 #include "compiler/schema.hpp"
+#include "compiler/semantic.hpp"
 #include "compiler/source.hpp"
 #include "resource/resource.hpp"
 
@@ -308,6 +309,7 @@ void test_fixed_seed_malformed_programs_terminate_with_valid_spans() {
         "root", "if", "else", "for", "in", "when", "Text", "1", "\"text\"",
         "{", "}", "(", ")", "[", "]", ":", ";", ",", ".", "?", "->", "@", "\n",
     };
+    const strata::compiler::SchemaRegistry registry = strata::compiler::SchemaRegistry::builtins();
     std::uint64_t random = 0xD1B54A32D192ED03ULL;
     const auto next = [&random]() {
         random ^= random << 13U;
@@ -330,7 +332,14 @@ void test_fixed_seed_malformed_programs_terminate_with_valid_spans() {
         }
 
         const auto parsed = strata::compiler::parse_source("generated.strata", source);
-        for (const auto& diagnostic : parsed.diagnostics) {
+        // Analysis runs on whatever the parser recovered, recovery nodes included.
+        const auto analysed = strata::compiler::validate_semantics(
+            parsed.file, registry, strata::compiler::AnalysisInput::incomplete
+        );
+        std::vector<strata::compiler::Diagnostic> diagnostics = parsed.diagnostics;
+        diagnostics.insert(diagnostics.end(), analysed.diagnostics.begin(),
+                           analysed.diagnostics.end());
+        for (const auto& diagnostic : diagnostics) {
             if (!diagnostic.range.has_value()) continue;
             check(
                 diagnostic.range->source_id == "generated.strata",
@@ -811,6 +820,191 @@ void test_slots_declared_inside_child_component_fills_are_forwarded() {
     check(forwarded.succeeded(), "a forwarded slot was not declared:" + describe(forwarded));
 }
 
+namespace compiler = strata::compiler;
+
+/** Every node id of a file: expressions, statements, blocks and widget calls. */
+class NodeIds final {
+public:
+    void file(const compiler::File& file) {
+        for (const compiler::Declaration& declaration : file.declarations) {
+            if (const auto* screen = std::get_if<compiler::ScreenDeclaration>(&declaration.node))
+                block(*screen->body);
+            else if (const auto* component =
+                         std::get_if<compiler::ComponentDeclaration>(&declaration.node)) {
+                for (const auto& parameter : component->parameters) {
+                    if (parameter.default_value != nullptr) expression(*parameter.default_value);
+                }
+                block(*component->body);
+            }
+        }
+    }
+
+    std::vector<compiler::NodeId> ids;
+    std::vector<const compiler::Expression*> identifiers;
+
+private:
+    void block(const compiler::Block& block) {
+        ids.push_back(block.id);
+        for (const compiler::StatementPtr& statement : block.statements) {
+            ids.push_back(statement->id);
+            if (const auto* state = std::get_if<compiler::StateStatement>(&statement->node)) {
+                if (state->initializer != nullptr) expression(*state->initializer);
+            } else if (const auto* derived =
+                           std::get_if<compiler::DerivedStatement>(&statement->node)) {
+                expression(*derived->expression);
+            } else if (const auto* widget =
+                           std::get_if<compiler::WidgetStatement>(&statement->node)) {
+                call(widget->call);
+            } else if (const auto* root = std::get_if<compiler::RootStatement>(&statement->node)) {
+                call(root->call);
+            } else if (const auto* loop = std::get_if<compiler::ForStatement>(&statement->node)) {
+                expression(*loop->collection);
+                this->block(*loop->block);
+            }
+        }
+    }
+
+    void call(const compiler::WidgetCall& call) {
+        ids.push_back(call.id);
+        for (const compiler::Argument& argument : call.arguments) expression(*argument.value);
+        if (call.body != nullptr) block(*call.body);
+    }
+
+    void expression(const compiler::Expression& expression) {
+        ids.push_back(expression.id);
+        if (std::holds_alternative<compiler::IdentifierExpression>(expression.node))
+            identifiers.push_back(&expression);
+        if (const auto* binary = std::get_if<compiler::BinaryExpression>(&expression.node)) {
+            this->expression(*binary->left);
+            this->expression(*binary->right);
+        } else if (const auto* call = std::get_if<compiler::CallExpression>(&expression.node)) {
+            for (const compiler::Argument& argument : call->arguments)
+                this->expression(*argument.value);
+        }
+    }
+};
+
+/** Loads `main` with `modules` serving its imports, without analysing it. */
+compiler::ModuleResult load(const std::string_view main,
+                            const std::vector<compiler::ModuleSource>& modules = {}) {
+    const compiler::ModuleLoader loader = [&modules](const std::string_view,
+                                                     const std::string_view path) {
+        const auto found = std::ranges::find(modules, path, &compiler::ModuleSource::source_id);
+        if (found == modules.end()) throw compiler::ModuleLoadError("test module is missing");
+        return *found;
+    };
+    return compiler::load_modules(compiler::ModuleSource{"app/main.strata", std::string(main)},
+                                  loader);
+}
+
+// Every node of a compilation has its own id, across imported modules and through the parser's
+// recovery nodes, so analysis can key its tables by id.
+void test_node_ids_are_unique_across_modules() {
+    const auto modules = load(
+        "import \"shared.strata\";\n"
+        "screen Main { state count = 1; root Panel { Label(text: \"a\") Text(text: ) } }",
+        {compiler::ModuleSource{
+            "shared.strata", "component Label(text: string) { Text(text: text + \"!\") }"}}
+    );
+    NodeIds walk;
+    walk.file(modules.merged_file);
+    std::vector<compiler::NodeId> ids = walk.ids;
+    std::ranges::sort(ids);
+    check(std::ranges::adjacent_find(ids) == ids.end(), "two nodes share an id");
+    check(!ids.empty() && ids.back() < modules.merged_file.node_id_limit,
+          "a node id lies outside the file's id range");
+}
+
+/** The identifier named `name` that `walk` found, in source order. */
+const compiler::Expression& identifier(const NodeIds& walk, const std::string_view name) {
+    for (const compiler::Expression* expression : walk.identifiers) {
+        if (std::get<compiler::IdentifierExpression>(expression->node).name == name)
+            return *expression;
+    }
+    throw std::runtime_error("identifier '" + std::string(name) + "' was not found");
+}
+
+// Analysis records what each name denotes, each expression's type and each call's parameters,
+// and remembers which module a declaration came from; lowering only reads these tables.
+void test_analysis_records_a_resolved_typed_tree() {
+    static const compiler::SchemaRegistry registry = compiler::SchemaRegistry::builtins();
+    const auto modules = load(
+        "import \"shared.strata\";\n"
+        "screen Main { state count = 1; derived doubled = count * 2;\n"
+        "  root Label(text: format(\"{0}\", doubled)) }",
+        {compiler::ModuleSource{"shared.strata",
+                                "component Label(text: string) { Text(text: text) }"}}
+    );
+    const compiler::SemanticResult analysed =
+        compiler::validate_semantics(modules.merged_file, registry);
+    check(analysed.diagnostics.empty(), "the resolved-tree fixture did not analyse cleanly");
+    const compiler::SemanticModel& model = analysed.model;
+    NodeIds walk;
+    walk.file(modules.merged_file);
+
+    const auto kind_of = [&](const std::string_view name) {
+        return model.symbol(identifier(walk, name))->kind;
+    };
+    check(kind_of("text") == compiler::SymbolKind::parameter &&
+              kind_of("count") == compiler::SymbolKind::state &&
+              kind_of("doubled") == compiler::SymbolKind::derived,
+          "identifiers did not resolve to their declarations");
+    const compiler::SemanticTypePtr& doubled_type = model.facts(identifier(walk, "doubled")).type;
+    check(doubled_type != nullptr && doubled_type->kind == compiler::SemanticTypeKind::number,
+          "a derived value was not typed by its expression");
+
+    const auto& screen = std::get<compiler::ScreenDeclaration>(
+        modules.merged_file.declarations.back().node
+    );
+    const auto& root = std::get<compiler::RootStatement>(screen.body->statements.back()->node);
+    const compiler::ResolvedWidgetCall* call = model.widget_call(root.call);
+    check(call != nullptr && call->target == compiler::WidgetCallTarget::component &&
+              call->arguments.size() == 1U && call->arguments.front().parameter != nullptr &&
+              call->arguments.front().parameter->name == "text",
+          "a component call did not record which parameter its argument fills");
+    check(model.components.at("Label").source_id == "shared.strata",
+          "an imported component lost the module it was declared in");
+}
+
+// `bind:` expands only for a retained state or Binding parameter. A loop item that shadows a
+// state is neither: lowering used to drop the binding silently, so it is now an error.
+void test_bind_shorthand_needs_a_retained_target() {
+    static const compiler::SchemaRegistry registry = compiler::SchemaRegistry::builtins();
+    const auto bound = load("screen Main { state name = \"\"; root TextBox(bind: name) }");
+    const compiler::SemanticResult analysed =
+        compiler::validate_semantics(bound.merged_file, registry);
+    const auto& screen =
+        std::get<compiler::ScreenDeclaration>(bound.merged_file.declarations.front().node);
+    const auto& root = std::get<compiler::RootStatement>(screen.body->statements.back()->node);
+    check(analysed.diagnostics.empty() && analysed.model.widget_call(root.call)->bindings.size() == 1U,
+          "a state bound with bind: was not recorded for expansion");
+
+    const auto shadowed = compile_source(
+        "screen Main { state name = \"\"; state names = [\"a\"];\n"
+        "  root Panel { for name in names { TextBox(bind: name) } } }"
+    );
+    check(diagnostic_count(shadowed, "STRATA.DSL.SEMANTIC_BINDING_TARGET") == 1U,
+          "bind: on a loop item shadowing a state was accepted:" + describe(shadowed));
+}
+
+// Analysis runs when parsing or an import failed, so every problem shows at once, without the
+// cascade a missing declaration or unreadable statement would cause.
+void test_analysis_runs_despite_syntax_and_import_errors() {
+    const auto broken = compile_source(
+        "screen Main { root Panel { Text(text: 5) Text(text \"x\") } }"
+    );
+    check(has_diagnostic(broken, "STRATA.DSL.PARSE_ARGUMENT_LIST") &&
+              diagnostic_count(broken, "STRATA.DSL.SEMANTIC_TYPE_MISMATCH") == 1U &&
+              !has_diagnostic(broken, "STRATA.DSL.SEMANTIC_LAYER_ROOT"),
+          "a syntax error hid or cascaded into semantic diagnostics:" + describe(broken));
+    check(!broken.source_map.entries.empty(), "a module with a syntax error had no source map");
+
+    const auto missing = compile_source("import \"missing.strata\";\nscreen Main { root Missing() }");
+    check(has_diagnostic(missing, "STRATA.DSL.IMPORT_LOAD_FAILED") &&
+              !has_diagnostic(missing, "STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET"),
+          "a failed import cascaded into unknown names:" + describe(missing));
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -838,6 +1032,10 @@ int strata_test_compiler() {
         test_state_actions_see_the_state_lowering_declares();
         test_sibling_widgets_need_their_own_persistence_keys();
         test_slots_declared_inside_child_component_fills_are_forwarded();
+        test_node_ids_are_unique_across_modules();
+        test_analysis_records_a_resolved_typed_tree();
+        test_bind_shorthand_needs_a_retained_target();
+        test_analysis_runs_despite_syntax_and_import_errors();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

@@ -19,11 +19,14 @@ struct PortableIrResult final {
     std::vector<Diagnostic> diagnostics;
 };
 
-/** Lowers parser-independent immutable JSON IR and validates its required structural invariants. */
+/**
+ * Projects an analysed module into parser-independent immutable JSON IR and validates its required
+ * structural invariants. `semantic` must be the error-free analysis of `file`.
+ */
 [[nodiscard]] PortableIrResult lower_portable_ir(
     const File& file,
     const SchemaRegistry& registry,
-    const std::map<std::string, ValidatedAnimation, std::less<>>& animations
+    const SemanticResult& semantic
 );
 void validate_portable_ir(const data::JsonValue& unit);
 void validate_portable_ir(data::JsonView unit);

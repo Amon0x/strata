@@ -13,7 +13,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -158,6 +157,11 @@ using data::JsonValue;
 }
 
 [[nodiscard]] JsonValue semantic_type(const SemanticType& type);
+
+[[nodiscard]] const std::string& map_key(const MapKey& key) {
+    if (const auto* identifier = std::get_if<IdentifierMapKey>(&key)) return identifier->name;
+    return std::get<StringMapKey>(key).value;
+}
 
 [[nodiscard]] JsonValue schema_parameter(const SchemaParameter& parameter) {
     std::vector<JsonValue> aliases;
@@ -312,67 +316,54 @@ using data::JsonValue;
     throw std::runtime_error("invalid semantic type");
 }
 
-enum class BindingKind { local, parameter, host, style, animation, component, unknown };
-
-struct Binding final {
-    BindingKind kind = BindingKind::unknown;
-    SemanticTypePtr type;
-    bool retained_state = false;
-};
-
-using Scope = std::unordered_map<std::string, Binding>;
-
-[[nodiscard]] std::string binding_name(const BindingKind kind) {
-    switch (kind) {
-    case BindingKind::local: return "local";
-    case BindingKind::parameter: return "parameter";
-    case BindingKind::host: return "host";
-    case BindingKind::style: return "style";
-    case BindingKind::animation: return "animation";
-    case BindingKind::component: return "component";
-    case BindingKind::unknown: return "unknown";
-    }
-    throw std::runtime_error("invalid binding kind");
-}
-
-struct ComponentSchema final {
-    std::vector<SchemaParameter> parameters;
-};
-
 struct ActionReference final {
     std::string component_path;
     const ActionSchema* schema;
     SourceSpan span;
 };
 
+/** How a variable's binding and static type appear in the IR, from the symbol it resolved to. */
+struct VariableBinding final {
+    std::string_view binding;
+    std::string type;
+};
+
+[[nodiscard]] VariableBinding variable_binding(const Symbol& symbol) {
+    switch (symbol.kind) {
+    case SymbolKind::state:
+    case SymbolKind::derived:
+    case SymbolKind::loop_item:
+    case SymbolKind::lambda_parameter:
+        return {"local", "unknown"};
+    case SymbolKind::loop_index:
+        return {"local", "number"};
+    case SymbolKind::parameter:
+        return {"parameter",
+                symbol.component != nullptr
+                    ? symbol.component->parameters[symbol.parameter_index].type->diagnostic_name()
+                    : std::string("unknown")};
+    case SymbolKind::component:
+        return {"component", "component"};
+    case SymbolKind::style:
+        return {"style", "style"};
+    case SymbolKind::animation:
+        return {"animation", "animation"};
+    case SymbolKind::host:
+    case SymbolKind::unresolved:
+        break;
+    }
+    return {"host", "unknown"};
+}
+
+/**
+ * Projects an analysed module into portable IR. Every name, call, type and IR position was decided
+ * by semantic analysis; this only writes those facts out in the IR's shape.
+ */
 class Lowerer final {
 public:
-    Lowerer(
-        const File& file,
-        const SchemaRegistry& registry,
-        const std::map<std::string, ValidatedAnimation, std::less<>>& validated_animations
-    ) : file_(file),
-        registry_(registry),
-        validated_animations_(validated_animations),
-        names_(file) {
-        for (const Declaration& declaration : file_.declarations) {
-            if (const auto* component = std::get_if<ComponentDeclaration>(&declaration.node)) {
-                ComponentSchema schema;
-                for (const Parameter& parameter : component->parameters) {
-                    schema.parameters.push_back(SchemaParameter{
-                        .name = parameter.name,
-                        .type = resolve_parameter_type(parameter, registry_),
-                        .required = parameter.default_value == nullptr,
-                        .nullable = parameter.type_reference.has_value() &&
-                            parameter.type_reference->nullable,
-                        .aliases = {},
-                        .material_type = std::nullopt,
-                    });
-                }
-                components_.emplace(component->name, std::move(schema));
-            }
-        }
-    }
+    Lowerer(const File& file, const SchemaRegistry& registry, const SemanticResult& semantic)
+        : file_(file), registry_(registry), model_(semantic.model),
+          validated_animations_(semantic.animations) {}
 
     [[nodiscard]] PortableIrResult run() {
         std::vector<std::pair<std::string, JsonValue>> screens;
@@ -380,15 +371,20 @@ public:
         std::vector<std::pair<std::string, JsonValue>> components;
         std::vector<std::pair<std::string, JsonValue>> styles;
         std::vector<std::pair<std::string, JsonValue>> animations;
-        for (const Declaration& declaration : file_.declarations) {
+        for (std::size_t index = 0U; index < file_.declarations.size(); ++index) {
+            const Declaration& declaration = file_.declarations[index];
+            const Placement& placement = model_.declaration_placements.at(index);
             if (const auto* screen = std::get_if<ScreenDeclaration>(&declaration.node)) {
-                screens.emplace_back(screen->name, compile_screen(*screen, declaration.span));
+                screens.emplace_back(screen->name,
+                                     layer(screen->name, *screen->body, placement, declaration.span));
             } else if (const auto* overlay = std::get_if<OverlayDeclaration>(&declaration.node)) {
-                overlays.emplace_back(overlay->name, compile_overlay(*overlay, declaration.span));
+                overlays.emplace_back(
+                    overlay->name, layer(overlay->name, *overlay->body, placement, declaration.span));
             } else if (const auto* component = std::get_if<ComponentDeclaration>(&declaration.node)) {
-                components.emplace_back(component->name, compile_component(*component, declaration.span));
+                components.emplace_back(component->name,
+                                        compile_component(*component, placement, declaration.span));
             } else if (const auto* style = std::get_if<StyleDeclaration>(&declaration.node)) {
-                styles.emplace_back(style->name, compile_style(*style, declaration.span));
+                styles.emplace_back(style->name, compile_style(*style, placement, declaration.span));
             } else if (const auto* animation = std::get_if<AnimationDeclaration>(&declaration.node)) {
                 const auto validated = validated_animations_.find(animation->name);
                 if (validated == validated_animations_.end()) {
@@ -439,189 +435,106 @@ public:
             {"sourceId", JsonValue(file_.source_id)},
             {"styles", array(sorted_values(styles))},
         });
-        if (!diagnostics_.empty()) return PortableIrResult{std::nullopt, std::move(diagnostics_)};
         validate_portable_ir(unit);
         return PortableIrResult{std::move(unit), {}};
     }
 
 private:
-    [[nodiscard]] SemanticTypePtr type_of(const SemanticTypeKind kind) const {
-        auto type = std::make_shared<SemanticType>();
-        type->kind = kind;
-        return type;
+    /**
+     * Where an expression lowers. An expression lowered at a synthesized node (a `bind:` shorthand
+     * as its controlled value, a binding's undo arguments under its event action) keeps its
+     * subtree's shape below the new position.
+     */
+    [[nodiscard]] Placement placed(const NodeId id) const {
+        Placement placement = model_.placement(id);
+        if (rebase_.has_value()) {
+            const auto move = [](std::string& value, const std::string& from, const std::string& to) {
+                if (value.starts_with(from)) value = to + value.substr(from.size());
+            };
+            move(placement.path, rebase_->first.path, rebase_->second.path);
+            move(placement.component_path, rebase_->first.component_path,
+                 rebase_->second.component_path);
+        }
+        return placement;
     }
 
-    [[nodiscard]] JsonValue compile_screen(const ScreenDeclaration& screen, const SourceSpan& source_span) {
-        const std::string path = "/screen/" + screen.name;
+    /** Lowers an expression at a synthesized position instead of the one analysis placed. */
+    [[nodiscard]] JsonValue compile_at(const Expression& expression, Placement at) {
+        rebase_.emplace(model_.placement(expression.id), std::move(at));
+        JsonValue lowered = compile_expression(expression);
+        rebase_.reset();
+        return lowered;
+    }
+
+    [[nodiscard]] JsonValue layer(const std::string& name, const Block& body,
+                                  const Placement& placement, const SourceSpan& source_span) {
         return object({
-            {"body", compile_block(*screen.body, child(path, "body"), "screen " + screen.name, {})},
-            {"name", JsonValue(screen.name)},
-            {"path", JsonValue(path)},
+            {"body", compile_block(body)},
+            {"name", JsonValue(name)},
+            {"path", JsonValue(placement.path)},
             {"span", span(source_span)},
         });
     }
 
-    [[nodiscard]] JsonValue compile_overlay(const OverlayDeclaration& overlay, const SourceSpan& source_span) {
-        const std::string path = "/overlay/" + overlay.name;
-        return object({
-            {"body", compile_block(*overlay.body, child(path, "body"), "overlay " + overlay.name, {})},
-            {"name", JsonValue(overlay.name)},
-            {"path", JsonValue(path)},
-            {"span", span(source_span)},
-        });
-    }
-
-    [[nodiscard]] JsonValue compile_component(
-        const ComponentDeclaration& component,
-        const SourceSpan& source_span
-    ) {
-        const std::string path = "/component/" + component.name;
-        const ComponentSchema& schema = components_.at(component.name);
-        Scope scope;
+    [[nodiscard]] JsonValue compile_component(const ComponentDeclaration& component,
+                                              const Placement& placement,
+                                              const SourceSpan& source_span) {
+        const ComponentInfo& info = model_.components.at(component.name);
         std::vector<JsonValue> parameters;
         for (std::size_t index = 0U; index < component.parameters.size(); ++index) {
             const Parameter& parameter = component.parameters[index];
-            const SchemaParameter& parameter_schema = schema.parameters[index];
-            scope.insert_or_assign(
-                parameter.name,
-                Binding{
-                    BindingKind::parameter,
-                    parameter_schema.type,
-                    parameter_schema.type->kind == SemanticTypeKind::state_binding,
-                }
-            );
             parameters.push_back(object({
                 {"default", parameter.default_value != nullptr
-                                ? compile_expression(
-                                      *parameter.default_value,
-                                      child(child(child(path, "parameter"), parameter.name), "default"),
-                                      "component " + component.name + "(" + parameter.name + ")",
-                                      scope,
-                                      parameter_schema.type.get()
-                                  )
+                                ? compile_expression(*parameter.default_value)
                                 : null()},
-                {"schema", schema_parameter(parameter_schema)},
+                {"schema", schema_parameter(info.parameters[index])},
                 {"span", span(parameter.span)},
             }));
         }
-        std::vector<std::pair<std::string, JsonValue>> widget_defaults;
-        for (const StatementPtr& statement : component.body->statements) {
-            const auto* property = std::get_if<PropertyStatement>(&statement->node);
-            if (property == nullptr || property->property.name != "defaults") continue;
-            const auto* defaults = std::get_if<MapExpression>(&property->property.value->node);
-            if (defaults == nullptr) continue;
-            for (const MapEntry& widget_entry : defaults->entries) {
-                const std::optional<std::string> widget_name = static_map_key(widget_entry.key);
-                const auto* values = std::get_if<MapExpression>(&widget_entry.value->node);
-                if (!widget_name.has_value() || values == nullptr ||
-                    registry_.widget(*widget_name) == nullptr) {
-                    continue;
-                }
-                const Expression* style = nullptr;
-                const Expression* variant = nullptr;
-                for (const MapEntry& value : values->entries) {
-                    const std::optional<std::string> name = static_map_key(value.key);
-                    if (name == "style") style = value.value.get();
-                    else if (name == "variant") variant = value.value.get();
-                }
-                widget_defaults.emplace_back(
-                    *widget_name,
-                    object({
-                        {"name", JsonValue(*widget_name)},
-                        {"style", style != nullptr
-                                      ? compile_expression(
-                                            *style,
-                                            child(child(child(path, "defaults"), *widget_name), "style"),
-                                            "component " + component.name + "/defaults/" +
-                                                *widget_name + ".style",
-                                            scope,
-                                            type_of(SemanticTypeKind::style).get()
-                                        )
-                                      : null()},
-                        {"variant", variant != nullptr
-                                        ? compile_expression(
-                                              *variant,
-                                              child(child(child(path, "defaults"), *widget_name), "variant"),
-                                              "component " + component.name + "/defaults/" +
-                                                  *widget_name + ".variant",
-                                              scope,
-                                              type_of(SemanticTypeKind::string).get()
-                                          )
-                                        : null()},
-                    })
-                );
-            }
-            break;
-        }
-        std::ranges::sort(widget_defaults, {}, &decltype(widget_defaults)::value_type::first);
-        std::vector<JsonValue> compiled_defaults;
-        compiled_defaults.reserve(widget_defaults.size());
-        for (auto& [name, value] : widget_defaults) {
-            static_cast<void>(name);
-            compiled_defaults.push_back(std::move(value));
+        std::vector<JsonValue> widget_defaults;
+        widget_defaults.reserve(info.widget_defaults.size());
+        for (const ComponentWidgetDefault& entry : info.widget_defaults) {
+            widget_defaults.push_back(object({
+                {"name", JsonValue(entry.widget)},
+                {"style", entry.style != nullptr ? compile_expression(*entry.style) : null()},
+                {"variant", entry.variant != nullptr ? compile_expression(*entry.variant) : null()},
+            }));
         }
         return object({
-            {"body", compile_block(
-                         *component.body,
-                         child(path, "body"),
-                         "component " + component.name,
-                         std::move(scope)
-                     )},
+            {"body", compile_block(*component.body)},
             {"name", JsonValue(component.name)},
             {"parameters", array(std::move(parameters))},
-            {"path", JsonValue(path)},
+            {"path", JsonValue(placement.path)},
             {"span", span(source_span)},
-            {"widgetDefaults", array(std::move(compiled_defaults))},
+            {"widgetDefaults", array(std::move(widget_defaults))},
         });
     }
 
-    [[nodiscard]] JsonValue compile_style(const StyleDeclaration& style, const SourceSpan& source_span) {
-        const std::string path = "/style/" + style.name;
+    [[nodiscard]] JsonValue compile_style(const StyleDeclaration& style, const Placement& placement,
+                                          const SourceSpan& source_span) {
         JsonValue::Object properties;
-        for (const Property& property : style.properties) {
-            properties.emplace_back(
-                property.name,
-                compile_expression(
-                    *property.value,
-                    child(path, property.name),
-                    "style " + style.name + "." + property.name,
-                    {},
-                    nullptr
-                )
-            );
-        }
+        for (const Property& property : style.properties)
+            properties.emplace_back(property.name, compile_expression(*property.value));
         std::vector<JsonValue> bases;
         for (const StyleBase& base : style.bases) bases.emplace_back(base.name);
         return object({
             {"bases", array(std::move(bases))},
             {"name", JsonValue(style.name)},
-            {"path", JsonValue(path)},
+            {"path", JsonValue(placement.path)},
             {"properties", JsonValue(std::move(properties))},
             {"span", span(source_span)},
         });
     }
 
-    [[nodiscard]] JsonValue compile_block(
-        const Block& block,
-        const std::string& path,
-        const std::string& component_path,
-        Scope scope,
-        const bool repeater_body = false
-    ) {
-        for (const StatementPtr& statement : block.statements) {
-            if (const auto* derived = std::get_if<DerivedStatement>(&statement->node)) {
-                scope.insert_or_assign(derived->name, Binding{BindingKind::local, type_of(SemanticTypeKind::unknown)});
-            }
-        }
+    [[nodiscard]] JsonValue compile_block(const Block& block, const bool repeater_body = false) {
         std::vector<JsonValue> statements;
-        for (std::size_t index = 0U; index < block.statements.size(); ++index) {
-            const Statement& statement = *block.statements[index];
-            const std::string statement_path = child(path, std::to_string(index));
+        for (const StatementPtr& pointer : block.statements) {
+            const Statement& statement = *pointer;
+            const std::string& statement_path = model_.placement(statement.id).path;
             if (const auto* state = std::get_if<StateStatement>(&statement.node)) {
-                SemanticTypePtr declared =
-                    state->type_reference.has_value()
-                        ? resolve_type_reference(*state->type_reference, registry_)
-                        : infer_structured_type(state->initializer.get());
+                const auto schema = model_.state_schemas.find(statement.id);
+                const SemanticType* declared =
+                    schema != model_.state_schemas.end() ? schema->second.get() : nullptr;
                 JsonValue declared_schema = declared != nullptr ? semantic_type(*declared) : null();
                 if (declared != nullptr && state->type_reference.has_value() &&
                     state->type_reference->nullable) {
@@ -632,106 +545,58 @@ private:
                 }
                 statements.push_back(object({
                     {"declaredSchema", std::move(declared_schema)},
-                    {"declaredType", declared != nullptr ? JsonValue(declared->diagnostic_name()) : null()},
+                    {"declaredType",
+                     declared != nullptr ? JsonValue(declared->diagnostic_name()) : null()},
                     {"initializer", state->initializer != nullptr
-                                         ? compile_expression(
-                                               *state->initializer,
-                                               child(statement_path, "initializer"),
-                                               component_path + "/" + state->name,
-                                               scope,
-                                               nullptr
-                                           )
-                                         : null()},
+                                        ? compile_expression(*state->initializer)
+                                        : null()},
                     {"kind", JsonValue("state")},
                     {"name", JsonValue(state->name)},
                     {"path", JsonValue(statement_path)},
                     {"span", span(statement.span)},
                 }));
-                scope.insert_or_assign(
-                    state->name,
-                    Binding{BindingKind::local, type_of(SemanticTypeKind::unknown), true}
-                );
             } else if (const auto* derived = std::get_if<DerivedStatement>(&statement.node)) {
                 statements.push_back(object({
-                    {"expression", compile_expression(
-                                       *derived->expression,
-                                       child(statement_path, "expression"),
-                                       component_path + "/" + derived->name,
-                                       scope,
-                                       nullptr
-                                   )},
+                    {"expression", compile_expression(*derived->expression)},
                     {"kind", JsonValue("derived")},
                     {"name", JsonValue(derived->name)},
                     {"path", JsonValue(statement_path)},
                     {"span", span(statement.span)},
                 }));
-                scope.insert_or_assign(derived->name, Binding{BindingKind::local, type_of(SemanticTypeKind::unknown)});
             } else if (const auto* widget = std::get_if<WidgetStatement>(&statement.node)) {
-                statements.push_back(node_statement(
-                    widget->call,
-                    statement_path,
-                    component_path + "/" + widget->call.name,
-                    scope,
-                    false,
-                    statement.span
-                ));
+                statements.push_back(object({
+                    {"call", compile_call(widget->call)},
+                    {"kind", JsonValue("node")},
+                    {"path", JsonValue(model_.placement(widget->call.id).path)},
+                    {"root", JsonValue(false)},
+                    {"span", span(statement.span)},
+                }));
             } else if (const auto* root = std::get_if<RootStatement>(&statement.node)) {
-                statements.push_back(node_statement(
-                    root->call,
-                    child(statement_path, "root"),
-                    component_path + "/root/" + root->call.name,
-                    scope,
-                    true,
-                    statement.span,
-                    statement_path
-                ));
+                statements.push_back(object({
+                    {"call", compile_call(root->call)},
+                    {"kind", JsonValue("node")},
+                    {"path", JsonValue(statement_path)},
+                    {"root", JsonValue(true)},
+                    {"span", span(statement.span)},
+                }));
             } else if (const auto* conditional = std::get_if<IfStatement>(&statement.node)) {
                 statements.push_back(object({
-                    {"condition", compile_expression(
-                                      *conditional->condition,
-                                      child(statement_path, "condition"),
-                                      component_path + "/if",
-                                      scope,
-                                      nullptr
-                                  )},
+                    {"condition", compile_expression(*conditional->condition)},
                     {"else", conditional->else_block != nullptr
-                                 ? compile_block(
-                                       *conditional->else_block,
-                                       child(statement_path, "else"),
-                                       component_path + "/else",
-                                       scope
-                                   )
+                                 ? compile_block(*conditional->else_block)
                                  : null()},
                     {"kind", JsonValue("if")},
                     {"path", JsonValue(statement_path)},
                     {"span", span(statement.span)},
-                    {"then", compile_block(
-                                 *conditional->then_block,
-                                 child(statement_path, "then"),
-                                 component_path + "/then",
-                                 scope
-                             )},
+                    {"then", compile_block(*conditional->then_block)},
                 }));
             } else if (const auto* when = std::get_if<WhenStatement>(&statement.node)) {
                 std::vector<JsonValue> branches;
-                for (std::size_t branch_index = 0U; branch_index < when->branches.size(); ++branch_index) {
-                    const WhenBranch& branch = when->branches[branch_index];
-                    const std::string branch_path = child(
-                        child(statement_path, "branch"), std::to_string(branch_index)
-                    );
-                    const std::string branch_component = component_path + "/when[" +
-                                                         std::to_string(branch_index) + "]";
+                for (const WhenBranch& branch : when->branches) {
                     branches.push_back(object({
-                        {"block", compile_block(*branch.block, branch_path, branch_component, scope)},
-                        {"match", branch.match != nullptr
-                                      ? compile_expression(
-                                            *branch.match,
-                                            child(branch_path, "match"),
-                                            branch_component,
-                                            scope,
-                                            nullptr
-                                        )
-                                      : null()},
+                        {"block", compile_block(*branch.block)},
+                        {"match", branch.match != nullptr ? compile_expression(*branch.match)
+                                                          : null()},
                         {"span", span(branch.span)},
                     }));
                 }
@@ -740,47 +605,14 @@ private:
                     {"kind", JsonValue("when")},
                     {"path", JsonValue(statement_path)},
                     {"span", span(statement.span)},
-                    {"subject", compile_expression(
-                                    *when->subject,
-                                    child(statement_path, "subject"),
-                                    component_path + "/when",
-                                    scope,
-                                    nullptr
-                                )},
+                    {"subject", compile_expression(*when->subject)},
                 }));
             } else if (const auto* loop = std::get_if<ForStatement>(&statement.node)) {
-                Scope loop_scope = scope;
-                loop_scope.insert_or_assign(loop->item_name, Binding{BindingKind::local, type_of(SemanticTypeKind::unknown)});
-                if (loop->index_name.has_value()) {
-                    loop_scope.insert_or_assign(
-                        *loop->index_name,
-                        Binding{BindingKind::local, type_of(SemanticTypeKind::number)}
-                    );
-                }
-                JsonValue compiled_body = compile_block(
-                    *loop->block,
-                    child(statement_path, "body"),
-                    component_path + "/" + loop->item_name,
-                    loop_scope
-                );
+                JsonValue compiled_body = compile_block(*loop->block);
                 JsonValue::Object loop_fields{
                     {"block", std::move(compiled_body)},
-                    {"collection", compile_expression(
-                                       *loop->collection,
-                                       child(statement_path, "collection"),
-                                       component_path + "/for",
-                                       scope,
-                                       nullptr
-                                   )},
-                    {"filter", loop->filter != nullptr
-                                   ? compile_expression(
-                                         *loop->filter,
-                                         child(statement_path, "filter"),
-                                         component_path + "/for/filter",
-                                         loop_scope,
-                                         nullptr
-                                     )
-                                   : null()},
+                    {"collection", compile_expression(*loop->collection)},
+                    {"filter", loop->filter != nullptr ? compile_expression(*loop->filter) : null()},
                 };
                 if (repeater_body) {
                     loop_fields.emplace_back(
@@ -797,632 +629,289 @@ private:
             }
         }
         return object({
-            {"path", JsonValue(path)},
+            {"path", JsonValue(model_.placement(block.id).path)},
             {"span", span(block.span)},
             {"statements", array(std::move(statements))},
         });
     }
 
-    [[nodiscard]] JsonValue node_statement(
-        const WidgetCall& call,
-        const std::string& call_path,
-        const std::string& component_path,
-        const Scope& scope,
-        const bool root,
-        const SourceSpan& statement_span,
-        std::optional<std::string> statement_path = std::nullopt
-    ) {
-        return object({
-            {"call", compile_call(call, call_path, component_path, scope)},
-            {"kind", JsonValue("node")},
-            {"path", JsonValue(statement_path.value_or(call_path))},
-            {"root", JsonValue(root)},
-            {"span", span(statement_span)},
-        });
-    }
-
-    [[nodiscard]] JsonValue compile_call(
-        const WidgetCall& call,
-        const std::string& path,
-        const std::string& component_path,
-        const Scope& scope
-    ) {
-        const WidgetSchema* widget = registry_.widget(call.name);
-        const auto component = components_.find(call.name);
-        const std::vector<SchemaParameter>* parameters = nullptr;
-        if (widget != nullptr) parameters = &widget->parameters;
-        if (component != components_.end()) parameters = &component->second.parameters;
-        const std::vector<SchemaParameter> empty;
-        if (parameters == nullptr) parameters = &empty;
-
-        struct ResolvedArgument final {
-            const Argument* argument = nullptr;
-            const SchemaParameter* parameter = nullptr;
-            std::string name;
-        };
-        std::vector<ResolvedArgument> resolved;
-        resolved.reserve(call.arguments.size());
-        std::set<std::string, std::less<>> supplied;
-        std::size_t positional_index = 0U;
-        bool seen_named = false;
-        for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
-            const Argument& argument = call.arguments[index];
-            const SchemaParameter* parameter = nullptr;
-            if (!argument.name.has_value()) {
-                if (!seen_named && positional_index < parameters->size()) {
-                    parameter = &(*parameters)[positional_index++];
-                }
-            } else {
-                seen_named = true;
-                const auto found = std::ranges::find_if(*parameters, [&argument](const SchemaParameter& candidate) {
-                    return candidate.accepts_name(*argument.name);
-                });
-                if (found != parameters->end()) parameter = &*found;
-            }
-            const std::string name = parameter != nullptr
-                                         ? parameter->name
-                                         : argument.name.value_or("#" + std::to_string(index));
-            resolved.push_back(ResolvedArgument{&argument, parameter, name});
-            if (parameter != nullptr) supplied.insert(parameter->name);
-        }
-
+    [[nodiscard]] JsonValue compile_call(const WidgetCall& call) {
+        const ResolvedWidgetCall& resolved = *model_.widget_call(call);
+        const Placement& placement = model_.placement(call.id);
         JsonValue::Object arguments;
-        for (const ResolvedArgument& resolved_argument : resolved) {
-            const Argument& argument = *resolved_argument.argument;
-            const SchemaParameter* parameter = resolved_argument.parameter;
-            if (widget != nullptr && parameter != nullptr &&
-                widget->find_binding(parameter->name) != nullptr) {
+        for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
+            const SchemaParameter* parameter = resolved.arguments[index].parameter;
+            // A `bind:` shorthand lowers only through its expansion below.
+            if (resolved.widget != nullptr && parameter != nullptr &&
+                resolved.widget->find_binding(parameter->name) != nullptr) {
                 continue;
             }
+            const Argument& argument = call.arguments[index];
             arguments.emplace_back(
-                resolved_argument.name,
-                compile_expression(
-                    *argument.value,
-                    child(child(path, "arguments"), resolved_argument.name),
-                    component_path + "." + resolved_argument.name,
-                    scope,
-                    parameter != nullptr ? parameter->type.get() : nullptr
+                parameter != nullptr ? parameter->name
+                                     : argument.name.value_or("#" + std::to_string(index)),
+                compile_expression(*argument.value)
+            );
+        }
+        for (const BindingExpansion& expansion : resolved.bindings) {
+            const Argument& shorthand = call.arguments[expansion.shorthand];
+            const std::string& value = expansion.binding->value_parameter;
+            arguments.emplace_back(
+                value,
+                compile_at(*shorthand.value,
+                           Placement{child(child(placement.path, "arguments"), value),
+                                     placement.component_path + "." + value})
+            );
+            const Placement event{
+                child(child(placement.path, "arguments"), expansion.binding->event_parameter),
+                placement.component_path + "." + expansion.binding->event_parameter,
+            };
+            arguments.emplace_back(
+                expansion.binding->event_parameter,
+                compile_binding_action(
+                    std::get<IdentifierExpression>(shorthand.value->node).name,
+                    shorthand.value->span, event,
+                    expansion.undo_label.has_value() ? &call.arguments[*expansion.undo_label]
+                                                     : nullptr,
+                    expansion.undo_coalesce.has_value() ? &call.arguments[*expansion.undo_coalesce]
+                                                        : nullptr
                 )
             );
         }
-        if (widget != nullptr) {
-            for (const WidgetBindingSchema& binding : widget->bindings) {
-                const auto bound = std::ranges::find_if(
-                    resolved,
-                    [&binding](const ResolvedArgument& argument) {
-                        return argument.parameter != nullptr &&
-                               argument.parameter->name == binding.shorthand_parameter;
-                    }
-                );
-                if (bound == resolved.end() ||
-                    supplied.contains(binding.value_parameter) ||
-                    supplied.contains(binding.event_parameter)) {
-                    continue;
-                }
-                const auto* identifier = std::get_if<IdentifierExpression>(
-                    &bound->argument->value->node
-                );
-                const auto scoped = identifier != nullptr
-                                        ? scope.find(identifier->name)
-                                        : scope.end();
-                if (identifier == nullptr || scoped == scope.end() ||
-                    !scoped->second.retained_state) {
-                    continue;
-                }
-                const SchemaParameter* controlled = widget->find_parameter(
-                    binding.value_parameter
-                );
-                if (controlled == nullptr) {
-                    throw std::logic_error("validated widget binding lost its controlled parameter");
-                }
-                const std::string value_path = child(
-                    child(path, "arguments"), binding.value_parameter
-                );
-                arguments.emplace_back(
-                    binding.value_parameter,
-                    compile_expression(
-                        *bound->argument->value,
-                        value_path,
-                        component_path + "." + binding.value_parameter,
-                        scope,
-                        controlled->type.get()
-                    )
-                );
-                const std::string event_path = child(
-                    child(path, "arguments"), binding.event_parameter
-                );
-                const auto undo_label = std::ranges::find(
-                    resolved, std::string("undoLabel"), &ResolvedArgument::name
-                );
-                const auto undo_coalesce = std::ranges::find(
-                    resolved, std::string("undoCoalesce"), &ResolvedArgument::name
-                );
-                arguments.emplace_back(
-                    binding.event_parameter,
-                    compile_binding_action(
-                        identifier->name,
-                        bound->argument->value->span,
-                        event_path,
-                        component_path + "." + binding.event_parameter,
-                        undo_label != resolved.end() ? undo_label->argument : nullptr,
-                        undo_coalesce != resolved.end() ? undo_coalesce->argument : nullptr,
-                        scope
-                    )
-                );
-            }
-        }
         return object({
             {"arguments", JsonValue(std::move(arguments))},
-            {"children", call.body != nullptr
-                             ? compile_block(
-                                   *call.body,
-                                   child(path, "children"),
-                                   component_path,
-                                   scope,
-                                   call.name == "Repeater"
-                               )
-                             : null()},
-            {"kind", JsonValue(widget != nullptr ? "widget" : "component")},
+            {"children", call.body != nullptr ? compile_block(*call.body, resolved.lazy_rows)
+                                              : null()},
+            {"kind", JsonValue(resolved.widget != nullptr ? "widget" : "component")},
             {"name", JsonValue(call.name)},
-            {"path", JsonValue(path)},
+            {"path", JsonValue(placement.path)},
             {"span", span(call.span)},
         });
     }
 
-    [[nodiscard]] const SemanticType* nested_expected(
-        const SemanticType* expected,
-        const std::string_view field
-    ) const {
-        if (expected == nullptr) return nullptr;
-        if (expected->kind == SemanticTypeKind::map) {
-            if (const ObjectField* object_field = expected->find_field(field); object_field != nullptr) {
-                return object_field->type.get();
-            }
-            return expected->value.get();
-        }
-        if (expected->kind == SemanticTypeKind::union_value) {
-            for (const SemanticTypePtr& option : expected->options) {
-                if (const SemanticType* nested = nested_expected(option.get(), field); nested != nullptr) {
-                    return nested;
-                }
-            }
-        }
-        return nullptr;
-    }
-
-    [[nodiscard]] bool accepts_kind(const SemanticType* expected, const SemanticTypeKind kind) const {
-        if (expected == nullptr) return false;
-        if (expected->kind == kind) return true;
-        if (expected->kind == SemanticTypeKind::union_value) {
-            return std::ranges::any_of(expected->options, [this, kind](const SemanticTypePtr& option) {
-                return accepts_kind(option.get(), kind);
+    [[nodiscard]] JsonValue compile_expression(const Expression& expression) {
+        const Placement placement = placed(expression.id);
+        const ExpressionFacts& facts = model_.facts(expression);
+        const auto literal = [&](std::initializer_list<JsonValue::ObjectEntry> value) {
+            return expression_base(placement.path, expression.span, {
+                {"kind", JsonValue("literal")},
+                {"value", object(value)},
+            });
+        };
+        switch (facts.form) {
+        case ExpressionForm::theme_token:
+            return literal({
+                {"kind", JsonValue("themeToken")},
+                {"name", JsonValue(std::get<PropertyAccessExpression>(expression.node).property_name)},
+            });
+        case ExpressionForm::material:
+            return compile_material(expression, placement);
+        case ExpressionForm::action:
+            return compile_action(expression, placement);
+        case ExpressionForm::animation_name: {
+            const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
+            return literal({
+                {"kind", JsonValue("animation")},
+                {"name", JsonValue(identifier != nullptr
+                                       ? identifier->name
+                                       : std::get<StringLiteral>(
+                                             std::get<LiteralExpression>(expression.node).value)
+                                             .value)},
             });
         }
-        return false;
-    }
-
-    [[nodiscard]] JsonValue compile_expression(
-        const Expression& expression,
-        const std::string& path,
-        const std::string& component_path,
-        const Scope& scope,
-        const SemanticType* expected
-    ) {
-        if (const auto* property = std::get_if<PropertyAccessExpression>(&expression.node)) {
-            if (const auto* receiver = std::get_if<IdentifierExpression>(&property->receiver->node);
-                receiver != nullptr && receiver->name == "theme") {
-                return expression_base(path, expression.span, {
-                    {"kind", JsonValue("literal")},
-                    {"value", object({
-                        {"kind", JsonValue("themeToken")},
-                        {"name", JsonValue(property->property_name)},
-                    })},
-                });
-            }
+        case ExpressionForm::style_reference:
+            return literal({
+                {"kind", JsonValue("styleReference")},
+                {"name", JsonValue(std::get<IdentifierExpression>(expression.node).name)},
+            });
+        case ExpressionForm::component_template:
+            return compile_component_template(expression, placement);
+        case ExpressionForm::key_literal:
+        case ExpressionForm::image_literal:
+        case ExpressionForm::value:
+            break;
         }
-        if (const auto* grouping = std::get_if<GroupingExpression>(&expression.node)) {
-            return compile_expression(
-                *grouping->expression,
-                child(path, "grouped"),
-                component_path,
-                scope,
-                expected
-            );
-        }
-        if (accepts_kind(expected, SemanticTypeKind::material)) {
-            if (JsonValue special = compile_material(expression, path, component_path, scope);
-                !special.is_null()) {
-                return special;
-            }
-        }
-        if (accepts_kind(expected, SemanticTypeKind::action)) {
-            if (JsonValue special = compile_action(expression, path, component_path, scope);
-                !special.is_null()) {
-                return special;
-            }
-        }
-        if (accepts_kind(expected, SemanticTypeKind::animation)) {
-            std::optional<std::string> name;
-            if (const std::string* literal = literal_string(expression); literal != nullptr) name = *literal;
-            if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
-                identifier != nullptr && !reads_value(identifier->name, scope)) {
-                name = identifier->name;
-            }
-            if (name.has_value()) {
-                return expression_base(path, expression.span, {
-                    {"kind", JsonValue("literal")},
-                    {"value", object({
-                        {"kind", JsonValue("animation")},
-                        {"name", JsonValue(*name)},
-                    })},
-                });
-            }
-        }
-        if (accepts_kind(expected, SemanticTypeKind::style)) {
-            if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
-                identifier != nullptr && !reads_value(identifier->name, scope)) {
-                return expression_base(path, expression.span, {
-                    {"kind", JsonValue("literal")},
-                    {"value", object({
-                        {"kind", JsonValue("styleReference")},
-                        {"name", JsonValue(identifier->name)},
-                    })},
-                });
-            }
-            if (const auto* call = std::get_if<CallExpression>(&expression.node);
-                call != nullptr && call->target.qualified_name() == "style") {
-                return compile_helper(*call, expression.span, path, component_path, scope);
-            }
-        }
-
-        if (const auto* literal = std::get_if<LiteralExpression>(&expression.node)) {
-            return expression_base(path, expression.span, {
+        if (const auto* grouping = std::get_if<GroupingExpression>(&expression.node))
+            return compile_expression(*grouping->expression);
+        if (const auto* value = std::get_if<LiteralExpression>(&expression.node)) {
+            return expression_base(placement.path, expression.span, {
                 {"kind", JsonValue("literal")},
-                {"value", literal_value(literal->value, expected)},
+                {"value", literal_value(value->value, facts.form)},
             });
         }
         if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node)) {
-            const Binding binding = binding_for(identifier->name, scope);
-            return expression_base(path, expression.span, {
-                {"binding", JsonValue(binding_name(binding.kind))},
+            const VariableBinding binding = variable_binding(model_.origin(facts.symbol));
+            return expression_base(placement.path, expression.span, {
+                {"binding", JsonValue(std::string(binding.binding))},
                 {"kind", JsonValue("variable")},
                 {"name", JsonValue(identifier->name)},
-                {"stateBinding", JsonValue(
-                    expected != nullptr &&
-                    expected->kind == SemanticTypeKind::state_binding
-                )},
-                {"type", JsonValue(binding.type->diagnostic_name())},
+                {"stateBinding", JsonValue(facts.state_binding)},
+                {"type", JsonValue(binding.type)},
             });
         }
         if (const auto* list = std::get_if<ListExpression>(&expression.node)) {
             std::vector<JsonValue> elements;
-            const SemanticType* element_expected = expected != nullptr ? expected->element.get() : nullptr;
-            for (std::size_t index = 0U; index < list->elements.size(); ++index) {
-                elements.push_back(compile_expression(
-                    *list->elements[index],
-                    child(path, std::to_string(index)),
-                    component_path + "[" + std::to_string(index) + "]",
-                    scope,
-                    element_expected
-                ));
-            }
-            return expression_base(path, expression.span, {
+            elements.reserve(list->elements.size());
+            for (const ExpressionPtr& element : list->elements)
+                elements.push_back(compile_expression(*element));
+            return expression_base(placement.path, expression.span, {
                 {"elements", array(std::move(elements))},
                 {"kind", JsonValue("list")},
             });
         }
         if (const auto* map = std::get_if<MapExpression>(&expression.node)) {
             JsonValue::Object entries;
-            for (std::size_t index = 0U; index < map->entries.size(); ++index) {
-                const MapEntry& entry = map->entries[index];
-                const std::string key = *static_map_key(entry.key);
-                entries.emplace_back(
-                    key,
-                    compile_expression(
-                        *entry.value,
-                        child(path, key),
-                        component_path + "." + key,
-                        scope,
-                        nested_expected(expected, key)
-                    )
-                );
-            }
-            return expression_base(path, expression.span, {
+            for (const MapEntry& entry : map->entries)
+                entries.emplace_back(map_key(entry.key),
+                                     compile_expression(*entry.value));
+            return expression_base(placement.path, expression.span, {
                 {"entries", JsonValue(std::move(entries))},
                 {"kind", JsonValue("map")},
             });
         }
         if (const auto* unary = std::get_if<UnaryExpression>(&expression.node)) {
-            return expression_base(path, expression.span, {
+            return expression_base(placement.path, expression.span, {
                 {"kind", JsonValue("unary")},
-                {"operand", compile_expression(
-                                *unary->operand,
-                                child(path, "operand"),
-                                component_path,
-                                scope,
-                                nullptr
-                            )},
-                {"operator", JsonValue(unary->operation == UnaryOperator::negate ? "negate" : "not")},
+                {"operand", compile_expression(*unary->operand)},
+                {"operator",
+                 JsonValue(unary->operation == UnaryOperator::negate ? "negate" : "not")},
             });
         }
         if (const auto* binary = std::get_if<BinaryExpression>(&expression.node)) {
-            return expression_base(path, expression.span, {
+            return expression_base(placement.path, expression.span, {
                 {"kind", JsonValue("binary")},
-                {"left", compile_expression(
-                             *binary->left,
-                             child(path, "left"),
-                             component_path + ".left",
-                             scope,
-                             nullptr
-                         )},
+                {"left", compile_expression(*binary->left)},
                 {"operator", JsonValue(binary_operator(binary->operation))},
-                {"right", compile_expression(
-                              *binary->right,
-                              child(path, "right"),
-                              component_path + ".right",
-                              scope,
-                              nullptr
-                          )},
+                {"right", compile_expression(*binary->right)},
             });
         }
         if (const auto* conditional = std::get_if<ConditionalExpression>(&expression.node)) {
-            return expression_base(path, expression.span, {
-                {"condition", compile_expression(
-                                  *conditional->condition,
-                                  child(path, "condition"),
-                                  component_path + ".condition",
-                                  scope,
-                                  nullptr
-                              )},
-                {"else", compile_expression(
-                             *conditional->else_expression,
-                             child(path, "else"),
-                             component_path + ".else",
-                             scope,
-                             expected
-                         )},
+            return expression_base(placement.path, expression.span, {
+                {"condition", compile_expression(*conditional->condition)},
+                {"else", compile_expression(*conditional->else_expression)},
                 {"kind", JsonValue("conditional")},
-                {"then", compile_expression(
-                             *conditional->then_expression,
-                             child(path, "then"),
-                             component_path + ".then",
-                             scope,
-                             expected
-                         )},
+                {"then", compile_expression(*conditional->then_expression)},
             });
         }
         if (const auto* property = std::get_if<PropertyAccessExpression>(&expression.node)) {
-            return expression_base(path, expression.span, {
+            return expression_base(placement.path, expression.span, {
                 {"kind", JsonValue("property")},
                 {"name", JsonValue(property->property_name)},
-                {"receiver", compile_expression(
-                                 *property->receiver,
-                                 child(path, "receiver"),
-                                 component_path + ".receiver",
-                                 scope,
-                                 nullptr
-                             )},
+                {"receiver", compile_expression(*property->receiver)},
             });
         }
         if (const auto* indexed = std::get_if<IndexExpression>(&expression.node)) {
-            return expression_base(path, expression.span, {
-                {"index", compile_expression(
-                              *indexed->index,
-                              child(path, "index"),
-                              component_path + ".index",
-                              scope,
-                              nullptr
-                          )},
+            return expression_base(placement.path, expression.span, {
+                {"index", compile_expression(*indexed->index)},
                 {"kind", JsonValue("index")},
-                {"receiver", compile_expression(
-                                 *indexed->receiver,
-                                 child(path, "receiver"),
-                                 component_path + ".receiver",
-                                 scope,
-                                 nullptr
-                             )},
+                {"receiver", compile_expression(*indexed->receiver)},
             });
         }
-        if (const auto* call = std::get_if<CallExpression>(&expression.node)) {
-            if (call->target.qualified_name() == "action") {
-                return compile_action(expression, path, component_path, scope);
-            }
-            if (call->target.qualified_name() == "material") {
-                return compile_material(expression, path, component_path, scope);
-            }
-            if (components_.contains(call->target.qualified_name())) {
-                return compile_component_template(
-                    *call,
-                    expression.span,
-                    path,
-                    component_path,
-                    scope
-                );
-            }
-            return compile_helper(*call, expression.span, path, component_path, scope);
-        }
+        if (const auto* call = std::get_if<CallExpression>(&expression.node))
+            return compile_helper(*call, expression.span, placement);
         if (const auto* lambda = std::get_if<LambdaExpression>(&expression.node)) {
-            Scope lambda_scope = scope;
-            lambda_scope.insert_or_assign(
-                lambda->parameter_name,
-                Binding{BindingKind::local, type_of(SemanticTypeKind::unknown)}
-            );
-            return expression_base(path, expression.span, {
-                {"body", compile_expression(
-                             *lambda->body,
-                             child(path, "body"),
-                             component_path + "/" + lambda->parameter_name,
-                             lambda_scope,
-                             nullptr
-                         )},
+            return expression_base(placement.path, expression.span, {
+                {"body", compile_expression(*lambda->body)},
                 {"kind", JsonValue("lambda")},
                 {"parameter", JsonValue(lambda->parameter_name)},
             });
         }
-        return expression_base(path, expression.span, {{"kind", JsonValue("error")}});
+        return expression_base(placement.path, expression.span, {{"kind", JsonValue("error")}});
     }
 
-    [[nodiscard]] JsonValue compile_helper(
-        const CallExpression& call,
-        const SourceSpan& source_span,
-        const std::string& path,
-        const std::string& component_path,
-        const Scope& scope
-    ) {
-        const std::string name = call.target.qualified_name();
-        const HelperSchema* helper = registry_.helper(name);
+    [[nodiscard]] JsonValue compile_helper(const CallExpression& call, const SourceSpan& source_span,
+                                           const Placement& placement) {
         std::vector<JsonValue> arguments;
-        for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
-            const Argument& argument = call.arguments[index];
-            const SchemaParameter* parameter = nullptr;
-            if (helper != nullptr) {
-                if (argument.name.has_value()) {
-                    const auto found = std::ranges::find_if(
-                        helper->parameters,
-                        [&argument](const SchemaParameter& candidate) {
-                            return candidate.accepts_name(*argument.name);
-                        }
-                    );
-                    if (found != helper->parameters.end()) parameter = &*found;
-                } else if (index < helper->parameters.size()) {
-                    parameter = &helper->parameters[index];
-                }
-            }
-            const SemanticType* expected = parameter != nullptr
-                                               ? parameter->type.get()
-                                               : helper != nullptr ? helper->vararg_type.get() : nullptr;
-            const std::string argument_path = argument.name.value_or(std::to_string(index));
+        arguments.reserve(call.arguments.size());
+        for (const Argument& argument : call.arguments) {
             arguments.push_back(object({
                 {"name", nullable_string(argument.name)},
                 {"span", span(argument.span)},
-                {"value", compile_expression(
-                              *argument.value,
-                              child(path, argument_path),
-                              component_path + "." + argument_path,
-                              scope,
-                              expected
-                          )},
+                {"value", compile_expression(*argument.value)},
             }));
         }
-        return expression_base(path, source_span, {
+        return expression_base(placement.path, source_span, {
             {"arguments", array(std::move(arguments))},
             {"kind", JsonValue("helper")},
-            {"name", JsonValue(name)},
+            {"name", JsonValue(call.target.qualified_name())},
         });
     }
 
-    [[nodiscard]] JsonValue compile_component_template(
-        const CallExpression& call,
-        const SourceSpan& source_span,
-        const std::string& path,
-        const std::string& component_path,
-        const Scope& scope
-    ) {
-        const std::string name = call.target.qualified_name();
-        const ComponentSchema& component = components_.at(name);
+    [[nodiscard]] JsonValue compile_component_template(const Expression& expression,
+                                                       const Placement& placement) {
+        const auto& call = std::get<CallExpression>(expression.node);
+        const ResolvedCall& resolved = *model_.call(expression);
         std::vector<JsonValue> arguments;
         arguments.reserve(call.arguments.size());
-        std::size_t positional_index = 0U;
         for (std::size_t index = 0U; index < call.arguments.size(); ++index) {
             const Argument& argument = call.arguments[index];
-            const SchemaParameter* parameter = nullptr;
-            if (argument.name.has_value()) {
-                const auto found = std::ranges::find_if(
-                    component.parameters,
-                    [&argument](const SchemaParameter& candidate) {
-                        return candidate.accepts_name(*argument.name);
-                    }
-                );
-                if (found != component.parameters.end()) parameter = &*found;
-            } else if (positional_index < component.parameters.size()) {
-                parameter = &component.parameters[positional_index++];
-            }
-            const std::string argument_name = parameter != nullptr
-                ? parameter->name
-                : argument.name.value_or("#" + std::to_string(index));
+            const SchemaParameter* parameter = resolved.arguments[index].parameter;
             arguments.push_back(object({
-                {"name", JsonValue(argument_name)},
+                {"name", JsonValue(parameter != nullptr
+                                       ? parameter->name
+                                       : argument.name.value_or("#" + std::to_string(index)))},
                 {"span", span(argument.span)},
-                {"value", compile_expression(
-                              *argument.value,
-                              child(path, argument_name),
-                              component_path + "." + argument_name,
-                              scope,
-                              parameter != nullptr ? parameter->type.get() : nullptr
-                          )},
+                {"value", compile_expression(*argument.value)},
             }));
         }
-        return expression_base(path, source_span, {
+        return expression_base(placement.path, expression.span, {
             {"arguments", array(std::move(arguments))},
-            {"component", JsonValue(name)},
+            {"component", JsonValue(call.target.qualified_name())},
             {"kind", JsonValue("componentTemplate")},
         });
     }
 
-    [[nodiscard]] JsonValue compile_action(
-        const Expression& expression,
-        const std::string& path,
-        const std::string& component_path,
-        const Scope& scope
-    ) {
-        const auto* call = std::get_if<CallExpression>(&expression.node);
-        const std::string* id = call != nullptr && !call->arguments.empty()
-                                    ? literal_string(*call->arguments.front().value)
-                                    : literal_string(expression);
-        if (id == nullptr) return null();
-        const ActionSchema* action = registry_.action(*id);
+    /** The named arguments an action or material call lowers, under the parameter each fills. */
+    [[nodiscard]] std::vector<JsonValue> identified_arguments(const CallExpression& call,
+                                                              const IdentifiedCall& identified) {
         std::vector<JsonValue> arguments;
-        if (call != nullptr && action != nullptr) {
-            for (const Argument& argument : call->arguments | std::views::drop(1)) {
-                if (!argument.name.has_value()) continue;
-                const auto parameter = std::ranges::find_if(
-                    action->parameters,
-                    [&argument](const SchemaParameter& candidate) {
-                        return candidate.accepts_name(*argument.name);
-                    }
-                );
-                if (parameter == action->parameters.end()) continue;
-                arguments.push_back(object({
-                    {"name", JsonValue(parameter->name)},
-                    {"span", span(argument.span)},
-                    {"value", compile_expression(
-                                  *argument.value,
-                                  child(path, parameter->name),
-                                  component_path + "." + parameter->name,
-                                  scope,
-                                  parameter->type.get()
-                              )},
-                }));
-            }
-            action_references_.push_back(ActionReference{component_path, action, expression.span});
+        arguments.reserve(identified.arguments.size());
+        for (const auto& [index, parameter] : identified.arguments) {
+            const Argument& argument = call.arguments[index];
+            arguments.push_back(object({
+                {"name", JsonValue(parameter->name)},
+                {"span", span(argument.span)},
+                {"value", compile_expression(*argument.value)},
+            }));
         }
-        return expression_base(path, expression.span, {
+        return arguments;
+    }
+
+    [[nodiscard]] JsonValue compile_action(const Expression& expression,
+                                           const Placement& placement) {
+        const IdentifiedCall& identified = model_.identified_calls.at(expression.id);
+        const auto* call = std::get_if<CallExpression>(&expression.node);
+        std::vector<JsonValue> arguments;
+        if (call != nullptr && identified.action != nullptr) {
+            arguments = identified_arguments(*call, identified);
+            action_references_.push_back(
+                ActionReference{placement.component_path, identified.action, expression.span});
+        }
+        return expression_base(placement.path, expression.span, {
             {"arguments", array(std::move(arguments))},
-            {"id", JsonValue(*id)},
+            {"id", JsonValue(identified.id)},
             {"kind", JsonValue("action")},
         });
     }
 
+    /** `bind: state` writes the widget's event value back into the state it names. */
     [[nodiscard]] JsonValue compile_binding_action(
         const std::string& state_name,
         const SourceSpan& source_span,
-        const std::string& path,
-        const std::string& component_path,
+        const Placement& event,
         const Argument* const undo_label,
-        const Argument* const undo_coalesce,
-        const Scope& scope
+        const Argument* const undo_coalesce
     ) {
         const ActionSchema* action = registry_.action("state.setFromEvent");
         if (action == nullptr) {
             throw std::logic_error("widget binding requires the state.setFromEvent action contract");
         }
-        action_references_.push_back(ActionReference{component_path, action, source_span});
-        const std::string name_path = child(path, "name");
+        action_references_.push_back(ActionReference{event.component_path, action, source_span});
         std::vector<JsonValue> arguments;
         arguments.push_back(object({
             {"name", JsonValue("name")},
             {"span", span(source_span)},
-            {"value", expression_base(name_path, source_span, {
+            {"value", expression_base(child(event.path, "name"), source_span, {
                 {"kind", JsonValue("literal")},
                 {"value", object({
                     {"kind", JsonValue("string")},
@@ -1430,81 +919,51 @@ private:
                 })},
             })},
         }));
-        const auto append_undo_argument = [this, &arguments, &path, &component_path, &scope](
+        const auto append_undo_argument = [this, &arguments, &event](
                                               const std::string_view name,
                                               const Argument* const argument
                                           ) {
             if (argument == nullptr) return;
+            // The argument already lowered in its own slot; here it lowers again under the event.
             arguments.push_back(object({
                 {"name", JsonValue(std::string(name))},
                 {"span", span(argument->span)},
-                {"value", compile_expression(
-                    *argument->value,
-                    child(path, name),
-                    component_path + "." + std::string(name),
-                    scope,
-                    nullptr
-                )},
+                {"value", compile_at(*argument->value,
+                                     Placement{child(event.path, name),
+                                               event.component_path + "." + std::string(name)})},
             }));
         };
         append_undo_argument("undoLabel", undo_label);
         append_undo_argument("undoCoalesce", undo_coalesce);
-        return expression_base(path, source_span, {
+        return expression_base(event.path, source_span, {
             {"arguments", array(std::move(arguments))},
             {"id", JsonValue("state.setFromEvent")},
             {"kind", JsonValue("action")},
         });
     }
 
-    [[nodiscard]] JsonValue compile_material(
-        const Expression& expression,
-        const std::string& path,
-        const std::string& component_path,
-        const Scope& scope
-    ) {
-        const auto* call = std::get_if<CallExpression>(&expression.node);
-        const std::string* id = call != nullptr && !call->arguments.empty()
-                                    ? literal_string(*call->arguments.front().value)
-                                    : literal_string(expression);
-        if (id == nullptr) return null();
-        material_ids_.insert(*id);
-        if (call != nullptr) {
-            std::vector<JsonValue> parameters;
-            const MaterialSchema* material = registry_.material(*id);
-            for (std::size_t index = 1U; index < call->arguments.size(); ++index) {
-                const Argument& argument = call->arguments[index];
-                if (!argument.name.has_value() || material == nullptr) continue;
-                const SchemaParameter* parameter = material->find_parameter(*argument.name);
-                if (parameter == nullptr) continue;
-                parameters.push_back(object({
-                    {"name", JsonValue(parameter->name)},
-                    {"span", span(argument.span)},
-                    {"value", compile_expression(
-                                  *argument.value,
-                                  child(path, parameter->name),
-                                  component_path + "." + parameter->name,
-                                  scope,
-                                  parameter->type.get()
-                              )},
-                }));
-            }
-            return expression_base(path, expression.span, {
-                {"id", JsonValue(*id)},
+    [[nodiscard]] JsonValue compile_material(const Expression& expression,
+                                             const Placement& placement) {
+        const IdentifiedCall& identified = model_.identified_calls.at(expression.id);
+        material_ids_.insert(identified.id);
+        if (const auto* call = std::get_if<CallExpression>(&expression.node)) {
+            return expression_base(placement.path, expression.span, {
+                {"id", JsonValue(identified.id)},
                 {"kind", JsonValue("materialCall")},
-                {"parameters", array(std::move(parameters))},
+                {"parameters", array(identified_arguments(*call, identified))},
             });
         }
-        return expression_base(path, expression.span, {
-            {"id", JsonValue(*id)},
+        return expression_base(placement.path, expression.span, {
+            {"id", JsonValue(identified.id)},
             {"kind", JsonValue("materialReference")},
         });
     }
 
-    [[nodiscard]] JsonValue expression_base(
+    [[nodiscard]] static JsonValue expression_base(
         const std::string& path,
         const SourceSpan& source_span,
         std::initializer_list<JsonValue::ObjectEntry> fields
-    ) const {
+    ) {
         JsonValue::Object entries;
         entries.emplace_back("path", JsonValue(path));
         entries.emplace_back("span", span(source_span));
@@ -1512,18 +971,13 @@ private:
         return JsonValue(std::move(entries));
     }
 
-    [[nodiscard]] JsonValue literal_value(
-        const LiteralValue& literal,
-        const SemanticType* expected
-    ) const {
+    [[nodiscard]] static JsonValue literal_value(const LiteralValue& literal,
+                                                 const ExpressionForm form) {
         if (const auto* value = std::get_if<StringLiteral>(&literal)) {
-            if (accepts_kind(expected, SemanticTypeKind::key)) {
-                return object({{"kind", JsonValue("key")}, {"value", JsonValue(value->value)}});
-            }
-            if (accepts_kind(expected, SemanticTypeKind::image)) {
-                return object({{"kind", JsonValue("image")}, {"value", JsonValue(value->value)}});
-            }
-            return object({{"kind", JsonValue("string")}, {"value", JsonValue(value->value)}});
+            const std::string_view kind = form == ExpressionForm::key_literal     ? "key"
+                                          : form == ExpressionForm::image_literal ? "image"
+                                                                                  : "string";
+            return object({{"kind", JsonValue(std::string(kind))}, {"value", JsonValue(value->value)}});
         }
         if (const auto* value = std::get_if<NumberLiteral>(&literal)) {
             const double number = parse_number(value->raw);
@@ -1542,95 +996,9 @@ private:
                 {"rgba", JsonValue(color_rgba(value->raw))},
             });
         }
-        if (const auto* value = std::get_if<BooleanLiteral>(&literal)) {
+        if (const auto* value = std::get_if<BooleanLiteral>(&literal))
             return object({{"kind", JsonValue("boolean")}, {"value", JsonValue(value->value)}});
-        }
         return object({{"kind", JsonValue("null")}});
-    }
-
-    [[nodiscard]] Binding binding_for(const std::string_view name, const Scope& scope) const {
-        const auto scoped = scope.find(std::string(name));
-        switch (names_.resolve(name, scoped != scope.end(), registry_)) {
-        case NameBinding::local: return scoped->second;
-        case NameBinding::component:
-            return Binding{BindingKind::component, type_of(SemanticTypeKind::component)};
-        case NameBinding::style: return Binding{BindingKind::style, type_of(SemanticTypeKind::style)};
-        case NameBinding::animation:
-            return Binding{BindingKind::animation, type_of(SemanticTypeKind::animation)};
-        case NameBinding::host:
-        case NameBinding::unresolved: break;
-        }
-        return Binding{BindingKind::host, type_of(SemanticTypeKind::unknown)};
-    }
-
-    /** Whether a bare name in a style or animation slot reads a value rather than a declaration. */
-    [[nodiscard]] bool reads_value(const std::string_view name, const Scope& scope) const {
-        const NameBinding binding = names_.resolve(name, scope.contains(std::string(name)), registry_);
-        return binding == NameBinding::local || binding == NameBinding::host;
-    }
-
-    [[nodiscard]] SemanticTypePtr infer_structured_type(const Expression* expression) const {
-        if (expression == nullptr) return nullptr;
-        if (const auto* literal = std::get_if<LiteralExpression>(&expression->node)) {
-            if (std::holds_alternative<StringLiteral>(literal->value)) return type_of(SemanticTypeKind::string);
-            if (std::holds_alternative<NumberLiteral>(literal->value)) return type_of(SemanticTypeKind::number);
-            if (std::holds_alternative<ColorLiteral>(literal->value)) return type_of(SemanticTypeKind::color);
-            if (std::holds_alternative<BooleanLiteral>(literal->value)) return type_of(SemanticTypeKind::boolean);
-            return type_of(SemanticTypeKind::null_value);
-        }
-        if (const auto* list = std::get_if<ListExpression>(&expression->node)) {
-            auto type = std::make_shared<SemanticType>();
-            type->kind = SemanticTypeKind::list;
-            type->element = list->elements.empty()
-                                ? type_of(SemanticTypeKind::any)
-                                : infer_structured_type(list->elements.front().get());
-            type->maximum_items = maximum_eager_loop_items;
-            return type;
-        }
-        if (const auto* map = std::get_if<MapExpression>(&expression->node)) {
-            auto type = std::make_shared<SemanticType>();
-            type->kind = SemanticTypeKind::map;
-            type->label = "record";
-            for (const MapEntry& entry : map->entries) {
-                const std::optional<std::string> key = static_map_key(entry.key);
-                if (!key.has_value()) {
-                    type->allow_unknown_fields = true;
-                    type->value = type_of(SemanticTypeKind::any);
-                    continue;
-                }
-                SemanticTypePtr field = infer_structured_type(entry.value.get());
-                type->fields.push_back(ObjectField{
-                    *key,
-                    field != nullptr ? std::move(field) : type_of(SemanticTypeKind::any),
-                    true,
-                    false,
-                });
-            }
-            return type;
-        }
-        if (const auto* call = std::get_if<CallExpression>(&expression->node);
-            call != nullptr && call->target.qualified_name() == "persisted") {
-            std::size_t positional = 0U;
-            for (const Argument& argument : call->arguments) {
-                const bool initial = argument.name.has_value()
-                    ? *argument.name == "initial" : positional++ == 1U;
-                if (initial) return infer_structured_type(argument.value.get());
-            }
-        }
-        return nullptr;
-    }
-
-    [[nodiscard]] static const std::string* literal_string(const Expression& expression) {
-        const auto* literal = std::get_if<LiteralExpression>(&expression.node);
-        if (literal == nullptr) return nullptr;
-        const auto* string = std::get_if<StringLiteral>(&literal->value);
-        return string == nullptr ? nullptr : &string->value;
-    }
-
-    [[nodiscard]] static std::optional<std::string> static_map_key(const MapKey& key) {
-        if (const auto* identifier = std::get_if<IdentifierMapKey>(&key)) return identifier->name;
-        if (const auto* string = std::get_if<StringMapKey>(&key)) return string->value;
-        return std::nullopt;
     }
 
     [[nodiscard]] static std::string binary_operator(const BinaryOperator operation) {
@@ -1755,12 +1123,12 @@ private:
 
     const File& file_;
     const SchemaRegistry& registry_;
+    const SemanticModel& model_;
     const std::map<std::string, ValidatedAnimation, std::less<>>& validated_animations_;
-    std::unordered_map<std::string, ComponentSchema> components_;
-    ModuleNames names_;
     std::set<std::string> material_ids_;
     std::vector<ActionReference> action_references_;
-    std::vector<Diagnostic> diagnostics_;
+    /** While an expression lowers a second time: its own placement and the one it lowers at. */
+    std::optional<std::pair<Placement, Placement>> rebase_;
 };
 
 } // namespace
@@ -1768,9 +1136,9 @@ private:
 PortableIrResult lower_portable_ir(
     const File& file,
     const SchemaRegistry& registry,
-    const std::map<std::string, ValidatedAnimation, std::less<>>& animations
+    const SemanticResult& semantic
 ) {
-    return Lowerer(file, registry, animations).run();
+    return Lowerer(file, registry, semantic).run();
 }
 
 } // namespace strata::compiler

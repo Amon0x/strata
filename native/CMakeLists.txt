@@ -338,6 +338,15 @@ add_library(
         src/compiler/portable_ir_validation.cpp
         src/compiler/schema.cpp
         src/compiler/semantic.cpp
+        src/compiler/semantic/animations.cpp
+        src/compiler/semantic/declarations.cpp
+        src/compiler/semantic/path_outline.cpp
+        src/compiler/semantic/placements.cpp
+        src/compiler/semantic/policy.cpp
+        src/compiler/semantic/resolve.cpp
+        src/compiler/semantic/support.cpp
+        src/compiler/semantic/type_check.cpp
+        src/compiler/semantic/types.cpp
         src/compiler/source.cpp
         src/compiler/source_map.cpp
         src/font/opentype.cpp

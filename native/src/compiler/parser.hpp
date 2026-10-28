@@ -35,7 +35,8 @@ public:
         std::string source_id,
         std::vector<Token> tokens,
         std::vector<Diagnostic> diagnostics,
-        ParserLimits limits = {}
+        ParserLimits limits = {},
+        NodeId first_node_id = 0U
     );
 
     [[nodiscard]] ParseResult parse();
@@ -163,13 +164,15 @@ private:
     std::size_t declaration_count_ = 0U;
     std::size_t statement_count_ = 0U;
     std::size_t expression_count_ = 0U;
+    NodeId next_node_id_ = 0U;
 };
 
 [[nodiscard]] ParseResult parse_source(
     std::string source_id,
     std::string source,
     ParserLimits limits = {},
-    std::pmr::memory_resource* scratch = std::pmr::get_default_resource()
+    std::pmr::memory_resource* scratch = std::pmr::get_default_resource(),
+    NodeId first_node_id = 0U
 );
 
 } // namespace strata::compiler

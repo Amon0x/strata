@@ -33,6 +33,9 @@ ModuleResult load_modules(
     std::vector<std::string> dependencies;
     std::vector<Diagnostic> diagnostics;
     std::vector<std::string> visiting;
+    // Every module numbers its nodes from where the previous one stopped, so ids stay unique once
+    // the modules' declarations are merged into one file.
+    NodeId next_node_id = 0U;
 
     const auto add_dependency = [&dependencies](const std::string& source_id) {
         if (std::ranges::find(dependencies, source_id) == dependencies.end()) {
@@ -65,7 +68,9 @@ ModuleResult load_modules(
         }
 
         visiting.push_back(source.source_id);
-        ParseResult parsed = parse_source(source.source_id, source.text, {}, scratch);
+        ParseResult parsed =
+            parse_source(source.source_id, source.text, {}, scratch, next_node_id);
+        next_node_id = parsed.file.node_id_limit;
         diagnostics.insert(
             diagnostics.end(),
             std::make_move_iterator(parsed.diagnostics.begin()),
@@ -107,12 +112,17 @@ ModuleResult load_modules(
     visit(entry, std::nullopt);
     auto entry_module = std::ranges::find(modules, entry.source_id, &decltype(modules)::value_type::first);
     if (entry_module == modules.end()) {
-        modules.emplace_back(entry.source_id, parse_source(entry.source_id, entry.text, {}, scratch));
+        modules.emplace_back(
+            entry.source_id,
+            parse_source(entry.source_id, entry.text, {}, scratch, next_node_id)
+        );
+        next_node_id = modules.back().second.file.node_id_limit;
         entry_module = std::prev(modules.end());
     }
     File merged = entry_module->second.file;
     merged.imports.clear();
     merged.declarations.clear();
+    merged.node_id_limit = next_node_id;
     for (const auto& [source_id, module] : modules) {
         static_cast<void>(source_id);
         merged.declarations.insert(

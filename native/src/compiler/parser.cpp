@@ -18,13 +18,17 @@ namespace strata::compiler {
 namespace {
 
 template <typename Node>
-[[nodiscard]] ExpressionPtr make_expression(Node node, SourceSpan span) {
-    return std::make_shared<const Expression>(Expression{std::move(node), std::move(span)});
+[[nodiscard]] ExpressionPtr make_expression(NodeId& next_id, Node node, SourceSpan span) {
+    return std::make_shared<const Expression>(
+        Expression{std::move(node), std::move(span), next_id++}
+    );
 }
 
 template <typename Node>
-[[nodiscard]] StatementPtr make_statement(Node node, SourceSpan span) {
-    return std::make_shared<const Statement>(Statement{std::move(node), std::move(span)});
+[[nodiscard]] StatementPtr make_statement(NodeId& next_id, Node node, SourceSpan span) {
+    return std::make_shared<const Statement>(
+        Statement{std::move(node), std::move(span), next_id++}
+    );
 }
 
 } // namespace
@@ -33,11 +37,13 @@ Parser::Parser(
     std::string source_id,
     std::vector<Token> tokens,
     std::vector<Diagnostic> diagnostics,
-    ParserLimits limits
+    ParserLimits limits,
+    const NodeId first_node_id
 )
     : source_id_(std::move(source_id)),
       diagnostics_(std::move(diagnostics)),
-      limits_(limits) {
+      limits_(limits),
+      next_node_id_(first_node_id) {
     if (limits_.max_source_bytes == 0U || limits_.max_tokens == 0U ||
         limits_.max_nesting_depth == 0U || limits_.max_declarations == 0U ||
         limits_.max_statements == 0U || limits_.max_expressions == 0U ||
@@ -107,6 +113,7 @@ ParseResult Parser::parse() {
         std::move(declarations),
         std::move(trivia_),
         file_span,
+        next_node_id_,
     };
     return ParseResult{std::move(file), std::move(diagnostics_)};
 }
@@ -336,6 +343,7 @@ BlockPtr Parser::parse_block(const BodyKind kind) {
     return std::make_shared<const Block>(Block{
         std::move(statements),
         covering(left.span, right.span),
+        next_node_id_++,
     });
 }
 
@@ -356,7 +364,7 @@ StatementPtr Parser::parse_statement(const BodyKind kind) {
         if (widget_name()) return parse_widget_statement();
         if (match(TokenType::semicolon)) return nullptr;
         if (match(TokenType::error)) {
-            return make_statement(ErrorStatement{}, previous_token().span);
+            return make_statement(next_node_id_, ErrorStatement{}, previous_token().span);
         }
         static_cast<void>(error(
             peek(),
@@ -365,11 +373,11 @@ StatementPtr Parser::parse_statement(const BodyKind kind) {
         ));
         const Token& token = advance();
         synchronize_block();
-        return make_statement(ErrorStatement{}, token.span);
+        return make_statement(next_node_id_, ErrorStatement{}, token.span);
     } catch (const ParsePanic&) {
         const SourceSpan span = previous_or_peek().span;
         synchronize_block();
-        return make_statement(ErrorStatement{}, span);
+        return make_statement(next_node_id_, ErrorStatement{}, span);
     }
 }
 
@@ -396,6 +404,7 @@ StatementPtr Parser::parse_state_declaration(const Token& keyword) {
     const SourceSpan end_span = initializer != nullptr ? initializer->span : name.span;
     const SourceSpan span = covering(keyword.span, end_span);
     return make_statement(
+        next_node_id_,
         StateStatement{name.lexeme, std::move(type_reference), initializer},
         span
     );
@@ -414,13 +423,13 @@ StatementPtr Parser::parse_derived_declaration(const Token& keyword) {
     ExpressionPtr value = expression();
     static_cast<void>(match(TokenType::semicolon));
     const SourceSpan span = covering(keyword.span, value->span);
-    return make_statement(DerivedStatement{name.lexeme, value}, span);
+    return make_statement(next_node_id_, DerivedStatement{name.lexeme, value}, span);
 }
 
 StatementPtr Parser::parse_root_statement(const Token& keyword) {
     WidgetCall call = parse_widget_call();
     const SourceSpan span = covering(keyword.span, call.span);
-    return make_statement(RootStatement{std::move(call)}, span);
+    return make_statement(next_node_id_, RootStatement{std::move(call)}, span);
 }
 
 StatementPtr Parser::parse_if_statement(const Token& keyword) {
@@ -433,6 +442,7 @@ StatementPtr Parser::parse_if_statement(const Token& keyword) {
             else_block = std::make_shared<const Block>(Block{
                 std::vector<StatementPtr>{nested},
                 nested->span,
+                next_node_id_++,
             });
         } else {
             else_block = parse_block();
@@ -440,6 +450,7 @@ StatementPtr Parser::parse_if_statement(const Token& keyword) {
     }
     const SourceSpan span = covering(keyword.span, else_block != nullptr ? else_block->span : then_block->span);
     return make_statement(
+        next_node_id_,
         IfStatement{condition, std::move(then_block), std::move(else_block)},
         span
     );
@@ -460,7 +471,11 @@ StatementPtr Parser::parse_when_statement(const Token& keyword) {
             // `name -> { ... }` matches the value of `name`; a branch is never a lambda.
             count_expression();
             const Token& name = advance();
-            match_expression = make_expression(IdentifierExpression{name.lexeme}, name.span);
+            match_expression = make_expression(
+                next_node_id_,
+                IdentifierExpression{name.lexeme},
+                name.span
+            );
         } else if (!match(TokenType::else_keyword)) {
             match_expression = expression();
         }
@@ -485,7 +500,11 @@ StatementPtr Parser::parse_when_statement(const Token& keyword) {
         "Expected '}' after when branches."
     );
     const SourceSpan span = covering(keyword.span, right.span);
-    return make_statement(WhenStatement{std::move(subject), std::move(branches)}, span);
+    return make_statement(
+        next_node_id_,
+        WhenStatement{std::move(subject), std::move(branches)},
+        span
+    );
 }
 
 StatementPtr Parser::parse_for_statement(const Token& keyword) {
@@ -514,6 +533,7 @@ StatementPtr Parser::parse_for_statement(const Token& keyword) {
     BlockPtr body = parse_block();
     const SourceSpan span = covering(keyword.span, body->span);
     return make_statement(
+        next_node_id_,
         ForStatement{
             item.lexeme,
             std::move(index_name),
@@ -531,6 +551,7 @@ StatementPtr Parser::parse_animation_frame_statement(const Token& keyword) {
         keyword.type == TokenType::from ? AnimationFramePhase::from : AnimationFramePhase::to;
     const SourceSpan span = covering(keyword.span, body_span);
     return make_statement(
+        next_node_id_,
         AnimationFrameStatement{AnimationFrame{phase, std::move(properties), span}},
         span
     );
@@ -576,7 +597,7 @@ StatementPtr Parser::parse_property_statement() {
     static_cast<void>(match(TokenType::comma));
     static_cast<void>(match(TokenType::semicolon));
     const SourceSpan span = property.span;
-    return make_statement(PropertyStatement{std::move(property)}, span);
+    return make_statement(next_node_id_, PropertyStatement{std::move(property)}, span);
 }
 
 Property Parser::parse_property() {
@@ -598,7 +619,7 @@ StatementPtr Parser::parse_widget_statement() {
     WidgetCall call = parse_widget_call();
     static_cast<void>(match(TokenType::semicolon));
     const SourceSpan span = call.span;
-    return make_statement(WidgetStatement{std::move(call)}, span);
+    return make_statement(next_node_id_, WidgetStatement{std::move(call)}, span);
 }
 
 WidgetCall Parser::parse_widget_call() {
@@ -615,7 +636,7 @@ WidgetCall Parser::parse_widget_call() {
         body = parse_block();
     }
     const SourceSpan span = covering(name.span, body != nullptr ? body->span : previous_or_peek().span);
-    return WidgetCall{name.lexeme, std::move(arguments), std::move(body), span};
+    return WidgetCall{name.lexeme, std::move(arguments), std::move(body), span, next_node_id_++};
 }
 
 std::vector<Argument> Parser::parse_arguments(const TokenType terminator) {
@@ -673,7 +694,7 @@ ExpressionPtr Parser::parse_condition() {
             "Expected ')' after condition."
         );
         const SourceSpan span = covering(left.span, right.span);
-        return make_expression(GroupingExpression{std::move(condition)}, span);
+        return make_expression(next_node_id_, GroupingExpression{std::move(condition)}, span);
     }
     return expression();
 }
@@ -695,36 +716,48 @@ ExpressionPtr Parser::parse_expression(const Precedence minimum) {
 ExpressionPtr Parser::parse_prefix() {
     if (match(TokenType::string)) {
         const Token& token = previous_token();
-        return make_expression(LiteralExpression{StringLiteral{decode_string(token)}}, token.span);
+        return make_expression(
+            next_node_id_,
+            LiteralExpression{StringLiteral{decode_string(token)}},
+            token.span
+        );
     }
     if (match(TokenType::number)) {
         const Token& token = previous_token();
-        return make_expression(LiteralExpression{number_literal(token)}, token.span);
+        return make_expression(next_node_id_, LiteralExpression{number_literal(token)}, token.span);
     }
     if (match(TokenType::color)) {
         const Token& token = previous_token();
-        return make_expression(LiteralExpression{ColorLiteral{token.lexeme}}, token.span);
+        return make_expression(
+            next_node_id_,
+            LiteralExpression{ColorLiteral{token.lexeme}},
+            token.span
+        );
     }
     if (match(TokenType::true_keyword)) {
         const Token& token = previous_token();
-        return make_expression(LiteralExpression{BooleanLiteral{true}}, token.span);
+        return make_expression(next_node_id_, LiteralExpression{BooleanLiteral{true}}, token.span);
     }
     if (match(TokenType::false_keyword)) {
         const Token& token = previous_token();
-        return make_expression(LiteralExpression{BooleanLiteral{false}}, token.span);
+        return make_expression(next_node_id_, LiteralExpression{BooleanLiteral{false}}, token.span);
     }
     if (match(TokenType::null_keyword)) {
         const Token& token = previous_token();
-        return make_expression(LiteralExpression{NullLiteral{}}, token.span);
+        return make_expression(next_node_id_, LiteralExpression{NullLiteral{}}, token.span);
     }
     if (identifier_like()) {
         const Token& token = advance();
         if (match(TokenType::arrow)) {
             ExpressionPtr body = expression();
             const SourceSpan span = covering(token.span, body->span);
-            return make_expression(LambdaExpression{token.lexeme, std::move(body)}, span);
+            return make_expression(
+                next_node_id_,
+                LambdaExpression{token.lexeme, std::move(body)},
+                span
+            );
         }
-        return make_expression(IdentifierExpression{token.lexeme}, token.span);
+        return make_expression(next_node_id_, IdentifierExpression{token.lexeme}, token.span);
     }
     if (match(TokenType::minus)) return parse_unary(previous_token(), UnaryOperator::negate);
     if (match(TokenType::bang)) return parse_unary(previous_token(), UnaryOperator::logical_not);
@@ -741,13 +774,13 @@ ExpressionPtr Parser::parse_prefix() {
     if (!at_end() && !expression_recovery_token(token.type)) {
         static_cast<void>(advance());
     }
-    return make_expression(ErrorExpression{}, token.span);
+    return make_expression(next_node_id_, ErrorExpression{}, token.span);
 }
 
 ExpressionPtr Parser::parse_unary(const Token& token, const UnaryOperator operation) {
     ExpressionPtr operand = parse_expression(Precedence::unary);
     const SourceSpan span = covering(token.span, operand->span);
-    return make_expression(UnaryExpression{operation, std::move(operand)}, span);
+    return make_expression(next_node_id_, UnaryExpression{operation, std::move(operand)}, span);
 }
 
 ExpressionPtr Parser::parse_grouping(const Token& left) {
@@ -758,7 +791,7 @@ ExpressionPtr Parser::parse_grouping(const Token& left) {
         "Expected ')' after grouped expression."
     );
     const SourceSpan span = covering(left.span, right.span);
-    return make_expression(GroupingExpression{std::move(value)}, span);
+    return make_expression(next_node_id_, GroupingExpression{std::move(value)}, span);
 }
 
 ExpressionPtr Parser::parse_list(const Token& left) {
@@ -775,7 +808,7 @@ ExpressionPtr Parser::parse_list(const Token& left) {
         "Expected ']' after list literal."
     );
     const SourceSpan span = covering(left.span, right.span);
-    return make_expression(ListExpression{std::move(elements)}, span);
+    return make_expression(next_node_id_, ListExpression{std::move(elements)}, span);
 }
 
 ExpressionPtr Parser::parse_map(const Token& left) {
@@ -813,7 +846,7 @@ ExpressionPtr Parser::parse_map(const Token& left) {
         "Expected '}' after map literal."
     );
     const SourceSpan span = covering(left.span, right.span);
-    return make_expression(MapExpression{std::move(entries)}, span);
+    return make_expression(next_node_id_, MapExpression{std::move(entries)}, span);
 }
 
 std::optional<MapEntry> Parser::parse_map_entry() {
@@ -873,12 +906,17 @@ ExpressionPtr Parser::finish_call(ExpressionPtr callee, const Token& left_parent
             std::nullopt,
         });
         return make_expression(
+            next_node_id_,
             ErrorExpression{},
             covering(covering(callee->span, end_span), left_parenthesis.span)
         );
     }
     const SourceSpan span = covering(covering(callee->span, end_span), left_parenthesis.span);
-    return make_expression(CallExpression{std::move(*target), std::move(arguments)}, span);
+    return make_expression(
+        next_node_id_,
+        CallExpression{std::move(*target), std::move(arguments)},
+        span
+    );
 }
 
 std::optional<CallTarget> Parser::call_target(const ExpressionPtr& expression) const {
@@ -911,6 +949,7 @@ ExpressionPtr Parser::finish_property_access(ExpressionPtr receiver, const Token
     );
     const SourceSpan span = covering(covering(receiver->span, dot.span), name.span);
     return make_expression(
+        next_node_id_,
         PropertyAccessExpression{std::move(receiver), name.lexeme},
         span
     );
@@ -924,7 +963,11 @@ ExpressionPtr Parser::finish_index(ExpressionPtr receiver, const Token& left_bra
         "Expected ']' after index expression."
     );
     const SourceSpan span = covering(covering(receiver->span, left_bracket.span), right.span);
-    return make_expression(IndexExpression{std::move(receiver), std::move(index)}, span);
+    return make_expression(
+        next_node_id_,
+        IndexExpression{std::move(receiver), std::move(index)},
+        span
+    );
 }
 
 ExpressionPtr Parser::finish_conditional(ExpressionPtr condition, const Token& question) {
@@ -937,6 +980,7 @@ ExpressionPtr Parser::finish_conditional(ExpressionPtr condition, const Token& q
     ExpressionPtr else_expression = parse_expression(previous(Precedence::conditional));
     const SourceSpan span = covering(covering(condition->span, question.span), else_expression->span);
     return make_expression(
+        next_node_id_,
         ConditionalExpression{
             std::move(condition),
             std::move(then_expression),
@@ -955,6 +999,7 @@ ExpressionPtr Parser::finish_binary(ExpressionPtr left) {
     ExpressionPtr right = parse_expression(right_precedence);
     const SourceSpan span = covering(left->span, right->span);
     return make_expression(
+        next_node_id_,
         BinaryExpression{std::move(left), binary_operator(operation.type), std::move(right)},
         span
     );
@@ -1288,7 +1333,8 @@ ParseResult parse_source(
     std::string source_id,
     std::string source,
     const ParserLimits limits,
-    std::pmr::memory_resource* const scratch
+    std::pmr::memory_resource* const scratch,
+    const NodeId first_node_id
 ) {
     if (limits.max_source_bytes == 0U || limits.max_tokens == 0U ||
         limits.max_nesting_depth == 0U || limits.max_declarations == 0U ||
@@ -1305,6 +1351,7 @@ ParseResult parse_source(
             {},
             {},
             SourceSpan{source_id, start, start, 0U},
+            first_node_id,
         };
         std::vector<Diagnostic> diagnostics;
         diagnostics.push_back(Diagnostic{
@@ -1322,7 +1369,8 @@ ParseResult parse_source(
         std::move(source_id),
         std::move(lexed.tokens),
         std::move(lexed.diagnostics),
-        limits
+        limits,
+        first_node_id
     ).parse();
 }
 
