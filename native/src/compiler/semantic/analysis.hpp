@@ -47,6 +47,12 @@ inline constexpr std::size_t maximum_lazy_loop_items = 100'000U;
 [[nodiscard]] const std::string* static_map_key(const MapKey& key);
 [[nodiscard]] const SourceSpan& map_key_span(const MapKey& key);
 [[nodiscard]] const Expression& ungrouped(const Expression& expression);
+/**
+ * Calls `visit` with each expression `expression` directly contains, in source order, a lambda's
+ * body included: the one traversal passes share instead of each walking the node kinds.
+ */
+void for_each_child(const Expression& expression,
+                    const std::function<void(const Expression&)>& visit);
 
 struct StaticNumber final {
     double value;

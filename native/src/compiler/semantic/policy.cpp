@@ -190,42 +190,15 @@ using DefaultStyles = std::map<std::string, const Expression*, std::less<>>;
 void collect_referenced_identifiers(const Expression& expression,
                                     std::set<std::string, std::less<>>& output,
                                     std::set<std::string, std::less<>> bound = {}) {
-    std::visit(
-        [&](const auto& node) {
-            using Node = std::decay_t<decltype(node)>;
-            if constexpr (std::is_same_v<Node, IdentifierExpression>) {
-                if (!bound.contains(node.name)) output.insert(node.name);
-            } else if constexpr (std::is_same_v<Node, GroupingExpression>) {
-                collect_referenced_identifiers(*node.expression, output, std::move(bound));
-            } else if constexpr (std::is_same_v<Node, ListExpression>) {
-                for (const ExpressionPtr& element : node.elements)
-                    collect_referenced_identifiers(*element, output, bound);
-            } else if constexpr (std::is_same_v<Node, MapExpression>) {
-                for (const MapEntry& entry : node.entries)
-                    collect_referenced_identifiers(*entry.value, output, bound);
-            } else if constexpr (std::is_same_v<Node, UnaryExpression>) {
-                collect_referenced_identifiers(*node.operand, output, std::move(bound));
-            } else if constexpr (std::is_same_v<Node, BinaryExpression>) {
-                collect_referenced_identifiers(*node.left, output, bound);
-                collect_referenced_identifiers(*node.right, output, std::move(bound));
-            } else if constexpr (std::is_same_v<Node, ConditionalExpression>) {
-                collect_referenced_identifiers(*node.condition, output, bound);
-                collect_referenced_identifiers(*node.then_expression, output, bound);
-                collect_referenced_identifiers(*node.else_expression, output, std::move(bound));
-            } else if constexpr (std::is_same_v<Node, PropertyAccessExpression>) {
-                collect_referenced_identifiers(*node.receiver, output, std::move(bound));
-            } else if constexpr (std::is_same_v<Node, IndexExpression>) {
-                collect_referenced_identifiers(*node.receiver, output, bound);
-                collect_referenced_identifiers(*node.index, output, std::move(bound));
-            } else if constexpr (std::is_same_v<Node, CallExpression>) {
-                for (const Argument& argument : node.arguments)
-                    collect_referenced_identifiers(*argument.value, output, bound);
-            } else if constexpr (std::is_same_v<Node, LambdaExpression>) {
-                bound.insert(node.parameter_name);
-                collect_referenced_identifiers(*node.body, output, std::move(bound));
-            }
-        },
-        expression.node);
+    if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node)) {
+        if (!bound.contains(identifier->name)) output.insert(identifier->name);
+        return;
+    }
+    if (const auto* lambda = std::get_if<LambdaExpression>(&expression.node))
+        bound.insert(lambda->parameter_name);
+    for_each_child(expression, [&](const Expression& child) {
+        collect_referenced_identifiers(child, output, bound);
+    });
 }
 
 class PolicyChecker final {
@@ -558,42 +531,16 @@ private:
 
     /**
      * persisted() stores its value under a literal key, as the direct initializer of a state; the
-     * key belongs to that state alone.
+     * key belongs to that state alone. Every call nested anywhere, a lambda body included, is
+     * checked.
      */
     void persisted_calls(const Expression& expression, const std::string& path,
                          const Expression* owner) {
-        std::visit(
-            [&](const auto& node) {
-                using Node = std::decay_t<decltype(node)>;
-                if constexpr (std::is_same_v<Node, GroupingExpression>) {
-                    persisted_calls(*node.expression, path, owner);
-                } else if constexpr (std::is_same_v<Node, ListExpression>) {
-                    for (const ExpressionPtr& element : node.elements)
-                        persisted_calls(*element, path, owner);
-                } else if constexpr (std::is_same_v<Node, MapExpression>) {
-                    for (const MapEntry& entry : node.entries)
-                        persisted_calls(*entry.value, path, owner);
-                } else if constexpr (std::is_same_v<Node, UnaryExpression>) {
-                    persisted_calls(*node.operand, path, owner);
-                } else if constexpr (std::is_same_v<Node, BinaryExpression>) {
-                    persisted_calls(*node.left, path, owner);
-                    persisted_calls(*node.right, path, owner);
-                } else if constexpr (std::is_same_v<Node, ConditionalExpression>) {
-                    persisted_calls(*node.condition, path, owner);
-                    persisted_calls(*node.then_expression, path, owner);
-                    persisted_calls(*node.else_expression, path, owner);
-                } else if constexpr (std::is_same_v<Node, PropertyAccessExpression>) {
-                    persisted_calls(*node.receiver, path, owner);
-                } else if constexpr (std::is_same_v<Node, IndexExpression>) {
-                    persisted_calls(*node.receiver, path, owner);
-                    persisted_calls(*node.index, path, owner);
-                } else if constexpr (std::is_same_v<Node, CallExpression>) {
-                    for (const Argument& argument : node.arguments)
-                        persisted_calls(*argument.value, path, owner);
-                    persisted_call(expression, path, owner);
-                }
-            },
-            expression.node);
+        for_each_child(expression, [&](const Expression& child) {
+            persisted_calls(child, path, owner);
+        });
+        if (std::holds_alternative<CallExpression>(expression.node))
+            persisted_call(expression, path, owner);
     }
 
     void persisted_call(const Expression& expression, const std::string& path,

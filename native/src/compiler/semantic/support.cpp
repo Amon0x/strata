@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cmath>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 #include "compiler/semantic/analysis.hpp"
@@ -206,6 +207,40 @@ const Expression& ungrouped(const Expression& expression) {
         current = grouping->expression.get();
     }
     return *current;
+}
+
+void for_each_child(const Expression& expression,
+                    const std::function<void(const Expression&)>& visit) {
+    std::visit(
+        [&visit](const auto& node) {
+            using Node = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<Node, GroupingExpression>) {
+                visit(*node.expression);
+            } else if constexpr (std::is_same_v<Node, ListExpression>) {
+                for (const ExpressionPtr& element : node.elements) visit(*element);
+            } else if constexpr (std::is_same_v<Node, MapExpression>) {
+                for (const MapEntry& entry : node.entries) visit(*entry.value);
+            } else if constexpr (std::is_same_v<Node, UnaryExpression>) {
+                visit(*node.operand);
+            } else if constexpr (std::is_same_v<Node, BinaryExpression>) {
+                visit(*node.left);
+                visit(*node.right);
+            } else if constexpr (std::is_same_v<Node, ConditionalExpression>) {
+                visit(*node.condition);
+                visit(*node.then_expression);
+                visit(*node.else_expression);
+            } else if constexpr (std::is_same_v<Node, PropertyAccessExpression>) {
+                visit(*node.receiver);
+            } else if constexpr (std::is_same_v<Node, IndexExpression>) {
+                visit(*node.receiver);
+                visit(*node.index);
+            } else if constexpr (std::is_same_v<Node, CallExpression>) {
+                for (const Argument& argument : node.arguments) visit(*argument.value);
+            } else if constexpr (std::is_same_v<Node, LambdaExpression>) {
+                visit(*node.body);
+            }
+        },
+        expression.node);
 }
 
 std::optional<StaticNumber> static_number(const Expression& expression) {

@@ -805,6 +805,15 @@ void test_sibling_widgets_need_their_own_persistence_keys() {
         "screen Main { root Panel { Log Log } }"
     );
     check(reused.succeeded(), "a component drawn twice lost its persistence key:" + describe(reused));
+
+    // persisted() is checked wherever it is nested, a lambda body included.
+    const auto in_lambda = compile_source(
+        "screen Main { state items = [1]\n"
+        "  derived saved = map(items, item -> persisted(\"saved.item\", item))\n"
+        "  root Text(text: \"x\") }"
+    );
+    check(diagnostic_count(in_lambda, "STRATA.DSL.SEMANTIC_PERSISTED_CONTEXT") == 1U,
+          "persisted() inside a lambda was not reported:" + describe(in_lambda));
 }
 
 // A component can forward a slot by declaring it inside what it passes to a child component,
