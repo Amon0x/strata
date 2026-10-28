@@ -349,6 +349,8 @@ add_library(
         src/compiler/semantic/types.cpp
         src/compiler/source.cpp
         src/compiler/source_map.cpp
+        src/geometry/path.cpp
+        src/geometry/primitives.cpp
         src/font/opentype.cpp
         src/font/atlas.cpp
         src/font/msdf.cpp
