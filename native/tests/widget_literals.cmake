@@ -39,10 +39,6 @@ list(FILTER generic_sources EXCLUDE REGEX "/ui/widget/(description|input|inspect
 list(FILTER generic_sources EXCLUDE REGEX "/ui/widget/[a-z_]+_model\\.(cpp|hpp)$")
 list(FILTER generic_sources EXCLUDE REGEX "/ui/widget/subtarget_projections\\.cpp$")
 list(FILTER generic_sources EXCLUDE REGEX "/ui/widget/registry\\.cpp$")
-# The description builder and retained tree still name the widgets they expand structurally
-# (Slot projection, Repeater rows, AnimatedContent): they need catalog capability flags first.
-list(FILTER generic_sources EXCLUDE REGEX "/ui/description\\.cpp$")
-list(FILTER generic_sources EXCLUDE REGEX "/ui/tree\\.cpp$")
 
 # Single lines that a concurrent change removes; each names its owner.
 set(exempt_lines "")

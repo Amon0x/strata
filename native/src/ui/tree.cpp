@@ -307,9 +307,8 @@ const RetainedDescriptionSnapshot::Node* RetainedDescriptionSnapshot::find_key(
     const auto found = key_index_.find(key);
     if (found == key_index_.end())
         return nullptr;
-    const auto compatible_type = [type](const Node* candidate) {
-        return candidate->type == type || (type == "Repeater" && candidate->type == "VirtualList");
-    };
+    // The type is the one the widget describes as, which retained nodes carry.
+    const auto compatible_type = [type](const Node* candidate) { return candidate->type == type; };
     const auto unique_match = [&found](const auto& predicate) {
         const Node* result = nullptr;
         for (const Node* candidate : found->second) {

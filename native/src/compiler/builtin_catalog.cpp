@@ -409,6 +409,15 @@ const BuiltinCatalog& builtin_catalog() {
     return catalog;
 }
 
+const DeclaredWidget* find_builtin_widget(const std::string_view name) {
+    // The catalog keeps its widgets sorted by name.
+    const std::vector<DeclaredWidget>& widgets = builtin_catalog().widgets;
+    const auto found = std::ranges::lower_bound(
+        widgets, name, std::less<>{},
+        [](const DeclaredWidget& widget) -> std::string_view { return widget.name; });
+    return found != widgets.end() && found->name == name ? &*found : nullptr;
+}
+
 data::JsonValue export_builtin_registry(const BuiltinCatalog& catalog) {
     const auto properties = [](const std::vector<DeclaredProperty>& declarations,
                                const bool include_nullable) {

@@ -11,6 +11,8 @@
 #include <string>
 #include <string_view>
 
+#include "compiler/builtin_catalog.hpp"
+
 namespace strata::compiler {
 namespace {
 
@@ -310,7 +312,9 @@ private:
             validate_expression(expression, context + "/argument " + name);
         }
         const JsonValue children = required(call, "children");
-        const bool repeater = require_string(call, "name", context) == "Repeater";
+        const DeclaredWidget* const widget =
+            kind == "widget" ? find_builtin_widget(require_string(call, "name", context)) : nullptr;
+        const bool repeater = widget != nullptr && widget->lazy_rows;
         if (children.is_null()) {
             if (repeater) fail(context, "Repeater children must contain one keyed for statement");
             return;

@@ -224,6 +224,10 @@ struct ProgramSlotFill final {
 
 struct ProgramCall final {
     bool component = false;
+    /** A widget call that declares or fills a component slot (the catalog's slot role). */
+    bool slot = false;
+    /** A widget call whose rows are generated lazily from its one keyed loop (lazy_rows). */
+    bool lazy_rows = false;
     std::string type;
     std::string path;
     /** The declaration a component call instantiates. */

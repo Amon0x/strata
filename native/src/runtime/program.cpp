@@ -619,6 +619,13 @@ class ProgramLowering final {
         result.component = string_field(source, "kind") == "component";
         result.type = std::string(string_field(source, "name"));
         result.path = std::string(optional_string(source, "path").value_or(""));
+        if (!result.component) {
+            if (const compiler::DeclaredWidget* const widget =
+                    compiler::find_builtin_widget(result.type)) {
+                result.slot = widget->slot;
+                result.lazy_rows = widget->lazy_rows;
+            }
+        }
         std::vector<ProgramCallArgument> arguments;
         std::vector<ProgramBehavior> behaviors;
         for (const auto& [name, value] : object_field(source, "arguments")) {
@@ -652,7 +659,7 @@ class ProgramLowering final {
         const JsonValue children = required(source, "children");
         result.children = children.is_null()
                               ? no_program_id
-                              : block(children, declaration_scope, result.type == "Repeater");
+                              : block(children, declaration_scope, result.lazy_rows);
 
         result.arguments_begin = static_cast<std::uint32_t>(program_.call_arguments_.size());
         result.arguments_count = static_cast<std::uint32_t>(arguments.size());
@@ -694,7 +701,7 @@ class ProgramLowering final {
                     if (statement.kind != StatementKind::node)
                         continue;
                     const ProgramCall& fill = program_.calls_[statement.call];
-                    if (fill.component || fill.type != "Slot")
+                    if (!fill.slot)
                         continue;
                     program_.projected_statements_.push_back(index);
                     ProgramSlotFill slot;

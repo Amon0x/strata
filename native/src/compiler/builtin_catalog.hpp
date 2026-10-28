@@ -260,6 +260,9 @@ struct BuiltinCatalog final {
 /** Process-wide immutable catalog, validated before first use. */
 [[nodiscard]] const BuiltinCatalog& builtin_catalog();
 
+/** The built-in widget declared under a name, or none: its roles say how calls of it expand. */
+[[nodiscard]] const DeclaredWidget* find_builtin_widget(std::string_view name);
+
 /** Framework parameters composed onto a widget without duplicating them in native declarations. */
 [[nodiscard]] std::vector<DeclaredParameter>
 composed_widget_parameters(const BuiltinCatalog& catalog, const DeclaredWidget& widget);

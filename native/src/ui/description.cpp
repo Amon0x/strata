@@ -14,6 +14,7 @@
 #include <string>
 #include <utility>
 
+#include "compiler/builtin_catalog.hpp"
 #include "ui/description_detail.hpp"
 #include "ui/widget/description.hpp"
 
@@ -274,6 +275,12 @@ void set_layout_field(DescriptionNode::Properties& properties, std::string name,
     properties.insert_or_assign("$layout", ExpressionValue(map_value(std::move(fields))));
 }
 
+/** Whether described nodes of a type are component slots: the catalog's slot role. */
+[[nodiscard]] bool is_slot_type(const std::string_view type) {
+    const compiler::DeclaredWidget* const widget = compiler::find_builtin_widget(type);
+    return widget != nullptr && widget->slot;
+}
+
 /**
  * The name of a slot a component declares itself, or none. A component's output also holds the
  * slots of the components it calls; only those described from its own body (its source path)
@@ -281,7 +288,7 @@ void set_layout_field(DescriptionNode::Properties& properties, std::string name,
  */
 [[nodiscard]] const std::string* own_slot_name(const DescriptionNode& node,
                                                const std::string_view component_path) {
-    if (node.type != "Slot" || !node.source_path.starts_with(component_path) ||
+    if (!is_slot_type(node.type) || !node.source_path.starts_with(component_path) ||
         node.source_path.size() <= component_path.size() ||
         node.source_path[component_path.size()] != '/') {
         return nullptr;
@@ -329,7 +336,7 @@ void block_slot_names(const runtime::Program& program, const runtime::BlockId bl
                                  program.projected_statements(call));
                 break;
             }
-            if (call.type == "Slot") {
+            if (call.slot) {
                 for (const runtime::ProgramCallArgument& argument : program.arguments(call)) {
                     const runtime::ProgramExpression& name = program.expression(argument.value);
                     if (argument.name.name() == "name" &&
@@ -904,9 +911,8 @@ DescriptionBuilder::retained_widget(const RetainedQuery& query) const noexcept {
     if (candidates == nullptr)
         return nullptr;
     const auto found = std::ranges::find_if(*candidates, [&](const auto* candidate) {
-        const bool compatible_type = candidate->type == query.type ||
-                                     (query.type == "Repeater" && candidate->type == "VirtualList");
-        return compatible_type && candidate->state_scope == query.state_scope;
+        // The query names the type its widget describes as (its canonical type).
+        return candidate->type == query.type && candidate->state_scope == query.state_scope;
     });
     return found != candidates->end() ? *found : nullptr;
 }
@@ -1139,7 +1145,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
     // A call providing generated rows is an instance of its own: its rows are its children.
     ComponentInstance* rows_generator = nullptr;
     RepeaterChildren repeater_children;
-    if (type == "Repeater" && call.children != runtime::no_program_id) {
+    if (call.lazy_rows && call.children != runtime::no_program_id) {
         const std::span<const runtime::ProgramStatement> statements =
             program().statements(program().block(call.children));
         if (statements.size() == 1U && statements.front().kind == runtime::StatementKind::loop) {
