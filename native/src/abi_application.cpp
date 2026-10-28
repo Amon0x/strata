@@ -26,7 +26,7 @@ using namespace strata::abi_detail;
 namespace {
 
 [[nodiscard]] bool valid_json_sink(const strata_value_json_sink* const sink) noexcept {
-    return sink != nullptr && sink->struct_size >= sizeof(strata_value_json_sink) &&
+    return has_struct(sink) &&
            sink->emit != nullptr;
 }
 
@@ -112,7 +112,7 @@ strata_result strata_runtime_publish_host_snapshot(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
-    if (snapshot == nullptr || snapshot->struct_size < sizeof(strata_host_snapshot_config) ||
+    if (snapshot == nullptr || !has_struct(snapshot) ||
         !valid_view(snapshot->id, false) || !valid_view(snapshot->values_json, false)) {
         return runtime_failure(
             *runtime,
@@ -154,7 +154,7 @@ strata_result strata_runtime_publish_image(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
-    if (image == nullptr || image->struct_size < sizeof(strata_runtime_image_config) ||
+    if (image == nullptr || !has_struct(image) ||
         !valid_view(image->id, false) || image->reserved != 0U ||
         (image->sampling != STRATA_IMAGE_SAMPLING_NEAREST &&
          image->sampling != STRATA_IMAGE_SAMPLING_LINEAR) ||
@@ -210,17 +210,17 @@ strata_result strata_runtime_get_host_snapshot_info(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr || out_info == nullptr ||
-        out_info->struct_size < sizeof(strata_host_snapshot_info)) {
+        !has_struct(out_info)) {
         return invalid_argument();
     }
     const auto& snapshot = runtime->core.host_snapshot();
-    *out_info = strata_host_snapshot_info{
+    static_cast<void>(write_struct(out_info, strata_host_snapshot_info{
         sizeof(strata_host_snapshot_info),
         snapshot != nullptr ? snapshot->generation() : 0U,
         snapshot != nullptr ? snapshot->evaluated_scalar_count() : 0U,
         snapshot != nullptr ? 1U : 0U,
         0U,
-    };
+    }));
     return strata::core::result(STRATA_STATUS_OK);
 }
 
@@ -251,7 +251,7 @@ strata_result strata_runtime_read_diagnostics(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr || sink == nullptr ||
-        sink->struct_size < sizeof(strata_diagnostics_snapshot_sink) || sink->emit == nullptr) {
+        !has_struct(sink) || sink->emit == nullptr) {
         return invalid_argument();
     }
     // A failed diagnostics read reports a bare status; emitting a diagnostic would recurse.
@@ -292,7 +292,7 @@ strata_result strata_runtime_read_host_value_json(
         return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (!valid_view(path, false) || sink == nullptr ||
-        sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr) {
+        !has_struct(sink) || sink->emit == nullptr) {
         return runtime_failure(
             *runtime,
             STRATA_STATUS_INVALID_ARGUMENT,
@@ -328,7 +328,7 @@ strata_result strata_runtime_configure_application(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
-    if (config == nullptr || config->struct_size < sizeof(strata_application_config) ||
+    if (config == nullptr || !has_struct(config) ||
         !valid_view(config->id, false) || !valid_view(config->schemas_json, true) ||
         (config->extension_schemas_json == nullptr && config->extension_schema_count != 0U)) {
         return runtime_failure(
@@ -390,8 +390,8 @@ strata_result strata_runtime_compile_and_activate(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
-    if (out_info == nullptr || out_info->struct_size < sizeof(strata_activation_info) ||
-        config == nullptr || config->struct_size < sizeof(strata_activation_config) ||
+    if (out_info == nullptr || !has_struct(out_info) ||
+        config == nullptr || !has_struct(config) ||
         !valid_view(config->entry_source_id, false) || !valid_view(config->entry_text, true)) {
         return runtime_failure(
             *runtime,
@@ -400,7 +400,7 @@ strata_result strata_runtime_compile_and_activate(
             "Activation requires a complete configuration, entry source id/text, and output structure."
         );
     }
-    *out_info = strata_activation_info{sizeof(strata_activation_info), 0U, 0U, 0U, 0U, 0U, 0U, 0U};
+    static_cast<void>(write_struct(out_info, strata_activation_info{sizeof(strata_activation_info), 0U, 0U, 0U, 0U, 0U, 0U, 0U}));
     if (!runtime->core.has_application()) {
         return runtime_failure(
             *runtime,
@@ -431,7 +431,7 @@ strata_result strata_runtime_compile_and_activate(
                 strata_string_view{path.data(), path.size()},
                 &source
             );
-            if (status != STRATA_STATUS_OK || source.struct_size < sizeof(strata_module_source) ||
+            if (status != STRATA_STATUS_OK || !has_struct(&source) ||
                 !valid_view(source.source_id, false) || !valid_view(source.text, true)) {
                 throw strata::compiler::ModuleLoadError(
                     "Host module loader rejected import '" + std::string(path) + "'.",
@@ -465,9 +465,9 @@ strata_result strata_runtime_activate_compiled_module(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
-    if (out_info == nullptr || out_info->struct_size < sizeof(strata_activation_info) ||
+    if (out_info == nullptr || !has_struct(out_info) ||
         config == nullptr ||
-        config->struct_size < sizeof(strata_compiled_activation_config) ||
+        !has_struct(config) ||
         (config->artifact.data == nullptr || config->artifact.size == 0U)) {
         return runtime_failure(
             *runtime,
@@ -476,9 +476,9 @@ strata_result strata_runtime_activate_compiled_module(
             "Compiled activation requires a generation, non-empty artifact, and output structure."
         );
     }
-    *out_info = strata_activation_info{
+    static_cast<void>(write_struct(out_info, strata_activation_info{
         sizeof(strata_activation_info), 0U, 0U, 0U, 0U, 0U, 0U, 0U,
-    };
+    }));
     if (!runtime->core.has_application()) {
         return runtime_failure(
             *runtime,
@@ -657,7 +657,7 @@ strata_result strata_runtime_read_active_unit_json(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
-    if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr) {
+    if (sink == nullptr || !has_struct(sink) || sink->emit == nullptr) {
         return runtime_failure(
             *runtime,
             STRATA_STATUS_INVALID_ARGUMENT,
@@ -783,7 +783,7 @@ strata_result strata_runtime_register_action_handler(
         return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (out_registration == nullptr || config == nullptr ||
-        config->struct_size < sizeof(strata_action_handler_config) ||
+        !has_struct(config) ||
         !valid_view(config->action_id, false) || !valid_view(config->owner, false) ||
         config->invoke == nullptr) {
         return runtime_failure(
@@ -896,7 +896,7 @@ strata_result strata_runtime_dispatch_action_json(
         return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (!valid_action_dispatch_config(config) || out_info == nullptr ||
-        out_info->struct_size < sizeof(strata_action_dispatch_info)) {
+        !has_struct(out_info)) {
         return runtime_failure(
             *runtime,
             STRATA_STATUS_INVALID_ARGUMENT,
@@ -904,12 +904,12 @@ strata_result strata_runtime_dispatch_action_json(
             "Action dispatch requires an action id, payload/event JSON, event kind, and output structure."
         );
     }
-    *out_info = strata_action_dispatch_info{
+    static_cast<void>(write_struct(out_info, strata_action_dispatch_info{
         sizeof(strata_action_dispatch_info),
         STRATA_ACTION_DISPATCH_FAILED,
         0U,
         0U,
-    };
+    }));
     if (!runtime->core.has_application()) {
         return runtime_failure(
             *runtime,
@@ -959,12 +959,12 @@ strata_result strata_runtime_dispatch_action_json(
                     ? std::string_view(config->state_scope.data, config->state_scope.size)
                     : std::string_view{}
             );
-        *out_info = strata_action_dispatch_info{
+        static_cast<void>(write_struct(out_info, strata_action_dispatch_info{
             sizeof(strata_action_dispatch_info),
             dispatch_status(outcome.status),
             0U,
             static_cast<std::uint64_t>(outcome.handler_owners.size()),
-        };
+        }));
         return strata::core::result(STRATA_STATUS_OK);
     });
 }

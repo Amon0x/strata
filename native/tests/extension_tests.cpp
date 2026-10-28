@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -14,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -710,6 +712,18 @@ void test_external_package_and_schema_projection() {
     return config;
 }
 
+/** Lays out a bundle's widget descriptors as an older caller would: `size` bytes apart. */
+[[nodiscard]] std::vector<std::byte> packed_widgets(const strata_surface_extension_bundle& bundle,
+                                                    const std::size_t size) {
+    std::vector<std::byte> packed(bundle.widget_count * size);
+    for (std::size_t index = 0U; index < bundle.widget_count; ++index) {
+        strata_widget_extension descriptor = bundle.widgets[index];
+        descriptor.struct_size = size;
+        std::memcpy(packed.data() + index * size, &descriptor, size);
+    }
+    return packed;
+}
+
 void test_surface_lifecycle(const std::filesystem::path& resource_root) {
     counters = HarnessCounters{};
     const std::unique_ptr<Package> harness = harness_package();
@@ -1171,14 +1185,12 @@ screen Main {
           "a detached extension widget retained its requested frame callback");
 
     strata_surface_release(surface);
+    // An older caller's descriptor array is strided by that caller's struct size.
     strata_surface_extension_bundle version_2_widget_extensions = harness->bundle();
-    std::vector<strata_widget_extension> version_2_widgets(
-        version_2_widget_extensions.widgets,
-        version_2_widget_extensions.widgets + version_2_widget_extensions.widget_count);
-    for (strata_widget_extension& descriptor : version_2_widgets) {
-        descriptor.struct_size = STRATA_WIDGET_EXTENSION_VERSION_2_SIZE;
-    }
-    version_2_widget_extensions.widgets = version_2_widgets.data();
+    const std::vector<std::byte> version_2_widgets =
+        packed_widgets(version_2_widget_extensions, STRATA_WIDGET_EXTENSION_VERSION_2_SIZE);
+    version_2_widget_extensions.widgets =
+        reinterpret_cast<const strata_widget_extension*>(version_2_widgets.data());
     surface_config.id = view("harness.version-2-widget");
     surface_config.extensions = &version_2_widget_extensions;
     surface = nullptr;
@@ -1188,11 +1200,10 @@ screen Main {
           "a version-2 widget descriptor prefix was rejected after frame-hook growth");
     strata_surface_release(surface);
     strata_surface_extension_bundle legacy_widget_extensions = harness->bundle();
-    std::vector<strata_widget_extension> legacy_widgets(legacy_widget_extensions.widgets,
-                                                        legacy_widget_extensions.widgets +
-                                                            legacy_widget_extensions.widget_count);
-    legacy_widgets.front().struct_size = STRATA_WIDGET_EXTENSION_VERSION_1_SIZE;
-    legacy_widget_extensions.widgets = legacy_widgets.data();
+    const std::vector<std::byte> legacy_widgets =
+        packed_widgets(legacy_widget_extensions, STRATA_WIDGET_EXTENSION_VERSION_1_SIZE);
+    legacy_widget_extensions.widgets =
+        reinterpret_cast<const strata_widget_extension*>(legacy_widgets.data());
     surface_config.id = view("harness.legacy-widget");
     surface_config.extensions = &legacy_widget_extensions;
     surface = nullptr;

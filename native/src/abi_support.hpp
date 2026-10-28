@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -12,6 +13,7 @@
 
 #include "abi_boundary.hpp"
 #include "abi_internal.hpp"
+#include "abi_struct.hpp"
 #include "core/diagnostics.hpp"
 #include "data/json.hpp"
 #include "runtime/value.hpp"
@@ -205,21 +207,22 @@ dispatch_status(const runtime::ActionDispatchStatus status) noexcept {
 }
 
 [[nodiscard]] inline bool
-valid_action_dispatch_config(const strata_action_dispatch_config* const config) noexcept {
-    constexpr std::size_t version_one_size = offsetof(strata_action_dispatch_config, dynamic);
-    if (config == nullptr || config->struct_size < version_one_size ||
-        !valid_view(config->action_id, false) || !valid_view(config->payload_json, true) ||
-        !valid_view(config->event_kind, false) || !valid_view(config->source_key, true) ||
-        !valid_view(config->event_value_json, true) || !valid_view(config->state_scope, true)) {
+valid_action_dispatch_config(const strata_action_dispatch_config* const provided) noexcept {
+    const std::optional<strata_action_dispatch_config> config = read_struct(provided);
+    if (!config.has_value() || !valid_view(config->action_id, false) ||
+        !valid_view(config->payload_json, true) || !valid_view(config->event_kind, false) ||
+        !valid_view(config->source_key, true) || !valid_view(config->event_value_json, true) ||
+        !valid_view(config->state_scope, true)) {
         return false;
     }
-    return config->struct_size < sizeof(strata_action_dispatch_config) ||
-           (config->dynamic <= 1U && config->reserved == 0U);
+    return config->dynamic <= 1U && config->reserved == 0U;
 }
 
+/** Whether a dispatch is dynamic; a caller layout that predates the flag dispatches statically. */
 [[nodiscard]] inline bool
-dynamic_action_dispatch(const strata_action_dispatch_config& config) noexcept {
-    return config.struct_size >= sizeof(strata_action_dispatch_config) && config.dynamic != 0U;
+dynamic_action_dispatch(const strata_action_dispatch_config& provided) noexcept {
+    const std::optional<strata_action_dispatch_config> config = read_struct(&provided);
+    return config.has_value() && config->dynamic != 0U;
 }
 
 } // namespace strata::abi_detail

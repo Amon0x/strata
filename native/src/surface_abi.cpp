@@ -37,9 +37,11 @@ namespace {
 
 using strata::abi_detail::AbiCall;
 using strata::abi_detail::EntryGuard;
+using strata::abi_detail::has_struct;
 using strata::abi_detail::Reentry;
 using strata::abi_detail::StatusError;
 using strata::abi_detail::surface_call;
+using strata::abi_detail::write_struct;
 
 /** Host resource-adapter failure; reported with the adapter's own status. */
 [[nodiscard]] StatusError resource_unavailable(const strata_status status, std::string message) {
@@ -171,9 +173,8 @@ rectangle_snapping(const strata_rectangle_snap_policy value) {
     constexpr strata_surface_input_capabilities known_input =
         STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD | STRATA_SURFACE_INPUT_TOUCH |
         STRATA_SURFACE_INPUT_IME | STRATA_SURFACE_INPUT_CLIPBOARD | STRATA_SURFACE_INPUT_CONTROLLER;
-    if (value.struct_size < sizeof(strata_surface_environment) || value.generation == 0U ||
-        value.reserved != 0U || value.reduced_motion > 1U ||
-        (value.input_capabilities & ~known_input) != 0U) {
+    if (!has_struct(&value) || value.generation == 0U || value.reserved != 0U ||
+        value.reduced_motion > 1U || (value.input_capabilities & ~known_input) != 0U) {
         throw std::invalid_argument("surface environment header, flags, or generation is invalid");
     }
     const bool has_pointer = (value.input_capabilities & STRATA_SURFACE_INPUT_POINTER) != 0U;
@@ -416,7 +417,7 @@ void require_finite(const double value, const char* const message) {
 }
 
 [[nodiscard]] strata::ui::SurfaceInputEvent input_event(const strata_input_event& value) {
-    if (value.struct_size < sizeof(strata_input_event)) {
+    if (!has_struct(&value)) {
         throw std::invalid_argument("input event structure is incomplete");
     }
     if (value.version != STRATA_INPUT_EVENT_VERSION_2 || value.reserved != 0U) {
@@ -522,9 +523,8 @@ void destroy_surface(strata_surface* const surface, const bool unlink_from_runti
 extern "C" {
 
 strata_result strata_runtime_create_surface(strata_runtime* const runtime,
-                                            const strata_surface_config* const config,
+                                            const strata_surface_config* const provided_config,
                                             strata_surface** const out_surface) noexcept {
-    constexpr std::size_t surface_config_v1_size = offsetof(strata_surface_config, extensions);
     if (out_surface != nullptr)
         *out_surface = nullptr;
     const EntryGuard entry(runtime, Reentry::rejected);
@@ -532,8 +532,12 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
         return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
-    if (config == nullptr || out_surface == nullptr ||
-        config->struct_size < surface_config_v1_size || !valid_view(config->id, false) ||
+    // Fields newer than the caller's layout (such as `extensions`) read as absent.
+    const std::optional<strata_surface_config> copied_config =
+        strata::abi_detail::read_struct(provided_config);
+    const strata_surface_config* const config =
+        copied_config.has_value() ? &*copied_config : nullptr;
+    if (config == nullptr || out_surface == nullptr || !valid_view(config->id, false) ||
         !valid_view(config->root_name, false) || config->reserved != 0U) {
         return runtime_failure(*runtime, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.ABI.INVALID_SURFACE_CONFIG",
@@ -564,8 +568,7 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
                 })) {
                 throw std::invalid_argument("Surface ids must be unique within a Runtime");
             }
-            const strata_surface_extension_bundle* const extension_bundle =
-                config->struct_size >= sizeof(strata_surface_config) ? config->extensions : nullptr;
+            const strata_surface_extension_bundle* const extension_bundle = config->extensions;
             strata::abi_detail::ExtensionRegistries extensions =
                 strata::abi_detail::extension_registries(extension_bundle,
                                                          runtime->core.diagnostics());
@@ -610,7 +613,7 @@ strata_result strata_surface_prepare_release_packet(strata_surface* const surfac
         return entry.refusal();
     if (surface == nullptr || surface->owner == nullptr)
         return invalid_argument();
-    if (sink == nullptr || sink->struct_size < sizeof(strata_bytes_sink) || sink->emit == nullptr) {
+    if (sink == nullptr || !has_struct(sink) || sink->emit == nullptr) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.ABI.INVALID_BYTES_SINK",
                                "Preparing a Surface release packet requires a complete byte sink.");
@@ -719,22 +722,26 @@ strata_surface_enqueue_input(strata_surface* const surface, const strata_input_e
         return invalid_argument();
     if (surface->release_packet_prepared)
         return terminal_surface_failure(*surface);
-    if (out_info == nullptr || out_info->struct_size < sizeof(strata_surface_input_batch_info) ||
-        (events == nullptr && event_count != 0U)) {
+    if (out_info == nullptr || !has_struct(out_info) || (events == nullptr && event_count != 0U)) {
         return surface_failure(
             *surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_INPUT_BATCH",
             "Input enqueue requires a contiguous event array and complete output structure.");
     }
-    *out_info = strata_surface_input_batch_info{
-        sizeof(strata_surface_input_batch_info),
-        0U,
-        static_cast<std::uint64_t>(surface->core.input().queued_event_count()),
-    };
+    static_cast<void>(write_struct(
+        out_info, strata_surface_input_batch_info{
+                      sizeof(strata_surface_input_batch_info),
+                      0U,
+                      static_cast<std::uint64_t>(surface->core.input().queued_event_count()),
+                  }));
     return surface_call(surface, AbiCall{"Input batch enqueue", "STRATA.INPUT.INVALID_EVENT"}, [&] {
         std::vector<strata::ui::SurfaceInputEvent> decoded;
         decoded.reserve(event_count);
         for (std::size_t index = 0U; index < event_count; ++index) {
-            decoded.push_back(input_event(events[index]));
+            const std::optional<strata_input_event> event =
+                strata::abi_detail::read_struct_element(events, index);
+            if (!event.has_value())
+                throw std::invalid_argument("input event structure is incomplete");
+            decoded.push_back(input_event(*event));
         }
         const strata::ui::InputOperationResult enqueued =
             surface->core.input().enqueue(std::move(decoded));
@@ -809,18 +816,18 @@ strata_surface_dispatch_action_json(strata_surface* const surface,
     if (surface->release_packet_prepared)
         return terminal_surface_failure(*surface);
     if (!strata::abi_detail::valid_action_dispatch_config(config) || out_info == nullptr ||
-        out_info->struct_size < sizeof(strata_action_dispatch_info)) {
+        !has_struct(out_info)) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.ABI.INVALID_SURFACE_ACTION_DISPATCH",
                                "Surface action dispatch requires an action id, payload/event JSON, "
                                "event kind, and output structure.");
     }
-    *out_info = strata_action_dispatch_info{
-        sizeof(strata_action_dispatch_info),
-        STRATA_ACTION_DISPATCH_FAILED,
-        0U,
-        0U,
-    };
+    static_cast<void>(write_struct(out_info, strata_action_dispatch_info{
+                                                 sizeof(strata_action_dispatch_info),
+                                                 STRATA_ACTION_DISPATCH_FAILED,
+                                                 0U,
+                                                 0U,
+                                             }));
     constexpr AbiCall call{
         "Surface action dispatch",
         "STRATA.ACTION.INVALID_SURFACE_DISPATCH",
@@ -835,12 +842,13 @@ strata_surface_dispatch_action_json(strata_surface* const surface,
             source.empty() ? std::nullopt : std::optional<std::string>(source),
             strata::abi_detail::decoded_value(config->event_value_json, true),
             strata::abi_detail::dynamic_action_dispatch(*config));
-        *out_info = strata_action_dispatch_info{
-            sizeof(strata_action_dispatch_info),
-            strata::abi_detail::dispatch_status(outcome.status),
-            0U,
-            static_cast<std::uint64_t>(outcome.handler_owners.size()),
-        };
+        static_cast<void>(
+            write_struct(out_info, strata_action_dispatch_info{
+                                       sizeof(strata_action_dispatch_info),
+                                       strata::abi_detail::dispatch_status(outcome.status),
+                                       0U,
+                                       static_cast<std::uint64_t>(outcome.handler_owners.size()),
+                                   }));
         return strata::core::result(STRATA_STATUS_OK);
     });
 }
@@ -855,7 +863,7 @@ strata_result strata_surface_frame(strata_surface* const surface,
         return invalid_argument();
     if (surface->release_packet_prepared)
         return terminal_surface_failure(*surface);
-    if (out_info == nullptr || out_info->struct_size < sizeof(strata_surface_frame_info)) {
+    if (out_info == nullptr || !has_struct(out_info)) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.ABI.INVALID_SURFACE_FRAME_OUTPUT",
                                "Surface framing requires a complete output structure.");
@@ -931,18 +939,19 @@ strata_result strata_surface_frame(strata_surface* const surface,
         // Canonical inspection JSON is expensive and optional; materialize it on first read.
         surface->frame_json.clear();
         surface->frame_snapshot_available = true;
-        *out_info = strata_surface_frame_info{
-            sizeof(strata_surface_frame_info),
-            frame.frame_index,
-            frame.frame_time_nanos,
-            static_cast<std::uint64_t>(frame.operations.input_events_processed),
-            static_cast<std::uint64_t>(frame.lifecycle_input.events.size()),
-            static_cast<std::uint64_t>(frame.lifecycle_input.action_outcomes.size()),
-            static_cast<std::uint64_t>(surface->core.render_commands().size()),
-            surface->core.semantics().generation(),
-            static_cast<std::uint64_t>(surface->core.input().queued_event_count()),
-            static_cast<std::uint64_t>(surface->current_render_packet().size()),
-        };
+        static_cast<void>(write_struct(
+            out_info, strata_surface_frame_info{
+                          sizeof(strata_surface_frame_info),
+                          frame.frame_index,
+                          frame.frame_time_nanos,
+                          static_cast<std::uint64_t>(frame.operations.input_events_processed),
+                          static_cast<std::uint64_t>(frame.lifecycle_input.events.size()),
+                          static_cast<std::uint64_t>(frame.lifecycle_input.action_outcomes.size()),
+                          static_cast<std::uint64_t>(surface->core.render_commands().size()),
+                          surface->core.semantics().generation(),
+                          static_cast<std::uint64_t>(surface->core.input().queued_event_count()),
+                          static_cast<std::uint64_t>(surface->current_render_packet().size()),
+                      }));
         return strata::core::result(STRATA_STATUS_OK);
     });
 }
@@ -954,8 +963,7 @@ strata_result strata_surface_read_frame_json(const strata_surface* const surface
         return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
-    if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) ||
-        sink->emit == nullptr) {
+    if (sink == nullptr || !has_struct(sink) || sink->emit == nullptr) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.ABI.INVALID_VALUE_SINK",
                                "Reading a surface frame requires a complete JSON sink.");
@@ -1010,8 +1018,7 @@ strata_result strata_surface_drain_events_json(strata_surface* const surface,
         return invalid_argument();
     if (surface->release_packet_prepared)
         return terminal_surface_failure(*surface);
-    if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) ||
-        sink->emit == nullptr) {
+    if (sink == nullptr || !has_struct(sink) || sink->emit == nullptr) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.ABI.INVALID_VALUE_SINK",
                                "Draining surface events requires a complete JSON sink.");
@@ -1047,7 +1054,7 @@ strata_result strata_surface_read_render_packet(const strata_surface* const surf
         return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
-    if (sink == nullptr || sink->struct_size < sizeof(strata_bytes_sink) || sink->emit == nullptr) {
+    if (sink == nullptr || !has_struct(sink) || sink->emit == nullptr) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.ABI.INVALID_BYTES_SINK",
                                "Reading a surface render packet requires a complete byte sink.");

@@ -29,7 +29,7 @@ strata_runtime_set_resource_adapter(strata_runtime* const runtime,
                                "STRATA.ABI.RESOURCE_ADAPTER_REQUIRED",
                                "A resource adapter cannot be null.");
     }
-    if (adapter->struct_size < sizeof(strata_resource_adapter) || adapter->load == nullptr) {
+    if (!has_struct(adapter) || adapter->load == nullptr) {
         return runtime_failure(
             *runtime, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_RESOURCE_ADAPTER",
             "A resource adapter requires the complete ABI structure and a load callback.");
@@ -52,8 +52,8 @@ strata_result strata_runtime_read_resource(strata_runtime* const runtime,
         return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
-    if (!valid_view(resource_id, false) || sink == nullptr ||
-        sink->struct_size < sizeof(strata_bytes_sink) || sink->emit == nullptr) {
+    if (!valid_view(resource_id, false) || sink == nullptr || !has_struct(sink) ||
+        sink->emit == nullptr) {
         return runtime_failure(
             *runtime, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_RESOURCE_READ",
             "Resource reads require a non-empty UTF-8 id and complete byte sink.");
@@ -98,8 +98,7 @@ strata_runtime_set_clipboard_adapter(strata_runtime* const runtime,
         runtime->clipboard.reset();
         return strata::core::result(STRATA_STATUS_OK);
     }
-    if (adapter->struct_size < sizeof(strata_clipboard_adapter) || adapter->read == nullptr ||
-        adapter->write == nullptr) {
+    if (!has_struct(adapter) || adapter->read == nullptr || adapter->write == nullptr) {
         return runtime_failure(*runtime, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.ABI.INVALID_CLIPBOARD_ADAPTER",
                                "A clipboard adapter requires complete read and write callbacks.");
@@ -115,8 +114,7 @@ strata_result strata_runtime_clipboard_read(strata_runtime* const runtime,
         return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
-    if (text_sink == nullptr || text_sink->struct_size < sizeof(strata_string_sink) ||
-        text_sink->emit == nullptr) {
+    if (text_sink == nullptr || !has_struct(text_sink) || text_sink->emit == nullptr) {
         return runtime_failure(*runtime, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.ABI.INVALID_STRING_SINK",
                                "Clipboard reads require a complete UTF-8 string sink.");
@@ -190,9 +188,8 @@ strata_result strata_runtime_set_ime_adapter(strata_runtime* const runtime,
         return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
-    if (adapter != nullptr &&
-        (adapter->struct_size < sizeof(strata_ime_adapter) || adapter->set_active == nullptr ||
-         adapter->set_cursor_rect == nullptr)) {
+    if (adapter != nullptr && (!has_struct(adapter) || adapter->set_active == nullptr ||
+                               adapter->set_cursor_rect == nullptr)) {
         return runtime_failure(
             *runtime, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_IME_ADAPTER",
             "An IME adapter requires active-state and cursor-rectangle callbacks.");
@@ -283,7 +280,7 @@ strata_runtime_set_effect_adapter(strata_runtime* const runtime,
         runtime->effects.reset();
         return strata::core::result(STRATA_STATUS_OK);
     }
-    if (adapter->struct_size < sizeof(strata_effect_adapter) || adapter->emit == nullptr) {
+    if (!has_struct(adapter) || adapter->emit == nullptr) {
         return runtime_failure(
             *runtime, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_EFFECT_ADAPTER",
             "An effect adapter requires the complete ABI structure and emit callback.");
@@ -386,9 +383,8 @@ strata_result strata_runtime_set_durable_store_adapter(
     if (runtime == nullptr)
         return invalid_argument();
     if (!runtime->core.has_application() || runtime->durable_store.has_value() ||
-        !runtime->surfaces.empty() || adapter == nullptr ||
-        adapter->struct_size < sizeof(strata_durable_store_adapter) || adapter->load == nullptr ||
-        adapter->write == nullptr) {
+        !runtime->surfaces.empty() || adapter == nullptr || !has_struct(adapter) ||
+        adapter->load == nullptr || adapter->write == nullptr) {
         return runtime_failure(
             *runtime, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_DURABLE_STORE_ADAPTER",
             "Durable store installation is one-time and requires a configured application, no "
@@ -416,7 +412,7 @@ strata_runtime_read_durable_shell_value_json(strata_runtime* const runtime,
     if (runtime == nullptr)
         return invalid_argument();
     if (!runtime->core.has_application() || !valid_view(key, false) || sink == nullptr ||
-        sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr) {
+        !has_struct(sink) || sink->emit == nullptr) {
         return runtime_failure(
             *runtime, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_DURABLE_READ",
             "Durable shell reads require a configured application, key, and complete JSON sink.");
@@ -487,8 +483,7 @@ strata_runtime_set_async_host_adapter(strata_runtime* const runtime,
     if (runtime == nullptr)
         return invalid_argument();
     if (!runtime->core.has_application() || runtime->async_host.has_value() || adapter == nullptr ||
-        adapter->struct_size < sizeof(strata_async_host_adapter) || adapter->begin == nullptr ||
-        adapter->cancel == nullptr) {
+        !has_struct(adapter) || adapter->begin == nullptr || adapter->cancel == nullptr) {
         return runtime_failure(*runtime, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.ABI.INVALID_ASYNC_HOST_ADAPTER",
                                "Async host installation is one-time and requires a configured "
@@ -531,9 +526,9 @@ strata_result strata_runtime_async_progress(strata_runtime* const runtime,
                                             const strata_async_progress* const progress) noexcept {
     if (runtime == nullptr)
         return invalid_argument();
-    if (!runtime->core.has_application() || progress == nullptr ||
-        progress->struct_size < sizeof(strata_async_progress) || progress->has_total > 1U ||
-        progress->reserved != 0U || !valid_view(progress->message, true)) {
+    if (!runtime->core.has_application() || progress == nullptr || !has_struct(progress) ||
+        progress->has_total > 1U || progress->reserved != 0U ||
+        !valid_view(progress->message, true)) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     // Completions may arrive on any thread, so failures report bare statuses, not diagnostics.

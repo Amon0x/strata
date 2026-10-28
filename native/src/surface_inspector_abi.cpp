@@ -13,6 +13,7 @@
 
 using strata::abi_detail::AbiCall;
 using strata::abi_detail::EntryGuard;
+using strata::abi_detail::has_struct;
 using strata::abi_detail::Reentry;
 using strata::abi_detail::surface_call;
 
@@ -104,7 +105,7 @@ strata_result strata_surface_read_inspector_selection_json(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr) {
+    if (sink == nullptr || !has_struct(sink) || sink->emit == nullptr) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_VALUE_SINK", "Reading inspector selection requires a complete JSON sink.");
     }
     return surface_call(surface, AbiCall{"Inspector selection delivery"}, [&] {
@@ -126,7 +127,7 @@ strata_result strata_surface_read_inspection_node_json(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr ||
+    if (sink == nullptr || !has_struct(sink) || sink->emit == nullptr ||
         !strata::abi_detail::valid_view(key, false)) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_INSPECTION_NODE", "Reading an inspection node requires a complete key and JSON sink.");
     }

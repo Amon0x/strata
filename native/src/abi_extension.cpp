@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "abi_boundary.hpp"
+#include "abi_struct.hpp"
 #include "core/runtime.hpp"
 #include "core/utf8.hpp"
 #include "data/json.hpp"
@@ -27,6 +28,8 @@ namespace {
 
 using strata::abi_detail::guarded;
 using strata::abi_detail::guarded_value;
+using strata::abi_detail::has_struct;
+using strata::abi_detail::read_struct_element;
 using strata::runtime::Value;
 
 /** Firewall for draw calls, which return nothing: a failure marks the callback's fragment. */
@@ -113,7 +116,7 @@ using ValueFields = std::map<std::string, Value, std::less<>>;
 material_state(const strata_material_state* const value) {
     if (value == nullptr)
         return std::nullopt;
-    if (value->struct_size < sizeof(strata_material_state) || !valid_view(value->id, false) ||
+    if (!has_struct(value) || !valid_view(value->id, false) ||
         !valid_view(value->blend_mode, true) || !std::isfinite(value->opacity) ||
         (value->parameters == nullptr && value->parameter_count != 0U)) {
         return std::nullopt;
@@ -126,9 +129,11 @@ material_state(const strata_material_state* const value) {
     state.opacity = value->opacity;
     state.parameters.reserve(value->parameter_count);
     for (std::size_t index = 0U; index < value->parameter_count; ++index) {
-        const strata_material_parameter parameter = value->parameters[index];
-        if (parameter.struct_size < sizeof(strata_material_parameter))
+        const std::optional<strata_material_parameter> element =
+            read_struct_element(value->parameters, index);
+        if (!element.has_value())
             return std::nullopt;
+        const strata_material_parameter parameter = *element;
         std::string name = checked_string(parameter.name, false, "material parameter name");
         Value parameter_value;
         switch (parameter.kind) {
@@ -421,88 +426,79 @@ ExtensionRetainedFields::find(const std::string_view name) const noexcept {
     return nullptr;
 }
 
-ExtensionRegistries extension_registries(const strata_surface_extension_bundle* const bundle,
+ExtensionRegistries extension_registries(const strata_surface_extension_bundle* const provided,
                                          core::Diagnostics& diagnostics) {
     ExtensionRegistries result;
-    if (bundle == nullptr)
+    if (provided == nullptr)
         return result;
-    const bool has_widget_inputs =
-        bundle->struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE;
-    const bool has_widget_scrolls =
-        bundle->struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_3_SIZE;
-    const bool has_behavior_inputs = bundle->struct_size >= sizeof(strata_surface_extension_bundle);
-    if (bundle->struct_size < STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE ||
-        (bundle->widgets == nullptr && bundle->widget_count != 0U) ||
+    // Tables newer than the caller's bundle layout read as empty.
+    const std::optional<strata_surface_extension_bundle> copied = read_struct(provided);
+    if (!copied.has_value())
+        throw std::invalid_argument("surface extension bundle is incomplete");
+    const strata_surface_extension_bundle* const bundle = &*copied;
+    if ((bundle->widgets == nullptr && bundle->widget_count != 0U) ||
         (bundle->behaviors == nullptr && bundle->behavior_count != 0U) ||
-        (has_widget_inputs && bundle->widget_inputs == nullptr &&
-         bundle->widget_input_count != 0U) ||
-        (has_widget_scrolls && bundle->widget_scrolls == nullptr &&
-         bundle->widget_scroll_count != 0U) ||
-        (has_behavior_inputs && bundle->behavior_inputs == nullptr &&
-         bundle->behavior_input_count != 0U)) {
+        (bundle->widget_inputs == nullptr && bundle->widget_input_count != 0U) ||
+        (bundle->widget_scrolls == nullptr && bundle->widget_scroll_count != 0U) ||
+        (bundle->behavior_inputs == nullptr && bundle->behavior_input_count != 0U)) {
         throw std::invalid_argument("surface extension bundle is incomplete");
     }
     constexpr std::size_t maximum_extensions = 256U;
     if (bundle->widget_count > maximum_extensions || bundle->behavior_count > maximum_extensions ||
-        (has_widget_inputs && bundle->widget_input_count > maximum_extensions) ||
-        (has_widget_scrolls && bundle->widget_scroll_count > maximum_extensions) ||
-        (has_behavior_inputs && bundle->behavior_input_count > maximum_extensions)) {
+        (bundle->widget_input_count > maximum_extensions) ||
+        (bundle->widget_scroll_count > maximum_extensions) ||
+        (bundle->behavior_input_count > maximum_extensions)) {
         throw std::invalid_argument("surface extension bundle exceeds its bounded lifecycle count");
     }
     std::map<std::string, strata_widget_input_extension, std::less<>> widget_inputs;
-    if (has_widget_inputs) {
-        for (std::size_t index = 0U; index < bundle->widget_input_count; ++index) {
-            const strata_widget_input_extension descriptor = bundle->widget_inputs[index];
-            if (descriptor.struct_size < sizeof(strata_widget_input_extension)) {
-                throw std::invalid_argument("widget input extension descriptor is incomplete");
-            }
-            std::string type =
-                checked_string(descriptor.type, false, "widget input extension type");
-            if (!widget_inputs.emplace(std::move(type), descriptor).second) {
-                throw std::invalid_argument(
-                    "widget input extension declares one widget type twice");
-            }
+    for (std::size_t index = 0U; index < bundle->widget_input_count; ++index) {
+        const std::optional<strata_widget_input_extension> element =
+            read_struct_element(bundle->widget_inputs, index);
+        if (!element.has_value()) {
+            throw std::invalid_argument("widget input extension descriptor is incomplete");
+        }
+        const strata_widget_input_extension descriptor = *element;
+        std::string type = checked_string(descriptor.type, false, "widget input extension type");
+        if (!widget_inputs.emplace(std::move(type), descriptor).second) {
+            throw std::invalid_argument("widget input extension declares one widget type twice");
         }
     }
     std::map<std::string, strata_widget_scroll_extension, std::less<>> widget_scrolls;
-    if (has_widget_scrolls) {
-        for (std::size_t index = 0U; index < bundle->widget_scroll_count; ++index) {
-            const strata_widget_scroll_extension descriptor = bundle->widget_scrolls[index];
-            if (descriptor.struct_size < sizeof(strata_widget_scroll_extension)) {
-                throw std::invalid_argument("widget scroll extension descriptor is incomplete");
-            }
-            std::string type =
-                checked_string(descriptor.type, false, "widget scroll extension type");
-            if (!widget_scrolls.emplace(std::move(type), descriptor).second) {
-                throw std::invalid_argument(
-                    "widget scroll extension declares one widget type twice");
-            }
+    for (std::size_t index = 0U; index < bundle->widget_scroll_count; ++index) {
+        const std::optional<strata_widget_scroll_extension> element =
+            read_struct_element(bundle->widget_scrolls, index);
+        if (!element.has_value()) {
+            throw std::invalid_argument("widget scroll extension descriptor is incomplete");
+        }
+        const strata_widget_scroll_extension descriptor = *element;
+        std::string type = checked_string(descriptor.type, false, "widget scroll extension type");
+        if (!widget_scrolls.emplace(std::move(type), descriptor).second) {
+            throw std::invalid_argument("widget scroll extension declares one widget type twice");
         }
     }
     std::map<std::string, strata_behavior_input_extension, std::less<>> behavior_inputs;
-    if (has_behavior_inputs) {
-        for (std::size_t index = 0U; index < bundle->behavior_input_count; ++index) {
-            const strata_behavior_input_extension descriptor = bundle->behavior_inputs[index];
-            if (descriptor.struct_size < sizeof(strata_behavior_input_extension)) {
-                throw std::invalid_argument("behavior input extension descriptor is incomplete");
-            }
-            std::string id = checked_string(descriptor.id, false, "behavior input extension id");
-            if (!behavior_inputs.emplace(std::move(id), descriptor).second) {
-                throw std::invalid_argument(
-                    "behavior input extension declares one behavior id twice");
-            }
+    for (std::size_t index = 0U; index < bundle->behavior_input_count; ++index) {
+        const std::optional<strata_behavior_input_extension> element =
+            read_struct_element(bundle->behavior_inputs, index);
+        if (!element.has_value()) {
+            throw std::invalid_argument("behavior input extension descriptor is incomplete");
+        }
+        const strata_behavior_input_extension descriptor = *element;
+        std::string id = checked_string(descriptor.id, false, "behavior input extension id");
+        if (!behavior_inputs.emplace(std::move(id), descriptor).second) {
+            throw std::invalid_argument("behavior input extension declares one behavior id twice");
         }
     }
     for (std::size_t index = 0U; index < bundle->widget_count; ++index) {
-        const strata_widget_extension descriptor = bundle->widgets[index];
-        if (descriptor.struct_size < STRATA_WIDGET_EXTENSION_VERSION_1_SIZE) {
+        const std::optional<strata_widget_extension> element =
+            read_struct_element(bundle->widgets, index);
+        if (!element.has_value()) {
             throw std::invalid_argument("widget extension descriptor is incomplete");
         }
-        const bool has_subtargets =
-            descriptor.struct_size >= STRATA_WIDGET_EXTENSION_VERSION_2_SIZE &&
-            descriptor.subtargets != nullptr;
-        const bool has_frame = descriptor.struct_size >= sizeof(strata_widget_extension) &&
-                               descriptor.frame != nullptr;
+        // Hooks newer than the caller's descriptor layout read as absent.
+        const strata_widget_extension descriptor = *element;
+        const bool has_subtargets = descriptor.subtargets != nullptr;
+        const bool has_frame = descriptor.frame != nullptr;
         const std::string type = checked_string(descriptor.type, false, "widget extension type");
         if (result.widgets.find(type) != nullptr) {
             throw std::invalid_argument("widget extension conflicts with lifecycle '" + type + "'");
@@ -525,11 +521,13 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
         auto fields = std::make_shared<ExtensionRetainedFields>();
         std::vector<std::string> paint_fields;
         for (std::size_t field = 0U; field < descriptor.retained_field_count; ++field) {
-            const strata_widget_retained_field entry = descriptor.retained_fields[field];
-            if (entry.struct_size < sizeof(strata_widget_retained_field)) {
+            const std::optional<strata_widget_retained_field> retained =
+                read_struct_element(descriptor.retained_fields, field);
+            if (!retained.has_value()) {
                 throw std::invalid_argument("widget extension '" + type +
                                             "' has an incomplete retained field descriptor");
             }
+            const strata_widget_retained_field entry = *retained;
             std::string name = checked_string(entry.name, false, "widget retained field name");
             if (fields->find(name) != nullptr) {
                 throw std::invalid_argument("widget extension '" + type +
@@ -749,10 +747,12 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
                                     widget_scrolls.begin()->first + "'");
     }
     for (std::size_t index = 0U; index < bundle->behavior_count; ++index) {
-        const strata_behavior_extension descriptor = bundle->behaviors[index];
-        if (descriptor.struct_size < STRATA_BEHAVIOR_EXTENSION_VERSION_1_SIZE) {
+        const std::optional<strata_behavior_extension> element =
+            read_struct_element(bundle->behaviors, index);
+        if (!element.has_value()) {
             throw std::invalid_argument("behavior extension descriptor is incomplete");
         }
+        const strata_behavior_extension descriptor = *element;
         const std::string id = checked_string(descriptor.id, false, "behavior extension id");
         if (result.behaviors.find(id) != nullptr) {
             throw std::invalid_argument("behavior extension conflicts with lifecycle '" + id + "'");
@@ -1065,8 +1065,7 @@ strata_result
 strata_widget_subtargets_add(strata_widget_subtargets_context* const context,
                              const strata_widget_subtarget* const subtarget) noexcept {
     if (context == nullptr || context->node == nullptr || context->layout == nullptr ||
-        context->targets == nullptr || subtarget == nullptr ||
-        subtarget->struct_size < sizeof(strata_widget_subtarget) ||
+        context->targets == nullptr || subtarget == nullptr || !has_struct(subtarget) ||
         !valid_view(subtarget->id, false) || !std::isfinite(subtarget->bounds.x) ||
         !std::isfinite(subtarget->bounds.y) || !std::isfinite(subtarget->bounds.width) ||
         !std::isfinite(subtarget->bounds.height) || subtarget->bounds.width < 0.0 ||
@@ -1615,7 +1614,7 @@ void strata_widget_render_custom_mesh(strata_widget_render_context* const contex
                                       const strata_string_view texture,
                                       const strata_material_state* const material_value) noexcept {
     if (context == nullptr || context->scope == nullptr || !valid_view(mesh, false) ||
-        geometry == nullptr || geometry->struct_size < sizeof(strata_mesh_geometry) ||
+        geometry == nullptr || !has_struct(geometry) ||
         (geometry->vertices == nullptr && geometry->vertex_count != 0U) ||
         (geometry->indices == nullptr && geometry->index_count != 0U) ||
         !valid_view(texture, true)) {
@@ -1808,8 +1807,7 @@ strata_result strata_widget_semantics_add_action(strata_widget_semantics_context
 strata_result
 strata_widget_semantics_add_child(strata_widget_semantics_context* const context,
                                   const strata_widget_semantic_child* const child) noexcept {
-    if (context == nullptr || context->scope == nullptr || child == nullptr ||
-        child->struct_size < sizeof(strata_widget_semantic_child) ||
+    if (context == nullptr || context->scope == nullptr || child == nullptr || !has_struct(child) ||
         !valid_view(child->role, false) || !valid_view(child->name, false) ||
         !valid_view(child->value_text, true)) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);

@@ -118,13 +118,13 @@ void emit_snapshot(
 }
 
 [[nodiscard]] bool valid_sink(const strata_profiler_snapshot_sink* const sink) noexcept {
-    return sink != nullptr && sink->struct_size >= sizeof(strata_profiler_snapshot_sink) &&
-        sink->emit != nullptr;
+    return strata::abi_detail::has_struct(sink) && sink->emit != nullptr;
 }
 
 } // namespace
 
 using strata::abi_detail::EntryGuard;
+using strata::abi_detail::has_struct;
 using strata::abi_detail::Reentry;
 
 strata_result strata_runtime_read_profiler(
@@ -202,7 +202,7 @@ strata_result strata_surface_record_host_frame(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr || telemetry == nullptr ||
-        telemetry->struct_size < sizeof(strata_profiler_host_frame) ||
+        !has_struct(telemetry) ||
         telemetry->version != STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT ||
         telemetry->reserved != 0U || telemetry->submit_nanos < 0) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);

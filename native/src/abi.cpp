@@ -56,19 +56,19 @@ strata_result strata_get_api_info(
     const uint32_t requested_abi,
     strata_api_info* const out_info
 ) noexcept {
-    if (out_info == nullptr || out_info->struct_size < sizeof(strata_api_info)) {
+    if (out_info == nullptr || !has_struct(out_info)) {
         return invalid_argument();
     }
     if (requested_abi < STRATA_ABI_VERSION_MINIMUM ||
         requested_abi > STRATA_ABI_VERSION_CURRENT) {
         return strata::core::result(STRATA_STATUS_UNSUPPORTED_ABI);
     }
-    *out_info = strata_api_info{
+    static_cast<void>(write_struct(out_info, strata_api_info{
         sizeof(strata_api_info),
         STRATA_ABI_VERSION_CURRENT,
         STRATA_ABI_VERSION_MINIMUM,
         capabilities,
-    };
+    }));
     return strata::core::result(STRATA_STATUS_OK);
 }
 
@@ -80,14 +80,14 @@ strata_result strata_runtime_create(
         *out_runtime = nullptr;
     }
     if (config == nullptr || out_runtime == nullptr ||
-        config->struct_size < sizeof(strata_runtime_config)) {
+        !has_struct(config)) {
         return invalid_argument();
     }
 
     const strata_diagnostic_sink sink =
         config->diagnostics.struct_size == 0U ? empty_sink() : config->diagnostics;
     if (config->diagnostics.struct_size != 0U &&
-        config->diagnostics.struct_size < sizeof(strata_diagnostic_sink)) {
+        !has_struct(&config->diagnostics)) {
         return strata::core::emit_without_runtime(
             empty_sink(),
             STRATA_STATUS_INVALID_ARGUMENT,
@@ -120,7 +120,7 @@ strata_result strata_runtime_create(
             "The runtime requires a capability this Strata library does not provide."
         );
     }
-    if (config->clock.struct_size < sizeof(strata_clock) ||
+    if (!has_struct(&config->clock) ||
         config->clock.now_nanoseconds == nullptr) {
         return strata::core::emit_without_runtime(
             sink,
@@ -206,11 +206,11 @@ strata_result strata_runtime_get_memory_info(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr || out_info == nullptr ||
-        out_info->struct_size < sizeof(strata_runtime_memory_info)) {
+        !has_struct(out_info)) {
         return invalid_argument();
     }
     const strata::core::AllocatorStatistics statistics = runtime->core.allocator_statistics();
-    *out_info = strata_runtime_memory_info{
+    static_cast<void>(write_struct(out_info, strata_runtime_memory_info{
         sizeof(strata_runtime_memory_info),
         statistics.routed.current_bytes,
         statistics.routed.peak_bytes,
@@ -226,7 +226,7 @@ strata_result strata_runtime_get_memory_info(
         statistics.arena.peak_live_allocations,
         statistics.arena.allocation_count,
         statistics.arena.deallocation_count,
-    };
+    }));
     return strata::core::result(STRATA_STATUS_OK);
 }
 
@@ -312,15 +312,15 @@ strata_result strata_snapshot_get_info(
     strata_snapshot_info* const out_info
 ) noexcept {
     if (snapshot == nullptr || out_info == nullptr ||
-        out_info->struct_size < sizeof(strata_snapshot_info)) {
+        !has_struct(out_info)) {
         return invalid_argument();
     }
-    *out_info = strata_snapshot_info{
+    static_cast<void>(write_struct(out_info, strata_snapshot_info{
         sizeof(strata_snapshot_info),
         snapshot->data.generation,
         snapshot->data.time_nanoseconds,
         snapshot->data.last_stable_identity,
-    };
+    }));
     return strata::core::result(STRATA_STATUS_OK);
 }
 

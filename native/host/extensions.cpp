@@ -1,6 +1,7 @@
 #include "extensions.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <format>
@@ -334,6 +335,34 @@ std::vector<std::string> declared_extension_packages(const std::string_view sche
     return result;
 }
 
+namespace {
+
+/**
+ * Appends a package's descriptor array to a combined table. The package strides its array by its
+ * own struct size, which may predate this host's headers; each element is copied into the current
+ * layout, with hooks the package predates left null.
+ */
+template <typename Descriptor>
+void append_descriptors(std::vector<Descriptor>& output, const Descriptor* const array,
+                        const std::size_t count) {
+    if (count == 0U)
+        return;
+    const auto* const bytes = reinterpret_cast<const std::byte*>(array);
+    std::size_t stride = 0U;
+    std::memcpy(&stride, bytes + offsetof(Descriptor, struct_size), sizeof(stride));
+    if (stride < offsetof(Descriptor, struct_size) + sizeof(stride)) {
+        throw std::runtime_error("external extension descriptor array has no struct size");
+    }
+    for (std::size_t index = 0U; index < count; ++index) {
+        Descriptor element{};
+        std::memcpy(&element, bytes + index * stride, std::min(stride, sizeof(Descriptor)));
+        element.struct_size = sizeof(Descriptor);
+        output.push_back(element);
+    }
+}
+
+} // namespace
+
 SelectedExtensions select_extensions(const std::vector<std::string>& package_ids,
                                      const std::vector<std::filesystem::path>& search_directories) {
     SelectedExtensions result;
@@ -345,29 +374,20 @@ SelectedExtensions select_extensions(const std::vector<std::string>& package_ids
         }
         result.packages.push_back(load_extension(id, search_directories));
         const strata_surface_extension_bundle& package = result.packages.back().bundle();
-        if (package.widget_count != 0U) {
-            result.widgets.insert(result.widgets.end(), package.widgets,
-                                  package.widgets + package.widget_count);
+        append_descriptors(result.widgets, package.widgets, package.widget_count);
+        if (package.struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE) {
+            append_descriptors(result.widget_inputs, package.widget_inputs,
+                               package.widget_input_count);
         }
-        if (package.struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE &&
-            package.widget_input_count != 0U) {
-            result.widget_inputs.insert(result.widget_inputs.end(), package.widget_inputs,
-                                        package.widget_inputs + package.widget_input_count);
+        if (package.struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_3_SIZE) {
+            append_descriptors(result.widget_scrolls, package.widget_scrolls,
+                               package.widget_scroll_count);
         }
-        if (package.struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_3_SIZE &&
-            package.widget_scroll_count != 0U) {
-            result.widget_scrolls.insert(result.widget_scrolls.end(), package.widget_scrolls,
-                                         package.widget_scrolls + package.widget_scroll_count);
+        if (package.struct_size >= sizeof(strata_surface_extension_bundle)) {
+            append_descriptors(result.behavior_inputs, package.behavior_inputs,
+                               package.behavior_input_count);
         }
-        if (package.struct_size >= sizeof(strata_surface_extension_bundle) &&
-            package.behavior_input_count != 0U) {
-            result.behavior_inputs.insert(result.behavior_inputs.end(), package.behavior_inputs,
-                                          package.behavior_inputs + package.behavior_input_count);
-        }
-        if (package.behavior_count != 0U) {
-            result.behaviors.insert(result.behaviors.end(), package.behaviors,
-                                    package.behaviors + package.behavior_count);
-        }
+        append_descriptors(result.behaviors, package.behaviors, package.behavior_count);
     }
     return result;
 }

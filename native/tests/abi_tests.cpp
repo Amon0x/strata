@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -13,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -1436,6 +1438,10 @@ struct FragmentFixture final {
             "name": "AbiFragment", "allowsChildren": false, "parameters": [
               {"name":"key","type":{"kind":"key"},"required":false,"nullable":false,"aliases":[],"default":null},
               {"name":"layout","type":{"kind":"layout"},"required":false,"nullable":false,"aliases":[],"default":null}
+            ]}, {
+            "name": "AbiFragmentTwin", "allowsChildren": false, "parameters": [
+              {"name":"key","type":{"kind":"key"},"required":false,"nullable":false,"aliases":[],"default":null},
+              {"name":"layout","type":{"kind":"layout"},"required":false,"nullable":false,"aliases":[],"default":null}
             ]}]},
           "behaviors": {"registry": "abi-fragment.v1", "required": [], "definitions": []},
           "actions": {"registry": "abi-fragment.v1", "required": [], "definitions": []},
@@ -1716,6 +1722,111 @@ void test_reentrant_and_cross_thread_calls(const std::filesystem::path& resource
                                           "different thread");
 }
 
+void count_presentation(void* const user_data, strata_widget_render_context*) {
+    ++*static_cast<std::uint64_t*>(user_data);
+}
+
+/** Older struct layouts are accepted by prefix, read only as far as provided, and arrays of them
+ * are strided by the caller's struct size. */
+void test_struct_size_versioning(const std::filesystem::path& resource_root) {
+    FragmentFixture fixture(resource_root, &present_nothing, nullptr);
+    const strata_surface_environment environment{
+        sizeof(strata_surface_environment),
+        1U,
+        200,
+        100,
+        200.0,
+        100.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        STRATA_POINT_SNAP_NEAREST,
+        STRATA_RECTANGLE_SNAP_OUTWARD,
+        STRATA_SURFACE_DENSITY_COMFORTABLE,
+        STRATA_POINTER_PRECISION_FINE,
+        STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD,
+        0U,
+        0U,
+    };
+
+    // Two widget descriptors from the oldest layout, packed at that layout's stride.
+    constexpr std::size_t widget_v1 = STRATA_WIDGET_EXTENSION_VERSION_1_SIZE;
+    std::uint64_t first_presentations = 0U;
+    std::uint64_t twin_presentations = 0U;
+    strata_widget_extension descriptors[2]{};
+    descriptors[0].type = view("AbiFragment");
+    descriptors[0].user_data = &first_presentations;
+    descriptors[0].present = &count_presentation;
+    descriptors[1].type = view("AbiFragmentTwin");
+    descriptors[1].user_data = &twin_presentations;
+    descriptors[1].present = &count_presentation;
+    std::vector<std::byte> packed(2U * widget_v1);
+    for (std::size_t index = 0U; index < 2U; ++index) {
+        descriptors[index].struct_size = widget_v1;
+        std::memcpy(packed.data() + index * widget_v1, &descriptors[index], widget_v1);
+    }
+    strata_surface_extension_bundle bundle{};
+    bundle.struct_size = STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE;
+    bundle.widgets = reinterpret_cast<const strata_widget_extension*>(packed.data());
+    bundle.widget_count = 2U;
+    strata_surface_config config{};
+    config.struct_size = sizeof(config);
+    config.id = view("fragment.versioned");
+    config.root_role = STRATA_SURFACE_ROOT_SCREEN;
+    config.root_name = view("Main");
+    config.environment = environment;
+    config.extensions = &bundle;
+    strata_surface* packed_surface = nullptr;
+    check(strata_runtime_create_surface(fixture.runtime, &config, &packed_surface).status ==
+                  STRATA_STATUS_OK &&
+              packed_surface != nullptr,
+          "an array of oldest-layout widget descriptors was not read at its own stride");
+    strata_surface_frame_info info{};
+    info.struct_size = sizeof(info);
+    check(strata_surface_frame(packed_surface, fixture.clock.now + 1, &info).status ==
+                  STRATA_STATUS_OK &&
+              first_presentations != 0U,
+          "an oldest-layout widget descriptor did not present");
+    check(strata_surface_abandon(packed_surface).status == STRATA_STATUS_OK,
+          "versioned Surface abandonment failed");
+
+    // The oldest Surface configuration ends before `extensions`; bytes past it are never read.
+    strata_surface_config oldest = config;
+    oldest.id = view("fragment.oldest");
+    oldest.struct_size = offsetof(strata_surface_config, extensions);
+    oldest.extensions = reinterpret_cast<const strata_surface_extension_bundle*>(std::uintptr_t{1});
+    strata_surface* oldest_surface = nullptr;
+    check(strata_runtime_create_surface(fixture.runtime, &oldest, &oldest_surface).status ==
+                  STRATA_STATUS_OK &&
+              oldest_surface != nullptr,
+          "the oldest Surface configuration prefix was rejected or read past its size");
+    check(strata_surface_abandon(oldest_surface).status == STRATA_STATUS_OK,
+          "oldest-layout Surface abandonment failed");
+    strata_surface_config truncated = oldest;
+    truncated.id = view("fragment.truncated");
+    truncated.struct_size = offsetof(strata_surface_config, extensions) - 1U;
+    strata_surface* truncated_surface = nullptr;
+    check(strata_runtime_create_surface(fixture.runtime, &truncated, &truncated_surface).status ==
+                  STRATA_STATUS_INVALID_ARGUMENT &&
+              truncated_surface == nullptr,
+          "a Surface configuration shorter than its oldest layout was accepted");
+
+    // A newer caller's larger output struct keeps the bytes this library does not know.
+    struct NewerMemoryInfo final {
+        strata_runtime_memory_info info;
+        std::uint64_t future_field;
+    } newer{};
+    newer.info.struct_size = sizeof(newer);
+    newer.future_field = 0xFEEDFACEU;
+    check(strata_runtime_get_memory_info(fixture.runtime, &newer.info).status ==
+                  STRATA_STATUS_OK &&
+              newer.info.struct_size == sizeof(strata_runtime_memory_info) &&
+              newer.future_field == 0xFEEDFACEU,
+          "an output struct was written past the layout this library knows");
+}
+
 struct SubtargetCapture final {
     bool called = false;
     strata_status reserve_status = STRATA_STATUS_OK;
@@ -1779,6 +1890,7 @@ int strata_test_abi(const int argument_count, const char* const* const arguments
             test_extension_allocation_failure_status(arguments[1]);
             test_extension_clip_balance(arguments[1]);
             test_reentrant_and_cross_thread_calls(arguments[1]);
+            test_struct_size_versioning(arguments[1]);
         }
         test_host_service_adapters();
         test_allocator_ownership_and_validation();

@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "abi_boundary.hpp"
+#include "abi_struct.hpp"
 #include "core/diagnostics.hpp"
 #include "ui/scale.hpp"
 
@@ -90,13 +91,16 @@ namespace {
 
 } // namespace
 
+using strata::abi_detail::has_struct;
+using strata::abi_detail::write_struct;
+
 extern "C" {
 
 strata_result strata_scale_policy_defaults(
     const strata_scale_policy_kind kind,
     strata_scale_policy_config* const out_policy
 ) noexcept {
-    if (out_policy == nullptr || out_policy->struct_size < sizeof(strata_scale_policy_config)) {
+    if (out_policy == nullptr || !has_struct(out_policy)) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return strata::abi_detail::guarded([&] {
@@ -112,8 +116,8 @@ strata_result strata_resolve_scale_context(
     strata_scale_context* const out_context
 ) noexcept {
     if (policy == nullptr || out_context == nullptr ||
-        policy->struct_size < sizeof(strata_scale_policy_config) ||
-        out_context->struct_size < sizeof(strata_scale_context) ||
+        !has_struct(policy) ||
+        !has_struct(out_context) ||
         policy->reserved != 0U || policy->prefer_integer_scale > 1U ||
         !valid_policy_kind(policy->kind) || !valid_snapping(*policy)) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
@@ -123,7 +127,7 @@ strata_result strata_resolve_scale_context(
             *policy,
             strata::ui::FramebufferSize{framebuffer_width, framebuffer_height}
         );
-        *out_context = strata_scale_context{
+        static_cast<void>(write_struct(out_context, strata_scale_context{
             sizeof(strata_scale_context),
             resolved.framebuffer.width,
             resolved.framebuffer.height,
@@ -134,7 +138,7 @@ strata_result strata_resolve_scale_context(
             policy->point_snapping,
             policy->rectangle_snapping,
             0U,
-        };
+        }));
         return strata::core::result(STRATA_STATUS_OK);
     });
 }

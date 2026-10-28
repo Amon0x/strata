@@ -22,6 +22,8 @@
 
 using strata::abi_detail::AbiCall;
 using strata::abi_detail::EntryGuard;
+using strata::abi_detail::has_struct;
+using strata::abi_detail::write_struct;
 using strata::abi_detail::Reentry;
 using strata::abi_detail::surface_call;
 
@@ -120,7 +122,7 @@ void validate_table(
 }
 
 [[nodiscard]] strata::ui::ThemeTokens tokens(const strata_theme_tokens& value) {
-    if (value.struct_size < sizeof(strata_theme_tokens) || value.reserved != 0U) {
+    if (!has_struct(&value) || value.reserved != 0U) {
         throw std::invalid_argument("theme tokens header is invalid");
     }
     strata::ui::ThemeTokens result{
@@ -148,7 +150,7 @@ void validate_table(
 ) {
     if (policy == nullptr) return std::nullopt;
     constexpr std::size_t maximum_theme_timings = 64U;
-    if (policy->struct_size < sizeof(strata_theme_motion_policy) ||
+    if (!has_struct(policy) ||
         policy->reduced_motion > 1U || policy->reserved != 0U ||
         policy->timing_count > maximum_theme_timings ||
         ((policy->timing_count == 0U) != (policy->timings == nullptr))) {
@@ -157,7 +159,7 @@ void validate_table(
     std::map<std::string, strata::ui::MotionTiming, std::less<>> timings;
     for (std::size_t index = 0U; index < policy->timing_count; ++index) {
         const strata_theme_motion_timing& source = policy->timings[index];
-        if (source.struct_size < sizeof(strata_theme_motion_timing) || source.reserved != 0U ||
+        if (!has_struct(&source) || source.reserved != 0U ||
             source.repeat_kind > STRATA_THEME_MOTION_REPEAT_FOREVER ||
             source.fill_mode > STRATA_THEME_MOTION_FILL_BOTH ||
             (source.repeat_kind == STRATA_THEME_MOTION_REPEAT_COUNT
@@ -214,7 +216,7 @@ private:
 [[nodiscard]] strata::ui::ThemeWidgetVisualStyle visual_style(
     const strata_theme_visual_style& source
 ) {
-    if (source.struct_size < sizeof(strata_theme_visual_style) || source.reserved != 0U) {
+    if (!has_struct(&source) || source.reserved != 0U) {
         throw std::invalid_argument("theme visual-style header is invalid");
     }
     strata::ui::ThemeWidgetVisualStyle result{
@@ -253,7 +255,7 @@ private:
 [[nodiscard]] strata::ui::ThemeWidgetTextVisualStyle text_visual_style(
     const strata_theme_text_visual_style& source
 ) {
-    if (source.struct_size < sizeof(strata_theme_text_visual_style) || source.reserved != 0U) {
+    if (!has_struct(&source) || source.reserved != 0U) {
         throw std::invalid_argument("theme text-visual-style header is invalid");
     }
     return {color(source.color), color(source.hint_color), color(source.selection_color), color(source.caret_color)};
@@ -263,7 +265,7 @@ private:
     const strata_theme_text_layout_style& source
 ) {
     constexpr std::size_t maximum_fallback_fonts = 64U;
-    if (source.struct_size < sizeof(strata_theme_text_layout_style) || source.reserved != 0U) {
+    if (!has_struct(&source) || source.reserved != 0U) {
         throw std::invalid_argument("theme text-layout-style header is invalid");
     }
     validate_table(source.fallback_fonts, source.fallback_font_count, maximum_fallback_fonts, "theme fallback font");
@@ -289,7 +291,7 @@ private:
     const std::size_t depth = 0U
 ) {
     constexpr std::size_t maximum_depth = 64U;
-    if (depth > maximum_depth || source.struct_size < sizeof(strata_theme_layout_size) ||
+    if (depth > maximum_depth || !has_struct(&source) ||
         source.reserved != 0U || source.kind > STRATA_THEME_SIZE_CLAMP) {
         throw std::invalid_argument(std::string(label) + " is invalid");
     }
@@ -337,7 +339,7 @@ private:
 
 [[nodiscard]] strata::ui::LayoutStyle layout_style(const strata_theme_layout_style& source) {
     constexpr std::size_t maximum_tracks = 1'024U;
-    if (source.struct_size < sizeof(strata_theme_layout_style) || source.reserved != 0U ||
+    if (!has_struct(&source) || source.reserved != 0U ||
         source.kind > STRATA_THEME_LAYOUT_PORTAL || source.align_items > STRATA_THEME_ALIGN_STRETCH ||
         source.justify_content > STRATA_THEME_JUSTIFY_SPACE_EVENLY ||
         source.align_content > STRATA_THEME_JUSTIFY_SPACE_EVENLY ||
@@ -404,7 +406,7 @@ private:
     if (source.virtual_list != nullptr) {
         constexpr std::size_t maximum_virtual_items = 1'000'000U;
         const strata_theme_virtual_list& list = *source.virtual_list;
-        if (list.struct_size < sizeof(strata_theme_virtual_list) || list.reserved != 0U ||
+        if (!has_struct(&list) || list.reserved != 0U ||
             list.axis > STRATA_THEME_AXIS_VERTICAL) {
             throw std::invalid_argument("theme virtual-list header is invalid");
         }
@@ -474,7 +476,7 @@ private:
 [[nodiscard]] strata::ui::MotionEasing motion_easing(
     const strata_theme_motion_easing& source
 ) {
-    if (source.struct_size < sizeof(strata_theme_motion_easing) || source.reserved != 0U ||
+    if (!has_struct(&source) || source.reserved != 0U ||
         source.kind > STRATA_THEME_MOTION_EASING_CUBIC_BEZIER) {
         throw std::invalid_argument("theme motion easing is invalid");
     }
@@ -494,7 +496,7 @@ private:
 ) {
     constexpr std::size_t maximum_tracks = 128U;
     constexpr std::size_t maximum_keyframes = 4'096U;
-    if (source.struct_size < sizeof(strata_theme_declared_animation) || source.reserved != 0U ||
+    if (!has_struct(&source) || source.reserved != 0U ||
         source.fill_mode > static_cast<std::uint32_t>(strata::ui::MotionFillMode::both)) {
         throw std::invalid_argument("theme declared-animation header is invalid");
     }
@@ -561,7 +563,7 @@ private:
 
 [[nodiscard]] strata::ui::ThemeAnimationSet animation_set(const strata_theme_animation_set& source) {
     constexpr std::size_t maximum_entries = 1'024U;
-    if (source.struct_size < sizeof(strata_theme_animation_set) || source.reserved != 0U) {
+    if (!has_struct(&source) || source.reserved != 0U) {
         throw std::invalid_argument("theme animation-set header is invalid");
     }
     validate_table(source.attachments, source.attachment_count, maximum_entries, "theme motion attachments");
@@ -659,7 +661,7 @@ private:
     const strata_theme_widget_style& source,
     strata::ui::ThemeWidgetKey& key
 ) {
-    if (source.struct_size < sizeof(strata_theme_widget_style) || source.reserved != 0U ||
+    if (!has_struct(&source) || source.reserved != 0U ||
         source.motion_mode > STRATA_THEME_VALUE_NONE ||
         ((source.motion_mode == STRATA_THEME_VALUE_SET) != (source.motion != nullptr)) ||
         (source.motion_mode == STRATA_THEME_VALUE_NONE && source.motion != nullptr)) {
@@ -685,7 +687,7 @@ private:
     const strata_theme& source
 ) {
     constexpr std::size_t maximum_theme_widget_styles = 1'024U;
-    if (source.struct_size < sizeof(strata_theme) || source.reserved != 0U ||
+    if (!has_struct(&source) || source.reserved != 0U ||
         source.model_version != STRATA_THEME_MODEL_VERSION_CURRENT ||
         source.widget_style_count > maximum_theme_widget_styles ||
         ((source.widget_style_count == 0U) != (source.widget_styles == nullptr))) {
@@ -749,11 +751,11 @@ template <typename Mutation>
 extern "C" {
 
 strata_result strata_theme_tokens_defaults(strata_theme_tokens* const out_tokens) noexcept {
-    if (out_tokens == nullptr || out_tokens->struct_size < sizeof(strata_theme_tokens)) {
+    if (out_tokens == nullptr || !has_struct(out_tokens)) {
         return strata::abi_detail::invalid_argument();
     }
     const strata::ui::ThemeTokens source;
-    *out_tokens = strata_theme_tokens{
+    static_cast<void>(write_struct(out_tokens, strata_theme_tokens{
         sizeof(strata_theme_tokens),
         strata_color{source.surface.red, source.surface.green, source.surface.blue, source.surface.alpha},
         strata_color{
@@ -781,14 +783,14 @@ strata_result strata_theme_tokens_defaults(strata_theme_tokens* const out_tokens
         source.radius,
         source.density,
         0U,
-    };
+    }));
     return strata::core::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_theme_visual_style_defaults(
     strata_theme_visual_style* const out_style
 ) noexcept {
-    if (out_style == nullptr || out_style->struct_size < sizeof(strata_theme_visual_style)) {
+    if (out_style == nullptr || !has_struct(out_style)) {
         return strata::abi_detail::invalid_argument();
     }
     strata_theme_visual_style result{};
@@ -806,28 +808,28 @@ strata_result strata_theme_visual_style_defaults(
 strata_result strata_theme_text_visual_style_defaults(
     strata_theme_text_visual_style* const out_style
 ) noexcept {
-    if (out_style == nullptr || out_style->struct_size < sizeof(strata_theme_text_visual_style)) {
+    if (out_style == nullptr || !has_struct(out_style)) {
         return strata::abi_detail::invalid_argument();
     }
-    *out_style = strata_theme_text_visual_style{
+    static_cast<void>(write_struct(out_style, strata_theme_text_visual_style{
         sizeof(strata_theme_text_visual_style),
         strata_color{255U, 255U, 255U, 255U},
         strata_color{160U, 168U, 178U, 180U},
         strata_color{72U, 119U, 218U, 96U},
         strata_color{255U, 255U, 255U, 255U},
         0U,
-    };
+    }));
     return strata::core::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_theme_text_layout_style_defaults(
     strata_theme_text_layout_style* const out_style
 ) noexcept {
-    if (out_style == nullptr || out_style->struct_size < sizeof(strata_theme_text_layout_style)) {
+    if (out_style == nullptr || !has_struct(out_style)) {
         return strata::abi_detail::invalid_argument();
     }
     static constexpr char default_font[] = "strata:fonts/default";
-    *out_style = strata_theme_text_layout_style{
+    static_cast<void>(write_struct(out_style, strata_theme_text_layout_style{
         sizeof(strata_theme_text_layout_style),
         strata_string_view{default_font, sizeof(default_font) - 1U},
         nullptr,
@@ -838,14 +840,14 @@ strata_result strata_theme_text_layout_style_defaults(
         strata_theme_optional_number{},
         1.0,
         0.0,
-    };
+    }));
     return strata::core::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_theme_layout_style_defaults(
     strata_theme_layout_style* const out_style
 ) noexcept {
-    if (out_style == nullptr || out_style->struct_size < sizeof(strata_theme_layout_style)) {
+    if (out_style == nullptr || !has_struct(out_style)) {
         return strata::abi_detail::invalid_argument();
     }
     static constexpr char root[] = "root";
@@ -874,10 +876,10 @@ strata_result strata_theme_layout_style_defaults(
 strata_result strata_theme_animation_set_defaults(
     strata_theme_animation_set* const out_set
 ) noexcept {
-    if (out_set == nullptr || out_set->struct_size < sizeof(strata_theme_animation_set)) {
+    if (out_set == nullptr || !has_struct(out_set)) {
         return strata::abi_detail::invalid_argument();
     }
-    *out_set = strata_theme_animation_set{};
+    static_cast<void>(write_struct(out_set, strata_theme_animation_set{}));
     out_set->struct_size = sizeof(strata_theme_animation_set);
     return strata::core::result(STRATA_STATUS_OK);
 }
@@ -1010,7 +1012,7 @@ strata_result strata_surface_animate_scroll_to(
     if (surface->release_packet_prepared) return strata::abi_detail::terminal_surface_failure(*surface);
     if (out_started != nullptr) *out_started = 0U;
     if (source == nullptr || out_started == nullptr ||
-        source->struct_size < sizeof(strata_scroll_animation_request) ||
+        !has_struct(source) ||
         source->reserved != 0U || source->has_x > 1U || source->has_y > 1U ||
         source->has_duration > 1U) {
         return surface_failure(
