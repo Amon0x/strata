@@ -1,6 +1,6 @@
 #include "host_services.hpp"
 
-#include "host/system_fonts.hpp"
+#include "host/resource_root.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -30,30 +30,6 @@ namespace {
 
 [[nodiscard]] std::string copy(const strata_string_view value) {
     return value.size == 0U ? std::string{} : std::string(value.data, value.size);
-}
-
-[[nodiscard]] std::vector<std::uint8_t> read_bytes(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary | std::ios::ate);
-    if (!input)
-        throw std::runtime_error("could not open desktop resource: " + path.string());
-    const std::streampos end = input.tellg();
-    if (end < 0) {
-        throw std::runtime_error("could not size desktop resource: " + path.string());
-    }
-    const auto size = static_cast<std::uint64_t>(end);
-    if (size > static_cast<std::uint64_t>(std::numeric_limits<std::streamsize>::max()) ||
-        size > std::vector<std::uint8_t>{}.max_size()) {
-        throw std::length_error("desktop resource is too large: " + path.string());
-    }
-    std::vector<std::uint8_t> result(static_cast<std::size_t>(size));
-    input.seekg(0, std::ios::beg);
-    if (!result.empty()) {
-        input.read(reinterpret_cast<char*>(result.data()),
-                   static_cast<std::streamsize>(result.size()));
-    }
-    if (!input)
-        throw std::runtime_error("could not read desktop resource: " + path.string());
-    return result;
 }
 
 [[nodiscard]] std::string wide_to_utf8(const std::wstring_view value) {
@@ -95,10 +71,10 @@ struct HostServices::Impl final {
         Impl* host = nullptr;
     };
 
-    Impl(HWND window, std::filesystem::path root) : window(window), root(std::move(root)) {
+    Impl(HWND window, std::filesystem::path root) : window(window), resources(std::move(root)) {
         if (window == nullptr)
             throw std::invalid_argument("desktop services require a window");
-        if (!std::filesystem::is_directory(this->root)) {
+        if (!std::filesystem::is_directory(resources.root())) {
             throw std::invalid_argument("desktop resource root is not a directory");
         }
     }
@@ -109,50 +85,20 @@ struct HostServices::Impl final {
         }
     }
 
-    [[nodiscard]] std::filesystem::path resource_path(const std::filesystem::path& relative) const {
-        // On Windows "/x" (root directory, no drive) and "D:x" (drive-relative) are not absolute, yet
-    // either one joined to the resource root leaves it.
-        if (relative.empty() || relative.has_root_name() || relative.has_root_directory()) {
-            throw std::invalid_argument("desktop resource id must be relative");
-        }
-        for (const std::filesystem::path& component : relative) {
-            if (component == "..") {
-                throw std::invalid_argument("desktop resource id escapes its root");
-            }
-        }
-        return root / relative;
+    [[nodiscard]] std::string text(const std::string_view id) const {
+        return resources.read_text(host::utf8_path(id));
     }
 
-    [[nodiscard]] std::string text(const std::filesystem::path& relative) const {
-        const std::vector<std::uint8_t> bytes = read_bytes(resource_path(relative));
-        return std::string(bytes.begin(), bytes.end());
-    }
-
-    [[nodiscard]] std::vector<std::uint8_t> bytes(const std::filesystem::path& relative) const {
-        return read_bytes(resource_path(relative));
+    [[nodiscard]] std::vector<std::uint8_t> bytes(const std::string_view id) const {
+        return resources.read(host::utf8_path(id));
     }
 
     static strata_status load_resource(void* const user_data, const strata_string_view id,
                                        strata_bytes_view* const output) noexcept {
-        if (output == nullptr)
+        if (user_data == nullptr || output == nullptr)
             return STRATA_STATUS_INVALID_ARGUMENT;
-        try {
-            auto& self = *static_cast<Impl*>(user_data);
-            const std::string resource_id = copy(id);
-            const std::filesystem::path relative(resource_id);
-            auto [found, inserted] = self.resource_cache.try_emplace(resource_id);
-            if (inserted) {
-                std::optional<std::vector<std::uint8_t>> system =
-                    host::read_system_font(resource_id);
-                found->second = system.has_value() ? std::move(*system)
-                                                   : read_bytes(self.resource_path(relative));
-            }
-            output->data = found->second.data();
-            output->size = found->second.size();
-            return output->size == 0U ? STRATA_STATUS_NOT_FOUND : STRATA_STATUS_OK;
-        } catch (...) {
-            return STRATA_STATUS_NOT_FOUND;
-        }
+        return static_cast<Impl*>(user_data)->resources.load(
+            std::string_view(id.data != nullptr ? id.data : "", id.size), *output);
     }
 
     static strata_status clipboard_read(void* const user_data,
@@ -297,8 +243,7 @@ struct HostServices::Impl final {
     }
 
     HWND window = nullptr;
-    std::filesystem::path root;
-    std::map<std::string, std::vector<std::uint8_t>, std::less<>> resource_cache;
+    host::ResourceRoot resources;
     std::map<std::string, std::unique_ptr<ImeClient>, std::less<>> ime_clients;
     std::string clipboard_text;
     HIMC detached_ime_context = nullptr;
@@ -310,12 +255,12 @@ HostServices::HostServices(HWND window, std::filesystem::path resource_root)
     : impl_(std::make_unique<Impl>(window, std::move(resource_root))) {}
 HostServices::~HostServices() = default;
 
-std::string HostServices::text(const std::filesystem::path& relative) const {
-    return impl_->text(relative);
+std::string HostServices::text(const std::string_view id) const {
+    return impl_->text(id);
 }
 
-std::vector<std::uint8_t> HostServices::bytes(const std::filesystem::path& relative) const {
-    return impl_->bytes(relative);
+std::vector<std::uint8_t> HostServices::bytes(const std::string_view id) const {
+    return impl_->bytes(id);
 }
 
 bool HostServices::write_clipboard(const std::string_view text) noexcept {

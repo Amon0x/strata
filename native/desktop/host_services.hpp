@@ -22,8 +22,9 @@ class HostServices final {
     HostServices(const HostServices&) = delete;
     HostServices& operator=(const HostServices&) = delete;
 
-    [[nodiscard]] std::string text(const std::filesystem::path& relative) const;
-    [[nodiscard]] std::vector<std::uint8_t> bytes(const std::filesystem::path& relative) const;
+    /** Reads one UTF-8 resource id below the resource root; see host::ResourceRoot. */
+    [[nodiscard]] std::string text(std::string_view id) const;
+    [[nodiscard]] std::vector<std::uint8_t> bytes(std::string_view id) const;
     [[nodiscard]] bool write_clipboard(std::string_view text) noexcept;
     [[nodiscard]] strata_resource_adapter resource_adapter() noexcept;
     [[nodiscard]] strata_clipboard_adapter clipboard_adapter() noexcept;

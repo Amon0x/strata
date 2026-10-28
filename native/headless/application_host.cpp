@@ -24,6 +24,7 @@
 #include "capture_renderer.hpp"
 #include "host/extensions.hpp"
 #include "host/module_path.hpp"
+#include "host/resource_root.hpp"
 #include "host/system_fonts.hpp"
 #include <strata/render_packet.hpp>
 
@@ -50,21 +51,6 @@ void require_renderable_surface(const double width, const double height, const d
 
 [[nodiscard]] std::string copy(const strata_string_view value) {
     return value.size == 0U ? std::string{} : std::string(value.data, value.size);
-}
-
-[[nodiscard]] std::string read_text(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input)
-        throw std::runtime_error("could not open headless resource: " + path.string());
-    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
-}
-
-[[nodiscard]] std::vector<std::uint8_t> read_bytes(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input)
-        throw std::runtime_error("could not open headless resource: " + path.string());
-    return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(input),
-                                     std::istreambuf_iterator<char>());
 }
 
 [[nodiscard]] std::string
@@ -107,7 +93,7 @@ struct ApplicationHost::Impl final {
 
     Impl(const Scenario& scenario, std::filesystem::path resource_root,
          ApplicationHostOptions options)
-        : scenario(scenario), resource_root(std::move(resource_root)), options(std::move(options)),
+        : scenario(scenario), resource_files(std::move(resource_root)), options(std::move(options)),
           renderer(create_capture_renderer(scenario.render_backend)) {
         try {
             initialize();
@@ -152,43 +138,20 @@ struct ApplicationHost::Impl final {
         }
     }
 
-    [[nodiscard]] std::filesystem::path resource_path(const std::string_view id) const {
-        const std::filesystem::path relative{std::string(id)};
-        // On Windows "/x" (root directory, no drive) and "D:x" (drive-relative) are not absolute, yet
-    // either one joined to the resource root leaves it.
-        if (id.empty() || relative.has_root_name() || relative.has_root_directory()) {
-            throw std::invalid_argument("headless resource id must be relative");
-        }
-        for (const std::filesystem::path& part : relative) {
-            if (part == "..")
-                throw std::invalid_argument("headless resource id escapes its root");
-        }
-        return resource_root / relative;
+    [[nodiscard]] std::string resource_text(const std::filesystem::path& relative) const {
+        return resource_files.read_text(relative);
+    }
+
+    [[nodiscard]] std::string resource_text(const std::string& id) const {
+        return resource_files.read_text(host::utf8_path(id));
     }
 
     static strata_status load_resource(void* const user_data, const strata_string_view id,
                                        strata_bytes_view* const output) noexcept {
         if (user_data == nullptr || output == nullptr)
             return STRATA_STATUS_INVALID_ARGUMENT;
-        try {
-            auto& self = *static_cast<Impl*>(user_data);
-            const std::string resource_id = copy(id);
-            auto [found, inserted] = self.resource_cache.try_emplace(resource_id);
-            if (inserted) {
-                std::optional<std::vector<std::uint8_t>> system =
-                    host::read_system_font(resource_id);
-                found->second = system.has_value()
-                                    ? std::move(*system)
-                                    : read_bytes(self.resource_path(resource_id));
-            }
-            output->data = found->second.data();
-            output->size = found->second.size();
-            return output->size == 0U ? STRATA_STATUS_NOT_FOUND : STRATA_STATUS_OK;
-        } catch (const std::bad_alloc&) {
-            return STRATA_STATUS_OUT_OF_MEMORY;
-        } catch (...) {
-            return STRATA_STATUS_NOT_FOUND;
-        }
+        return static_cast<Impl*>(user_data)->resource_files.load(
+            std::string_view(id.data != nullptr ? id.data : "", id.size), *output);
     }
 
     static strata_status load_module(void* const user_data,
@@ -201,7 +164,7 @@ struct ApplicationHost::Impl final {
             auto& self = *static_cast<Impl*>(user_data);
             self.module_id_scratch =
                 host::resolve_module_id(copy(importer_source_id), copy(import_path));
-            self.module_text_scratch = read_text(self.resource_path(self.module_id_scratch));
+            self.module_text_scratch = self.resource_text(self.module_id_scratch);
             *output = strata_module_source{
                 sizeof(strata_module_source),
                 strata::view(self.module_id_scratch),
@@ -210,8 +173,12 @@ struct ApplicationHost::Impl final {
             return STRATA_STATUS_OK;
         } catch (const std::bad_alloc&) {
             return STRATA_STATUS_OUT_OF_MEMORY;
-        } catch (...) {
+        } catch (const host::ResourceNotFound&) {
             return STRATA_STATUS_NOT_FOUND;
+        } catch (const std::invalid_argument&) {
+            return STRATA_STATUS_INVALID_ARGUMENT;
+        } catch (...) {
+            return STRATA_STATUS_SERVICE_UNAVAILABLE;
         }
     }
 
@@ -358,7 +325,7 @@ struct ApplicationHost::Impl final {
     }
 
     void initialize() {
-        if (!std::filesystem::is_directory(resource_root)) {
+        if (!std::filesystem::is_directory(resource_files.root())) {
             throw std::invalid_argument("headless resource root is not a directory");
         }
         require_renderable_surface(scenario.width, scenario.height, scenario.scale);
@@ -425,7 +392,7 @@ struct ApplicationHost::Impl final {
 
         const std::string schemas =
             scenario.schemas.empty() ? std::string{}
-                                     : read_text(resource_path(scenario.schemas.generic_string()));
+                                     : resource_text(scenario.schemas);
         std::vector<std::string> packages = host::declared_extension_packages(schemas);
         if (packages.empty()) {
             packages = scenario.packages;
@@ -451,7 +418,7 @@ struct ApplicationHost::Impl final {
         for (const strata::MaterialDeclaration& material : runtime->material_declarations("hlsl")) {
             if (material.source.empty())
                 continue;
-            renderer->declare_material(material.id, read_text(resource_path(material.source)));
+            renderer->declare_material(material.id, resource_text(material.source));
         }
         const std::string_view effect_backend =
             renderer->backend() == "reference" ? "reference" : "hlsl";
@@ -461,7 +428,7 @@ struct ApplicationHost::Impl final {
                 pass.effect_id, pass.index, static_cast<std::uint32_t>(pass.kind), pass.radius,
                 pass.downsample, pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
                 pass.downsample_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
-                pass.source.empty() ? std::string{} : read_text(resource_path(pass.source)));
+                pass.source.empty() ? std::string{} : resource_text(pass.source));
         }
 
         const strata_durable_store_adapter durable_adapter{
@@ -498,7 +465,7 @@ struct ApplicationHost::Impl final {
             publish(snapshot);
 
         const std::string source_id = scenario.module.generic_string();
-        const std::string source = read_text(resource_path(source_id));
+        const std::string source = resource_text(source_id);
         const strata_activation_config activation{
             sizeof(strata_activation_config),
             1U,
@@ -645,7 +612,7 @@ struct ApplicationHost::Impl final {
     }
 
     const Scenario& scenario;
-    std::filesystem::path resource_root;
+    host::ResourceRoot resource_files;
     ApplicationHostOptions options;
     std::unique_ptr<strata::Runtime> runtime;
     std::vector<Registration> registrations;
@@ -653,7 +620,6 @@ struct ApplicationHost::Impl final {
     std::optional<strata::Surface> surface;
     host::RenderPacketDecoder decoder;
     std::unique_ptr<CaptureRenderer> renderer;
-    std::map<std::string, std::vector<std::uint8_t>, std::less<>> resource_cache;
     std::vector<CapturedDiagnostic> diagnostics;
     std::vector<CapturedAction> actions;
     std::vector<CapturedEffect> effects;

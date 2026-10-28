@@ -4,9 +4,12 @@
 #include <strata/host.hpp>
 #include <strata/render_packet.hpp>
 
+#include "host/resource_root.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -593,6 +596,63 @@ void runtime_images_upload_only_when_sampled() {
     runtime.close();
 }
 
+/**
+ * Resource loads report exact statuses, never cache a failure, read UTF-8 ids without the narrow
+ * code page, and cannot leave the root lexically or through a junction inside it.
+ */
+void resource_root_maps_failures_and_confines_links() {
+    namespace fs = std::filesystem;
+    const fs::path base = fs::temp_directory_path() / "strata-resource-root-test";
+    fs::remove_all(base);
+    const fs::path root = base / "root";
+    const fs::path outside = base / "outside";
+    fs::create_directories(root);
+    fs::create_directories(outside);
+    {
+        std::ofstream secret(outside / "secret.txt", std::ios::binary);
+        secret << "secret";
+    }
+    strata::host::ResourceRoot resources(root);
+    const auto load = [&resources](const std::string_view id) {
+        strata_bytes_view bytes{};
+        const strata_status status = resources.load(id, bytes);
+        return std::pair{status, std::string(reinterpret_cast<const char*>(bytes.data),
+                                             bytes.data != nullptr ? bytes.size : 0U)};
+    };
+
+    check(load("late.txt").first == STRATA_STATUS_NOT_FOUND,
+          "a missing resource was not reported as missing");
+    {
+        std::ofstream late(root / "late.txt", std::ios::binary);
+        late << "late";
+    }
+    check(load("late.txt") == std::pair{STRATA_STATUS_OK, std::string("late")},
+          "a resource that appeared after a failed load stayed missing");
+    check(load("../outside/secret.txt").first == STRATA_STATUS_INVALID_ARGUMENT &&
+              load("/outside/secret.txt").first == STRATA_STATUS_INVALID_ARGUMENT,
+          "an escaping resource id was not rejected as an invalid argument");
+
+    const std::string unicode_id = "\xC3\xBC" "ber.txt"; // "über.txt" in UTF-8
+    {
+        std::ofstream unicode(root / strata::host::utf8_path(unicode_id), std::ios::binary);
+        unicode << "unicode";
+    }
+    check(load(unicode_id) == std::pair{STRATA_STATUS_OK, std::string("unicode")},
+          "a UTF-8 resource id was decoded through the narrow code page");
+
+#if defined(_WIN32)
+    const fs::path link = root / "linked";
+    const std::wstring command =
+        L"mklink /J \"" + link.wstring() + L"\" \"" + outside.wstring() + L"\" >NUL";
+    check(_wsystem(command.c_str()) == 0 && fs::exists(link / "secret.txt"),
+          "could not create the resource junction fixture");
+    check(load("linked/secret.txt").first == STRATA_STATUS_INVALID_ARGUMENT,
+          "a junction inside the resource root escaped it");
+    fs::remove(link);
+#endif
+    fs::remove_all(base);
+}
+
 #if defined(_WIN32)
 [[nodiscard]] std::string read_text_file(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
@@ -688,6 +748,7 @@ int strata_test_host() {
         generated_root_models_publish_changed_fields_only();
         public_runtime_facade_owns_host_boundaries();
         runtime_images_upload_only_when_sampled();
+        resource_root_maps_failures_and_confines_links();
 #if defined(_WIN32)
         durable_writer_isolates_and_retries_failures();
 #endif

@@ -24,6 +24,7 @@
 
 #include "host/extensions.hpp"
 #include "host/module_path.hpp"
+#include "host/resource_root.hpp"
 #include "host/system_fonts.hpp"
 #include "host_services.hpp"
 #include "ime.hpp"
@@ -191,8 +192,12 @@ struct ApplicationHost::Impl final {
             return STRATA_STATUS_OK;
         } catch (const std::bad_alloc&) {
             return STRATA_STATUS_OUT_OF_MEMORY;
-        } catch (...) {
+        } catch (const host::ResourceNotFound&) {
             return STRATA_STATUS_NOT_FOUND;
+        } catch (const std::invalid_argument&) {
+            return STRATA_STATUS_INVALID_ARGUMENT;
+        } catch (...) {
+            return STRATA_STATUS_SERVICE_UNAVAILABLE;
         }
     }
 
@@ -410,7 +415,7 @@ struct ApplicationHost::Impl final {
         if (std::ranges::find(program_resources, resource_id) == program_resources.end()) {
             return false;
         }
-        const std::string hlsl_source = services.text(std::filesystem::path(resource_id));
+        const std::string hlsl_source = services.text(resource_id);
         for (const strata::MaterialDeclaration& declaration :
              runtime->material_declarations("hlsl")) {
             if (declaration.source == resource_id) {

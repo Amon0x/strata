@@ -260,6 +260,7 @@ add_library(
         host/browser_model.cpp
         host/extensions.cpp
         host/module_path.cpp
+        host/resource_root.cpp
         host/system_fonts.cpp
 )
 target_include_directories(
@@ -737,6 +738,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             desktop/renderer.cpp
             host/extensions.cpp
             host/module_path.cpp
+            host/resource_root.cpp
             host/system_fonts.cpp
     )
     add_library(Strata::desktop ALIAS strata_desktop_host)
