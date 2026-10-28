@@ -5,15 +5,30 @@
 #include <strata/render_packet.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include "durable_writer.hpp"
+#endif
 
 namespace {
 
@@ -578,6 +593,86 @@ void runtime_images_upload_only_when_sampled() {
     runtime.close();
 }
 
+#if defined(_WIN32)
+[[nodiscard]] std::string read_text_file(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
+/**
+ * One unwritable path parks with its payload and is reported; other paths keep writing, later
+ * enqueues never rethrow, and a briefly locked destination is written once the lock is gone.
+ */
+void durable_writer_isolates_and_retries_failures() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() /
+                          ("strata-durable-writer-" + std::to_string(GetCurrentProcessId()));
+    fs::remove_all(root);
+    fs::create_directories(root);
+    std::mutex reports_mutex;
+    std::vector<std::string> reports;
+    {
+        strata::desktop::DurableWriter writer(
+            [&](const fs::path& path, const std::string_view message) {
+                const std::scoped_lock lock(reports_mutex);
+                reports.push_back(path.filename().string() + ": " + std::string(message));
+            },
+            strata::desktop::DurableWriter::Options{6U, std::chrono::milliseconds(5)});
+
+        // A directory where the temporary file belongs makes this path permanently unwritable.
+        const fs::path blocked = root / "blocked.json";
+        fs::create_directories(fs::path(blocked.wstring() + L".tmp"));
+        const fs::path healthy = root / "healthy.json";
+        writer.enqueue(blocked, "blocked");
+        writer.enqueue(healthy, "healthy");
+        const std::vector<fs::path> parked = writer.flush();
+        check(parked == std::vector<fs::path>{blocked},
+              "a failing durable path was not parked on its own");
+        check(read_text_file(healthy) == "healthy",
+              "a failing durable path stopped an unrelated write");
+        check(writer.pending(blocked) == std::optional<std::string>("blocked"),
+              "a parked durable payload was not served to readers");
+        {
+            const std::scoped_lock lock(reports_mutex);
+            check(reports.size() == 1U && reports.front().starts_with("blocked.json: "),
+                  "a durable write failure was not reported exactly once");
+        }
+
+        writer.enqueue(healthy, "healthy again");
+        check(writer.flush() == std::vector<fs::path>{blocked} &&
+                  read_text_file(healthy) == "healthy again",
+              "the durable writer stopped after one path failed");
+
+        // A destination another process holds without sharing is retried until it is released.
+        const fs::path locked = root / "locked.json";
+        {
+            std::ofstream initial(locked, std::ios::binary);
+            initial << "initial";
+        }
+        const HANDLE holder = CreateFileW(locked.c_str(), GENERIC_READ, 0U, nullptr,
+                                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        check(holder != INVALID_HANDLE_VALUE, "could not lock the durable test file");
+        std::jthread release([holder] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            CloseHandle(holder);
+        });
+        writer.enqueue(locked, "unlocked");
+        release.join();
+        check(writer.flush() == std::vector<fs::path>{blocked} &&
+                  read_text_file(locked) == "unlocked",
+              "a briefly locked durable file was not retried");
+
+        // The next payload for a parked path retries it.
+        fs::remove(fs::path(blocked.wstring() + L".tmp"));
+        writer.enqueue(blocked, "recovered");
+        check(writer.flush().empty() && read_text_file(blocked) == "recovered" &&
+                  !writer.pending(blocked).has_value(),
+              "a parked durable path did not recover on its next payload");
+    }
+    fs::remove_all(root);
+}
+#endif
+
 } // namespace
 
 int strata_test_host() {
@@ -593,6 +688,9 @@ int strata_test_host() {
         generated_root_models_publish_changed_fields_only();
         public_runtime_facade_owns_host_boundaries();
         runtime_images_upload_only_when_sampled();
+#if defined(_WIN32)
+        durable_writer_isolates_and_retries_failures();
+#endif
         std::cout << "strata_host_tests: typed values, models, and complete host facade OK\n";
         return 0;
     } catch (const std::exception& error) {

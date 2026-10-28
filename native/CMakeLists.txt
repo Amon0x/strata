@@ -983,6 +983,7 @@ endif()
 if(WIN32 AND STRATA_BUILD_DESKTOP)
     add_executable(
         strata_desktop
+        desktop/durable_writer.cpp
         desktop/host.cpp
         desktop/launch.cpp
         desktop/launch_manifest.cpp
@@ -1270,6 +1271,9 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         PRIVATE Strata::host Strata::render_host strata_application_contracts strata_host_support
     )
     target_include_directories(strata_host_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop)
+    if(WIN32)
+        target_sources(strata_host_tests PRIVATE desktop/durable_writer.cpp)
+    endif()
     strata_target_defaults(strata_host_tests)
     add_test(NAME strata.host COMMAND strata_host_tests host)
     add_test(NAME strata.host.browser_model COMMAND strata_host_tests browser_model)

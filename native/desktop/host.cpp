@@ -41,6 +41,7 @@
 #include <strata/host.hpp>
 #include <strata/strata.hpp>
 
+#include "durable_writer.hpp"
 #include "host_services.hpp"
 #include "host/extensions.hpp"
 #include <strata/render_packet.hpp>
@@ -234,112 +235,6 @@ struct Host::Impl final {
         std::array<TimingSummary, host_timing_count> host;
     };
 
-    class DurableWriter final {
-    public:
-        DurableWriter() : worker_([this] { run(); }) {}
-        DurableWriter(const DurableWriter&) = delete;
-        DurableWriter& operator=(const DurableWriter&) = delete;
-        ~DurableWriter() {
-            {
-                std::scoped_lock lock(mutex_);
-                stopping_ = true;
-            }
-            changed_.notify_all();
-        }
-
-        void enqueue(std::filesystem::path path, std::string payload) {
-            std::scoped_lock lock(mutex_);
-            if (failure_ != nullptr) std::rethrow_exception(failure_);
-            pending_.insert_or_assign(
-                std::move(path), Pending{++version_, std::move(payload)}
-            );
-            changed_.notify_one();
-        }
-
-        [[nodiscard]] std::optional<std::string> pending(
-            const std::filesystem::path& path
-        ) const {
-            std::scoped_lock lock(mutex_);
-            if (failure_ != nullptr) std::rethrow_exception(failure_);
-            const auto found = pending_.find(path);
-            return found != pending_.end()
-                ? std::optional<std::string>(found->second.payload) : std::nullopt;
-        }
-
-        void flush() {
-            std::unique_lock lock(mutex_);
-            settled_.wait(lock, [this] { return pending_.empty() || failure_ != nullptr; });
-            if (failure_ != nullptr) std::rethrow_exception(failure_);
-        }
-
-    private:
-        struct Pending final {
-            std::uint64_t version = 0U;
-            std::string payload;
-        };
-
-        static void write(const std::filesystem::path& path, const std::string_view payload) {
-            std::filesystem::create_directories(path.parent_path());
-            const std::filesystem::path temporary = path.wstring() + L".tmp";
-            {
-                std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-                output.write(payload.data(), static_cast<std::streamsize>(payload.size()));
-                output.flush();
-                if (!output) throw std::runtime_error("desktop durable write failed");
-            }
-            if (!MoveFileExW(
-                    temporary.c_str(),
-                    path.c_str(),
-                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
-                )) {
-                std::error_code ignored;
-                std::filesystem::remove(temporary, ignored);
-                throw std::runtime_error("desktop durable atomic replace failed");
-            }
-        }
-
-        void run() noexcept {
-            for (;;) {
-                std::filesystem::path path;
-                Pending current;
-                {
-                    std::unique_lock lock(mutex_);
-                    changed_.wait(lock, [this] { return stopping_ || !pending_.empty(); });
-                    if (pending_.empty() && stopping_) return;
-                    const auto& [next_path, next] = *pending_.begin();
-                    path = next_path;
-                    current = next;
-                }
-                try {
-                    write(path, current.payload);
-                } catch (...) {
-                    std::scoped_lock lock(mutex_);
-                    failure_ = std::current_exception();
-                    pending_.clear();
-                    settled_.notify_all();
-                    return;
-                }
-                {
-                    std::scoped_lock lock(mutex_);
-                    const auto found = pending_.find(path);
-                    if (found != pending_.end() && found->second.version == current.version) {
-                        pending_.erase(found);
-                    }
-                    if (pending_.empty()) settled_.notify_all();
-                }
-            }
-        }
-
-        mutable std::mutex mutex_;
-        std::condition_variable changed_;
-        std::condition_variable settled_;
-        std::map<std::filesystem::path, Pending> pending_;
-        std::exception_ptr failure_;
-        std::uint64_t version_ = 0U;
-        bool stopping_ = false;
-        std::jthread worker_;
-    };
-
     struct AsyncBridge final {
         struct Pending final {
             std::uint64_t id = 0U;
@@ -417,7 +312,8 @@ struct Host::Impl final {
         close_session(effect_gallery);
         close_session(showcase);
         try {
-            durable_writer.flush();
+            // Paths that still fail were already reported by the writer.
+            static_cast<void>(durable_writer.flush());
         } catch (...) {
         }
     }
@@ -456,6 +352,17 @@ struct Host::Impl final {
         std::ostringstream name;
         name << std::hex << fingerprint(std::span(identity));
         return root / "Strata" / "durable" / (name.str() + ".json");
+    }
+
+    static void report_durable_failure(
+        const std::filesystem::path& path,
+        const std::string_view message
+    ) noexcept {
+        try {
+            std::cerr << "strata desktop: STRATA.DESKTOP.DURABLE_WRITE_FAILED: "
+                      << path.string() << ": " << message << '\n';
+        } catch (...) {
+        }
     }
 
     static strata_status durable_load(
@@ -2106,7 +2013,7 @@ struct Host::Impl final {
     Renderer renderer;
     std::string instance_label;
     ShowcaseModel showcase_model;
-    DurableWriter durable_writer;
+    desktop::DurableWriter durable_writer{&report_durable_failure};
     std::string durable_read_buffer;
     Session showcase;
     Session control_deck;
