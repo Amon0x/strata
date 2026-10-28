@@ -325,8 +325,14 @@ struct GlyphRunState final {
     throw FontError("unsupported OpenType coverage format");
 }
 
+/**
+ * Expands coverage into glyph ids in coverage-index order. Every caller indexes the result with a
+ * record count stored in the table, so expansion stops at `limit` glyphs: a six-byte range record
+ * never costs more than the records that use it.
+ */
 [[nodiscard]] std::vector<std::uint16_t> expand_coverage(
-    const std::vector<GlyphRange>& ranges
+    const std::vector<GlyphRange>& ranges,
+    const std::size_t limit
 ) {
     std::vector<std::uint16_t> glyphs;
     for (const GlyphRange& range : ranges) {
@@ -335,11 +341,52 @@ struct GlyphRunState final {
             throw FontError("OpenType coverage expands beyond the glyph id space");
         }
         for (std::uint32_t glyph = range.first; glyph <= range.last; ++glyph) {
+            if (glyphs.size() == limit) return glyphs;
             glyphs.push_back(static_cast<std::uint16_t>(glyph));
         }
     }
     return glyphs;
 }
+
+/**
+ * Bounds the work one layout table (GDEF, GSUB or GPOS) may expand into. Offsets let any number of
+ * records share one subtable, pair set, ligature set or feature, so a table of a few hundred
+ * kilobytes can otherwise describe billions of pairs or rules. Each parsed entry is charged here;
+ * an unshared table never needs more than about one entry per byte, so the budget is a fixed
+ * multiple of the table's length with a small floor. Exceeding it is a FontError that ends parsing
+ * of that table: the lookups completed before it are kept and the rest of the table is dropped
+ * with a diagnostic, so a given font always truncates at the same place.
+ */
+class ExpansionBudget final {
+public:
+    static constexpr std::size_t units_per_byte = 8U;
+    static constexpr std::size_t minimum_units = std::size_t{1U} << 16U;
+
+    void reset(const std::string_view table, const std::size_t table_bytes) {
+        table_ = table;
+        remaining_ = std::max(table_bytes, minimum_units / units_per_byte) * units_per_byte;
+        exhausted_ = false;
+    }
+
+    void charge(const std::size_t units) {
+        if (units > remaining_) {
+            remaining_ = 0U;
+            exhausted_ = true;
+            throw FontError(
+                "OpenType " + std::string(table_) +
+                " expands beyond its work budget; the rest of the table is ignored"
+            );
+        }
+        remaining_ -= units;
+    }
+
+    [[nodiscard]] bool exhausted() const noexcept { return exhausted_; }
+
+private:
+    std::string_view table_;
+    std::size_t remaining_ = 0U;
+    bool exhausted_ = false;
+};
 
 [[nodiscard]] ClassDefinition parse_class_definition(
     const Reader& reader,
@@ -533,6 +580,8 @@ struct OpenTypeFont::Impl final {
     FontMetadata metadata;
     std::vector<std::string> optional_diagnostics;
     std::unique_ptr<TrueTypeOutlineSource> outlines;
+    /** Work budget of the layout table being parsed; see ExpansionBudget. */
+    mutable ExpansionBudget layout_budget;
 
     [[nodiscard]] const Table& table(const std::string_view name) const {
         const auto found = tables.find(name);
@@ -714,6 +763,7 @@ struct OpenTypeFont::Impl final {
         const std::optional<Reader> table_reader = optional_table_reader("GDEF");
         if (!table_reader.has_value()) return;
         const Reader& reader = *table_reader;
+        layout_budget.reset("GDEF", reader.size());
         reader.require(0U, 12U);
         const std::uint16_t major = reader.u16(0U);
         const std::uint16_t minor = reader.u16(2U);
@@ -722,9 +772,11 @@ struct OpenTypeFont::Impl final {
         const std::uint16_t mark_attach_offset = reader.u16(10U);
         if (glyph_class_offset != 0U) {
             glyph_classes = parse_class_definition(reader, glyph_class_offset);
+            layout_budget.charge(glyph_classes.ranges.size());
         }
         if (mark_attach_offset != 0U) {
             mark_attachment_classes = parse_class_definition(reader, mark_attach_offset);
+            layout_budget.charge(mark_attachment_classes.ranges.size());
         }
         if (minor < 2U) return;
         reader.require(0U, 14U);
@@ -743,51 +795,50 @@ struct OpenTypeFont::Impl final {
                 reader.u32(sets_offset + 4U + index * 4U),
                 reader
             );
+            layout_budget.charge(1U);
             mark_filtering_sets.push_back(parse_coverage(reader, coverage));
+            layout_budget.charge(mark_filtering_sets.back().size());
         }
     }
 
-    [[nodiscard]] std::vector<std::uint16_t> lang_features(
+    /** Marks the features one LangSys selects. `selected` is indexed by feature index. */
+    void select_lang_features(
         const Reader& reader,
-        const std::size_t offset
+        const std::size_t offset,
+        std::vector<bool>& selected
     ) const {
         reader.require(offset, 6U);
-        std::vector<std::uint16_t> result;
-        const auto append = [&result](const std::uint16_t value) {
-            if (!std::ranges::contains(result, value)) result.push_back(value);
-        };
         const std::uint16_t required_index = reader.u16(offset + 2U);
-        if (required_index != 0xFFFFU) append(required_index);
+        if (required_index != 0xFFFFU) selected[required_index] = true;
         const std::uint16_t count = reader.u16(offset + 4U);
         reader.require(offset + 6U, static_cast<std::size_t>(count) * 2U);
+        layout_budget.charge(1U + static_cast<std::size_t>(count));
         for (std::size_t index = 0U; index < count; ++index) {
-            append(reader.u16(offset + 6U + index * 2U));
+            selected[reader.u16(offset + 6U + index * 2U)] = true;
         }
-        return result;
     }
 
-    void append_script_features(
+    /**
+     * Marks the features of a script's default and English language systems. A set rather than a
+     * list: lookups are applied in LookupList order whatever order the features were named in,
+     * and membership stays constant-time however many records repeat an index.
+     */
+    void select_script_features(
         const Reader& reader,
         const std::size_t script,
-        std::vector<std::uint16_t>& feature_indices
+        std::vector<bool>& selected
     ) const {
-        const auto append = [&feature_indices](const std::vector<std::uint16_t>& selected) {
-            for (const std::uint16_t value : selected) {
-                if (!std::ranges::contains(feature_indices, value)) {
-                    feature_indices.push_back(value);
-                }
-            }
-        };
         reader.require(script, 4U);
         const std::uint16_t default_offset = reader.u16(script);
-        if (default_offset != 0U) append(lang_features(reader, script + default_offset));
+        if (default_offset != 0U) select_lang_features(reader, script + default_offset, selected);
         const std::uint16_t count = reader.u16(script + 2U);
         reader.require(script + 4U, static_cast<std::size_t>(count) * 6U);
+        layout_budget.charge(1U + static_cast<std::size_t>(count));
         for (std::size_t index = 0U; index < count; ++index) {
             const std::size_t record = script + 4U + index * 6U;
             const std::string name = reader.tag(record);
             if (name != "dflt" && name != "ENG ") continue;
-            append(lang_features(reader, script + reader.u16(record + 4U)));
+            select_lang_features(reader, script + reader.u16(record + 4U), selected);
         }
     }
 
@@ -854,13 +905,18 @@ struct OpenTypeFont::Impl final {
         const std::uint16_t first_format = reader.u16(offset + 4U);
         const std::uint16_t second_format = reader.u16(offset + 6U);
         if (format == 1U) {
-            const auto coverage = expand_coverage(parse_coverage(reader, offset + reader.u16(offset + 2U)));
             const std::uint16_t count = reader.u16(offset + 8U);
             reader.require(offset + 10U, static_cast<std::size_t>(count) * 2U);
+            const std::vector<GlyphRange> ranges =
+                parse_coverage(reader, offset + reader.u16(offset + 2U));
+            layout_budget.charge(ranges.size() + count);
+            const auto coverage = expand_coverage(ranges, count);
             for (std::size_t index = 0U; index < count; ++index) {
                 if (index >= coverage.size()) break;
                 const std::size_t pair_set = offset + reader.u16(offset + 10U + index * 2U);
                 const std::uint16_t pair_count = reader.u16(pair_set);
+                // Every coverage glyph may name the same PairSet; each use is charged.
+                layout_budget.charge(pair_count);
                 std::size_t cursor = pair_set + 2U;
                 for (std::size_t pair_index = 0U; pair_index < pair_count; ++pair_index) {
                     const std::uint16_t right = reader.u16(cursor);
@@ -881,10 +937,25 @@ struct OpenTypeFont::Impl final {
             rule.coverage = parse_coverage(reader, offset + reader.u16(offset + 2U));
             rule.first_classes = parse_class_definition(reader, offset + reader.u16(offset + 8U));
             rule.second_classes = parse_class_definition(reader, offset + reader.u16(offset + 10U));
+            layout_budget.charge(
+                rule.coverage.size() + rule.first_classes.ranges.size() +
+                rule.second_classes.ranges.size()
+            );
             const std::uint16_t first_count = reader.u16(offset + 12U);
             const std::uint16_t second_count = reader.u16(offset + 14U);
             rule.first_class_count = first_count;
             rule.second_class_count = second_count;
+            // Without value records every class pair is a zero adjustment and occupies no bytes,
+            // so nothing bounds the class counts; there is nothing to read either.
+            const std::size_t record_size =
+                value_record_size(first_format) + value_record_size(second_format);
+            const std::size_t class_pairs = static_cast<std::size_t>(first_count) * second_count;
+            if (record_size == 0U) {
+                result.class_rule = std::move(rule);
+                return result;
+            }
+            reader.require(offset + 16U, class_pairs * record_size);
+            layout_budget.charge(class_pairs);
             std::size_t cursor = offset + 16U;
             for (std::size_t first_class = 0U; first_class < first_count; ++first_class) {
                 for (std::size_t second_class = 0U; second_class < second_count; ++second_class) {
@@ -920,27 +991,32 @@ struct OpenTypeFont::Impl final {
     ) const {
         reader.require(offset, 12U);
         if (reader.u16(offset) != 1U) throw FontError("unsupported GPOS mark format");
-        const auto mark_coverage = expand_coverage(parse_coverage(
-            reader, offset + reader.u16(offset + 2U)
-        ));
-        const auto base_coverage = expand_coverage(parse_coverage(
-            reader, offset + reader.u16(offset + 4U)
-        ));
         const std::uint16_t class_count = reader.u16(offset + 6U);
         if (class_count == 0U) throw FontError("GPOS mark lookup has no classes");
         const std::size_t mark_array = offset + reader.u16(offset + 8U);
         const std::size_t base_array = offset + reader.u16(offset + 10U);
+        const std::uint16_t mark_count = reader.u16(mark_array);
+        const std::uint16_t base_count = reader.u16(base_array);
+        const std::vector<GlyphRange> mark_ranges =
+            parse_coverage(reader, offset + reader.u16(offset + 2U));
+        const std::vector<GlyphRange> base_ranges =
+            parse_coverage(reader, offset + reader.u16(offset + 4U));
+        layout_budget.charge(
+            mark_ranges.size() + base_ranges.size() + mark_count + base_count
+        );
+        const auto mark_coverage = expand_coverage(mark_ranges, mark_count);
+        const auto base_coverage = expand_coverage(base_ranges, base_count);
         MarkAttachmentRule result;
         result.kind = kind;
         result.marks = parse_mark_array(reader, mark_array, mark_coverage, class_count);
 
-        const std::uint16_t base_count = reader.u16(base_array);
         if (base_count > base_coverage.size()) {
             throw FontError("GPOS attachment array exceeds its coverage");
         }
         if (kind != MarkAttachmentKind::ligature) {
             const std::size_t record_size = static_cast<std::size_t>(class_count) * 2U;
             reader.require(base_array + 2U, static_cast<std::size_t>(base_count) * record_size);
+            layout_budget.charge(static_cast<std::size_t>(base_count) * class_count);
             for (std::size_t index = 0U; index < base_count; ++index) {
                 result.anchors.insert_or_assign(
                     base_coverage[index],
@@ -960,6 +1036,8 @@ struct OpenTypeFont::Impl final {
             const std::uint16_t component_count = reader.u16(attach);
             const std::size_t component_size = static_cast<std::size_t>(class_count) * 2U;
             reader.require(attach + 2U, static_cast<std::size_t>(component_count) * component_size);
+            // Every ligature may name the same LigatureAttach; each use is charged.
+            layout_budget.charge(static_cast<std::size_t>(component_count) * class_count);
             std::vector<std::vector<std::optional<Anchor>>> components;
             components.reserve(component_count);
             for (std::size_t component = 0U; component < component_count; ++component) {
@@ -1013,6 +1091,7 @@ struct OpenTypeFont::Impl final {
                 throw FontError("GPOS lookup mark filtering set is absent from GDEF");
             }
         }
+        layout_budget.charge(1U + static_cast<std::size_t>(count));
         for (std::size_t index = 0U; index < count; ++index) {
             const std::size_t subtable = lookup + reader.u16(lookup + 6U + index * 2U);
             try {
@@ -1034,6 +1113,7 @@ struct OpenTypeFont::Impl final {
                     result.subtables.push_back(std::move(*parsed));
                 }
             } catch (const std::exception& error) {
+                if (layout_budget.exhausted()) throw;
                 optional_diagnostics.push_back(
                     "GPOS lookup " + std::to_string(lookup_index) + " subtable " +
                     std::to_string(index) + " ignored: " + error.what()
@@ -1049,6 +1129,7 @@ struct OpenTypeFont::Impl final {
         const std::optional<Reader> table_reader = optional_table_reader("GPOS");
         if (!table_reader.has_value()) return;
         const Reader& reader = *table_reader;
+        layout_budget.reset("GPOS", reader.size());
         constexpr std::size_t base = 0U;
         reader.require(base, 10U);
         if (reader.u16(base) != 1U) return;
@@ -1056,13 +1137,14 @@ struct OpenTypeFont::Impl final {
         const std::size_t features = base + reader.u16(base + 6U);
         const std::size_t lookups = base + reader.u16(base + 8U);
 
-        std::vector<std::uint16_t> feature_indices;
+        std::vector<bool> selected_features(65'536U, false);
         const std::uint16_t script_count = reader.u16(scripts);
         reader.require(scripts + 2U, static_cast<std::size_t>(script_count) * 6U);
+        layout_budget.charge(script_count);
         for (std::size_t index = 0U; index < script_count; ++index) {
             const std::size_t record = scripts + 2U + index * 6U;
-            append_script_features(
-                reader, scripts + reader.u16(record + 4U), feature_indices
+            select_script_features(
+                reader, scripts + reader.u16(record + 4U), selected_features
             );
         }
 
@@ -1077,6 +1159,8 @@ struct OpenTypeFont::Impl final {
             reader.require(feature, 4U);
             const std::uint16_t count = reader.u16(feature + 2U);
             reader.require(feature + 4U, static_cast<std::size_t>(count) * 2U);
+            // Every FeatureRecord may name the same Feature table; each use is charged.
+            layout_budget.charge(1U + static_cast<std::size_t>(count));
             Feature value{reader.tag(record), {}};
             value.lookups.reserve(count);
             for (std::size_t lookup_index = 0U; lookup_index < count; ++lookup_index) {
@@ -1088,8 +1172,9 @@ struct OpenTypeFont::Impl final {
         const std::uint16_t lookup_count = reader.u16(lookups);
         reader.require(lookups + 2U, static_cast<std::size_t>(lookup_count) * 2U);
         std::vector<bool> active_lookups(lookup_count, false);
-        for (const std::uint16_t feature_index : feature_indices) {
-            if (feature_index >= feature_records.size()) continue;
+        for (std::size_t feature_index = 0U; feature_index < feature_records.size();
+             ++feature_index) {
+            if (!selected_features[feature_index]) continue;
             const Feature& feature = feature_records[feature_index];
             if (feature.tag != "kern" && feature.tag != "mark" && feature.tag != "mkmk") {
                 continue;
@@ -1109,6 +1194,7 @@ struct OpenTypeFont::Impl final {
                     positioning_lookups.push_back(std::move(*lookup));
                 }
             } catch (const std::exception& error) {
+                if (layout_budget.exhausted()) throw;
                 optional_diagnostics.push_back(
                     "GPOS lookup " + std::to_string(lookup_index) +
                     " ignored: " + error.what()
@@ -1126,11 +1212,12 @@ struct OpenTypeFont::Impl final {
         if (reader.u16(offset) != 1U) {
             throw FontError("unsupported GSUB LigatureSubst format");
         }
-        const std::vector<std::uint16_t> coverage = expand_coverage(parse_coverage(
-            reader, offset + reader.u16(offset + 2U)
-        ));
         const std::uint16_t set_count = reader.u16(offset + 4U);
         reader.require(offset + 6U, static_cast<std::size_t>(set_count) * 2U);
+        const std::vector<GlyphRange> ranges =
+            parse_coverage(reader, offset + reader.u16(offset + 2U));
+        layout_budget.charge(ranges.size() + set_count);
+        const std::vector<std::uint16_t> coverage = expand_coverage(ranges, set_count);
         if (set_count > coverage.size()) {
             throw FontError("GSUB LigatureSet count exceeds coverage");
         }
@@ -1139,6 +1226,9 @@ struct OpenTypeFont::Impl final {
             const std::size_t set = offset + reader.u16(offset + 6U + set_index * 2U);
             const std::uint16_t ligature_count = reader.u16(set);
             reader.require(set + 2U, static_cast<std::size_t>(ligature_count) * 2U);
+            // Every coverage glyph may name the same LigatureSet and every set the same
+            // Ligature; each use is charged.
+            layout_budget.charge(ligature_count);
             std::vector<LigatureSubstitutionRule>& rules = result[coverage[set_index]];
             rules.reserve(rules.size() + ligature_count);
             for (std::size_t index = 0U; index < ligature_count; ++index) {
@@ -1152,6 +1242,7 @@ struct OpenTypeFont::Impl final {
                     ligature + 4U,
                     static_cast<std::size_t>(component_count - 1U) * 2U
                 );
+                layout_budget.charge(component_count);
                 LigatureSubstitutionRule rule;
                 rule.replacement = reader.u16(ligature);
                 rule.components.reserve(component_count - 1U);
@@ -1185,6 +1276,7 @@ struct OpenTypeFont::Impl final {
                 throw FontError("GSUB lookup mark filtering set is absent from GDEF");
             }
         }
+        layout_budget.charge(1U + static_cast<std::size_t>(count));
         for (std::size_t index = 0U; index < count; ++index) {
             try {
                 std::uint16_t resolved_type = type;
@@ -1210,6 +1302,7 @@ struct OpenTypeFont::Impl final {
                     );
                 }
             } catch (const std::exception& error) {
+                if (layout_budget.exhausted()) throw;
                 optional_diagnostics.push_back(
                     "GSUB lookup " + std::to_string(lookup_index) + " subtable " +
                     std::to_string(index) + " ignored: " + error.what()
@@ -1225,19 +1318,21 @@ struct OpenTypeFont::Impl final {
         const std::optional<Reader> table_reader = optional_table_reader("GSUB");
         if (!table_reader.has_value()) return;
         const Reader& reader = *table_reader;
+        layout_budget.reset("GSUB", reader.size());
         reader.require(0U, 10U);
         if (reader.u16(0U) != 1U) return;
         const std::size_t scripts = reader.u16(4U);
         const std::size_t features = reader.u16(6U);
         const std::size_t lookups = reader.u16(8U);
 
-        std::vector<std::uint16_t> feature_indices;
+        std::vector<bool> selected_features(65'536U, false);
         const std::uint16_t script_count = reader.u16(scripts);
         reader.require(scripts + 2U, static_cast<std::size_t>(script_count) * 6U);
+        layout_budget.charge(script_count);
         for (std::size_t index = 0U; index < script_count; ++index) {
             const std::size_t record = scripts + 2U + index * 6U;
-            append_script_features(
-                reader, scripts + reader.u16(record + 4U), feature_indices
+            select_script_features(
+                reader, scripts + reader.u16(record + 4U), selected_features
             );
         }
 
@@ -1252,6 +1347,8 @@ struct OpenTypeFont::Impl final {
             reader.require(feature, 4U);
             const std::uint16_t count = reader.u16(feature + 2U);
             reader.require(feature + 4U, static_cast<std::size_t>(count) * 2U);
+            // Every FeatureRecord may name the same Feature table; each use is charged.
+            layout_budget.charge(1U + static_cast<std::size_t>(count));
             Feature value{reader.tag(record), {}};
             value.lookups.reserve(count);
             for (std::size_t index_in_feature = 0U; index_in_feature < count;
@@ -1266,8 +1363,9 @@ struct OpenTypeFont::Impl final {
         const std::uint16_t lookup_count = reader.u16(lookups);
         reader.require(lookups + 2U, static_cast<std::size_t>(lookup_count) * 2U);
         std::vector<bool> active_lookups(lookup_count, false);
-        for (const std::uint16_t feature_index : feature_indices) {
-            if (feature_index >= feature_records.size()) continue;
+        for (std::size_t feature_index = 0U; feature_index < feature_records.size();
+             ++feature_index) {
+            if (!selected_features[feature_index]) continue;
             const Feature& feature = feature_records[feature_index];
             if (feature.tag != "rlig" && feature.tag != "liga" && feature.tag != "clig") {
                 continue;
@@ -1287,6 +1385,7 @@ struct OpenTypeFont::Impl final {
                     substitution_lookups.push_back(std::move(*lookup));
                 }
             } catch (const std::exception& error) {
+                if (layout_budget.exhausted()) throw;
                 optional_diagnostics.push_back(
                     "GSUB lookup " + std::to_string(lookup_index) +
                     " ignored: " + error.what()

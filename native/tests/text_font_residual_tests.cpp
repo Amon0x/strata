@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -1142,6 +1143,185 @@ void test_optional_tables_and_generic_positioning(const std::filesystem::path& r
     }
 }
 
+/** Coverage format 2 with one range covering glyphs [0, count). */
+[[nodiscard]] Bytes coverage_range(const std::uint16_t count) {
+    Bytes result;
+    append_u16(result, 2U);
+    append_u16(result, 1U);
+    append_u16(result, 0U);
+    append_u16(result, static_cast<std::uint16_t>(count - 1U));
+    append_u16(result, 0U);
+    return result;
+}
+
+/**
+ * PairPos format 1 whose `sets` coverage glyphs all name one PairSet of `pairs` value-less pairs:
+ * about 2 * (sets + pairs) bytes describing sets * pairs kerning pairs.
+ */
+[[nodiscard]] Bytes aliased_pair_subtable(const std::uint16_t sets, const std::uint16_t pairs) {
+    Bytes result(10U + static_cast<std::size_t>(sets) * 2U, 0U);
+    set_u16(result, 0U, 1U);
+    set_u16(result, 8U, sets);
+    set_u16(result, 2U, static_cast<std::uint16_t>(result.size()));
+    const Bytes covered = coverage_range(sets);
+    result.insert(result.end(), covered.begin(), covered.end());
+    const auto pair_set = static_cast<std::uint16_t>(result.size());
+    for (std::size_t index = 0U; index < sets; ++index) set_u16(result, 10U + index * 2U, pair_set);
+    append_u16(result, pairs);
+    for (std::uint16_t right = 0U; right < pairs; ++right) append_u16(result, right);
+    return result;
+}
+
+/** LigatureSubst whose coverage glyphs all name one set of `rules` copies of one ligature. */
+[[nodiscard]] Bytes aliased_ligature_subtable(const std::uint16_t sets, const std::uint16_t rules) {
+    Bytes result(6U + static_cast<std::size_t>(sets) * 2U, 0U);
+    set_u16(result, 0U, 1U);
+    set_u16(result, 4U, sets);
+    set_u16(result, 2U, static_cast<std::uint16_t>(result.size()));
+    const Bytes covered = coverage_range(sets);
+    result.insert(result.end(), covered.begin(), covered.end());
+    const auto ligature_set = static_cast<std::uint16_t>(result.size());
+    for (std::size_t index = 0U; index < sets; ++index) {
+        set_u16(result, 6U + index * 2U, ligature_set);
+    }
+    const auto ligature = static_cast<std::uint16_t>(2U + static_cast<std::size_t>(rules) * 2U);
+    append_u16(result, rules);
+    for (std::size_t index = 0U; index < rules; ++index) append_u16(result, ligature);
+    append_u16(result, 1U);
+    append_u16(result, 2U);
+    append_u16(result, 2U);
+    return result;
+}
+
+[[nodiscard]] Bytes gsub_with_lookup(const Bytes& lookup_bytes) {
+    Bytes scripts;
+    append_u16(scripts, 1U);
+    scripts.insert(scripts.end(), {'D', 'F', 'L', 'T'});
+    append_u16(scripts, 8U);
+    append_u16(scripts, 4U);
+    append_u16(scripts, 0U);
+    append_u16(scripts, 0U);
+    append_u16(scripts, 0xFFFFU);
+    append_u16(scripts, 1U);
+    append_u16(scripts, 0U);
+
+    Bytes features(8U, 0U);
+    set_u16(features, 0U, 1U);
+    features[2U] = 'l';
+    features[3U] = 'i';
+    features[4U] = 'g';
+    features[5U] = 'a';
+    set_u16(features, 6U, 8U);
+    append_u16(features, 0U);
+    append_u16(features, 1U);
+    append_u16(features, 0U);
+
+    Bytes lookup_list(4U, 0U);
+    set_u16(lookup_list, 0U, 1U);
+    set_u16(lookup_list, 2U, 4U);
+    lookup_list.insert(lookup_list.end(), lookup_bytes.begin(), lookup_bytes.end());
+
+    Bytes result(10U, 0U);
+    set_u16(result, 0U, 1U);
+    set_u16(result, 4U, static_cast<std::uint16_t>(result.size()));
+    result.insert(result.end(), scripts.begin(), scripts.end());
+    set_u16(result, 6U, static_cast<std::uint16_t>(result.size()));
+    result.insert(result.end(), features.begin(), features.end());
+    set_u16(result, 8U, static_cast<std::uint16_t>(result.size()));
+    result.insert(result.end(), lookup_list.begin(), lookup_list.end());
+    return result;
+}
+
+/**
+ * Layout tables whose offsets alias one shared record describe far more entries than they hold
+ * bytes. Parsing must stay proportional to the table: aliased PairSets and LigatureSets stop at
+ * the table's work budget (keeping the lookups parsed before it), and a class-pair matrix without
+ * value records is never iterated.
+ */
+void test_layout_tables_bound_expansion(const std::filesystem::path& resources) {
+    const auto load = [&] {
+        return strata::resource::load_binary_resource(
+            resources,
+            strata::resource::ResourceId::parse("assets/strata/fonts/default.ttf")
+        );
+    };
+    const strata::font::OpenTypeFont original = strata::font::OpenTypeFont::parse(load());
+    const std::uint16_t pair_left = original.glyph_id('E');
+    const std::uint16_t pair_right = original.glyph_id('F');
+    const auto budget_diagnostic = [](const strata::font::OpenTypeFont& font,
+                                      const std::string_view table) {
+        return std::ranges::any_of(
+            font.optional_diagnostics(),
+            [table](const std::string& value) {
+                return value.contains(table) && value.contains("work budget");
+            }
+        );
+    };
+    const auto timed_parse = [](Bytes bytes) {
+        const auto started = std::chrono::steady_clock::now();
+        strata::font::OpenTypeFont font = strata::font::OpenTypeFont::parse(std::move(bytes));
+        const auto elapsed = std::chrono::steady_clock::now() - started;
+        check(elapsed < std::chrono::seconds(5),
+              "an aliased layout table took seconds to parse");
+        return font;
+    };
+
+    // 30000 coverage glyphs share one 60000-pair PairSet: 1.8e9 pairs from ~180 KB.
+    Bytes pair_bomb = load();
+    replace_table(
+        pair_bomb,
+        "GPOS",
+        "GPOS",
+        gpos_with_lookups({
+            lookup(2U, {pair_subtable(pair_left, pair_right)}),
+            lookup(2U, {aliased_pair_subtable(30'000U, 60'000U)}),
+        })
+    );
+    const strata::font::OpenTypeFont pair_font = timed_parse(std::move(pair_bomb));
+    check(budget_diagnostic(pair_font, "GPOS"),
+          "aliased PairSets did not stop at the GPOS work budget");
+    const std::array<std::uint16_t, 2U> pair_glyphs{pair_left, pair_right};
+    check(pair_font.position_glyphs(pair_glyphs)[0].x_advance == -20,
+          "the lookup parsed before the exhausted budget was not kept");
+
+    // A 65535 x 65535 class matrix with no value records holds no bytes and no adjustments.
+    Bytes zero_classes(16U, 0U);
+    set_u16(zero_classes, 0U, 2U);
+    set_u16(zero_classes, 12U, 0xFFFFU);
+    set_u16(zero_classes, 14U, 0xFFFFU);
+    set_u16(zero_classes, 2U, static_cast<std::uint16_t>(zero_classes.size()));
+    const Bytes zero_coverage = coverage(pair_right);
+    zero_classes.insert(zero_classes.end(), zero_coverage.begin(), zero_coverage.end());
+    set_u16(zero_classes, 8U, static_cast<std::uint16_t>(zero_classes.size()));
+    set_u16(zero_classes, 10U, static_cast<std::uint16_t>(zero_classes.size()));
+    append_u16(zero_classes, 2U);
+    append_u16(zero_classes, 0U);
+    Bytes class_bomb = load();
+    replace_table(
+        class_bomb,
+        "GPOS",
+        "GPOS",
+        gpos_with_lookups({lookup(2U, {zero_classes, pair_subtable(pair_left, pair_right)})})
+    );
+    const strata::font::OpenTypeFont class_font = timed_parse(std::move(class_bomb));
+    check(class_font.position_glyphs(pair_glyphs)[0].x_advance == -20,
+          "a value-less class PairPos disturbed the following subtable");
+
+    // 30000 coverage glyphs share one LigatureSet of 30000 copies of one ligature.
+    Bytes ligature_bomb = load();
+    replace_table(
+        ligature_bomb,
+        "GSUB",
+        "GSUB",
+        gsub_with_lookup(lookup(4U, {aliased_ligature_subtable(30'000U, 30'000U)}))
+    );
+    const strata::font::OpenTypeFont ligature_font = timed_parse(std::move(ligature_bomb));
+    check(budget_diagnostic(ligature_font, "GSUB"),
+          "aliased LigatureSets did not stop at the GSUB work budget");
+    check(ligature_font.glyph_id('A') != 0U,
+          "an exhausted GSUB budget rejected the font's mandatory tables");
+}
+
 void test_layout_runs_fallback_and_soft_wrap(const std::filesystem::path& resources) {
     using namespace strata;
     const Bytes regular_bytes = resource::load_binary_resource(
@@ -1693,6 +1873,7 @@ int strata_test_text_font_residual(const int argument_count, const char* const* 
         const std::filesystem::path resources(arguments[1]);
         test_logical_glyph_json_default_absence();
         test_optional_tables_and_generic_positioning(resources);
+        test_layout_tables_bound_expansion(resources);
         test_layout_runs_fallback_and_soft_wrap(resources);
         test_layout_cache_drops_unused_text(resources);
         std::cout << "text/font residual tests passed\n";
