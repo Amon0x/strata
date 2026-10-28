@@ -425,12 +425,15 @@ std::string DescriptionBuilder::keyed_instance_path(const Scope& scope, const st
  */
 struct DescriptionBuilder::GeneratedRowEvaluationContext final {
     GeneratedRowEvaluationContext(runtime::ApplicationContext& application,
-                                  const WidgetRegistry& source_widgets,
+                                  std::shared_ptr<const WidgetRegistry> source_widgets,
                                   const std::shared_ptr<const runtime::RuntimeUnit>& unit,
                                   std::shared_ptr<const runtime::HostRoots> contextual_host_roots,
                                   std::shared_ptr<const RetainedDescriptionSnapshot> retained)
-        : widgets(source_widgets),
-          evaluator(std::make_unique<DescriptionBuilder>(application, widgets)) {
+        : widgets(std::move(source_widgets)),
+          evaluator(std::make_unique<DescriptionBuilder>(application, *widgets)) {
+        // Rows nested in these rows describe with the same registry.
+        evaluator->widget_snapshot_ = widgets;
+        evaluator->widget_snapshot_revision_ = widgets->revision();
         evaluator->use_unit(unit);
         evaluator->contextual_host_roots_ = std::move(contextual_host_roots);
         evaluator->retained_snapshot_ = std::move(retained);
@@ -543,7 +546,8 @@ struct DescriptionBuilder::GeneratedRowEvaluationContext final {
         std::uint64_t host_invalidation_count = 0U;
     };
 
-    WidgetRegistry widgets;
+    /** The registry rows describe with, shared by every provider made from one revision. */
+    std::shared_ptr<const WidgetRegistry> widgets;
     std::unique_ptr<DescriptionBuilder> evaluator;
     /** Guards the evaluator and the rows: rows are realized wherever the provider is asked. */
     mutable std::mutex mutex;
@@ -552,14 +556,14 @@ struct DescriptionBuilder::GeneratedRowEvaluationContext final {
 
 struct DescriptionBuilder::LazyRowEvaluationState final {
     LazyRowEvaluationState(runtime::ApplicationContext& application,
-                           const WidgetRegistry& source_widgets,
+                           std::shared_ptr<const WidgetRegistry> source_widgets,
                            const std::shared_ptr<const runtime::RuntimeUnit>& unit,
                            Scope source_scope, const Symbol source_item,
                            const std::optional<Symbol> source_index,
                            const runtime::BlockId source_block,
                            std::shared_ptr<const RetainedDescriptionSnapshot> retained)
         : evaluation(std::make_shared<GeneratedRowEvaluationContext>(
-              application, source_widgets, unit,
+              application, std::move(source_widgets), unit,
               source_scope.expressions.shared_contextual_host_roots(), std::move(retained))),
           scope(std::move(source_scope)), item(source_item), index(source_index),
           block(source_block) {}
@@ -596,12 +600,12 @@ struct DescriptionBuilder::LazyRowEvaluationState final {
 
 struct DescriptionBuilder::WidgetRowEvaluationState final {
     WidgetRowEvaluationState(runtime::ApplicationContext& application,
-                             const WidgetRegistry& source_widgets,
+                             std::shared_ptr<const WidgetRegistry> source_widgets,
                              const std::shared_ptr<const runtime::RuntimeUnit>& unit,
                              Scope source_scope, WidgetGeneratedChildHook source_factory,
                              std::shared_ptr<const RetainedDescriptionSnapshot> retained)
         : evaluation(std::make_shared<GeneratedRowEvaluationContext>(
-              application, source_widgets, unit,
+              application, std::move(source_widgets), unit,
               source_scope.expressions.shared_contextual_host_roots(), std::move(retained))),
           caller(std::move(source_scope)), factory(std::move(source_factory)),
           actions(&application.bundle()->action_registry()) {}
@@ -610,7 +614,7 @@ struct DescriptionBuilder::WidgetRowEvaluationState final {
         return evaluation->describe_row(index, [&] {
             WidgetDescriptionExpansion item;
             WidgetDescriptionScope item_scope(
-                item, caller.instance_path(), *actions, evaluation->widgets, nullptr,
+                item, caller.instance_path(), *actions, *evaluation->widgets, nullptr,
                 [this](const std::string_view component, std::string key,
                        WidgetTemplateArguments arguments) {
                     return evaluation->evaluator->build_component_template(
@@ -709,6 +713,14 @@ void DescriptionBuilder::use_unit(const std::shared_ptr<const runtime::RuntimeUn
     unit_ = unit;
     call_widgets_.assign(unit_ != nullptr ? program().call_count() : 0U, std::nullopt);
     call_widgets_revision_ = widgets_.revision();
+}
+
+std::shared_ptr<const WidgetRegistry> DescriptionBuilder::widget_snapshot() {
+    if (widget_snapshot_ == nullptr || widget_snapshot_revision_ != widgets_.revision()) {
+        widget_snapshot_ = std::make_shared<const WidgetRegistry>(widgets_);
+        widget_snapshot_revision_ = widgets_.revision();
+    }
+    return widget_snapshot_;
 }
 
 const WidgetLifecycle* DescriptionBuilder::call_widget(const runtime::CallId call) {
@@ -1224,7 +1236,7 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
 
     capture_retained_snapshot();
     auto evaluation =
-        std::make_shared<LazyRowEvaluationState>(application_, widgets_, unit_, scope, item_name,
+        std::make_shared<LazyRowEvaluationState>(application_, widget_snapshot(), unit_, scope, item_name,
                                                  index_name, statement.block, retained_snapshot_);
     hold_generated_rows(evaluation->evaluation);
     auto source = std::make_shared<const GeneratedDescriptionChildren>(
@@ -1363,7 +1375,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
         generated_virtualization = generated->virtualization;
         capture_retained_snapshot();
         auto evaluation = std::make_shared<WidgetRowEvaluationState>(
-            application_, widgets_, unit_, scope, generated->factory, retained_snapshot_);
+            application_, widget_snapshot(), unit_, scope, generated->factory, retained_snapshot_);
         hold_generated_rows(evaluation->evaluation);
         generated_children = std::make_shared<const GeneratedDescriptionChildren>(
             generated->count, [evaluation = std::move(evaluation)](const std::size_t index) {

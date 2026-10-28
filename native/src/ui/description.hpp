@@ -221,6 +221,11 @@ class DescriptionBuilder final {
     }
     /** Makes `unit` the one descriptions are built from, dropping what the last one cached. */
     void use_unit(const std::shared_ptr<const runtime::RuntimeUnit>& unit);
+    /**
+     * The registry as generated rows describe with it after this build: rows may be realized
+     * after the registry changes, so they keep a copy, made once per registry revision.
+     */
+    [[nodiscard]] std::shared_ptr<const WidgetRegistry> widget_snapshot();
     /** The widget a call names, looked up once per call site. */
     [[nodiscard]] const WidgetLifecycle* call_widget(runtime::CallId call);
 
@@ -336,6 +341,8 @@ class DescriptionBuilder final {
     /** Per call site of the unit's program, the widget it names, for one registry revision. */
     std::vector<std::optional<const WidgetLifecycle*>> call_widgets_;
     std::uint64_t call_widgets_revision_ = 0U;
+    std::shared_ptr<const WidgetRegistry> widget_snapshot_;
+    std::uint64_t widget_snapshot_revision_ = 0U;
     struct KeyHash final {
         using is_transparent = void;
         [[nodiscard]] std::size_t operator()(const std::string_view key) const noexcept {
