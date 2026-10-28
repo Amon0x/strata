@@ -64,6 +64,22 @@ struct HostPathSegment final {
     [[nodiscard]] friend bool operator==(const HostPathSegment&, const HostPathSegment&) = default;
 };
 
+/** The canonical key of a host path: each segment's kind, length-prefixed field and index. */
+[[nodiscard]] std::string canonical_host_path(std::span<const HostPathSegment> path);
+
+/**
+ * A host path built once and shared by every read of it, with the canonical key reads are
+ * indexed by: an expression's path is resolved per IR node, not per evaluation.
+ */
+struct HostPathKey final {
+    std::vector<HostPathSegment> segments;
+    std::string canonical;
+
+    [[nodiscard]] static std::shared_ptr<const HostPathKey> make(
+        std::vector<HostPathSegment> segments
+    );
+};
+
 /**
  * One immutable node in a host snapshot. Scalar providers run at most once and only after their
  * exact path is read. Object traversal never evaluates siblings.

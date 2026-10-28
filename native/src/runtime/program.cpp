@@ -192,7 +192,7 @@ class ProgramLowering final {
             const std::string_view binding = optional_string(source, "binding").value_or("");
             if (binding == "host") {
                 node.fallback = VariableFallback::host;
-                node.host = add_host_path(ProgramHostPath{node.name, {}, std::nullopt});
+                node.host = add_host_path(ProgramHostPath{node.name, {}, nullptr});
             } else if (binding == "style" || binding == "animation" || binding == "component") {
                 node.fallback = VariableFallback::name;
                 node.value = Value(std::string(node.name.name()));
@@ -517,7 +517,7 @@ class ProgramLowering final {
             fixed.push_back(HostPathSegment::named(std::string(path.root.name())));
             for (const ProgramHostStep& step : path.steps)
                 fixed.push_back(step.segment);
-            path.fixed = std::move(fixed);
+            path.fixed = HostPathKey::make(std::move(fixed));
         }
         program_.host_paths_.push_back(std::move(path));
         return static_cast<std::uint32_t>(program_.host_paths_.size() - 1U);

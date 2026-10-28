@@ -104,8 +104,8 @@ struct ProgramHostStep final {
 struct ProgramHostPath final {
     Symbol root;
     std::vector<ProgramHostStep> steps;
-    /** The whole path when no step is dynamic, built once. */
-    std::optional<std::vector<HostPathSegment>> fixed;
+    /** The whole path when no step is dynamic, built once with its canonical key. */
+    std::shared_ptr<const HostPathKey> fixed;
 };
 
 /**

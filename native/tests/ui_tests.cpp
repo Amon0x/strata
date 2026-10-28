@@ -4055,7 +4055,7 @@ overlay IndexedDependencyRepeater {
                   one_repeater->virtual_sequence_generation->host_dependencies.begin()
                       ->second.contextual &&
                   one_repeater->virtual_sequence_generation->host_dependencies.begin()
-                          ->second.path.size() == 2U,
+                          ->second.path().size() == 2U,
               "direct Repeater source evaluation did not retain its exact host/view stamp");
         static_cast<void>(direct_source_retained.reconcile(one.root));
         builder.set_retained_tree(&direct_source_retained);

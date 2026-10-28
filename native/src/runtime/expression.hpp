@@ -55,16 +55,25 @@ collection_view_immutable_identity(const CollectionViewImmutableIdentity& value)
 
 /** Exact leaf read, including whether the selected root was contextual and whether it existed. */
 struct ExpressionHostDependency final {
-    std::vector<HostPathSegment> path;
+    /** The path read, shared with the IR node that read it. */
+    std::shared_ptr<const HostPathKey> key;
     bool contextual = false;
     std::optional<Value> value;
     std::optional<std::string> snapshot_id;
     std::uint64_t snapshot_generation = 0U;
 
+    [[nodiscard]] const std::vector<HostPathSegment>& path() const noexcept {
+        return key->segments;
+    }
+    /** The canonical key of the path, which reads of it are indexed by. */
+    [[nodiscard]] const std::string& canonical() const noexcept {
+        return key->canonical;
+    }
+
     [[nodiscard]] friend bool operator==(const ExpressionHostDependency& left,
                                          const ExpressionHostDependency& right) {
-        return left.path == right.path && left.contextual == right.contextual &&
-               left.value == right.value;
+        return (left.key == right.key || left.canonical() == right.canonical()) &&
+               left.contextual == right.contextual && left.value == right.value;
     }
 };
 
@@ -350,7 +359,8 @@ class ExpressionRuntime final {
         return dependency_observer_;
     }
     [[nodiscard]] ExpressionHostDependency
-    read_host_dependency(std::span<const HostPathSegment> path, const ExpressionScope& scope) const;
+    read_host_dependency(const std::shared_ptr<const HostPathKey>& path,
+                         const ExpressionScope& scope) const;
 
   private:
     enum class CollectionDependencyKind { lexical, host };
@@ -368,16 +378,17 @@ class ExpressionRuntime final {
         std::shared_ptr<const CollectionViewValue> view;
     };
 
-    struct CollectionCacheKey final {
+    /** A node of one program: an expression, or a host path, by its index. */
+    struct ProgramNodeKey final {
         std::uint64_t program = 0U;
-        ExpressionId expression = no_program_id;
-        [[nodiscard]] friend bool operator==(const CollectionCacheKey&,
-                                             const CollectionCacheKey&) = default;
+        std::uint32_t node = no_program_id;
+        [[nodiscard]] friend bool operator==(const ProgramNodeKey&,
+                                             const ProgramNodeKey&) = default;
     };
 
-    struct CollectionCacheKeyHash final {
-        [[nodiscard]] std::size_t operator()(const CollectionCacheKey& key) const noexcept {
-            return std::hash<std::uint64_t>{}(key.program * 0x9E3779B97F4A7C15ULL ^ key.expression);
+    struct ProgramNodeKeyHash final {
+        [[nodiscard]] std::size_t operator()(const ProgramNodeKey& key) const noexcept {
+            return std::hash<std::uint64_t>{}(key.program * 0x9E3779B97F4A7C15ULL ^ key.node);
         }
     };
 
@@ -430,9 +441,14 @@ class ExpressionRuntime final {
     std::vector<RuntimeDiagnostic> diagnostics_;
     std::set<std::string, std::less<>> reported_diagnostics_;
     /** Views per collection expression, one per lexical context, newest last. */
-    std::unordered_map<CollectionCacheKey, std::vector<CollectionCacheEntry>,
-                       CollectionCacheKeyHash>
+    std::unordered_map<ProgramNodeKey, std::vector<CollectionCacheEntry>, ProgramNodeKeyHash>
         collection_cache_;
+    /**
+     * The last path each host path with a computed step resolved to: evaluated again with the
+     * same lookups, it reads through the same shared key.
+     */
+    std::unordered_map<ProgramNodeKey, std::shared_ptr<const HostPathKey>, ProgramNodeKeyHash>
+        dynamic_host_paths_;
     std::size_t collection_cache_entries_ = 0U;
     /** Programs lowered from standalone expressions, by content. */
     std::unordered_map<std::string, std::shared_ptr<const Program>> standalone_programs_;

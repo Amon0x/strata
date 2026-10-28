@@ -180,8 +180,7 @@ struct RepeaterExpressionDependencies final : runtime::ExpressionDependencyObser
     }
 
     void host(const runtime::ExpressionHostDependency& dependency) override {
-        host_values.insert_or_assign(runtime::canonical_host_dependency_path(dependency.path),
-                                     dependency);
+        host_values.insert_or_assign(dependency.canonical(), dependency);
         if (upstream != nullptr)
             upstream->host(dependency);
     }
@@ -202,7 +201,7 @@ struct RepeaterExpressionDependencies final : runtime::ExpressionDependencyObser
     }
     for (const auto& [canonical, dependency] : previous.host_dependencies) {
         static_cast<void>(canonical);
-        if (expressions.read_host_dependency(dependency.path, scope) != dependency)
+        if (expressions.read_host_dependency(dependency.key, scope) != dependency)
             return false;
     }
     return true;
@@ -1706,8 +1705,7 @@ void DescriptionBuilder::observe_state_value(const runtime::StateAddress& addres
 void DescriptionBuilder::observe_host_dependency(
     const runtime::ExpressionHostDependency& dependency) {
     if (Frame* const current = frame(); current != nullptr) {
-        current->reads.host.insert_or_assign(
-            runtime::canonical_host_dependency_path(dependency.path), dependency);
+        current->reads.host.insert_or_assign(dependency.canonical(), dependency);
     }
 }
 
@@ -1749,11 +1747,11 @@ bool DescriptionBuilder::host_read_current(
     // republishes often (a HUD every frame) keeps every component whose values stayed.
     if (dependency.value.has_value()) {
         if (!current.value.has_value())
-            current.value = host.resolve(dependency.path);
+            current.value = host.resolve(dependency.path());
         return current.value->has_value() && **current.value == *dependency.value;
     }
     if (!current.origin.has_value())
-        current.origin = host.origin(dependency.path);
+        current.origin = host.origin(dependency.path());
     const std::optional<std::pair<std::string, std::uint64_t>>& origin = *current.origin;
     return origin.has_value() == dependency.snapshot_id.has_value() &&
            (!origin.has_value() || (origin->first == *dependency.snapshot_id &&
@@ -1836,8 +1834,7 @@ bool DescriptionBuilder::style_current(ResolvedStyle& style) const {
     if (style.host_invalidation_count == invalidation_count)
         return true;
     for (const runtime::ExpressionHostDependency& dependency : style.host_values) {
-        if (!host_read_current(runtime::canonical_host_dependency_path(dependency.path),
-                               dependency))
+        if (!host_read_current(dependency.canonical(), dependency))
             return false;
     }
     style.host_invalidation_count = invalidation_count;

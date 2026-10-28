@@ -171,7 +171,7 @@ struct CollectionDependencyTrace final : ExpressionDependencyObserver {
     void host(const ExpressionHostDependency& dependency) override {
         if (parent != nullptr)
             parent->host(dependency);
-        std::string key = canonical_host_dependency_path(dependency.path);
+        std::string key = dependency.canonical();
         if (host_values.try_emplace(key, dependency).second)
             order.push_back({true, {}, std::move(key)});
     }
@@ -593,19 +593,7 @@ ExpressionValue restore_expression_dependency(const ExpressionDependencyValue& v
 }
 
 std::string canonical_host_dependency_path(const std::span<const HostPathSegment> path) {
-    std::string result;
-    for (const HostPathSegment& segment : path) {
-        result.push_back(segment.kind == HostPathSegmentKind::field ? 'f' : 'l');
-        result.append(std::to_string(segment.field.size()));
-        result.push_back(':');
-        result.append(segment.field);
-        if (segment.kind == HostPathSegmentKind::lookup) {
-            result.push_back('#');
-            result.append(segment.index.has_value() ? std::to_string(*segment.index) : "-");
-        }
-        result.push_back('/');
-    }
-    return result;
+    return canonical_host_path(path);
 }
 
 ExpressionRuntime::ExpressionRuntime(const HostStore& host, const RuntimeActionRegistry& actions)
@@ -636,6 +624,7 @@ void ExpressionRuntime::clear_diagnostics() {
 void ExpressionRuntime::clear_caches() noexcept {
     collection_cache_.clear();
     collection_cache_entries_ = 0U;
+    dynamic_host_paths_.clear();
 }
 
 ExpressionDependencyObserver* ExpressionRuntime::exchange_dependency_observer(
@@ -644,19 +633,19 @@ ExpressionDependencyObserver* ExpressionRuntime::exchange_dependency_observer(
 }
 
 ExpressionHostDependency
-ExpressionRuntime::read_host_dependency(const std::span<const HostPathSegment> path,
+ExpressionRuntime::read_host_dependency(const std::shared_ptr<const HostPathKey>& key,
                                         const ExpressionScope& scope) const {
-    if (path.empty() || path.front().kind != HostPathSegmentKind::field ||
-        path.front().field.empty()) {
+    if (key == nullptr || key->segments.empty() ||
+        key->segments.front().kind != HostPathSegmentKind::field ||
+        key->segments.front().field.empty()) {
         throw std::invalid_argument("host dependency path requires a named root");
     }
-    // Only retained lazy identity evaluators freeze reads; others need no canonical path here.
+    const std::vector<HostPathSegment>& path = key->segments;
+    // Only retained lazy identity evaluators freeze reads.
     if (const FrozenHostReads* frozen = scope.host_dependency_overrides();
         frozen != nullptr && !frozen->empty()) {
-        if (const auto read = frozen->find(canonical_host_dependency_path(path));
-            read != frozen->end()) {
+        if (const auto read = frozen->find(key->canonical); read != frozen->end())
             return read->second;
-        }
     }
 
     const HostRoots& roots = scope.contextual_host_roots();
@@ -664,7 +653,7 @@ ExpressionRuntime::read_host_dependency(const std::span<const HostPathSegment> p
     if (contextual == roots.end()) {
         std::optional<HostResolution> resolution = host_.resolve_with_origin(path);
         return ExpressionHostDependency{
-            std::vector<HostPathSegment>(path.begin(), path.end()),
+            key,
             false,
             resolution.has_value() ? std::optional<Value>(std::move(resolution->value))
                                    : std::nullopt,
@@ -688,7 +677,7 @@ ExpressionRuntime::read_host_dependency(const std::span<const HostPathSegment> p
         }
     }
     return ExpressionHostDependency{
-        std::vector<HostPathSegment>(path.begin(), path.end()),
+        key,
         true,
         current != nullptr ? std::optional<Value>(*current) : std::nullopt,
         std::nullopt,
@@ -703,23 +692,46 @@ std::optional<ExpressionHostDependency> ExpressionRuntime::host_read(const Progr
     // A local of the root's name shadows the host root.
     if (scope.find(path.root) != nullptr)
         return std::nullopt;
-    if (path.fixed.has_value())
-        return read_host_dependency(*path.fixed, scope);
+    if (path.fixed != nullptr)
+        return read_host_dependency(path.fixed, scope);
+    // Every computed step is evaluated, in order; while they look the same things up as the
+    // last time, the path read is the one resolved then.
+    std::shared_ptr<const HostPathKey>& cached =
+        dynamic_host_paths_[ProgramNodeKey{program.serial(), node.host}];
     std::vector<HostPathSegment> segments;
-    segments.reserve(path.steps.size() + 1U);
-    segments.push_back(HostPathSegment::named(std::string(path.root.name())));
-    for (const ProgramHostStep& step : path.steps) {
+    bool rebuilt = cached == nullptr;
+    if (rebuilt) {
+        segments.reserve(path.steps.size() + 1U);
+        segments.push_back(HostPathSegment::named(std::string(path.root.name())));
+    }
+    for (std::size_t position = 0U; position < path.steps.size(); ++position) {
+        const ProgramHostStep& step = path.steps[position];
         if (!step.dynamic) {
-            segments.push_back(step.segment);
+            if (rebuilt)
+                segments.push_back(step.segment);
             continue;
         }
         const ProgramExpression& index = program.expression(step.index);
         const Value lookup = require_value(evaluate_node(program, step.index, scope), index, scope);
+        const std::string* text = lookup.string();
+        const std::optional<std::size_t> bounded = bounded_index(lookup);
+        if (!rebuilt) {
+            const HostPathSegment& previous = cached->segments[position + 1U];
+            if (previous.index == bounded &&
+                (text != nullptr ? previous.field == *text
+                                 : previous.field == display_string(lookup))) {
+                continue;
+            }
+            rebuilt = true;
+            segments.assign(cached->segments.begin(),
+                            cached->segments.begin() + static_cast<std::ptrdiff_t>(position + 1U));
+        }
         segments.push_back(HostPathSegment::lookup(
-            lookup.string() != nullptr ? *lookup.string() : display_string(lookup),
-            bounded_index(lookup)));
+            text != nullptr ? *text : display_string(lookup), bounded));
     }
-    return read_host_dependency(segments, scope);
+    if (rebuilt)
+        cached = HostPathKey::make(std::move(segments));
+    return read_host_dependency(cached, scope);
 }
 
 ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
@@ -1600,7 +1612,7 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
                "Collection helper requires a source list.");
         return empty_view();
     }
-    const CollectionCacheKey key{program.serial(), expression};
+    const ProgramNodeKey key{program.serial(), expression};
     if (const auto bucket = collection_cache_.find(key); bucket != collection_cache_.end()) {
         for (std::size_t position = bucket->second.size(); position-- > 0U;) {
             const CollectionCacheEntry& cached = bucket->second[position];
@@ -1616,7 +1628,7 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
                 } else {
                     const ExpressionHostDependency& stored =
                         cached.host_dependencies.at(read.host_key);
-                    if (read_host_dependency(stored.path, scope) != stored) {
+                    if (read_host_dependency(stored.key, scope) != stored) {
                         current = false;
                         break;
                     }

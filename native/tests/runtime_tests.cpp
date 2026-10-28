@@ -876,6 +876,17 @@ void test_dynamic_host_index_reads_the_selected_item() {
     check(value.value() != nullptr && value.value()->string() != nullptr &&
               *value.value()->string() == "one" && runtime.diagnostics().empty(),
           "a computed host index did not read the item it selects");
+    // The path a node resolved is reused only while its lookups stay the same.
+    const auto name_at = [&](const double position) {
+        ExpressionScope moved = scope;
+        moved.bind("position", Value(position));
+        const ExpressionValue read = runtime.evaluate(selected, moved);
+        return read.value() != nullptr && read.value()->string() != nullptr
+                   ? *read.value()->string()
+                   : std::string("<none>");
+    };
+    check(name_at(0.0) == "zero" && name_at(1.0) == "one" && name_at(1.0) == "one",
+          "a computed host index kept reading the item an earlier evaluation selected");
 }
 
 void test_portable_ir_expression_runtime() {
@@ -928,8 +939,8 @@ void test_portable_ir_expression_runtime() {
     const ExpressionValue indexed_host_value = runtime.evaluate(indexed_host_expression, scope);
     check(indexed_host_value.value() != nullptr &&
               *indexed_host_value.value()->string() == "Lazy title" &&
-              dependencies.reads.size() == 1U && dependencies.reads.front().path.size() == 2U &&
-              dependencies.reads.front().path.back().kind == HostPathSegmentKind::lookup,
+              dependencies.reads.size() == 1U && dependencies.reads.front().path().size() == 2U &&
+              dependencies.reads.front().path().back().kind == HostPathSegmentKind::lookup,
           "indexed host evaluation did not publish one exact structural leaf read");
     dependencies.reads.clear();
     const auto short_circuit_host_expression = strata::data::parse_json(R"({

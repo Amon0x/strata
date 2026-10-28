@@ -151,6 +151,29 @@ HostPathSegment HostPathSegment::lookup(
     return HostPathSegment{HostPathSegmentKind::lookup, std::move(field), index};
 }
 
+std::string canonical_host_path(const std::span<const HostPathSegment> path) {
+    std::string result;
+    for (const HostPathSegment& segment : path) {
+        result.push_back(segment.kind == HostPathSegmentKind::field ? 'f' : 'l');
+        result.append(std::to_string(segment.field.size()));
+        result.push_back(':');
+        result.append(segment.field);
+        if (segment.kind == HostPathSegmentKind::lookup) {
+            result.push_back('#');
+            result.append(segment.index.has_value() ? std::to_string(*segment.index) : "-");
+        }
+        result.push_back('/');
+    }
+    return result;
+}
+
+std::shared_ptr<const HostPathKey> HostPathKey::make(std::vector<HostPathSegment> segments) {
+    std::string canonical = canonical_host_path(segments);
+    return std::make_shared<const HostPathKey>(
+        HostPathKey{std::move(segments), std::move(canonical)}
+    );
+}
+
 HostConstantData::HostConstantData(Value source_value, HostEvaluationCounter source_counter)
     : value(std::move(source_value)), counter(std::move(source_counter)) {}
 
