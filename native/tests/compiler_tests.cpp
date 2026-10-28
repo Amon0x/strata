@@ -725,6 +725,34 @@ void test_slot_names_resolve_the_same_for_analysis_and_lowering() {
           "a string parameter shadowing a style was accepted as the style:" + describe(mistyped));
 }
 
+// Expressions are typed as the runtime evaluates them: '+' joins text when either side is text,
+// arithmetic needs numbers, a conditional is either branch, and a derived value has its type
+// wherever it is read, before its declaration included.
+void test_expression_types_follow_runtime_evaluation() {
+    const auto joined = compile_source(
+        "screen Main { state name = \"Ada\"; state count = 2;\n"
+        "  root Panel { Text(text: \"Hello \" + name) Text(text: count + \" items\") } }"
+    );
+    check(joined.succeeded(), "joining text with '+' was rejected:" + describe(joined));
+
+    const auto mismatch = [](const std::string_view source, const std::string_view what) {
+        const auto result = compile_source(source);
+        check(diagnostic_count(result, "STRATA.DSL.SEMANTIC_TYPE_MISMATCH") == 1U &&
+                  result.diagnostics.size() == 1U,
+              std::string(what) + " was not reported as one type mismatch:" + describe(result));
+    };
+    mismatch("screen Main { root Text(text: later); derived later = 5; }",
+             "a number derived value read before its declaration");
+    mismatch("screen Main { derived first = second; derived second = 5; root Text(text: first) }",
+             "a derived value reading a later one");
+    mismatch("screen Main { state wide = true; derived label = wide ? \"wide\" : 5;\n"
+             "  root Text(text: label) }",
+             "a conditional whose else branch is a number");
+    mismatch("screen Main { state wide = true; derived twice = wide * 2;\n"
+             "  root Text(text: \"x\") }",
+             "arithmetic on a boolean");
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -748,6 +776,7 @@ int strata_test_compiler() {
         test_each_problem_is_reported_once();
         test_types_resolve_once_for_analysis_and_lowering();
         test_slot_names_resolve_the_same_for_analysis_and_lowering();
+        test_expression_types_follow_runtime_evaluation();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

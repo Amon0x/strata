@@ -308,6 +308,16 @@ struct StaticNumber final {
     return raw;
 }
 
+/** A derived value whose type is inferred when it is first read; see `defer_derived_values`. */
+struct DeferredDerived final {
+    const Expression* expression = nullptr;
+    std::string path;
+    /** The scope at its declaration, once the states before it are typed. */
+    std::optional<Scope> scope;
+    SemanticTypePtr type;
+    bool resolving = false;
+};
+
 class Validator final {
   public:
     Validator(const File& file, const SchemaRegistry& registry)
@@ -1497,11 +1507,7 @@ class Validator final {
                         const BlockContext context = BlockContext::ui) {
         validate_derived_cycles(block, path);
         validate_sibling_keys(block, path);
-        for (const StatementPtr& statement : block.statements) {
-            if (const auto* derived = std::get_if<DerivedStatement>(&statement->node)) {
-                scope.try_emplace(derived->name, simple(SemanticTypeKind::unknown));
-            }
-        }
+        const std::vector<const SemanticType*> deferred = defer_derived_values(block, scope, path);
         for (const StatementPtr& statement : block.statements) {
             if (const auto* state = std::get_if<StateStatement>(&statement->node)) {
                 if (!local_names.insert(state->name).second) {
@@ -1526,21 +1532,8 @@ class Validator final {
                                       scope);
                 }
                 persisted_owner_ = previous_persisted_owner;
-                // A Record's fields are fixed by its initializer, so reads are checked against
-                // them; their values change at runtime, so literal field types widen.
-                if (declared->kind == SemanticTypeKind::map && declared->label == "record" &&
-                    initializer->kind == SemanticTypeKind::map && !initializer->fields.empty()) {
-                    auto record = std::make_shared<SemanticType>(*initializer);
-                    record->label = "record '" + state->name + "'";
-                    for (ObjectField& field : record->fields) {
-                        if (field.type != nullptr &&
-                            field.type->kind == SemanticTypeKind::string_literal) {
-                            field.type = simple(SemanticTypeKind::string);
-                        }
-                    }
-                    declared = std::move(record);
-                }
-                scope.insert_or_assign(state->name, std::move(declared));
+                scope.insert_or_assign(state->name,
+                                       retained_state_type(*state, declared, initializer));
                 retained_states.insert(state->name);
             } else if (const auto* derived = std::get_if<DerivedStatement>(&statement->node)) {
                 if (!local_names.insert(derived->name).second) {
@@ -1712,6 +1705,93 @@ class Validator final {
                                nested_context(context));
             }
         }
+        for (const SemanticType* placeholder : deferred)
+            deferred_derived_.erase(placeholder);
+    }
+
+    /** The type a retained state holds, given its declared type and its initializer's. */
+    [[nodiscard]] static SemanticTypePtr retained_state_type(const StateStatement& state,
+                                                             SemanticTypePtr declared,
+                                                             const SemanticTypePtr& initializer) {
+        // A Record's fields are fixed by its initializer, so reads are checked against them;
+        // their values change at runtime, so literal field types widen.
+        if (declared->kind == SemanticTypeKind::map && declared->label == "record" &&
+            initializer->kind == SemanticTypeKind::map && !initializer->fields.empty()) {
+            auto record = std::make_shared<SemanticType>(*initializer);
+            record->label = "record '" + state.name + "'";
+            for (ObjectField& field : record->fields) {
+                if (field.type != nullptr && field.type->kind == SemanticTypeKind::string_literal) {
+                    field.type = simple(SemanticTypeKind::string);
+                }
+            }
+            declared = std::move(record);
+        }
+        return declared;
+    }
+
+    /**
+     * A derived value is visible to its whole block, so a read before its declaration must still
+     * see its type. Each derived value enters the scope as a placeholder that `infer` resolves on
+     * first read, by inferring the value as declared: with the states declared before it in scope.
+     * Returns the placeholders, which stay registered until the block is validated.
+     */
+    [[nodiscard]] std::vector<const SemanticType*>
+    defer_derived_values(const Block& block, Scope& scope, const std::string& path) {
+        std::vector<const SemanticType*> placeholders;
+        for (const StatementPtr& statement : block.statements) {
+            const auto* derived = std::get_if<DerivedStatement>(&statement->node);
+            if (derived == nullptr)
+                continue;
+            SemanticTypePtr placeholder = simple(SemanticTypeKind::unknown);
+            if (!scope.try_emplace(derived->name, placeholder).second)
+                continue;
+            placeholders.push_back(placeholder.get());
+            deferred_derived_.emplace(placeholder.get(),
+                                      DeferredDerived{derived->expression.get(),
+                                                      path + "/" + derived->name, std::nullopt,
+                                                      nullptr, false});
+        }
+        if (placeholders.empty())
+            return placeholders;
+        Scope declared = scope;
+        for (const StatementPtr& statement : block.statements) {
+            if (const auto* state = std::get_if<StateStatement>(&statement->node)) {
+                const Expression* previous_persisted_owner = persisted_owner_;
+                persisted_owner_ = state->initializer.get();
+                SemanticTypePtr initializer =
+                    infer(*state->initializer, declared, path + "/" + state->name);
+                persisted_owner_ = previous_persisted_owner;
+                SemanticTypePtr type =
+                    state->type_reference.has_value()
+                        ? resolve_type_reference(*state->type_reference, registry_)
+                        : initializer;
+                declared.insert_or_assign(state->name,
+                                          retained_state_type(*state, std::move(type), initializer));
+            } else if (const auto* derived = std::get_if<DerivedStatement>(&statement->node)) {
+                const auto found = declared.find(derived->name);
+                const auto deferred = found != declared.end()
+                                          ? deferred_derived_.find(found->second.get())
+                                          : deferred_derived_.end();
+                if (deferred != deferred_derived_.end())
+                    deferred->second.scope = declared;
+            }
+        }
+        return placeholders;
+    }
+
+    /** The type of a derived value read before its declaration; see `defer_derived_values`. */
+    [[nodiscard]] SemanticTypePtr deferred_derived_type(DeferredDerived& derived) {
+        if (derived.type != nullptr)
+            return derived.type;
+        // A cycle is reported on its own, and a state initializer may read the value before the
+        // states it depends on are known.
+        if (derived.resolving || !derived.scope.has_value())
+            return simple(SemanticTypeKind::unknown);
+        derived.resolving = true;
+        SemanticTypePtr type = infer(*derived.expression, *derived.scope, derived.path);
+        derived.resolving = false;
+        derived.type = type;
+        return type;
     }
 
     [[nodiscard]] bool call_has_explicit_key(const WidgetCall& call) const {
@@ -3300,6 +3380,78 @@ class Validator final {
         return simple(SemanticTypeKind::unknown);
     }
 
+    /** How an operand takes part in arithmetic, as the runtime evaluates it. */
+    enum class OperandClass { number, text, other, undetermined };
+
+    [[nodiscard]] static OperandClass operand_class(const SemanticType& type) {
+        switch (type.kind) {
+        case SemanticTypeKind::number:
+        case SemanticTypeKind::duration:
+            return OperandClass::number;
+        case SemanticTypeKind::string:
+        case SemanticTypeKind::string_literal:
+        case SemanticTypeKind::enumeration:
+            return OperandClass::text;
+        case SemanticTypeKind::state_binding:
+            return type.value != nullptr ? operand_class(*type.value)
+                                         : OperandClass::undetermined;
+        case SemanticTypeKind::null_value:
+        case SemanticTypeKind::boolean:
+        case SemanticTypeKind::color:
+        case SemanticTypeKind::list:
+        case SemanticTypeKind::map:
+        case SemanticTypeKind::host_object:
+        case SemanticTypeKind::collection:
+        case SemanticTypeKind::async_value:
+        case SemanticTypeKind::action:
+        case SemanticTypeKind::lambda:
+        case SemanticTypeKind::component_template:
+            return OperandClass::other;
+        default:
+            return OperandClass::undetermined;
+        }
+    }
+
+    [[nodiscard]] static std::string operator_symbol(const BinaryOperator operation) {
+        switch (operation) {
+        case BinaryOperator::add: return "+";
+        case BinaryOperator::subtract: return "-";
+        case BinaryOperator::multiply: return "*";
+        case BinaryOperator::divide: return "/";
+        case BinaryOperator::modulo: return "%";
+        case BinaryOperator::less: return "<";
+        case BinaryOperator::less_equal: return "<=";
+        case BinaryOperator::greater: return ">";
+        case BinaryOperator::greater_equal: return ">=";
+        default: return "?";
+        }
+    }
+
+    /**
+     * The result of numeric operator `symbol`, a duration when either operand is one. An operand
+     * the runtime cannot treat as a number is reported, since the operation would fail there.
+     */
+    [[nodiscard]] SemanticTypePtr arithmetic(const Expression& expression,
+                                             const std::string& symbol, const SemanticType& left,
+                                             const SemanticType& right,
+                                             const std::string& component_path) {
+        for (const SemanticType* operand : {&left, &right}) {
+            const OperandClass kind = operand_class(*operand);
+            if (kind == OperandClass::text || kind == OperandClass::other) {
+                report("STRATA.DSL.SEMANTIC_TYPE_MISMATCH",
+                       "Operator '" + symbol + "' needs numbers or durations" +
+                           (symbol == "+" ? " or text" : "") + ", but found " +
+                           operand->diagnostic_name() + ".",
+                       expression.span, component_path, "number or duration");
+                return simple(SemanticTypeKind::unknown);
+            }
+        }
+        return simple(left.kind == SemanticTypeKind::duration ||
+                              right.kind == SemanticTypeKind::duration
+                          ? SemanticTypeKind::duration
+                          : SemanticTypeKind::number);
+    }
+
     /**
      * Whether a bare name in a style or animation slot reads a value in scope rather than naming a
      * declaration; lowering decides the same way.
@@ -3333,6 +3485,10 @@ class Validator final {
             // The scope holds the host roots too, so a host name resolves as a local here.
             switch (names_.resolve(identifier->name, found != scope.end(), registry_)) {
             case NameBinding::local:
+                if (const auto deferred = deferred_derived_.find(found->second.get());
+                    deferred != deferred_derived_.end()) {
+                    return deferred_derived_type(deferred->second);
+                }
                 return found->second;
             case NameBinding::component:
                 return component_template_type(components_.at(identifier->name));
@@ -3382,36 +3538,64 @@ class Validator final {
             return type;
         }
         if (const auto* unary = std::get_if<UnaryExpression>(&expression.node)) {
-            static_cast<void>(infer(*unary->operand, scope, component_path));
-            return simple(unary->operation == UnaryOperator::logical_not
-                              ? SemanticTypeKind::boolean
-                              : SemanticTypeKind::number);
+            const SemanticTypePtr operand = infer(*unary->operand, scope, component_path);
+            if (unary->operation == UnaryOperator::logical_not)
+                return simple(SemanticTypeKind::boolean);
+            return arithmetic(expression, "-", *operand, *simple(SemanticTypeKind::number),
+                              component_path);
         }
         if (const auto* binary = std::get_if<BinaryExpression>(&expression.node)) {
             SemanticTypePtr left = infer(*binary->left, scope, component_path);
             SemanticTypePtr right = infer(*binary->right, scope, component_path);
-            static_cast<void>(right);
             switch (binary->operation) {
             case BinaryOperator::equal:
             case BinaryOperator::not_equal:
+            case BinaryOperator::logical_and:
+            case BinaryOperator::logical_or:
+                return simple(SemanticTypeKind::boolean);
             case BinaryOperator::less:
             case BinaryOperator::less_equal:
             case BinaryOperator::greater:
             case BinaryOperator::greater_equal:
-            case BinaryOperator::logical_and:
-            case BinaryOperator::logical_or:
+                static_cast<void>(arithmetic(expression, operator_symbol(binary->operation),
+                                             *left, *right, component_path));
                 return simple(SemanticTypeKind::boolean);
             case BinaryOperator::coalesce:
                 return left;
-            default:
-                return simple(SemanticTypeKind::number);
+            case BinaryOperator::add:
+                // The runtime joins the operands as text when either one is text.
+                if (operand_class(*left) == OperandClass::text ||
+                    operand_class(*right) == OperandClass::text) {
+                    return simple(SemanticTypeKind::string);
+                }
+                if (operand_class(*left) == OperandClass::undetermined ||
+                    operand_class(*right) == OperandClass::undetermined) {
+                    return simple(SemanticTypeKind::unknown);
+                }
+                return arithmetic(expression, "+", *left, *right, component_path);
+            case BinaryOperator::subtract:
+            case BinaryOperator::multiply:
+            case BinaryOperator::divide:
+            case BinaryOperator::modulo:
+                return arithmetic(expression, operator_symbol(binary->operation), *left, *right,
+                                  component_path);
             }
+            return simple(SemanticTypeKind::unknown);
         }
         if (const auto* conditional = std::get_if<ConditionalExpression>(&expression.node)) {
             static_cast<void>(infer(*conditional->condition, scope, component_path));
-            SemanticTypePtr then_type = infer(*conditional->then_expression, scope, component_path);
-            static_cast<void>(infer(*conditional->else_expression, scope, component_path));
-            return then_type;
+            const SemanticTypePtr then_type =
+                infer(*conditional->then_expression, scope, component_path);
+            const SemanticTypePtr else_type =
+                infer(*conditional->else_expression, scope, component_path);
+            if (then_type->diagnostic_name() == else_type->diagnostic_name())
+                return then_type;
+            // Either branch can be the value, so a use must accept both.
+            auto either = std::make_shared<SemanticType>();
+            either->kind = SemanticTypeKind::union_value;
+            either->label = then_type->diagnostic_name() + " or " + else_type->diagnostic_name();
+            either->options = {then_type, else_type};
+            return either;
         }
         if (const auto* property = std::get_if<PropertyAccessExpression>(&expression.node)) {
             // `theme.<token>` lowers to a theme token read whatever else is in scope.
@@ -3630,6 +3814,8 @@ class Validator final {
         const std::map<std::string, const Expression*, std::less<>>*
     > active_widget_default_styles_;
     const Expression* persisted_owner_ = nullptr;
+    /** Derived values a block declares, keyed by the placeholder type its scope holds. */
+    std::map<const SemanticType*, DeferredDerived> deferred_derived_;
 };
 
 } // namespace
