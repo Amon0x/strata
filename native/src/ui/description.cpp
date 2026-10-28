@@ -460,6 +460,7 @@ DescriptionBuilder::DescriptionBuilder(runtime::ApplicationContext& application)
           application.host(), application.bundle()->action_registry())),
       frame_observer_(*this) {
     static_cast<void>(expressions_->exchange_dependency_observer(&frame_observer_));
+    observe_state_changes();
 }
 
 DescriptionBuilder::DescriptionBuilder(runtime::ApplicationContext& application,
@@ -470,11 +471,24 @@ DescriptionBuilder::DescriptionBuilder(runtime::ApplicationContext& application,
           application.host(), application.bundle()->action_registry())),
       frame_observer_(*this) {
     static_cast<void>(expressions_->exchange_dependency_observer(&frame_observer_));
+    observe_state_changes();
 }
 
 DescriptionBuilder::~DescriptionBuilder() {
     // Rows realized from now on are described by a builder of their own.
     *self_ = nullptr;
+    application_.state().stop_observing_changes(state_observer_);
+}
+
+void DescriptionBuilder::observe_state_changes() {
+    // A write is noted only when a body read the address; a build checks those values alone.
+    state_observer_ =
+        application_.state().observe_changes([this](const runtime::StateAddress* const address) {
+            if (address == nullptr)
+                all_states_changed_ = true;
+            else if (state_readers_.contains(*address))
+                changed_states_.insert(*address);
+        });
 }
 
 DescriptionBuildResult DescriptionBuilder::build(const runtime::LayerRole role,

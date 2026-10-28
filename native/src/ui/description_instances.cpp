@@ -190,7 +190,9 @@ void DescriptionBuilder::install_frame(ComponentInstance& instance, Frame& recor
         }
     }
     instance.children = std::move(recording.children);
+    unindex_reads(instance);
     instance.reads = std::move(recording.reads);
+    index_reads(instance);
     instance.outer_reads = std::move(recording.outer_reads);
     instance.bindings = std::move(recording.bindings);
     instance.owned_scopes = std::move(recording.owned_scopes);
@@ -449,6 +451,7 @@ void DescriptionBuilder::forget(ComponentInstance& instance) {
         }
     }
     release(instance);
+    unindex_reads(instance);
     if (instance.kind == InstanceKind::row) {
         if (ComponentInstance* const generator = find_instance(instance.parent);
             generator != nullptr) {
@@ -461,29 +464,61 @@ void DescriptionBuilder::forget(ComponentInstance& instance) {
     instances_.erase(id);
 }
 
-bool DescriptionBuilder::reads_current(const ComponentInstance& instance) const {
-    for (const auto& [canonical, dependency] : instance.reads.host) {
-        if (!host_read_current(canonical, dependency))
-            return false;
-    }
+void DescriptionBuilder::index_reads(const ComponentInstance& instance) {
     for (const auto& [address, value] : instance.reads.state) {
-        const runtime::Value* const current = application_.state().find(address);
-        if (current == nullptr || *current != value)
-            return false;
+        static_cast<void>(value);
+        state_readers_[address].insert(instance.id);
     }
-    for (const RetainedRead& read : instance.reads.retained) {
+    for (const auto& [canonical, dependency] : instance.reads.host) {
+        // A surface's own roots are compared as a whole when they change.
+        if (!dependency.contextual)
+            host_readers_[canonical].insert(instance.id);
+    }
+    for (const RetainedRead& read : instance.reads.retained)
+        retained_readers_[read.name].insert(instance.id);
+    if (instance.reads.raised_errors)
+        erroring_.insert(instance.id);
+}
+
+void DescriptionBuilder::unindex_reads(const ComponentInstance& instance) noexcept {
+    const auto remove = [&instance](auto& index, const auto& key) {
+        if (const auto found = index.find(key); found != index.end()) {
+            found->second.erase(instance.id);
+            if (found->second.empty())
+                index.erase(found);
+        }
+    };
+    for (const auto& [address, value] : instance.reads.state) {
+        static_cast<void>(value);
+        remove(state_readers_, address);
+    }
+    for (const auto& [canonical, dependency] : instance.reads.host) {
+        static_cast<void>(dependency);
+        remove(host_readers_, canonical);
+    }
+    for (const RetainedRead& read : instance.reads.retained)
+        remove(retained_readers_, read.name);
+    erroring_.erase(instance.id);
+}
+
+bool DescriptionBuilder::retained_reads_current(const ComponentInstance& instance) const {
+    return std::ranges::all_of(instance.reads.retained, [this](const RetainedRead& read) {
         const RetainedDescriptionSnapshot::Node* const retained = retained_widget(read.query);
         const runtime::Value* const current =
             retained != nullptr ? retained->retained_value(read.name) : nullptr;
-        if (current == nullptr ? read.value.has_value()
-                               : !read.value.has_value() || *current != *read.value) {
-            return false;
-        }
-    }
-    return true;
+        return current == nullptr ? !read.value.has_value()
+                                  : read.value.has_value() && *current == *read.value;
+    });
 }
 
 void DescriptionBuilder::collect_invalidations() {
+    const std::uint64_t host_count = application_.host().invalidation_count();
+    const auto checked = [&] {
+        changed_states_.clear();
+        all_states_changed_ = false;
+        checked_host_count_ = host_count;
+        checked_retained_snapshot_ = retained_snapshot_;
+    };
     if (contextual_host_roots_changed_) {
         // Every scope holds the surface's roots: every body is described in the new ones.
         contextual_host_roots_changed_ = false;
@@ -492,15 +527,65 @@ void DescriptionBuilder::collect_invalidations() {
             if (instance->kind != InstanceKind::generator)
                 mark_dirty(*instance);
         }
+        checked();
         return;
     }
-    for (const auto& [id, instance] : instances_) {
-        static_cast<void>(id);
-        if (instance->kind == InstanceKind::generator || instance->dirty)
-            continue;
-        if (instance->reads.raised_errors || !reads_current(*instance))
-            mark_dirty(*instance);
+    // Only the readers of what changed are looked at, and only those whose value differs now
+    // are stale.
+    const auto stale_by = [this](const Readers& readers, const auto& changed) {
+        std::vector<ComponentInstance*> stale;
+        for (const InstanceId id : readers) {
+            if (ComponentInstance* const reader = find_instance(id);
+                reader != nullptr && !reader->dirty && changed(*reader)) {
+                stale.push_back(reader);
+            }
+        }
+        for (ComponentInstance* const reader : stale)
+            mark_dirty(*reader);
+    };
+    const std::vector<InstanceId> erroring(erroring_.begin(), erroring_.end());
+    for (const InstanceId id : erroring) {
+        if (ComponentInstance* const reader = find_instance(id); reader != nullptr)
+            mark_dirty(*reader);
     }
+    const auto state_changed = [this, &stale_by](const runtime::StateAddress& address,
+                                                 const Readers& readers) {
+        const runtime::Value* const current = application_.state().find(address);
+        stale_by(readers, [&](const ComponentInstance& reader) {
+            const auto read = reader.reads.state.find(address);
+            return current == nullptr || read == reader.reads.state.end() ||
+                   *current != read->second;
+        });
+    };
+    if (all_states_changed_) {
+        for (const auto& [address, readers] : state_readers_)
+            state_changed(address, readers);
+    } else {
+        for (const runtime::StateAddress& address : changed_states_) {
+            if (const auto readers = state_readers_.find(address); readers != state_readers_.end())
+                state_changed(address, readers->second);
+        }
+    }
+    if (host_count != checked_host_count_) {
+        for (const auto& [canonical, readers] : host_readers_) {
+            stale_by(readers, [&](const ComponentInstance& reader) {
+                const auto read = reader.reads.host.find(canonical);
+                return read == reader.reads.host.end() ||
+                       !host_read_current(canonical, read->second);
+            });
+        }
+    }
+    if (retained_snapshot_ != checked_retained_snapshot_) {
+        Readers readers;
+        for (const auto& [name, named] : retained_readers_) {
+            static_cast<void>(name);
+            readers.insert(named.begin(), named.end());
+        }
+        stale_by(readers, [this](const ComponentInstance& reader) {
+            return !retained_reads_current(reader);
+        });
+    }
+    checked();
 }
 
 void DescriptionBuilder::describe_stale() {
@@ -722,6 +807,10 @@ void DescriptionBuilder::reset() noexcept {
     instances_.clear();
     instance_ids_.clear();
     layers_.clear();
+    state_readers_.clear();
+    host_readers_.clear();
+    retained_readers_.clear();
+    erroring_.clear();
     stale_.clear();
     emitted_changed_.clear();
     reprovisioned_.clear();
@@ -818,17 +907,21 @@ bool DescriptionBuilder::observes_retained_value(const RetainedNode& node,
                                                  const std::string_view name) const {
     if (retained_snapshot_ == nullptr || instances_.empty())
         return true;
-    for (const auto& [id, instance] : instances_) {
-        static_cast<void>(id);
-        for (const RetainedRead& read : instance->reads.retained) {
-            if (read.name != name)
-                continue;
-            const RetainedDescriptionSnapshot::Node* const retained = retained_widget(read.query);
-            if (retained != nullptr && retained->identity == node.identity())
-                return true;
-        }
-    }
-    return false;
+    // Only the bodies that read a value of this name, on this node, are described again.
+    const auto readers = retained_readers_.find(name);
+    if (readers == retained_readers_.end())
+        return false;
+    return std::ranges::any_of(readers->second, [&](const InstanceId id) {
+        const ComponentInstance* const reader = find_instance(id);
+        return reader != nullptr &&
+               std::ranges::any_of(reader->reads.retained, [&](const RetainedRead& read) {
+                   if (read.name != name)
+                       return false;
+                   const RetainedDescriptionSnapshot::Node* const retained =
+                       retained_widget(read.query);
+                   return retained != nullptr && retained->identity == node.identity();
+               });
+    });
 }
 
 DescriptionBuilder::ComponentInstance&

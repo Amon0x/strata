@@ -1332,6 +1332,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         tests/widget_binding_tests.cpp
         tests/form_validation_tests.cpp
         tests/command_binding_tests.cpp
+        tests/description_invalidation_tests.cpp
     )
     target_link_libraries(
         strata_core_tests
@@ -1350,6 +1351,10 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/widget_literals.cmake
     )
     add_test(NAME strata.core COMMAND strata_core_tests core)
+    add_test(
+        NAME strata.ui.description_invalidation
+        COMMAND strata_core_tests description_invalidation
+    )
     add_test(NAME strata.data COMMAND strata_core_tests data)
     add_test(NAME strata.compiler COMMAND strata_core_tests compiler)
     add_test(

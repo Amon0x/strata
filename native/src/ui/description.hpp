@@ -447,9 +447,13 @@ class DescriptionBuilder final {
     void count_scopes(ComponentInstance& instance);
     void uncount_scopes(ComponentInstance& instance) noexcept;
     [[nodiscard]] const runtime::StateScopeSet& layer_scopes(ComponentInstance& layer);
-    /** Whether everything the instance's body read would read the same now. */
-    [[nodiscard]] bool reads_current(const ComponentInstance& instance) const;
-    /** Marks stale every instance whose reads changed since the last build. */
+    void observe_state_changes();
+    /** Files the instance's reads under what they read, or takes them out again. */
+    void index_reads(const ComponentInstance& instance);
+    void unindex_reads(const ComponentInstance& instance) noexcept;
+    /** Whether the retained values the instance's body read would read the same now. */
+    [[nodiscard]] bool retained_reads_current(const ComponentInstance& instance) const;
+    /** Marks stale the instances that read what changed since the last build. */
     void collect_invalidations();
     void flush_reprovisions();
     /** Describes the stale instances, shallowest first. */
@@ -525,6 +529,21 @@ class DescriptionBuilder final {
     std::vector<InstanceId> reprovisioned_;
     std::size_t eviction_threshold_ = 1024U;
     DescriptionTelemetry telemetry_;
+
+    // Who read what: a change is pushed through these to the instances that read it.
+    using Readers = std::unordered_set<InstanceId>;
+    std::map<runtime::StateAddress, Readers, std::less<>> state_readers_;
+    std::map<std::string, Readers, std::less<>> host_readers_;
+    /** Readers of retained values, by the value's name. */
+    std::unordered_map<std::string, Readers, KeyHash, std::equal_to<>> retained_readers_;
+    /** Bodies that raised errors: described again by every build, which reports them. */
+    Readers erroring_;
+    // What changed since the last build looked.
+    std::uint64_t state_observer_ = 0U;
+    std::set<runtime::StateAddress, std::less<>> changed_states_;
+    bool all_states_changed_ = false;
+    std::uint64_t checked_host_count_ = 0U;
+    std::shared_ptr<const RetainedDescriptionSnapshot> checked_retained_snapshot_;
 
     /** Host paths resolved while checking cached reads, for one host generation. */
     struct HostRead final {

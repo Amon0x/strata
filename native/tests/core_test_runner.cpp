@@ -19,6 +19,7 @@ int strata_test_interaction_residual(int argument_count, const char* const* cons
 int strata_test_widget_binding(int argument_count, const char* const* const arguments);
 int strata_test_form_validation(int argument_count, const char* const* const arguments);
 int strata_test_command_binding(int argument_count, const char* const* const arguments);
+int strata_test_description_invalidation();
 
 int main(const int argument_count, const char* const* const arguments) {
     if (argument_count < 2) {
@@ -66,6 +67,8 @@ int main(const int argument_count, const char* const* const arguments) {
         return strata_test_form_validation(suite_argument_count, suite_arguments);
     if (suite == "command_binding")
         return strata_test_command_binding(suite_argument_count, suite_arguments);
+    if (suite == "description_invalidation")
+        return strata_test_description_invalidation();
 
     std::cerr << "unknown test suite: " << suite << '\n';
     return 2;
