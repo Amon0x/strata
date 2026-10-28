@@ -196,6 +196,7 @@ class ProgramLowering final {
             } else if (binding == "style" || binding == "animation" || binding == "component") {
                 node.fallback = VariableFallback::name;
                 node.value = Value(std::string(node.name.name()));
+                node.names_component = binding == "component";
             }
         } else if (kind == "list") {
             node.kind = ExpressionKind::list;
@@ -619,12 +620,11 @@ class ProgramLowering final {
         result.component = string_field(source, "kind") == "component";
         result.type = std::string(string_field(source, "name"));
         result.path = std::string(optional_string(source, "path").value_or(""));
-        if (!result.component) {
-            if (const compiler::DeclaredWidget* const widget =
-                    compiler::find_builtin_widget(result.type)) {
-                result.slot = widget->slot;
-                result.lazy_rows = widget->lazy_rows;
-            }
+        const compiler::DeclaredWidget* const widget =
+            result.component ? nullptr : compiler::find_builtin_widget(result.type);
+        if (widget != nullptr) {
+            result.slot = widget->slot;
+            result.lazy_rows = widget->lazy_rows;
         }
         std::vector<ProgramCallArgument> arguments;
         std::vector<ProgramBehavior> behaviors;
@@ -654,7 +654,9 @@ class ProgramLowering final {
             }
             if (name == "key")
                 result.key_argument = static_cast<std::uint32_t>(arguments.size());
-            arguments.push_back(ProgramCallArgument{Symbol::intern(name), expression(value)});
+            arguments.push_back(ProgramCallArgument{
+                Symbol::intern(name), expression(value),
+                widget != nullptr && std::ranges::contains(widget->row_templates, name)});
         }
         const JsonValue children = required(source, "children");
         result.children = children.is_null()

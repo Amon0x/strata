@@ -73,6 +73,7 @@ SemanticResult validate_semantics(
     });
     semantic::collect_declarations(analysis);
     semantic::resolve_names(analysis);
+    semantic::collect_row_template_slots(analysis);
     semantic::TypeOracle oracle(analysis);
     semantic::check_types(analysis, oracle);
     semantic::check_policies(analysis, oracle);

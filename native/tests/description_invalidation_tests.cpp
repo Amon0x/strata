@@ -399,6 +399,54 @@ overlay Filled {
           "rows kept the content their caller no longer passes");
 }
 
+void test_a_slot_in_a_widgets_generated_rows_takes_the_callers_content() {
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("invalidation-table-slots", bundle);
+    // The row template declares the slot: it describes inside Listing, so Listing's callers fill
+    // it, the slot being Listing's only one.
+    activate(application, "invalidation-table-slots", R"(
+component RowView(cells: any, key: key, selected: boolean) {
+  Panel(key: key) {
+    Text(key: format("{0}.label", key), text: cells.name)
+    Slot(name: "content")
+  }
+}
+component Listing() {
+  Table(key: "slot.table", columns: [{ id: "name", header: "Name" }],
+        rows: [{ key: "a", cells: { name: "A" } }, { key: "b", cells: { name: "B" } }],
+        rowTemplate: RowView)
+}
+overlay Filled {
+  state caption = "first";
+  root Listing() {
+    Text(key: "slot.caption", text: caption)
+  }
+}
+)");
+    ui::DescriptionBuilder builder(application);
+    const ui::DescriptionBuildResult first = builder.build(runtime::LayerRole::overlay, "Filled");
+    check(first.diagnostics.empty(), "the table slot fixture produced diagnostics");
+    const std::shared_ptr<const ui::DescriptionNode> table = find(first.root, "slot.table");
+    check(table != nullptr && table->children->size() == 2U, "the table did not provide its rows");
+    check(builder.telemetry().described_rows == 0U,
+          "projecting content into a component realized its table rows");
+    for (std::size_t index = 0U; index < table->children->size(); ++index) {
+        check(text(find(table->children->at(index), "slot.caption")) == "first",
+              "a slot inside a table's row template did not take the caller's content");
+    }
+    const std::uint64_t described = builder.telemetry().described_rows;
+
+    // New content reaches the rows already realized when they are next realized.
+    write_state(application, "overlay Filled", "caption", runtime::Value("second"));
+    const ui::DescriptionBuildResult second = builder.build(runtime::LayerRole::overlay, "Filled");
+    const std::shared_ptr<const ui::DescriptionNode> reprovided = find(second.root, "slot.table");
+    check(reprovided != nullptr && reprovided->children != table->children &&
+              text(find(reprovided->children->at(0U), "slot.caption")) == "second" &&
+              text(find(reprovided->children->at(1U), "slot.caption")) == "second" &&
+              builder.telemetry().described_rows == described + 2U,
+          "table rows kept the content their caller no longer passes");
+}
+
 void test_a_failed_build_changes_nothing_outside_the_builder() {
     const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("invalidation-pure", bundle);
@@ -456,6 +504,7 @@ int strata_test_description_invalidation() {
         test_rows_of_a_new_generation_keep_what_did_not_change();
         test_a_retained_write_beside_a_repeater_describes_only_its_reader();
         test_a_slot_in_lazy_rows_takes_the_callers_content();
+        test_a_slot_in_a_widgets_generated_rows_takes_the_callers_content();
         test_a_failed_build_changes_nothing_outside_the_builder();
         std::cout << "strata_description_invalidation_tests: OK\n";
         return 0;

@@ -197,6 +197,7 @@ void DescriptionBuilder::install_frame(ComponentInstance& instance, Frame& recor
     instance.bindings = std::move(recording.bindings);
     instance.owned_scopes = std::move(recording.owned_scopes);
     instance.generated_slots = std::move(recording.generated_slots);
+    instance.slot_templates = std::move(recording.slot_templates);
     touch(instance);
 }
 
@@ -325,6 +326,26 @@ DescriptionBuilder::project_into_row(const ComponentInstance& row,
             !enclosing->call_site.projected.empty()) {
             node = description_detail::project_slot_content(
                 node, enclosing->call_site.component_path, enclosing->call_site.projected);
+        }
+    }
+    return node;
+}
+
+std::shared_ptr<const DescriptionNode>
+DescriptionBuilder::project_into_template(const std::uint32_t component_index,
+                                          std::shared_ptr<const DescriptionNode> node) {
+    // Only a row describes a row template; elsewhere a template's slots are its own.
+    const Frame* const current = frame();
+    if (current == nullptr || current->instance->kind != InstanceKind::row)
+        return node;
+    const std::string& path = program().component(component_index).path;
+    for (const ComponentInstance* enclosing = find_instance(current->instance->parent);
+         enclosing != nullptr; enclosing = find_instance(enclosing->parent)) {
+        if (enclosing->kind == InstanceKind::component &&
+            enclosing->slot_templates.contains(component_index) &&
+            !enclosing->call_site.projected.empty()) {
+            node = description_detail::project_slot_content(node, path,
+                                                            enclosing->call_site.projected);
         }
     }
     return node;

@@ -283,6 +283,10 @@ void validate_catalog(const BuiltinCatalog& catalog) {
                     "built-in widget binding references an undeclared parameter");
             }
         }
+        for (const std::string& name : widget.row_templates) {
+            if (!std::ranges::contains(parameters, name, &DeclaredParameter::name))
+                throw std::logic_error("built-in widget row template is an undeclared parameter");
+        }
     }
     for (const DeclaredAction& action : catalog.actions) {
         require_unique(action.parameters, "action parameter", &DeclaredParameter::name);

@@ -135,6 +135,8 @@ struct ProgramExpression final {
     VariableFallback fallback = VariableFallback::missing;
     bool state_binding = false;
     bool material_call = false;
+    /** A variable naming a component declaration, which reads as its name: a template. */
+    bool names_component = false;
     Symbol name;
     std::string text;
     Value value;
@@ -204,6 +206,8 @@ struct ProgramBlock final {
 struct ProgramCallArgument final {
     Symbol name;
     ExpressionId value = no_program_id;
+    /** It fills one of the widget's row-template parameters (the catalog's row_templates). */
+    bool row_template = false;
 };
 
 /** One entry of a literal `behaviors` list: each field evaluated on its own. */

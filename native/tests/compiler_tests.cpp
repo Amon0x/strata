@@ -831,6 +831,36 @@ void test_slots_declared_inside_child_component_fills_are_forwarded() {
     check(forwarded.succeeded(), "a forwarded slot was not declared:" + describe(forwarded));
 }
 
+// A row template a component hands its widget describes inside that component: its slots, and
+// those of the row templates it hands on, are the component's, required ones included.
+void test_slots_of_row_templates_belong_to_the_component_handing_them_over() {
+    const std::string declarations =
+        "component Cell(cells: any, columnId: string, header: string, key: key, rowKey: key,\n"
+        "               selected: boolean, value: any) {\n"
+        "  Panel { Slot(name: \"badge\", required: true) }\n"
+        "}\n"
+        "component Row(cells: any, key: key, selected: boolean) {\n"
+        "  Panel { Slot(name: \"content\")\n"
+        "    Table(columns: [{ id: \"x\", header: \"X\" }],\n"
+        "      rows: [{ key: \"r\", cells: { x: 1 } }], cellTemplate: Cell) }\n"
+        "}\n"
+        "component Listing() {\n"
+        "  Table(columns: [{ id: \"x\", header: \"X\" }],\n"
+        "      rows: [{ key: \"r\", cells: { x: 1 } }], rowTemplate: Row)\n"
+        "}\n";
+    const auto filled = compile_source(
+        declarations +
+        "screen Main { root Listing { Slot(name: \"content\") { Text(text: \"a\") }\n"
+        "  Slot(name: \"badge\") { Text(text: \"b\") } } }"
+    );
+    check(filled.succeeded(),
+          "a row template's slots were not the component's:" + describe(filled));
+    const auto missing =
+        compile_source(declarations + "screen Main { root Listing { Text(text: \"a\") } }");
+    check(diagnostic_count(missing, "STRATA.DSL.SEMANTIC_MISSING_REQUIRED_SLOT") == 1U,
+          "a required slot of a nested row template was not required:" + describe(missing));
+}
+
 namespace compiler = strata::compiler;
 
 /** Every node id of a file: expressions, statements, blocks and widget calls. */
@@ -1328,6 +1358,7 @@ int strata_test_compiler() {
         test_state_actions_see_the_state_lowering_declares();
         test_sibling_widgets_need_their_own_persistence_keys();
         test_slots_declared_inside_child_component_fills_are_forwarded();
+        test_slots_of_row_templates_belong_to_the_component_handing_them_over();
         test_node_ids_are_unique_across_modules();
         test_analysis_records_a_resolved_typed_tree();
         test_bind_shorthand_needs_a_retained_target();

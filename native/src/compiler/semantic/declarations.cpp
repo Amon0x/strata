@@ -1,8 +1,11 @@
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <set>
 #include <type_traits>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include "compiler/semantic/analysis.hpp"
 
@@ -303,10 +306,134 @@ private:
     Analysis& analysis_;
 };
 
+/**
+ * A component template handed to a widget's row-template parameter describes each of the widget's
+ * generated rows inside the component that handed it over. The slots it declares, and those of the
+ * row templates it hands on in turn, are that component's own: its callers fill them.
+ */
+class RowTemplateSlotCollector final {
+public:
+    explicit RowTemplateSlotCollector(Analysis& analysis) : analysis_(analysis) {}
+
+    void run() {
+        std::map<const ComponentInfo*, std::vector<const ComponentInfo*>> references;
+        for (const auto& [name, component] : analysis_.model.components) {
+            static_cast<void>(name);
+            std::vector<const ComponentInfo*>& referenced = references[&component];
+            if (component.declaration != nullptr && component.declaration->body != nullptr)
+                block(*component.declaration->body, referenced);
+        }
+        // Each component's own slots, before any template's are added to them.
+        std::map<const ComponentInfo*, std::vector<ComponentSlot>> own;
+        for (const auto& [name, component] : analysis_.model.components) {
+            static_cast<void>(name);
+            own.emplace(&component, component.slots);
+        }
+        for (auto& [name, component] : analysis_.model.components) {
+            static_cast<void>(name);
+            std::set<const ComponentInfo*> reached{&component};
+            std::vector<const ComponentInfo*> pending = references[&component];
+            while (!pending.empty()) {
+                const ComponentInfo* const current = pending.back();
+                pending.pop_back();
+                if (!reached.insert(current).second) continue;
+                for (const ComponentSlot& slot : own[current]) add(component, slot);
+                const std::vector<const ComponentInfo*>& next = references[current];
+                pending.insert(pending.end(), next.begin(), next.end());
+            }
+        }
+    }
+
+private:
+    /** A slot declared twice, by the component and a template or by two templates, is one. */
+    static void add(ComponentInfo& component, const ComponentSlot& slot) {
+        const auto existing = std::ranges::find(component.slots, slot.name, &ComponentSlot::name);
+        if (existing == component.slots.end())
+            component.slots.push_back(slot);
+        else
+            existing->required = existing->required || slot.required;
+    }
+
+    void block(const Block& body, std::vector<const ComponentInfo*>& referenced) const {
+        for (const StatementPtr& statement : body.statements) {
+            if (const WidgetCall* call = statement_call(*statement)) {
+                widget_call(*call, referenced);
+            } else if (const auto* conditional = std::get_if<IfStatement>(&statement->node)) {
+                if (conditional->then_block != nullptr) block(*conditional->then_block, referenced);
+                if (conditional->else_block != nullptr) block(*conditional->else_block, referenced);
+            } else if (const auto* when = std::get_if<WhenStatement>(&statement->node)) {
+                for (const WhenBranch& branch : when->branches) {
+                    if (branch.block != nullptr) block(*branch.block, referenced);
+                }
+            } else if (const auto* loop = std::get_if<ForStatement>(&statement->node)) {
+                if (loop->block != nullptr) block(*loop->block, referenced);
+            }
+        }
+    }
+
+    void widget_call(const WidgetCall& call, std::vector<const ComponentInfo*>& referenced) const {
+        const ResolvedWidgetCall* resolved = analysis_.model.widget_call(call);
+        if (resolved != nullptr && resolved->widget != nullptr &&
+            !resolved->widget->row_templates.empty()) {
+            for (std::size_t index = 0U;
+                 index < call.arguments.size() && index < resolved->arguments.size(); ++index) {
+                const SchemaParameter* parameter = resolved->arguments[index].parameter;
+                if (parameter != nullptr &&
+                    std::ranges::contains(resolved->widget->row_templates, parameter->name)) {
+                    templates(*call.arguments[index].value, referenced);
+                }
+            }
+        }
+        if (call.body != nullptr) block(*call.body, referenced);
+    }
+
+    /** The component templates an argument names, wherever in it they are written. */
+    void templates(const Expression& expression,
+                   std::vector<const ComponentInfo*>& referenced) const {
+        const auto visit = [&](const ExpressionPtr& child) {
+            if (child != nullptr) templates(*child, referenced);
+        };
+        std::visit(
+            [&](const auto& node) {
+                using Node = std::decay_t<decltype(node)>;
+                if constexpr (std::is_same_v<Node, IdentifierExpression>) {
+                    const Symbol* symbol = analysis_.model.symbol(expression);
+                    if (symbol != nullptr && symbol->kind == SymbolKind::component &&
+                        symbol->component != nullptr) {
+                        referenced.push_back(symbol->component);
+                    }
+                } else if constexpr (std::is_same_v<Node, CallExpression>) {
+                    const ResolvedCall* call = analysis_.model.call(expression);
+                    if (call != nullptr && call->kind == CallKind::component_template &&
+                        call->component != nullptr) {
+                        referenced.push_back(call->component);
+                        for (const Argument& argument : node.arguments) visit(argument.value);
+                    }
+                } else if constexpr (std::is_same_v<Node, GroupingExpression>) {
+                    visit(node.expression);
+                } else if constexpr (std::is_same_v<Node, ListExpression>) {
+                    for (const ExpressionPtr& element : node.elements) visit(element);
+                } else if constexpr (std::is_same_v<Node, MapExpression>) {
+                    for (const MapEntry& entry : node.entries) visit(entry.value);
+                } else if constexpr (std::is_same_v<Node, ConditionalExpression>) {
+                    visit(node.then_expression);
+                    visit(node.else_expression);
+                }
+            },
+            expression.node);
+    }
+
+    Analysis& analysis_;
+};
+
 } // namespace
 
 void collect_declarations(Analysis& analysis) {
     DeclarationCollector(analysis).run();
+}
+
+void collect_row_template_slots(Analysis& analysis) {
+    RowTemplateSlotCollector(analysis).run();
 }
 
 } // namespace strata::compiler::semantic

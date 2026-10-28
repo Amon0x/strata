@@ -140,6 +140,8 @@ struct WidgetSchema final {
     bool lazy_rows = false;
     /** The layout kind its children use when no style names one; empty when none applies. */
     std::string layout_kind;
+    /** Parameters naming the component templates its generated rows are described with. */
+    std::vector<std::string> row_templates;
 
     [[nodiscard]] const SchemaParameter* find_parameter(std::string_view name) const noexcept;
     [[nodiscard]] const WidgetBindingSchema* find_binding(std::string_view shorthand) const noexcept;

@@ -96,6 +96,12 @@ that slot; `required: true` rejects omission. Unnamed caller children remain sho
 component has exactly one slot (or a slot named `content`). Filled expressions keep the caller's
 scope and stable identity; component parameters and state remain private.
 
+A component template handed to a widget's row-template parameter (a `Table`'s `rowTemplate`,
+`cellTemplate` and `cellTemplates`, the `itemTemplate` of a `VirtualList` or `ItemGrid`, a
+`TreeView`'s `rowTemplate`) describes each generated row inside the component that hands it over.
+The slots it declares, and those of the row templates it hands on in turn, are that component's:
+its callers fill them, and every row shows the content.
+
 Application schemas may declare reusable semantic types for component parameters and host roots:
 
 ```json

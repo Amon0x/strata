@@ -312,60 +312,116 @@ void set_layout_field(DescriptionNode::Properties& properties, std::string name,
 /**
  * The names of the Slots a block declares itself, read from the program rather than from what it
  * describes: a lazily generated row is described only when realized. Content passed to another
- * component is the block's own, except the fills naming that component's slots. A name the block
- * computes cannot be known before it runs and is left out.
+ * component is the block's own, except the fills naming that component's slots. A row template
+ * the block hands to a widget describes inside it, so the slots the template declares are the
+ * block's too; the templates are kept by component index. A name the block computes cannot be
+ * known before it runs and is left out. The compiler counts slots the same way.
  */
-void block_slot_names(const runtime::Program& program, const runtime::BlockId block,
-                      std::set<std::string, std::less<>>& names,
-                      const std::span<const std::size_t> skipped = {}) {
-    if (block == runtime::no_program_id)
-        return;
-    const std::span<const runtime::ProgramStatement> statements =
-        program.statements(program.block(block));
-    for (std::size_t index = 0U; index < statements.size(); ++index) {
-        if (std::ranges::binary_search(skipped, index))
-            continue;
-        const runtime::ProgramStatement& statement = statements[index];
-        switch (statement.kind) {
-        case runtime::StatementKind::node: {
-            const runtime::ProgramCall& call = program.call(statement.call);
-            if (call.component) {
-                for (const runtime::ProgramSlotFill& fill : program.slot_fills(call))
-                    block_slot_names(program, fill.children, names);
-                block_slot_names(program, call.children, names,
-                                 program.projected_statements(call));
+class SlotDeclarations final {
+  public:
+    SlotDeclarations(const runtime::Program& program, std::set<std::string, std::less<>>& names,
+                     std::set<std::uint32_t>& templates)
+        : program_(program), names_(names), templates_(templates) {}
+
+    void block(const runtime::BlockId block, const std::span<const std::size_t> skipped = {}) {
+        if (block == runtime::no_program_id)
+            return;
+        const std::span<const runtime::ProgramStatement> statements =
+            program_.statements(program_.block(block));
+        for (std::size_t index = 0U; index < statements.size(); ++index) {
+            if (std::ranges::binary_search(skipped, index))
+                continue;
+            const runtime::ProgramStatement& statement = statements[index];
+            switch (statement.kind) {
+            case runtime::StatementKind::node: {
+                const runtime::ProgramCall& call = program_.call(statement.call);
+                if (call.component) {
+                    for (const runtime::ProgramSlotFill& fill : program_.slot_fills(call))
+                        this->block(fill.children);
+                    this->block(call.children, program_.projected_statements(call));
+                    break;
+                }
+                if (call.slot) {
+                    for (const runtime::ProgramCallArgument& argument : program_.arguments(call)) {
+                        const runtime::ProgramExpression& name =
+                            program_.expression(argument.value);
+                        if (argument.name.name() == "name" &&
+                            name.kind == runtime::ExpressionKind::literal &&
+                            name.value.string() != nullptr && !name.value.string()->empty()) {
+                            names_.insert(*name.value.string());
+                        }
+                    }
+                } else {
+                    row_templates(call);
+                }
+                this->block(call.children);
                 break;
             }
-            if (call.slot) {
-                for (const runtime::ProgramCallArgument& argument : program.arguments(call)) {
-                    const runtime::ProgramExpression& name = program.expression(argument.value);
-                    if (argument.name.name() == "name" &&
-                        name.kind == runtime::ExpressionKind::literal &&
-                        name.value.string() != nullptr && !name.value.string()->empty()) {
-                        names.insert(*name.value.string());
-                    }
-                }
+            case runtime::StatementKind::conditional:
+                this->block(statement.block);
+                this->block(statement.otherwise);
+                break;
+            case runtime::StatementKind::when:
+                for (const runtime::ProgramWhenBranch& branch : program_.branches(statement))
+                    this->block(branch.block);
+                break;
+            case runtime::StatementKind::loop:
+                this->block(statement.block);
+                break;
+            case runtime::StatementKind::state:
+            case runtime::StatementKind::derived:
+                break;
             }
-            block_slot_names(program, call.children, names);
-            break;
         }
-        case runtime::StatementKind::conditional:
-            block_slot_names(program, statement.block, names);
-            block_slot_names(program, statement.otherwise, names);
+    }
+
+    /** The row templates a widget call hands over, and the slots they declare. */
+    void row_templates(const runtime::ProgramCall& call) {
+        for (const runtime::ProgramCallArgument& argument : program_.arguments(call)) {
+            if (argument.row_template)
+                templates_in(argument.value);
+        }
+    }
+
+  private:
+    void templates_in(const runtime::ExpressionId id) {
+        if (id == runtime::no_program_id)
+            return;
+        const runtime::ProgramExpression& node = program_.expression(id);
+        switch (node.kind) {
+        case runtime::ExpressionKind::component_template:
+            row_template(node.text);
+            for (const runtime::ProgramArgument& argument : program_.arguments(node))
+                templates_in(argument.value);
             break;
-        case runtime::StatementKind::when:
-            for (const runtime::ProgramWhenBranch& branch : program.branches(statement))
-                block_slot_names(program, branch.block, names);
+        case runtime::ExpressionKind::variable:
+            if (node.names_component)
+                row_template(node.name.name());
             break;
-        case runtime::StatementKind::loop:
-            block_slot_names(program, statement.block, names);
+        case runtime::ExpressionKind::list:
+        case runtime::ExpressionKind::map:
+            for (const runtime::ProgramArgument& argument : program_.arguments(node))
+                templates_in(argument.value);
             break;
-        case runtime::StatementKind::state:
-        case runtime::StatementKind::derived:
+        case runtime::ExpressionKind::conditional:
+            templates_in(node.second);
+            templates_in(node.third);
+            break;
+        default:
             break;
         }
     }
-}
+
+    void row_template(const std::string_view name) {
+        const std::optional<std::uint32_t> index = program_.component_index(name);
+        if (index.has_value() && templates_.insert(*index).second)
+            block(program_.component(*index).body);
+    }
+
+    const runtime::Program& program_;
+    std::set<std::string, std::less<>>& names_;
+    std::set<std::uint32_t>& templates_;
+};
 
 void collect_slot_names(const std::shared_ptr<const DescriptionNode>& node,
                         const std::string_view component_path,
@@ -1155,9 +1211,18 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
             // A body's slots in its rows are its own; rows within rows are counted with them.
             if (Frame* const current = frame();
                 current != nullptr && current->instance->kind != InstanceKind::row) {
-                block_slot_names(program(), statements.front().block, current->generated_slots);
+                SlotDeclarations(program(), current->generated_slots, current->slot_templates)
+                    .block(statements.front().block);
             }
         }
+    }
+    // The slots of the row templates a body hands its widgets are its own, as rows of a Repeater.
+    if (Frame* const current = frame();
+        current != nullptr && current->instance->kind != InstanceKind::row &&
+        std::ranges::any_of(program().arguments(call),
+                            &runtime::ProgramCallArgument::row_template)) {
+        SlotDeclarations(program(), current->generated_slots, current->slot_templates)
+            .row_templates(call);
     }
     widgets_.apply_layout_defaults(type, properties);
 
@@ -1579,7 +1644,7 @@ DescriptionBuilder::build_component_template(const std::string_view component_na
         build_block(component.body, instance);
     if (roots.size() != 1U)
         throw std::logic_error("validated component template must describe exactly one root node");
-    return std::move(roots.front());
+    return project_into_template(*index, std::move(roots.front()));
 }
 
 std::vector<DescriptionBehavior>

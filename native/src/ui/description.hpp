@@ -238,6 +238,11 @@ class DescriptionBuilder final {
          * hold until they are realized: rows take the caller's content when they are described.
          */
         std::set<std::string, std::less<>> generated_slots;
+        /**
+         * The row templates (by component index) the body hands to its widgets, whose slots are
+         * among `generated_slots`: each instance of one in a row takes the caller's content.
+         */
+        std::set<std::uint32_t> slot_templates;
 
         /** The state scopes the body binds and owns itself. */
         StateBindings bindings;
@@ -286,6 +291,7 @@ class DescriptionBuilder final {
         StateBindings bindings;
         runtime::StateScopeSet owned_scopes;
         std::set<std::string, std::less<>> generated_slots;
+        std::set<std::uint32_t> slot_templates;
         /** A row's enclosing scope: reads of its bindings are the row's inputs. */
         const runtime::ExpressionScope* outer = nullptr;
         std::map<runtime::Symbol, runtime::ExpressionDependencyValue> outer_reads;
@@ -495,6 +501,13 @@ class DescriptionBuilder final {
     [[nodiscard]] std::shared_ptr<const DescriptionNode>
     project_into_row(const ComponentInstance& row,
                      std::shared_ptr<const DescriptionNode> node) const;
+    /**
+     * A row template's instance in a generated row, with the content the callers of the
+     * components that handed the template over project into its slots.
+     */
+    [[nodiscard]] std::shared_ptr<const DescriptionNode>
+    project_into_template(std::uint32_t component_index,
+                          std::shared_ptr<const DescriptionNode> node);
     /** Rows within the instance are described again when they are next realized. */
     void invalidate_rows(ComponentInstance& instance);
 

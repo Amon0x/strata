@@ -264,6 +264,8 @@ void claim_persistence_key(
 
 void collect_declarations(Analysis& analysis);
 void resolve_names(Analysis& analysis);
+/** Adds the slots of the row templates a component hands its widgets to the component's own. */
+void collect_row_template_slots(Analysis& analysis);
 void check_types(Analysis& analysis, TypeOracle& oracle);
 void check_policies(Analysis& analysis, TypeOracle& oracle);
 /** Validates an animation declaration into its checked, lowerable form. */

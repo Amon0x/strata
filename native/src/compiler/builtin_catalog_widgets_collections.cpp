@@ -116,7 +116,8 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                      DeclaredRetainedState{
                          .name = "scrollOffset",
                          .description =
-                             "Virtual row-band viewport offset and sticky group position."}}},
+                             "Virtual row-band viewport offset and sticky group position."}},
+                .row_templates = {"itemTemplate"}},
             DeclaredWidget{
                 .name = "Repeater",
                 .parameters = {DeclaredParameter{.name = "estimatedItemExtent",
@@ -414,7 +415,8 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                                            .description = "Uncontrolled visible column order."},
                      DeclaredRetainedState{
                          .name = "scrollOffset",
-                         .description = "Vertical row window and horizontal wide-table offset."}}},
+                         .description = "Vertical row window and horizontal wide-table offset."}},
+                .row_templates = {"cellTemplate", "cellTemplates", "rowTemplate"}},
             DeclaredWidget{
                 .name = "TreeView",
                 .parameters =
@@ -564,7 +566,8 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                          .description =
                              "Uncontrolled expanded keys and pending lazy-child requests."},
                      DeclaredRetainedState{.name = "scrollOffset",
-                                           .description = "Virtual tree viewport offset."}}},
+                                           .description = "Virtual tree viewport offset."}},
+                .row_templates = {"rowTemplate"}},
             DeclaredWidget{
                 .name = "VirtualList",
                 .parameters = {DeclaredParameter{.name = "itemCount",
@@ -639,7 +642,8 @@ void add_builtin_collection_widgets(BuiltinCatalog& catalog) {
                     .name = "scrollOffset",
                     .description =
                         "Horizontal or vertical scroll offset for the retained viewport."}},
-                .allows_children = true},
+                .allows_children = true,
+                .row_templates = {"itemTemplate"}},
         });
 }
 
