@@ -161,6 +161,12 @@ class DescriptionBuilder final {
          * around it stay cached and patch its new subtree in.
          */
         bool raised_errors = false;
+        /**
+         * The generated child providers this body made itself. Their realized rows are part of
+         * its output: it is stale when one of them is, and rebinds what they bound when it is
+         * replayed.
+         */
+        std::vector<std::shared_ptr<const GeneratedRowEvaluationContext>> generated_rows;
     };
 
     struct ComponentCacheEntry final {
@@ -230,6 +236,13 @@ class DescriptionBuilder final {
                                    const RetainedDescriptionSnapshot::Node* retained);
     void capture_retained_snapshot();
     void replay_component_effects(const ComponentEffects& effects);
+    /** Makes the body being described the holder of a generated child provider's rows. */
+    void hold_generated_rows(std::shared_ptr<const GeneratedRowEvaluationContext> rows);
+    /** Binds again what the rows realized in `effects` and its cached components bound. */
+    void rebind_generated_rows(const ComponentEffects& effects) const;
+    /** Whether a body and the cached components it called would be described the same now. */
+    [[nodiscard]] bool effects_subtree_current(const ComponentEffects& effects,
+                                               std::uint64_t host_invalidation_count) const;
     [[nodiscard]] bool aggregate_component_effects(ComponentEffects& effects) const;
     [[nodiscard]] std::shared_ptr<const DescriptionNode>
     build_component_body(std::uint32_t component, const Scope& scope, ComponentEffects& effects);

@@ -7937,6 +7937,75 @@ overlay Keys {
           "Repeater key lookups evaluated the generation's keys again");
 }
 
+void test_lazy_rows_follow_what_they_read() {
+    using namespace strata;
+    const data::JsonValue schemas = data::parse_json(R"({
+      "extensionPackages":[],
+      "widgets":{"registry":"lazy-row-reads","required":[],"definitions":[]},
+      "actions":{"registry":"lazy-row-reads","required":[],"definitions":[]},
+      "host":[
+        {"path":"model","nullable":false,"type":{"kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[{"name":"label","type":{"kind":"string"},"required":true,"nullable":false}]}}
+      ]
+    })");
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
+    runtime::ApplicationContext application("lazy-row-reads", bundle);
+    const auto publish = [&](const std::uint64_t generation, const std::string_view label) {
+        static_cast<void>(application.host().adopt(bundle->host_snapshot(
+            "lazy-row-reads-model", generation,
+            data::parse_json("{\"model\":{\"label\":\"" + std::string(label) + "\"}}"))));
+    };
+    publish(1U, "L1");
+    activate_description_fixture(application, "lazy-row-reads", R"(
+component Rows() {
+  Repeater(key: "rows.list", estimatedItemExtent: 24) {
+    for row in [{ id: "a" }, { id: "b" }] {
+      Panel(key: row.id) {
+        state expanded = false;
+        Text(key: format("{0}.text", row.id), text: format("{0} {1} {2}", row.id, expanded ? "open" : "closed", model.label))
+      }
+    }
+  }
+}
+overlay Rows { root Rows() }
+)");
+    ui::DescriptionBuilder builder(application);
+    const auto row_text = [](const ui::DescriptionBuildResult& built) {
+        const std::shared_ptr<const ui::DescriptionNode> row =
+            built.root->children->at(0U)->children->at(0U);
+        return std::pair(row, description_text(find_description_key(row, "a.text")));
+    };
+    const ui::DescriptionBuildResult first = builder.build(runtime::LayerRole::overlay, "Rows");
+    const auto [first_row, first_text] = row_text(first);
+    check(first.diagnostics.empty() && first_text == "a closed L1",
+          "lazy row fixture did not realize its first row");
+    const std::string row_scope = first_row->state_scope;
+
+    // A build that reuses the cached body binds again the state scope its realized row bound.
+    const ui::DescriptionBuildResult replayed = builder.build(runtime::LayerRole::overlay, "Rows");
+    check(replayed.root == first.root, "an unchanged lazy row fixture was not cached");
+    const std::optional<runtime::StateScopeResolution> expanded =
+        application.resolve_state_scope(row_scope, "expanded");
+    check(expanded.has_value() && expanded->declaration != nullptr,
+          "a cached body lost the state scope its realized row bound");
+
+    // The row read its state: changing it outside the row (undo, host dispatch, async) leaves the
+    // realized row stale, and the body holding it is described again.
+    check(application.state().write(expanded->address,
+                                    runtime::StateSlot{"expanded", expanded->declaration->type_id,
+                                                       runtime::Value(false),
+                                                       expanded->declaration_scope},
+                                    runtime::Value(true)),
+          "lazy row state did not change");
+    const ui::DescriptionBuildResult opened = builder.build(runtime::LayerRole::overlay, "Rows");
+    check(row_text(opened).second == "a open L1", "a realized row kept a state value it read");
+
+    // The row read the host too.
+    publish(2U, "L2");
+    const ui::DescriptionBuildResult relabeled = builder.build(runtime::LayerRole::overlay, "Rows");
+    check(row_text(relabeled).second == "a open L2", "a realized row kept a host value it read");
+    static_cast<void>(first_row);
+}
+
 int strata_test_ui(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--collections") {
@@ -8015,6 +8084,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_loop_component_keys_name_their_instances();
             test_component_refresh_checks_the_body_before_its_components();
             test_repeater_keys_are_kept_by_their_generation();
+            test_lazy_rows_follow_what_they_read();
         }
         std::cout << "strata_ui_tests: OK\n";
         return 0;

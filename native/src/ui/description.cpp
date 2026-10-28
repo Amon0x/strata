@@ -417,6 +417,12 @@ std::string DescriptionBuilder::keyed_instance_path(const Scope& scope, const st
     return component_instance_path(scope.instance_path(), type, key, source_path);
 }
 
+/**
+ * Describes the rows of one generated child provider when they are first realized, after the
+ * build that made the provider. Each row's reads are recorded as a body's are, so the body holding
+ * the provider is stale when a realized row would read something else, and the state scopes rows
+ * bind are bound again when that body is replayed from its cache.
+ */
 struct DescriptionBuilder::GeneratedRowEvaluationContext final {
     GeneratedRowEvaluationContext(runtime::ApplicationContext& application,
                                   const WidgetRegistry& source_widgets,
@@ -430,11 +436,66 @@ struct DescriptionBuilder::GeneratedRowEvaluationContext final {
         evaluator->retained_snapshot_ = std::move(retained);
     }
 
-    void begin() {
-        evaluator->diagnostics_.clear();
-        evaluator->evaluated_expressions_ = 0U;
-        evaluator->described_nodes_ = 0U;
-        evaluator->current_layer_state_scopes_.clear();
+    /** Describes the row at `index` with `describe`, recording what it reads. */
+    template <typename Describe>
+    [[nodiscard]] std::shared_ptr<const DescriptionNode> describe_row(const std::size_t index,
+                                                                      Describe&& describe) {
+        std::scoped_lock lock(mutex);
+        DescriptionBuilder& builder = *evaluator;
+        builder.diagnostics_.clear();
+        builder.evaluated_expressions_ = 0U;
+        builder.described_nodes_ = 0U;
+        builder.current_layer_state_scopes_.clear();
+        ComponentEffects effects;
+        std::shared_ptr<const DescriptionNode> row;
+        builder.component_effect_stack_.push_back(&effects);
+        {
+            ComponentExpressionDependencies dependencies;
+            dependencies.observe_host = [&builder](const runtime::ExpressionHostDependency& read) {
+                builder.observe_host_dependency(read);
+            };
+            ExpressionDependencyObserverRestore observer(*builder.expressions_, &dependencies);
+            dependencies.upstream = observer.previous();
+            try {
+                row = describe();
+            } catch (...) {
+                builder.component_effect_stack_.pop_back();
+                throw;
+            }
+        }
+        builder.component_effect_stack_.pop_back();
+        // A row's diagnostics travel with its materialization: it is realized again only when
+        // what it read changes.
+        effects.raised_errors = false;
+        rows.insert_or_assign(index, Row{row, std::move(effects),
+                                         builder.application_.host().invalidation_count()});
+        return row;
+    }
+
+    /** Whether every row still realized would be described the same now. */
+    [[nodiscard]] bool current() const {
+        std::scoped_lock lock(mutex);
+        return std::ranges::all_of(rows, [this](const auto& entry) {
+            const Row& row = entry.second;
+            return row.node.expired() ||
+                   evaluator->effects_subtree_current(row.effects, row.host_invalidation_count);
+        });
+    }
+
+    /** Binds again the state scopes the rows still realized bound. */
+    void rebind() const {
+        std::scoped_lock lock(mutex);
+        for (const auto& [index, row] : rows) {
+            static_cast<void>(index);
+            if (row.node.expired())
+                continue;
+            for (const auto& [address, binding] : row.effects.state_bindings) {
+                evaluator->application_.bind_state_scope(address.scope, address.name,
+                                                         binding.declaration_scope,
+                                                         binding.address_scope);
+            }
+            evaluator->rebind_generated_rows(row.effects);
+        }
     }
 
     [[nodiscard]] std::shared_ptr<const DescriptionNode>
@@ -475,8 +536,18 @@ struct DescriptionBuilder::GeneratedRowEvaluationContext final {
         return anchored;
     }
 
+    struct Row final {
+        /** The row as described: its record matters while someone still holds it. */
+        std::weak_ptr<const DescriptionNode> node;
+        ComponentEffects effects;
+        std::uint64_t host_invalidation_count = 0U;
+    };
+
     WidgetRegistry widgets;
     std::unique_ptr<DescriptionBuilder> evaluator;
+    /** Guards the evaluator and the rows: rows are realized wherever the provider is asked. */
+    mutable std::mutex mutex;
+    std::map<std::size_t, Row> rows;
 };
 
 struct DescriptionBuilder::LazyRowEvaluationState final {
@@ -487,34 +558,36 @@ struct DescriptionBuilder::LazyRowEvaluationState final {
                            const std::optional<Symbol> source_index,
                            const runtime::BlockId source_block,
                            std::shared_ptr<const RetainedDescriptionSnapshot> retained)
-        : evaluation(application, source_widgets, unit,
-                     source_scope.expressions.shared_contextual_host_roots(), std::move(retained)),
+        : evaluation(std::make_shared<GeneratedRowEvaluationContext>(
+              application, source_widgets, unit,
+              source_scope.expressions.shared_contextual_host_roots(), std::move(retained))),
           scope(std::move(source_scope)), item(source_item), index(source_index),
           block(source_block) {}
 
     [[nodiscard]] std::shared_ptr<const DescriptionNode>
     materialize(const runtime::IndexableSequence& sequence, const std::size_t lazy_index) {
-        evaluation.begin();
-        const runtime::Value& value = sequence.item_at(lazy_index);
-        const std::size_t source_index = sequence.source_index_at(lazy_index);
-        const std::string canonical_key = sequence.key_at(lazy_index);
-        Scope item_scope = scope;
-        item_scope.expressions.push(item_frame(item, value, index, source_index));
-        // The row's root key already names it among the rows: keyed calls inside stay in it.
-        item_scope.set_instance(item_scope.instance_path() + "/" + std::string(item.name()) + ":" +
-                                path_segment(canonical_key));
-        std::vector<std::shared_ptr<const DescriptionNode>> nodes =
-            evaluation.evaluator->build_block(block, item_scope);
-        if (nodes.size() != 1U) {
-            throw std::logic_error(
-                "validated Repeater identity selected a row body that did not produce one root");
-        }
-        auto anchored = std::make_shared<DescriptionNode>(*nodes.front());
-        anchored->key = canonical_key;
-        return evaluation.finish(std::move(anchored), 0U, canonical_key);
+        return evaluation->describe_row(lazy_index, [&] {
+            const runtime::Value& value = sequence.item_at(lazy_index);
+            const std::size_t source_index = sequence.source_index_at(lazy_index);
+            const std::string canonical_key = sequence.key_at(lazy_index);
+            Scope item_scope = scope;
+            item_scope.expressions.push(item_frame(item, value, index, source_index));
+            // The row's root key already names it among the rows: keyed calls inside stay in it.
+            item_scope.set_instance(item_scope.instance_path() + "/" + std::string(item.name()) +
+                                    ":" + path_segment(canonical_key));
+            std::vector<std::shared_ptr<const DescriptionNode>> nodes =
+                evaluation->evaluator->build_block(block, item_scope);
+            if (nodes.size() != 1U) {
+                throw std::logic_error(
+                    "validated Repeater identity selected a row body that did not produce one root");
+            }
+            auto anchored = std::make_shared<DescriptionNode>(*nodes.front());
+            anchored->key = canonical_key;
+            return evaluation->finish(std::move(anchored), 0U, canonical_key);
+        });
     }
 
-    GeneratedRowEvaluationContext evaluation;
+    std::shared_ptr<GeneratedRowEvaluationContext> evaluation;
     Scope scope;
     Symbol item;
     std::optional<Symbol> index;
@@ -527,30 +600,32 @@ struct DescriptionBuilder::WidgetRowEvaluationState final {
                              const std::shared_ptr<const runtime::RuntimeUnit>& unit,
                              Scope source_scope, WidgetGeneratedChildHook source_factory,
                              std::shared_ptr<const RetainedDescriptionSnapshot> retained)
-        : evaluation(application, source_widgets, unit,
-                     source_scope.expressions.shared_contextual_host_roots(), std::move(retained)),
+        : evaluation(std::make_shared<GeneratedRowEvaluationContext>(
+              application, source_widgets, unit,
+              source_scope.expressions.shared_contextual_host_roots(), std::move(retained))),
           caller(std::move(source_scope)), factory(std::move(source_factory)),
           actions(&application.bundle()->action_registry()) {}
 
     [[nodiscard]] std::shared_ptr<const DescriptionNode> materialize(const std::size_t index) {
-        evaluation.begin();
-        WidgetDescriptionExpansion item;
-        WidgetDescriptionScope item_scope(
-            item, caller.instance_path(), *actions, evaluation.widgets, nullptr,
-            [this](const std::string_view component, std::string key,
-                   WidgetTemplateArguments arguments) {
-                return evaluation.evaluator->build_component_template(component, std::move(key),
-                                                                      std::move(arguments), caller);
-            },
-            {});
-        std::shared_ptr<const DescriptionNode> row = factory(item_scope, index);
-        const std::string materialization_key = row != nullptr && row->key.has_value()
-                                                    ? *row->key
-                                                    : "widget-generated-" + std::to_string(index);
-        return evaluation.finish(std::move(row), item.synthesized_nodes, materialization_key);
+        return evaluation->describe_row(index, [&] {
+            WidgetDescriptionExpansion item;
+            WidgetDescriptionScope item_scope(
+                item, caller.instance_path(), *actions, evaluation->widgets, nullptr,
+                [this](const std::string_view component, std::string key,
+                       WidgetTemplateArguments arguments) {
+                    return evaluation->evaluator->build_component_template(
+                        component, std::move(key), std::move(arguments), caller);
+                },
+                {});
+            std::shared_ptr<const DescriptionNode> row = factory(item_scope, index);
+            const std::string materialization_key =
+                row != nullptr && row->key.has_value() ? *row->key
+                                                       : "widget-generated-" + std::to_string(index);
+            return evaluation->finish(std::move(row), item.synthesized_nodes, materialization_key);
+        });
     }
 
-    GeneratedRowEvaluationContext evaluation;
+    std::shared_ptr<GeneratedRowEvaluationContext> evaluation;
     Scope caller;
     WidgetGeneratedChildHook factory;
     const runtime::RuntimeActionRegistry* actions;
@@ -1151,6 +1226,7 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
     auto evaluation =
         std::make_shared<LazyRowEvaluationState>(application_, widgets_, unit_, scope, item_name,
                                                  index_name, statement.block, retained_snapshot_);
+    hold_generated_rows(evaluation->evaluation);
     auto source = std::make_shared<const GeneratedDescriptionChildren>(
         sequence->count(),
         [evaluation = std::move(evaluation), sequence](const std::size_t lazy_index) {
@@ -1288,6 +1364,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
         capture_retained_snapshot();
         auto evaluation = std::make_shared<WidgetRowEvaluationState>(
             application_, widgets_, unit_, scope, generated->factory, retained_snapshot_);
+        hold_generated_rows(evaluation->evaluation);
         generated_children = std::make_shared<const GeneratedDescriptionChildren>(
             generated->count, [evaluation = std::move(evaluation)](const std::size_t index) {
                 return evaluation->materialize(index);
@@ -1980,6 +2057,37 @@ void DescriptionBuilder::replay_component_effects(const ComponentEffects& effect
         bind_state_scope(binding_address.scope, binding_address.name, binding.declaration_scope,
                          binding.address_scope, true);
     }
+    // Rows realized after the cached build bound their scopes then; every build starts unbound.
+    rebind_generated_rows(effects);
+}
+
+void DescriptionBuilder::hold_generated_rows(
+    std::shared_ptr<const GeneratedRowEvaluationContext> rows) {
+    if (!component_effect_stack_.empty())
+        component_effect_stack_.back()->generated_rows.push_back(std::move(rows));
+}
+
+void DescriptionBuilder::rebind_generated_rows(const ComponentEffects& effects) const {
+    for (const auto& rows : effects.generated_rows)
+        rows->rebind();
+    for (const ComponentId id : effects.descendants) {
+        if (const auto entry = component_cache_.find(id); entry != component_cache_.end()) {
+            for (const auto& rows : entry->second.effects.generated_rows)
+                rows->rebind();
+        }
+    }
+}
+
+bool DescriptionBuilder::effects_subtree_current(const ComponentEffects& effects,
+                                                 const std::uint64_t host_invalidation_count) const {
+    if (!component_effects_current(effects, host_invalidation_count, contextual_host_roots_))
+        return false;
+    return std::ranges::all_of(effects.direct_descendants, [this](const ComponentId id) {
+        const auto entry = component_cache_.find(id);
+        return entry != component_cache_.end() &&
+               effects_subtree_current(entry->second.effects,
+                                       entry->second.host_invalidation_count);
+    });
 }
 
 bool DescriptionBuilder::aggregate_component_effects(ComponentEffects& effects) const {
@@ -2131,7 +2239,8 @@ bool DescriptionBuilder::component_effects_current(
         if (sequence != effect.sequence.lock() || generation != effect.generation)
             return false;
     }
-    return true;
+    return std::ranges::all_of(effects.generated_rows,
+                               [](const auto& rows) { return rows->current(); });
 }
 
 ExpressionValue DescriptionBuilder::evaluate(const runtime::ExpressionId expression,
