@@ -1321,6 +1321,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     target_include_directories(strata_abi_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     strata_target_defaults(strata_abi_tests)
     add_test(NAME strata.scale COMMAND strata_abi_tests scale)
+    add_test(NAME strata.abi.async_completion COMMAND strata_abi_tests async_completion)
     add_test(
         NAME strata.abi
         COMMAND strata_abi_tests abi

@@ -3,6 +3,7 @@
 
 int strata_test_abi(int argument_count, const char* const* const arguments);
 int strata_test_scale();
+int strata_test_async_completion();
 
 int main(const int argument_count, const char* const* const arguments) {
     if (argument_count < 2) {
@@ -15,6 +16,8 @@ int main(const int argument_count, const char* const* const arguments) {
         return strata_test_abi(argument_count - 1, arguments + 1);
     if (suite == "scale")
         return strata_test_scale();
+    if (suite == "async_completion")
+        return strata_test_async_completion();
 
     std::cerr << "unknown test suite: " << suite << '\n';
     return 2;

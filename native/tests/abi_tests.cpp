@@ -1858,6 +1858,62 @@ void test_extension_allocation_failure_status(const std::filesystem::path& resou
               std::to_string(capture.reserve_status) + " instead of out-of-memory");
 }
 
+/**
+ * Async completions may arrive on any thread, so `strata_runtime_async_succeed_json` reports a
+ * bare status and never a diagnostic: the diagnostic store belongs to the thread inside the
+ * runtime. Every rejection is STRATA_STATUS_INVALID_ARGUMENT with no diagnostic id, and an id the
+ * runtime has not issued is accepted into the completion mailbox and dropped there.
+ */
+void test_async_succeed_json_failure_statuses() {
+    Clock clock{1'000};
+    DiagnosticCapture diagnostics;
+    strata_runtime_config runtime_config = config(clock, diagnostics);
+    runtime_config.required_capabilities |=
+        STRATA_CAPABILITY_APPLICATION_LIFECYCLE | STRATA_CAPABILITY_ASYNC_HOST_DATA;
+    strata_runtime* runtime = nullptr;
+    check(strata_runtime_create(&runtime_config, &runtime).status == STRATA_STATUS_OK,
+          "async completion runtime creation failed");
+    const auto rejected = [](const strata_result result) {
+        return result.status == STRATA_STATUS_INVALID_ARGUMENT && result.reserved == 0U &&
+               result.diagnostic_id == 0U;
+    };
+
+    check(rejected(strata_runtime_async_succeed_json(nullptr, 1U, view("1"))),
+          "async success on a null runtime was not a bare invalid argument");
+    check(rejected(strata_runtime_async_succeed_json(runtime, 1U, view("1"))),
+          "async success before application configuration was not a bare invalid argument");
+
+    const strata_application_config application{
+        sizeof(strata_application_config), view("abi-async"), strata_string_view{nullptr, 0U},
+        nullptr, 0U,
+    };
+    check(strata_runtime_configure_application(runtime, &application).status == STRATA_STATUS_OK,
+          "async completion application configuration failed");
+    const std::uint64_t diagnostics_before = diagnostics.count;
+
+    check(rejected(strata_runtime_async_succeed_json(runtime, 1U, strata_string_view{nullptr, 3U})),
+          "async success with a null view of nonzero size was accepted");
+    check(rejected(strata_runtime_async_succeed_json(runtime, 1U, view(""))),
+          "async success with empty JSON was accepted");
+    check(rejected(strata_runtime_async_succeed_json(runtime, 1U, view("{\"value\":"))),
+          "async success with malformed JSON was accepted");
+    check(rejected(strata_runtime_async_succeed_json(runtime, 1U, view("\"\xC0\xAF\""))),
+          "async success with malformed UTF-8 was accepted");
+    check(rejected(strata_runtime_async_succeed_json(runtime, 1U, view("[1] [2]"))),
+          "async success with trailing JSON was accepted");
+    check(rejected(strata_runtime_async_succeed_json(runtime, 0U, view("1"))),
+          "async success for request zero was accepted");
+    check(diagnostics.count == diagnostics_before,
+          "a rejected async completion published a diagnostic");
+
+    const strata_result accepted =
+        strata_runtime_async_succeed_json(runtime, 42U, view("{\"rows\":[1,2]}"));
+    check(accepted.status == STRATA_STATUS_OK && accepted.diagnostic_id == 0U,
+          "async success for an unissued id was not accepted into the mailbox");
+    check(strata_runtime_release(runtime).status == STRATA_STATUS_OK,
+          "async completion runtime release failed");
+}
+
 void test_invalid_contracts() {
     Clock clock{0};
     DiagnosticCapture diagnostics;
@@ -1878,6 +1934,17 @@ void test_invalid_contracts() {
 }
 
 } // namespace
+
+int strata_test_async_completion() {
+    try {
+        test_async_succeed_json_failure_statuses();
+        std::cout << "strata_abi_tests async_completion: OK\n";
+        return 0;
+    } catch (const std::exception& exception) {
+        std::cerr << "strata_abi_tests async_completion: " << exception.what() << '\n';
+        return 1;
+    }
+}
 
 int strata_test_abi(const int argument_count, const char* const* const arguments) {
     try {
