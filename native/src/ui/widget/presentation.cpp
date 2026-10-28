@@ -46,6 +46,20 @@ namespace {
     };
 }
 
+[[nodiscard]] constexpr RenderColor token_color(const runtime::ColorValue& value,
+                                           const std::optional<std::uint8_t> alpha = std::nullopt) {
+    return RenderColor{value.red, value.green, value.blue, alpha.value_or(value.alpha)};
+}
+
+/**
+ * The palette an unthemed widget falls back to: the default theme's own tokens, so a fallback
+ * cannot drift from what the default theme materializes.
+ */
+[[nodiscard]] const ThemeTokens& fallback_tokens() noexcept {
+    static const ThemeTokens tokens;
+    return tokens;
+}
+
 [[nodiscard]] std::optional<RenderBorder>
 resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& fallback) noexcept {
     if (value == nullptr)
@@ -57,7 +71,8 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
     return RenderBorder{
         value_number(value->field("width"), fallback.has_value() ? fallback->width : 1.0),
         widget_color(value->field("color"),
-                     fallback.has_value() ? fallback->color : RenderColor{143U, 150U, 161U, 255U}),
+                     fallback.has_value() ? fallback->color
+                                          : token_color(fallback_tokens().muted_foreground)),
         value_boolean(value->field("inside"), true),
     };
 }
@@ -65,21 +80,22 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
 [[nodiscard]] WidgetVisualStyle resolve_visual(const WidgetRenderScope& scope,
                                                const WidgetVisualProfile profile) {
     const std::string variant = scope.string("variant", "default");
-    const RenderColor accent = variant == "danger" ? RenderColor{225U, 115U, 115U, 255U}
-                                                   : RenderColor{151U, 181U, 211U, 255U};
+    const ThemeTokens& tokens = fallback_tokens();
+    const RenderColor accent =
+        token_color(variant == "danger" ? tokens.danger : tokens.accent);
 
     WidgetVisualStyle result;
     result.fill = accent;
     result.selection = accent;
     result.selection.alpha = 48U;
     if (!profile.text_variant_foreground && (variant == "primary" || variant == "danger"))
-        result.foreground = RenderColor{24U, 26U, 30U, 255U};
+        result.foreground = token_color(tokens.surface);
     if (profile.text_variant_foreground && variant == "primary")
         result.foreground = accent;
     else if (profile.text_variant_foreground && variant == "danger") {
-        result.foreground = RenderColor{225U, 115U, 115U, 255U};
+        result.foreground = token_color(tokens.danger);
     } else if (profile.text_variant_foreground && variant == "subtle") {
-        result.foreground = RenderColor{143U, 150U, 161U, 255U};
+        result.foreground = token_color(tokens.muted_foreground);
     }
     if (profile.transparent_chrome || variant == "subtle") {
         result.background.reset();
@@ -87,9 +103,10 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
     } else {
         result.background = variant == "primary" || variant == "danger" ? accent
                             : variant == "secondary" || profile.raised_chrome
-                                ? RenderColor{30U, 33U, 38U, 255U}
-                                : RenderColor{24U, 26U, 30U, 255U};
-        result.border = RenderBorder{1.0, RenderColor{143U, 150U, 161U, 64U}, true};
+                                ? token_color(tokens.surface_raised)
+                                : token_color(tokens.surface);
+        result.border =
+            RenderBorder{1.0, token_color(tokens.muted_foreground, std::uint8_t{64U}), true};
     }
     if (const runtime::Value* value = scope.style("background"); value != nullptr) {
         result.background = paint_from_value(value);
