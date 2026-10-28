@@ -2,6 +2,7 @@
 
 #include <strata/strata.h>
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -46,6 +47,10 @@ struct strata_widget_render_context final {
      * so a failed one marks the callback and its whole fragment is dropped afterwards.
      */
     strata_status failure = STRATA_STATUS_OK;
+    /** Clips pushed and not yet popped by this callback; nonzero at return is unbalanced. */
+    std::size_t open_clips = 0U;
+    /** Set when the callback popped a clip it never pushed; the pop itself is not emitted. */
+    bool clip_underflow = false;
 };
 
 struct strata_widget_inspection_context final {

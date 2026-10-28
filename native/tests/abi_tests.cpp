@@ -1597,6 +1597,43 @@ void test_extension_fragment_failure_isolation(const std::filesystem::path& reso
                             "a discarded extension fragment was not isolated");
 }
 
+void present_stray_pop(void*, strata_widget_render_context* const context) {
+    strata_widget_render_solid_rect(context, strata_widget_render_bounds(context),
+                                    strata_color{1U, 2U, 3U, 255U});
+    strata_widget_render_pop_clip(context);
+}
+
+void present_unclosed_clip(void*, strata_widget_render_context* const context) {
+    const strata_rect bounds = strata_widget_render_bounds(context);
+    strata_widget_render_push_clip(context, bounds);
+    strata_widget_render_solid_rect(context, bounds, strata_color{1U, 2U, 3U, 255U});
+}
+
+void present_balanced_clip(void*, strata_widget_render_context* const context) {
+    const strata_rect bounds = strata_widget_render_bounds(context);
+    strata_widget_render_push_clip(context, bounds);
+    strata_widget_render_solid_rect(context, bounds, strata_color{1U, 2U, 3U, 255U});
+    strata_widget_render_pop_clip(context);
+}
+
+/** Unbalanced extension clips drop that fragment alone instead of failing the Surface frame. */
+void test_extension_clip_balance(const std::filesystem::path& resource_root) {
+    check_fragments_dropped(resource_root, {&present_stray_pop, &present_unclosed_clip},
+                            "STRATA.EXTENSION.UNBALANCED_CLIP",
+                            "an unbalanced extension clip was not isolated to its own fragment");
+    strata_surface_frame_info baseline{};
+    {
+        FragmentFixture fixture(resource_root, &present_nothing, nullptr);
+        check(fixture.frame(baseline).status == STRATA_STATUS_OK,
+              "clip fixture baseline frame failed");
+    }
+    FragmentFixture fixture(resource_root, &present_balanced_clip, nullptr);
+    strata_surface_frame_info info{};
+    check(fixture.frame(info).status == STRATA_STATUS_OK &&
+              info.render_command_count == baseline.render_command_count + 3U,
+          "a balanced extension clip did not reach the frame");
+}
+
 struct SubtargetCapture final {
     bool called = false;
     strata_status reserve_status = STRATA_STATUS_OK;
@@ -1658,6 +1695,7 @@ int strata_test_abi(const int argument_count, const char* const* const arguments
             test_application_activation_and_action_abi(arguments[1]);
             test_extension_fragment_failure_isolation(arguments[1]);
             test_extension_allocation_failure_status(arguments[1]);
+            test_extension_clip_balance(arguments[1]);
         }
         test_host_service_adapters();
         test_allocator_ownership_and_validation();

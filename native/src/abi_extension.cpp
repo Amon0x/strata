@@ -379,17 +379,26 @@ template <typename Scope>
  */
 void finish_fragment(strata_widget_render_context& context, strata::core::Diagnostics& diagnostics,
                      const std::string_view type) noexcept {
-    if (context.failure == STRATA_STATUS_OK)
+    // Clip balance is checked per fragment here, so a malformed extension never reaches the
+    // submission planner, where an unbalanced stack fails the whole Surface frame.
+    const bool unbalanced = context.open_clips != 0U || context.clip_underflow;
+    if (context.failure == STRATA_STATUS_OK && !unbalanced)
         return;
     context.scope->discard();
+    const strata_status status =
+        context.failure != STRATA_STATUS_OK ? context.failure : STRATA_STATUS_INVALID_ARGUMENT;
+    const std::string_view code = context.failure == STRATA_STATUS_OK
+                                      ? "STRATA.EXTENSION.UNBALANCED_CLIP"
+                                      : "STRATA.EXTENSION.FRAGMENT_DROPPED";
     try {
-        const std::string message = "Widget extension '" + std::string(type) +
-                                    "' failed to present; its fragment was dropped.";
-        static_cast<void>(diagnostics.emit(context.failure, STRATA_DIAGNOSTIC_ERROR,
-                                           "STRATA.EXTENSION.FRAGMENT_DROPPED", message));
+        const std::string message =
+            "Widget extension '" + std::string(type) +
+            (context.failure == STRATA_STATUS_OK
+                 ? "' left its clip pushes and pops unbalanced; its fragment was dropped."
+                 : "' failed to present; its fragment was dropped.");
+        static_cast<void>(diagnostics.emit(status, STRATA_DIAGNOSTIC_ERROR, code, message));
     } catch (...) {
-        static_cast<void>(diagnostics.emit(context.failure, STRATA_DIAGNOSTIC_ERROR,
-                                           "STRATA.EXTENSION.FRAGMENT_DROPPED",
+        static_cast<void>(diagnostics.emit(status, STRATA_DIAGNOSTIC_ERROR, code,
                                            "A widget extension fragment was dropped."));
     }
 }
@@ -1695,13 +1704,24 @@ void strata_widget_render_push_clip(strata_widget_render_context* const context,
                                     const strata_rect bounds) noexcept {
     if (context == nullptr || context->scope == nullptr)
         return;
-    render_call(context, [&] { context->scope->push_clip(rect(bounds)); });
+    render_call(context, [&] {
+        context->scope->push_clip(rect(bounds));
+        ++context->open_clips;
+    });
 }
 
 void strata_widget_render_pop_clip(strata_widget_render_context* const context) noexcept {
     if (context == nullptr || context->scope == nullptr)
         return;
-    render_call(context, [&] { context->scope->pop_clip(); });
+    if (context->open_clips == 0U) {
+        // A stray pop would underflow the Surface clip stack; it marks this fragment instead.
+        context->clip_underflow = true;
+        return;
+    }
+    render_call(context, [&] {
+        context->scope->pop_clip();
+        --context->open_clips;
+    });
 }
 
 void strata_widget_render_discard(strata_widget_render_context* const context) noexcept {

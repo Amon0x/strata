@@ -2400,7 +2400,11 @@ STRATA_API void strata_widget_render_shadow(strata_widget_render_context* contex
                                             strata_rect bounds, strata_corner_radii radii,
                                             strata_color color, double radius,
                                             double spread) STRATA_NOEXCEPT;
-/* Every push must be matched by one pop inside the same presentation callback. */
+/*
+ * Every push must be matched by one pop inside the same presentation callback. A callback that
+ * pops a clip it never pushed, or returns with clips still open, has its whole fragment dropped
+ * with a diagnostic; the rest of the frame is unaffected.
+ */
 STRATA_API void strata_widget_render_push_clip(strata_widget_render_context* context,
                                                strata_rect bounds) STRATA_NOEXCEPT;
 STRATA_API void

@@ -240,6 +240,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.EFFECT.INVALID_ID` | `native/src/abi_services.cpp` |
 | `STRATA.EFFECT.INVALID_JSON` | `native/src/abi_services.cpp` |
 | `STRATA.EXTENSION.FRAGMENT_DROPPED` | `native/src/abi_extension.cpp` |
+| `STRATA.EXTENSION.UNBALANCED_CLIP` | `native/src/abi_extension.cpp` |
 | `STRATA.FOCUS.CONTAINMENT_TARGET_NOT_FOUND` | `native/src/surface_focus_abi.cpp` |
 | `STRATA.FOCUS.INVALID_CONTAINMENT_KEY` | `native/src/surface_focus_abi.cpp` |
 | `STRATA.FONT.REGISTRATION_FAILED` | `native/src/font/registry.cpp` |
