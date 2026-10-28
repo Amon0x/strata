@@ -121,14 +121,14 @@ Ground rules:
 
 ### Phase 2 leftovers
 
-- [ ] `description.cpp` and `tree.cpp` read Repeater/VirtualList/Slot roles from catalog
+- [x] `description.cpp` and `tree.cpp` read Repeater/VirtualList/Slot roles from catalog
       capability flags; `widget_literals.cmake` drops their exclusions.
-- [ ] `.strata` code reads open and palette theme tokens (`theme.<name>` is no longer a closed set).
-- [ ] Interpreter: no string copies on variable reads, one list/map literal representation, cached
+- [x] `.strata` code reads open and palette theme tokens (`theme.<name>` is no longer a closed set).
+- [x] Interpreter: no string copies on variable reads, one list/map literal representation, cached
       host-path segments, an explicit dependency recorder.
-- [ ] Slots inside a widget's own generated rows (tables) receive caller content.
-- [ ] The showcase `Host` runs its sessions on `host::Session`.
-- [ ] The core PNG decoder and inflate have a fuzzer and bounded output.
-- [ ] Lambda bodies beyond `map` are type-checked; cascade suppression on broken input is per
+- [x] Slots inside a widget's own generated rows (tables) receive caller content.
+- [x] The showcase `Host` runs its sessions on `host::Session`.
+- [x] The core PNG decoder and inflate have a fuzzer and bounded output.
+- [x] Lambda bodies beyond `map` are type-checked; cascade suppression on broken input is per
       missing declaration, not global.
-- [ ] The runtime's evaluator-name table is generated from the catalog.
+- [x] The runtime's evaluator-name table is generated from the catalog.
