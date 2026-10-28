@@ -1338,9 +1338,6 @@ class Validator final {
                     }
                 } else if constexpr (std::is_same_v<Node, MapExpression>) {
                     for (const MapEntry& entry : node.entries) {
-                        if (const auto* key = std::get_if<ExpressionMapKey>(&entry.key)) {
-                            collect_referenced_identifiers(*key->expression, output, bound);
-                        }
                         collect_referenced_identifiers(*entry.value, output, bound);
                     }
                 } else if constexpr (std::is_same_v<Node, UnaryExpression>) {
@@ -2893,18 +2890,7 @@ class Validator final {
                 // The parser already reports a key written twice in a map literal.
                 std::vector<LayoutPropertyRef> layout_properties;
                 for (const MapEntry& entry : style->entries) {
-                    std::string name;
-                    if (const auto* identifier = std::get_if<IdentifierMapKey>(&entry.key)) {
-                        name = identifier->name;
-                    } else if (const auto* string = std::get_if<StringMapKey>(&entry.key)) {
-                        name = string->value;
-                    } else {
-                        report("STRATA.DSL.SEMANTIC_DYNAMIC_STYLE_KEY",
-                               "Style object keys must be static identifiers or strings.",
-                               entry.span, component_path, "static style property name");
-                        static_cast<void>(infer(*entry.value, scope, component_path));
-                        continue;
-                    }
+                    const std::string& name = *static_map_key(entry.key);
                     layout_properties.push_back(LayoutPropertyRef{
                         name,
                         entry.value.get(),

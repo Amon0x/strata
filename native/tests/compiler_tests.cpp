@@ -617,6 +617,22 @@ void test_when_arm_matches_a_bare_name() {
     check(compiled.succeeded(), "a bare-name when arm did not compile:" + describe(compiled));
 }
 
+// A map literal is an object with fixed field names, so a computed key is a syntax error rather
+// than a field the runtime would see under an invented name.
+void test_computed_map_keys_are_rejected() {
+    const auto number_key = compile_source(
+        "screen Main { state values = { 1: \"a\" }; root Text(text: \"x\") }"
+    );
+    check(diagnostic_count(number_key, "STRATA.DSL.PARSE_MAP_KEY") == 1U && !number_key.unit,
+          "a number map key was accepted:" + describe(number_key));
+    const auto member_key = compile_source(
+        "screen Main { state item = { id: \"a\" }; state values = { item.id: 1, b: 2 }; "
+        "root Text(text: \"x\") }"
+    );
+    check(diagnostic_count(member_key, "STRATA.DSL.PARSE_MAP_KEY") == 1U && !member_key.unit,
+          "a member-access map key was accepted:" + describe(member_key));
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -636,6 +652,7 @@ int strata_test_compiler() {
         test_long_single_line_compiles_in_linear_time();
         test_statement_keywords_are_member_names();
         test_when_arm_matches_a_bare_name();
+        test_computed_map_keys_are_rejected();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

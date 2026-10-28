@@ -1156,9 +1156,7 @@ private:
             JsonValue::Object entries;
             for (std::size_t index = 0U; index < map->entries.size(); ++index) {
                 const MapEntry& entry = map->entries[index];
-                const std::string key = static_map_key(entry.key).value_or(
-                    "dynamic_" + std::to_string(index)
-                );
+                const std::string key = *static_map_key(entry.key);
                 entries.emplace_back(
                     key,
                     compile_expression(

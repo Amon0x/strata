@@ -784,7 +784,9 @@ ExpressionPtr Parser::parse_map(const Token& left) {
     std::set<std::string, std::less<>> keys;
     if (!check(TokenType::right_brace)) {
         do {
-            entries.push_back(parse_map_entry());
+            std::optional<MapEntry> entry = parse_map_entry();
+            if (!entry.has_value()) continue;
+            entries.push_back(std::move(*entry));
             check_collection_size(entries.size());
             const MapKey& key = entries.back().key;
             const std::string* name = nullptr;
@@ -814,8 +816,8 @@ ExpressionPtr Parser::parse_map(const Token& left) {
     return make_expression(MapExpression{std::move(entries)}, span);
 }
 
-MapEntry Parser::parse_map_entry() {
-    MapKey key;
+std::optional<MapEntry> Parser::parse_map_entry() {
+    std::optional<MapKey> key;
     SourceSpan key_span = peek().span;
     if (name_token() && check_next(TokenType::colon)) {
         const Token& token = advance();
@@ -826,9 +828,17 @@ MapEntry Parser::parse_map_entry() {
         key_span = token.span;
         key = StringMapKey{decode_string(token), token.span};
     } else {
-        ExpressionPtr key_expression = expression();
+        // A map literal lowers to an object whose field names are fixed at compile time.
+        const ExpressionPtr key_expression = expression();
         key_span = key_expression->span;
-        key = ExpressionMapKey{std::move(key_expression), key_span};
+        diagnostics_.push_back(Diagnostic{
+            "STRATA.DSL.PARSE_MAP_KEY",
+            DiagnosticSeverity::error,
+            "Map keys must be a name or a string literal; computed keys are not supported.",
+            key_span.range(),
+            std::nullopt,
+            std::nullopt,
+        });
     }
     static_cast<void>(consume(
         TokenType::colon,
@@ -836,8 +846,9 @@ MapEntry Parser::parse_map_entry() {
         "Expected ':' after map key."
     ));
     ExpressionPtr value = expression();
+    if (!key.has_value()) return std::nullopt;
     const SourceSpan span = covering(key_span, value->span);
-    return MapEntry{std::move(key), std::move(value), span};
+    return MapEntry{std::move(*key), std::move(value), span};
 }
 
 ExpressionPtr Parser::parse_infix(ExpressionPtr left) {

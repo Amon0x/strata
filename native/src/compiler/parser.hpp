@@ -105,7 +105,7 @@ private:
     [[nodiscard]] ExpressionPtr parse_grouping(const Token& left);
     [[nodiscard]] ExpressionPtr parse_list(const Token& left);
     [[nodiscard]] ExpressionPtr parse_map(const Token& left);
-    [[nodiscard]] MapEntry parse_map_entry();
+    [[nodiscard]] std::optional<MapEntry> parse_map_entry();
     [[nodiscard]] ExpressionPtr parse_infix(ExpressionPtr left);
     [[nodiscard]] ExpressionPtr finish_call(ExpressionPtr callee, const Token& left_parenthesis);
     [[nodiscard]] std::optional<CallTarget> call_target(const ExpressionPtr& expression) const;

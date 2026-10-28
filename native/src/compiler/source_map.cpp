@@ -227,8 +227,7 @@ private:
             }
         } else if (const auto* map = std::get_if<MapExpression>(&expression.node)) {
             for (std::size_t index = 0U; index < map->entries.size(); ++index) {
-                const std::string key = static_map_key(map->entries[index].key)
-                                            .value_or("dynamic_" + std::to_string(index));
+                const std::string key = *static_map_key(map->entries[index].key);
                 compile_expression(
                     *map->entries[index].value,
                     child(path, key),

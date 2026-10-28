@@ -82,12 +82,7 @@ struct StringMapKey final {
     SourceSpan span;
 };
 
-struct ExpressionMapKey final {
-    ExpressionPtr expression;
-    SourceSpan span;
-};
-
-using MapKey = std::variant<IdentifierMapKey, StringMapKey, ExpressionMapKey>;
+using MapKey = std::variant<IdentifierMapKey, StringMapKey>;
 
 struct MapEntry final {
     MapKey key;

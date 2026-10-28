@@ -116,6 +116,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.PARSE_LIST_CLOSE` | `native/src/compiler/parser.cpp` |
 | `STRATA.DSL.PARSE_MAP_CLOSE` | `native/src/compiler/parser.cpp` |
 | `STRATA.DSL.PARSE_MAP_COLON` | `native/src/compiler/parser.cpp` |
+| `STRATA.DSL.PARSE_MAP_KEY` | `native/src/compiler/parser.cpp` |
 | `STRATA.DSL.PARSE_PARAMETER_LIST` | `native/src/compiler/parser.cpp` |
 | `STRATA.DSL.PARSE_PARAMETER_NAME` | `native/src/compiler/parser.cpp` |
 | `STRATA.DSL.PARSE_PARAMETER_TYPE` | `native/src/compiler/parser.cpp` |
@@ -179,7 +180,6 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_DYNAMIC_MATERIAL` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DYNAMIC_SLOT_DECLARATION` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_DYNAMIC_SLOT_NAME` | `native/src/compiler/semantic.cpp` |
-| `STRATA.DSL.SEMANTIC_DYNAMIC_STYLE_KEY` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_INVALID_PATH` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_INVALID_WIDGET_DEFAULTS` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_LAYER_ROOT` | `native/src/compiler/semantic.cpp` |
