@@ -310,7 +310,8 @@ struct StaticNumber final {
 
 class Validator final {
   public:
-    Validator(const File& file, const SchemaRegistry& registry) : file_(file), registry_(registry) {
+    Validator(const File& file, const SchemaRegistry& registry)
+        : file_(file), registry_(registry), names_(file) {
         std::set<std::pair<std::string, std::string>> declaration_names;
         for (const Declaration& declaration : file_.declarations) {
             const auto note_declaration = [&](std::string kind, const std::string& name) {
@@ -2798,7 +2799,7 @@ class Validator final {
             if (const std::string* literal = string_literal_value(expression); literal != nullptr) {
                 name = *literal;
             } else if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
-                       identifier != nullptr && scope.find(identifier->name) == scope.end()) {
+                       identifier != nullptr && !reads_value(*identifier, scope)) {
                 name = identifier->name;
             }
             if (name.has_value()) {
@@ -2832,12 +2833,9 @@ class Validator final {
         }
         if (expected.kind == SemanticTypeKind::style) {
             if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
-                identifier != nullptr &&
-                std::ranges::find(styles_, identifier->name) != styles_.end()) {
-                return;
-            }
-            if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
-                identifier != nullptr && scope.find(identifier->name) == scope.end()) {
+                identifier != nullptr && !reads_value(*identifier, scope)) {
+                if (names_.styles.contains(identifier->name))
+                    return;
                 report("STRATA.DSL.SEMANTIC_UNKNOWN_STYLE",
                        "Style '" + identifier->name + "' is not declared." +
                            did_you_mean(identifier->name, styles_),
@@ -3302,6 +3300,17 @@ class Validator final {
         return simple(SemanticTypeKind::unknown);
     }
 
+    /**
+     * Whether a bare name in a style or animation slot reads a value in scope rather than naming a
+     * declaration; lowering decides the same way.
+     */
+    [[nodiscard]] bool reads_value(const IdentifierExpression& identifier,
+                                   const Scope& scope) const {
+        const NameBinding binding =
+            names_.resolve(identifier.name, scope.contains(identifier.name), registry_);
+        return binding == NameBinding::local || binding == NameBinding::host;
+    }
+
     [[nodiscard]] SemanticTypePtr infer(const Expression& expression, const Scope& scope,
                                         const std::string& component_path) {
         static_cast<void>(component_path);
@@ -3321,15 +3330,19 @@ class Validator final {
         }
         if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node)) {
             const auto found = scope.find(identifier->name);
-            if (found != scope.end())
+            // The scope holds the host roots too, so a host name resolves as a local here.
+            switch (names_.resolve(identifier->name, found != scope.end(), registry_)) {
+            case NameBinding::local:
                 return found->second;
-            const auto component = components_.find(identifier->name);
-            if (component != components_.end())
-                return component_template_type(component->second);
-            if (std::ranges::find(styles_, identifier->name) != styles_.end())
+            case NameBinding::component:
+                return component_template_type(components_.at(identifier->name));
+            case NameBinding::style:
                 return simple(SemanticTypeKind::style);
-            if (std::ranges::find(animations_, identifier->name) != animations_.end()) {
+            case NameBinding::animation:
                 return simple(SemanticTypeKind::animation);
+            case NameBinding::host:
+            case NameBinding::unresolved:
+                break;
             }
             report_unknown_identifier(*identifier, expression, scope, component_path);
             return simple(SemanticTypeKind::unknown);
@@ -3600,6 +3613,7 @@ class Validator final {
 
     const File& file_;
     const SchemaRegistry& registry_;
+    ModuleNames names_;
     std::unordered_map<std::string, ComponentSchema> components_;
     std::vector<std::string> styles_;
     std::map<std::string, const StyleDeclaration*, std::less<>> style_declarations_;
@@ -3619,6 +3633,32 @@ class Validator final {
 };
 
 } // namespace
+
+ModuleNames::ModuleNames(const File& file) {
+    for (const Declaration& declaration : file.declarations) {
+        if (const auto* component = std::get_if<ComponentDeclaration>(&declaration.node))
+            components.insert(component->name);
+        else if (const auto* style = std::get_if<StyleDeclaration>(&declaration.node))
+            styles.insert(style->name);
+        else if (const auto* animation = std::get_if<AnimationDeclaration>(&declaration.node))
+            animations.insert(animation->name);
+    }
+}
+
+NameBinding ModuleNames::resolve(const std::string_view name, const bool local,
+                                 const SchemaRegistry& registry) const {
+    if (local)
+        return NameBinding::local;
+    if (registry.host_types().contains(std::string(name)))
+        return NameBinding::host;
+    if (components.contains(name))
+        return NameBinding::component;
+    if (styles.contains(name))
+        return NameBinding::style;
+    if (animations.contains(name))
+        return NameBinding::animation;
+    return NameBinding::unresolved;
+}
 
 SemanticTypePtr resolve_type_reference(
     const TypeReference& reference,

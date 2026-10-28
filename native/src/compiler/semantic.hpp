@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -68,6 +69,29 @@ inline constexpr std::array<std::string_view, 1U> contextual_host_roots{"env"};
 struct SemanticResult final {
     std::vector<Diagnostic> diagnostics;
     std::map<std::string, ValidatedAnimation, std::less<>> animations;
+};
+
+/** What a bare name in an expression denotes. */
+enum class NameBinding { local, host, component, style, animation, unresolved };
+
+/** The declarations of a module a bare name can refer to. */
+struct ModuleNames final {
+    explicit ModuleNames(const File& file);
+
+    /**
+     * What `name` denotes, where `local` says whether a local value or parameter of that name is in
+     * scope. Semantic analysis and lowering both resolve names here, so a name is typed and lowered
+     * as the same thing: locals shadow host roots, which shadow the module's declarations.
+     */
+    [[nodiscard]] NameBinding resolve(
+        std::string_view name,
+        bool local,
+        const SchemaRegistry& registry
+    ) const;
+
+    std::set<std::string, std::less<>> components;
+    std::set<std::string, std::less<>> styles;
+    std::set<std::string, std::less<>> animations;
 };
 
 /** Items an eagerly expanded loop may draw, and so the bound of a declared or retained list. */

@@ -351,7 +351,10 @@ public:
         const File& file,
         const SchemaRegistry& registry,
         const std::map<std::string, ValidatedAnimation, std::less<>>& validated_animations
-    ) : file_(file), registry_(registry), validated_animations_(validated_animations) {
+    ) : file_(file),
+        registry_(registry),
+        validated_animations_(validated_animations),
+        names_(file) {
         for (const Declaration& declaration : file_.declarations) {
             if (const auto* component = std::get_if<ComponentDeclaration>(&declaration.node)) {
                 ComponentSchema schema;
@@ -367,10 +370,6 @@ public:
                     });
                 }
                 components_.emplace(component->name, std::move(schema));
-            } else if (const auto* style = std::get_if<StyleDeclaration>(&declaration.node)) {
-                styles_.insert(style->name);
-            } else if (const auto* animation = std::get_if<AnimationDeclaration>(&declaration.node)) {
-                animations_.insert(animation->name);
             }
         }
     }
@@ -1045,7 +1044,10 @@ private:
         if (accepts_kind(expected, SemanticTypeKind::animation)) {
             std::optional<std::string> name;
             if (const std::string* literal = literal_string(expression); literal != nullptr) name = *literal;
-            if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node)) name = identifier->name;
+            if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
+                identifier != nullptr && !reads_value(identifier->name, scope)) {
+                name = identifier->name;
+            }
             if (name.has_value()) {
                 return expression_base(path, expression.span, {
                     {"kind", JsonValue("literal")},
@@ -1058,7 +1060,7 @@ private:
         }
         if (accepts_kind(expected, SemanticTypeKind::style)) {
             if (const auto* identifier = std::get_if<IdentifierExpression>(&expression.node);
-                identifier != nullptr && scope.find(identifier->name) == scope.end()) {
+                identifier != nullptr && !reads_value(identifier->name, scope)) {
                 return expression_base(path, expression.span, {
                     {"kind", JsonValue("literal")},
                     {"value", object({
@@ -1548,17 +1550,23 @@ private:
 
     [[nodiscard]] Binding binding_for(const std::string_view name, const Scope& scope) const {
         const auto scoped = scope.find(std::string(name));
-        if (scoped != scope.end()) return scoped->second;
-        if (styles_.contains(std::string(name))) {
-            return Binding{BindingKind::style, type_of(SemanticTypeKind::style)};
-        }
-        if (animations_.contains(std::string(name))) {
-            return Binding{BindingKind::animation, type_of(SemanticTypeKind::animation)};
-        }
-        if (components_.contains(std::string(name))) {
+        switch (names_.resolve(name, scoped != scope.end(), registry_)) {
+        case NameBinding::local: return scoped->second;
+        case NameBinding::component:
             return Binding{BindingKind::component, type_of(SemanticTypeKind::component)};
+        case NameBinding::style: return Binding{BindingKind::style, type_of(SemanticTypeKind::style)};
+        case NameBinding::animation:
+            return Binding{BindingKind::animation, type_of(SemanticTypeKind::animation)};
+        case NameBinding::host:
+        case NameBinding::unresolved: break;
         }
         return Binding{BindingKind::host, type_of(SemanticTypeKind::unknown)};
+    }
+
+    /** Whether a bare name in a style or animation slot reads a value rather than a declaration. */
+    [[nodiscard]] bool reads_value(const std::string_view name, const Scope& scope) const {
+        const NameBinding binding = names_.resolve(name, scope.contains(std::string(name)), registry_);
+        return binding == NameBinding::local || binding == NameBinding::host;
     }
 
     [[nodiscard]] SemanticTypePtr infer_structured_type(const Expression* expression) const {
@@ -1749,8 +1757,7 @@ private:
     const SchemaRegistry& registry_;
     const std::map<std::string, ValidatedAnimation, std::less<>>& validated_animations_;
     std::unordered_map<std::string, ComponentSchema> components_;
-    std::set<std::string> styles_;
-    std::set<std::string> animations_;
+    ModuleNames names_;
     std::set<std::string> material_ids_;
     std::vector<ActionReference> action_references_;
     std::vector<Diagnostic> diagnostics_;

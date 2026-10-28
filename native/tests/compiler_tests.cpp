@@ -685,6 +685,46 @@ void test_types_resolve_once_for_analysis_and_lowering() {
           "lowering dropped a nullable list element type");
 }
 
+/** The lowered value of argument `name` on the root widget of the first component. */
+const strata::data::JsonValue& first_component_argument(
+    const strata::compiler::CompileResult& result,
+    const std::string_view name
+) {
+    const auto& component = result.unit->find("components")->array()->front();
+    const auto& statement = component.find("body")->find("statements")->array()->front();
+    return *statement.find("call")->find("arguments")->find(name);
+}
+
+// A name in a style or animation slot is a value when a parameter or local of that name is in
+// scope and a declaration otherwise, in semantic analysis and in lowering alike.
+void test_slot_names_resolve_the_same_for_analysis_and_lowering() {
+    const auto animation = compile_source(
+        "animation Fade { from { opacity: 0 } to { opacity: 1 } }\n"
+        "component Pulse(a: Animation) { Panel(animation: a) }\n"
+        "screen Main { root Pulse(a: Fade) }"
+    );
+    check(animation.succeeded(), "an animation parameter did not compile:" + describe(animation));
+    check(*first_component_argument(animation, "animation").find("kind")->string() == "variable",
+          "an animation parameter lowered as a literal animation name");
+
+    const auto style = compile_source(
+        "style Card { padding: 4 }\n"
+        "component Boxed(Card: Style) { Panel(style: Card) }\n"
+        "screen Main { root Boxed(Card: { padding: 8 }) }"
+    );
+    check(style.succeeded(), "a style parameter did not compile:" + describe(style));
+    check(*first_component_argument(style, "style").find("kind")->string() == "variable",
+          "a style parameter named like a style lowered as a style reference");
+
+    const auto mistyped = compile_source(
+        "style Card { padding: 4 }\n"
+        "component Boxed(Card: string) { Panel(style: Card) }\n"
+        "screen Main { root Boxed(Card: \"x\") }"
+    );
+    check(diagnostic_count(mistyped, "STRATA.DSL.SEMANTIC_TYPE_MISMATCH") == 1U,
+          "a string parameter shadowing a style was accepted as the style:" + describe(mistyped));
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -707,6 +747,7 @@ int strata_test_compiler() {
         test_computed_map_keys_are_rejected();
         test_each_problem_is_reported_once();
         test_types_resolve_once_for_analysis_and_lowering();
+        test_slot_names_resolve_the_same_for_analysis_and_lowering();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {
