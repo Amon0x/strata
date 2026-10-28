@@ -50,7 +50,9 @@ void rich_text(WidgetSemanticsScope& scope) {
                              *action->action() != nullptr;
             }
         } else {
-            has_action = span.field("action") != nullptr;
+            // Spans of plain data hold no action; a null one is none either.
+            const runtime::Value* action = span.field("action");
+            has_action = action != nullptr && action->kind() != runtime::ValueKind::null_value;
         }
         if (!has_action) continue;
         scope.virtual_before(scope.virtual_item(

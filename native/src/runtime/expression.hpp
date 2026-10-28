@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <span>
@@ -111,9 +112,12 @@ class ExpressionValue final {
     explicit ExpressionValue(std::shared_ptr<const ExpressionObjectValue> value);
     explicit ExpressionValue(std::shared_ptr<const ComponentTemplateValue> value);
 
-    [[nodiscard]] const Value* value() const noexcept;
+    /** The value as data: an executable composite's data projection, null for the rest. */
+    [[nodiscard]] const Value* value() const;
     /** Materialized data consumed by widgets, including collection-view items. */
-    [[nodiscard]] const Value* data_value() const noexcept;
+    [[nodiscard]] const Value* data_value() const;
+    /** Moves the data out of a value that holds plain data (not executable() itself). */
+    [[nodiscard]] Value take_value() &&;
     [[nodiscard]] const std::shared_ptr<const CollectionViewValue>* collection() const noexcept;
     [[nodiscard]] const std::shared_ptr<const LambdaValue>* lambda() const noexcept;
     [[nodiscard]] const std::shared_ptr<const ActionValue>* action() const noexcept;
@@ -139,18 +143,38 @@ class ExpressionValue final {
     std::shared_ptr<const LexicalStateBinding> lexical_state_binding_;
 };
 
-/** Executable composites retain nested actions/lambdas and expose an immutable scalar projection.
+/**
+ * A list literal holding more than data: an action, a lambda, a collection view or a state
+ * binding among its elements. A literal of plain data evaluates to a list Value instead. The
+ * elements are the one representation; the data projection consumers read is derived from them
+ * once, when first asked for, with executable parts read as null and views as their items.
  */
 struct ExpressionListValue final {
-    Value materialized;
+    explicit ExpressionListValue(std::vector<ExpressionValue> elements)
+        : values(std::move(elements)) {}
+
     std::vector<ExpressionValue> values;
+
+    [[nodiscard]] const Value& materialized() const;
+
+  private:
+    mutable std::once_flag materialize_once_;
+    mutable Value materialized_;
 };
 
+/** A map literal holding more than data; see ExpressionListValue. */
 struct ExpressionObjectValue final {
-    Value materialized;
+    explicit ExpressionObjectValue(std::vector<std::pair<std::string, ExpressionValue>> entries)
+        : fields(std::move(entries)) {}
+
     std::vector<std::pair<std::string, ExpressionValue>> fields;
 
     [[nodiscard]] const ExpressionValue* field(std::string_view name) const noexcept;
+    [[nodiscard]] const Value& materialized() const;
+
+  private:
+    mutable std::once_flag materialize_once_;
+    mutable Value materialized_;
 };
 
 struct ComponentTemplateValue final {

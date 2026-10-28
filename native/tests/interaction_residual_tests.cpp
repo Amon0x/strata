@@ -276,15 +276,11 @@ class InputFixture final {
 
 [[nodiscard]] runtime::ExpressionValue
 rich_span(std::string text, std::shared_ptr<const runtime::ActionValue> action) {
-    runtime::Value materialized = object({{"text", runtime::Value(text)}});
     std::vector<std::pair<std::string, runtime::ExpressionValue>> fields;
     fields.emplace_back("text", runtime::ExpressionValue(runtime::Value(std::move(text))));
     fields.emplace_back("action", runtime::ExpressionValue(std::move(action)));
     return runtime::ExpressionValue(
-        std::make_shared<const runtime::ExpressionObjectValue>(runtime::ExpressionObjectValue{
-            std::move(materialized),
-            std::move(fields),
-        }));
+        std::make_shared<const runtime::ExpressionObjectValue>(std::move(fields)));
 }
 
 void test_primary_pointer_focus_default(InputFixture& fixture) {
@@ -631,19 +627,12 @@ void test_rich_text_press_arm(InputFixture& fixture) {
     std::vector<runtime::ExpressionValue> expressed;
     expressed.push_back(rich_span("first", first));
     expressed.push_back(rich_span(" second", second));
-    const runtime::Value materialized(std::vector<runtime::Value>{
-        object({{"text", runtime::Value("first")}}),
-        object({{"text", runtime::Value(" second")}}),
-    });
     ui::DescriptionNode::Properties rich = sized(300.0, 32.0);
     rich.emplace("text", runtime::ExpressionValue(runtime::Value("first second")));
     rich.emplace("selectable", runtime::ExpressionValue(runtime::Value(true)));
-    rich.emplace("spans",
-                 runtime::ExpressionValue(std::make_shared<const runtime::ExpressionListValue>(
-                     runtime::ExpressionListValue{
-                         materialized,
-                         std::move(expressed),
-                     })));
+    rich.emplace("spans", runtime::ExpressionValue(
+                              std::make_shared<const runtime::ExpressionListValue>(
+                                  std::move(expressed))));
     fixture.adopt(node("Panel", "rich.root",
                        {
                            node("RichText", "rich.text", {}, std::move(rich)),
@@ -709,9 +698,6 @@ void test_static_text_state_partition(InputFixture& fixture) {
         fixture.notification_action("link only");
     std::vector<runtime::ExpressionValue> expressed;
     expressed.push_back(rich_span("link only", action));
-    const runtime::Value materialized(std::vector<runtime::Value>{
-        object({{"text", runtime::Value("link only")}}),
-    });
 
     ui::DescriptionNode::Properties ordinary = sized(240.0, 28.0);
     ordinary.emplace("text", runtime::ExpressionValue(runtime::Value("ordinary title")));
@@ -723,12 +709,9 @@ void test_static_text_state_partition(InputFixture& fixture) {
     ui::DescriptionNode::Properties linked = sized(240.0, 28.0);
     linked.emplace("text", runtime::ExpressionValue(runtime::Value("link only")));
     linked.emplace("selectable", runtime::ExpressionValue(runtime::Value(false)));
-    linked.emplace("spans",
-                   runtime::ExpressionValue(std::make_shared<const runtime::ExpressionListValue>(
-                       runtime::ExpressionListValue{
-                           materialized,
-                           std::move(expressed),
-                       })));
+    linked.emplace("spans", runtime::ExpressionValue(
+                                std::make_shared<const runtime::ExpressionListValue>(
+                                    std::move(expressed))));
     ui::DescriptionNode::Properties button = sized(240.0, 28.0);
     button.emplace("label", runtime::ExpressionValue(runtime::Value("Clear selection")));
     fixture.adopt(node("Panel", "static.root",

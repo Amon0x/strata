@@ -99,6 +99,11 @@ constexpr std::size_t maximum_derived_items = 100'000U;
     return Value{};
 }
 
+/** A value a literal can hold as plain data: not executable, and no state binding to keep. */
+[[nodiscard]] bool plain_data(const ExpressionValue& value) noexcept {
+    return !value.executable() && value.lexical_state_binding() == nullptr;
+}
+
 [[nodiscard]] std::pair<std::size_t, std::size_t> collection_counts(const ExpressionValue& value) {
     if (const auto* collection = value.collection())
         return {(*collection)->total, (*collection)->matched};
@@ -315,18 +320,21 @@ ExpressionValue::ExpressionValue(std::shared_ptr<const ExpressionObjectValue> va
     : storage_(std::move(value)) {}
 ExpressionValue::ExpressionValue(std::shared_ptr<const ComponentTemplateValue> value)
     : storage_(std::move(value)) {}
-const Value* ExpressionValue::value() const noexcept {
+const Value* ExpressionValue::value() const {
     if (const Value* scalar = std::get_if<Value>(&storage_))
         return scalar;
     if (const auto* list_value = list())
-        return &(**list_value).materialized;
+        return &(**list_value).materialized();
     if (const auto* object_value = object())
-        return &(**object_value).materialized;
+        return &(**object_value).materialized();
     if (const auto* component_value = component_template())
         return &(**component_value).materialized;
     return nullptr;
 }
-const Value* ExpressionValue::data_value() const noexcept {
+Value ExpressionValue::take_value() && {
+    return std::move(std::get<Value>(storage_));
+}
+const Value* ExpressionValue::data_value() const {
     if (const Value* materialized = value())
         return materialized;
     if (const auto* collection_value = collection();
@@ -363,9 +371,31 @@ ExpressionValue ExpressionValue::without_state_binding() const {
     return result;
 }
 
+const Value& ExpressionListValue::materialized() const {
+    std::call_once(materialize_once_, [this] {
+        std::vector<Value> elements;
+        elements.reserve(values.size());
+        for (const ExpressionValue& value : values)
+            elements.push_back(materialized_value(value));
+        materialized_ = Value(std::move(elements));
+    });
+    return materialized_;
+}
+
 const ExpressionValue* ExpressionObjectValue::field(const std::string_view name) const noexcept {
     const auto found = std::ranges::find(fields, name, &decltype(fields)::value_type::first);
     return found != fields.end() ? &found->second : nullptr;
+}
+
+const Value& ExpressionObjectValue::materialized() const {
+    std::call_once(materialize_once_, [this] {
+        std::vector<std::pair<std::string, Value>> entries;
+        entries.reserve(fields.size());
+        for (const auto& [name, value] : fields)
+            entries.emplace_back(name, materialized_value(value));
+        materialized_ = Value(std::move(entries));
+    });
+    return materialized_;
 }
 
 const ExpressionValue* ExpressionScope::find(const Symbol name) const noexcept {
@@ -706,35 +736,52 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
     case ExpressionKind::index:
         return evaluate_index(program, node, scope);
     case ExpressionKind::list: {
-        std::vector<ExpressionValue> executable;
-        std::vector<Value> materialized;
-        executable.reserve(node.arguments_count);
-        materialized.reserve(node.arguments_count);
-        for (const ProgramArgument& element : program.arguments(node)) {
-            ExpressionValue value = evaluate_node(program, element.value, scope);
-            materialized.push_back(materialized_value(value));
+        // Plain data, the common case, is a list Value; the first element that is more than
+        // data makes the literal an executable composite of its elements.
+        const std::span<const ProgramArgument> elements = program.arguments(node);
+        std::vector<Value> data;
+        data.reserve(elements.size());
+        for (std::size_t index = 0U; index < elements.size(); ++index) {
+            ExpressionValue value = evaluate_node(program, elements[index].value, scope);
+            if (plain_data(value)) {
+                data.push_back(std::move(value).take_value());
+                continue;
+            }
+            std::vector<ExpressionValue> executable;
+            executable.reserve(elements.size());
+            for (Value& element : data)
+                executable.emplace_back(std::move(element));
             executable.push_back(std::move(value));
+            for (++index; index < elements.size(); ++index)
+                executable.push_back(evaluate_node(program, elements[index].value, scope));
+            return ExpressionValue(std::make_shared<const ExpressionListValue>(std::move(executable)));
         }
-        return ExpressionValue(std::make_shared<const ExpressionListValue>(ExpressionListValue{
-            Value(std::move(materialized)),
-            std::move(executable),
-        }));
+        return ExpressionValue(Value(std::move(data)));
     }
     case ExpressionKind::map: {
-        std::vector<std::pair<std::string, ExpressionValue>> executable;
-        std::vector<std::pair<std::string, Value>> materialized;
-        executable.reserve(node.arguments_count);
-        materialized.reserve(node.arguments_count);
-        for (const ProgramArgument& entry : program.arguments(node)) {
-            ExpressionValue value = evaluate_node(program, entry.value, scope);
-            const std::string name(entry.name.name());
-            materialized.emplace_back(name, materialized_value(value));
-            executable.emplace_back(name, std::move(value));
+        const std::span<const ProgramArgument> entries = program.arguments(node);
+        std::vector<std::pair<std::string, Value>> data;
+        data.reserve(entries.size());
+        for (std::size_t index = 0U; index < entries.size(); ++index) {
+            ExpressionValue value = evaluate_node(program, entries[index].value, scope);
+            if (plain_data(value)) {
+                data.emplace_back(std::string(entries[index].name.name()),
+                                  std::move(value).take_value());
+                continue;
+            }
+            std::vector<std::pair<std::string, ExpressionValue>> executable;
+            executable.reserve(entries.size());
+            for (auto& [name, element] : data)
+                executable.emplace_back(std::move(name), ExpressionValue(std::move(element)));
+            executable.emplace_back(std::string(entries[index].name.name()), std::move(value));
+            for (++index; index < entries.size(); ++index) {
+                executable.emplace_back(std::string(entries[index].name.name()),
+                                        evaluate_node(program, entries[index].value, scope));
+            }
+            return ExpressionValue(
+                std::make_shared<const ExpressionObjectValue>(std::move(executable)));
         }
-        return ExpressionValue(std::make_shared<const ExpressionObjectValue>(ExpressionObjectValue{
-            Value(std::move(materialized)),
-            std::move(executable),
-        }));
+        return ExpressionValue(Value(std::move(data)));
     }
     case ExpressionKind::component_template: {
         std::map<std::string, ExpressionValue, std::less<>> arguments;
