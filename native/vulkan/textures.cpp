@@ -108,13 +108,22 @@ std::pair<Slice, Slice> Renderer::Impl::upload_geometry(const host::RenderPacket
     auto& layer = geometry[active_layer];
     const auto* index_bytes = reinterpret_cast<const std::uint8_t*>(packet.indices.data());
     const std::size_t index_byte_count = packet.indices.size() * 4;
-    if (!layer.seen || packet.full_geometry_payload || layer.epoch != packet.geometry_epoch ||
-        packet.vertices.size() > layer.vertices.size() || index_byte_count > layer.indices.size()) {
+    // A retained packet repeats the epoch and changes nothing. A patch packet is the decoder's step
+    // from the previous epoch (it rejects any other), so it applies only on top of exactly that
+    // epoch; after a skipped epoch (a frame that failed after the decoder applied it) the copy is
+    // older than the patches assume and is replaced from the decoder's complete geometry, as D3D11
+    // does.
+    const bool same_size = layer.seen && !packet.full_geometry_payload &&
+                           packet.vertices.size() == layer.vertices.size() &&
+                           index_byte_count == layer.indices.size();
+    const bool retained = same_size && layer.epoch == packet.geometry_epoch;
+    const bool incremental = same_size && layer.epoch + 1U == packet.geometry_epoch;
+    if (!retained && !incremental) {
         layer.vertices.assign(packet.vertices.begin(), packet.vertices.end());
         layer.indices.assign(index_bytes, index_bytes + index_byte_count);
         ++layer.generation;
         layer.seen = true;
-    } else if (!packet.vertex_patches.empty() || !packet.index_patches.empty()) {
+    } else if (incremental && (!packet.vertex_patches.empty() || !packet.index_patches.empty())) {
         const auto patch = [](std::vector<std::uint8_t>& bytes, const auto& patches) {
             for (const auto& update : patches) {
                 if (update.offset > bytes.size() ||

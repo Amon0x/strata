@@ -271,15 +271,29 @@ void run() {
         near(at(0.5), {26, 0, 0, 255}, "effect refresh cache");
         near(at(1.2), {255, 0, 0, 255}, "effect refresh deadline");
         near(at(0.2), {51, 0, 0, 255}, "effect clock rollback");
+        // A decoded patch packet is the step from the previous epoch to the next. The renderer
+        // must apply its patches to the geometry it retains rather than re-copy the decoder's
+        // complete arrays, so this packet's complete arrays deliberately omit the patch.
+        cached.geometry_epoch = 2;
         cached.vertex_patches.push_back({20, {0, 255, 0, 255}});
         near(at(0.6), {153, 0, 0, 255}, "geometry patch invalidates effect cache");
         cached.batches.resize(1);
         cached.vertex_patches.clear();
-        // The first vertex color patch was uploaded even though the geometry epoch stayed fixed.
+        // The retained epoch-2 frame draws the patched geometry the renderer kept.
         (void)renderer.render("clock", cached, context.target(32, 32),
                               {vulkan::TargetLoadAction::clear, {}, 0});
         const auto patched = pixel(context.pixels(), 32, 0, 0);
-        require(patched[1] > 240, "retained vertex patch reaches the GPU");
+        require(patched[1] > 240 && patched[0] < 15, "next-epoch vertex patch reaches the GPU");
+        // Patches that skip an epoch describe a step from geometry the renderer never saw, so it
+        // replaces its copy from the complete arrays instead of patching a stale one.
+        cached.geometry_epoch = 4;
+        cached.vertex_patches.push_back({20, {0, 0, 255, 255}});
+        (void)renderer.render("clock", cached, context.target(32, 32),
+                              {vulkan::TargetLoadAction::clear, {}, 0});
+        const auto replaced = pixel(context.pixels(), 32, 0, 0);
+        require(replaced[0] > 240 && replaced[1] < 15 && replaced[2] < 15,
+                "patches after a skipped epoch replace geometry from the complete arrays");
+        cached.vertex_patches.clear();
         renderer.release_layer("clock");
         renderer.release_layer("test");
         renderer.release_target();
