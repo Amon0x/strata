@@ -943,6 +943,47 @@ screen Main {
     check(strata_surface_register_theme(surface, &invalid_theme, &theme_changed).status ==
               STRATA_STATUS_INVALID_ARGUMENT,
           "pre-focus-visible typed theme model remained ambiguously accepted");
+    // The same themes as one JSON document; omitted tokens inherit from the registered parent.
+    check(strata_surface_register_theme_json(
+              surface,
+              view(R"({"modelVersion":1,"name":"abi-json","parent":"abi-theme",)"
+                   R"("tokens":{"accent":"#4F8CFF","focus":"#4F8CFF80","spacingUnit":6,)"
+                   R"("glow":"#FFD70080","gutter":12}})"),
+              &theme_changed)
+                  .status == STRATA_STATUS_OK &&
+              theme_changed == 1U,
+          "a JSON theme document with a registered parent did not register");
+    check(strata_surface_set_theme_json(
+              surface, view(R"({"modelVersion":1,"name":"abi-json-root","tokens":{"radius":3}})"),
+              &theme_changed)
+                  .status == STRATA_STATUS_OK &&
+              theme_changed == 1U,
+          "a JSON root theme was not selected");
+    for (const std::string_view invalid_theme_json : {
+             R"({"modelVersion":1,"name":"bad","tokens":{"accent":3}})",
+             R"({"modelVersion":1,"name":"bad","tokens":{"spacingUnit":"#FFFFFF"}})",
+             R"({"modelVersion":1,"name":"bad","tokens":{"glow":true}})",
+             R"({"modelVersion":1,"name":"bad","tokens":{"accent":"blue"}})",
+             R"({"modelVersion":1,"name":"bad","tokens":{"accent":"#GG0000"}})",
+             R"({"modelVersion":1,"name":"bad","tokens":{"radius":"3"}})",
+             R"({"modelVersion":1,"name":"bad","tokens":{"density":0}})",
+             R"({"modelVersion":1,"name":"bad","widgetStyles":[]})",
+             R"({"modelVersion":2,"name":"bad"})",
+             R"({"name":"bad"})",
+             R"({"modelVersion":1,"name":""})",
+             R"({"modelVersion":1,"name":"bad","parent":"unregistered"})",
+             R"({"modelVersion":1,"name":)",
+             R"([])",
+         }) {
+        theme_changed = 1U;
+        check(strata_surface_register_theme_json(surface, view(invalid_theme_json), &theme_changed).status ==
+                      STRATA_STATUS_INVALID_ARGUMENT &&
+                  theme_changed == 0U,
+              "an invalid JSON theme document was accepted: " + std::string(invalid_theme_json));
+    }
+    check(strata_surface_register_theme_json(surface, view("{}"), nullptr).status ==
+              STRATA_STATUS_INVALID_ARGUMENT,
+          "a JSON theme registration without an output was accepted");
     const strata_scroll_animation_request non_scroll_request{
         sizeof(strata_scroll_animation_request),
         view("abi.root"),

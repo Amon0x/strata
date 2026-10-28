@@ -18,6 +18,7 @@
 #include "abi_internal.hpp"
 #include "abi_support.hpp"
 #include "base/utf8.hpp"
+#include "data/json.hpp"
 #include "ui/theme.hpp"
 
 using strata::abi_detail::AbiCall;
@@ -746,6 +747,134 @@ template <typename Mutation>
     });
 }
 
+[[nodiscard]] std::uint8_t hex_byte(const std::string_view text, const std::size_t offset) {
+    const auto digit = [](const char value) -> int {
+        if (value >= '0' && value <= '9') return value - '0';
+        if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+        if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+        return -1;
+    };
+    const int high = digit(text[offset]);
+    const int low = digit(text[offset + 1U]);
+    if (high < 0 || low < 0) throw std::invalid_argument("theme color must be hexadecimal");
+    return static_cast<std::uint8_t>(high * 16 + low);
+}
+
+/** "#RRGGBB" or "#RRGGBBAA". */
+[[nodiscard]] strata::runtime::ColorValue json_color(const strata::data::JsonValue& value,
+                                                      const std::string_view token) {
+    const std::string* const text = value.string();
+    if (text == nullptr || (text->size() != 7U && text->size() != 9U) || text->front() != '#') {
+        throw std::invalid_argument("theme color token '" + std::string(token) +
+                                    "' must be a \"#RRGGBB\" or \"#RRGGBBAA\" string");
+    }
+    return strata::runtime::ColorValue{
+        hex_byte(*text, 1U), hex_byte(*text, 3U), hex_byte(*text, 5U),
+        text->size() == 9U ? hex_byte(*text, 7U) : std::uint8_t{255U},
+    };
+}
+
+[[nodiscard]] double json_number(const strata::data::JsonValue& value,
+                                 const std::string_view token) {
+    if (const double* const number = value.number()) return *number;
+    if (const std::int64_t* const integer = value.integer()) return static_cast<double>(*integer);
+    throw std::invalid_argument("theme number token '" + std::string(token) +
+                                "' must be a number");
+}
+
+/**
+ * A theme as one JSON document. Every token goes through ThemeTokens::set, which owns the token
+ * names and types: a standard token keeps its type and any other name is a custom token. A token
+ * the document omits keeps the parent theme's value, or the default without a parent. Widget
+ * styles and motion policies are still supplied through strata_theme.
+ */
+[[nodiscard]] strata::ui::Theme theme_from_json(strata_surface& surface,
+                                                const strata_string_view document) {
+    if (document.data == nullptr && document.size != 0U) {
+        throw std::invalid_argument("theme JSON view is invalid");
+    }
+    const strata::data::JsonValue root = strata::data::parse_json(
+        document.size == 0U ? std::string{} : std::string(document.data, document.size));
+    const strata::data::JsonValue::Object* const fields = root.object();
+    if (fields == nullptr) throw std::invalid_argument("theme JSON must be an object");
+    for (const auto& [key, ignored] : *fields) {
+        static_cast<void>(ignored);
+        if (key != "modelVersion" && key != "name" && key != "parent" && key != "tokens") {
+            throw std::invalid_argument("theme JSON field '" + key +
+                                        "' is not supported; widget styles and motion policies "
+                                        "use strata_theme");
+        }
+    }
+    const strata::data::JsonValue* const version = root.find("modelVersion");
+    if (version == nullptr || version->integer() == nullptr || *version->integer() != 1) {
+        throw std::invalid_argument("theme JSON requires \"modelVersion\": 1");
+    }
+    const strata::data::JsonValue* const name = root.find("name");
+    if (name == nullptr || name->string() == nullptr || name->string()->empty() ||
+        !strata::base::valid_utf8(*name->string())) {
+        throw std::invalid_argument("theme JSON requires a non-empty UTF-8 \"name\"");
+    }
+    std::shared_ptr<const strata::ui::Theme> parent;
+    strata::ui::ThemeTokens tokens;
+    if (const strata::data::JsonValue* const parent_name = root.find("parent")) {
+        if (parent_name->string() == nullptr) {
+            throw std::invalid_argument("theme JSON \"parent\" must be a string");
+        }
+        if (!parent_name->string()->empty()) {
+            const auto* registered = surface.core.registered_theme(*parent_name->string());
+            if (registered == nullptr) {
+                throw std::invalid_argument("theme parent is not registered on this Surface");
+            }
+            parent = *registered;
+            tokens = parent->tokens();
+        }
+    }
+    if (const strata::data::JsonValue* const authored = root.find("tokens")) {
+        const strata::data::JsonValue::Object* const entries = authored->object();
+        if (entries == nullptr) throw std::invalid_argument("theme JSON \"tokens\" must be an object");
+        for (const auto& [token, value] : *entries) {
+            // The token model owns the names and types: a standard token must keep its type and
+            // any other name is a custom token, so a token the model adds needs no change here.
+            if (value.string() != nullptr) {
+                tokens.set(token, json_color(value, token));
+            } else {
+                tokens.set(token, json_number(value, token));
+            }
+        }
+    }
+    tokens.validate();
+    std::optional<strata::ui::ThemeMotionPolicy> motion_policy;
+    std::map<strata::ui::ThemeWidgetKey, strata::ui::ThemedWidgetStyle> styles;
+    return strata::ui::Theme(*name->string(), std::move(tokens), std::move(parent),
+                             std::move(motion_policy), std::move(styles));
+}
+
+template <typename Mutation>
+[[nodiscard]] strata_result mutate_theme_json(
+    strata_surface* const surface,
+    const strata_string_view document,
+    std::uint32_t* const out_changed,
+    Mutation&& mutation
+) {
+    if (surface == nullptr) return strata::abi_detail::invalid_argument();
+    if (surface->packets.release_prepared()) {
+        return strata::abi_detail::terminal_surface_failure(*surface);
+    }
+    if (out_changed != nullptr) *out_changed = 0U;
+    if (out_changed == nullptr) {
+        return surface_failure(
+            *surface,
+            STRATA_STATUS_INVALID_ARGUMENT,
+            "STRATA.ABI.INVALID_THEME",
+            "Surface theme mutation requires an output pointer."
+        );
+    }
+    return surface_call(surface, AbiCall{"Surface theme mutation", "STRATA.THEME.INVALID"}, [&] {
+        *out_changed = mutation(surface->core, theme_from_json(*surface, document)) ? 1U : 0U;
+        return strata::abi_detail::result(STRATA_STATUS_OK);
+    });
+}
+
 } // namespace
 
 extern "C" {
@@ -913,6 +1042,42 @@ strata_result strata_surface_set_theme(
     return mutate_theme(
         surface,
         source,
+        out_changed,
+        [](strata::ui::Surface& target, strata::ui::Theme value) {
+            return target.set_theme(std::move(value));
+        }
+    );
+}
+
+strata_result strata_surface_register_theme_json(
+    strata_surface* const surface,
+    const strata_string_view theme_json,
+    std::uint32_t* const out_changed
+) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
+    return mutate_theme_json(
+        surface,
+        theme_json,
+        out_changed,
+        [](strata::ui::Surface& target, strata::ui::Theme value) {
+            return target.register_theme(std::move(value));
+        }
+    );
+}
+
+strata_result strata_surface_set_theme_json(
+    strata_surface* const surface,
+    const strata_string_view theme_json,
+    std::uint32_t* const out_changed
+) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
+    return mutate_theme_json(
+        surface,
+        theme_json,
         out_changed,
         [](strata::ui::Surface& target, strata::ui::Theme value) {
             return target.set_theme(std::move(value));

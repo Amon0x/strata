@@ -369,6 +369,23 @@ reserved for cases where delivery is impossible and the host independently disca
 resources. The C++ destructor treats a forgotten live Surface as that failure mode and reports it
 through the diagnostic sink.
 
+## Themes
+
+`strata_surface_register_theme` and `strata_surface_set_theme` take a complete `strata_theme`:
+tokens, widget styles, and a motion policy as nested structures. A host that only needs tokens can
+pass one JSON document to `strata_surface_register_theme_json` or `strata_surface_set_theme_json`:
+
+```json
+{"modelVersion": 1, "name": "brand", "parent": "base",
+ "tokens": {"accent": "#4F8CFFFF", "surfaceRaised": "#1E2126", "spacingUnit": 4}}
+```
+
+Standard tokens keep their types and any other name is a custom color or number token.
+Colors are `"#RRGGBB"` or `"#RRGGBBAA"` strings, and an
+omitted token keeps the registered parent's value (or the default). Unknown fields and mistyped
+tokens are rejected with `STRATA_STATUS_INVALID_ARGUMENT` and a diagnostic. Widget styles and motion policies are not part of
+the JSON document yet; they still go through `strata_theme`.
+
 ## Reactivation and failure recovery
 
 Compilation/activation is last-good: a rejected generation returns diagnostics and leaves the active

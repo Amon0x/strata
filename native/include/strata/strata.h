@@ -2119,6 +2119,25 @@ STRATA_API strata_result strata_surface_register_theme(strata_surface* surface,
 STRATA_API strata_result strata_surface_set_theme(strata_surface* surface,
                                                   const strata_theme* theme,
                                                   uint32_t* out_changed) STRATA_NOEXCEPT;
+/*
+ * The same operations taking one JSON theme document instead of the nested strata_theme
+ * structures:
+ *
+ *   {"modelVersion": 1, "name": "brand", "parent": "base",
+ *    "tokens": {"accent": "#4F8CFFFF", "surfaceRaised": "#1E2126", "spacingUnit": 4}}
+ *
+ * Standard tokens (surface, surfaceRaised, foreground, mutedForeground, accent, danger, focus,
+ * spacingUnit, radius, density) keep their types; any other name is a custom color or number
+ * token. Colors are "#RRGGBB" or "#RRGGBBAA" strings, numbers are JSON numbers. Omitted tokens
+ * keep the registered parent's value, or the default without a parent. Widget styles and motion
+ * policies are not part of the document; supply them through strata_theme.
+ */
+STRATA_API strata_result strata_surface_register_theme_json(strata_surface* surface,
+                                                            strata_string_view theme_json,
+                                                            uint32_t* out_changed) STRATA_NOEXCEPT;
+STRATA_API strata_result strata_surface_set_theme_json(strata_surface* surface,
+                                                       strata_string_view theme_json,
+                                                       uint32_t* out_changed) STRATA_NOEXCEPT;
 /** Refuses the active root and reports an unknown name as an unchanged successful operation. */
 STRATA_API strata_result strata_surface_unregister_theme(strata_surface* surface,
                                                          strata_string_view name,
