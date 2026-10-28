@@ -333,7 +333,7 @@ void SoftwareRenderer::resize(const std::uint32_t framebuffer_width,
     logical_height_ = logical_height;
     pixels_.resize(static_cast<std::size_t>(byte_count));
     cached_effects_.clear();
-    has_cached_effect_epoch_ = false;
+    cached_effect_epoch_.reset();
 }
 
 void SoftwareRenderer::set_clear_color(const std::array<std::uint8_t, 4U> rgba) noexcept {
@@ -1098,6 +1098,21 @@ void SoftwareRenderer::apply_effect(const host::EffectBatch& effect) {
     }
 }
 
+double SoftwareRenderer::read_reach(const host::EffectBatch& effect) const noexcept {
+    // The reference renderer runs blur passes only, so only they read beyond the bounds here.
+    double widest = 0.0;
+    if (const auto program = effects_.find(effect.effect); program != effects_.end()) {
+        for (const EffectPass& pass : program->second) {
+            if (pass.kind != 0U)
+                continue;
+            widest = std::max(widest, pass.radius_parameter < effect.parameter_count
+                                          ? effect.parameters[pass.radius_parameter]
+                                          : pass.radius);
+        }
+    }
+    return gpu::effect_read_reach(false, widest);
+}
+
 bool SoftwareRenderer::effect_refresh_due(const host::EffectBatch& effect, const bool content,
                                           const std::int64_t time_nanoseconds) const {
     if (effect.refresh_rate <= 0.0)
@@ -1176,14 +1191,15 @@ void SoftwareRenderer::render(const host::RenderPacket& packet,
         throw std::logic_error("headless renderer must be sized before rendering");
     }
     consume_resources(packet);
-    // A changed group table moves content beneath cached effects without a new epoch; the decoder
-    // reports where in geometry_dirty_regions.
-    if (!has_cached_effect_epoch_ || cached_effect_epoch_ != packet.geometry_epoch ||
-        packet.geometry_dirty_all || !packet.geometry_dirty_regions.empty()) {
-        cached_effects_.clear();
-        cached_effect_epoch_ = packet.geometry_epoch;
-        has_cached_effect_epoch_ = true;
+    // The decoder reports what changed since the previous packet (patched geometry, moved groups,
+    // replaced texels); only samples whose inputs it reaches are stale, as on the GPU backends.
+    const gpu::EffectChanges changes(packet, cached_effect_epoch_);
+    if (!changes.none()) {
+        std::erase_if(cached_effects_, [this, &changes](const auto& entry) {
+            return changes.touch(entry.second.effect, read_reach(entry.second.effect));
+        });
     }
+    cached_effect_epoch_ = packet.geometry_epoch;
     pixels_.resize(static_cast<std::size_t>(width_) * height_ * 4U);
     for (std::size_t pixel = 0U; pixel < pixels_.size(); pixel += 4U) {
         std::copy(clear_.begin(), clear_.end(),

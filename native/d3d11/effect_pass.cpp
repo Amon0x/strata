@@ -359,24 +359,12 @@ struct EffectPassRenderer::Impl final {
         const std::optional<std::uint64_t> previous_epoch =
             found != layer_epochs.end() ? std::optional(found->second) : std::nullopt;
         layer_epochs.insert_or_assign(layer, geometry_epoch);
-        const auto intersects = [](const host::EffectBatch& effect,
-                                   const host::GeometryDirtyRegion& dirty) {
-            const double effect_right = effect.x + effect.width;
-            const double effect_bottom = effect.y + effect.height;
-            const double dirty_right = dirty.x + dirty.width;
-            const double dirty_bottom = dirty.y + dirty.height;
-            return dirty.x <= effect_right && dirty_right >= effect.x &&
-                dirty.y <= effect_bottom && dirty_bottom >= effect.y;
-        };
+        const gpu::EffectChanges changes(geometry_epoch, previous_epoch, dirty_all, dirty_regions);
         for (auto& [key, sample] : cached_samples) {
             if (key.layer != layer) continue;
-            const bool dirty = dirty_all || std::ranges::any_of(
-                dirty_regions,
-                [&sample, &intersects](const host::GeometryDirtyRegion& region) {
-                    return intersects(sample.effect, region);
-                }
-            );
-            if (dirty) {
+            // A sample read beyond its bounds by its blur or shader reach, so a change just
+            // outside a panel still reaches the glass edge sampled over it.
+            if (changes.touch(sample.effect, read_reach(sample.effect))) {
                 // Stale against this epoch, whether or not the epoch moved.
                 if (sample.geometry_epoch == geometry_epoch)
                     sample.geometry_epoch = geometry_epoch - 1U;
@@ -705,27 +693,39 @@ struct EffectPassRenderer::Impl final {
         return slot < effect.parameter_count ? effect.parameters[slot] : fallback;
     }
 
+    /** The widest blur radius among the effect's passes, in logical pixels. */
+    [[nodiscard]] double widest_blur(const host::EffectBatch& effect) const noexcept {
+        double widest = 0.0;
+        if (const auto program = programs.find(effect.effect); program != programs.end()) {
+            for (const Pass& pass : program->second) {
+                if (pass.kind == 0U)
+                    widest = std::max(widest, parameter(effect, pass.radius_parameter, pass.radius));
+            }
+        }
+        return widest;
+    }
+
+    /** How far outside its bounds the effect's output depends on its inputs; see gpu policy. */
+    [[nodiscard]] double read_reach(const host::EffectBatch& effect) const noexcept {
+        const auto program = programs.find(effect.effect);
+        const bool shader_passes =
+            program != programs.end() &&
+            std::ranges::any_of(program->second, [](const Pass& pass) { return pass.kind == 1U; });
+        return gpu::effect_read_reach(shader_passes, widest_blur(effect));
+    }
+
     // The framebuffer region one effect can read: its bounds extended by the prelude's sample reach,
     // or by its widest blur when that reaches further. Blur plans its own source rect from the
     // clipped effect rect plus its radius, which this always contains.
     [[nodiscard]] D3D11_BOX sample_region(const host::EffectBatch& effect,
-                                          const std::vector<Pass>* const passes,
                                           const double logical_width,
                                           const double logical_height) const noexcept {
         const double scale_x = logical_width > 0.0 ? width / logical_width : 1.0;
         const double scale_y = logical_height > 0.0 ? height / logical_height : 1.0;
         const double scale = std::max(scale_x, scale_y);
-        double reach = gpu::effect_sample_reach * scale;
-        if (passes != nullptr) {
-            for (const Pass& pass : *passes) {
-                if (pass.kind != 0U)
-                    continue;
-                const double radius =
-                    std::max(0.0, parameter(effect, pass.radius_parameter, pass.radius));
-                reach = std::max(reach, std::clamp(std::ceil(radius * scale), 1.0, 256.0));
-            }
-        }
-        reach = std::ceil(reach);
+        const double reach = std::ceil(std::max(
+            gpu::effect_sample_reach * scale,
+            std::clamp(std::ceil(widest_blur(effect) * scale), 1.0, 256.0)));
         const auto bounded = [](const double value, const std::uint32_t limit) {
             return static_cast<UINT>(std::clamp(value, 0.0, static_cast<double>(limit)));
         };
@@ -819,9 +819,7 @@ struct EffectPassRenderer::Impl final {
         const bool samples_backdrop =
             program != programs.end() &&
             std::ranges::any_of(program->second, [](const Pass& pass) { return pass.kind == 1U; });
-        const D3D11_BOX region = sample_region(
-            effect, program != programs.end() ? &program->second : nullptr, logical_width,
-            logical_height);
+        const D3D11_BOX region = sample_region(effect, logical_width, logical_height);
         Target* current = &work.capture;
         if (resolved_source != current->texture.Get()) {
             context->CopySubresourceRegion(current->texture.Get(), 0U, region.left, region.top, 0U,

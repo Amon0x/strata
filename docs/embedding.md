@@ -187,6 +187,10 @@ translation rounded to whole framebuffer pixels) and multiplies material opacity
 15) by the group opacity; the shared `native/gpu` vertex shader already does. The decoder presents
 grouped blur/effect bounds itself, and a changed table adds dirty regions covering the moved
 content. Settled nodes leave their group and bake their final presentation back into geometry.
+Resource operations that replace texels add the bounds of the draws sampling them, so
+`geometry_dirty_all` and `geometry_dirty_regions` describe everything a retained effect sample may
+have read; a sample is stale when they touch its bounds grown by its blur or shader reach
+(`native/gpu/effect_policy.hpp`), or when the backend did not render the previous epoch.
 
 Before framing, enumerate `Runtime::material_declarations(shaderBackend)` and
 `Runtime::effect_pass_declarations(shaderBackend)`. Effect declarations are a flat table ordered by

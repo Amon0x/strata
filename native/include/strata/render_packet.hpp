@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -219,7 +221,11 @@ struct GeometryPatch final {
     std::vector<std::uint8_t> bytes;
 };
 
-/** Logical bounds touched by one or more retained vertex patches, including old positions. */
+/**
+ * Logical bounds whose presented content changed since the previous packet: retained vertex
+ * patches (old and new positions), presentation-group moves, and draws whose sampled texels this
+ * packet's resource operations replaced.
+ */
 struct GeometryDirtyRegion final {
     double x = 0.0;
     double y = 0.0;
@@ -241,6 +247,10 @@ struct RenderPacket final {
     bool full_geometry_payload = false;
     std::vector<GeometryPatch> vertex_patches;
     std::vector<GeometryPatch> index_patches;
+    /**
+     * What changed since the previous decoded packet, for backends that retain samples of what
+     * they drew (effects): everything when set, otherwise only geometry_dirty_regions.
+     */
     bool geometry_dirty_all = false;
     std::vector<GeometryDirtyRegion> geometry_dirty_regions;
     /**
@@ -251,6 +261,9 @@ struct RenderPacket final {
      */
     std::vector<PresentationGroup> groups;
 };
+
+/** Texel dimensions of each live texture, by texture id. */
+using TextureSizes = std::map<std::string, std::array<std::uint32_t, 2U>, std::less<>>;
 
 /**
  * Stateful decoder for one ordered Surface/backend packet stream. Compact packets depend on the
@@ -268,6 +281,8 @@ class RenderPacketDecoder final {
     std::vector<std::pair<std::size_t, SubmissionBatch>> grouped_batches_;
     /** Layout-space left/top/right/bottom of each group's retained vertices, by group index. */
     std::vector<std::array<double, 4U>> group_extents_;
+    /** Sizes of the stream's live textures, which place an upload within its texture. */
+    TextureSizes texture_sizes_;
 };
 
 struct SurfacePacketFrame final {

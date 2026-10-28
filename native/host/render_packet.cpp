@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -375,6 +376,136 @@ void append_group_regions(const std::vector<PresentationGroup>& previous,
     };
 }
 
+/**
+ * Texel rectangles, normalized to the texture (left, top, right, bottom), that one packet's
+ * resource operations replaced. Creation, an encoded image and release change the whole texture;
+ * an upload changes its region of a texture whose size is known. `sizes` is advanced through the
+ * operations, so an upload after a create in the same packet resolves against it.
+ */
+using TextureChanges = std::map<std::string, std::vector<std::array<double, 4U>>, std::less<>>;
+
+[[nodiscard]] TextureChanges texture_changes(const std::vector<ResourceOperation>& operations,
+                                             TextureSizes& sizes) {
+    TextureChanges result;
+    for (const ResourceOperation& operation : operations) {
+        std::vector<std::array<double, 4U>>& rectangles = result[operation.texture];
+        if (operation.kind == resource_upload) {
+            const auto size = sizes.find(operation.texture);
+            if (size != sizes.end()) {
+                const double width = size->second[0U];
+                const double height = size->second[1U];
+                rectangles.push_back({
+                    operation.x / width,
+                    operation.y / height,
+                    (static_cast<double>(operation.x) + operation.width) / width,
+                    (static_cast<double>(operation.y) + operation.height) / height,
+                });
+                continue;
+            }
+        } else if (operation.kind == resource_release) {
+            if (const auto size = sizes.find(operation.texture); size != sizes.end())
+                sizes.erase(size);
+        } else {
+            sizes.insert_or_assign(operation.texture,
+                                   std::array<std::uint32_t, 2U>{operation.width, operation.height});
+        }
+        rectangles.push_back({0.0, 0.0, 1.0, 1.0});
+    }
+    return result;
+}
+
+/**
+ * Appends the presented bounds of the draws whose sampled texels `changes` replaced: what a
+ * retained effect sample over them read is stale although no vertex moved. The unified material
+ * samples its texture at the interpolated vertex UV, so a triangle whose UV bounds (plus a texel
+ * for filtering) miss every changed rectangle is unaffected; an authored material may sample
+ * anywhere, so every triangle of its draw counts.
+ */
+void append_texture_regions(const RenderPacket& packet,
+                            const std::vector<PresentationGroup>& groups,
+                            const TextureChanges& changes, const TextureSizes& sizes,
+                            std::vector<GeometryDirtyRegion>& output) {
+    if (changes.empty())
+        return;
+    constexpr double infinity = std::numeric_limits<double>::infinity();
+    for (const SubmissionBatch& batch : packet.batches) {
+        const DrawBatch* const draw = std::get_if<DrawBatch>(&batch);
+        if (draw == nullptr || !draw->texture.has_value())
+            continue;
+        const auto changed = changes.find(*draw->texture);
+        if (changed == changes.end())
+            continue;
+        const bool exact = draw->material == "strata:unified_ui";
+        double margin_u = 0.0;
+        double margin_v = 0.0;
+        if (const auto size = sizes.find(*draw->texture); size != sizes.end()) {
+            margin_u = 1.0 / std::max<std::uint32_t>(1U, size->second[0U]);
+            margin_v = 1.0 / std::max<std::uint32_t>(1U, size->second[1U]);
+        }
+        double left = infinity;
+        double top = infinity;
+        double right = -infinity;
+        double bottom = -infinity;
+        const std::size_t end = static_cast<std::size_t>(draw->first_index) + draw->index_count;
+        for (std::size_t first = draw->first_index; first + 3U <= end; first += 3U) {
+            std::array<const std::uint8_t*, 3U> corners{};
+            for (std::size_t corner = 0U; corner < corners.size(); ++corner) {
+                const std::size_t vertex =
+                    static_cast<std::size_t>(packet.indices[first + corner]) + draw->base_vertex;
+                corners[corner] = packet.vertices.data() + vertex * 88U;
+            }
+            if (exact) {
+                double u0 = infinity;
+                double v0 = infinity;
+                double u1 = -infinity;
+                double v1 = -infinity;
+                for (const std::uint8_t* const corner : corners) {
+                    float u = 0.0F;
+                    float v = 0.0F;
+                    std::memcpy(&u, corner + 12U, sizeof(u));
+                    std::memcpy(&v, corner + 16U, sizeof(v));
+                    u0 = std::min(u0, static_cast<double>(u));
+                    v0 = std::min(v0, static_cast<double>(v));
+                    u1 = std::max(u1, static_cast<double>(u));
+                    v1 = std::max(v1, static_cast<double>(v));
+                }
+                // A NaN coordinate makes every comparison false, so such a triangle is kept.
+                const bool reaches = std::ranges::any_of(
+                    changed->second, [&](const std::array<double, 4U>& rectangle) {
+                        return !(u1 + margin_u < rectangle[0U] || u0 - margin_u > rectangle[2U] ||
+                                 v1 + margin_v < rectangle[1U] || v0 - margin_v > rectangle[3U]);
+                    });
+                if (!reaches)
+                    continue;
+            }
+            for (const std::uint8_t* const corner : corners) {
+                float x = 0.0F;
+                float y = 0.0F;
+                std::memcpy(&x, corner, sizeof(x));
+                std::memcpy(&y, corner + sizeof(x), sizeof(y));
+                const PresentationGroup group = group_of(groups, vertex_group(corner));
+                const double presented_x = group.translate_x + group.scale_x * x;
+                const double presented_y = group.translate_y + group.scale_y * y;
+                if (!std::isfinite(presented_x) || !std::isfinite(presented_y))
+                    continue;
+                left = std::min(left, presented_x);
+                top = std::min(top, presented_y);
+                right = std::max(right, presented_x);
+                bottom = std::max(bottom, presented_y);
+            }
+        }
+        if (left <= right && top <= bottom) {
+            // One logical pixel of slack, as for group moves, covers edge antialiasing.
+            output.push_back(GeometryDirtyRegion{
+                left - 1.0,
+                top - 1.0,
+                right - left + 2.0,
+                bottom - top + 2.0,
+            });
+        }
+    }
+}
+
 [[nodiscard]] std::vector<PresentationGroup> presentation_groups(Reader& input) {
     const std::uint32_t count = input.count();
     if (count > maximum_presentation_group) {
@@ -621,6 +752,8 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         std::vector<GeometryDirtyRegion> group_regions;
         if (groups_changed)
             append_group_regions(retained_->groups, groups, group_extents_, group_regions);
+        TextureSizes sizes = texture_sizes_;
+        const TextureChanges changed_textures = texture_changes(resources, sizes);
         retained_->frame_index = frame_index;
         retained_->planned_draw_count = planned_draw_count;
         retained_->skipped_draw_count = skipped_draw_count;
@@ -635,6 +768,9 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
                 present(local, groups, retained_->batches[position]);
             retained_->groups = std::move(groups);
         }
+        append_texture_regions(*retained_, retained_->groups, changed_textures, sizes,
+                               retained_->geometry_dirty_regions);
+        texture_sizes_.swap(sizes);
         return *retained_;
     }
 
@@ -846,11 +982,18 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             throw std::invalid_argument("retained render geometry epoch changed its batch shape");
         }
     }
+    TextureSizes sizes = texture_sizes_;
+    const TextureChanges changed_textures = texture_changes(result.resources, sizes);
+    if (!result.geometry_dirty_all) {
+        append_texture_regions(result, groups, changed_textures, sizes,
+                               result.geometry_dirty_regions);
+    }
     result.groups = std::move(groups);
     retained_ = std::move(result);
     if (patch_transaction.has_value()) patch_transaction->commit();
     grouped_batches_.swap(grouped);
     group_extents_.swap(extents);
+    texture_sizes_.swap(sizes);
     return *retained_;
 }
 
@@ -858,6 +1001,7 @@ void RenderPacketDecoder::reset() noexcept {
     retained_.reset();
     grouped_batches_.clear();
     group_extents_.clear();
+    texture_sizes_.clear();
 }
 
 } // namespace strata::host

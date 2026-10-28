@@ -587,6 +587,184 @@ void test_effect_refresh_defaults_to_unbounded(const std::filesystem::path& reso
           "an effect without a refresh rate was encoded as rate limited");
 }
 
+/** Writes render packets byte by byte, for streams the UI encoder does not readily produce. */
+class PacketWriter final {
+  public:
+    void u32(const std::uint32_t value) {
+        for (std::uint32_t shift = 0U; shift < 32U; shift += 8U)
+            bytes.push_back(static_cast<std::uint8_t>(value >> shift));
+    }
+    void u64(const std::uint64_t value) {
+        u32(static_cast<std::uint32_t>(value));
+        u32(static_cast<std::uint32_t>(value >> 32U));
+    }
+    void text(const std::string_view value) {
+        u32(static_cast<std::uint32_t>(value.size()));
+        bytes.insert(bytes.end(), value.begin(), value.end());
+    }
+    void record(const std::uint32_t kind, const PacketWriter& body) {
+        u32(kind);
+        u32(static_cast<std::uint32_t>(body.bytes.size()));
+        bytes.insert(bytes.end(), body.bytes.begin(), body.bytes.end());
+    }
+    std::vector<std::uint8_t> bytes;
+};
+
+/** One textured quad: logical bounds (x, y, size) sampling texture UVs (u0, v0)-(u1, v1). */
+struct TexturedQuad final {
+    std::string texture;
+    float x = 0.0F;
+    float y = 0.0F;
+    float size = 0.0F;
+    float u0 = 0.0F;
+    float v0 = 0.0F;
+    float u1 = 1.0F;
+    float v1 = 1.0F;
+};
+
+/**
+ * A packet of textured quads. With `geometry`, a full payload for `epoch`; without, a retained
+ * packet repeating it. Resources are (kind, writer of the record after its texture id).
+ */
+std::vector<std::uint8_t> textured_packet(
+    const std::uint64_t epoch, const bool geometry, const std::vector<TexturedQuad>& quads,
+    const std::vector<std::pair<std::uint32_t, PacketWriter>>& resources) {
+    PacketWriter packet;
+    packet.bytes.assign({'S', 'T', 'R', 'A', 'T', 'A', 'R', 'P'});
+    packet.u32(STRATA_RENDER_PACKET_VERSION_CURRENT);
+    packet.u32(static_cast<std::uint32_t>(resources.size()));
+    packet.u32(geometry ? static_cast<std::uint32_t>(quads.size()) : 0U);
+    packet.u64(epoch);
+    packet.u64(epoch);
+    packet.u32(geometry ? strata::host::packet_flag_geometry_payload : 0U);
+    packet.u32(geometry ? static_cast<std::uint32_t>(quads.size() * 4U * 88U) : 0U);
+    packet.u32(geometry ? static_cast<std::uint32_t>(quads.size() * 6U) : 0U);
+    packet.u32(0U);
+    packet.u32(0U);
+    packet.u32(0U);
+    for (const auto& [kind, body] : resources)
+        packet.record(kind, body);
+    if (!geometry)
+        return packet.bytes;
+    for (const TexturedQuad& quad : quads) {
+        const std::array<std::array<float, 4U>, 4U> corners{{
+            {quad.x, quad.y, quad.u0, quad.v0},
+            {quad.x + quad.size, quad.y, quad.u1, quad.v0},
+            {quad.x + quad.size, quad.y + quad.size, quad.u1, quad.v1},
+            {quad.x, quad.y + quad.size, quad.u0, quad.v1},
+        }};
+        for (const std::array<float, 4U>& corner : corners) {
+            std::array<std::uint8_t, 88U> vertex{};
+            std::memcpy(vertex.data(), &corner[0U], sizeof(float));
+            std::memcpy(vertex.data() + 4U, &corner[1U], sizeof(float));
+            std::memcpy(vertex.data() + 12U, &corner[2U], sizeof(float));
+            std::memcpy(vertex.data() + 16U, &corner[3U], sizeof(float));
+            vertex[23U] = 255U;
+            packet.bytes.insert(packet.bytes.end(), vertex.begin(), vertex.end());
+        }
+    }
+    for (std::uint32_t quad = 0U; quad < quads.size(); ++quad) {
+        for (const std::uint32_t index : {0U, 1U, 2U, 0U, 2U, 3U})
+            packet.u32(index);
+    }
+    for (std::uint32_t quad = 0U; quad < quads.size(); ++quad) {
+        PacketWriter draw;
+        draw.u32(quad);
+        for (const std::uint32_t value : {0U, 0U, 64U, 64U})
+            draw.u32(value);
+        draw.u32(0U);
+        draw.text("strata:unified_ui");
+        draw.text("straight_alpha");
+        draw.u32(1U);
+        draw.text(quads[quad].texture);
+        draw.u32(quad * 4U);
+        draw.u32(quad * 6U);
+        draw.u32(6U);
+        packet.record(0U, draw);
+    }
+    return packet.bytes;
+}
+
+PacketWriter atlas_record(const std::string_view texture, const std::uint32_t x,
+                          const std::uint32_t y, const std::uint32_t width,
+                          const std::uint32_t height, const bool upload) {
+    PacketWriter record;
+    record.text(texture);
+    record.u32(strata::host::texture_format_rgba8);
+    record.u32(x);
+    record.u32(y);
+    record.u32(width);
+    record.u32(height);
+    if (upload) {
+        record.u32(width * height * 4U);
+        record.bytes.resize(record.bytes.size() + static_cast<std::size_t>(width) * height * 4U,
+                            0x7FU);
+    }
+    return record;
+}
+
+PacketWriter image_record(const std::string_view texture) {
+    PacketWriter record;
+    record.text(texture);
+    record.u32(strata::host::texture_encoding_rgba8);
+    record.u32(strata::host::texture_sampling_linear);
+    record.u32(1U);
+    record.u32(1U);
+    record.u32(4U);
+    record.bytes.insert(record.bytes.end(), {10U, 20U, 30U, 255U});
+    return record;
+}
+
+/**
+ * Replacing a texture changes what every draw sampling it shows, though no vertex moves. The
+ * decoder reports those draws' bounds so a retained effect sample over them is refreshed, and only
+ * those: an atlas upload into texels no draw samples leaves every sample current.
+ */
+void test_texture_changes_report_dirty_regions() {
+    using namespace strata;
+    const std::vector<TexturedQuad> quads{
+        {"image", 4.0F, 4.0F, 8.0F, 0.0F, 0.0F, 1.0F, 1.0F},
+        // Samples texels [0, 2) of an 8x8 atlas.
+        {"atlas", 40.0F, 40.0F, 8.0F, 0.0F, 0.0F, 0.25F, 0.25F},
+    };
+    host::RenderPacketDecoder decoder;
+    const host::RenderPacket& first = decoder.decode(textured_packet(
+        1U, true, quads,
+        {{host::resource_encoded_image, image_record("image")},
+         {host::resource_create, atlas_record("atlas", 0U, 0U, 8U, 8U, false)}}));
+    check(first.geometry_dirty_all, "a full geometry payload did not dirty everything");
+
+    const auto covers = [](const host::GeometryDirtyRegion& region, const double x,
+                           const double y, const double size) {
+        return region.x <= x && region.y <= y && region.x + region.width >= x + size &&
+               region.y + region.height >= y + size && region.x > x - 2.0 &&
+               region.y > y - 2.0 && region.width < size + 4.0 && region.height < size + 4.0;
+    };
+    const host::RenderPacket& replaced = decoder.decode(textured_packet(
+        1U, false, quads, {{host::resource_encoded_image, image_record("image")}}));
+    check(!replaced.geometry_dirty_all && replaced.geometry_dirty_regions.size() == 1U &&
+              covers(replaced.geometry_dirty_regions.front(), 4.0, 4.0, 8.0),
+          "a replaced image did not dirty exactly the draw that samples it");
+
+    const host::RenderPacket& unused_texels = decoder.decode(textured_packet(
+        1U, false, quads,
+        {{host::resource_upload, atlas_record("atlas", 5U, 5U, 3U, 3U, true)}}));
+    check(!unused_texels.geometry_dirty_all && unused_texels.geometry_dirty_regions.empty(),
+          "an atlas upload into texels no draw samples dirtied a draw");
+
+    const host::RenderPacket& sampled_texels = decoder.decode(textured_packet(
+        1U, false, quads,
+        {{host::resource_upload, atlas_record("atlas", 1U, 1U, 1U, 1U, true)}}));
+    check(!sampled_texels.geometry_dirty_all &&
+              sampled_texels.geometry_dirty_regions.size() == 1U &&
+              covers(sampled_texels.geometry_dirty_regions.front(), 40.0, 40.0, 8.0),
+          "an atlas upload into sampled texels did not dirty the draw that samples them");
+
+    const host::RenderPacket& unchanged = decoder.decode(textured_packet(1U, false, quads, {}));
+    check(!unchanged.geometry_dirty_all && unchanged.geometry_dirty_regions.empty(),
+          "a retained packet without resource changes reported dirty regions");
+}
+
 } // namespace
 
 int strata_test_render_packet(const int argument_count, const char* const* const arguments) {
@@ -606,6 +784,7 @@ int strata_test_render_packet(const int argument_count, const char* const* const
         test_incremental_geometry_patch_round_trip(arguments[1]);
         test_effect_batch_change_invalidates_retained_samples(arguments[1]);
         test_effect_refresh_defaults_to_unbounded(arguments[1]);
+        test_texture_changes_report_dirty_regions();
         std::cout << "strata_render_packet_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

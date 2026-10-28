@@ -254,6 +254,54 @@ void test_group_move_refreshes_effect(strata::headless::CaptureRenderer& rendere
           "an unchanged retained frame resampled a rate-limited effect");
 }
 
+/**
+ * A blurred effect reads its radius beyond its own bounds. Content that changes just outside a
+ * glass panel shows in the blurred edge, so the retained sample must be resampled even though the
+ * change does not overlap the panel itself; a change beyond everything the effect read must not
+ * cost a resample. A packet that skips an epoch carries no record of what the skipped one changed.
+ */
+void test_changes_within_blur_reach_refresh_effect(strata::headless::CaptureRenderer& renderer) {
+    using namespace strata;
+    renderer.resize(32U, 32U, 32.0, 32.0);
+    renderer.declare_effect_pass("fixture.reach-blur", 0U, 0U, 4.0, 1U, UINT32_MAX, UINT32_MAX,
+                                 {});
+    host::EffectBatch effect;
+    effect.source_order = 0U;
+    effect.scissor = host::Scissor{0U, 0U, 32U, 32U};
+    effect.x = 12.0;
+    effect.y = 12.0;
+    effect.width = 8.0;
+    effect.height = 8.0;
+    effect.effect = "fixture.reach-blur";
+    effect.refresh_rate = 100.0;
+    host::RenderPacket packet;
+    packet.geometry_epoch = 1U;
+    packet.batches.emplace_back(effect);
+    renderer.set_clear_color({255U, 0U, 0U, 255U});
+    renderer.render(packet, 0);
+    check(center(renderer) == std::array<std::uint8_t, 4U>{255U, 0U, 0U, 255U},
+          "the blurred effect did not sample its backdrop");
+
+    packet.geometry_dirty_regions = {host::GeometryDirtyRegion{0.0, 0.0, 2.0, 2.0}};
+    renderer.set_clear_color({0U, 0U, 255U, 255U});
+    renderer.render(packet, 1'000'000);
+    check(center(renderer) == std::array<std::uint8_t, 4U>{255U, 0U, 0U, 255U},
+          "a change beyond the blur's reach resampled a rate-limited effect");
+
+    packet.geometry_dirty_regions = {host::GeometryDirtyRegion{22.0, 12.0, 2.0, 8.0}};
+    renderer.set_clear_color({0U, 255U, 0U, 255U});
+    renderer.render(packet, 2'000'000);
+    check(center(renderer) == std::array<std::uint8_t, 4U>{0U, 255U, 0U, 255U},
+          "a change within the blur's reach outside the bounds reused a stale sample");
+
+    packet.geometry_dirty_regions.clear();
+    packet.geometry_epoch = 3U;
+    renderer.set_clear_color({255U, 255U, 0U, 255U});
+    renderer.render(packet, 3'000'000);
+    check(center(renderer) == std::array<std::uint8_t, 4U>{255U, 255U, 0U, 255U},
+          "a packet after a skipped epoch reused a sample from before it");
+}
+
 void test_temporal_refresh_contract() {
     using namespace strata;
     headless::SoftwareRenderer renderer(headless::platform_image_codec());
@@ -447,12 +495,14 @@ int main() {
         test_surface_backdrop_inside_content(software);
         test_subpixel_snapping(software);
         test_group_move_refreshes_effect(software);
+        test_changes_within_blur_reach_refresh_effect(software);
 #ifdef _WIN32
         strata::headless::D3D11Renderer d3d11;
         test_surface_backdrop_source(d3d11);
         test_surface_backdrop_inside_content(d3d11);
         test_subpixel_snapping(d3d11);
         test_group_move_refreshes_effect(d3d11);
+        test_changes_within_blur_reach_refresh_effect(d3d11);
         test_downsampled_blur_matches_d3d11();
 #endif
         test_temporal_refresh_contract();

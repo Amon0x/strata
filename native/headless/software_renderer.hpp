@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -76,8 +77,8 @@ class SoftwareRenderer final : public CaptureRenderer {
     std::vector<std::string> material_fallbacks_;
     std::map<std::string, std::vector<EffectPass>, std::less<>> effects_;
     std::map<std::uint64_t, CachedEffect> cached_effects_;
-    std::uint64_t cached_effect_epoch_ = 0U;
-    bool has_cached_effect_epoch_ = false;
+    /** Geometry epoch of the last rendered packet; cached effects are current against it. */
+    std::optional<std::uint64_t> cached_effect_epoch_;
 
     void apply(const host::ResourceOperation& operation);
     void draw(const host::DrawBatch& batch, const host::RenderPacket& packet);
@@ -86,6 +87,7 @@ class SoftwareRenderer final : public CaptureRenderer {
                           std::uint32_t right, std::uint32_t bottom, std::uint32_t downsample,
                           const std::vector<std::uint8_t>& clipped_original);
     void apply_effect(const host::EffectBatch& effect);
+    [[nodiscard]] double read_reach(const host::EffectBatch& effect) const noexcept;
     [[nodiscard]] bool effect_refresh_due(const host::EffectBatch& effect, bool content,
                                           std::int64_t time_nanoseconds) const;
     void capture_effect(const host::EffectBatch& effect, bool content,
