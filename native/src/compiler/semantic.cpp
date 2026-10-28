@@ -370,8 +370,11 @@ class Validator final {
                         .material_type = std::nullopt,
                     });
                 }
-                std::function<void(const Block&)> scan_slots;
-                scan_slots = [&](const Block& block) {
+                // `fills` marks the body of a call to another component, whose direct Slot children
+                // fill that component's slots; what a fill holds can declare this component's
+                // slots in turn, which forwards them.
+                std::function<void(const Block&, bool)> scan_slots;
+                scan_slots = [&](const Block& block, const bool fills) {
                     for (const StatementPtr& statement : block.statements) {
                         const WidgetCall* call = nullptr;
                         if (const auto* widget = std::get_if<WidgetStatement>(&statement->node)) {
@@ -380,7 +383,10 @@ class Validator final {
                                        std::get_if<RootStatement>(&statement->node)) {
                             call = &root->call;
                         }
-                        if (call != nullptr) {
+                        if (call != nullptr && call->name == "Slot" && fills) {
+                            if (call->body != nullptr)
+                                scan_slots(*call->body, false);
+                        } else if (call != nullptr) {
                             if (call->name == "Slot") {
                                 const Expression* name_expression = nullptr;
                                 const Expression* required_expression = nullptr;
@@ -429,25 +435,24 @@ class Validator final {
                                         });
                                     }
                                 }
-                            } else if (registry_.widget(call->name) != nullptr &&
-                                       call->body != nullptr) {
-                                scan_slots(*call->body);
+                            } else if (call->body != nullptr) {
+                                scan_slots(*call->body, registry_.widget(call->name) == nullptr);
                             }
                         }
                         if (const auto* conditional = std::get_if<IfStatement>(&statement->node)) {
-                            scan_slots(*conditional->then_block);
+                            scan_slots(*conditional->then_block, false);
                             if (conditional->else_block != nullptr)
-                                scan_slots(*conditional->else_block);
+                                scan_slots(*conditional->else_block, false);
                         } else if (const auto* when =
                                        std::get_if<WhenStatement>(&statement->node)) {
                             for (const WhenBranch& branch : when->branches)
-                                scan_slots(*branch.block);
+                                scan_slots(*branch.block, false);
                         } else if (const auto* loop = std::get_if<ForStatement>(&statement->node)) {
-                            scan_slots(*loop->block);
+                            scan_slots(*loop->block, false);
                         }
                     }
                 };
-                scan_slots(*component->body);
+                scan_slots(*component->body, false);
                 schema.widget_default_styles =
                     collect_widget_default_styles(*component->body);
                 components_.emplace(component->name, std::move(schema));

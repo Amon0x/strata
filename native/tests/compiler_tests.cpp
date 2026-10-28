@@ -796,6 +796,21 @@ void test_sibling_widgets_need_their_own_persistence_keys() {
     check(reused.succeeded(), "a component drawn twice lost its persistence key:" + describe(reused));
 }
 
+// A component can forward a slot by declaring it inside what it passes to a child component,
+// whether in a named fill or in raw content.
+void test_slots_declared_inside_child_component_fills_are_forwarded() {
+    const auto forwarded = compile_source(
+        "component Frame { Panel { Slot(name: \"content\") } }\n"
+        "component Named { Frame { Slot(name: \"content\") { Slot(name: \"inner\") } } }\n"
+        "component Raw { Frame { Panel { Slot(name: \"body\") } } }\n"
+        "screen Main { root Panel {\n"
+        "  Named { Slot(name: \"inner\") { Text(text: \"a\") } }\n"
+        "  Raw { Slot(name: \"body\") { Text(text: \"b\") } }\n"
+        "} }"
+    );
+    check(forwarded.succeeded(), "a forwarded slot was not declared:" + describe(forwarded));
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -822,6 +837,7 @@ int strata_test_compiler() {
         test_expression_types_follow_runtime_evaluation();
         test_state_actions_see_the_state_lowering_declares();
         test_sibling_widgets_need_their_own_persistence_keys();
+        test_slots_declared_inside_child_component_fills_are_forwarded();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {
