@@ -9,6 +9,8 @@
 #include "core/utf8.hpp"
 
 using strata::abi_detail::AbiCall;
+using strata::abi_detail::EntryGuard;
+using strata::abi_detail::Reentry;
 using strata::abi_detail::surface_call;
 
 namespace {
@@ -31,6 +33,9 @@ strata_result strata_surface_set_focus_containment(
     const strata_string_view key,
     uint32_t* const out_contained
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);

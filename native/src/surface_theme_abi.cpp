@@ -21,6 +21,8 @@
 #include "ui/theme.hpp"
 
 using strata::abi_detail::AbiCall;
+using strata::abi_detail::EntryGuard;
+using strata::abi_detail::Reentry;
 using strata::abi_detail::surface_call;
 
 namespace {
@@ -885,6 +887,9 @@ strata_result strata_surface_register_theme(
     const strata_theme* const source,
     std::uint32_t* const out_changed
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     return mutate_theme(
         surface,
         source,
@@ -900,6 +905,9 @@ strata_result strata_surface_set_theme(
     const strata_theme* const source,
     std::uint32_t* const out_changed
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     return mutate_theme(
         surface,
         source,
@@ -915,6 +923,9 @@ strata_result strata_surface_unregister_theme(
     const strata_string_view name,
     std::uint32_t* const out_removed
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
@@ -941,6 +952,9 @@ strata_result strata_surface_set_scoped_theme(
     const strata_theme* const source,
     std::uint32_t* const out_changed
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) return strata::abi_detail::terminal_surface_failure(*surface);
     if (out_changed != nullptr) *out_changed = 0U;
@@ -968,6 +982,9 @@ strata_result strata_surface_clear_scoped_theme(
     const strata_string_view node_key,
     std::uint32_t* const out_removed
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) return strata::abi_detail::terminal_surface_failure(*surface);
     if (out_removed != nullptr) *out_removed = 0U;
@@ -986,6 +1003,9 @@ strata_result strata_surface_animate_scroll_to(
     const strata_scroll_animation_request* const source,
     std::uint32_t* const out_started
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) return strata::abi_detail::terminal_surface_failure(*surface);
     if (out_started != nullptr) *out_started = 0U;

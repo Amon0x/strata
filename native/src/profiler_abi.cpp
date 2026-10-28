@@ -124,10 +124,16 @@ void emit_snapshot(
 
 } // namespace
 
+using strata::abi_detail::EntryGuard;
+using strata::abi_detail::Reentry;
+
 strata_result strata_runtime_read_profiler(
     const strata_runtime* const runtime,
     const strata_profiler_snapshot_sink* const sink
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr || !valid_sink(sink) || !runtime->core.has_application()) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
@@ -141,6 +147,9 @@ strata_result strata_runtime_set_profiler_capture(
     strata_runtime* const runtime,
     const uint32_t enabled
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr || enabled > 1U || !runtime->core.has_application()) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
@@ -154,6 +163,9 @@ strata_result strata_surface_read_profiler(
     const strata_surface* const surface,
     const strata_profiler_snapshot_sink* const sink
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr || !valid_sink(sink)) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
@@ -167,6 +179,9 @@ strata_result strata_surface_set_profiler_capture(
     strata_surface* const surface,
     const uint32_t enabled
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr || enabled > 1U) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
@@ -183,6 +198,9 @@ strata_result strata_surface_record_host_frame(
     strata_surface* const surface,
     const strata_profiler_host_frame* const telemetry
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr || telemetry == nullptr ||
         telemetry->struct_size < sizeof(strata_profiler_host_frame) ||
         telemetry->version != STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT ||

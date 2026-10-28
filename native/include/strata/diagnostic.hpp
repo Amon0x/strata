@@ -59,6 +59,8 @@ struct DiagnosticsSnapshot final {
     case STRATA_STATUS_ACTIVATION_REJECTED: return "activation rejected";
     case STRATA_STATUS_SERVICE_UNAVAILABLE: return "service unavailable";
     case STRATA_STATUS_INPUT_QUEUE_FULL: return "input queue full";
+    case STRATA_STATUS_REENTRANT_CALL: return "reentrant call";
+    case STRATA_STATUS_WRONG_THREAD: return "wrong thread";
     default: return "unknown status";
     }
 }

@@ -6,6 +6,9 @@
 #include "abi_internal.hpp"
 #include "abi_support.hpp"
 
+using strata::abi_detail::EntryGuard;
+using strata::abi_detail::Reentry;
+
 extern "C" {
 
 strata_result strata_runtime_create_application_state_snapshot(
@@ -13,6 +16,9 @@ strata_result strata_runtime_create_application_state_snapshot(
     strata_application_state_snapshot** const out_snapshot
 ) noexcept {
     if (out_snapshot != nullptr) *out_snapshot = nullptr;
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr || out_snapshot == nullptr || !runtime->core.has_application()) {
         return strata::abi_detail::invalid_argument();
     }
@@ -55,6 +61,9 @@ strata_result strata_runtime_restore_application_state(
     uint32_t* const out_changed
 ) noexcept {
     if (out_changed != nullptr) *out_changed = 0U;
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr || snapshot == nullptr || out_changed == nullptr ||
         !runtime->core.has_application()) {
         return strata::abi_detail::invalid_argument();

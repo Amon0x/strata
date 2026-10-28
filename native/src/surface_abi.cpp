@@ -36,6 +36,8 @@
 namespace {
 
 using strata::abi_detail::AbiCall;
+using strata::abi_detail::EntryGuard;
+using strata::abi_detail::Reentry;
 using strata::abi_detail::StatusError;
 using strata::abi_detail::surface_call;
 
@@ -525,6 +527,9 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
     constexpr std::size_t surface_config_v1_size = offsetof(strata_surface_config, extensions);
     if (out_surface != nullptr)
         *out_surface = nullptr;
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (config == nullptr || out_surface == nullptr ||
@@ -600,6 +605,9 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
 
 strata_result strata_surface_prepare_release_packet(strata_surface* const surface,
                                                     const strata_bytes_sink* const sink) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr || surface->owner == nullptr)
         return invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_bytes_sink) || sink->emit == nullptr) {
@@ -628,6 +636,9 @@ strata_result strata_surface_prepare_release_packet(strata_surface* const surfac
 }
 
 strata_result strata_surface_acknowledge_release_packet(strata_surface* const surface) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr || surface->owner == nullptr)
         return invalid_argument();
     if (!surface->release_packet_prepared) {
@@ -640,6 +651,9 @@ strata_result strata_surface_acknowledge_release_packet(strata_surface* const su
 }
 
 strata_result strata_surface_release(strata_surface* const surface) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return strata::core::result(STRATA_STATUS_OK);
     if (surface->owner == nullptr)
@@ -655,6 +669,9 @@ strata_result strata_surface_release(strata_surface* const surface) noexcept {
 }
 
 strata_result strata_surface_abandon(strata_surface* const surface) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return strata::core::result(STRATA_STATUS_OK);
     if (surface->owner == nullptr)
@@ -670,6 +687,9 @@ strata_result strata_surface_abandon(strata_surface* const surface) noexcept {
 strata_result strata_surface_adopt_environment(strata_surface* const surface,
                                                const strata_surface_environment* const value,
                                                uint32_t* const out_adopted) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -692,6 +712,9 @@ strata_result
 strata_surface_enqueue_input(strata_surface* const surface, const strata_input_event* const events,
                              const size_t event_count,
                              strata_surface_input_batch_info* const out_info) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -727,6 +750,9 @@ strata_surface_enqueue_input(strata_surface* const surface, const strata_input_e
 }
 
 strata_result strata_surface_cancel_interactions(strata_surface* const surface) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -738,6 +764,9 @@ strata_result strata_surface_cancel_interactions(strata_surface* const surface) 
 }
 
 strata_result strata_surface_reveal(strata_surface* const surface) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -751,6 +780,9 @@ strata_result strata_surface_reveal(strata_surface* const surface) noexcept {
 strata_result strata_surface_report_backdrop(strata_surface* const surface,
                                              const strata_backdrop_sample* const samples,
                                              const size_t sample_count) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr || (samples == nullptr && sample_count != 0U))
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -769,6 +801,9 @@ strata_result
 strata_surface_dispatch_action_json(strata_surface* const surface,
                                     const strata_action_dispatch_config* const config,
                                     strata_action_dispatch_info* const out_info) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -813,6 +848,9 @@ strata_surface_dispatch_action_json(strata_surface* const surface,
 strata_result strata_surface_frame(strata_surface* const surface,
                                    const int64_t frame_time_nanoseconds,
                                    strata_surface_frame_info* const out_info) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -911,6 +949,9 @@ strata_result strata_surface_frame(strata_surface* const surface,
 
 strata_result strata_surface_read_frame_json(const strata_surface* const surface,
                                              const strata_value_json_sink* const sink) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) ||
@@ -962,6 +1003,9 @@ strata_result strata_surface_clear_diagnostics(strata_surface* const surface) no
 
 strata_result strata_surface_drain_events_json(strata_surface* const surface,
                                                const strata_value_json_sink* const sink) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -998,6 +1042,9 @@ strata_result strata_surface_drain_events_json(strata_surface* const surface,
 
 strata_result strata_surface_read_render_packet(const strata_surface* const surface,
                                                 const strata_bytes_sink* const sink) noexcept {
+    const EntryGuard entry(surface, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_bytes_sink) || sink->emit == nullptr) {

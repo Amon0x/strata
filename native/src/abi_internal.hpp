@@ -7,6 +7,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -153,6 +154,13 @@ struct strata_runtime final {
     /** One runtime-owned service boundary shared by every Surface/InputRouter. */
     strata::runtime::HostServices host_services;
     std::vector<strata_surface*> surfaces;
+    /**
+     * Thread currently inside this runtime, or no thread while it is idle. Calls may come from
+     * any thread but never overlap; see abi_detail::EntryGuard.
+     */
+    mutable std::atomic<std::thread::id> active_thread{};
+    /** ABI calls in progress on `active_thread`; nonzero while host callbacks run. */
+    mutable std::uint32_t call_depth = 0U;
 };
 
 struct strata_snapshot final {

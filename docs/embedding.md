@@ -21,6 +21,18 @@ Every host owns its clock, environment generations, resource generations, and ha
 Separate windows should use separate runtimes when their application/input/diagnostic state must be
 isolated.
 
+### Threading and reentrancy
+
+A runtime and its Surfaces are single-threaded. Calls may come from any thread but must not
+overlap; a call made while another thread is inside the runtime returns
+`STRATA_STATUS_WRONG_THREAD` without touching it. Only the async completion functions may be called
+concurrently from worker threads. Host callbacks run inside the call that triggered them and may
+call back only for reads and host-service calls; release, activation, publication, input, framing,
+and other structural calls return `STRATA_STATUS_REENTRANT_CALL` from inside a callback. Record the
+change and perform it after the outer call returns, as `strata::host::Bindings::synchronize` does
+for host snapshots. The exact list is in the Threading comment at the top of `strata.h`. No C++
+exception crosses the ABI: exports are `noexcept`, and callbacks must not throw.
+
 ## Minimal C setup
 
 Initialize structures to zero, set `struct_size`, and require only capabilities the host uses:

@@ -12,6 +12,8 @@
 #include "ui/inspection.hpp"
 
 using strata::abi_detail::AbiCall;
+using strata::abi_detail::EntryGuard;
+using strata::abi_detail::Reentry;
 using strata::abi_detail::surface_call;
 
 namespace {
@@ -34,6 +36,9 @@ strata_result strata_surface_inspector_select(
     const strata_string_view key,
     uint32_t* const out_selected
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
@@ -62,6 +67,9 @@ strata_result strata_surface_inspector_pick(
     const double y,
     uint32_t* const out_selected
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
@@ -77,6 +85,9 @@ strata_result strata_surface_inspector_pick(
 }
 
 strata_result strata_surface_inspector_clear(strata_surface* const surface) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
@@ -89,6 +100,9 @@ strata_result strata_surface_read_inspector_selection_json(
     const strata_surface* const surface,
     const strata_value_json_sink* const sink
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_VALUE_SINK", "Reading inspector selection requires a complete JSON sink.");
@@ -108,6 +122,9 @@ strata_result strata_surface_read_inspection_node_json(
     const uint32_t depth,
     const strata_value_json_sink* const sink
 ) noexcept {
+    const EntryGuard entry(surface, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr ||
         !strata::abi_detail::valid_view(key, false)) {

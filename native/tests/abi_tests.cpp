@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace {
 
@@ -1634,6 +1635,87 @@ void test_extension_clip_balance(const std::filesystem::path& resource_root) {
           "a balanced extension clip did not reach the frame");
 }
 
+struct ReentryProbe final {
+    strata_runtime* runtime = nullptr;
+    strata_surface* surface = nullptr;
+    bool probed = false;
+    strata_status abandon = STRATA_STATUS_OK;
+    strata_status release = STRATA_STATUS_OK;
+    strata_status activate = STRATA_STATUS_OK;
+    strata_status publish = STRATA_STATUS_OK;
+    strata_status memory = STRATA_STATUS_INTERNAL_ERROR;
+    strata_status packet = STRATA_STATUS_INTERNAL_ERROR;
+    strata_status other_thread = STRATA_STATUS_OK;
+};
+
+void present_reentrant(void* const user_data, strata_widget_render_context*) {
+    auto& probe = *static_cast<ReentryProbe*>(user_data);
+    if (probe.probed)
+        return;
+    probe.probed = true;
+    // Structural calls from inside a callback would destroy or replace the framing Surface.
+    probe.abandon = strata_surface_abandon(probe.surface).status;
+    probe.release = strata_runtime_release(probe.runtime).status;
+    const std::string source = "screen Main { root Panel {} }";
+    const strata_activation_config activation{
+        sizeof(strata_activation_config), 2U, view("reentry/main.strata"), view(source), nullptr,
+        nullptr,
+    };
+    strata_activation_info activation_info{};
+    activation_info.struct_size = sizeof(activation_info);
+    probe.activate =
+        strata_runtime_compile_and_activate(probe.runtime, &activation, &activation_info).status;
+    const strata_host_snapshot_config snapshot{
+        sizeof(strata_host_snapshot_config), view("reentry"), 1U, view("{}"),
+    };
+    probe.publish = strata_runtime_publish_host_snapshot(probe.runtime, &snapshot).status;
+    // Reads stay available to callbacks.
+    strata_runtime_memory_info memory{};
+    memory.struct_size = sizeof(memory);
+    probe.memory = strata_runtime_get_memory_info(probe.runtime, &memory).status;
+    std::string packet;
+    const strata_bytes_sink packet_sink{sizeof(strata_bytes_sink), &packet, &capture_bytes};
+    probe.packet = strata_surface_read_render_packet(probe.surface, &packet_sink).status;
+    // Another thread may not enter while this one is inside the runtime.
+    std::thread other([&probe] {
+        strata_runtime_memory_info other_memory{};
+        other_memory.struct_size = sizeof(other_memory);
+        probe.other_thread = strata_runtime_get_memory_info(probe.runtime, &other_memory).status;
+    });
+    other.join();
+}
+
+/** Callbacks cannot tear down or replace the runtime they run in; overlapping threads are refused. */
+void test_reentrant_and_cross_thread_calls(const std::filesystem::path& resource_root) {
+    ReentryProbe probe;
+    FragmentFixture fixture(resource_root, &present_reentrant, &probe);
+    probe.runtime = fixture.runtime;
+    probe.surface = fixture.surface;
+    strata_surface_frame_info info{};
+    check(fixture.frame(info).status == STRATA_STATUS_OK && probe.probed,
+          "the reentrancy probe frame did not complete");
+    check(probe.abandon == STRATA_STATUS_REENTRANT_CALL &&
+              probe.release == STRATA_STATUS_REENTRANT_CALL &&
+              probe.activate == STRATA_STATUS_REENTRANT_CALL &&
+              probe.publish == STRATA_STATUS_REENTRANT_CALL,
+          "a callback destroyed, replaced, or republished its own runtime mid-frame");
+    check(probe.memory == STRATA_STATUS_OK, "a callback could not read its runtime");
+    check(probe.packet == STRATA_STATUS_NOT_FOUND || probe.packet == STRATA_STATUS_OK,
+          "a callback could not read the last render packet");
+    check(probe.other_thread == STRATA_STATUS_WRONG_THREAD,
+          "a second thread entered a runtime another thread was inside");
+
+    // Serialized calls may move between threads once the runtime is idle.
+    strata_status handed_off = STRATA_STATUS_INTERNAL_ERROR;
+    std::thread render_thread([&fixture, &handed_off] {
+        strata_surface_frame_info frame_info{};
+        handed_off = fixture.frame(frame_info).status;
+    });
+    render_thread.join();
+    check(handed_off == STRATA_STATUS_OK, "an idle runtime refused a serialized call from a "
+                                          "different thread");
+}
+
 struct SubtargetCapture final {
     bool called = false;
     strata_status reserve_status = STRATA_STATUS_OK;
@@ -1696,6 +1778,7 @@ int strata_test_abi(const int argument_count, const char* const* const arguments
             test_extension_fragment_failure_isolation(arguments[1]);
             test_extension_allocation_failure_status(arguments[1]);
             test_extension_clip_balance(arguments[1]);
+            test_reentrant_and_cross_thread_calls(arguments[1]);
         }
         test_host_service_adapters();
         test_allocator_ownership_and_validation();

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -46,6 +47,70 @@ inline constexpr strata_capabilities capabilities =
                                                    const char* const message) noexcept {
     return runtime.core.diagnostics().emit(status, STRATA_DIAGNOSTIC_ERROR, code, message);
 }
+
+/** Whether an ABI call may run while a host callback of the same runtime is executing. */
+enum class Reentry : bool {
+    /** Structural calls: they may destroy or replace state the in-progress call is using. */
+    rejected,
+    /** Reads and host-service calls that leave core state unchanged. */
+    allowed,
+};
+
+/**
+ * Admits one ABI call into a runtime. Calls may come from any thread but never overlap: a call
+ * while another thread is inside the runtime is refused with STRATA_STATUS_WRONG_THREAD, and a
+ * structural call from inside a host callback is refused with STRATA_STATUS_REENTRANT_CALL.
+ * Neither refusal emits a diagnostic, since the diagnostic sink is itself a callback and the
+ * diagnostic store belongs to the thread inside the runtime. A null runtime is admitted so the
+ * export can apply its own null-handle contract.
+ */
+class EntryGuard final {
+  public:
+    EntryGuard(const strata_runtime* const runtime, const Reentry reentry) noexcept
+        : runtime_(runtime) {
+        if (runtime_ == nullptr)
+            return;
+        const std::thread::id self = std::this_thread::get_id();
+        std::thread::id idle{};
+        if (runtime_->active_thread.compare_exchange_strong(idle, self,
+                                                            std::memory_order_acq_rel)) {
+            runtime_->call_depth = 1U;
+            return;
+        }
+        if (idle != self) {
+            status_ = STRATA_STATUS_WRONG_THREAD;
+        } else if (reentry == Reentry::rejected) {
+            status_ = STRATA_STATUS_REENTRANT_CALL;
+        } else {
+            ++runtime_->call_depth;
+            return;
+        }
+        runtime_ = nullptr;
+    }
+
+    EntryGuard(const strata_surface* const surface, const Reentry reentry) noexcept
+        : EntryGuard(surface != nullptr ? surface->owner : nullptr, reentry) {}
+
+    ~EntryGuard() {
+        if (runtime_ != nullptr && --runtime_->call_depth == 0U)
+            runtime_->active_thread.store(std::thread::id{}, std::memory_order_release);
+    }
+
+    EntryGuard(const EntryGuard&) = delete;
+    EntryGuard& operator=(const EntryGuard&) = delete;
+
+    [[nodiscard]] bool refused() const noexcept {
+        return status_ != STRATA_STATUS_OK;
+    }
+
+    [[nodiscard]] strata_result refusal() const noexcept {
+        return core::result(status_);
+    }
+
+  private:
+    const strata_runtime* runtime_;
+    strata_status status_ = STRATA_STATUS_OK;
+};
 
 /**
  * Runtime-attached firewall: a null runtime is an invalid argument, and an exception escaping the

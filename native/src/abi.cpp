@@ -179,13 +179,18 @@ strata_result strata_runtime_release(strata_runtime* const runtime) noexcept {
     if (runtime == nullptr) {
         return strata::core::result(STRATA_STATUS_OK);
     }
-    if (!runtime->surfaces.empty()) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.RUNTIME.LIVE_SURFACES",
-            "Runtime release requires every owned Surface to complete or explicitly abandon its release barrier first."
-        );
+    {
+        // The guard must end before destruction; it only admits the release.
+        const EntryGuard entry(runtime, Reentry::rejected);
+        if (entry.refused()) return entry.refusal();
+        if (!runtime->surfaces.empty()) {
+            return runtime_failure(
+                *runtime,
+                STRATA_STATUS_INVALID_ARGUMENT,
+                "STRATA.RUNTIME.LIVE_SURFACES",
+                "Runtime release requires every owned Surface to complete or explicitly abandon its release barrier first."
+            );
+        }
     }
     const strata::core::HostAllocator allocator = runtime->core.allocator();
     std::destroy_at(runtime);
@@ -197,6 +202,9 @@ strata_result strata_runtime_get_memory_info(
     const strata_runtime* const runtime,
     strata_runtime_memory_info* const out_info
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr || out_info == nullptr ||
         out_info->struct_size < sizeof(strata_runtime_memory_info)) {
         return invalid_argument();
@@ -226,6 +234,9 @@ strata_result strata_runtime_next_identity(
     strata_runtime* const runtime,
     uint64_t* const out_identity
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) {
         return invalid_argument();
     }
@@ -250,6 +261,9 @@ strata_result strata_runtime_create_snapshot(
     if (out_snapshot != nullptr) {
         *out_snapshot = nullptr;
     }
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) {
         return invalid_argument();
     }

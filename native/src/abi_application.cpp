@@ -108,6 +108,9 @@ strata_result strata_runtime_publish_host_snapshot(
     strata_runtime* const runtime,
     const strata_host_snapshot_config* const snapshot
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (snapshot == nullptr || snapshot->struct_size < sizeof(strata_host_snapshot_config) ||
         !valid_view(snapshot->id, false) || !valid_view(snapshot->values_json, false)) {
@@ -147,6 +150,9 @@ strata_result strata_runtime_publish_image(
     strata_runtime* const runtime,
     const strata_runtime_image_config* const image
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (image == nullptr || image->struct_size < sizeof(strata_runtime_image_config) ||
         !valid_view(image->id, false) || image->reserved != 0U ||
@@ -178,6 +184,9 @@ strata_result strata_runtime_release_image(
     strata_runtime* const runtime,
     const strata_string_view id
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (!valid_view(id, false)) {
         return runtime_failure(
@@ -197,6 +206,9 @@ strata_result strata_runtime_get_host_snapshot_info(
     const strata_runtime* const runtime,
     strata_host_snapshot_info* const out_info
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr || out_info == nullptr ||
         out_info->struct_size < sizeof(strata_host_snapshot_info)) {
         return invalid_argument();
@@ -217,6 +229,9 @@ strata_result strata_runtime_get_host_snapshot_generation(
     const strata_string_view id,
     std::uint64_t* const out_generation
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr || out_generation == nullptr || !valid_view(id, false)) {
         return invalid_argument();
     }
@@ -232,6 +247,9 @@ strata_result strata_runtime_read_diagnostics(
     const strata_runtime* const runtime,
     const strata_diagnostics_snapshot_sink* const sink
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr || sink == nullptr ||
         sink->struct_size < sizeof(strata_diagnostics_snapshot_sink) || sink->emit == nullptr) {
         return invalid_argument();
@@ -247,6 +265,9 @@ strata_result strata_runtime_read_diagnostics(
 }
 
 strata_result strata_runtime_clear_diagnostics(strata_runtime* const runtime) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     return runtime_call(runtime, AbiCall{"Diagnostic clearing"}, [&] {
         runtime->core.diagnostics().clear();
         if (runtime->core.has_application()) {
@@ -266,6 +287,9 @@ strata_result strata_runtime_read_host_value_json(
     const strata_string_view path,
     const strata_value_json_sink* const sink
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (!valid_view(path, false) || sink == nullptr ||
         sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr) {
@@ -300,6 +324,9 @@ strata_result strata_runtime_configure_application(
     strata_runtime* const runtime,
     const strata_application_config* const config
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (config == nullptr || config->struct_size < sizeof(strata_application_config) ||
         !valid_view(config->id, false) || !valid_view(config->schemas_json, true) ||
@@ -359,6 +386,9 @@ strata_result strata_runtime_compile_and_activate(
     const strata_activation_config* const config,
     strata_activation_info* const out_info
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (out_info == nullptr || out_info->struct_size < sizeof(strata_activation_info) ||
         config == nullptr || config->struct_size < sizeof(strata_activation_config) ||
@@ -431,6 +461,9 @@ strata_result strata_runtime_activate_compiled_module(
     const strata_compiled_activation_config* const config,
     strata_activation_info* const out_info
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (out_info == nullptr || out_info->struct_size < sizeof(strata_activation_info) ||
         config == nullptr ||
@@ -490,6 +523,9 @@ strata_result strata_runtime_read_material_declarations(
     const size_t capacity,
     size_t* const out_count
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr || out_count == nullptr) return invalid_argument();
     if (!runtime->core.has_application()) {
         return runtime_failure(
@@ -537,6 +573,9 @@ strata_result strata_runtime_read_effect_pass_declarations(
     const size_t capacity,
     size_t* const out_count
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr || out_count == nullptr) return invalid_argument();
     if (!runtime->core.has_application()) {
         return runtime_failure(
@@ -614,6 +653,9 @@ strata_result strata_runtime_read_active_unit_json(
     strata_runtime* const runtime,
     const strata_value_json_sink* const sink
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr) {
         return runtime_failure(
@@ -645,6 +687,9 @@ strata_result strata_runtime_read_source_map_entry_json(
     const strata_string_view compiled_path,
     const strata_value_json_sink* const sink
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (!valid_view(compiled_path, false) || !valid_json_sink(sink)) {
         return runtime_failure(
@@ -690,6 +735,9 @@ strata_result strata_runtime_read_source_map_entries_at_json(
     const std::uint32_t column,
     const strata_value_json_sink* const sink
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (!valid_view(source_id, false) || line == 0U || column == 0U || !valid_json_sink(sink)) {
         return runtime_failure(
@@ -730,6 +778,9 @@ strata_result strata_runtime_register_action_handler(
     strata_action_registration** const out_registration
 ) noexcept {
     if (out_registration != nullptr) *out_registration = nullptr;
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (out_registration == nullptr || config == nullptr ||
         config->struct_size < sizeof(strata_action_handler_config) ||
@@ -840,6 +891,9 @@ strata_result strata_runtime_dispatch_action_json(
     const strata_action_dispatch_config* const config,
     strata_action_dispatch_info* const out_info
 ) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr) return invalid_argument();
     if (!valid_action_dispatch_config(config) || out_info == nullptr ||
         out_info->struct_size < sizeof(strata_action_dispatch_info)) {

@@ -703,7 +703,6 @@ struct RuntimeControl final {
     RuntimeControl& operator=(const RuntimeControl&) = delete;
 
     strata_runtime* value;
-    std::mutex host_snapshot_mutex;
     std::uint64_t next_host_snapshot_generation = 1U;
     std::shared_ptr<RuntimeCallbacks> callbacks;
     std::shared_ptr<ResourceBridge> resource;
@@ -732,13 +731,18 @@ inline void clear_retained_diagnostics(RuntimeControl* const control) noexcept {
     control->callbacks->diagnostics.clear();
 }
 
+/**
+ * Publishes one host snapshot with the next generation. Like every runtime call it follows the
+ * threading contract in strata.h: the host serializes calls into one runtime, and a publication
+ * from inside a callback or racing another thread fails with an AbiError instead of entering the
+ * single-threaded host store. The generation counter therefore needs no lock of its own.
+ */
 [[nodiscard]] inline std::uint64_t
 publish_host_snapshot(const std::shared_ptr<RuntimeControl>& control, const std::string_view id,
                       const std::string_view value_json) {
     if (control == nullptr || control->value == nullptr) {
         throw std::logic_error("host snapshot publication requires a live runtime");
     }
-    const std::scoped_lock lock(control->host_snapshot_mutex);
     std::uint64_t retained_generation = 0U;
     const strata_result retained = strata_runtime_get_host_snapshot_generation(
         control->value, strata_string_view{id.data(), id.size()}, &retained_generation);

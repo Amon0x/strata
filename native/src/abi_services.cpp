@@ -19,6 +19,9 @@ using namespace strata::abi_detail;
 strata_result
 strata_runtime_set_resource_adapter(strata_runtime* const runtime,
                                     const strata_resource_adapter* const adapter) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (adapter == nullptr) {
@@ -44,6 +47,9 @@ strata_runtime_set_resource_adapter(strata_runtime* const runtime,
 strata_result strata_runtime_read_resource(strata_runtime* const runtime,
                                            const strata_string_view resource_id,
                                            const strata_bytes_sink* const sink) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (!valid_view(resource_id, false) || sink == nullptr ||
@@ -83,6 +89,9 @@ strata_result strata_runtime_read_resource(strata_runtime* const runtime,
 strata_result
 strata_runtime_set_clipboard_adapter(strata_runtime* const runtime,
                                      const strata_clipboard_adapter* const adapter) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (adapter == nullptr) {
@@ -101,6 +110,9 @@ strata_runtime_set_clipboard_adapter(strata_runtime* const runtime,
 
 strata_result strata_runtime_clipboard_read(strata_runtime* const runtime,
                                             const strata_string_sink* const text_sink) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (text_sink == nullptr || text_sink->struct_size < sizeof(strata_string_sink) ||
@@ -140,6 +152,9 @@ strata_result strata_runtime_clipboard_read(strata_runtime* const runtime,
 
 strata_result strata_runtime_clipboard_write(strata_runtime* const runtime,
                                              const strata_string_view text) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (!valid_view(text, true)) {
@@ -170,6 +185,9 @@ strata_result strata_runtime_clipboard_write(strata_runtime* const runtime,
 
 strata_result strata_runtime_set_ime_adapter(strata_runtime* const runtime,
                                              const strata_ime_adapter* const adapter) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (adapter != nullptr &&
@@ -200,6 +218,9 @@ strata_result strata_runtime_set_ime_adapter(strata_runtime* const runtime,
 
 strata_result strata_runtime_ime_set_active(strata_runtime* const runtime,
                                             const uint32_t active) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (active > 1U) {
@@ -223,6 +244,9 @@ strata_result strata_runtime_ime_set_active(strata_runtime* const runtime,
 
 strata_result strata_runtime_ime_set_cursor_rect(strata_runtime* const runtime,
                                                  const strata_rect logical_rect) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (!std::isfinite(logical_rect.x) || !std::isfinite(logical_rect.y) ||
@@ -250,6 +274,9 @@ strata_result strata_runtime_ime_set_cursor_rect(strata_runtime* const runtime,
 strata_result
 strata_runtime_set_effect_adapter(strata_runtime* const runtime,
                                   const strata_effect_adapter* const adapter) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (adapter == nullptr) {
@@ -268,6 +295,9 @@ strata_runtime_set_effect_adapter(strata_runtime* const runtime,
 strata_result strata_runtime_emit_effect_json(strata_runtime* const runtime,
                                               const strata_string_view effect_id,
                                               const strata_string_view payload_json) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (!valid_view(effect_id, false) || !valid_view(payload_json, true)) {
@@ -350,6 +380,9 @@ void configure_durable_store(strata_runtime& runtime_handle) {
 
 strata_result strata_runtime_set_durable_store_adapter(
     strata_runtime* const runtime, const strata_durable_store_adapter* const adapter) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (!runtime->core.has_application() || runtime->durable_store.has_value() ||
@@ -377,6 +410,9 @@ strata_result
 strata_runtime_read_durable_shell_value_json(strata_runtime* const runtime,
                                              const strata_string_view key,
                                              const strata_value_json_sink* const sink) noexcept {
+    const EntryGuard entry(runtime, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (!runtime->core.has_application() || !valid_view(key, false) || sink == nullptr ||
@@ -402,6 +438,9 @@ strata_result
 strata_runtime_write_durable_shell_value_json(strata_runtime* const runtime,
                                               const strata_string_view key,
                                               const strata_string_view value_json) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (!runtime->core.has_application() || !valid_view(key, false) ||
@@ -420,6 +459,9 @@ strata_runtime_write_durable_shell_value_json(strata_runtime* const runtime,
 }
 
 strata_result strata_runtime_flush_durable_state(strata_runtime* const runtime) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (!runtime->core.has_application()) {
@@ -439,6 +481,9 @@ strata_result strata_runtime_flush_durable_state(strata_runtime* const runtime) 
 strata_result
 strata_runtime_set_async_host_adapter(strata_runtime* const runtime,
                                       const strata_async_host_adapter* const adapter) noexcept {
+    const EntryGuard entry(runtime, Reentry::rejected);
+    if (entry.refused())
+        return entry.refusal();
     if (runtime == nullptr)
         return invalid_argument();
     if (!runtime->core.has_application() || runtime->async_host.has_value() || adapter == nullptr ||

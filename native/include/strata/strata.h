@@ -1,6 +1,36 @@
 #ifndef STRATA_STRATA_H
 #define STRATA_STRATA_H
 
+/*
+ * Threading
+ *
+ * A runtime and its Surfaces are single-threaded objects. Calls into one runtime may come from
+ * any thread, but they must not overlap: the host serializes them (for example by constructing
+ * and activating on one thread before handing the Surface to a render thread). A call made while
+ * another thread is inside the same runtime is refused with STRATA_STATUS_WRONG_THREAD and leaves
+ * the runtime untouched. Distinct runtimes are independent.
+ *
+ * The async completion functions (strata_runtime_async_progress, strata_runtime_async_succeed_json
+ * and strata_runtime_async_fail) are the exception: they post to a synchronized mailbox, may be
+ * called from any thread at any time, and report failures as bare statuses.
+ *
+ * Reentrancy
+ *
+ * Host callbacks (diagnostic sinks, action handlers, resource/durable/async/clipboard/IME/effect
+ * adapters, byte and JSON sinks, and extension hooks) run inside the runtime call that triggered
+ * them. From inside a callback the host may call back into the same runtime only for reads and
+ * host-service calls: the get/read functions, strata_runtime_next_identity,
+ * strata_runtime_create_snapshot, the clipboard/IME/effect calls, strata_runtime_read_resource,
+ * strata_surface_read_render_packet, and the profiler and diagnostic reads. Every other runtime or
+ * Surface call (release, abandon, activation, configuration, adapter installation, publication,
+ * input, framing, themes, and so on) is refused with STRATA_STATUS_REENTRANT_CALL, because it could
+ * destroy or replace state the in-progress call is using. Refusals emit no diagnostic. Extension
+ * context functions (strata_widget_*, strata_behavior_*) are valid only inside their own callback.
+ *
+ * No C++ exception crosses this ABI: every export is noexcept to C++ callers, and host callbacks
+ * must not throw either.
+ */
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -53,6 +83,10 @@ typedef uint32_t strata_status;
 #define STRATA_STATUS_ACTIVATION_REJECTED UINT32_C(11)
 #define STRATA_STATUS_SERVICE_UNAVAILABLE UINT32_C(12)
 #define STRATA_STATUS_INPUT_QUEUE_FULL UINT32_C(13)
+/* A callback called back into a runtime operation that may not nest; see Threading above. */
+#define STRATA_STATUS_REENTRANT_CALL UINT32_C(14)
+/* Another thread is inside the runtime; calls into one runtime must be serialized. */
+#define STRATA_STATUS_WRONG_THREAD UINT32_C(15)
 
 typedef uint32_t strata_diagnostic_severity;
 
