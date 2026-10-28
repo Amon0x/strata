@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -8,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -7879,6 +7881,62 @@ overlay Errors {
           "one component's error kept the body around it from being cached");
 }
 
+void test_repeater_keys_are_kept_by_their_generation() {
+    using namespace strata;
+    const data::JsonValue schemas = data::parse_json(R"({
+      "extensionPackages":[],
+      "widgets":{"registry":"repeater-keys","required":[],"definitions":[]},
+      "actions":{"registry":"repeater-keys","required":[],"definitions":[]},
+      "host":[{
+        "path":"model","nullable":false,
+        "type":{"kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[{
+          "name":"rows","required":true,"nullable":false,
+          "type":{"kind":"list","maximumItems":8192,"elementNullable":false,"element":{
+            "kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[
+              {"name":"id","type":{"kind":"string"},"required":true,"nullable":false}
+            ]}}
+        }]}
+      }]
+    })");
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
+    runtime::ApplicationContext application("repeater-keys", bundle);
+    constexpr std::size_t row_count = 4000U;
+    std::string rows = "[";
+    for (std::size_t index = 0U; index < row_count; ++index)
+        rows += (index == 0U ? "" : ",") + std::string("{\"id\":\"r") + std::to_string(index) + "\"}";
+    rows += "]";
+    static_cast<void>(application.host().adopt(bundle->host_snapshot(
+        "repeater-keys-model", 1U, data::parse_json("{\"model\":{\"rows\":" + rows + "}}"))));
+    activate_description_fixture(application, "repeater-keys", R"(
+overlay Keys {
+  root Repeater(key: "keys.rows", estimatedItemExtent: 24) {
+    for row in model.rows where row.id != "r1" {
+      Text(key: format("{0}.key", row.id), text: row.id)
+    }
+  }
+}
+)");
+    ui::DescriptionBuilder builder(application);
+    const ui::DescriptionBuildResult built = builder.build(runtime::LayerRole::overlay, "Keys");
+    const std::shared_ptr<const runtime::IndexableSequence> sequence =
+        built.root->children->at(0U)->virtual_sequence;
+    check(sequence != nullptr && sequence->count() == row_count - 1U &&
+              sequence->key_at(1U) == "r2.key" && sequence->source_index_at(1U) == 2U &&
+              sequence->index_of_key("r2.key") == std::optional<std::size_t>(1U) &&
+              !sequence->index_of_key("r1.key").has_value(),
+          "a Repeater generation answered the wrong keys");
+    // Virtualization asks for the index of every key it measured: a generation answers from the
+    // keys it evaluated once, not by evaluating them again for each question.
+    const auto started = std::chrono::steady_clock::now();
+    for (std::size_t index = 0U; index < sequence->count(); ++index) {
+        check(sequence->index_of_key(sequence->key_at(index)) == std::optional<std::size_t>(index),
+              "a Repeater key did not find its own index");
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    check(elapsed < std::chrono::milliseconds(500),
+          "Repeater key lookups evaluated the generation's keys again");
+}
+
 int strata_test_ui(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--collections") {
@@ -7956,6 +8014,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_repeater_follows_host_rows_it_reads();
             test_loop_component_keys_name_their_instances();
             test_component_refresh_checks_the_body_before_its_components();
+            test_repeater_keys_are_kept_by_their_generation();
         }
         std::cout << "strata_ui_tests: OK\n";
         return 0;

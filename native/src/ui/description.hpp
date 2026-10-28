@@ -66,7 +66,6 @@ class DescriptionBuilder final {
 
     struct GeneratedRowEvaluationContext;
     struct LazyRowEvaluationState;
-    struct RepeaterIdentityEvaluationState;
     struct WidgetRowEvaluationState;
 
     struct Scope final {

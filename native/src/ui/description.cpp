@@ -126,24 +126,37 @@ declared_binding(const Symbol name, const ExpressionValue& value,
     return frame;
 }
 
+struct TransparentStringHash final {
+    using is_transparent = void;
+    [[nodiscard]] std::size_t operator()(const std::string_view key) const noexcept {
+        return std::hash<std::string_view>{}(key);
+    }
+};
+
 [[nodiscard]] bool same_inputs(const std::vector<ExpressionValue>& left,
                                const std::vector<ExpressionValue>& right) {
     return std::ranges::equal(left, right, runtime::same_expression_value);
 }
 
+/**
+ * One Repeater generation: its items and their root keys. A generation evaluates every key once
+ * (it must, to reject duplicates), so it keeps them, and a key's index, instead of evaluating them
+ * again whenever virtualization asks.
+ */
 class RepeaterIndexableSequence final : public runtime::IndexableSequence {
   public:
-    using KeyFactory = std::function<std::string(const runtime::Value&, std::size_t)>;
+    using KeyIndexes = std::unordered_map<std::string, std::size_t, TransparentStringHash,
+                                          std::equal_to<>>;
 
     RepeaterIndexableSequence(const std::uint64_t generation, runtime::Value source,
                               std::optional<std::vector<std::size_t>> selection,
-                              KeyFactory key_factory)
+                              std::vector<std::string> keys, KeyIndexes indexes)
         : generation_(generation), source_(std::move(source)), selection_(std::move(selection)),
-          key_factory_(std::move(key_factory)) {
+          keys_(std::move(keys)), indexes_(std::move(indexes)) {
         if (source_.list() == nullptr)
             throw std::invalid_argument("repeater sequence source must be a list");
-        if (!key_factory_)
-            throw std::invalid_argument("repeater sequence requires a key evaluator");
+        if (keys_.size() != count() || indexes_.size() != keys_.size())
+            throw std::invalid_argument("repeater sequence requires one distinct key per item");
     }
 
     [[nodiscard]] std::uint64_t generation() const noexcept override {
@@ -165,23 +178,23 @@ class RepeaterIndexableSequence final : public runtime::IndexableSequence {
     }
 
     [[nodiscard]] std::string key_at(const std::size_t index) const override {
-        return key_factory_(item_at(index), source_index_at(index));
+        if (index >= keys_.size())
+            throw std::out_of_range("repeater sequence index is outside the selection");
+        return keys_[index];
     }
 
     [[nodiscard]] std::optional<std::size_t>
     index_of_key(const std::string_view key) const override {
-        for (std::size_t index = 0U; index < count(); ++index) {
-            if (key_at(index) == key)
-                return index;
-        }
-        return std::nullopt;
+        const auto found = indexes_.find(key);
+        return found != indexes_.end() ? std::optional<std::size_t>(found->second) : std::nullopt;
     }
 
   private:
     std::uint64_t generation_;
     runtime::Value source_;
     std::optional<std::vector<std::size_t>> selection_;
-    KeyFactory key_factory_;
+    std::vector<std::string> keys_;
+    KeyIndexes indexes_;
 };
 
 /**
@@ -403,42 +416,6 @@ std::string DescriptionBuilder::keyed_instance_path(const Scope& scope, const st
     }
     return component_instance_path(scope.instance_path(), type, key, source_path);
 }
-
-struct DescriptionBuilder::RepeaterIdentityEvaluationState final {
-    RepeaterIdentityEvaluationState(runtime::ApplicationContext& application,
-                                    const WidgetRegistry& source_widgets,
-                                    std::shared_ptr<const runtime::RuntimeUnit> unit,
-                                    Scope source_scope, const Symbol source_item,
-                                    const std::optional<Symbol> source_index,
-                                    const runtime::IdentityId source_identity)
-        : widgets(source_widgets),
-          evaluator(std::make_unique<DescriptionBuilder>(application, widgets)),
-          scope(std::move(source_scope)), item(source_item), index(source_index),
-          identity(source_identity) {
-        evaluator->use_unit(unit);
-        evaluator->contextual_host_roots_ = scope.expressions.shared_contextual_host_roots();
-    }
-
-    [[nodiscard]] std::string key(const runtime::Value& value, const std::size_t source_index) {
-        std::scoped_lock lock(mutex);
-        Scope item_scope = scope;
-        item_scope.expressions.push(item_frame(item, value, index, source_index));
-        // The complete domain was validated while the sequence generation was constructed.
-        // Later observed-key queries are deterministic reads and do not leak counters or
-        // diagnostics into an unrelated row materialization transaction.
-        evaluator->diagnostics_.clear();
-        evaluator->evaluated_expressions_ = 0U;
-        return evaluator->evaluate_repeater_identity(identity, item_scope);
-    }
-
-    WidgetRegistry widgets;
-    std::unique_ptr<DescriptionBuilder> evaluator;
-    Scope scope;
-    Symbol item;
-    std::optional<Symbol> index;
-    runtime::IdentityId identity;
-    std::mutex mutex;
-};
 
 struct DescriptionBuilder::GeneratedRowEvaluationContext final {
     GeneratedRowEvaluationContext(runtime::ApplicationContext& application,
@@ -1128,7 +1105,13 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
                 selection.emplace();
                 selection->reserve(values->values.size());
             }
-            std::map<std::string, std::size_t, std::less<>> first_source_index_by_key;
+            std::vector<std::string> keys;
+            RepeaterIndexableSequence::KeyIndexes indexes;
+            keys.reserve(values->values.size());
+            indexes.reserve(values->values.size());
+            const auto source_index_of = [&selection](const std::size_t visible) {
+                return selection.has_value() ? (*selection)[visible] : visible;
+            };
             for (std::size_t index = 0U; index < values->values.size(); ++index) {
                 Scope item_scope = scope;
                 item_scope.expressions.push(
@@ -1139,16 +1122,16 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
                                       program.expression(statement.filter).source))) {
                     continue;
                 }
-                const std::string canonical_key =
+                std::string canonical_key =
                     evaluate_repeater_identity(statement.identity, item_scope);
-                const auto [duplicate, inserted] =
-                    first_source_index_by_key.emplace(canonical_key, index);
+                const auto [duplicate, inserted] = indexes.try_emplace(canonical_key, keys.size());
                 if (!inserted) {
                     throw std::invalid_argument("Repeater root key '" + canonical_key +
                                                 "' is duplicated at source indexes " +
-                                                std::to_string(duplicate->second) + " and " +
-                                                std::to_string(index));
+                                                std::to_string(source_index_of(duplicate->second)) +
+                                                " and " + std::to_string(index));
                 }
+                keys.push_back(std::move(canonical_key));
                 if (selection.has_value())
                     selection->push_back(index);
             }
@@ -1158,31 +1141,9 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
                 previous_sequence != nullptr ? previous_sequence->generation() : 0U;
             if (previous_generation == std::numeric_limits<std::uint64_t>::max())
                 throw std::overflow_error("repeater sequence generation exhausted");
-            // Later key queries read exactly what this generation read.
-            Scope identity_scope = scope;
-            identity_scope.expressions.set_host_dependency_overrides(
-                std::make_shared<const runtime::FrozenHostReads>(stamp.host_dependencies));
-            runtime::ScopeFrame frozen;
-            for (const auto& [name, value] : stamp.lexical_dependencies) {
-                // A source may read an outer binding the loop's own names shadow: the per-item
-                // domain is never frozen.
-                if (name == item_name || (index_name.has_value() && name == *index_name))
-                    continue;
-                frozen.bindings.push_back(
-                    runtime::ScopeBinding{name, true, runtime::ScopeStateBinding::inherit,
-                                          runtime::restore_expression_dependency(value), nullptr});
-            }
-            if (!frozen.bindings.empty())
-                identity_scope.expressions.push(std::move(frozen));
-            auto identity_evaluation = std::make_shared<RepeaterIdentityEvaluationState>(
-                application_, widgets_, unit_, std::move(identity_scope), item_name, index_name,
-                statement.identity);
             sequence = std::make_shared<const RepeaterIndexableSequence>(
-                previous_generation + 1U, source_items, std::move(selection),
-                [identity_evaluation = std::move(identity_evaluation)](
-                    const runtime::Value& item, const std::size_t source_index) {
-                    return identity_evaluation->key(item, source_index);
-                });
+                previous_generation + 1U, source_items, std::move(selection), std::move(keys),
+                std::move(indexes));
         }
     }
 
