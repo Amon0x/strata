@@ -1037,6 +1037,41 @@ void InputRouter::set_hovered_subtarget(const std::optional<WidgetSubtarget>& ta
         frame_invalidator_();
 }
 
+RetainedNode* InputRouter::subtarget_hover_target(const Point position, RetainedNode* const hit,
+                                                  std::optional<WidgetSubtarget>& subtarget) {
+    subtarget = hit_subtarget(position, hit);
+    if (!subtarget.has_value())
+        return hit;
+    RetainedNode* owner = tree_->find_identity(subtarget->owner_identity);
+    if (subtarget->kind == WidgetSubtargetKind::scrim && owner != nullptr && hit != nullptr &&
+        hit != owner && descendant_of(*hit, *owner)) {
+        subtarget.reset();
+        return hit;
+    }
+    return owner != nullptr ? owner : hit;
+}
+
+void InputRouter::refresh_hover() {
+    // A pressed, dragging or absent pointer hovers what its own events say.
+    if (tree_ == nullptr || layout_ == nullptr || !hover_position_.has_value() ||
+        !hover_present_ || !pressed_pointer_targets_.empty() || !drag_sessions_.empty() ||
+        scrollbar_drag_.has_value()) {
+        return;
+    }
+    std::optional<WidgetSubtarget> subtarget;
+    RetainedNode* hover_target = subtarget_hover_target(
+        *hover_position_, widget_native_input_owner(hit_test(*hover_position_)), subtarget);
+    if (RetainedNode* modal = active_modal(); modal != nullptr) {
+        const bool above_modal = subtarget.has_value() && subtarget->detached &&
+                                 subtarget->owner_identity != modal->identity() &&
+                                 subtarget->z_index > detached_overlay_z_index(*modal);
+        if (!above_modal && (hover_target == nullptr || !descendant_of(*hover_target, *modal)))
+            hover_target = modal;
+    }
+    set_hovered_subtarget(subtarget);
+    hover_route(hover_target);
+}
+
 RetainedNode* InputRouter::interactive_ancestor(RetainedNode* node) const noexcept {
     for (RetainedNode* current = node; current != nullptr; current = current->parent()) {
         if (inside_native_presentation(*current))
@@ -1271,23 +1306,14 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
         restart_hover_disclosures(event.type == PointerEventType::press);
     }
     hover_position_ = event.position;
+    hover_present_ = event.type != PointerEventType::cancel;
     // A press changes modality even when it lands on the already-focused control or is consumed.
     // Motion alone must not erase a keyboard user's location indicator.
     if (event.type == PointerEventType::press)
         set_focus_visibility(false);
-    RetainedNode* hover_target = widget_native_input_owner(hit_test(event.position));
-    RetainedNode* const scrollbar_hit_target = hover_target;
-    routed_subtarget_ = hit_subtarget(event.position, hover_target);
-    if (routed_subtarget_.has_value()) {
-        RetainedNode* owner = tree_->find_identity(routed_subtarget_->owner_identity);
-        if (routed_subtarget_->kind == WidgetSubtargetKind::scrim && owner != nullptr &&
-            hover_target != nullptr && hover_target != owner &&
-            descendant_of(*hover_target, *owner)) {
-            routed_subtarget_.reset();
-        } else if (owner != nullptr) {
-            hover_target = owner;
-        }
-    }
+    RetainedNode* const scrollbar_hit_target = widget_native_input_owner(hit_test(event.position));
+    RetainedNode* hover_target =
+        subtarget_hover_target(event.position, scrollbar_hit_target, routed_subtarget_);
     RetainedNode* const static_text_owner =
         event.type == PointerEventType::press && event.button == 0
             ? selectable_static_text_owner(hover_target)

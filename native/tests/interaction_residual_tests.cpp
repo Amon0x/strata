@@ -2549,6 +2549,64 @@ overlay BatchedReveal {
           "text after the key revealing a field did not reach it");
 }
 
+void test_hover_follows_content_under_still_pointer(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay HoverScroll {
+  state open = false;
+  root Panel(key: "hover.root", layout: { kind: "COLUMN", width: 300, height: 300 }) {
+    Scroll(key: "hover.scroll", vertical: true, horizontal: false, layout: { width: 200, height: 120 }) {
+      Panel(key: "hover.content", layout: { kind: "COLUMN", width: 200, height: 400 }) {
+        Panel(key: "hover.row.0", layout: { width: 200, height: 40 })
+        Panel(key: "hover.row.1", layout: { width: 200, height: 40 })
+        Panel(key: "hover.row.2", layout: { width: 200, height: 40 })
+        Panel(key: "hover.row.3", layout: { width: 200, height: 280 })
+      }
+    }
+    if open {
+      Panel(key: "hover.popup", layout: { kind: "PORTAL", width: 200, height: 120, anchorPoint: { x: 0, y: 0 }, anchorGap: 0, anchorSide: "BOTTOM" })
+    }
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("hover-scroll", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "HoverScroll", 300.0, 300.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const auto hovered = [&surface](const std::string_view key) {
+        const ui::RetainedNode* node = surface->tree().find_key(key);
+        return node != nullptr && surface->input().hovered(node->identity());
+    };
+    const ui::Point still = center(
+        surface->layout().find(surface->tree().find_key("hover.row.0")->identity())->bounds);
+    std::vector<ui::SurfaceInputEvent> events;
+    events.emplace_back(ui::PointerInputEvent{still, ui::PointerEventType::move, 4, 0});
+    static_cast<void>(surface->input().enqueue(std::move(events)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(hovered("hover.row.0") && !hovered("hover.row.2"), "hover fixture did not hover row 0");
+
+    // Content scrolled beneath a pointer that does not move: the row now under it is hovered.
+    ui::InputOperationResult scrolled;
+    check(surface->input().scroll_to("hover.scroll", ui::Point{0.0, 80.0}, scrolled),
+          "hover fixture did not scroll");
+    for (int frame = 0; frame < 2; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    check(hovered("hover.row.2") && !hovered("hover.row.0"),
+          "hover stayed on content that scrolled away from a still pointer");
+
+    // A popup opening under the still pointer takes the hover.
+    static_cast<void>(surface->dispatch_action(
+        "state.set", object({{"name", runtime::Value("open")}, {"value", runtime::Value(true)}}),
+        "test", std::string("hover.root"), runtime::Value{}));
+    for (int frame = 0; frame < 2; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    check(surface->tree().find_key("hover.popup") != nullptr,
+          "hover fixture did not open its popup");
+    check(hovered("hover.popup") && !hovered("hover.row.2"),
+          "a popup opened under a still pointer did not take its hover");
+}
+
 } // namespace
 
 int strata_test_interaction_residual(const int argument_count, const char* const* const arguments) {
@@ -2586,6 +2644,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_sticky_table_header_blocks_hits(resources);
         test_subtargets_hit_in_presented_space(resources);
         test_queued_batch_sees_rebuilt_tree(resources);
+        test_hover_follows_content_under_still_pointer(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

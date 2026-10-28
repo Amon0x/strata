@@ -748,6 +748,7 @@ InputOperationResult InputRouter::after_layout() {
         reveal_node(*target, reveal.padding, result);
     }
     route_active_lifecycle_hooks(true, result);
+    refresh_hover();
     update_editor_scroll();
     std::optional<runtime::HostServiceRect> ime_cursor;
     if (focused_.has_value() && ime_cursor_rect_resolver_) {

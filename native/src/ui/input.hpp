@@ -459,6 +459,17 @@ class InputRouter final {
     /** Routes the blur of the node losing focus, commits its editor and records the change. */
     void blur(RetainedNode& previous, std::string_view reason, InputOperationResult& result);
     void hover_route(const RetainedNode* target);
+    /**
+     * The hovered node for a hit at `hit`: the owner of the subtarget hit there, which `subtarget`
+     * receives, unless that is a scrim behind the hit.
+     */
+    [[nodiscard]] RetainedNode* subtarget_hover_target(Point position, RetainedNode* hit,
+                                                       std::optional<WidgetSubtarget>& subtarget);
+    /**
+     * Hovers what is now under a still pointer: content moves beneath it when it scrolls,
+     * animates or opens a popup, without any pointer event to say so.
+     */
+    void refresh_hover();
     runtime::ActionDispatchOutcome emit(data::JsonValue event,
                                         const std::shared_ptr<const runtime::ActionValue>& action,
                                         const RetainedNode& node, runtime::Value event_value,
@@ -742,6 +753,8 @@ class InputRouter final {
     std::optional<std::uint64_t> focus_before_containment_;
     std::set<std::uint64_t> hovered_;
     std::optional<Point> hover_position_;
+    // Whether the pointer is over the surface at hover_position_ (it has not left or cancelled).
+    bool hover_present_ = false;
     std::map<std::uint64_t, std::int64_t> hover_started_nanos_;
     std::set<std::uint64_t> matured_command_tooltips_;
     /** What the authored presentation state last synchronized from; equal inputs skip the pass. */

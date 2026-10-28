@@ -226,6 +226,9 @@ InputOperationResult InputRouter::scroll(const ScrollInputEvent event) {
     result.processed_events = 1U;
     if (tree_ == nullptr || layout_ == nullptr) return result;
 
+    // The wheel turns under the pointer: that is where the pointer is.
+    hover_position_ = event.position;
+    hover_present_ = true;
     RetainedNode* target = widget_native_input_owner(hit_test(event.position));
     if (RetainedNode* modal = active_modal(); modal != nullptr &&
         (target == nullptr || !descendant_of(*target, *modal))) {
