@@ -568,6 +568,55 @@ void test_long_single_line_compiles_in_linear_time() {
               "ms for the same source on separate lines");
 }
 
+// Statement keywords are names wherever a name is expected: after '.', as map keys and arguments.
+void test_statement_keywords_are_member_names() {
+    const auto result = compile_source(
+        "screen Main {\n"
+        "  state job = { state: \"s\", from: \"f\", to: \"t\", in: \"i\", where: \"w\", "
+        "derived: \"d\", root: \"r\", if: \"c\" };\n"
+        "  root Panel {\n"
+        "    Text(text: job.state) Text(text: job.from) Text(text: job.to)\n"
+        "    Text(text: job.in) Text(text: job.where) Text(text: job.derived)\n"
+        "    Text(text: job.root) Text(text: job.if)\n"
+        "  }\n"
+        "}"
+    );
+    check(result.succeeded(), "keywords were rejected as member names:" + describe(result));
+}
+
+// A when arm written as a bare name matches that name's value; it is not a lambda whose body is
+// the arm's block.
+void test_when_arm_matches_a_bare_name() {
+    const std::string source =
+        "screen Main {\n"
+        "  state value = \"a\";\n"
+        "  state other = \"b\";\n"
+        "  root Panel {\n"
+        "    when value {\n"
+        "      \"a\" -> { Text(text: \"first\") }\n"
+        "      other -> { Text(text: \"second\") }\n"
+        "      else -> { Text(text: \"third\") }\n"
+        "    }\n"
+        "  }\n"
+        "}";
+    const auto parsed = strata::compiler::parse_source("app/main.strata", source);
+    check(parsed.diagnostics.empty(), "a bare-name when arm did not parse");
+    const auto& screen =
+        std::get<strata::compiler::ScreenDeclaration>(parsed.file.declarations.front().node);
+    const auto* panel =
+        std::get_if<strata::compiler::RootStatement>(&screen.body->statements.back()->node);
+    const auto* when = panel != nullptr && panel->call.body != nullptr
+        ? std::get_if<strata::compiler::WhenStatement>(&panel->call.body->statements.front()->node)
+        : nullptr;
+    check(when != nullptr && when->branches.size() == 3U &&
+              std::holds_alternative<strata::compiler::IdentifierExpression>(
+                  when->branches[1].match->node
+              ),
+          "a bare-name when arm did not match the name");
+    const auto compiled = compile_source(source);
+    check(compiled.succeeded(), "a bare-name when arm did not compile:" + describe(compiled));
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -585,6 +634,8 @@ int strata_test_compiler() {
         test_portable_ir_rejects_duplicate_fields_in_narrow_and_wide_objects();
         test_duplicate_components_are_reported_without_reading_the_other_schema();
         test_long_single_line_compiles_in_linear_time();
+        test_statement_keywords_are_member_names();
+        test_when_arm_matches_a_bare_name();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

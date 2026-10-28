@@ -456,7 +456,12 @@ StatementPtr Parser::parse_when_statement(const Token& keyword) {
     while (!check(TokenType::right_brace) && !at_end()) {
         const SourceSpan branch_start = peek().span;
         ExpressionPtr match_expression;
-        if (!match(TokenType::else_keyword)) {
+        if (identifier_like() && check_next(TokenType::arrow)) {
+            // `name -> { ... }` matches the value of `name`; a branch is never a lambda.
+            count_expression();
+            const Token& name = advance();
+            match_expression = make_expression(IdentifierExpression{name.lexeme}, name.span);
+        } else if (!match(TokenType::else_keyword)) {
             match_expression = expression();
         }
         static_cast<void>(consume(
@@ -889,7 +894,7 @@ std::optional<CallTarget> Parser::call_target(const ExpressionPtr& expression) c
 }
 
 ExpressionPtr Parser::finish_property_access(ExpressionPtr receiver, const Token& dot) {
-    const Token& name = consume_identifier_like(
+    const Token& name = consume_name_token(
         "STRATA.DSL.PARSE_PROPERTY_ACCESS",
         "Expected property name after '.'."
     );
@@ -1170,15 +1175,19 @@ bool Parser::declaration_start() const noexcept {
 }
 
 bool Parser::name_token() const noexcept {
+    // Statement keywords only start statements, so where a name is expected they are names.
     switch (peek().type) {
     case TokenType::when_keyword:
     case TokenType::from:
     case TokenType::to:
     case TokenType::state:
+    case TokenType::derived:
     case TokenType::root:
     case TokenType::if_keyword:
     case TokenType::for_keyword:
     case TokenType::in_keyword:
+    case TokenType::where:
+    case TokenType::extends_keyword:
     case TokenType::else_keyword: return true;
     default: return identifier_like();
     }
