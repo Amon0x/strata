@@ -691,7 +691,7 @@ struct Host::Impl final {
 
         const std::string schemas = services.text(schemas_resource);
         result.extensions = host::select_extensions(
-            host::declared_extension_packages(schemas)
+            host::declared_extension_packages(schemas), {}, strata::widget_api()
         );
         const std::vector<std::string> extension_schemas = result.extensions.schemas();
         std::vector<strata_string_view> extension_schema_views;

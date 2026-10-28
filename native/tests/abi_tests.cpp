@@ -1,4 +1,5 @@
 #include <strata/strata.h>
+#include <strata/widget_api.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -1914,6 +1915,36 @@ void test_async_succeed_json_failure_statuses() {
           "async completion runtime release failed");
 }
 
+/** The widget table is versioned apart from the core ABI and complete in every member. */
+void test_widget_api_table() {
+    const strata_widget_api* api = nullptr;
+    check(strata_widget_api_query(STRATA_WIDGET_API_VERSION_CURRENT + 1U, &api).status ==
+                  STRATA_STATUS_UNSUPPORTED_ABI &&
+              api == nullptr,
+          "a newer widget API version than the library implements was granted");
+    check(strata_widget_api_query(0U, &api).status == STRATA_STATUS_UNSUPPORTED_ABI,
+          "widget API version zero was granted");
+    check(strata_widget_api_query(STRATA_WIDGET_API_VERSION_1, nullptr).status ==
+              STRATA_STATUS_INVALID_ARGUMENT,
+          "a widget API query without an output was accepted");
+    check(strata_widget_api_query(STRATA_WIDGET_API_VERSION_1, &api).status == STRATA_STATUS_OK &&
+              api != nullptr && api->struct_size == sizeof(strata_widget_api) &&
+              api->api_version == STRATA_WIDGET_API_VERSION_1 && api->reserved == 0U,
+          "the widget API table header is wrong");
+    const auto* const first = reinterpret_cast<const unsigned char*>(&api->has_property);
+    const auto* const end = reinterpret_cast<const unsigned char*>(api) + sizeof(strata_widget_api);
+    for (const unsigned char* member = first; member < end; member += sizeof(void (*)())) {
+        void (*function)() = nullptr;
+        std::memcpy(&function, member, sizeof(function));
+        check(function != nullptr, "a widget API table member is null");
+    }
+    // The context-kind accessors treat an unknown kind as absent instead of reading through it.
+    check(api->has_property(0U, nullptr, view("x")) == 0U &&
+              api->property_number(99U, nullptr, view("x"), 2.5) == 2.5 &&
+              api->retained_boolean(99U, nullptr, view("x"), 1U) == 1U,
+          "an unknown widget context kind was not read as absent");
+}
+
 void test_invalid_contracts() {
     Clock clock{0};
     DiagnosticCapture diagnostics;
@@ -1962,6 +1993,7 @@ int strata_test_abi(const int argument_count, const char* const* const arguments
         test_host_service_adapters();
         test_allocator_ownership_and_validation();
         test_invalid_contracts();
+        test_widget_api_table();
         std::cout << "strata_abi_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

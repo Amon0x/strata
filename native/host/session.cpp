@@ -72,7 +72,8 @@ struct Session::Impl final {
             throw std::invalid_argument(
                 "the Session's extension packages disagree with its schema declaration");
         }
-        extensions = select_extensions(packages, options.extension_search_paths);
+        extensions =
+            select_extensions(packages, options.extension_search_paths, strata::widget_api());
         const std::vector<std::string> extension_schemas = extensions.schemas();
         std::vector<strata_string_view> extension_views;
         extension_views.reserve(extension_schemas.size());

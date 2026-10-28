@@ -181,22 +181,59 @@ resolve_library(const std::string_view id, const std::vector<std::filesystem::pa
 #endif
 }
 
-[[nodiscard]] strata_extension_plugin_entry entry_point(void* const library,
-                                                        const std::filesystem::path& path) {
-    strata_extension_plugin_entry entry = nullptr;
+template <typename Entry>
+[[nodiscard]] Entry find_entry(void* const library, const char* const name) {
+    Entry entry = nullptr;
 #if defined(_WIN32)
-    entry = reinterpret_cast<strata_extension_plugin_entry>(
-        GetProcAddress(static_cast<HMODULE>(library), STRATA_EXTENSION_PLUGIN_ENTRY_NAME));
+    entry = reinterpret_cast<Entry>(GetProcAddress(static_cast<HMODULE>(library), name));
 #else
-    void* const symbol = dlsym(library, STRATA_EXTENSION_PLUGIN_ENTRY_NAME);
+    void* const symbol = dlsym(library, name);
     static_assert(sizeof(entry) == sizeof(symbol));
     std::memcpy(&entry, &symbol, sizeof(entry));
 #endif
-    if (entry == nullptr) {
-        throw std::runtime_error("external extension '" + utf8(path) + "' does not export " +
+    return entry;
+}
+
+/**
+ * Queries the package through its plugin ABI 2 entry point when it has one, handing it the widget
+ * function table, and otherwise through the deprecated version 1 entry point.
+ */
+[[nodiscard]] strata_extension_plugin query_package(void* const library,
+                                                    const std::filesystem::path& path,
+                                                    const strata_widget_api* const widget_api) {
+    strata_extension_plugin plugin{};
+    plugin.struct_size = sizeof(plugin);
+    std::uint32_t expected_version = STRATA_EXTENSION_PLUGIN_ABI_VERSION_2;
+    strata_status status = STRATA_STATUS_OK;
+    if (const auto query = find_entry<strata_extension_plugin_entry_v2>(
+            library, STRATA_EXTENSION_PLUGIN_ENTRY_V2_NAME)) {
+        const strata_extension_host host{
+            sizeof(strata_extension_host),
+            STRATA_EXTENSION_PLUGIN_ABI_VERSION_2,
+            0U,
+            widget_api,
+        };
+        status = query(&host, &plugin);
+    } else if (const auto legacy = find_entry<strata_extension_plugin_entry>(
+                   library, STRATA_EXTENSION_PLUGIN_ENTRY_NAME)) {
+        expected_version = STRATA_EXTENSION_PLUGIN_ABI_VERSION_1;
+        status = legacy(STRATA_EXTENSION_PLUGIN_ABI_VERSION_1, &plugin);
+    } else {
+        throw std::runtime_error("external extension '" + utf8(path) + "' exports neither " +
+                                 STRATA_EXTENSION_PLUGIN_ENTRY_V2_NAME + " nor " +
                                  STRATA_EXTENSION_PLUGIN_ENTRY_NAME);
     }
-    return entry;
+    if (status != STRATA_STATUS_OK) {
+        throw std::runtime_error("external extension '" + utf8(path) +
+                                 "' rejected its package query with status " +
+                                 std::to_string(status));
+    }
+    if (plugin.struct_size < sizeof(strata_extension_plugin) ||
+        plugin.plugin_abi_version != expected_version) {
+        throw std::runtime_error("external extension '" + utf8(path) +
+                                 "' answered with an unexpected plugin ABI version");
+    }
+    return plugin;
 }
 
 } // namespace
@@ -235,23 +272,14 @@ void LoadedExtension::close() noexcept {
 }
 
 LoadedExtension load_extension(const std::string_view expected_id,
-                               const std::vector<std::filesystem::path>& search_directories) {
+                               const std::vector<std::filesystem::path>& search_directories,
+                               const strata_widget_api* const widget_api) {
     require_package_id(expected_id);
     LoadedExtension result;
     result.path_ = resolve_library(expected_id, search_directories);
     result.library_ = open_library(result.path_);
-    const strata_extension_plugin_entry query = entry_point(result.library_, result.path_);
-    strata_extension_plugin plugin{};
-    plugin.struct_size = sizeof(plugin);
-    const strata_status status = query(STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT, &plugin);
-    if (status != STRATA_STATUS_OK) {
-        throw std::runtime_error("external extension '" + utf8(result.path_) +
-                                 "' rejected its package query with status " +
-                                 std::to_string(status));
-    }
-    if (plugin.struct_size < sizeof(strata_extension_plugin) ||
-        plugin.plugin_abi_version != STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT ||
-        plugin.core_abi_version < STRATA_ABI_VERSION_MINIMUM ||
+    const strata_extension_plugin plugin = query_package(result.library_, result.path_, widget_api);
+    if (plugin.core_abi_version < STRATA_ABI_VERSION_MINIMUM ||
         plugin.core_abi_version > STRATA_ABI_VERSION_CURRENT || plugin.extensions == nullptr ||
         plugin.extensions->struct_size < STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_1_SIZE ||
         (plugin.extensions->widget_count != 0U && plugin.extensions->widgets == nullptr) ||
@@ -372,7 +400,8 @@ void append_descriptors(std::vector<Descriptor>& output, const Descriptor* const
 } // namespace
 
 SelectedExtensions select_extensions(const std::vector<std::string>& package_ids,
-                                     const std::vector<std::filesystem::path>& search_directories) {
+                                     const std::vector<std::filesystem::path>& search_directories,
+                                     const strata_widget_api* const widget_api) {
     SelectedExtensions result;
     result.packages.reserve(package_ids.size());
     std::set<std::string, std::less<>> seen;
@@ -380,7 +409,7 @@ SelectedExtensions select_extensions(const std::vector<std::string>& package_ids
         if (!seen.insert(id).second) {
             throw std::invalid_argument("native extension package ids must be unique");
         }
-        result.packages.push_back(load_extension(id, search_directories));
+        result.packages.push_back(load_extension(id, search_directories, widget_api));
         const strata_surface_extension_bundle& package = result.packages.back().bundle();
         append_descriptors(result.widgets, package.widgets, package.widget_count);
         if (package.struct_size >= STRATA_SURFACE_EXTENSION_BUNDLE_VERSION_2_SIZE) {

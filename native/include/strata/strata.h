@@ -2231,6 +2231,10 @@ STRATA_API strata_result strata_surface_read_inspection_node_json(
     const strata_value_json_sink* sink) STRATA_NOEXCEPT;
 
 /* Extension callback capabilities. Context pointers are valid only for their callback invocation.
+ *
+ * Deprecated for new packages: these exports bind a package to strata_c by symbol name. Packages
+ * built for plugin ABI 2 call the same functions through the strata_widget_api table in
+ * <strata/widget_api.h>, which their host passes to strata_extension_plugin_query_v2.
  */
 /* Borrowed immutable values remain valid only for the callback that returned them. */
 STRATA_API strata_widget_value_kind strata_widget_value_get_kind(const strata_widget_value* value)

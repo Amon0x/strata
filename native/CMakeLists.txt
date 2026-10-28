@@ -510,10 +510,10 @@ target_include_directories(
 )
 
 # Static C++ authoring support is linked into each external package. Runtime hosts consume only the
-# stable C descriptor exported by that package's shared library.
+# stable C descriptor exported by that package's shared library, and the package calls Strata only
+# through the strata_widget_api table its host passes in: it links nothing from strata_c.
 add_library(strata_extensions STATIC src/extensions/authoring.cpp)
 add_library(Strata::extensions ALIAS strata_extensions)
-target_link_libraries(strata_extensions PUBLIC Strata::c)
 target_compile_features(strata_extensions PUBLIC cxx_std_23)
 target_include_directories(
     strata_extensions
@@ -1324,7 +1324,9 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     )
 
     add_executable(strata_extension_tests tests/extension_tests.cpp)
-    target_link_libraries(strata_extension_tests PRIVATE strata_extensions strata_host_support)
+    target_link_libraries(
+        strata_extension_tests PRIVATE strata_extensions strata_host_support Strata::c
+    )
     add_dependencies(
         strata_extension_tests
         strata_demo_extension

@@ -11,6 +11,27 @@ shared library. That single definition exports both the runtime bundle passed to
 name, parameter, or action contract cannot drift between the two. Hosts load the library through the
 stable C ABI in `<strata/extension_plugin.h>`; no C++ object crosses the library boundary.
 
+## Plugin ABI and the widget function table
+
+`STRATA_EXTENSION_PACKAGE` exports `strata_extension_plugin_query_v2` (plugin ABI 2). The host
+passes it a `strata_extension_host` carrying the `strata_widget_api` table from
+`<strata/widget_api.h>`, which it obtains with `strata_widget_api_query` (or `strata::widget_api()`
+in C++); `host::select_extensions` and `host::Session` do this for you. Every call the authoring
+layer makes goes through that table, so a package library imports nothing from `strata_c`, binds
+no Strata symbol by name, and keeps working against any `strata_c` whose table is at least as new.
+The table has its own version, `STRATA_WIDGET_API_VERSION_*`, separate from the core ABI version of
+the descriptors a package returns; later versions only append members. Property and retained-field
+reads are one family that takes the context kind (`STRATA_WIDGET_CONTEXT_INPUT`, `_RENDER`,
+`_SEMANTICS`, `_SUBTARGETS`) instead of four per-context copies. A host that only reads package
+schemas, like `strata_compile`, may pass no table.
+
+Code that runs packages inside the host process, such as a test harness, binds the linked
+library's table itself with `strata::extension::bind_widget_api(*strata::widget_api())`.
+
+Deprecated: the exported `strata_widget_*` and `strata_behavior_*` functions and the plugin ABI 1
+entry point `strata_extension_plugin_query`. They keep working, and hosts still load ABI 1
+packages, but new packages should be built with the current authoring layer, which uses the table.
+
 ## A complete draggable widget
 
 ```cpp

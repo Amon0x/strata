@@ -1,5 +1,6 @@
 #include <strata/extension.hpp>
 #include <strata/strata.h>
+#include <strata/strata.hpp>
 
 #include "host/extensions.hpp"
 
@@ -637,19 +638,19 @@ void test_definition_diagnostics() {
 }
 
 void test_external_package_and_schema_projection() {
-    strata::host::SelectedExtensions selected = strata::host::select_extensions({"strata.demo.v1"});
+    strata::host::SelectedExtensions selected = strata::host::select_extensions({"strata.demo.v1"}, {}, strata::widget_api());
     check(selected.packages.size() == 1U && selected.packages.front().id() == "strata.demo.v1",
           "the external demo package was not loaded");
     check(selected.widgets.size() == 2U && selected.behaviors.size() == 1U,
           "the external demo package did not project its runtime descriptors");
     const std::string unknown = rejection(
-        [] { static_cast<void>(strata::host::select_extensions({"strata.missing.v1"})); });
+        [] { static_cast<void>(strata::host::select_extensions({"strata.missing.v1"}, {}, strata::widget_api())); });
     check(unknown.find("strata.missing.v1") != std::string::npos &&
               unknown.find("strata-extension-strata.missing.v1") != std::string::npos,
           "an unknown external package did not report its id and expected library");
     check(rejection([] {
               static_cast<void>(
-                  strata::host::select_extensions({"strata.demo.v1", "strata.demo.v1"}));
+                  strata::host::select_extensions({"strata.demo.v1", "strata.demo.v1"}, {}, strata::widget_api()));
           }).find("must be unique") != std::string::npos,
           "duplicate external package selection was accepted");
 
@@ -677,7 +678,7 @@ void test_external_package_and_schema_projection() {
           }).find("must be unique") != std::string::npos,
           "duplicate schema package declarations were accepted");
 
-    strata::host::SelectedExtensions control = strata::host::select_extensions(declared);
+    strata::host::SelectedExtensions control = strata::host::select_extensions(declared, {}, strata::widget_api());
     check(control.widgets.size() == 5U && control.widget_inputs.size() == 4U &&
               control.behaviors.empty(),
           "the Control Deck package did not project widget pointer input separately");
@@ -1409,6 +1410,8 @@ void test_throwing_hooks_stay_in_the_plugin(const std::filesystem::path& resourc
 
 int main(const int argument_count, const char* const* const arguments) {
     try {
+        // Packages built inside this process call the linked library through its table.
+        strata::extension::bind_widget_api(*strata::widget_api());
         test_canvas_sdk();
         test_definition_diagnostics();
         test_external_package_and_schema_projection();

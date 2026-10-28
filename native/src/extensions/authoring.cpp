@@ -1,6 +1,7 @@
 #include <strata/extension.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <format>
 #include <mutex>
@@ -10,6 +11,9 @@
 
 namespace strata::extension {
 namespace {
+
+/** The table of the host that loaded this package library; one per library. */
+std::atomic<const strata_widget_api*> bound_widget_api{nullptr};
 
 [[nodiscard]] constexpr strata_string_view view(const std::string_view value) noexcept {
     return strata_string_view{value.data(), value.size()};
@@ -126,7 +130,7 @@ void draw_mesh(strata_widget_render_context* const context, const Rect bounds,
         state.parameters = material->parameters.data();
         state.parameter_count = material->parameters.size();
     }
-    strata_widget_render_custom_mesh(context, bounds, view(id), &converted, view(texture),
+    detail::widget_api().render_custom_mesh(context, bounds, view(id), &converted, view(texture),
                                      material != nullptr ? &state : nullptr);
 }
 
@@ -286,7 +290,7 @@ void present_trampoline(void* const user_data,
         Present present(context);
         hooks->present(present);
     } catch (...) {
-        strata_widget_render_discard(context);
+        detail::widget_api().render_discard(context);
     }
 }
 
@@ -297,7 +301,7 @@ void overlay_trampoline(void* const user_data,
         Present present(context);
         hooks->overlay(present);
     } catch (...) {
-        strata_widget_render_discard(context);
+        detail::widget_api().render_discard(context);
     }
 }
 
@@ -330,7 +334,7 @@ strata_rect hit_bounds_trampoline(void* const user_data,
         Inspect inspect(context);
         return hooks->hit_bounds(inspect);
     } catch (...) {
-        return strata_widget_inspection_layout_bounds(context);
+        return detail::widget_api().inspection_layout_bounds(context);
     }
 }
 
@@ -484,121 +488,121 @@ behavior_focus_trampoline(void* const user_data, strata_behavior_input_context* 
 } // namespace
 
 double Input::get(const Retained<number>& field) const noexcept {
-    return strata_widget_input_retained_number(context_, view(field.name), field.fallback);
+    return detail::widget_api().retained_number(STRATA_WIDGET_CONTEXT_INPUT, context_, view(field.name), field.fallback);
 }
 
 bool Input::get(const Retained<boolean>& field) const noexcept {
-    return strata_widget_input_retained_boolean(context_, view(field.name),
+    return detail::widget_api().retained_boolean(STRATA_WIDGET_CONTEXT_INPUT, context_, view(field.name),
                                                 field.fallback ? 1U : 0U) != 0U;
 }
 
 std::string Input::get(const Retained<extension::text>& field) const {
     return read_text(
                [this](const auto... arguments) {
-                   return strata_widget_input_retained_text(context_, arguments...);
+                   return detail::widget_api().retained_text(STRATA_WIDGET_CONTEXT_INPUT, context_, arguments...);
                },
                field.name)
         .value_or(std::string(field.fallback));
 }
 
 double Input::get(const Parameter<number>& field) const noexcept {
-    return strata_widget_input_property_number(context_, view(field.name),
+    return detail::widget_api().property_number(STRATA_WIDGET_CONTEXT_INPUT, context_, view(field.name),
                                                field.value.value_or(0.0));
 }
 
 bool Input::get(const Parameter<boolean>& field) const noexcept {
-    return strata_widget_input_property_boolean(context_, view(field.name),
+    return detail::widget_api().property_boolean(STRATA_WIDGET_CONTEXT_INPUT, context_, view(field.name),
                                                 field.value.value_or(false) ? 1U : 0U) != 0U;
 }
 
 std::string Input::get(const Parameter<extension::text>& field) const {
     return read_text(
                [this](const auto... arguments) {
-                   return strata_widget_input_property_text(context_, arguments...);
+                   return detail::widget_api().property_text(STRATA_WIDGET_CONTEXT_INPUT, context_, arguments...);
                },
                field.name)
         .value_or(std::string(field.value.value_or(std::string_view{})));
 }
 Rect Input::bounds() const noexcept {
-    return strata_widget_input_bounds(context_);
+    return detail::widget_api().input_bounds(context_);
 }
 double Input::scale() const noexcept {
-    return strata_widget_input_scale(context_);
+    return detail::widget_api().input_scale(context_);
 }
 
 bool Input::set(const Retained<number>& field, const double value) noexcept {
-    return strata_widget_input_set_retained_number(context_, view(field.name), value).status ==
+    return detail::widget_api().input_set_retained_number(context_, view(field.name), value).status ==
            STRATA_STATUS_OK;
 }
 
 bool Input::set(const Retained<boolean>& field, const bool value) noexcept {
-    return strata_widget_input_set_retained_boolean(context_, view(field.name), value ? 1U : 0U)
+    return detail::widget_api().input_set_retained_boolean(context_, view(field.name), value ? 1U : 0U)
                .status == STRATA_STATUS_OK;
 }
 
 bool Input::set(const Retained<extension::text>& field, const std::string_view value) noexcept {
-    return strata_widget_input_set_retained_text(context_, view(field.name), view(value)).status ==
+    return detail::widget_api().input_set_retained_text(context_, view(field.name), view(value)).status ==
            STRATA_STATUS_OK;
 }
 bool Input::claim_gesture() noexcept {
-    return strata_widget_input_claim_gesture(context_) != 0U;
+    return detail::widget_api().input_claim_gesture(context_) != 0U;
 }
 
 bool Input::cancel_gesture() noexcept {
-    return strata_widget_input_cancel_gesture(context_) != 0U;
+    return detail::widget_api().input_cancel_gesture(context_) != 0U;
 }
 bool Input::invalidate(const Invalidation value) noexcept {
-    return strata_widget_input_invalidate(context_, invalidation_value(value)).status ==
+    return detail::widget_api().input_invalidate(context_, invalidation_value(value)).status ==
            STRATA_STATUS_OK;
 }
 
 bool Input::request_frame(const FrameCost cost) noexcept {
-    return strata_widget_input_request_frame(context_, static_cast<strata_widget_frame_cost>(cost))
+    return detail::widget_api().input_request_frame(context_, static_cast<strata_widget_frame_cost>(cost))
                .status == STRATA_STATUS_OK;
 }
 
 void Input::cancel_frame() noexcept {
-    static_cast<void>(strata_widget_input_cancel_frame(context_));
+    static_cast<void>(detail::widget_api().input_cancel_frame(context_));
 }
 
 bool Input::emit(const std::string_view action_id, const std::string_view payload_json,
                  const std::string_view event_kind,
                  const std::string_view event_value_json) noexcept {
-    return strata_widget_input_emit_action_json(context_, view(action_id), view(payload_json),
+    return detail::widget_api().input_emit_action_json(context_, view(action_id), view(payload_json),
                                                 view(event_kind), view(event_value_json))
                .status == STRATA_STATUS_OK;
 }
 bool Input::emit(const Parameter<action>& field, const std::string_view event_kind,
                  const std::string_view event_value_json) noexcept {
-    return strata_widget_input_emit_property_action_json(context_, view(field.name),
+    return detail::widget_api().input_emit_property_action_json(context_, view(field.name),
                                                          view(event_kind), view(event_value_json))
                .status == STRATA_STATUS_OK;
 }
 bool Input::emit(const Parameter<action>& field, const std::string_view event_kind,
                  const Color value) noexcept {
-    return strata_widget_input_emit_property_color_event(context_, view(field.name),
+    return detail::widget_api().input_emit_property_color_event(context_, view(field.name),
                                                          view(event_kind), value)
                .status == STRATA_STATUS_OK;
 }
 
 bool Input::emit_event(const std::string_view event_kind,
                        const std::string_view event_value_json) noexcept {
-    return strata_widget_input_emit_event_json(context_, view(event_kind), view(event_value_json))
+    return detail::widget_api().input_emit_event_json(context_, view(event_kind), view(event_value_json))
                .status == STRATA_STATUS_OK;
 }
 bool Input::emit_event(const std::string_view event_kind, const double value) noexcept {
-    return strata_widget_input_emit_number_event(context_, view(event_kind), value).status ==
+    return detail::widget_api().input_emit_number_event(context_, view(event_kind), value).status ==
            STRATA_STATUS_OK;
 }
 
 bool Input::emit_event(const std::string_view event_kind, const bool value) noexcept {
-    return strata_widget_input_emit_boolean_event(context_, view(event_kind), value ? 1U : 0U)
+    return detail::widget_api().input_emit_boolean_event(context_, view(event_kind), value ? 1U : 0U)
                .status == STRATA_STATUS_OK;
 }
 
 bool Input::emit_text_event(const std::string_view event_kind,
                             const std::string_view value) noexcept {
-    return strata_widget_input_emit_text_event(context_, view(event_kind), view(value)).status ==
+    return detail::widget_api().input_emit_text_event(context_, view(event_kind), view(value)).status ==
            STRATA_STATUS_OK;
 }
 
@@ -622,40 +626,40 @@ bool Input::commit_text(const std::string_view value) noexcept {
 }
 
 Rect Present::bounds() const noexcept {
-    return strata_widget_render_bounds(context_);
+    return detail::widget_api().render_bounds(context_);
 }
 Rect Present::root_bounds() const noexcept {
-    return strata_widget_render_root_bounds(context_);
+    return detail::widget_api().render_root_bounds(context_);
 }
 bool Present::focused() const noexcept {
-    return strata_widget_render_focused(context_) != 0U;
+    return detail::widget_api().render_focused(context_) != 0U;
 }
 bool Present::focus_visible() const noexcept {
-    return strata_widget_render_focus_visible(context_) != 0U;
+    return detail::widget_api().render_focus_visible(context_) != 0U;
 }
 bool Present::hovered() const noexcept {
-    return strata_widget_render_hovered(context_) != 0U;
+    return detail::widget_api().render_hovered(context_) != 0U;
 }
 bool Present::enabled() const noexcept {
-    return strata_widget_render_enabled(context_) != 0U;
+    return detail::widget_api().render_enabled(context_) != 0U;
 }
 bool Present::active() const noexcept {
-    return strata_widget_render_active(context_) != 0U;
+    return detail::widget_api().render_active(context_) != 0U;
 }
 double Present::scale() const noexcept {
-    return strata_widget_render_scale(context_);
+    return detail::widget_api().render_scale(context_);
 }
 
 double Present::motion(const std::string_view channel, const double fallback) const noexcept {
-    return strata_widget_render_motion_progress(context_, view(channel), fallback);
+    return detail::widget_api().render_motion_progress(context_, view(channel), fallback);
 }
 
 double Present::get(const Retained<number>& field) const noexcept {
-    return strata_widget_render_retained_number(context_, view(field.name), field.fallback);
+    return detail::widget_api().retained_number(STRATA_WIDGET_CONTEXT_RENDER, context_, view(field.name), field.fallback);
 }
 
 bool Present::get(const Retained<boolean>& field) const noexcept {
-    return strata_widget_render_retained_boolean(context_, view(field.name),
+    return detail::widget_api().retained_boolean(STRATA_WIDGET_CONTEXT_RENDER, context_, view(field.name),
                                                  field.fallback ? 1U : 0U) != 0U;
 }
 
@@ -663,26 +667,26 @@ bool Present::get(const Retained<boolean>& field) const noexcept {
 std::string Present::get(const Retained<extension::text>& field) const {
     return read_text(
                [this](const auto... arguments) {
-                   return strata_widget_render_retained_text(context_, arguments...);
+                   return detail::widget_api().retained_text(STRATA_WIDGET_CONTEXT_RENDER, context_, arguments...);
                },
                field.name)
         .value_or(std::string(field.fallback));
 }
 
 double Present::get(const Parameter<number>& field) const noexcept {
-    return strata_widget_render_property_number(context_, view(field.name),
+    return detail::widget_api().property_number(STRATA_WIDGET_CONTEXT_RENDER, context_, view(field.name),
                                                 field.value.value_or(0.0));
 }
 
 bool Present::get(const Parameter<boolean>& field) const noexcept {
-    return strata_widget_render_property_boolean(context_, view(field.name),
+    return detail::widget_api().property_boolean(STRATA_WIDGET_CONTEXT_RENDER, context_, view(field.name),
                                                  field.value.value_or(false) ? 1U : 0U) != 0U;
 }
 
 std::string Present::get(const Parameter<extension::text>& field) const {
     return read_text(
                [this](const auto... arguments) {
-                   return strata_widget_render_property_text(context_, arguments...);
+                   return detail::widget_api().property_text(STRATA_WIDGET_CONTEXT_RENDER, context_, arguments...);
                },
                field.name)
         .value_or(std::string(field.value.value_or(std::string_view{})));
@@ -690,7 +694,7 @@ std::string Present::get(const Parameter<extension::text>& field) const {
 
 std::optional<Size> Present::measure(const std::string_view value) const noexcept {
     Size size;
-    if (strata_widget_render_text_metrics(context_, view(value), &size.width, &size.height)
+    if (detail::widget_api().render_text_metrics(context_, view(value), &size.width, &size.height)
             .status != STRATA_STATUS_OK) {
         return std::nullopt;
     }
@@ -698,43 +702,43 @@ std::optional<Size> Present::measure(const std::string_view value) const noexcep
 }
 
 void Present::rect(const Rect bounds, const Color fill) {
-    strata_widget_render_solid_rect(context_, bounds, fill);
+    detail::widget_api().render_solid_rect(context_, bounds, fill);
 }
 
 void Present::rounded_rect(const Rect bounds, const double radius, const Color fill) {
-    strata_widget_render_rounded_rect(context_, bounds, radius, fill, nullptr);
+    detail::widget_api().render_rounded_rect(context_, bounds, radius, fill, nullptr);
 }
 
 void Present::rounded_rect(const Rect bounds, const double radius, const Color fill,
                            const Border border) {
-    strata_widget_render_rounded_rect(context_, bounds, radius, fill, &border);
+    detail::widget_api().render_rounded_rect(context_, bounds, radius, fill, &border);
 }
 
 void Present::border(const Rect bounds, const double radius, const Border border) {
-    strata_widget_render_border(context_, bounds, radius, border);
+    detail::widget_api().render_border(context_, bounds, radius, border);
 }
 
 void Present::text(const std::string_view value, const double x, const double y,
                    const Color color) {
-    strata_widget_render_text(context_, view(value), x, y, color);
+    detail::widget_api().render_text(context_, view(value), x, y, color);
 }
 
 void Present::text(const std::string_view value, const Rect bounds, const Color color,
                    const TextAlignment horizontal, const TextAlignment vertical) {
-    strata_widget_render_aligned_text(context_, view(value), bounds,
+    detail::widget_api().render_aligned_text(context_, view(value), bounds,
                                       static_cast<strata_widget_text_alignment>(horizontal),
                                       static_cast<strata_widget_text_alignment>(vertical), color);
 }
 
 void Present::image(const Rect bounds, const std::string_view image, const Color tint,
                     const TextureRegion source) {
-    strata_widget_render_image(context_, bounds, view(image), tint, source);
+    detail::widget_api().render_image(context_, bounds, view(image), tint, source);
 }
 
 void Present::nine_patch(const Rect bounds, const std::string_view texture,
                          const Edges source_insets, const Edges destination_insets,
                          const Color tint, const TextureRegion source) {
-    strata_widget_render_nine_patch(context_, bounds, view(texture), source_insets,
+    detail::widget_api().render_nine_patch(context_, bounds, view(texture), source_insets,
                                     destination_insets, source, tint);
 }
 
@@ -753,90 +757,90 @@ void Present::mesh(const Rect bounds, const std::string_view id, const Mesh& geo
 }
 
 void Present::blur(const Rect bounds, const double radius, const unsigned int downsample) {
-    strata_widget_render_blur(context_, bounds, radius, downsample);
+    detail::widget_api().render_blur(context_, bounds, radius, downsample);
 }
 
 void Present::shadow(const Rect bounds, const CornerRadii radii, const Color color,
                      const double radius, const double spread) {
-    strata_widget_render_shadow(context_, bounds, radii, color, radius, spread);
+    detail::widget_api().render_shadow(context_, bounds, radii, color, radius, spread);
 }
 
 ClipScope Present::clip(const Rect bounds) {
-    strata_widget_render_push_clip(context_, bounds);
+    detail::widget_api().render_push_clip(context_, bounds);
     return ClipScope(context_);
 }
 
 double Semantics::get(const Retained<number>& field) const noexcept {
-    return strata_widget_semantics_retained_number(context_, view(field.name), field.fallback);
+    return detail::widget_api().retained_number(STRATA_WIDGET_CONTEXT_SEMANTICS, context_, view(field.name), field.fallback);
 }
 std::string Semantics::get(const Retained<extension::text>& field) const {
     return read_text(
                [this](const auto... arguments) {
-                   return strata_widget_semantics_retained_text(context_, arguments...);
+                   return detail::widget_api().retained_text(STRATA_WIDGET_CONTEXT_SEMANTICS, context_, arguments...);
                },
                field.name)
         .value_or(std::string(field.fallback));
 }
 
 bool Semantics::get(const Retained<boolean>& field) const noexcept {
-    return strata_widget_semantics_retained_boolean(context_, view(field.name),
+    return detail::widget_api().retained_boolean(STRATA_WIDGET_CONTEXT_SEMANTICS, context_, view(field.name),
                                                     field.fallback ? 1U : 0U) != 0U;
 }
 double Semantics::get(const Parameter<number>& field) const noexcept {
-    return strata_widget_semantics_property_number(context_, view(field.name),
+    return detail::widget_api().property_number(STRATA_WIDGET_CONTEXT_SEMANTICS, context_, view(field.name),
                                                    field.value.value_or(0.0));
 }
 
 std::string Semantics::get(const Parameter<extension::text>& field) const {
     return read_text(
                [this](const auto... arguments) {
-                   return strata_widget_semantics_property_text(context_, arguments...);
+                   return detail::widget_api().property_text(STRATA_WIDGET_CONTEXT_SEMANTICS, context_, arguments...);
                },
                field.name)
         .value_or(std::string(field.value.value_or(std::string_view{})));
 }
 
 bool Semantics::get(const Parameter<boolean>& field) const noexcept {
-    return strata_widget_semantics_property_boolean(context_, view(field.name),
+    return detail::widget_api().property_boolean(STRATA_WIDGET_CONTEXT_SEMANTICS, context_, view(field.name),
                                                     field.value.value_or(false) ? 1U : 0U) != 0U;
 }
 
 void Semantics::name(const std::string_view value) noexcept {
-    static_cast<void>(strata_widget_semantics_set_name(context_, view(value)));
+    static_cast<void>(detail::widget_api().semantics_set_name(context_, view(value)));
 }
 
 void Semantics::value_text(const std::string_view value) noexcept {
-    static_cast<void>(strata_widget_semantics_set_value_text(context_, view(value)));
+    static_cast<void>(detail::widget_api().semantics_set_value_text(context_, view(value)));
 }
 
 void Semantics::add_action(const std::string_view value) noexcept {
-    static_cast<void>(strata_widget_semantics_add_action(context_, view(value)));
+    static_cast<void>(detail::widget_api().semantics_add_action(context_, view(value)));
 }
 
 void Semantics::checked(const bool value) noexcept {
-    strata_widget_semantics_set_checked(context_, value ? 1U : 0U);
+    detail::widget_api().semantics_set_checked(context_, value ? 1U : 0U);
 }
 
 void Semantics::expanded(const bool value) noexcept {
-    strata_widget_semantics_set_expanded(context_, value ? 1U : 0U);
+    detail::widget_api().semantics_set_expanded(context_, value ? 1U : 0U);
 }
 void Semantics::value_range(const double current, const double minimum,
                             const double maximum) noexcept {
-    strata_widget_semantics_set_value_range(context_, current, minimum, maximum);
+    detail::widget_api().semantics_set_value_range(context_, current, minimum, maximum);
 }
 
 void Semantics::selected(const bool value) noexcept {
-    strata_widget_semantics_set_selected(context_, value ? 1U : 0U);
+    detail::widget_api().semantics_set_selected(context_, value ? 1U : 0U);
 }
 
 Rect Inspect::layout_bounds() const noexcept {
-    return strata_widget_inspection_layout_bounds(context_);
+    return detail::widget_api().inspection_layout_bounds(context_);
 }
 
 bool BehaviorInput::emit(const std::string_view action_id, const std::string_view payload_json,
                          const std::string_view event_kind,
                          const std::string_view event_value_json) noexcept {
-    return strata_behavior_input_emit_action_json(context_, view(action_id), view(payload_json),
+    return detail::widget_api().behavior_input_emit_action_json(context_, view(action_id), view(payload_json),
                                                   view(event_kind), view(event_value_json))
                .status == STRATA_STATUS_OK;
 }
@@ -1327,16 +1331,36 @@ std::vector<std::string> Package::behavior_ids() const {
     return ids;
 }
 
+void bind_widget_api(const strata_widget_api& api) noexcept {
+    bound_widget_api.store(&api, std::memory_order_release);
+}
+
 namespace detail {
 
-strata_status query_plugin(const PackageFactory factory, const std::uint32_t requested_plugin_abi,
+const strata_widget_api& widget_api() {
+    const strata_widget_api* const api = bound_widget_api.load(std::memory_order_acquire);
+    if (api == nullptr)
+        throw std::logic_error("no Strata widget API is bound to this extension package");
+    return *api;
+}
+
+strata_status query_plugin(const PackageFactory factory, const strata_extension_host* const host,
                            strata_extension_plugin* const output) noexcept {
     if (output == nullptr || output->struct_size < sizeof(strata_extension_plugin) ||
-        factory == nullptr) {
+        factory == nullptr || host == nullptr || host->struct_size < sizeof(strata_extension_host)) {
         return STRATA_STATUS_INVALID_ARGUMENT;
     }
-    if (requested_plugin_abi != STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT) {
+    if (host->plugin_abi_version != STRATA_EXTENSION_PLUGIN_ABI_VERSION_2) {
         return STRATA_STATUS_UNSUPPORTED_ABI;
+    }
+    if (host->widget_api != nullptr) {
+        // A host that only reads schemas passes no table; one that runs widgets must pass a
+        // table at least as new as the one this package was compiled against.
+        if (host->widget_api->struct_size < sizeof(strata_widget_api) ||
+            host->widget_api->api_version < STRATA_WIDGET_API_VERSION_CURRENT) {
+            return STRATA_STATUS_UNSUPPORTED_ABI;
+        }
+        bind_widget_api(*host->widget_api);
     }
     try {
         static std::mutex mutex;

@@ -33,7 +33,8 @@ class LoadedExtension final {
   private:
     friend struct SelectedExtensions;
     friend LoadedExtension load_extension(std::string_view,
-                                          const std::vector<std::filesystem::path>&);
+                                          const std::vector<std::filesystem::path>&,
+                                          const strata_widget_api*);
 
     void close() noexcept;
 
@@ -61,9 +62,14 @@ struct SelectedExtensions final {
 /** Reads the single extension package declaration from an application schema document. */
 [[nodiscard]] std::vector<std::string> declared_extension_packages(std::string_view schemas_json);
 
-/** Loads each selected package from a shared library and merges its runtime descriptor bundle. */
+/**
+ * Loads each selected package from a shared library and merges its runtime descriptor bundle.
+ * `widget_api` is the table plugin ABI 2 packages call Strata through (strata_widget_api_query);
+ * a host that only reads package schemas may pass null. Plugin ABI 1 packages ignore it.
+ */
 [[nodiscard]] SelectedExtensions
 select_extensions(const std::vector<std::string>& package_ids,
-                  const std::vector<std::filesystem::path>& search_directories = {});
+                  const std::vector<std::filesystem::path>& search_directories = {},
+                  const strata_widget_api* widget_api = nullptr);
 
 } // namespace strata::host

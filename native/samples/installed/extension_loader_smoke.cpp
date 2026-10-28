@@ -18,27 +18,38 @@ int main(const int argument_count, const char* const* const arguments) {
 #if defined(_WIN32)
     HMODULE library = LoadLibraryW(std::filesystem::path(arguments[1]).c_str());
     if (library == nullptr) return 3;
-    const auto query = reinterpret_cast<strata_extension_plugin_entry>(
-        GetProcAddress(library, STRATA_EXTENSION_PLUGIN_ENTRY_NAME)
+    const auto query = reinterpret_cast<strata_extension_plugin_entry_v2>(
+        GetProcAddress(library, STRATA_EXTENSION_PLUGIN_ENTRY_V2_NAME)
     );
 #else
     void* library = dlopen(arguments[1], RTLD_NOW | RTLD_LOCAL);
     if (library == nullptr) return 3;
-    void* symbol = dlsym(library, STRATA_EXTENSION_PLUGIN_ENTRY_NAME);
-    strata_extension_plugin_entry query = nullptr;
+    void* symbol = dlsym(library, STRATA_EXTENSION_PLUGIN_ENTRY_V2_NAME);
+    strata_extension_plugin_entry_v2 query = nullptr;
     static_assert(sizeof(query) == sizeof(symbol));
     std::memcpy(&query, &symbol, sizeof(query));
 #endif
     if (query == nullptr) return 4;
-    strata_extension_plugin incompatible{};
-    incompatible.struct_size = sizeof(incompatible);
-    if (query(STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT + 1U, &incompatible) !=
-        STRATA_STATUS_UNSUPPORTED_ABI) {
+    // The package calls Strata only through the table its host hands it.
+    const strata_widget_api* widget_api = nullptr;
+    if (strata_widget_api_query(STRATA_WIDGET_API_VERSION_CURRENT, &widget_api).status !=
+            STRATA_STATUS_OK ||
+        widget_api == nullptr || widget_api->api_version != STRATA_WIDGET_API_VERSION_CURRENT) {
         return 5;
     }
+    strata_extension_host host{
+        sizeof(strata_extension_host), STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT + 1U, 0U,
+        widget_api,
+    };
+    strata_extension_plugin incompatible{};
+    incompatible.struct_size = sizeof(incompatible);
+    if (query(&host, &incompatible) != STRATA_STATUS_UNSUPPORTED_ABI) {
+        return 5;
+    }
+    host.plugin_abi_version = STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT;
     strata_extension_plugin plugin{};
     plugin.struct_size = sizeof(plugin);
-    const strata_status status = query(STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT, &plugin);
+    const strata_status status = query(&host, &plugin);
     const std::string id(
         plugin.package_id.data == nullptr ? "" : plugin.package_id.data,
         plugin.package_id.size

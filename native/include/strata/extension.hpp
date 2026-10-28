@@ -9,9 +9,11 @@
  * consumed by `--check-module`, so a widget name or parameter is never copied by hand.
  *
  * The layer is a thin projection over the C ABI in <strata/strata.h>: every builder field maps to
- * one descriptor field, and every facade call maps to one `strata_widget_*` entry point. It adds no
- * runtime of its own, allocates nothing after `Package::bundle()` is first taken, and keeps hooks
- * as plain function pointers so no per-callback state is captured.
+ * one descriptor field, and every facade call maps to one member of the host's strata_widget_api
+ * table (<strata/widget_api.h>), which the package receives through plugin ABI 2, so a package
+ * library binds no Strata symbol by name. It adds no runtime of its own, allocates nothing after
+ * `Package::bundle()` is first taken, and keeps hooks as plain function pointers so no
+ * per-callback state is captured.
  */
 
 #include <algorithm>
@@ -31,8 +33,23 @@
 
 #include <strata/extension_plugin.h>
 #include <strata/strata.h>
+#include <strata/widget_api.h>
 
 namespace strata::extension {
+
+/**
+ * Binds the widget function table this library's packages call Strata through. A package library
+ * is bound by its plugin ABI 2 query. Code that runs packages inside the host process, such as a
+ * test or a host with its own widgets, binds the linked library's table (`*strata::widget_api()`).
+ */
+void bind_widget_api(const strata_widget_api& api) noexcept;
+
+namespace detail {
+
+/** The bound widget table. Throws std::logic_error while none is bound. */
+[[nodiscard]] const strata_widget_api& widget_api();
+
+} // namespace detail
 
 using Rect = strata_rect;
 struct Point final {
@@ -425,17 +442,17 @@ class ValueView final {
     explicit constexpr ValueView(const strata_widget_value* const value) noexcept : value_(value) {}
 
     [[nodiscard]] Kind kind() const noexcept {
-        return static_cast<Kind>(strata_widget_value_get_kind(value_));
+        return static_cast<Kind>(detail::widget_api().value_get_kind(value_));
     }
     [[nodiscard]] bool boolean(bool fallback = false) const noexcept {
-        return strata_widget_value_get_boolean(value_, fallback ? 1U : 0U) != 0U;
+        return detail::widget_api().value_get_boolean(value_, fallback ? 1U : 0U) != 0U;
     }
     [[nodiscard]] double number(double fallback = 0.0) const noexcept {
-        return strata_widget_value_get_number(value_, fallback);
+        return detail::widget_api().value_get_number(value_, fallback);
     }
     [[nodiscard]] std::optional<Color> color() const noexcept {
         Color result{};
-        return strata_widget_value_get_color(value_, &result) != 0U ? std::optional<Color>(result)
+        return detail::widget_api().value_get_color(value_, &result) != 0U ? std::optional<Color>(result)
                                                                     : std::nullopt;
     }
     [[nodiscard]] std::optional<std::string_view> text() const noexcept {
@@ -444,18 +461,18 @@ class ValueView final {
             value_kind != Kind::theme_token) {
             return std::nullopt;
         }
-        const strata_string_view result = strata_widget_value_get_text(value_);
+        const strata_string_view result = detail::widget_api().value_get_text(value_);
         return std::string_view(result.data != nullptr ? result.data : "", result.size);
     }
     [[nodiscard]] std::size_t size() const noexcept {
-        return strata_widget_value_list_size(value_);
+        return detail::widget_api().value_list_size(value_);
     }
     [[nodiscard]] ValueView at(const std::size_t index) const noexcept {
-        return ValueView(strata_widget_value_list_at(value_, index));
+        return ValueView(detail::widget_api().value_list_at(value_, index));
     }
     [[nodiscard]] ValueView field(const std::string_view name) const noexcept {
         return ValueView(
-            strata_widget_value_object_field(value_, strata_string_view{name.data(), name.size()}));
+            detail::widget_api().value_object_field(value_, strata_string_view{name.data(), name.size()}));
     }
     [[nodiscard]] explicit operator bool() const noexcept {
         return value_ != nullptr;
@@ -482,26 +499,26 @@ class Subtargets final {
         : context_(context) {}
 
     [[nodiscard]] Rect bounds() const noexcept {
-        return strata_widget_subtargets_bounds(context_);
+        return detail::widget_api().subtargets_bounds(context_);
     }
     template <typename T> [[nodiscard]] T get(const Retained<structured<T>>& field) const noexcept {
         T value = field.fallback;
-        static_cast<void>(strata_widget_subtargets_retained_bytes(
+        static_cast<void>(detail::widget_api().retained_bytes(STRATA_WIDGET_CONTEXT_SUBTARGETS, 
             context_, strata_string_view{field.name.data(), field.name.size()}, &value,
             sizeof(value)));
         return value;
     }
     [[nodiscard]] ValueView get(const Parameter<any>& field) const noexcept {
-        return ValueView(strata_widget_subtargets_property_value(
+        return ValueView(detail::widget_api().property_value(STRATA_WIDGET_CONTEXT_SUBTARGETS, 
             context_, strata_string_view{field.name.data(), field.name.size()}));
     }
     [[nodiscard]] std::optional<Color> get(const Parameter<color>& field) const noexcept {
-        return ValueView(strata_widget_subtargets_property_value(
+        return ValueView(detail::widget_api().property_value(STRATA_WIDGET_CONTEXT_SUBTARGETS, 
                              context_, strata_string_view{field.name.data(), field.name.size()}))
             .color();
     }
     bool reserve(const std::size_t capacity) noexcept {
-        return strata_widget_subtargets_reserve(context_, capacity).status == STRATA_STATUS_OK;
+        return detail::widget_api().subtargets_reserve(context_, capacity).status == STRATA_STATUS_OK;
     }
     bool add(const Subtarget& target) noexcept {
         const strata_widget_subtarget descriptor{
@@ -514,7 +531,7 @@ class Subtargets final {
             target.semantic ? STRATA_WIDGET_SUBTARGET_ITEM : STRATA_WIDGET_SUBTARGET_CONTROL,
             0U,
         };
-        return strata_widget_subtargets_add(context_, &descriptor).status == STRATA_STATUS_OK;
+        return detail::widget_api().subtargets_add(context_, &descriptor).status == STRATA_STATUS_OK;
     }
 
   private:
@@ -530,7 +547,7 @@ class Input final {
     [[nodiscard]] std::string get(const Retained<text>& field) const;
     template <typename T> [[nodiscard]] T get(const Retained<structured<T>>& field) const noexcept {
         T value = field.fallback;
-        static_cast<void>(strata_widget_input_retained_bytes(
+        static_cast<void>(detail::widget_api().retained_bytes(STRATA_WIDGET_CONTEXT_INPUT, 
             context_, strata_string_view{field.name.data(), field.name.size()}, &value,
             sizeof(value)));
         return value;
@@ -539,17 +556,17 @@ class Input final {
     [[nodiscard]] bool get(const Parameter<boolean>& field) const noexcept;
     [[nodiscard]] std::string get(const Parameter<text>& field) const;
     template <typename Kind> [[nodiscard]] bool has(const Parameter<Kind>& field) const noexcept {
-        return strata_widget_input_has_property(
+        return detail::widget_api().has_property(STRATA_WIDGET_CONTEXT_INPUT, 
                    context_, strata_string_view{field.name.data(), field.name.size()}) != 0U;
     }
     [[nodiscard]] Rect bounds() const noexcept;
     [[nodiscard]] double scale() const noexcept;
     [[nodiscard]] ValueView get(const Parameter<any>& field) const noexcept {
-        return ValueView(strata_widget_input_property_value(
+        return ValueView(detail::widget_api().property_value(STRATA_WIDGET_CONTEXT_INPUT, 
             context_, strata_string_view{field.name.data(), field.name.size()}));
     }
     [[nodiscard]] std::optional<Color> get(const Parameter<color>& field) const noexcept {
-        return ValueView(strata_widget_input_property_value(
+        return ValueView(detail::widget_api().property_value(STRATA_WIDGET_CONTEXT_INPUT, 
                              context_, strata_string_view{field.name.data(), field.name.size()}))
             .color();
     }
@@ -559,7 +576,7 @@ class Input final {
     bool set(const Retained<boolean>& field, bool value) noexcept;
     bool set(const Retained<text>& field, std::string_view value) noexcept;
     template <typename T> bool set(const Retained<structured<T>>& field, const T& value) noexcept {
-        return strata_widget_input_set_retained_bytes(
+        return detail::widget_api().input_set_retained_bytes(
                    context_, strata_string_view{field.name.data(), field.name.size()}, &value,
                    sizeof(value))
                    .status == STRATA_STATUS_OK;
@@ -568,7 +585,7 @@ class Input final {
     template <typename T>
     bool set_target(std::string_view target_key, const Retained<structured<T>>& field,
                     const T& value) noexcept {
-        return strata_widget_input_set_target_retained_bytes(
+        return detail::widget_api().input_set_target_retained_bytes(
                    context_, strata_string_view{target_key.data(), target_key.size()},
                    strata_string_view{field.name.data(), field.name.size()}, &value, sizeof(value))
                    .status == STRATA_STATUS_OK;
@@ -622,7 +639,7 @@ class ClipScope final {
     ClipScope& operator=(ClipScope&&) = delete;
     ~ClipScope() {
         if (context_ != nullptr)
-            strata_widget_render_pop_clip(context_);
+            detail::widget_api().render_pop_clip(context_);
     }
 
   private:
@@ -649,7 +666,7 @@ class Present final {
     [[nodiscard]] std::string get(const Retained<text>& field) const;
     template <typename T> [[nodiscard]] T get(const Retained<structured<T>>& field) const noexcept {
         T value = field.fallback;
-        static_cast<void>(strata_widget_render_retained_bytes(
+        static_cast<void>(detail::widget_api().retained_bytes(STRATA_WIDGET_CONTEXT_RENDER, 
             context_, strata_string_view{field.name.data(), field.name.size()}, &value,
             sizeof(value)));
         return value;
@@ -658,23 +675,23 @@ class Present final {
     [[nodiscard]] bool get(const Parameter<boolean>& field) const noexcept;
     [[nodiscard]] std::string get(const Parameter<text>& field) const;
     template <typename Kind> [[nodiscard]] bool has(const Parameter<Kind>& field) const noexcept {
-        return strata_widget_render_has_property(
+        return detail::widget_api().has_property(STRATA_WIDGET_CONTEXT_RENDER, 
                    context_, strata_string_view{field.name.data(), field.name.size()}) != 0U;
     }
     [[nodiscard]] double scale() const noexcept;
     /** Measures one line through the shaping cache the paint path already uses. */
     [[nodiscard]] std::optional<Size> measure(std::string_view value) const noexcept;
     [[nodiscard]] ValueView get(const Parameter<any>& field) const noexcept {
-        return ValueView(strata_widget_render_property_value(
+        return ValueView(detail::widget_api().property_value(STRATA_WIDGET_CONTEXT_RENDER, 
             context_, strata_string_view{field.name.data(), field.name.size()}));
     }
     [[nodiscard]] std::optional<Color> get(const Parameter<color>& field) const noexcept {
-        return ValueView(strata_widget_render_property_value(
+        return ValueView(detail::widget_api().property_value(STRATA_WIDGET_CONTEXT_RENDER, 
                              context_, strata_string_view{field.name.data(), field.name.size()}))
             .color();
     }
     [[nodiscard]] ValueView style(const std::string_view name) const noexcept {
-        return ValueView(strata_widget_render_style_value(
+        return ValueView(detail::widget_api().render_style_value(
             context_, strata_string_view{name.data(), name.size()}));
     }
 
@@ -728,7 +745,7 @@ class Semantics final {
     [[nodiscard]] bool get(const Retained<boolean>& field) const noexcept;
     template <typename T> [[nodiscard]] T get(const Retained<structured<T>>& field) const noexcept {
         T value = field.fallback;
-        static_cast<void>(strata_widget_semantics_retained_bytes(
+        static_cast<void>(detail::widget_api().retained_bytes(STRATA_WIDGET_CONTEXT_SEMANTICS, 
             context_, strata_string_view{field.name.data(), field.name.size()}, &value,
             sizeof(value)));
         return value;
@@ -738,18 +755,18 @@ class Semantics final {
     [[nodiscard]] std::string get(const Parameter<text>& field) const;
     [[nodiscard]] bool get(const Parameter<boolean>& field) const noexcept;
     template <typename Kind> [[nodiscard]] bool has(const Parameter<Kind>& field) const noexcept {
-        return strata_widget_semantics_has_property(
+        return detail::widget_api().has_property(STRATA_WIDGET_CONTEXT_SEMANTICS, 
                    context_, strata_string_view{field.name.data(), field.name.size()}) != 0U;
     }
     void name(std::string_view value) noexcept;
     void value_text(std::string_view value) noexcept;
     void add_action(std::string_view value) noexcept;
     [[nodiscard]] ValueView get(const Parameter<any>& field) const noexcept {
-        return ValueView(strata_widget_semantics_property_value(
+        return ValueView(detail::widget_api().property_value(STRATA_WIDGET_CONTEXT_SEMANTICS, 
             context_, strata_string_view{field.name.data(), field.name.size()}));
     }
     [[nodiscard]] std::optional<Color> get(const Parameter<color>& field) const noexcept {
-        return ValueView(strata_widget_semantics_property_value(
+        return ValueView(detail::widget_api().property_value(STRATA_WIDGET_CONTEXT_SEMANTICS, 
                              context_, strata_string_view{field.name.data(), field.name.size()}))
             .color();
     }
@@ -773,7 +790,7 @@ class Semantics final {
             flags,
             0U,
         };
-        return strata_widget_semantics_add_child(context_, &descriptor).status == STRATA_STATUS_OK;
+        return detail::widget_api().semantics_add_child(context_, &descriptor).status == STRATA_STATUS_OK;
     }
     void checked(bool value) noexcept;
     void expanded(bool value) noexcept;
@@ -1066,18 +1083,16 @@ namespace detail {
 
 using PackageFactory = std::unique_ptr<Package> (*)();
 
-[[nodiscard]] strata_status query_plugin(PackageFactory factory, std::uint32_t requested_plugin_abi,
+[[nodiscard]] strata_status query_plugin(PackageFactory factory, const strata_extension_host* host,
                                          strata_extension_plugin* output) noexcept;
 
 } // namespace detail
 
 } // namespace strata::extension
 
-/** Exports one package factory as the stable C extension-library entry point. */
+/** Exports one package factory as the plugin ABI 2 extension-library entry point. */
 #define STRATA_EXTENSION_PACKAGE(factory)                                                          \
-    extern "C" STRATA_EXTENSION_PLUGIN_EXPORT strata_status strata_extension_plugin_query(         \
-        const std::uint32_t requested_plugin_abi,                                                  \
-        strata_extension_plugin* const output) noexcept {                                          \
-        return ::strata::extension::detail::query_plugin(&(factory), requested_plugin_abi,         \
-                                                         output);                                  \
+    extern "C" STRATA_EXTENSION_PLUGIN_EXPORT strata_status strata_extension_plugin_query_v2(      \
+        const strata_extension_host* const host, strata_extension_plugin* const output) noexcept { \
+        return ::strata::extension::detail::query_plugin(&(factory), host, output);                \
     }

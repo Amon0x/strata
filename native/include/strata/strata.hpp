@@ -22,6 +22,7 @@
 #include <strata/input.hpp>
 #include <strata/profiler.hpp>
 #include <strata/strata.h>
+#include <strata/widget_api.h>
 
 namespace strata {
 
@@ -79,6 +80,13 @@ class AbiError final : public std::runtime_error {
 inline void require_ok(const strata_result result, const std::string_view operation) {
     if (result.status != STRATA_STATUS_OK)
         throw AbiError(result, operation);
+}
+
+/** The widget function table of the linked library, for hosts loading extension packages. */
+[[nodiscard]] inline const strata_widget_api* widget_api() {
+    const strata_widget_api* api = nullptr;
+    require_ok(strata_widget_api_query(STRATA_WIDGET_API_VERSION_CURRENT, &api), "widget API query");
+    return api;
 }
 
 [[nodiscard]] inline strata_scale_policy_config

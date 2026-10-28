@@ -13,6 +13,8 @@
 #include <string_view>
 #include <utility>
 
+#include <strata/widget_api.h>
+
 #include "abi_boundary.hpp"
 #include "abi_struct.hpp"
 #include "core/runtime.hpp"
@@ -1956,6 +1958,286 @@ strata_widget_semantics_property_text(const strata_widget_semantics_context* con
         return copied_text(value != nullptr ? value->string() : nullptr, buffer, capacity,
                            out_length);
     });
+}
+
+} // extern "C"
+
+namespace {
+
+// One property/retained accessor family for every widget context: each routes to the exported
+// function of the context its kind names. A subtargets context has authored properties and
+// retained bytes; its other retained reads are absent.
+
+[[nodiscard]] const strata_widget_input_context* input(const void* const context) noexcept {
+    return static_cast<const strata_widget_input_context*>(context);
+}
+[[nodiscard]] const strata_widget_render_context* render(const void* const context) noexcept {
+    return static_cast<const strata_widget_render_context*>(context);
+}
+[[nodiscard]] const strata_widget_semantics_context* semantics(const void* const context) noexcept {
+    return static_cast<const strata_widget_semantics_context*>(context);
+}
+[[nodiscard]] const strata_widget_subtargets_context*
+subtargets(const void* const context) noexcept {
+    return static_cast<const strata_widget_subtargets_context*>(context);
+}
+
+[[nodiscard]] strata_result absent_text(char* const buffer, const size_t capacity,
+                                        size_t* const out_length) noexcept {
+    if (out_length == nullptr || (buffer == nullptr && capacity != 0U))
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
+    *out_length = 0U;
+    return strata::abi_detail::result(STRATA_STATUS_NOT_FOUND);
+}
+
+uint32_t generic_has_property(const strata_widget_context_kind kind, const void* const context,
+                              const strata_string_view name) noexcept {
+    switch (kind) {
+    case STRATA_WIDGET_CONTEXT_INPUT: return strata_widget_input_has_property(input(context), name);
+    case STRATA_WIDGET_CONTEXT_RENDER:
+        return strata_widget_render_has_property(render(context), name);
+    case STRATA_WIDGET_CONTEXT_SEMANTICS:
+        return strata_widget_semantics_has_property(semantics(context), name);
+    case STRATA_WIDGET_CONTEXT_SUBTARGETS:
+        return strata_widget_subtargets_property_value(subtargets(context), name) != nullptr ? 1U
+                                                                                          : 0U;
+    default: return 0U;
+    }
+}
+
+const strata_widget_value* generic_property_value(const strata_widget_context_kind kind,
+                                                  const void* const context,
+                                                  const strata_string_view name) noexcept {
+    switch (kind) {
+    case STRATA_WIDGET_CONTEXT_INPUT:
+        return strata_widget_input_property_value(input(context), name);
+    case STRATA_WIDGET_CONTEXT_RENDER:
+        return strata_widget_render_property_value(render(context), name);
+    case STRATA_WIDGET_CONTEXT_SEMANTICS:
+        return strata_widget_semantics_property_value(semantics(context), name);
+    case STRATA_WIDGET_CONTEXT_SUBTARGETS:
+        return strata_widget_subtargets_property_value(subtargets(context), name);
+    default: return nullptr;
+    }
+}
+
+double generic_property_number(const strata_widget_context_kind kind, const void* const context,
+                               const strata_string_view name, const double fallback) noexcept {
+    switch (kind) {
+    case STRATA_WIDGET_CONTEXT_INPUT:
+        return strata_widget_input_property_number(input(context), name, fallback);
+    case STRATA_WIDGET_CONTEXT_RENDER:
+        return strata_widget_render_property_number(render(context), name, fallback);
+    case STRATA_WIDGET_CONTEXT_SEMANTICS:
+        return strata_widget_semantics_property_number(semantics(context), name, fallback);
+    case STRATA_WIDGET_CONTEXT_SUBTARGETS:
+        return strata_widget_value_get_number(
+            strata_widget_subtargets_property_value(subtargets(context), name), fallback);
+    default: return fallback;
+    }
+}
+
+uint32_t generic_property_boolean(const strata_widget_context_kind kind, const void* const context,
+                                  const strata_string_view name, const uint32_t fallback) noexcept {
+    switch (kind) {
+    case STRATA_WIDGET_CONTEXT_INPUT:
+        return strata_widget_input_property_boolean(input(context), name, fallback);
+    case STRATA_WIDGET_CONTEXT_RENDER:
+        return strata_widget_render_property_boolean(render(context), name, fallback);
+    case STRATA_WIDGET_CONTEXT_SEMANTICS:
+        return strata_widget_semantics_property_boolean(semantics(context), name, fallback);
+    case STRATA_WIDGET_CONTEXT_SUBTARGETS:
+        return strata_widget_value_get_boolean(
+            strata_widget_subtargets_property_value(subtargets(context), name), fallback);
+    default: return fallback != 0U ? 1U : 0U;
+    }
+}
+
+strata_result generic_property_text(const strata_widget_context_kind kind,
+                                    const void* const context, const strata_string_view name,
+                                    char* const buffer, const size_t capacity,
+                                    size_t* const out_length) noexcept {
+    switch (kind) {
+    case STRATA_WIDGET_CONTEXT_INPUT:
+        return strata_widget_input_property_text(input(context), name, buffer, capacity,
+                                                 out_length);
+    case STRATA_WIDGET_CONTEXT_RENDER:
+        return strata_widget_render_property_text(render(context), name, buffer, capacity,
+                                                  out_length);
+    case STRATA_WIDGET_CONTEXT_SEMANTICS:
+        return strata_widget_semantics_property_text(semantics(context), name, buffer, capacity,
+                                                     out_length);
+    case STRATA_WIDGET_CONTEXT_SUBTARGETS: {
+        const strata_widget_value* const value =
+            strata_widget_subtargets_property_value(subtargets(context), name);
+        if (strata_widget_value_get_kind(value) != STRATA_WIDGET_VALUE_TEXT)
+            return absent_text(buffer, capacity, out_length);
+        if (out_length == nullptr || (buffer == nullptr && capacity != 0U))
+            return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
+        const strata_string_view text = strata_widget_value_get_text(value);
+        *out_length = text.size;
+        if (text.size > capacity)
+            return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
+        if (text.size != 0U)
+            std::copy(text.data, text.data + text.size, buffer);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
+    }
+    default: return absent_text(buffer, capacity, out_length);
+    }
+}
+
+double generic_retained_number(const strata_widget_context_kind kind, const void* const context,
+                               const strata_string_view name, const double fallback) noexcept {
+    switch (kind) {
+    case STRATA_WIDGET_CONTEXT_INPUT:
+        return strata_widget_input_retained_number(input(context), name, fallback);
+    case STRATA_WIDGET_CONTEXT_RENDER:
+        return strata_widget_render_retained_number(render(context), name, fallback);
+    case STRATA_WIDGET_CONTEXT_SEMANTICS:
+        return strata_widget_semantics_retained_number(semantics(context), name, fallback);
+    default: return fallback;
+    }
+}
+
+uint32_t generic_retained_boolean(const strata_widget_context_kind kind, const void* const context,
+                                  const strata_string_view name, const uint32_t fallback) noexcept {
+    switch (kind) {
+    case STRATA_WIDGET_CONTEXT_INPUT:
+        return strata_widget_input_retained_boolean(input(context), name, fallback);
+    case STRATA_WIDGET_CONTEXT_RENDER:
+        return strata_widget_render_retained_boolean(render(context), name, fallback);
+    case STRATA_WIDGET_CONTEXT_SEMANTICS:
+        return strata_widget_semantics_retained_boolean(semantics(context), name, fallback);
+    default: return fallback != 0U ? 1U : 0U;
+    }
+}
+
+strata_result generic_retained_text(const strata_widget_context_kind kind,
+                                    const void* const context, const strata_string_view name,
+                                    char* const buffer, const size_t capacity,
+                                    size_t* const out_length) noexcept {
+    switch (kind) {
+    case STRATA_WIDGET_CONTEXT_INPUT:
+        return strata_widget_input_retained_text(input(context), name, buffer, capacity,
+                                                 out_length);
+    case STRATA_WIDGET_CONTEXT_RENDER:
+        return strata_widget_render_retained_text(render(context), name, buffer, capacity,
+                                                  out_length);
+    case STRATA_WIDGET_CONTEXT_SEMANTICS:
+        return strata_widget_semantics_retained_text(semantics(context), name, buffer, capacity,
+                                                     out_length);
+    default: return absent_text(buffer, capacity, out_length);
+    }
+}
+
+strata_result generic_retained_bytes(const strata_widget_context_kind kind,
+                                     const void* const context, const strata_string_view name,
+                                     void* const buffer, const size_t size) noexcept {
+    switch (kind) {
+    case STRATA_WIDGET_CONTEXT_INPUT:
+        return strata_widget_input_retained_bytes(input(context), name, buffer, size);
+    case STRATA_WIDGET_CONTEXT_RENDER:
+        return strata_widget_render_retained_bytes(render(context), name, buffer, size);
+    case STRATA_WIDGET_CONTEXT_SEMANTICS:
+        return strata_widget_semantics_retained_bytes(semantics(context), name, buffer, size);
+    case STRATA_WIDGET_CONTEXT_SUBTARGETS:
+        return strata_widget_subtargets_retained_bytes(subtargets(context), name, buffer, size);
+    default: return strata::abi_detail::result(STRATA_STATUS_NOT_FOUND);
+    }
+}
+
+constexpr strata_widget_api widget_api_v1{
+    sizeof(strata_widget_api),
+    STRATA_WIDGET_API_VERSION_1,
+    0U,
+    &generic_has_property,
+    &generic_property_value,
+    &generic_property_number,
+    &generic_property_boolean,
+    &generic_property_text,
+    &generic_retained_number,
+    &generic_retained_boolean,
+    &generic_retained_text,
+    &generic_retained_bytes,
+    &strata_widget_value_get_kind,
+    &strata_widget_value_get_boolean,
+    &strata_widget_value_get_number,
+    &strata_widget_value_get_color,
+    &strata_widget_value_get_text,
+    &strata_widget_value_list_size,
+    &strata_widget_value_list_at,
+    &strata_widget_value_object_field,
+    &strata_widget_input_bounds,
+    &strata_widget_input_scale,
+    &strata_widget_input_claim_gesture,
+    &strata_widget_input_cancel_gesture,
+    &strata_widget_input_invalidate,
+    &strata_widget_input_request_frame,
+    &strata_widget_input_cancel_frame,
+    &strata_widget_input_set_retained_number,
+    &strata_widget_input_set_retained_boolean,
+    &strata_widget_input_set_retained_text,
+    &strata_widget_input_set_retained_bytes,
+    &strata_widget_input_set_target_retained_bytes,
+    &strata_widget_input_emit_action_json,
+    &strata_widget_input_emit_property_action_json,
+    &strata_widget_input_emit_property_color_event,
+    &strata_widget_input_emit_event_json,
+    &strata_widget_input_emit_number_event,
+    &strata_widget_input_emit_boolean_event,
+    &strata_widget_input_emit_text_event,
+    &strata_behavior_input_emit_action_json,
+    &strata_widget_render_style_value,
+    &strata_widget_render_bounds,
+    &strata_widget_render_root_bounds,
+    &strata_widget_render_scale,
+    &strata_widget_render_focused,
+    &strata_widget_render_focus_visible,
+    &strata_widget_render_hovered,
+    &strata_widget_render_motion_progress,
+    &strata_widget_render_rounded_rect,
+    &strata_widget_render_solid_rect,
+    &strata_widget_render_border,
+    &strata_widget_render_text,
+    &strata_widget_render_aligned_text,
+    &strata_widget_render_image,
+    &strata_widget_render_nine_patch,
+    &strata_widget_render_custom_mesh,
+    &strata_widget_render_blur,
+    &strata_widget_render_shadow,
+    &strata_widget_render_push_clip,
+    &strata_widget_render_pop_clip,
+    &strata_widget_render_discard,
+    &strata_widget_render_text_metrics,
+    &strata_widget_render_enabled,
+    &strata_widget_render_active,
+    &strata_widget_inspection_layout_bounds,
+    &strata_widget_semantics_set_name,
+    &strata_widget_semantics_set_value_text,
+    &strata_widget_semantics_set_value_range,
+    &strata_widget_semantics_add_action,
+    &strata_widget_semantics_add_child,
+    &strata_widget_semantics_set_checked,
+    &strata_widget_semantics_set_expanded,
+    &strata_widget_semantics_set_selected,
+    &strata_widget_subtargets_bounds,
+    &strata_widget_subtargets_reserve,
+    &strata_widget_subtargets_add,
+};
+
+} // namespace
+
+extern "C" {
+
+strata_result strata_widget_api_query(const uint32_t requested_version,
+                                      const strata_widget_api** const out_api) noexcept {
+    if (out_api == nullptr)
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
+    *out_api = nullptr;
+    if (requested_version == 0U || requested_version > STRATA_WIDGET_API_VERSION_CURRENT)
+        return strata::abi_detail::result(STRATA_STATUS_UNSUPPORTED_ABI);
+    *out_api = &widget_api_v1;
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 } // extern "C"
