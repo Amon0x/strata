@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "compiler/module.hpp"
 #include "data/json.hpp"
 #include "resource/resource.hpp"
 #include "runtime/application.hpp"
@@ -23,6 +24,7 @@
 #include "ui/notification.hpp"
 #include "ui/semantics.hpp"
 #include "ui/status.hpp"
+#include "ui/surface.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
 #include "ui/tree.hpp"
@@ -2178,6 +2180,136 @@ void test_event_outcome_pairing(InputFixture& fixture) {
     check_paired(clicked, "a nested focus move split an event from its action outcome");
 }
 
+[[nodiscard]] bool has_event(const ui::InputOperationResult& result, const std::string_view type,
+                             const std::string_view field, const data::JsonValue& value) {
+    return std::ranges::any_of(result.events, [&](const data::JsonValue& event) {
+        const data::JsonValue* kind = event.find("type");
+        const data::JsonValue* found = event.find(field);
+        return kind != nullptr && kind->string() != nullptr && *kind->string() == type &&
+               found != nullptr && *found == value;
+    });
+}
+
+void test_removed_focused_editor_commits(InputFixture& fixture) {
+    ui::DescriptionNode::Properties field = sized(160.0, 28.0);
+    field.emplace("commitFormat", runtime::ExpressionValue(runtime::Value("uppercase")));
+    const auto tree = [&field](const bool dialog) {
+        std::vector<std::shared_ptr<const ui::DescriptionNode>> children{
+            node("Probe", "removal.anchor", {}, sized(80.0, 32.0)),
+        };
+        if (dialog) {
+            children.push_back(node("Panel", "removal.dialog",
+                                    {node("TextBox", "removal.field", {}, field)},
+                                    sized(200.0, 60.0, "COLUMN")));
+        }
+        return node("Panel", "removal.root", std::move(children), sized(300.0, 200.0, "COLUMN"));
+    };
+    fixture.adopt(tree(true));
+    static_cast<void>(fixture.input_.click("removal.field"));
+    check(fixture.focused("removal.field"), "removal fixture editor was not focused");
+    static_cast<void>(fixture.input_.text("ab"));
+    // Dismissing the dialog removes the focused editor before the router sees the new tree. It is
+    // still blurred, and its uncommitted edit committed, as if focus had moved away first.
+    const InputFixture::FrameResult removed = fixture.frame(tree(false));
+    check(!fixture.input_.focused_key().has_value(), "removed editor kept focus");
+    check(has_event(removed.input, "focus-changed", "focused", data::JsonValue(false)),
+          "removed focused editor was not blurred");
+    check(has_event(removed.input, "text-changed", "text", data::JsonValue("AB")),
+          "removed focused editor dropped its uncommitted edit");
+    check_paired(removed.input, "removed editor blur split an event from its outcome");
+}
+
+[[nodiscard]] std::unique_ptr<ui::Surface>
+compiled_surface(runtime::ApplicationContext& application, const std::filesystem::path& resources,
+                 const std::string& source, const std::string& root, const double width,
+                 const double height) {
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    const runtime::ActivationResult activation = application.compile_and_activate(
+        compiler::ModuleSource{root + ".strata", source}, no_imports, 0U);
+    if (!activation.activated()) {
+        std::string message = "surface fixture '" + root + "' did not activate";
+        for (const runtime::ActivationDiagnostic& diagnostic : activation.diagnostics)
+            message += " [" + diagnostic.code + ": " + diagnostic.message + "]";
+        throw std::runtime_error(message);
+    }
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = static_cast<int>(width);
+    environment.framebuffer_height = static_cast<int>(height);
+    environment.logical_width = width;
+    environment.logical_height = height;
+    environment.reduced_motion = true;
+    return std::make_unique<ui::Surface>(
+        root, application, runtime::LayerRole::overlay, root, environment,
+        ui::TextEngine::load_control_font(
+            resources, resource::ResourceId::parse("assets/strata/fonts/medium.ttf")));
+}
+
+void test_virtual_focused_row_stays_realized(const std::filesystem::path& resources) {
+    std::string items;
+    for (int index = 0; index < 120; ++index) {
+        items += std::string(index == 0 ? "" : ", ") + "{ key: \"row." + std::to_string(index) +
+                 "\", label: \"Row " + std::to_string(index) + "\" }";
+    }
+    const std::string source = R"(
+component EditRow(item: record, key: key, index: number) {
+  TextBox(key: key, text: item.label, layout: { width: 160, height: 28 })
+}
+overlay VirtualRows {
+  Panel(key: "rows.root", layout: { kind: "COLUMN", width: { weight: 1 }, height: { weight: 1 } }) {
+    VirtualList(
+      key: "rows.list",
+      items: [)" + items + R"(],
+      itemTemplate: EditRow,
+      itemExtent: 28,
+      layout: { kind: "SCROLL", width: { weight: 1 }, height: 112 }
+    )
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("virtual-rows", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "VirtualRows", 320.0, 200.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    static_cast<void>(surface->input().click("rows.list.$item.row.1"));
+    static_cast<void>(surface->input().text("draft"));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    const ui::RetainedNode* row = surface->tree().find_key("rows.list.$item.row.1");
+    check(row != nullptr && surface->input().focused(row->identity()),
+          "virtual row editor was not focused");
+    const std::uint64_t identity = row->identity();
+
+    ui::InputOperationResult scrolled;
+    check(surface->input().scroll_to("rows.list", ui::Point{0.0, 28.0 * 100.0}, scrolled),
+          "virtual list did not scroll");
+    for (int frame = 0; frame < 3; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    check(surface->tree().find_key("rows.list.$item.row.100") != nullptr,
+          "virtual list did not realize its new window");
+    // The focused row left the realized window but stays attached, focused and unedited.
+    row = surface->tree().find_key("rows.list.$item.row.1");
+    check(row != nullptr && row->identity() == identity,
+          "virtual list released the focused row it scrolled away from");
+    check(surface->input().focused(identity), "focus was lost when its row scrolled away");
+    const std::optional<ui::TextEditorSnapshot> snapshot =
+        surface->input().editor_snapshot(identity);
+    check(snapshot.has_value() && snapshot->text == "Row 1draft",
+          "the focused row's uncommitted edit was lost when it scrolled away");
+    check(surface->tree().find_key("rows.list.$item.row.50") == nullptr,
+          "keeping the focused row realized the rows between it and the window");
+
+    // Once focus leaves, the row is released like any other row outside the window.
+    static_cast<void>(surface->input().click("rows.list.$item.row.100"));
+    for (int frame = 0; frame < 2; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    check(surface->tree().find_key("rows.list.$item.row.1") == nullptr,
+          "a row kept for focus outlived the focus that kept it");
+}
+
 } // namespace
 
 int strata_test_interaction_residual(const int argument_count, const char* const* const arguments) {
@@ -2209,6 +2341,8 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_select_inside_modal(fixture);
         test_banner_semantics(fixture);
         test_event_outcome_pairing(fixture);
+        test_removed_focused_editor_commits(fixture);
+        test_virtual_focused_row_stays_realized(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

@@ -375,6 +375,7 @@ class InputRouter final {
     [[nodiscard]] bool focus_contained() const noexcept;
     /** Semantic focus remains active even when pointer modality suppresses its visual indicator. */
     [[nodiscard]] bool focused(std::uint64_t identity) const noexcept;
+    [[nodiscard]] std::optional<std::uint64_t> focused_identity() const noexcept;
     /** True only for the focused node while keyboard/spatial focus indication is active. */
     [[nodiscard]] bool focus_visible(std::uint64_t identity) const noexcept;
     [[nodiscard]] bool hovered(std::uint64_t identity) const noexcept;
@@ -446,6 +447,8 @@ class InputRouter final {
     void focus(const RetainedNode& node, std::string_view reason, InputOperationResult& result);
     void clear_focus(std::string_view reason, InputOperationResult& result,
                      bool dismiss_popups = true);
+    /** Routes the blur of the node losing focus, commits its editor and records the change. */
+    void blur(RetainedNode& previous, std::string_view reason, InputOperationResult& result);
     void hover_route(const RetainedNode* target);
     runtime::ActionDispatchOutcome emit(data::JsonValue event,
                                         const std::shared_ptr<const runtime::ActionValue>& action,

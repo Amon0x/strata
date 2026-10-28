@@ -225,7 +225,8 @@ declaration_root(const std::shared_ptr<const DescriptionNode>& declaration) {
             visible,
             !node.realization_current(provider, projected.projected_theme,
                                       projected.projected_theme_scope,
-                                      projected.projected_theme_generation, materialized),
+                                      projected.projected_theme_generation, materialized,
+                                      node.realized_kept_row()),
         });
     }
     std::sort(result.begin(), result.end());
@@ -277,6 +278,23 @@ declaration_root(const std::shared_ptr<const DescriptionNode>& declaration) {
         desired.end_exclusive = std::max(desired.start, desired.end_exclusive);
     }
     return desired;
+}
+
+// The row of `collection` holding the focused node when the realization window has left it:
+// releasing that row would drop focus, the uncommitted edit and its undo history.
+[[nodiscard]] std::optional<std::size_t> kept_focused_row(const RetainedNode& collection,
+                                                          const RetainedNode* focused,
+                                                          const MaterializationRange window,
+                                                          const std::size_t child_count) {
+    const RetainedNode* row = focused;
+    while (row != nullptr && row->parent() != &collection)
+        row = row->parent();
+    if (row == nullptr || row->lifecycle() != RetainedLifecycle::attached)
+        return std::nullopt;
+    const std::size_t index = row->source_index();
+    if (index >= child_count || (index >= window.start && index < window.end_exclusive))
+        return std::nullopt;
+    return index;
 }
 
 [[nodiscard]] bool
@@ -1125,9 +1143,13 @@ ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
         const std::size_t child_count = provider->size();
         const MaterializationRange desired =
             desired_realization_range(*parent, layout, child_count);
+        const std::optional<std::uint64_t> focused = input_.focused_identity();
+        const std::optional<std::size_t> kept = kept_focused_row(
+            *parent, focused.has_value() ? tree_.find_identity(*focused) : nullptr, desired,
+            child_count);
         if (parent->realization_current(provider, projected.projected_theme,
                                         projected.projected_theme_scope,
-                                        projected.projected_theme_generation, desired)) {
+                                        projected.projected_theme_generation, desired, kept)) {
             continue;
         }
         if (projected.projected_theme == nullptr) {
@@ -1141,8 +1163,8 @@ ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
             bool requires_projection = false;
         };
         std::vector<RowProjection> rows;
-        rows.reserve(desired.end_exclusive - desired.start);
-        for (std::size_t index = desired.start; index < desired.end_exclusive; ++index) {
+        rows.reserve(desired.end_exclusive - desired.start + 1U);
+        const auto project_row = [&](const std::size_t index) {
             std::shared_ptr<const DescriptionNode> description = parent->realized_child_description(
                 index, provider, projected.projected_theme, projected.projected_theme_scope,
                 projected.projected_theme_generation);
@@ -1150,7 +1172,13 @@ ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
             if (generated)
                 description = provider->at(index);
             rows.push_back(RowProjection{index, std::move(description), generated});
-        }
+        };
+        if (kept.has_value() && *kept < desired.start)
+            project_row(*kept);
+        for (std::size_t index = desired.start; index < desired.end_exclusive; ++index)
+            project_row(index);
+        if (kept.has_value() && *kept >= desired.end_exclusive)
+            project_row(*kept);
 
         std::vector<RealizedDescriptionChild> realized;
         realized.reserve(rows.size());
@@ -1182,7 +1210,8 @@ ReconcileStats Surface::realize_virtual_children(const LayoutResult& layout) {
         ReconcileStats local = tree_.realize_children(
             identity, provider, projected.projected_theme, projected.projected_theme_scope,
             projected.projected_theme_generation, desired, std::move(realized),
-            [this](const RetainedNode& node) { return motion_.should_retain_for_exit(node); });
+            [this](const RetainedNode& node) { return motion_.should_retain_for_exit(node); },
+            kept);
         aggregate.created += local.created;
         aggregate.reused += local.reused;
         aggregate.updated += local.updated;

@@ -345,6 +345,7 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
 
     if (!description->materialization.has_value() && existing->realized_range_.has_value()) {
         existing->realized_range_.reset();
+        existing->realized_kept_row_.reset();
         existing->realization_provider_.reset();
         existing->realization_theme_.reset();
         existing->realization_theme_scope_.reset();
@@ -499,7 +500,8 @@ ReconcileStats RetainedTree::realize_children(
     const std::uint64_t parent_identity, std::shared_ptr<const DescriptionChildren> provider,
     std::shared_ptr<const Theme> projected_theme, std::optional<std::string> projected_theme_scope,
     const std::uint64_t theme_generation, MaterializationRange range,
-    std::vector<RealizedDescriptionChild> children, const ExitRetention& exit_retention) {
+    std::vector<RealizedDescriptionChild> children, const ExitRetention& exit_retention,
+    std::optional<std::size_t> kept_row) {
     if (provider == nullptr) {
         throw std::invalid_argument("virtual realization requires a description provider");
     }
@@ -513,12 +515,21 @@ ReconcileStats RetainedTree::realize_children(
     const std::size_t child_count = provider->size();
     range.start = std::min(range.start, child_count);
     range.end_exclusive = std::clamp(range.end_exclusive, range.start, child_count);
-    if (children.size() != range.end_exclusive - range.start) {
+    if (kept_row.has_value() && (*kept_row >= child_count ||
+                                 (*kept_row >= range.start && *kept_row < range.end_exclusive))) {
+        throw std::invalid_argument("a kept virtual row must lie outside the realized range");
+    }
+    if (children.size() != range.end_exclusive - range.start + (kept_row.has_value() ? 1U : 0U)) {
         throw std::invalid_argument("virtual realization rows do not cover the requested range");
     }
+    const bool kept_first = kept_row.has_value() && *kept_row < range.start;
     for (std::size_t offset = 0U; offset < children.size(); ++offset) {
-        if (children[offset].source_index != range.start + offset ||
-            children[offset].description == nullptr) {
+        const std::size_t expected = kept_first
+                                         ? (offset == 0U ? *kept_row : range.start + offset - 1U)
+                                     : range.start + offset < range.end_exclusive
+                                         ? range.start + offset
+                                         : *kept_row;
+        if (children[offset].source_index != expected || children[offset].description == nullptr) {
             throw std::invalid_argument(
                 "virtual realization rows must be non-null and ordered by source index");
         }
@@ -638,6 +649,7 @@ ReconcileStats RetainedTree::realize_children(
     parent->realization_theme_scope_ = std::move(projected_theme_scope);
     parent->realization_theme_generation_ = theme_generation;
     parent->realized_range_ = range;
+    parent->realized_kept_row_ = kept_row;
     const std::size_t window = range.end_exclusive - range.start;
     const std::size_t cache_capacity = std::clamp(window > 64U ? std::size_t{256U} : window * 4U,
                                                   std::size_t{32U}, std::size_t{256U});

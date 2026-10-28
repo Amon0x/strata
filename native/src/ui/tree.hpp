@@ -339,6 +339,8 @@ class RetainedNode final {
     [[nodiscard]] const DirtySet& dirty() const noexcept;
     /** Exact source range currently attached by this virtual collection's local realizer. */
     [[nodiscard]] std::optional<MaterializationRange> realized_range() const noexcept;
+    /** A row outside the realized range kept attached (the focused row), if any. */
+    [[nodiscard]] std::optional<std::size_t> realized_kept_row() const noexcept;
     /**
      * Returns an attached or warm themed row only when it belongs to the same immutable provider
      * and theme projection generation.
@@ -353,7 +355,8 @@ class RetainedNode final {
     realization_current(const std::shared_ptr<const DescriptionChildren>& provider,
                         const std::shared_ptr<const Theme>& projected_theme,
                         const std::optional<std::string>& projected_theme_scope,
-                        std::uint64_t theme_generation, MaterializationRange range) const noexcept;
+                        std::uint64_t theme_generation, MaterializationRange range,
+                        std::optional<std::size_t> kept_row = std::nullopt) const noexcept;
     /** State scopes kept alive by the collection's bounded warm description window. */
     [[nodiscard]] const runtime::StateScopeSet& warm_realization_state_scopes() const noexcept;
     [[nodiscard]] DirtyGenerationSnapshot dirty_generations() const noexcept;
@@ -393,6 +396,7 @@ class RetainedNode final {
     std::map<std::string, std::vector<std::byte>, std::less<>> retained_bytes_;
     std::vector<Cleanup> cleanups_;
     std::optional<MaterializationRange> realized_range_;
+    std::optional<std::size_t> realized_kept_row_;
     std::shared_ptr<const DescriptionChildren> realization_provider_;
     std::shared_ptr<const Theme> realization_theme_;
     std::optional<std::string> realization_theme_scope_;
@@ -446,13 +450,16 @@ class RetainedTree final {
     /**
      * Locally reconciles one virtual collection's attached window without rebuilding its
      * declarative ancestors. Descriptions must be themed for the parent's projected context.
+     * `children` covers `range` in source order; a `kept_row` outside the range (the focused row,
+     * scrolled away) is realized too, its description in source order among them.
      */
     [[nodiscard]] ReconcileStats realize_children(
         std::uint64_t parent_identity, std::shared_ptr<const DescriptionChildren> provider,
         std::shared_ptr<const Theme> projected_theme,
         std::optional<std::string> projected_theme_scope, std::uint64_t theme_generation,
         MaterializationRange range, std::vector<RealizedDescriptionChild> children,
-        const ExitRetention& exit_retention = {});
+        const ExitRetention& exit_retention = {},
+        std::optional<std::size_t> kept_row = std::nullopt);
     /** Detaches completed EXITING child subtrees after the motion stage advances them. */
     [[nodiscard]] std::size_t prune_exiting(const ExitCompletion& exit_completion);
     [[nodiscard]] RetainedNode* root() const noexcept;
@@ -508,6 +515,16 @@ class RetainedTree final {
     /** Consumes the reasons owned by measurement/arrangement without touching other stages. */
     void consume_layout_dirty();
     void clear();
+    /**
+     * Names the node whose removal its owner must observe while it is still whole (the input
+     * router's focused node, so it can be blurred and its editor committed). A reconcile that
+     * removes it keeps the removed subtree alive, detached and unindexed, until
+     * release_detached(); `clear` holds nothing.
+     */
+    void hold_on_detach(std::optional<std::uint64_t> identity) noexcept;
+    /** A node of a subtree kept by hold_on_detach, or null. */
+    [[nodiscard]] RetainedNode* find_detached(std::uint64_t identity) const noexcept;
+    void release_detached() noexcept;
 
   private:
     [[nodiscard]] std::unique_ptr<RetainedNode>
@@ -519,6 +536,8 @@ class RetainedTree final {
     static void rebase_subtree(RetainedNode& node, RetainedNode* parent, std::size_t source_index,
                                std::string structural_path);
     void detach(std::unique_ptr<RetainedNode> node, ReconcileStats* stats) noexcept;
+    /** Marks a subtree detached and runs its cleanups; whether it contains the held node. */
+    [[nodiscard]] bool retire(RetainedNode& node, ReconcileStats* stats) noexcept;
     void rebuild_indexes();
     void index(RetainedNode& node);
     void invalidate_description_snapshot() noexcept;
@@ -554,6 +573,8 @@ class RetainedTree final {
     PersistenceFields persistence_fields_;
     PersistenceReader persistence_reader_;
     PersistenceWriter persistence_writer_;
+    std::optional<std::uint64_t> detach_hold_;
+    std::vector<std::unique_ptr<RetainedNode>> held_detached_;
 };
 
 /** State scopes owned by attached descriptions or an attached collection's bounded warm window. */

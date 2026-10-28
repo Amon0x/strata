@@ -482,7 +482,14 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
     InputOperationResult result;
     tree_ = &tree;
     if (focused_.has_value() && tree.find_identity(*focused_) == nullptr) {
-        if (pending_focus_.has_value() && pending_focus_->identity == *focused_) {
+        // The tree holds a removed focused node until now: it loses focus like any other blurred
+        // node, so its handlers see the blur and its editor's uncommitted text is committed.
+        if (RetainedNode* const removed = tree.find_detached(*focused_); removed != nullptr) {
+            focused_.reset();
+            blur(*removed, "invalid_target", result);
+            if (frame_invalidator_)
+                frame_invalidator_();
+        } else if (pending_focus_.has_value() && pending_focus_->identity == *focused_) {
             JsonValue event = object({
                 {"action", JsonValue{}},
                 {"focused", JsonValue(false)},
@@ -641,6 +648,8 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
     }
     sync_modal_focus(result);
     sanitize_focus(result);
+    tree.release_detached();
+    tree.hold_on_detach(focused_);
     return result;
 }
 
@@ -873,22 +882,11 @@ void InputRouter::focus(const RetainedNode& node, const std::string_view reason,
             if (reason != "pointer" && !descendant_of(node, *previous)) {
                 dismiss_transient_popups(&node, result, false);
             }
-            static_cast<void>(route_event(previous, nullptr, InputEventKind::blur, nullptr, nullptr,
-                                          nullptr, nullptr, nullptr, result));
-            commit_editor(*previous, result);
-            static_cast<void>(tree_->mark(previous->identity(), DirtyReason::input));
-            note_field_blur(*previous);
-            JsonValue event = object({
-                {"action", JsonValue{}},
-                {"focused", JsonValue(false)},
-                {"reason", JsonValue(std::string(reason))},
-                {"source", source(*previous)},
-                {"type", JsonValue("focus-changed")},
-            });
-            record_no_action(result, std::move(event));
+            blur(*previous, reason, result);
         }
     }
     focused_ = node.identity();
+    tree_->hold_on_detach(focused_);
     update_tooltip_disclosures();
     static_cast<void>(tree_->mark(node.identity(), DirtyReason::input));
     static_cast<void>(route_event(const_cast<RetainedNode*>(&node), nullptr, InputEventKind::focus,
@@ -917,19 +915,26 @@ void InputRouter::clear_focus(const std::string_view reason, InputOperationResul
         return;
     RetainedNode* previous = tree_ != nullptr ? tree_->find_identity(*focused_) : nullptr;
     focused_.reset();
+    if (tree_ != nullptr)
+        tree_->hold_on_detach(std::nullopt);
     update_tooltip_disclosures();
     if (previous == nullptr)
         return;
-    static_cast<void>(route_event(previous, nullptr, InputEventKind::blur, nullptr, nullptr,
+    blur(*previous, reason, result);
+}
+
+void InputRouter::blur(RetainedNode& previous, const std::string_view reason,
+                       InputOperationResult& result) {
+    static_cast<void>(route_event(&previous, nullptr, InputEventKind::blur, nullptr, nullptr,
                                   nullptr, nullptr, nullptr, result));
-    commit_editor(*previous, result);
-    static_cast<void>(tree_->mark(previous->identity(), DirtyReason::input));
-    note_field_blur(*previous);
+    commit_editor(previous, result);
+    static_cast<void>(tree_->mark(previous.identity(), DirtyReason::input));
+    note_field_blur(previous);
     JsonValue event = object({
         {"action", JsonValue{}},
         {"focused", JsonValue(false)},
         {"reason", JsonValue(std::string(reason))},
-        {"source", source(*previous)},
+        {"source", source(previous)},
         {"type", JsonValue("focus-changed")},
     });
     record_no_action(result, std::move(event));
@@ -1071,6 +1076,9 @@ bool InputRouter::focus_contained() const noexcept {
 
 bool InputRouter::focused(const std::uint64_t identity) const noexcept {
     return focused_ == identity;
+}
+std::optional<std::uint64_t> InputRouter::focused_identity() const noexcept {
+    return focused_;
 }
 bool InputRouter::focus_visible(const std::uint64_t identity) const noexcept {
     return focus_highlight_visible_ && focused_ == identity;

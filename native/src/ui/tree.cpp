@@ -435,6 +435,9 @@ const DirtySet& RetainedNode::dirty() const noexcept {
 std::optional<MaterializationRange> RetainedNode::realized_range() const noexcept {
     return realized_range_;
 }
+std::optional<std::size_t> RetainedNode::realized_kept_row() const noexcept {
+    return realized_kept_row_;
+}
 
 std::shared_ptr<const DescriptionNode>
 RetainedNode::realized_child_description(const std::size_t source_index,
@@ -462,11 +465,13 @@ bool RetainedNode::realization_current(const std::shared_ptr<const DescriptionCh
                                        const std::shared_ptr<const Theme>& projected_theme,
                                        const std::optional<std::string>& projected_theme_scope,
                                        const std::uint64_t theme_generation,
-                                       const MaterializationRange range) const noexcept {
+                                       const MaterializationRange range,
+                                       const std::optional<std::size_t> kept_row) const noexcept {
     return realization_provider_ == provider && realization_theme_ == projected_theme &&
            realization_theme_scope_ == projected_theme_scope &&
            realization_theme_generation_ == theme_generation &&
-           realized_range_ == std::optional<MaterializationRange>(range);
+           realized_range_ == std::optional<MaterializationRange>(range) &&
+           realized_kept_row_ == kept_row;
 }
 
 const runtime::StateScopeSet& RetainedNode::warm_realization_state_scopes() const noexcept {
@@ -877,7 +882,10 @@ void RetainedTree::consume_layout_dirty() {
 }
 
 void RetainedTree::clear() {
+    release_detached();
+    const std::optional<std::uint64_t> hold = std::exchange(detach_hold_, std::nullopt);
     detach(std::move(root_), nullptr);
+    detach_hold_ = hold;
     invalidate_description_snapshot();
     key_index_.clear();
     identity_index_.clear();
@@ -893,11 +901,24 @@ void RetainedTree::detach(std::unique_ptr<RetainedNode> node,
                           ReconcileStats* const stats) noexcept {
     if (node == nullptr)
         return;
-    node->lifecycle_ = RetainedLifecycle::detached;
-    for (auto& child : node->children_)
-        detach(std::move(child), stats);
-    node->children_.clear();
-    for (auto& cleanup : node->cleanups_) {
+    if (!retire(*node, stats))
+        return;
+    // The held node's owner finishes with it before the next release. The subtree's parent can be
+    // removed by then, so the subtree is cut loose from it.
+    node->parent_ = nullptr;
+    try {
+        held_detached_.push_back(std::move(node));
+    } catch (...) {
+        /* Holding is best effort; without memory the subtree is released now. */
+    }
+}
+
+bool RetainedTree::retire(RetainedNode& node, ReconcileStats* const stats) noexcept {
+    node.lifecycle_ = RetainedLifecycle::detached;
+    bool held = detach_hold_ == node.identity_;
+    for (const auto& child : node.children_)
+        held = retire(*child, stats) || held;
+    for (auto& cleanup : node.cleanups_) {
         try {
             cleanup();
         } catch (...) {
@@ -906,6 +927,32 @@ void RetainedTree::detach(std::unique_ptr<RetainedNode> node,
     }
     if (stats != nullptr)
         ++stats->detached;
+    return held;
+}
+
+void RetainedTree::hold_on_detach(const std::optional<std::uint64_t> identity) noexcept {
+    detach_hold_ = identity;
+}
+
+RetainedNode* RetainedTree::find_detached(const std::uint64_t identity) const noexcept {
+    const auto find = [identity](const auto& self, RetainedNode& node) -> RetainedNode* {
+        if (node.identity_ == identity)
+            return &node;
+        for (const auto& child : node.children_) {
+            if (RetainedNode* found = self(self, *child); found != nullptr)
+                return found;
+        }
+        return nullptr;
+    };
+    for (const auto& held : held_detached_) {
+        if (RetainedNode* found = find(find, *held); found != nullptr)
+            return found;
+    }
+    return nullptr;
+}
+
+void RetainedTree::release_detached() noexcept {
+    held_detached_.clear();
 }
 
 void RetainedTree::rebuild_indexes() {
