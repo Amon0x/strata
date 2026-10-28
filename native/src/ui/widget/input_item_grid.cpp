@@ -8,8 +8,10 @@
 namespace strata::ui::collection_input {
 namespace {
 
+constexpr Shape grid_shape{.source = "entries", .items_only = true};
+
 bool click(WidgetInputScope& scope) {
-    return common_click(scope, model(scope));
+    return common_click(scope, model(scope, grid_shape));
 }
 
 bool key(WidgetInputScope& scope) {
@@ -18,7 +20,7 @@ bool key(WidgetInputScope& scope) {
         1.0,
         std::floor(scope.number("columns", 4.0))
     ));
-    return common_key(scope, model(scope), NavigationConfig{
+    return common_key(scope, model(scope, grid_shape), NavigationConfig{
         .item_extent = scope.number("cellHeight", 88.0) + scope.number("gap", 6.0),
         .columns = columns,
         .two_dimensional = true,

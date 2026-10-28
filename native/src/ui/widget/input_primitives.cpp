@@ -297,6 +297,17 @@ bool popup_pointer(WidgetInputScope&) {
     return false;
 }
 
+/** Escape leaves a closed menu with no open submenu path. */
+bool menu_dismissed(WidgetInputScope& scope, const WidgetDismissal reason) {
+    if (reason == WidgetDismissal::escape)
+        static_cast<void>(scope.exchange_retained("$menuPath", runtime::Value{}, DirtyReason::input));
+    return false;
+}
+
+bool rich_text_has_links(const RetainedNode& node) {
+    return !rich_text_links(node).empty();
+}
+
 void add(WidgetRegistry& registry, std::string type, const bool focusable,
          const WidgetInputHook click = nullptr, std::string action_property = {},
          std::string fallback_action = {}) {
@@ -329,6 +340,7 @@ void register_primitive_widget_inputs(WidgetRegistry& registry) {
     rich_text.focusable = true;
     rich_text.tabbable = true;
     rich_text.text_edit_mode = WidgetTextEditMode::static_text;
+    rich_text.static_text_interactive = &rich_text_has_links;
     registry.register_input_phase("RichText", std::move(rich_text));
     WidgetInputPhase popup;
     popup.pointer = &popup_pointer;
@@ -336,6 +348,7 @@ void register_primitive_widget_inputs(WidgetRegistry& registry) {
     popup.popup_retained = "$expanded";
     popup.popup_initial = "defaultOpen";
     popup.popup_dismiss_action_property = "onDismiss";
+    popup.popup_anchored = true;
     registry.register_input_phase("Popup", std::move(popup));
 
     WidgetInputPhase menu;
@@ -347,6 +360,7 @@ void register_primitive_widget_inputs(WidgetRegistry& registry) {
     menu.popup_controlled = "open";
     menu.popup_retained = "$expanded";
     menu.popup_initial = "defaultOpen";
+    menu.on_dismiss = &menu_dismissed;
     registry.register_input_phase("Menu", std::move(menu));
 }
 

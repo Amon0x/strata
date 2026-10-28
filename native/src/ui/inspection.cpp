@@ -399,8 +399,8 @@ action_policy_name(const runtime::ActionDispatchPolicy policy) noexcept {
 
 [[nodiscard]] JsonValue authoring_type(const RetainedNode& node) {
     const std::string& type = node.description().type;
-    if (node.description().source_path.empty() || type == "SurfaceLayers" ||
-        type == "SurfaceLayer" || type == "AnimatedContent" || type == "AnimatedContentItem" ||
+    if (node.description().source_path.empty() || type == surface_layers_type ||
+        type == surface_layer_type || type == "AnimatedContent" || type == "AnimatedContentItem" ||
         type.starts_with('$')) {
         return JsonValue{};
     }

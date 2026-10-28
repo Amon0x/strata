@@ -348,6 +348,15 @@ void add(
     registry.register_input_phase(std::move(type), std::move(phase));
 }
 
+/** A closed list's keyboard cursor returns to the effective choice. */
+bool select_dismissed(WidgetInputScope& scope, WidgetDismissal) {
+    const std::optional<EffectiveChoice> selected = effective_choice(scope.node());
+    return selected.has_value() &&
+           scope.exchange_retained("$choiceIndex",
+                                   runtime::Value(static_cast<double>(selected->index)),
+                                   DirtyReason::properties);
+}
+
 } // namespace
 
 void register_control_widget_inputs(WidgetRegistry& registry) {
@@ -393,6 +402,7 @@ void register_control_widget_inputs(WidgetRegistry& registry) {
     select.click = &select_click;
     select.pointer = &select_pointer;
     select.key = &choice_key;
+    select.on_dismiss = &select_dismissed;
     registry.register_input_phase("Select", std::move(select));
 }
 

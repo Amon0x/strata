@@ -15,7 +15,7 @@
 #include "ui/input/detail.hpp"
 #include "ui/motion.hpp"
 #include "ui/presentation_geometry.hpp"
-#include "ui/widget/choice_model.hpp"
+#include "ui/widget/input.hpp"
 #include "ui/widget/registry.hpp"
 
 namespace strata::ui {
@@ -201,7 +201,8 @@ bool InputRouter::move_focus_spatial(const std::string_view direction,
 }
 
 void InputRouter::restore_popup_focus(const RetainedNode& popup, InputOperationResult& result) {
-    if (tree_ == nullptr || popup.description().type != "Popup")
+    const WidgetLifecycle* lifecycle = widgets_.find(popup.description().type);
+    if (tree_ == nullptr || lifecycle == nullptr || !lifecycle->input.popup_anchored)
         return;
     const std::string& anchor_key = layout_style(popup.description()).anchor_target;
     RetainedNode* const anchor = anchor_key.empty() ? nullptr : tree_->find_key(anchor_key);
@@ -239,14 +240,12 @@ bool InputRouter::dismiss_topmost(InputOperationResult& result) {
     RetainedNode* node = !dismissible.empty() ? dismissible.back() : active_modal();
     if (node == nullptr)
         return false;
-    if (node->description().type == "Modal" &&
-        !boolean_value(scalar_property(*node, "dismissible"), true)) {
-        return false;
-    }
     const WidgetLifecycle* lifecycle = widgets_.find(node->description().type);
     if (lifecycle == nullptr)
         return false;
     const WidgetInputPhase& input = lifecycle->input;
+    if (input.escape_dismissible != nullptr && !input.escape_dismissible(*node))
+        return false;
     bool changed = false;
     if (!input.popup_retained.empty()) {
         const runtime::Value* controlled = scalar_property(*node, input.popup_controlled);
@@ -256,26 +255,12 @@ bool InputRouter::dismiss_topmost(InputOperationResult& result) {
                       changed;
         }
     }
-    if (node->description().type == "Select") {
-        if (const std::optional<EffectiveChoice> selected = effective_choice(*node);
-            selected.has_value()) {
-            changed =
-                tree_->set_retained_value(node->identity(), "$choiceIndex",
-                                          runtime::Value(static_cast<double>(selected->index)),
-                                          DirtyReason::properties) ||
-                changed;
-        }
+    if (input.on_dismiss != nullptr) {
+        WidgetInputScope scope(*this, *node, result, {}, {});
+        changed = input.on_dismiss(scope, WidgetDismissal::escape) || changed;
     }
     if (changed && description_invalidator_)
         description_invalidator_(nullptr, {});
-    if (node->description().type == "CommandPalette") {
-        static_cast<void>(tree_->set_retained_value(node->identity(), "$paletteActive",
-                                                    runtime::Value(0.0), DirtyReason::input));
-        static_cast<void>(clear_editor_text(*node, result));
-    } else if (node->description().type == "Menu") {
-        static_cast<void>(tree_->set_retained_value(node->identity(), "$menuPath", runtime::Value{},
-                                                    DirtyReason::input));
-    }
     restore_popup_focus(*node, result);
     const std::shared_ptr<const runtime::ActionValue> action =
         activation_action(*node, !input.popup_dismiss_action_property.empty()

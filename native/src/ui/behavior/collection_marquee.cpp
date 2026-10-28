@@ -211,7 +211,9 @@ void update_session_field(
     for (const ItemGeometry& item : items) {
         if (intersects(marquee, item.bounds)) static_cast<void>(hits.insert(item.key));
     }
-    const collection::SelectionMode mode = selection_mode(scope);
+    // Marquee selection serves grids, whose items select multiply unless authored otherwise.
+    const collection::SelectionMode mode =
+        selection_mode(scope, collection::SelectionMode::multiple);
     const bool additive =
         (session.field("command") != nullptr && session.field("command")->boolean() != nullptr &&
          *session.field("command")->boolean()) ||

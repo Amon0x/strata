@@ -12,10 +12,23 @@
 
 namespace strata::ui::collection_input {
 
+/** How a collection widget's items are authored; each widget declares its own. */
+struct Shape final {
+    /** List property holding the items. */
+    std::string_view source = "entries";
+    /** Items nest through parentKey; rows under a collapsed parent are not navigable. */
+    bool hierarchical = false;
+    /** Only items of kind ITEM are navigable (headers and separators are skipped). */
+    bool items_only = false;
+    /** Selection mode when selectionMode is not authored. */
+    collection::SelectionMode default_selection = collection::SelectionMode::multiple;
+};
+
 struct Model final {
     std::vector<std::string> ordered;
     std::vector<collection::Label> labels;
     std::map<std::string, const runtime::Value*, std::less<>> items;
+    collection::SelectionMode default_selection = collection::SelectionMode::multiple;
 };
 
 struct NavigationConfig final {
@@ -32,8 +45,11 @@ struct NavigationConfig final {
 [[nodiscard]] runtime::Value key_list(const collection::KeySet& values);
 [[nodiscard]] collection::KeySet keys(const runtime::Value* value);
 [[nodiscard]] collection::KeySet expanded(WidgetInputScope& scope);
-[[nodiscard]] Model model(WidgetInputScope& scope);
-[[nodiscard]] collection::SelectionMode selection_mode(WidgetInputScope& scope);
+[[nodiscard]] Model model(WidgetInputScope& scope, const Shape& shape);
+/** The authored selectionMode, else the fallback. */
+[[nodiscard]] collection::SelectionMode selection_mode(WidgetInputScope& scope,
+                                                       collection::SelectionMode fallback);
+[[nodiscard]] collection::SelectionMode selection_mode(WidgetInputScope& scope, const Model& model);
 [[nodiscard]] collection::KeySet selected(WidgetInputScope& scope);
 [[nodiscard]] std::optional<std::string> retained_key(
     WidgetInputScope& scope,

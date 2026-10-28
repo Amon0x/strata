@@ -1342,6 +1342,12 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         NAME strata.svg
         COMMAND strata_core_tests svg ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/svg
     )
+    add_test(
+        NAME strata.ui.widget_literals
+        COMMAND ${CMAKE_COMMAND}
+            -DSTRATA_NATIVE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/widget_literals.cmake
+    )
     add_test(NAME strata.core COMMAND strata_core_tests core)
     add_test(NAME strata.data COMMAND strata_core_tests data)
     add_test(NAME strata.compiler COMMAND strata_core_tests compiler)

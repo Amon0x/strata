@@ -89,6 +89,25 @@ using WidgetRetainedDependencyObserver =
 
 enum class WidgetTextEditMode { none, single_line, multi_line, numeric, static_text };
 enum class WidgetPointerFocusPolicy { automatic, preserve };
+/** Why an open popup is being closed by the framework. */
+enum class WidgetDismissal { outside_press, escape };
+/** Widget-owned cleanup around a framework dismissal. Returns whether it changed retained state
+ * the description reads (via WidgetInputScope::exchange_retained), so the caller re-describes once.
+ */
+using WidgetDismissHook = bool (*)(WidgetInputScope& scope, WidgetDismissal reason);
+using WidgetNodePredicate = bool (*)(const RetainedNode& node);
+/** A widget's place in form validation: forms validate the fields beneath them. */
+enum class WidgetFormRole { none, form, field };
+
+/** Composite editors whose text sits inside one of their own subtargets, inset by a margin. */
+struct WidgetEditorViewport final {
+    std::string subtarget = "$editor";
+    double horizontal_inset = 0.0;
+    double vertical_inset = 0.0;
+};
+
+/** Item keys whose async loads a widget keeps alive; owner ids are formed `<surface>:<key>`. */
+using WidgetAsyncOwnersHook = void (*)(const RetainedNode& node, std::vector<std::string>& owners);
 
 struct WidgetDescribePhase final {
     WidgetLayoutDefaultsHook layout_defaults = nullptr;
@@ -137,6 +156,31 @@ struct WidgetInputPhase final {
     /** Scalar editors publish their draft through onChange; composite editors publish separately.
      */
     bool editor_emits_change = true;
+    /** Text viewport of a composite editor; absent, the editor uses its content bounds. Pointer
+     * text hits outside the composite viewport miss the editor. */
+    std::optional<WidgetEditorViewport> editor_viewport;
+    /** Static text that stays focusable and tabbable without selection (rich text links). */
+    WidgetNodePredicate static_text_interactive = nullptr;
+
+    /** A press outside this widget (it is not an ancestor of the target) runs this first. */
+    WidgetDismissHook outside_press = nullptr;
+    /** After the framework closed this widget's popup (popup_retained set to false). */
+    WidgetDismissHook on_dismiss = nullptr;
+    /** The popup is placed against its layout anchor: presses on the anchor count as inside, and
+     * closing it returns focus to the anchor. */
+    bool popup_anchored = false;
+    /** Set for modal widgets: whether this node currently traps input. */
+    WidgetNodePredicate modal_open = nullptr;
+    /** Among open modals the highest priority wins; ties go to the last in tree order. A modal
+     * popup is closed by outside presses only when the caller includes modals. */
+    int modal_priority = 0;
+    /** Whether Escape may close this open modal; absent, it always may. */
+    WidgetNodePredicate escape_dismissible = nullptr;
+    /** Disclosed while hovered after a delay (tooltips): the router keeps its shown state. */
+    bool hover_disclosure = false;
+    WidgetFormRole form_role = WidgetFormRole::none;
+    /** Framework action namespace this widget is the target of (`<namespace>.<operation>`). */
+    std::string framework_actions;
 };
 
 struct WidgetSemanticsPhase final {
@@ -191,6 +235,8 @@ struct WidgetPresentPhase final {
     bool detached_overlay = false;
     /** Plane of this widget's detached overlay and detached subtargets; higher paints above. */
     int overlay_z = detached_overlay_menu_z;
+    /** Presents the surface's notifications, so their changes repaint and re-describe it. */
+    bool observes_notifications = false;
     /** When set, the overlay is presented only while this holds: a detached overlay that shows
      * rarely (a hover tooltip) costs nothing on the frames it does not. */
     WidgetOverlayShown overlay_shown = nullptr;
@@ -206,6 +252,8 @@ struct WidgetFramePhase final {
 struct WidgetLifecycle final {
     std::string type;
     WidgetParticipationHook participates = nullptr;
+    /** Async loads this widget owns beyond its state scopes (a tree view's expanded rows). */
+    WidgetAsyncOwnersHook async_owners = nullptr;
     /** Paint fields extension widgets may update across stable keyed peers. */
     std::vector<std::string> extension_paint_fields;
     WidgetDescribePhase describe;
@@ -254,9 +302,21 @@ class WidgetRegistry final {
     [[nodiscard]] std::span<const std::string_view> detached_overlay_types() const noexcept;
     /** Types whose subtargets can lie outside their retained bounds. */
     [[nodiscard]] std::span<const std::string_view> detached_subtarget_types() const noexcept;
+    /** Modal types, highest modal_priority first. */
+    [[nodiscard]] std::span<const std::string_view> modal_types() const noexcept;
+    /** Types whose input phase is a hover disclosure. */
+    [[nodiscard]] std::span<const std::string_view> hover_disclosure_types() const noexcept;
+    /** Types that present notifications. */
+    [[nodiscard]] std::span<const std::string_view> notification_types() const noexcept;
+    /** Types that own async loads beyond their state scopes. */
+    [[nodiscard]] std::span<const std::string_view> async_owner_types() const noexcept;
+    /** Types that are the target of a framework action namespace, sorted. */
+    [[nodiscard]] std::vector<std::string_view>
+    framework_action_types(std::string_view action_namespace) const;
     /** Sets only the subtarget projection of a type, keeping the rest of its inspection phase. */
     void register_subtargets(std::string type, WidgetSubtargetsHook subtargets,
                              bool detached = false);
+    void register_async_owners(std::string type, WidgetAsyncOwnersHook owners);
 
     void apply_layout_defaults(std::string_view type,
                                DescriptionNode::Properties& properties) const;
@@ -283,6 +343,10 @@ class WidgetRegistry final {
     std::vector<std::string_view> authored_presentation_types_;
     std::vector<std::string_view> detached_overlay_types_;
     std::vector<std::string_view> detached_subtarget_types_;
+    std::vector<std::string_view> modal_types_;
+    std::vector<std::string_view> hover_disclosure_types_;
+    std::vector<std::string_view> notification_types_;
+    std::vector<std::string_view> async_owner_types_;
     std::vector<std::string_view> text_editable_types_;
     std::uint64_t revision_ = 0U;
 };

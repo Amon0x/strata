@@ -36,6 +36,7 @@ class MotionRuntime;
 class StatusFeedbackService;
 class WidgetInputScope;
 class WidgetRegistry;
+enum class WidgetFormRole;
 enum class WidgetFrameCost;
 
 struct InputOperationResult final {
@@ -398,6 +399,7 @@ class InputRouter final {
      */
     [[nodiscard]] const std::vector<WidgetSubtarget>&
     projected_subtargets(const RetainedNode& node) const;
+    [[nodiscard]] const WidgetRegistry& widget_registry() const noexcept { return widgets_; }
     /** Runs the node's lifecycle `inspection.subtargets` hook afresh, uncached. */
     [[nodiscard]] std::vector<WidgetSubtarget> project_subtargets(const RetainedNode& node) const;
     [[nodiscard]] bool subtarget_hovered(std::uint64_t identity,
@@ -442,6 +444,8 @@ class InputRouter final {
     [[nodiscard]] bool node_input_enabled(const RetainedNode& node) const noexcept;
     [[nodiscard]] bool command_tooltip_candidate(std::uint64_t identity) const noexcept;
     [[nodiscard]] bool tooltip_engaged(const RetainedNode& node) const noexcept;
+    /** Whether the node's lifecycle discloses it on hover after a delay. */
+    [[nodiscard]] bool hover_disclosure(const RetainedNode& node) const noexcept;
     [[nodiscard]] bool tooltip_disclosures_need_frame() const noexcept;
     void update_tooltip_disclosures();
     void restart_hover_disclosures(bool hide);
@@ -499,7 +503,13 @@ class InputRouter final {
     [[nodiscard]] bool validate_field(RetainedNode& field, bool mark_touched);
     void note_field_change(RetainedNode& node);
     void note_field_blur(RetainedNode& node);
-    [[nodiscard]] static RetainedNode* ancestor(RetainedNode& node, std::string_view type) noexcept;
+    [[nodiscard]] WidgetFormRole form_role(const RetainedNode& node) const noexcept;
+    /** Whether the node's lifecycle declares itself the target of a framework action namespace. */
+    [[nodiscard]] bool framework_action_target(const RetainedNode& node,
+                                               std::string_view action_namespace) const noexcept;
+    /** Nearest ancestor-or-self with the form role. */
+    [[nodiscard]] RetainedNode* form_ancestor(RetainedNode& node,
+                                              WidgetFormRole role) const noexcept;
     [[nodiscard]] std::shared_ptr<const runtime::ActionValue>
     activation_action(const RetainedNode& node, std::string_view property) const;
     [[nodiscard]] data::JsonValue canonical_action(const runtime::ActionValue& action,

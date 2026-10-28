@@ -23,6 +23,10 @@
 
 namespace strata::ui {
 
+/** Framework node types the surface wraps around its layers; no widget lifecycle owns them. */
+inline constexpr std::string_view surface_layers_type = "SurfaceLayers";
+inline constexpr std::string_view surface_layer_type = "SurfaceLayer";
+
 struct DescriptionNode;
 class Theme;
 struct ParsedLayout;

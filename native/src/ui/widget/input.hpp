@@ -88,6 +88,12 @@ class WidgetInputScope final {
     void synchronize_editor_text(std::string_view value, bool move_caret_to_end = false);
 
     void set_retained(std::string_view name, runtime::Value value, DirtyReason reason);
+    /**
+     * Writes like set_retained but leaves description invalidation to the caller: returns whether
+     * the value changed. Dismissal hooks report it so one batch of closures re-describes once.
+     */
+    [[nodiscard]] bool exchange_retained(std::string_view name, runtime::Value value,
+                                         DirtyReason reason);
     void set_retained_bytes(std::string name, std::span<const std::byte> value, DirtyReason reason);
     void set_presentation(std::string name, runtime::Value value);
     void set_paint(std::string_view name, runtime::Value value);

@@ -666,8 +666,10 @@ bool InputRouter::move_static_text_selection(RetainedNode& node, const std::stri
                             key == "home" || key == "end";
     if (!navigation || modifiers.alt)
         return false;
-    if (node.description().type == "RichText" && !rich_text_links(node).empty() &&
-        !modifiers.shift) {
+    // Arrows over interactive static text (links) move between its regions, not the caret.
+    if (const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
+        lifecycle != nullptr && lifecycle->input.static_text_interactive != nullptr &&
+        !modifiers.shift && lifecycle->input.static_text_interactive(node)) {
         return false;
     }
     const std::optional<std::string_view> text = static_text_value(node);

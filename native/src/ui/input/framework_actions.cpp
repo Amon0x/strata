@@ -89,10 +89,15 @@ std::optional<runtime::ActionDispatchOutcome> InputRouter::execute_surface_actio
         const std::string* key = string_value(action.payload.field("key"));
         RetainedNode* palette = key != nullptr && tree_ != nullptr ? tree_->find_key(*key) : nullptr;
         if (palette == nullptr && key == nullptr && tree_ != nullptr) {
-            const std::vector<RetainedNode*>* palettes = tree_->find_type("CommandPalette");
-            if (palettes != nullptr && !palettes->empty()) palette = palettes->front();
+            for (const std::string_view type : widgets_.framework_action_types("palette")) {
+                const std::vector<RetainedNode*>* palettes = tree_->find_type(type);
+                if (palettes != nullptr && !palettes->empty()) {
+                    palette = palettes->front();
+                    break;
+                }
+            }
         }
-        if (palette == nullptr || palette->description().type != "CommandPalette") {
+        if (palette == nullptr || !framework_action_target(*palette, "palette")) {
             return surface_outcome(
                 runtime::ActionDispatchStatus::failed,
                 key != nullptr
@@ -185,7 +190,7 @@ runtime::ActionDispatchOutcome InputRouter::execute_tree_action(
                 operation + " '" + std::string(item_key != nullptr ? *item_key : "") + "'.",
         };
     };
-    if (tree == nullptr || tree->description().type != "TreeView" || item_key == nullptr) {
+    if (tree == nullptr || !framework_action_target(*tree, "tree") || item_key == nullptr) {
         return failure();
     }
     const runtime::Value* items = scalar_property(*tree, "items");

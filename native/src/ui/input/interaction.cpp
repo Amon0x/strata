@@ -18,7 +18,6 @@
 #include "ui/input/detail.hpp"
 #include "ui/motion.hpp"
 #include "ui/status.hpp"
-#include "ui/widget/choice_model.hpp"
 #include "ui/widget/input.hpp"
 #include "ui/widget/registry.hpp"
 
@@ -42,28 +41,16 @@ void append(InputOperationResult& destination, InputOperationResult source) {
 RetainedNode* InputRouter::active_modal() const {
     if (tree_ == nullptr)
         return nullptr;
-    if (const std::vector<RetainedNode*>* palettes = tree_->find_type("CommandPalette");
-        palettes != nullptr) {
-        for (auto iterator = palettes->rbegin(); iterator != palettes->rend(); ++iterator) {
-            const runtime::Value* open = scalar_property(**iterator, "open");
-            if (open == nullptr || open->boolean() == nullptr) {
-                open = (*iterator)->retained_value("strata.palette.open");
-            }
-            if ((open == nullptr || open->boolean() == nullptr)) {
-                open = scalar_property(**iterator, "defaultOpen");
-            }
-            if (open != nullptr && open->boolean() != nullptr && *open->boolean()) {
+    // Highest priority first; within a type the last open node in tree order wins.
+    for (const std::string_view type : widgets_.modal_types()) {
+        const std::vector<RetainedNode*>* nodes = tree_->find_type(type);
+        const WidgetLifecycle* lifecycle = widgets_.find(type);
+        if (nodes == nullptr || lifecycle == nullptr)
+            continue;
+        for (auto iterator = nodes->rbegin(); iterator != nodes->rend(); ++iterator) {
+            if (lifecycle->input.modal_open(**iterator))
                 return *iterator;
-            }
         }
-    }
-    const std::vector<RetainedNode*>* modals = tree_->find_type("Modal");
-    if (modals == nullptr)
-        return nullptr;
-    for (auto iterator = modals->rbegin(); iterator != modals->rend(); ++iterator) {
-        const runtime::Value* open = scalar_property(**iterator, "open");
-        if (open != nullptr && open->boolean() != nullptr && *open->boolean())
-            return *iterator;
     }
     return nullptr;
 }
@@ -93,29 +80,25 @@ void InputRouter::dismiss_transient_popups(const RetainedNode* const target,
     bool modal_dismissed = false;
     const auto visit = [this, target, include_modal, &result,
                         &modal_dismissed](auto&& self, RetainedNode& node) -> void {
-        if (node.description().type == "MenuBar" &&
-            (target == nullptr || !descendant_of(*target, node))) {
-            const runtime::Value* category = node.retained_value("$menuCategory");
-            if (category != nullptr && category->string() != nullptr &&
-                !category->string()->empty()) {
-                const bool changed = tree_->set_retained_value(
-                    node.identity(), "$menuCategory", runtime::Value{}, DirtyReason::properties);
-                if (changed && description_invalidator_) {
-                    description_invalidator_(nullptr, {});
-                }
+        const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
+        bool target_within_popup = target != nullptr && descendant_of(*target, node);
+        if (lifecycle != nullptr && lifecycle->input.outside_press != nullptr &&
+            !target_within_popup) {
+            WidgetInputScope scope(*this, node, result, {}, {});
+            if (lifecycle->input.outside_press(scope, WidgetDismissal::outside_press) &&
+                description_invalidator_) {
+                description_invalidator_(nullptr, {});
             }
         }
-        bool target_within_popup = target != nullptr && descendant_of(*target, node);
-        if (!target_within_popup && target != nullptr && node.description().type == "Popup") {
+        if (!target_within_popup && target != nullptr && lifecycle != nullptr &&
+            lifecycle->input.popup_anchored) {
             const std::string& anchor_key = layout_style(node.description()).anchor_target;
             const RetainedNode* const anchor =
                 anchor_key.empty() ? nullptr : tree_->find_key(anchor_key);
             target_within_popup = anchor != nullptr && descendant_of(*target, *anchor);
         }
-        const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
         if (lifecycle != nullptr && !lifecycle->input.popup_retained.empty() &&
-            (include_modal || node.description().type != "CommandPalette") &&
-            !target_within_popup) {
+            (include_modal || lifecycle->input.modal_open == nullptr) && !target_within_popup) {
             const WidgetInputPhase& input = lifecycle->input;
             const auto value = [&node](const std::string& name) -> const runtime::Value* {
                 if (name.empty())
@@ -135,21 +118,14 @@ void InputRouter::dismiss_transient_popups(const RetainedNode* const target,
                 bool changed =
                     tree_->set_retained_value(node.identity(), input.popup_retained,
                                               runtime::Value(false), DirtyReason::properties);
-                if (node.description().type == "Select") {
-                    if (const std::optional<EffectiveChoice> selected = effective_choice(node);
-                        selected.has_value()) {
-                        changed = tree_->set_retained_value(
-                                      node.identity(), "$choiceIndex",
-                                      runtime::Value(static_cast<double>(selected->index)),
-                                      DirtyReason::properties) ||
-                                  changed;
-                    }
+                if (input.on_dismiss != nullptr) {
+                    WidgetInputScope scope(*this, node, result, {}, {});
+                    changed = input.on_dismiss(scope, WidgetDismissal::outside_press) || changed;
                 }
                 if (changed && description_invalidator_) {
                     description_invalidator_(nullptr, {});
                 }
-                modal_dismissed =
-                    modal_dismissed || (changed && node.description().type == "CommandPalette");
+                modal_dismissed = modal_dismissed || (changed && input.modal_open != nullptr);
                 restore_popup_focus(node, result);
                 const std::shared_ptr<const runtime::ActionValue> action =
                     activation_action(node, input.popup_dismiss_action_property);

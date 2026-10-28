@@ -257,8 +257,10 @@ bool pointer(WidgetInputScope& scope) {
     return true;
 }
 
+constexpr Shape table_shape{.source = "rows"};
+
 bool click(WidgetInputScope& scope) {
-    const Model collection_model = model(scope);
+    const Model collection_model = model(scope, table_shape);
     const bool handled = common_click(scope, collection_model);
     if (!handled || scope.pointer() == nullptr || scope.pointer()->button != 0) return handled;
     if (scope.string("focusMode", "ROW") == "CELL") {
@@ -331,7 +333,7 @@ bool key(WidgetInputScope& scope) {
         );
         return true;
     }
-    return common_key(scope, model(scope), NavigationConfig{
+    return common_key(scope, model(scope, table_shape), NavigationConfig{
         .item_extent = scope.number("rowHeight", 30.0),
         .leading_content_inset = scope.number("headerHeight", 32.0),
         .sticky_viewport_inset = scope.number("headerHeight", 32.0),

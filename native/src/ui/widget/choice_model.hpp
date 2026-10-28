@@ -30,11 +30,16 @@ namespace strata::ui {
     return choice_id(choice_property(node, "selectedId")) != nullptr;
 }
 
+/** Tab strips author their choices as `tabs`; other choice widgets as `options`. */
+[[nodiscard]] inline bool choice_tab_strip(const RetainedNode& node) noexcept {
+    return choice_property(node, "tabs") != nullptr;
+}
+
 [[nodiscard]] inline const runtime::ValueList* choice_options(
     const RetainedNode& node
 ) noexcept {
     const runtime::Value* value = choice_property(
-        node, node.description().type == "Tabs" ? "tabs" : "options"
+        node, choice_tab_strip(node) ? "tabs" : "options"
     );
     return value != nullptr ? value->list() : nullptr;
 }
@@ -92,7 +97,7 @@ struct EffectiveChoice final {
         }
     }
 
-    if (node.description().type != "Tabs") {
+    if (!choice_tab_strip(node)) {
         for (std::size_t index = 0U; index < options->values.size(); ++index) {
             const std::string* id = choice_option_id(options->values[index]);
             if (id != nullptr && choice_option_enabled(options->values[index])) {

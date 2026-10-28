@@ -282,7 +282,7 @@ void chip_input_content(WidgetRenderScope& scope) {
     }
     if (editor.has_value() && !active_visible) {
         const std::optional<Rect> viewport = editable_text_viewport(
-            scope.node(), scope.layout(), subtargets
+            scope.input().widget_registry(), scope.node(), scope.layout(), subtargets
         );
         if (!viewport.has_value()) return;
         present_editable_text(scope, EditableTextPresentation{
@@ -411,7 +411,7 @@ void command_palette_overlay(WidgetRenderScope& scope) {
     const std::vector<WidgetSubtarget> subtargets =
         scope.input().subtargets(scope.node().identity());
     const std::optional<Rect> viewport = editable_text_viewport(
-        scope.node(), scope.layout(), subtargets
+        scope.input().widget_registry(), scope.node(), scope.layout(), subtargets
     );
     if (!viewport.has_value()) return;
     present_editable_text(scope, EditableTextPresentation{
@@ -643,8 +643,10 @@ void register_shell_widget_presenters(WidgetRegistry& registry) {
     add(registry, "ChipInput", &chip_input_content);
     add(registry, "Breadcrumbs", &breadcrumbs_content);
     add(registry, "Banner", &banner_content);
-    add(registry, "ToastRegion", nullptr, &toast_region_overlay, true, {}, nullptr,
-        detached_overlay_toast_z);
+    WidgetPresentPhase toasts{nullptr, nullptr, &toast_region_overlay, nullptr, true};
+    toasts.overlay_z = detached_overlay_toast_z;
+    toasts.observes_notifications = true;
+    registry.register_present_phase("ToastRegion", std::move(toasts));
     add(registry, "Modal", &modal_content);
     add(registry, "Tooltip", nullptr, &tooltip_overlay, true, {false, true, false},
         &tooltip_overlay_shown, detached_overlay_tooltip_z);

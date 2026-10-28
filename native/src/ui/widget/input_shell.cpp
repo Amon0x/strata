@@ -684,6 +684,52 @@ bool indexed_key(WidgetInputScope& scope) {
     return true;
 }
 
+[[nodiscard]] const runtime::Value* node_property(const RetainedNode& node,
+                                                 const std::string_view name) noexcept {
+    const auto found = node.description().properties.find(name);
+    return found != node.description().properties.end() ? found->second.value() : nullptr;
+}
+
+[[nodiscard]] bool node_boolean(const runtime::Value* value) noexcept {
+    return value != nullptr && value->boolean() != nullptr;
+}
+
+bool modal_open(const RetainedNode& node) {
+    const runtime::Value* open = node_property(node, "open");
+    return node_boolean(open) && *open->boolean();
+}
+
+bool modal_escape_dismissible(const RetainedNode& node) {
+    const runtime::Value* dismissible = node_property(node, "dismissible");
+    return !node_boolean(dismissible) || *dismissible->boolean();
+}
+
+bool command_palette_open(const RetainedNode& node) {
+    const runtime::Value* open = node_property(node, "open");
+    if (!node_boolean(open))
+        open = node.retained_value("strata.palette.open");
+    if (!node_boolean(open))
+        open = node_property(node, "defaultOpen");
+    return node_boolean(open) && *open->boolean();
+}
+
+bool command_palette_dismissed(WidgetInputScope& scope, const WidgetDismissal reason) {
+    if (reason != WidgetDismissal::escape)
+        return false;
+    static_cast<void>(
+        scope.exchange_retained("$paletteActive", runtime::Value(0.0), DirtyReason::input));
+    static_cast<void>(scope.clear_editor_text());
+    return false;
+}
+
+/** A press anywhere outside the menu bar closes its open category. */
+bool menu_bar_outside_press(WidgetInputScope& scope, WidgetDismissal) {
+    const runtime::Value* category = scope.retained("$menuCategory");
+    if (category == nullptr || category->string() == nullptr || category->string()->empty())
+        return false;
+    return scope.exchange_retained("$menuCategory", runtime::Value{}, DirtyReason::properties);
+}
+
 } // namespace
 
 void register_shell_widget_inputs(WidgetRegistry& registry) {
@@ -694,6 +740,9 @@ void register_shell_widget_inputs(WidgetRegistry& registry) {
     modal.action_capability_requires_binding = true;
     modal.focusable = true;
     modal.focusable_when = "open";
+    modal.modal_open = &modal_open;
+    modal.modal_priority = 1;
+    modal.escape_dismissible = &modal_escape_dismissible;
     registry.register_input_phase("Modal", std::move(modal));
     WidgetInputPhase palette;
     palette.pointer = &command_palette_pointer;
@@ -708,6 +757,12 @@ void register_shell_widget_inputs(WidgetRegistry& registry) {
     palette.popup_initial = "defaultOpen";
     palette.text_edit_mode = WidgetTextEditMode::single_line;
     palette.editor_emits_change = false;
+    palette.editor_viewport = WidgetEditorViewport{"$editor", 10.0, 3.0};
+    // An open palette outranks any open Modal.
+    palette.modal_open = &command_palette_open;
+    palette.modal_priority = 2;
+    palette.on_dismiss = &command_palette_dismissed;
+    palette.framework_actions = "palette";
     registry.register_input_phase("CommandPalette", std::move(palette));
     WidgetInputPhase toast;
     toast.click = &toast_click;
@@ -722,6 +777,7 @@ void register_shell_widget_inputs(WidgetRegistry& registry) {
     chip.focusable = true;
     chip.text_edit_mode = WidgetTextEditMode::single_line;
     chip.editor_emits_change = false;
+    chip.editor_viewport = WidgetEditorViewport{"$editor", 6.0, 4.0};
     registry.register_input_phase("ChipInput", std::move(chip));
     WidgetInputPhase breadcrumbs;
     breadcrumbs.click = &breadcrumbs_click;
@@ -736,6 +792,7 @@ void register_shell_widget_inputs(WidgetRegistry& registry) {
     toolbar.popup_retained = "$toolbarOverflow";
     registry.register_input_phase("Toolbar", toolbar);
     toolbar.popup_retained.clear();
+    toolbar.outside_press = &menu_bar_outside_press;
     registry.register_input_phase("MenuBar", std::move(toolbar));
     WidgetInputPhase banner;
     banner.click = &banner_click;
@@ -752,7 +809,14 @@ void register_shell_widget_inputs(WidgetRegistry& registry) {
     form.key = &form_key;
     form.focusable = true;
     form.tabbable = false;
+    form.form_role = WidgetFormRole::form;
     registry.register_input_phase("Form", std::move(form));
+    WidgetInputPhase field;
+    field.form_role = WidgetFormRole::field;
+    registry.register_input_phase("Field", std::move(field));
+    WidgetInputPhase tooltip;
+    tooltip.hover_disclosure = true;
+    registry.register_input_phase("Tooltip", std::move(tooltip));
 }
 
 } // namespace strata::ui

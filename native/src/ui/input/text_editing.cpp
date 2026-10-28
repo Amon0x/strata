@@ -25,8 +25,10 @@ namespace strata::ui {
 using namespace input_detail;
 namespace {
 
-[[nodiscard]] bool text_read_only(const RetainedNode& node) noexcept {
-    if (node.description().type == "Text" || node.description().type == "RichText") {
+[[nodiscard]] bool text_read_only(const RetainedNode& node,
+                                  const WidgetLifecycle* const lifecycle) noexcept {
+    if (lifecycle != nullptr &&
+        lifecycle->input.text_edit_mode == WidgetTextEditMode::static_text) {
         return true;
     }
     return boolean_value(scalar_property(node, "readOnly"), false);
@@ -170,8 +172,9 @@ void InputRouter::record_editor_mutation(RetainedNode& node, const TextEditorMut
     const bool numeric =
         lifecycle != nullptr && lifecycle->input.text_edit_mode == WidgetTextEditMode::numeric;
     if (action == nullptr) {
+        // A numeric editor's fallback contract is its own; other editors share text-edit.
         const auto contract = application_.bundle()->action_registry().contract(
-            numeric ? "NumberField" : "text-edit");
+            numeric ? std::string_view(lifecycle->input.fallback_action) : "text-edit");
         if (contract != nullptr) {
             action = std::make_shared<const runtime::ActionValue>(runtime::ActionValue{
                 std::make_shared<const runtime::Action>(contract),
@@ -221,7 +224,7 @@ bool InputRouter::insert_editor_text(RetainedNode& node, const std::string_view 
         return false;
     const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
     const TextEditorMutation mutation =
-        text_read_only(node)
+        text_read_only(node, lifecycle)
             ? editor->second.cancel_preedit()
             : editor->second.insert(value, editor_config(node, lifecycle), frame_time_nanos_);
     if (mutation.text_changed || mutation.selection_changed) {
@@ -266,7 +269,7 @@ void InputRouter::commit_editor(RetainedNode& node, InputOperationResult& result
         return;
     const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
     TextEditorMutation mutation;
-    if (text_read_only(node)) {
+    if (text_read_only(node, lifecycle)) {
         mutation = editor->second.cancel_preedit();
     } else if (lifecycle != nullptr &&
                lifecycle->input.text_edit_mode == WidgetTextEditMode::numeric) {
@@ -298,7 +301,7 @@ std::optional<InputRouter::EditorView> InputRouter::editor_view(const RetainedNo
     if (record == nullptr)
         return std::nullopt;
     const std::optional<Rect> viewport =
-        editable_text_viewport(node, *record, projected_subtargets(node));
+        editable_text_viewport(widgets_, node, *record, projected_subtargets(node));
     if (!viewport.has_value() || viewport->empty())
         return std::nullopt;
     const bool multiline = editable_text_multiline(widgets_, node);
@@ -516,8 +519,8 @@ InputOperationResult InputRouter::key(KeyInputEvent event, const bool navigation
         }
         const std::string& key = normalized_key;
         const bool command = command_key(modifiers);
-        const bool read_only = text_read_only(*node);
         const WidgetLifecycle* lifecycle = widgets_.find(node->description().type);
+        const bool read_only = text_read_only(*node, lifecycle);
         const TextEditorConfig config = editor_config(*node, lifecycle);
         TextEditorMutation mutation;
         bool visual_navigation = false;
@@ -725,7 +728,7 @@ InputOperationResult InputRouter::ime_preedit(ImePreeditInputEvent event) {
     const WidgetLifecycle* lifecycle = widgets_.find(node->description().type);
     const TextEditorConfig config = editor_config(*node, lifecycle);
     const TextEditorMutation mutation =
-        text_read_only(*node)
+        text_read_only(*node, lifecycle)
             ? editor->second.cancel_preedit()
             : editor->second.set_preedit(std::move(event.text), event.selection_start,
                                          event.selection_end, config.multiline);

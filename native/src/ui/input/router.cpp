@@ -167,7 +167,7 @@ bool InputRouter::command_tooltip_candidate(const std::uint64_t identity) const 
         return false;
     for (const RetainedNode* ancestor = node->parent(); ancestor != nullptr;
          ancestor = ancestor->parent()) {
-        if (ancestor->description().type == "Tooltip")
+        if (hover_disclosure(*ancestor))
             return false;
     }
     const std::optional<CommandActivationBinding> binding = commands_->activation_binding(*node);
@@ -197,7 +197,7 @@ void InputRouter::restart_hover_disclosures(const bool hide) {
         if (hide && matured_command_tooltips_.erase(identity) != 0U)
             static_cast<void>(tree_->mark(identity, DirtyReason::input));
         RetainedNode* node = tree_->find_identity(identity);
-        if (node == nullptr || node->description().type != "Tooltip" ||
+        if (node == nullptr || !hover_disclosure(*node) ||
             tooltip_controlled_visible(*node).has_value() ||
             (!hide && retained_boolean(*node, tooltip_shown_state, false))) {
             continue;
@@ -223,28 +223,31 @@ void InputRouter::restart_hover_disclosures(const bool hide) {
         frame_invalidator_();
 }
 
+bool InputRouter::hover_disclosure(const RetainedNode& node) const noexcept {
+    const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
+    return lifecycle != nullptr && lifecycle->input.hover_disclosure;
+}
+
 bool InputRouter::tooltip_disclosures_need_frame() const noexcept {
     if (tree_ == nullptr)
         return false;
-    const std::vector<RetainedNode*>* tooltips = tree_->find_type("Tooltip");
-    if (tooltips == nullptr)
-        return false;
-    return std::ranges::any_of(*tooltips, [this](const RetainedNode* node) {
-        if (node == nullptr || tooltip_controlled_visible(*node).has_value())
-            return false;
-        const bool shown = retained_boolean(*node, tooltip_shown_state, false);
-        const bool desired = tooltip_engaged(*node);
-        return shown != desired ||
-               retained_optional_boolean(*node, tooltip_pending_state).has_value() ||
-               retained_deadline(*node).has_value();
+    return std::ranges::any_of(widgets_.hover_disclosure_types(), [this](const std::string_view type) {
+        const std::vector<RetainedNode*>* disclosures = tree_->find_type(type);
+        return disclosures != nullptr &&
+               std::ranges::any_of(*disclosures, [this](const RetainedNode* node) {
+            if (node == nullptr || tooltip_controlled_visible(*node).has_value())
+                return false;
+            const bool shown = retained_boolean(*node, tooltip_shown_state, false);
+            const bool desired = tooltip_engaged(*node);
+            return shown != desired ||
+                   retained_optional_boolean(*node, tooltip_pending_state).has_value() ||
+                   retained_deadline(*node).has_value();
+        });
     });
 }
 
 void InputRouter::update_tooltip_disclosures() {
     if (tree_ == nullptr)
-        return;
-    const std::vector<RetainedNode*>* tooltips = tree_->find_type("Tooltip");
-    if (tooltips == nullptr)
         return;
     bool changed = false;
     const auto set = [this, &changed](RetainedNode& node, const std::string_view name,
@@ -257,7 +260,11 @@ void InputRouter::update_tooltip_disclosures() {
         if (name == tooltip_shown_state && description_invalidator_)
             description_invalidator_(&node, name);
     };
-    for (RetainedNode* node : *tooltips) {
+    for (const std::string_view type : widgets_.hover_disclosure_types()) {
+    const std::vector<RetainedNode*>* disclosures = tree_->find_type(type);
+    if (disclosures == nullptr)
+        continue;
+    for (RetainedNode* node : *disclosures) {
         if (node == nullptr)
             continue;
         if (tooltip_controlled_visible(*node).has_value()) {
@@ -295,6 +302,7 @@ void InputRouter::update_tooltip_disclosures() {
             set(*node, tooltip_pending_state, runtime::Value{});
             set(*node, tooltip_deadline_state, runtime::Value{});
         }
+    }
     }
     if (changed && frame_invalidator_)
         frame_invalidator_();
@@ -349,7 +357,8 @@ bool InputRouter::focusable(const RetainedNode& node) const noexcept {
         // Static focus follows the selection contract rather than the mere presence of a shared
         // lifecycle. RichText link subtargets remain independently focusable after opt-out.
         focusable = static_text_selectable(node) ||
-                    (node.description().type == "RichText" && !rich_text_links(node).empty());
+                    (lifecycle->input.static_text_interactive != nullptr &&
+                     lifecycle->input.static_text_interactive(node));
     }
     if (focusable && !lifecycle->input.focusable_when.empty()) {
         const runtime::Value* condition = scalar_property(node, lifecycle->input.focusable_when);
@@ -375,7 +384,8 @@ bool InputRouter::tabbable(const RetainedNode& node) const noexcept {
         lifecycle->input.text_edit_mode == WidgetTextEditMode::static_text) {
         // Frozen static text is pointer-focusable for selection, but only activatable RichText
         // links enter traversal. Text selection itself does not add a tab stop.
-        return node.description().type == "RichText" && !rich_text_links(node).empty();
+        return lifecycle->input.static_text_interactive != nullptr &&
+               lifecycle->input.static_text_interactive(node);
     }
     return lifecycle == nullptr || lifecycle->input.tabbable;
 }

@@ -8,12 +8,6 @@
 namespace strata::ui::collection_input {
 namespace {
 
-[[nodiscard]] const runtime::Value* source(WidgetInputScope& scope) noexcept {
-    if (scope.node().description().type == "TreeView") return scope.property("items");
-    if (scope.node().description().type == "Table") return scope.property("rows");
-    return scope.property("entries");
-}
-
 void emit_selection(
     WidgetInputScope& scope,
     const collection::SelectionTransition& transition
@@ -211,12 +205,13 @@ collection::KeySet expanded(WidgetInputScope& scope) {
     return keys(value);
 }
 
-Model model(WidgetInputScope& scope) {
+Model model(WidgetInputScope& scope, const Shape& shape) {
     Model result;
-    const runtime::Value* values = source(scope);
+    result.default_selection = shape.default_selection;
+    const runtime::Value* values = scope.property(shape.source);
     if (values == nullptr || values->list() == nullptr) return result;
-    const bool tree = scope.node().description().type == "TreeView";
-    const bool grid = scope.node().description().type == "ItemGrid";
+    const bool tree = shape.hierarchical;
+    const bool grid = shape.items_only;
     const collection::KeySet open = tree ? expanded(scope) : collection::KeySet{};
     std::map<std::string, std::optional<std::string>, std::less<>> parents;
     for (const runtime::Value& item : values->list()->values) {
@@ -261,11 +256,16 @@ Model model(WidgetInputScope& scope) {
     return result;
 }
 
-collection::SelectionMode selection_mode(WidgetInputScope& scope) {
-    std::string value = scope.node().description().type == "TreeView" ? "SINGLE" : "MULTIPLE";
-    if (const std::string* authored = text(scope.property("selectionMode")); authored != nullptr) {
-        value = *authored;
-    }
+collection::SelectionMode selection_mode(WidgetInputScope& scope,
+                                         const Model& collection_model) {
+    return selection_mode(scope, collection_model.default_selection);
+}
+
+collection::SelectionMode selection_mode(WidgetInputScope& scope,
+                                         const collection::SelectionMode fallback) {
+    const std::string* authored = text(scope.property("selectionMode"));
+    if (authored == nullptr) return fallback;
+    std::string value = *authored;
     std::ranges::transform(value, value.begin(), [](const unsigned char character) {
         return static_cast<char>(std::toupper(character));
     });
@@ -317,7 +317,7 @@ void apply_selection(
         prior,
         retained_key(scope, "strata.collection.anchor"),
         key,
-        selection_mode(scope),
+        selection_mode(scope, collection_model),
         selection_modifiers(modifiers)
     );
     apply_transition(scope, prior, transition);
@@ -379,7 +379,7 @@ bool common_key(
     const NavigationConfig& config
 ) {
     if (scope.key() == "a" && (scope.modifiers().control || scope.modifiers().super_key) &&
-        selection_mode(scope) == collection::SelectionMode::multiple) {
+        selection_mode(scope, collection_model) == collection::SelectionMode::multiple) {
         const collection::KeySet prior = selected(scope);
         const collection::SelectionTransition transition = collection::select_all(
             collection_model.ordered,

@@ -439,8 +439,7 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
             ? *overrides->alignment
             : text_option(description, "alignment", "START"),
     };
-    if (description.type != "RichText")
-        return result;
+    // Styled runs come from a description's spans, whichever widget authored them.
     const runtime::Value* spans = property(description, "spans");
     if (spans == nullptr || spans->list() == nullptr)
         return result;

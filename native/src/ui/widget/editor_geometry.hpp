@@ -19,6 +19,12 @@ struct WidgetSubtarget;
     const RetainedNode& node
 ) noexcept;
 
+/** Whether the editor's text sits in a lifecycle-declared viewport inside a composite widget. */
+[[nodiscard]] bool editable_text_composite(
+    const WidgetRegistry& widgets,
+    const RetainedNode& node
+) noexcept;
+
 /**
  * Resolves the actual text viewport of an editable widget.
  *
@@ -26,6 +32,7 @@ struct WidgetSubtarget;
  * IME placement all consume this function so their insets cannot drift independently.
  */
 [[nodiscard]] std::optional<Rect> editable_text_viewport(
+    const WidgetRegistry& widgets,
     const RetainedNode& node,
     const LayoutRecord& layout,
     std::span<const WidgetSubtarget> subtargets

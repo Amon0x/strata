@@ -167,6 +167,11 @@ void WidgetRegistry::register_subtargets(std::string type, WidgetSubtargetsHook 
     refresh_trait_types();
 }
 
+void WidgetRegistry::register_async_owners(std::string type, WidgetAsyncOwnersHook owners) {
+    lifecycle(std::move(type)).async_owners = owners;
+    refresh_trait_types();
+}
+
 void WidgetRegistry::register_command_phase(std::string type, WidgetCommandPhase phase) {
     lifecycle(std::move(type)).command = std::move(phase);
     refresh_trait_types();
@@ -213,6 +218,10 @@ WidgetRegistry::WidgetRegistry(WidgetRegistry&& other) noexcept
       authored_presentation_types_(std::move(other.authored_presentation_types_)),
       detached_overlay_types_(std::move(other.detached_overlay_types_)),
       detached_subtarget_types_(std::move(other.detached_subtarget_types_)),
+      modal_types_(std::move(other.modal_types_)),
+      hover_disclosure_types_(std::move(other.hover_disclosure_types_)),
+      notification_types_(std::move(other.notification_types_)),
+      async_owner_types_(std::move(other.async_owner_types_)),
       text_editable_types_(std::move(other.text_editable_types_)),
       revision_(next_registry_revision()) {
     other.revision_ = next_registry_revision();
@@ -225,6 +234,10 @@ WidgetRegistry& WidgetRegistry::operator=(WidgetRegistry&& other) noexcept {
         authored_presentation_types_ = std::move(other.authored_presentation_types_);
         detached_overlay_types_ = std::move(other.detached_overlay_types_);
         detached_subtarget_types_ = std::move(other.detached_subtarget_types_);
+        modal_types_ = std::move(other.modal_types_);
+        hover_disclosure_types_ = std::move(other.hover_disclosure_types_);
+        notification_types_ = std::move(other.notification_types_);
+        async_owner_types_ = std::move(other.async_owner_types_);
         text_editable_types_ = std::move(other.text_editable_types_);
         revision_ = next_registry_revision();
         other.revision_ = next_registry_revision();
@@ -238,6 +251,10 @@ void WidgetRegistry::refresh_trait_types() {
     authored_presentation_types_.clear();
     detached_overlay_types_.clear();
     detached_subtarget_types_.clear();
+    modal_types_.clear();
+    hover_disclosure_types_.clear();
+    notification_types_.clear();
+    async_owner_types_.clear();
     text_editable_types_.clear();
     for (const auto& [type, lifecycle] : lifecycles_) {
         if (lifecycle.command.declaration)
@@ -248,6 +265,14 @@ void WidgetRegistry::refresh_trait_types() {
             detached_overlay_types_.push_back(type);
         if (lifecycle.inspection.subtargets != nullptr && lifecycle.inspection.detached_subtargets)
             detached_subtarget_types_.push_back(type);
+        if (lifecycle.input.modal_open != nullptr)
+            modal_types_.push_back(type);
+        if (lifecycle.input.hover_disclosure)
+            hover_disclosure_types_.push_back(type);
+        if (lifecycle.present.observes_notifications)
+            notification_types_.push_back(type);
+        if (lifecycle.async_owners != nullptr)
+            async_owner_types_.push_back(type);
         if (lifecycle.input.text_edit_mode != WidgetTextEditMode::none)
             text_editable_types_.push_back(type);
     }
@@ -255,6 +280,16 @@ void WidgetRegistry::refresh_trait_types() {
     std::ranges::sort(authored_presentation_types_);
     std::ranges::sort(detached_overlay_types_);
     std::ranges::sort(detached_subtarget_types_);
+    std::ranges::sort(hover_disclosure_types_);
+    std::ranges::sort(notification_types_);
+    std::ranges::sort(async_owner_types_);
+    // Highest priority first; equal priorities in name order.
+    std::ranges::sort(modal_types_, [this](const std::string_view left,
+                                           const std::string_view right) {
+        const int left_priority = lifecycles_.find(left)->second.input.modal_priority;
+        const int right_priority = lifecycles_.find(right)->second.input.modal_priority;
+        return left_priority != right_priority ? left_priority > right_priority : left < right;
+    });
     std::ranges::sort(text_editable_types_);
 }
 
@@ -270,6 +305,33 @@ std::span<const std::string_view> WidgetRegistry::detached_overlay_types() const
 
 std::span<const std::string_view> WidgetRegistry::detached_subtarget_types() const noexcept {
     return detached_subtarget_types_;
+}
+
+std::span<const std::string_view> WidgetRegistry::modal_types() const noexcept {
+    return modal_types_;
+}
+
+std::span<const std::string_view> WidgetRegistry::hover_disclosure_types() const noexcept {
+    return hover_disclosure_types_;
+}
+
+std::span<const std::string_view> WidgetRegistry::notification_types() const noexcept {
+    return notification_types_;
+}
+
+std::span<const std::string_view> WidgetRegistry::async_owner_types() const noexcept {
+    return async_owner_types_;
+}
+
+std::vector<std::string_view>
+WidgetRegistry::framework_action_types(const std::string_view action_namespace) const {
+    std::vector<std::string_view> result;
+    for (const auto& [type, lifecycle] : lifecycles_) {
+        if (!action_namespace.empty() && lifecycle.input.framework_actions == action_namespace)
+            result.push_back(type);
+    }
+    std::ranges::sort(result);
+    return result;
 }
 
 std::span<const std::string_view> WidgetRegistry::text_editable_types() const noexcept {

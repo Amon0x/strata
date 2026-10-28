@@ -284,6 +284,12 @@ void WidgetInputScope::set_retained(const std::string_view name, runtime::Value 
     }
 }
 
+bool WidgetInputScope::exchange_retained(const std::string_view name, runtime::Value value,
+                                         const DirtyReason reason) {
+    return router_.tree_ != nullptr &&
+           router_.tree_->set_retained_value(node_.identity(), name, std::move(value), reason);
+}
+
 std::span<const std::byte>
 WidgetInputScope::retained_bytes(const std::string_view name) const noexcept {
     return node_.retained_bytes(name);

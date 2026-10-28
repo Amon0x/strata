@@ -310,7 +310,8 @@ void text_input_content(WidgetRenderScope& scope, const TextInputMode mode) {
     const std::vector<WidgetSubtarget> subtargets =
         scope.input().subtargets(scope.node().identity());
     const std::optional<Rect> viewport =
-        editable_text_viewport(scope.node(), scope.layout(), subtargets);
+        editable_text_viewport(scope.input().widget_registry(), scope.node(), scope.layout(),
+                               subtargets);
     if (!viewport.has_value() || viewport->empty())
         return;
     scope.push_clip(*viewport);

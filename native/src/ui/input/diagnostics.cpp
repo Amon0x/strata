@@ -35,7 +35,7 @@ void InputRouter::report_action_outcome(
 
     std::string layer = "root";
     for (const RetainedNode* current = &node; current != nullptr; current = current->parent()) {
-        if (current->description().type != "SurfaceLayer" ||
+        if (current->description().type != surface_layer_type ||
             !current->description().key.has_value()) {
             continue;
         }

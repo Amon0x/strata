@@ -6,6 +6,12 @@
 namespace strata::ui::collection_input {
 namespace {
 
+constexpr Shape tree_shape{
+    .source = "items",
+    .hierarchical = true,
+    .default_selection = collection::SelectionMode::single,
+};
+
 constexpr std::string_view drag_hover_key = "strata.tree.dragHover";
 constexpr std::int64_t default_hover_expand_delay = 650'000'000;
 
@@ -92,7 +98,7 @@ void toggle(WidgetInputScope& scope, const Model& model, const std::string& key)
 bool advance(WidgetInputScope& scope) {
     const std::optional<WidgetDragInteraction> interaction = scope.active_drag();
     const runtime::Value* prior = scope.retained(drag_hover_key);
-    const Model collection_model = model(scope);
+    const Model collection_model = model(scope, tree_shape);
     const std::string* target = interaction.has_value() && interaction->target_key.has_value()
         ? &*interaction->target_key
         : nullptr;
@@ -157,7 +163,7 @@ bool advance(WidgetInputScope& scope) {
 
 bool click(WidgetInputScope& scope) {
     const PointerInputEvent* pointer = scope.pointer();
-    const Model collection_model = model(scope);
+    const Model collection_model = model(scope, tree_shape);
     const auto [key, item] = pointer_item(scope, collection_model);
     if (key.empty()) return false;
     if (pointer != nullptr && pointer->button == 1) {
@@ -179,7 +185,7 @@ bool click(WidgetInputScope& scope) {
 }
 
 bool key(WidgetInputScope& scope) {
-    const Model collection_model = model(scope);
+    const Model collection_model = model(scope, tree_shape);
     const std::optional<std::string> active = retained_key(scope, "strata.collection.active");
     if (scope.key() == "enter" && active.has_value()) {
         toggle(scope, collection_model, *active);
@@ -227,6 +233,23 @@ bool key(WidgetInputScope& scope) {
     });
 }
 
+/** Expanded rows own their loads; expansion is state, not shape. */
+void tree_async_owners(const RetainedNode& node, std::vector<std::string>& owners) {
+    const auto property = node.description().properties.find("expandedKeys");
+    const runtime::Value* expanded = property != node.description().properties.end()
+                                         ? property->second.value()
+                                         : nullptr;
+    if (expanded == nullptr || expanded->list() == nullptr)
+        expanded = node.retained_value("strata.tree.expanded");
+    if (expanded == nullptr || expanded->list() == nullptr)
+        return;
+    for (const runtime::Value& value : expanded->list()->values) {
+        const std::string* key = value.key() != nullptr ? &value.key()->value : value.string();
+        if (key != nullptr && !key->empty())
+            owners.push_back("item:" + *key);
+    }
+}
+
 } // namespace
 
 void register_tree_input(WidgetRegistry& registry) {
@@ -235,7 +258,9 @@ void register_tree_input(WidgetRegistry& registry) {
     phase.click = &click;
     phase.key = &key;
     phase.focusable = true;
+    phase.framework_actions = "tree";
     registry.register_input_phase("TreeView", std::move(phase));
+    registry.register_async_owners("TreeView", &tree_async_owners);
 }
 
 } // namespace strata::ui::collection_input

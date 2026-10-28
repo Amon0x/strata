@@ -70,9 +70,21 @@ namespace {
 
 } // namespace
 
-RetainedNode* InputRouter::ancestor(RetainedNode& node, const std::string_view type) noexcept {
+bool InputRouter::framework_action_target(const RetainedNode& node,
+                                          const std::string_view action_namespace) const noexcept {
+    const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
+    return lifecycle != nullptr && lifecycle->input.framework_actions == action_namespace;
+}
+
+WidgetFormRole InputRouter::form_role(const RetainedNode& node) const noexcept {
+    const WidgetLifecycle* lifecycle = widgets_.find(node.description().type);
+    return lifecycle != nullptr ? lifecycle->input.form_role : WidgetFormRole::none;
+}
+
+RetainedNode* InputRouter::form_ancestor(RetainedNode& node,
+                                         const WidgetFormRole role) const noexcept {
     for (RetainedNode* current = &node; current != nullptr; current = current->parent()) {
-        if (current->description().type == type) return current;
+        if (form_role(*current) == role) return current;
     }
     return nullptr;
 }
@@ -97,7 +109,9 @@ bool InputRouter::validate_field(RetainedNode& field, const bool mark_touched) {
     std::optional<std::string> text;
     std::optional<double> number;
     if (input != nullptr) {
-        if (input->description().type == "NumberField") {
+        if (const WidgetLifecycle* lifecycle = widgets_.find(input->description().type);
+            lifecycle != nullptr &&
+            lifecycle->input.text_edit_mode == WidgetTextEditMode::numeric) {
             const runtime::Value* value = effective_control_value(
                 *input, "value", "$value", "defaultValue"
             );
@@ -161,7 +175,11 @@ std::size_t InputRouter::validate_form(
     InputOperationResult& result
 ) {
     std::vector<RetainedNode*> fields;
-    collect_type(form, "Field", fields);
+    const auto collect = [this, &fields](const auto& self, RetainedNode& node) -> void {
+        if (form_role(node) == WidgetFormRole::field) fields.push_back(&node);
+        for (const auto& child : node.children()) self(self, *child);
+    };
+    collect(collect, form);
     RetainedNode* first_invalid = nullptr;
     std::size_t invalid_count = 0U;
     for (RetainedNode* field : fields) {
@@ -181,12 +199,12 @@ std::size_t InputRouter::validate_form(
 }
 
 void InputRouter::note_field_change(RetainedNode& node) {
-    RetainedNode* field = ancestor(node, "Field");
+    RetainedNode* field = form_ancestor(node, WidgetFormRole::field);
     if (field == nullptr) return;
     static_cast<void>(tree_->set_retained_value(
         field->identity(), "strata.form.dirty", runtime::Value(true), DirtyReason::semantics
     ));
-    RetainedNode* form = ancestor(*field, "Form");
+    RetainedNode* form = form_ancestor(*field, WidgetFormRole::form);
     if (form == nullptr) return;
     const runtime::Value* validated = field->retained_value("strata.form.validated");
     const bool previously_validated = validated != nullptr && validated->boolean() != nullptr &&
@@ -202,12 +220,12 @@ void InputRouter::note_field_change(RetainedNode& node) {
 }
 
 void InputRouter::note_field_blur(RetainedNode& node) {
-    RetainedNode* field = ancestor(node, "Field");
+    RetainedNode* field = form_ancestor(node, WidgetFormRole::field);
     if (field == nullptr) return;
     static_cast<void>(tree_->set_retained_value(
         field->identity(), "strata.form.touched", runtime::Value(true), DirtyReason::semantics
     ));
-    RetainedNode* form = ancestor(*field, "Form");
+    RetainedNode* form = form_ancestor(*field, WidgetFormRole::form);
     const runtime::Value* validate_on_blur = form != nullptr ? scalar_property(*form, "validateOnBlur") : nullptr;
     if (validate_on_blur == nullptr || validate_on_blur->boolean() == nullptr ||
         *validate_on_blur->boolean()) {
@@ -221,7 +239,7 @@ runtime::ActionDispatchOutcome InputRouter::execute_form_action(
 ) {
     const std::string* form_key = string_value(action.payload.field("key"));
     RetainedNode* form = form_key != nullptr ? tree_->find_key(*form_key) : nullptr;
-    if (form == nullptr || form->description().type != "Form") {
+    if (form == nullptr || form_role(*form) != WidgetFormRole::form) {
         return runtime::ActionDispatchOutcome{
             runtime::ActionDispatchStatus::failed,
             action.id(),

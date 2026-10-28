@@ -16,19 +16,26 @@ bool editable_text_multiline(const WidgetRegistry& widgets, const RetainedNode& 
     return lifecycle != nullptr && lifecycle->input.text_edit_mode == WidgetTextEditMode::multi_line;
 }
 
+bool editable_text_composite(const WidgetRegistry& widgets, const RetainedNode& node) noexcept {
+    const WidgetLifecycle* lifecycle = widgets.find(node.description().type);
+    return lifecycle != nullptr && lifecycle->input.editor_viewport.has_value();
+}
+
 std::optional<Rect> editable_text_viewport(
+    const WidgetRegistry& widgets,
     const RetainedNode& node,
     const LayoutRecord& layout,
     const std::span<const WidgetSubtarget> subtargets
 ) noexcept {
-    const std::string_view type = node.description().type;
-    if (type != "ChipInput" && type != "CommandPalette") {
+    const WidgetLifecycle* lifecycle = widgets.find(node.description().type);
+    if (lifecycle == nullptr || !lifecycle->input.editor_viewport.has_value()) {
         return layout.content_bounds;
     }
-    const auto editor = std::ranges::find(subtargets, "$editor", &WidgetSubtarget::id);
+    const WidgetEditorViewport& composite = *lifecycle->input.editor_viewport;
+    const auto editor = std::ranges::find(subtargets, composite.subtarget, &WidgetSubtarget::id);
     if (editor == subtargets.end()) return std::nullopt;
-    const double horizontal_inset = type == "ChipInput" ? 6.0 : 10.0;
-    const double vertical_inset = type == "ChipInput" ? 4.0 : 3.0;
+    const double horizontal_inset = composite.horizontal_inset;
+    const double vertical_inset = composite.vertical_inset;
     return Rect{
         editor->bounds.x + horizontal_inset,
         editor->bounds.y + vertical_inset,

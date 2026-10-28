@@ -467,14 +467,13 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
               if (text_engine_ == nullptr)
                   return std::nullopt;
               const std::optional<Rect> viewport =
-                  editable_text_viewport(node, layout, input_.projected_subtargets(node));
+                  editable_text_viewport(widgets_, node, layout, input_.projected_subtargets(node));
               if (!viewport.has_value() || viewport->empty())
                   return std::nullopt;
               const bool multiline = editable_text_multiline(widgets_, node);
               const TextLayout text_layout = text_engine_->layout(
                   node, text, editable_text_layout_options(*viewport, multiline));
-              if (node.description().type == "ChipInput" ||
-                  node.description().type == "CommandPalette") {
+              if (editable_text_composite(widgets_, node)) {
                   if (position.x < viewport->x || position.y < viewport->y ||
                       position.x > viewport->right() || position.y > viewport->bottom()) {
                       return std::nullopt;
@@ -494,7 +493,7 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
               if (text_engine_ == nullptr || !environment_.input.ime)
                   return std::nullopt;
               const std::optional<Rect> viewport =
-                  editable_text_viewport(node, layout, input_.projected_subtargets(node));
+                  editable_text_viewport(widgets_, node, layout, input_.projected_subtargets(node));
               if (!viewport.has_value() || viewport->empty())
                   return std::nullopt;
               const bool multiline = editable_text_multiline(widgets_, node);
@@ -782,15 +781,17 @@ const NotificationService& Surface::notifications() const noexcept {
 }
 
 void Surface::notifications_changed(const NotificationChange& change) {
-    const std::vector<RetainedNode*>* regions = tree_.find_type("ToastRegion");
-    if (regions == nullptr)
-        return;
-    for (RetainedNode* region : *regions) {
-        if (change.input || change.render) {
-            static_cast<void>(tree_.mark(region->identity(), DirtyReason::input));
-        }
-        if (change.semantics) {
-            static_cast<void>(tree_.mark(region->identity(), DirtyReason::semantics));
+    for (const std::string_view type : widgets_.notification_types()) {
+        const std::vector<RetainedNode*>* regions = tree_.find_type(type);
+        if (regions == nullptr)
+            continue;
+        for (RetainedNode* region : *regions) {
+            if (change.input || change.render) {
+                static_cast<void>(tree_.mark(region->identity(), DirtyReason::input));
+            }
+            if (change.semantics) {
+                static_cast<void>(tree_.mark(region->identity(), DirtyReason::semantics));
+            }
         }
     }
 }
@@ -1039,7 +1040,8 @@ std::shared_ptr<const DescriptionNode> Surface::describe(DescriptionBuildResult&
     layers.reserve(visible.size());
     for (std::size_t index = 0U; index < visible.size(); ++index) {
         layers.push_back(
-            DescriptionNode::create("SurfaceLayer", "strata.layer." + visible[index].id, {}, {},
+            DescriptionNode::create(std::string(surface_layer_type),
+                                    "strata.layer." + visible[index].id, {}, {},
                                     surface_layer_properties(visible[index].transition),
                                     eager({declaration_root(built.roots[index])})));
     }
@@ -1049,7 +1051,8 @@ std::shared_ptr<const DescriptionNode> Surface::describe(DescriptionBuildResult&
         built.evaluated_expressions,
         built.described_nodes,
     };
-    return DescriptionNode::create("SurfaceLayers", "strata.surface.layers", {}, {},
+    return DescriptionNode::create(std::string(surface_layers_type), "strata.surface.layers", {},
+                                   {},
                                    surface_layout(), eager(std::move(layers)));
 }
 
@@ -1501,33 +1504,25 @@ void Surface::commit_lazy_materializations(SurfaceFrame& frame) {
         application_.undo().clear(id_);
     }
 
-    // A tree view's expanded rows own their loads; its expansion is state, not shape.
-    static constexpr std::string_view tree_view = "TreeView";
-    const std::vector<RetainedNode*> tree_views = tree_.nodes_of_types(std::span(&tree_view, 1U));
-    if (tree_views.empty()) {
+    // Widgets whose rows own their loads (a tree view's expanded rows) keep them: that ownership
+    // is state, not shape.
+    const std::vector<RetainedNode*> owners = tree_.nodes_of_types(widgets_.async_owner_types());
+    if (owners.empty()) {
         static_cast<void>(application_.async().retain_owners(id_ + ":", ownership_.async_owners));
         return;
     }
     std::set<std::string, std::less<>> async_owners = ownership_.async_owners;
-    for (const RetainedNode* node : tree_views) {
+    std::vector<std::string> owned;
+    for (const RetainedNode* node : owners) {
         if (node->lifecycle() != RetainedLifecycle::attached)
             continue;
-        const auto property = node->description().properties.find("expandedKeys");
-        const runtime::Value* expanded = property != node->description().properties.end()
-                                             ? property->second.value()
-                                             : nullptr;
-        if (expanded == nullptr || expanded->list() == nullptr) {
-            expanded = node->retained_value("strata.tree.expanded");
-        }
-        if (expanded != nullptr && expanded->list() != nullptr) {
-            for (const runtime::Value& value : expanded->list()->values) {
-                const std::string* key =
-                    value.key() != nullptr ? &value.key()->value : value.string();
-                if (key != nullptr && !key->empty()) {
-                    async_owners.insert(id_ + ":item:" + *key);
-                }
-            }
-        }
+        const WidgetLifecycle* lifecycle = widgets_.find(node->description().type);
+        if (lifecycle == nullptr || lifecycle->async_owners == nullptr)
+            continue;
+        owned.clear();
+        lifecycle->async_owners(*node, owned);
+        for (const std::string& owner : owned)
+            async_owners.insert(id_ + ":" + owner);
     }
     static_cast<void>(application_.async().retain_owners(id_ + ":", async_owners));
 }

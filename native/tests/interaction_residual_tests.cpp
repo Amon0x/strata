@@ -449,6 +449,124 @@ void test_detached_portal_hit_testing(InputFixture& fixture) {
           "detached portal was visible outside its parent clip but could not be hit");
 }
 
+std::vector<ui::WidgetDismissal> lifecycle_dismissals;
+
+/**
+ * Widget types the framework has never heard of get modality, popup dismissal and projected
+ * subtargets from their lifecycle alone: generic input code holds no widget names.
+ */
+void test_lifecycle_input_hooks(InputFixture& fixture) {
+    ui::WidgetInputPhase trap;
+    trap.focusable = true;
+    trap.modal_open = [](const ui::RetainedNode& node) {
+        const auto open = node.description().properties.find("open");
+        const runtime::Value* value =
+            open != node.description().properties.end() ? open->second.value() : nullptr;
+        return value != nullptr && value->boolean() != nullptr && *value->boolean();
+    };
+    trap.modal_priority = 1;
+    fixture.widgets_.register_input_phase("LifecycleTrap", std::move(trap));
+
+    ui::WidgetInputPhase popup;
+    popup.popup_retained = "$open";
+    popup.popup_initial = "defaultOpen";
+    popup.on_dismiss = [](ui::WidgetInputScope&, const ui::WidgetDismissal reason) {
+        lifecycle_dismissals.push_back(reason);
+        return false;
+    };
+    fixture.widgets_.register_input_phase("LifecyclePopup", std::move(popup));
+
+    ui::WidgetInputPhase regions;
+    regions.focusable = true;
+    fixture.widgets_.register_input_phase("LifecycleRegions", std::move(regions));
+    fixture.widgets_.register_subtargets(
+        "LifecycleRegions",
+        [](const ui::WidgetSubtargetContext& context) {
+            const ui::Rect bounds = context.record.bounds;
+            return std::vector<ui::WidgetSubtarget>{ui::WidgetSubtarget{
+                context.node.identity(), "$flyout", ui::WidgetSubtargetKind::control, 0U,
+                ui::Rect{bounds.right() + 100.0, bounds.y, 60.0, 40.0}, runtime::Value{}, {}, {},
+                true, true, ui::detached_overlay_menu_z,
+            }};
+        },
+        true);
+    check(std::ranges::find(fixture.widgets_.detached_subtarget_types(), "LifecycleRegions") !=
+              fixture.widgets_.detached_subtarget_types().end(),
+          "a registered detached projection was not listed for detached hit testing");
+
+    const auto trapped = [](const bool open) {
+        return node("Panel", "lifecycle.root",
+                    {
+                        node("Probe", "lifecycle.outside", {}, sized(80.0, 32.0)),
+                        node("LifecycleTrap", "lifecycle.trap",
+                             {node("Probe", "lifecycle.inside", {}, sized(80.0, 32.0))},
+                             {{"open", runtime::ExpressionValue(runtime::Value(open))},
+                              {"$layout", layout(120.0, 60.0)}}),
+                    },
+                    sized(640.0, 480.0, "ROW"));
+    };
+    fixture.adopt(trapped(true));
+    const ui::Point outside = center(fixture.bounds("lifecycle.outside").bounds);
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{outside, ui::PointerEventType::press, 40, 0},
+        ui::PointerInputEvent{outside, ui::PointerEventType::release, 40, 0},
+    }));
+    check(!fixture.focused("lifecycle.outside"),
+          "an open lifecycle modal did not trap a press outside it");
+    fixture.adopt(trapped(false));
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{outside, ui::PointerEventType::press, 41, 0},
+        ui::PointerInputEvent{outside, ui::PointerEventType::release, 41, 0},
+    }));
+    check(fixture.focused("lifecycle.outside"), "a closed lifecycle modal still trapped input");
+
+    lifecycle_dismissals.clear();
+    const auto popup_tree = [] {
+        return node("Panel", "lifecycle.popup-root",
+                    {
+                        node("LifecyclePopup", "lifecycle.popup",
+                             {node("Probe", "lifecycle.popup-child", {}, sized(60.0, 30.0))},
+                             {{"defaultOpen", runtime::ExpressionValue(runtime::Value(true))},
+                              {"$layout", layout(100.0, 50.0)}}),
+                        node("LifecycleRegions", "lifecycle.regions", {}, sized(80.0, 40.0)),
+                    },
+                    sized(640.0, 480.0, "ROW"));
+    };
+    fixture.adopt(popup_tree());
+    const ui::Point child = center(fixture.bounds("lifecycle.popup-child").bounds);
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{child, ui::PointerEventType::press, 42, 0},
+        ui::PointerInputEvent{child, ui::PointerEventType::release, 42, 0},
+    }));
+    check(lifecycle_dismissals.empty(), "a press inside a lifecycle popup dismissed it");
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{ui::Point{600.0, 450.0}, ui::PointerEventType::press, 43, 0},
+        ui::PointerInputEvent{ui::Point{600.0, 450.0}, ui::PointerEventType::release, 43, 0},
+    }));
+    const runtime::Value* open = fixture.tree_.find_key("lifecycle.popup")->retained_value("$open");
+    check(open != nullptr && open->boolean() != nullptr && !*open->boolean() &&
+              lifecycle_dismissals == std::vector{ui::WidgetDismissal::outside_press},
+          "an outside press did not close a lifecycle popup through its dismissal hook");
+
+    fixture.adopt(popup_tree());
+    lifecycle_dismissals.clear();
+    static_cast<void>(fixture.input_.key("escape"));
+    check(lifecycle_dismissals == std::vector{ui::WidgetDismissal::escape},
+          "Escape did not dismiss a lifecycle popup through its dismissal hook");
+
+    const ui::RetainedNode* owner = fixture.tree_.find_key("lifecycle.regions");
+    const std::vector<ui::WidgetSubtarget> projected = fixture.input_.subtargets(owner->identity());
+    check(projected.size() == 1U && projected.front().id == "$flyout",
+          "a registered subtarget hook was not the node's projection");
+    static_cast<void>(fixture.pointer({
+        ui::PointerInputEvent{center(projected.front().bounds), ui::PointerEventType::press, 44, 0},
+        ui::PointerInputEvent{center(projected.front().bounds), ui::PointerEventType::release, 44,
+                              0},
+    }));
+    check(fixture.focused("lifecycle.regions"),
+          "a detached lifecycle subtarget outside its owner's bounds was not hit");
+}
+
 void test_authored_popup_dismissal(InputFixture& fixture) {
 
     const auto description =
@@ -2719,6 +2837,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_primary_pointer_focus_default(fixture);
         test_detached_portal_hit_testing(fixture);
         test_authored_popup_dismissal(fixture);
+        test_lifecycle_input_hooks(fixture);
         test_rich_text_press_arm(fixture);
         test_static_text_state_partition(fixture);
         test_wrapped_static_text_navigation(fixture);
