@@ -7695,6 +7695,111 @@ overlay Direct {
     }
 }
 
+void test_loop_component_keys_name_their_instances() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("loop-keys", bundle);
+    activate_description_fixture(application, "loop-keys", R"(
+component TodoRow(key: key, slug: string, label: string) {
+  state note = "";
+  if slug == "a" {
+    state onlyA = 1;
+  }
+  Text(key: format("row.{0}", slug), text: format("{0}:{1}", label, note))
+}
+component Badge(key: key, label: string) {
+  state seen = 0;
+  Text(key: format("badge.{0}", label), text: label)
+}
+overlay Todos {
+  state todos = [{ slug: "b", label: "Bravo" }, { slug: "a/b", label: "Slash" }];
+  root Panel(key: "todos") {
+    for t in todos {
+      TodoRow(key: t.slug, slug: t.slug, label: t.label)
+      Badge(key: t.slug == "never" ? t.slug : "shared", label: t.label)
+    }
+  }
+}
+overlay Segments {
+  state rows = [{ key: "x", label: "one" }, { key: "x", label: "two" }, { key: "x:1", label: "three" }];
+  root Panel(key: "segments") {
+    for r in rows {
+      Text(key: r.label, text: r.label)
+    }
+  }
+}
+)");
+    ui::DescriptionBuilder builder(application);
+    const auto write = [&application](const std::string_view scope, const std::string_view name,
+                                      runtime::Value value) {
+        const std::optional<runtime::StateScopeResolution> resolved =
+            application.resolve_state_scope(scope, name);
+        check(resolved.has_value() && resolved->declaration != nullptr,
+              "loop key fixture state '" + std::string(name) + "' was not bound");
+        const runtime::Value* const current = application.state().find(resolved->address);
+        check(current != nullptr &&
+                  application.state().write(resolved->address,
+                                            runtime::StateSlot{
+                                                std::string(name),
+                                                resolved->declaration->type_id,
+                                                *current,
+                                                resolved->declaration_scope,
+                                            },
+                                            std::move(value)),
+              "loop key fixture state did not change");
+    };
+
+    const ui::DescriptionBuildResult first = builder.build(runtime::LayerRole::overlay, "Todos");
+    check(first.diagnostics.empty(), "loop key fixture produced diagnostics");
+    const std::shared_ptr<const ui::DescriptionNode> bravo = find_description_key(first.root, "row.b");
+    const std::shared_ptr<const ui::DescriptionNode> slash =
+        find_description_key(first.root, "row.a/b");
+    check(bravo != nullptr && slash != nullptr, "loop key fixture rows were not described");
+    write(bravo->state_scope, "note", runtime::Value("kept"));
+
+    // A key holding the path separator stays one segment: the walk from that instance to its
+    // ancestors never passes through another row's instance.
+    check(std::ranges::count(slash->state_scope, '/') == std::ranges::count(bravo->state_scope, '/'),
+          "a component key holding '/' split its instance path");
+    write("overlay Todos", "todos",
+          runtime::Value(std::vector<runtime::Value>{
+              runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{
+                  {"label", runtime::Value("Alpha")}, {"slug", runtime::Value("a")}}),
+              runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{
+                  {"label", runtime::Value("Bravo")}, {"slug", runtime::Value("b")}}),
+              runtime::Value(std::vector<std::pair<std::string, runtime::Value>>{
+                  {"label", runtime::Value("Slash")}, {"slug", runtime::Value("a/b")}}),
+          }));
+    const ui::DescriptionBuildResult second = builder.build(runtime::LayerRole::overlay, "Todos");
+    check(description_text(find_description_key(second.root, "row.b")) == "Bravo:kept" &&
+              description_text(find_description_key(second.root, "row.a")) == "Alpha:",
+          "inserting an item before a keyed component moved its state to another row");
+    const std::shared_ptr<const ui::DescriptionNode> moved_slash =
+        find_description_key(second.root, "row.a/b");
+    check(moved_slash != nullptr &&
+              !application.resolve_state_scope(moved_slash->state_scope, "onlyA").has_value() &&
+              application.resolve_state_scope(
+                  find_description_key(second.root, "row.a")->state_scope, "onlyA").has_value(),
+          "a key holding '/' resolved state declared by another row");
+    // A key the items share cannot name one of them: each item keeps its own instance.
+    std::set<std::string> badge_scopes;
+    for (const std::string_view label : {"badge.Alpha", "badge.Bravo", "badge.Slash"}) {
+        const std::shared_ptr<const ui::DescriptionNode> badge =
+            find_description_key(second.root, label);
+        check(badge != nullptr, "loop key fixture lost a shared-key component");
+        badge_scopes.insert(badge->state_scope);
+    }
+    check(badge_scopes.size() == 3U, "items sharing a constant component key shared one instance");
+
+    // Equal item identities are told apart by occurrence, which no other identity can spell.
+    const ui::DescriptionBuildResult segments =
+        builder.build(runtime::LayerRole::overlay, "Segments");
+    std::set<std::string> segment_scopes;
+    for (const std::string_view label : {"one", "two", "three"})
+        segment_scopes.insert(find_description_key(segments.root, label)->state_scope);
+    check(segment_scopes.size() == 3U, "a loop item identity collided with a repeated one");
+}
+
 int strata_test_ui(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--collections") {
@@ -7770,6 +7875,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_native_collection_interaction_and_templates(arguments[1]);
             test_tree_rows_without_a_parent_are_reachable(arguments[1]);
             test_repeater_follows_host_rows_it_reads();
+            test_loop_component_keys_name_their_instances();
         }
         std::cout << "strata_ui_tests: OK\n";
         return 0;

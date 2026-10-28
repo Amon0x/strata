@@ -82,11 +82,28 @@ class DescriptionBuilder final {
         /** The scope states declared here belong to ("component X", "screen X"): the program's. */
         std::string_view declaration_scope;
         std::shared_ptr<const WidgetDefaults> widget_defaults;
+        /** The keyed component instances one run of a loop has placed beside its items. */
+        using KeyedInstances = std::set<std::string, std::less<>>;
+        struct LoopItem final {
+            /** The length of the instance path that holds the loop. */
+            std::size_t parent_length = 0U;
+            std::shared_ptr<KeyedInstances> keyed;
+        };
+        /** Set while the instance is one item of a loop. */
+        std::optional<LoopItem> loop;
 
         [[nodiscard]] const std::string& instance_path() const noexcept;
         /** Moves the scope to another instance, which its expressions then name. */
         void set_instance(std::string path);
+        /** Moves the scope to one item, identified by `identity`, of a loop repeating in it. */
+        void enter_loop_item(std::string_view item, std::string_view identity,
+                             std::shared_ptr<KeyedInstances> keyed);
     };
+
+    /** A component call's instance path in `scope`; see the definition for keyed calls. */
+    [[nodiscard]] static std::string keyed_instance_path(const Scope& scope, std::string_view type,
+                                                         const std::optional<std::string>& key,
+                                                         std::string_view source_path);
 
     /** A component call's inputs, in parameter order: compared position by position. */
     using ComponentInputs = std::vector<runtime::ExpressionValue>;

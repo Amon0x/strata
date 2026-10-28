@@ -37,21 +37,39 @@ constexpr std::size_t maximum_component_cache_entries = 512U;
     return std::nullopt;
 }
 
+/**
+ * An authored identity as one instance path segment. Paths are walked segment by segment ('/')
+ * and loop items are told apart by a ':' suffix, so neither may appear unescaped.
+ */
+[[nodiscard]] std::string path_segment(const std::string_view identity) {
+    std::string escaped;
+    escaped.reserve(identity.size());
+    for (const char character : identity) {
+        switch (character) {
+        case '%':
+            escaped += "%25";
+            break;
+        case '/':
+            escaped += "%2F";
+            break;
+        case ':':
+            escaped += "%3A";
+            break;
+        default:
+            escaped += character;
+            break;
+        }
+    }
+    return escaped;
+}
+
 [[nodiscard]] std::string component_instance_path(const std::string_view parent,
                                                   const std::string_view type,
                                                   const std::optional<std::string>& key,
                                                   const std::string_view source_path) {
-    std::string parent_path(parent);
-    if (key.has_value()) {
-        const std::size_t separator = parent_path.rfind('/');
-        if (separator != std::string::npos &&
-            parent_path.substr(separator + 1U).starts_with("for:")) {
-            parent_path.resize(separator);
-        }
-    }
     const std::string identity =
-        key.has_value() ? "key:" + *key : "call:" + std::string(source_path);
-    return parent_path + "/component:" + std::string(type) + "/" + identity;
+        key.has_value() ? "key:" + path_segment(*key) : "call:" + std::string(source_path);
+    return std::string(parent) + "/component:" + std::string(type) + "/" + identity;
 }
 
 [[nodiscard]] std::string repeated_item_segment(const runtime::Value& value,
@@ -358,6 +376,32 @@ const std::string& DescriptionBuilder::Scope::instance_path() const noexcept {
 void DescriptionBuilder::Scope::set_instance(std::string path) {
     instance = std::make_shared<const std::string>(std::move(path));
     expressions.set_component_path(instance);
+    loop.reset();
+}
+
+void DescriptionBuilder::Scope::enter_loop_item(const std::string_view item,
+                                                const std::string_view identity,
+                                                std::shared_ptr<KeyedInstances> keyed) {
+    const std::size_t parent_length = instance_path().size();
+    set_instance(instance_path() + "/" + std::string(item) + ":" + std::string(identity));
+    loop = LoopItem{parent_length, std::move(keyed)};
+}
+
+std::string DescriptionBuilder::keyed_instance_path(const Scope& scope, const std::string_view type,
+                                                    const std::optional<std::string>& key,
+                                                    const std::string_view source_path) {
+    // An explicit key names the instance among the items of the loop it repeats in, so it takes
+    // the place of the item's own segment there: the instance keeps its key, and its state,
+    // wherever the item moves. A key the loop's items share (a constant) cannot name one of them,
+    // and every later use stays inside its item.
+    if (key.has_value() && scope.loop.has_value()) {
+        std::string candidate = component_instance_path(
+            std::string_view(scope.instance_path()).substr(0U, scope.loop->parent_length), type,
+            key, source_path);
+        if (scope.loop->keyed->insert(candidate).second)
+            return candidate;
+    }
+    return component_instance_path(scope.instance_path(), type, key, source_path);
 }
 
 struct DescriptionBuilder::RepeaterIdentityEvaluationState final {
@@ -479,8 +523,9 @@ struct DescriptionBuilder::LazyRowEvaluationState final {
         const std::string canonical_key = sequence.key_at(lazy_index);
         Scope item_scope = scope;
         item_scope.expressions.push(item_frame(item, value, index, source_index));
+        // The row's root key already names it among the rows: keyed calls inside stay in it.
         item_scope.set_instance(item_scope.instance_path() + "/" + std::string(item.name()) + ":" +
-                                canonical_key);
+                                path_segment(canonical_key));
         std::vector<std::shared_ptr<const DescriptionNode>> nodes =
             evaluation.evaluator->build_block(block, item_scope);
         if (nodes.size() != 1U) {
@@ -911,6 +956,7 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
                 statement.has_index ? std::optional<Symbol>(statement.index_name) : std::nullopt;
             const std::string_view item_name = statement.name.name();
             std::map<std::string, std::size_t, std::less<>> repeated_segments;
+            const auto keyed_instances = std::make_shared<Scope::KeyedInstances>();
             // Emitted order, so filtered-out items leave no gap in an entry stagger.
             std::size_t position = 0U;
             for (std::size_t index = 0U; index < values->values.size(); ++index) {
@@ -923,12 +969,14 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
                                       program.expression(statement.filter).source))) {
                     continue;
                 }
-                std::string segment = repeated_item_segment(values->values[index], index);
+                // Items without an identity of their own are told apart by position, and equal
+                // identities by occurrence: an escaped identity never ends in ":n" itself.
+                std::string segment =
+                    path_segment(repeated_item_segment(values->values[index], index));
                 const std::size_t occurrence = repeated_segments[segment]++;
                 if (occurrence != 0U)
                     segment += ":" + std::to_string(occurrence);
-                item_scope.set_instance(item_scope.instance_path() + "/" + std::string(item_name) +
-                                        ":" + segment);
+                item_scope.enter_loop_item(item_name, segment, keyed_instances);
                 auto iteration = build_block(statement.block, item_scope);
                 for (std::size_t item = 0U; item < iteration.size(); ++item) {
                     const bool anchor = item == 0U;
@@ -1554,7 +1602,7 @@ DescriptionBuilder::build_component_call(const runtime::ProgramCall& call, const
     ComponentInputs inputs;
     inputs.reserve(parameter_arguments.size() + arguments.size());
     Scope instance = component_scope(
-        component, component_instance_path(scope.instance_path(), type, key, source_path), scope,
+        component, keyed_instance_path(scope, type, key, source_path), scope,
         projection_scope.widget_defaults, supplied, &inputs);
     // Arguments no parameter takes, and the widget defaults the body sees, describe it too.
     for (std::uint32_t index = 0U; index < arguments.size(); ++index) {
@@ -1705,6 +1753,8 @@ DescriptionBuilder::build_component_template(const std::string_view component_na
     }
     const Scope instance = component_scope(
         component,
+        // A template key is the widget's, not an item identity the author chose: the instance
+        // stays inside the loop item that called it.
         component_instance_path(caller.instance_path(), component_name, key, "$template:" + key),
         caller, std::move(defaults), supplied, nullptr);
     std::vector<std::shared_ptr<const DescriptionNode>> roots =
