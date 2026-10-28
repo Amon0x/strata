@@ -73,7 +73,7 @@ void run() {
                  0.25});
             return context.pixels();
         };
-        require(renderer.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 8, "prepare builtins");
+        require(renderer.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 9, "prepare builtins");
         require(renderer.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 0, "prepare is idempotent");
         const auto cache = std::filesystem::temp_directory_path() /
             ("strata-vulkan-test-" + std::to_string(reinterpret_cast<std::uintptr_t>(&renderer)));
@@ -85,7 +85,7 @@ void run() {
         {
             vulkan::Renderer restored(context.device);
             require(restored.load_pipeline_cache(cache), "load saved pipeline cache");
-            require(restored.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 8, "prepare restored cache");
+            require(restored.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 9, "prepare restored cache");
             (void)restored.render("restored", quad(), context.target(32, 32),
                                   {vulkan::TargetLoadAction::clear, {}, 0});
             near(pixel(context.pixels(), 32, 16, 16), {255, 0, 0, 255}, "restored cache pixels");
@@ -95,7 +95,7 @@ void run() {
         require(!renderer.load_pipeline_cache(cache), "corrupt cache ignored");
         auto packet = quad();
         near(pixel(render(packet), 32, 16, 16), {255, 0, 0, 255}, "solid quad");
-        require(renderer.pipeline_count() == 8, "prepared draw creates no pipelines");
+        require(renderer.pipeline_count() == 9, "prepared draw creates no pipelines");
         std::get<host::DrawBatch>(packet.batches[0]).scissor = {0, 0, 16, 32};
         auto image = render(packet);
         near(pixel(image, 32, 24, 16), {0, 0, 0, 0}, "scissor");
@@ -300,9 +300,12 @@ void run() {
         // complete arrays, so this packet's complete arrays deliberately omit the patch.
         cached.geometry_epoch = 2;
         cached.vertex_patches.push_back({20, {0, 255, 0, 255}});
+        // The decoder reports the patched vertex's bounds, which the effect covers.
+        cached.geometry_dirty_regions = {{0, 0, 0, 0}};
         near(at(0.6), {153, 0, 0, 255}, "geometry patch invalidates effect cache");
         cached.batches.resize(1);
         cached.vertex_patches.clear();
+        cached.geometry_dirty_regions.clear();
         // The retained epoch-2 frame draws the patched geometry the renderer kept.
         (void)renderer.render("clock", cached, context.target(32, 32),
                               {vulkan::TargetLoadAction::clear, {}, 0});
@@ -320,7 +323,58 @@ void run() {
         cached.vertex_patches.clear();
         renderer.release_layer("clock");
         renderer.release_layer("test");
+        // Glass over a large target copies and blurs only the region it samples, and nothing on
+        // a frame that reuses its retained output.
         renderer.release_target();
+        context.resize(512, 512);
+        renderer.declare_effect_pass("test.glass", 0, STRATA_EFFECT_PASS_BLUR, 4, 1, UINT32_MAX,
+                                     UINT32_MAX, {});
+        auto glass = quad();
+        const std::array<std::array<float, 2>, 4> half{{{0, 0}, {208, 0}, {208, 512}, {0, 512}}};
+        for (std::size_t i = 0; i < 4; ++i) {
+            put(glass, i, 0, half[i][0]);
+            put(glass, i, 4, half[i][1]);
+        }
+        std::get<host::DrawBatch>(glass.batches[0]).scissor = {0, 0, 512, 512};
+        host::EffectBatch pane;
+        pane.source_order = 1;
+        pane.x = pane.y = 200;
+        pane.width = pane.height = 16;
+        pane.scissor = {0, 0, 512, 512};
+        pane.effect = "test.glass";
+        pane.refresh_rate = 1;
+        glass.batches.emplace_back(pane);
+        const auto glass_at = [&](double seconds) {
+            const auto measured =
+                renderer.render("glass", glass, context.target(512, 512),
+                                {vulkan::TargetLoadAction::clear, {0, 0, 0, 1}, seconds});
+            return std::pair{measured, context.pixels()};
+        };
+        const auto [refreshed, fresh] = glass_at(0);
+        require(refreshed.blur_passes == 4 && refreshed.copied_pixels > 0 &&
+                    refreshed.copied_pixels < 512U * 512U / 4U,
+                "a refreshed effect copied more than the region it samples");
+        near(pixel(fresh, 512, 190, 208), {255, 0, 0, 255}, "glass left of the pane");
+        near(pixel(fresh, 512, 220, 208), {0, 0, 0, 255}, "glass right of the pane");
+        const auto edge = pixel(fresh, 512, 208, 208);
+        require(edge[0] > 30 && edge[0] < 225, "the pane did not blur the edge beneath it");
+        glass.full_geometry_payload = false;
+        const auto [reused, retained] = glass_at(0.5);
+        require(reused.blur_passes == 0 && reused.copied_pixels == 0,
+                "a frame that reuses the effect sample still captured or blurred");
+        for (std::uint32_t x = 196; x < 220; x += 3)
+            near(pixel(retained, 512, x, 208), pixel(fresh, 512, x, 208),
+                 "the retained sample composited elsewhere than it was taken", 1);
+        // Only changes within what the pane sampled (its bounds plus the blur reach) resample it.
+        glass.geometry_dirty_regions = {{0, 0, 4, 4}};
+        require(glass_at(0.6).first.blur_passes == 0, "a change far from the pane resampled it");
+        glass.geometry_dirty_regions = {{218, 200, 2, 16}};
+        require(glass_at(0.7).first.blur_passes == 4,
+                "a change within the pane's blur reach reused its stale sample");
+        glass.geometry_dirty_regions.clear();
+        renderer.release_layer("glass");
+        renderer.release_target();
+        context.resize(32, 32);
     }
     {
         std::int64_t now = 123456;
@@ -347,7 +401,7 @@ void run() {
         options.environment.logical_height = 32;
         auto surface = runtime.create_surface(options);
         vulkan::Presenter presenter(runtime, context.device);
-        require(presenter.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 8, "presenter prepare");
+        require(presenter.prepare(VK_FORMAT_R8G8B8A8_UNORM) == 9, "presenter prepare");
         presenter.attach("presenter", surface);
         const auto frame = presenter.present("presenter", surface, context.target(32, 32), now,
                                              {vulkan::TargetLoadAction::clear, {0, 0, 0, 0}, 0});
@@ -376,7 +430,7 @@ void run() {
         } guard{c_presenter};
         size_t prepared = 0;
         require(strata_vulkan_presenter_prepare(c_presenter, VK_FORMAT_R8G8B8A8_UNORM,
-                                                &prepared).status == STRATA_STATUS_OK && prepared == 8,
+                                                &prepared).status == STRATA_STATUS_OK && prepared == 9,
                 "C presenter preparation");
         strata_vulkan_render_target target{sizeof(strata_vulkan_render_target),
                                            context.image->image,

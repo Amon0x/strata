@@ -9,15 +9,15 @@ void Renderer::Impl::clear(Image& image, std::array<float, 4> color) {
     vkCmdClearColorImage(command, image.image, image.layout, &value, 1, &range);
 }
 Image& Renderer::Impl::temporary(std::uint32_t width, std::uint32_t height, VkFormat format) {
-    if (scratch_index == scratch.size())
-        scratch.push_back(nullptr);
-    auto& image = scratch[scratch_index++];
-    if (!image || image->width != width || image->height != height || image->format != format) {
-        if (image)
-            retire(std::move(image));
-        image = std::make_unique<Image>(device, width, height, format);
+    for (auto& entry : scratch) {
+        if (entry.used != scratch_frame && entry.image->width == width &&
+            entry.image->height == height && entry.image->format == format) {
+            entry.used = scratch_frame;
+            return *entry.image;
+        }
     }
-    return *image;
+    scratch.push_back({std::make_unique<Image>(device, width, height, format), scratch_frame});
+    return *scratch.back().image;
 }
 
 void Renderer::Impl::barrier(Target& target, VkImageLayout next) {
@@ -26,17 +26,30 @@ void Renderer::Impl::barrier(Target& target, VkImageLayout next) {
     target.layout = next;
 }
 
-Image& Renderer::Impl::capture(Target& source) {
-    Image& copy = temporary(source.width, source.height, source.format);
+void Renderer::Impl::copy(Target& source, Image& destination, host::Scissor region,
+                          std::int32_t destination_x, std::int32_t destination_y) {
+    if (!region.width || !region.height)
+        return;
     barrier(source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    transition(command, copy, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    VkImageCopy region{};
-    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.dstSubresource = region.srcSubresource;
-    region.extent = {source.width, source.height, 1};
-    vkCmdCopyImage(command, source.image, source.layout, copy.image, copy.layout, 1, &region);
-    transition(command, copy, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    return copy;
+    transition(command, destination, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkImageCopy copied{};
+    copied.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copied.dstSubresource = copied.srcSubresource;
+    copied.srcOffset = {static_cast<std::int32_t>(region.x), static_cast<std::int32_t>(region.y),
+                        0};
+    copied.dstOffset = {destination_x, destination_y, 0};
+    copied.extent = {region.width, region.height, 1};
+    vkCmdCopyImage(command, source.image, source.layout, destination.image, destination.layout, 1,
+                   &copied);
+    telemetry.copied_pixels += static_cast<std::uint64_t>(region.width) * region.height;
+}
+
+Image& Renderer::Impl::capture(Target& source, host::Scissor region) {
+    Image& captured = temporary(source.width, source.height, source.format);
+    copy(source, captured, region, static_cast<std::int32_t>(region.x),
+         static_cast<std::int32_t>(region.y));
+    transition(command, captured, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    return captured;
 }
 
 void Renderer::Impl::resources(const host::RenderPacket& packet) {

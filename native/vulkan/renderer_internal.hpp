@@ -144,25 +144,41 @@ struct Renderer::Impl {
         bool seen = false;
     };
     std::map<std::string, Geometry, std::less<>> geometry;
+    /** One effect's retained output: only its clipped bounds, at their device-pixel origin. */
     struct CachedEffect {
         host::EffectBatch batch;
-        std::uint64_t epoch = 0;
+        host::Scissor clip;
         double time = 0;
         double logical_width = 0, logical_height = 0;
         std::uint32_t width = 0, height = 0;
+        /** Something the sample read has changed since it was taken (see gpu::EffectChanges). */
+        bool stale = false;
+        /** The render() call that last composited this sample; others are evicted after it. */
+        std::uint64_t used = 0;
         std::unique_ptr<Image> output;
     };
-    std::map<std::pair<std::string, std::uint64_t>, CachedEffect> cached_effects;
+    /** Keyed like D3D11: layer, batch source order, and whether it filters isolated content. */
+    using EffectKey = std::tuple<std::string, std::uint32_t, bool>;
+    std::map<EffectKey, CachedEffect> cached_effects;
     std::string active_layer;
-    std::uint64_t active_epoch = 0;
-    std::uint64_t effect_index = 0;
+    std::uint64_t render_count = 0;
     std::unique_ptr<Image> white;
     /** Presentation groups bound for the current layer; the identity table when it has none. */
     std::unique_ptr<Buffer> identity_groups;
     gpu::PresentationGroupConstants packed_groups;
     Slice groups{};
-    std::vector<std::unique_ptr<Image>> scratch;
-    std::size_t scratch_index = 0;
+    /**
+     * Intermediate images, matched by size and format so differently sized effect regions reuse
+     * their own images frame after frame. An image serves one use per frame and is released after
+     * scratch_lifetime frames without one.
+     */
+    struct Scratch {
+        std::unique_ptr<Image> image;
+        std::uint64_t used = 0;
+    };
+    static constexpr std::uint64_t scratch_lifetime = 120U;
+    std::vector<Scratch> scratch;
+    std::uint64_t scratch_frame = 0;
     std::vector<std::uint32_t> vertex, fullscreen;
     bool poisoned = false;
     double logical_width{}, logical_height{}, seconds{};
@@ -189,7 +205,11 @@ struct Renderer::Impl {
     void clear(Image& image, std::array<float, 4> color = {});
     Image& temporary(std::uint32_t width, std::uint32_t height, VkFormat format);
     void barrier(Target& target, VkImageLayout next);
-    Image& capture(Target& source);
+    /** Copies `region` of `source` into the same place of `destination`. */
+    void copy(Target& source, Image& destination, host::Scissor region,
+              std::int32_t destination_x, std::int32_t destination_y);
+    /** A target-sized copy of `source` holding only `region`, which is all its reader samples. */
+    Image& capture(Target& source, host::Scissor region);
     void resources(const host::RenderPacket& packet);
     VkRenderPass render_pass(VkFormat format);
     VkPipeline pipeline(const std::string& program, const std::string& blend, VkFormat format,
@@ -200,7 +220,13 @@ struct Renderer::Impl {
               const gpu::RoundedClipConstants& clips, Image& source, Image& backdrop,
               host::Scissor scissor, const host::DrawBatch* batch = nullptr, Slice vertices = {},
               Slice indices = {});
-    Image& blur(Image& source, double radius, std::uint32_t downsample);
+    /**
+     * Blurs `area` of `image` in place, as D3D11's BlurPass does: only `area` grown by the radius
+     * is read, at 1/downsample resolution, and only `area` is written, composited over the
+     * unblurred pixels through `clips`.
+     */
+    void blur(Target& image, host::Scissor area, double physical_radius, std::uint32_t downsample,
+              std::span<const host::RoundedClip> clips = {});
     static void validate_target(const RenderTarget& target, const FrameOptions& options);
     /** Device pixels per logical pixel on `target`; blur radii are authored in logical pixels. */
     [[nodiscard]] double pixel_scale(const Target& target) const noexcept {
@@ -209,8 +235,26 @@ struct Renderer::Impl {
     }
     gpu::EffectConstants effect_constants(const host::EffectBatch& effect, const Target& target);
     host::Scissor bounds(const host::EffectBatch& effect, const Target& target);
-    void effect(Target& destination, Image& source, Image& backdrop,
-                const host::EffectBatch& batch);
+    const std::map<std::uint32_t, Pass>& passes(const host::EffectBatch& effect) const;
+    [[nodiscard]] double widest_blur(const host::EffectBatch& effect) const;
+    /** How far outside its bounds, in logical pixels, the effect's output depends on its input. */
+    [[nodiscard]] double read_reach(const host::EffectBatch& effect) const;
+    /** Device pixels of `target` the effect samples: its bounds grown by the D3D11 reach. */
+    [[nodiscard]] host::Scissor sample_region(const host::EffectBatch& effect,
+                                              const Target& target) const;
+    /** The retained sample the effect may composite now instead of refreshing, if any. */
+    [[nodiscard]] CachedEffect* reusable(const host::EffectBatch& effect, bool content,
+                                         const Target& destination);
+    /**
+     * Composites one effect into `destination`, refreshing it first unless its retained sample
+     * is still due. `source` is the isolated content of a content effect, the captured Surface of
+     * a SURFACE backdrop effect, or null to sample `destination` itself; `backdrop` is what
+     * authored passes read as the backdrop when it differs from the source.
+     */
+    void effect(Target& destination, const host::EffectBatch& batch, bool content, Image* source,
+                Image* backdrop);
+    /** Marks this layer's retained samples stale where the packet's changes reach them. */
+    void invalidate_effects(const host::RenderPacket& packet);
     std::pair<Slice, Slice> upload_geometry(const host::RenderPacket& packet);
     RenderLayerTelemetry render(const host::RenderPacket& packet, const RenderTarget& output,
                                 FrameOptions options);

@@ -1,35 +1,95 @@
 #include "renderer_internal.hpp"
 
 namespace strata::vulkan {
+namespace {
 
-Image& Renderer::Impl::blur(Image& source, double radius, std::uint32_t downsample) {
-    if (!std::isfinite(radius) || radius < 0)
+/**
+ * Blur draws cover the whole target with uv in [0, 1] and sample sourceUv.xy + uv * sourceUv.zw.
+ * This returns that rectangle for a draw that should map `area` (device pixels of a target_width x
+ * target_height target) onto (u, v, width, height) of the sampled image.
+ */
+void place(float (&output)[4], const double u, const double v, const double width,
+           const double height, const host::Scissor area, const std::uint32_t target_width,
+           const std::uint32_t target_height) {
+    const double scale_x = width / area.width;
+    const double scale_y = height / area.height;
+    output[0] = static_cast<float>(u - area.x * scale_x);
+    output[1] = static_cast<float>(v - area.y * scale_y);
+    output[2] = static_cast<float>(scale_x * target_width);
+    output[3] = static_cast<float>(scale_y * target_height);
+}
+
+} // namespace
+
+void Renderer::Impl::blur(Target& image, const host::Scissor area, const double physical_radius,
+                          std::uint32_t downsample, const std::span<const host::RoundedClip> clips) {
+    if (!std::isfinite(physical_radius) || physical_radius < 0)
         throw std::invalid_argument("invalid blur radius");
-    // The same bound as the D3D11 and reference renderers, so a packet blurs alike everywhere.
+    if (physical_radius <= 0 || !area.width || !area.height)
+        return;
+    // The same plan as D3D11's BlurPass, so a packet blurs alike everywhere: read the area plus
+    // the radius, reduce it by the downsample, blur both ways there, and write the area back.
     downsample = std::clamp(downsample, 1U, 8U);
-    const auto w = std::max(1U, source.width / downsample),
-               h = std::max(1U, source.height / downsample);
-    Image& ping = temporary(w, h, source.format);
-    Image& pong = temporary(w, h, source.format);
-    clear(ping);
-    clear(pong);
+    const auto padding =
+        static_cast<std::uint32_t>(std::clamp(std::ceil(physical_radius), 1.0, 256.0));
+    const auto source_left = area.x > padding ? area.x - padding : 0U;
+    const auto source_top = area.y > padding ? area.y - padding : 0U;
+    const auto source_right = static_cast<std::uint32_t>(
+        std::min<std::uint64_t>(static_cast<std::uint64_t>(area.x) + area.width + padding,
+                                image.width));
+    const auto source_bottom = static_cast<std::uint32_t>(
+        std::min<std::uint64_t>(static_cast<std::uint64_t>(area.y) + area.height + padding,
+                                image.height));
+    const host::Scissor source_area{source_left, source_top, source_right - source_left,
+                                    source_bottom - source_top};
+    const auto reduced = [downsample](std::uint32_t extent) {
+        return std::max(1U, extent / downsample + (extent % downsample == 0U ? 0U : 1U));
+    };
+    const auto width = reduced(source_area.width), height = reduced(source_area.height);
+    const float radius =
+        static_cast<float>(std::clamp(physical_radius / downsample, 0.5, 32.0));
+
+    Image& source = temporary(source_area.width, source_area.height, image.format);
+    copy(image, source, source_area, 0, 0);
+    Image& read = temporary(width, height, image.format);
+    Image& write = temporary(width, height, image.format);
+    const auto pass = [&](Image& output, Image& input, float direction_x, float direction_y,
+                          float pass_radius) {
+        BlurData data;
+        data.texel[0] = 1.0F / static_cast<float>(input.width);
+        data.texel[1] = 1.0F / static_cast<float>(input.height);
+        data.direction[0] = direction_x;
+        data.direction[1] = direction_y;
+        data.radius = pass_radius;
+        auto target = target_of(output);
+        draw(target, "blur", "opaque", arena->upload(&data, sizeof(data)), {}, input, input,
+             {0, 0, output.width, output.height});
+        output.layout = target.layout;
+    };
+    pass(read, source, 0, 0, 0);
+    pass(write, read, 1, 0, radius);
+    pass(read, write, 0, 1, radius);
+
     BlurData data;
-    data.radius = static_cast<float>(radius) / static_cast<float>(downsample);
-    data.texel[0] = 1.0F / static_cast<float>(w);
-    data.texel[1] = 1.0F / static_cast<float>(h);
-    data.direction[0] = 1;
-    auto target = target_of(ping);
-    draw(target, "blur", "opaque", arena->upload(&data, sizeof(data)), {}, source, source,
-         {0, 0, w, h});
-    ping.layout = target.layout;
-    data.direction[0] = 0;
-    data.direction[1] = 1;
-    target = target_of(pong);
-    draw(target, "blur", "opaque", arena->upload(&data, sizeof(data)), {}, ping, ping,
-         {0, 0, w, h});
-    pong.layout = target.layout;
-    telemetry.blur_passes += 2;
-    return pong;
+    data.texel[0] = 1.0F / static_cast<float>(width);
+    data.texel[1] = 1.0F / static_cast<float>(height);
+    data.composite = clips.empty() ? 0.0F : 1.0F;
+    place(data.source_uv, static_cast<double>((area.x - source_area.x) / downsample) / width,
+          static_cast<double>((area.y - source_area.y) / downsample) / height,
+          static_cast<double>(reduced(area.width)) / width,
+          static_cast<double>(reduced(area.height)) / height, area, image.width, image.height);
+    place(data.original_uv, static_cast<double>(area.x - source_area.x) / source_area.width,
+          static_cast<double>(area.y - source_area.y) / source_area.height,
+          static_cast<double>(area.width) / source_area.width,
+          static_cast<double>(area.height) / source_area.height, area, image.width,
+          image.height);
+    data.logical[0] = static_cast<float>(logical_width);
+    data.logical[1] = static_cast<float>(logical_height);
+    data.target[0] = static_cast<float>(image.width);
+    data.target[1] = static_cast<float>(image.height);
+    draw(image, "blur", "opaque", arena->upload(&data, sizeof(data)),
+         clip_constants(clips, gpu::RoundedClipMode::premultiplied_alpha), read, source, area);
+    telemetry.blur_passes += 4;
 }
 
 gpu::EffectConstants Renderer::Impl::effect_constants(const host::EffectBatch& effect,
@@ -74,29 +134,134 @@ host::Scissor Renderer::Impl::bounds(const host::EffectBatch& effect, const Targ
             static_cast<std::uint32_t>(b > top ? b - top : 0)};
 }
 
-void Renderer::Impl::effect(Target& destination, Image& source, Image& backdrop,
-                            const host::EffectBatch& batch) {
-    auto& cached = cached_effects[{active_layer, effect_index++}];
+const std::map<std::uint32_t, Renderer::Impl::Pass>&
+Renderer::Impl::passes(const host::EffectBatch& effect) const {
+    // An effect with no declared passes composites its input unchanged, as D3D11 does.
+    static const std::map<std::uint32_t, Pass> none;
+    const auto found = effects.find(effect.effect);
+    return found != effects.end() ? found->second : none;
+}
+
+double Renderer::Impl::widest_blur(const host::EffectBatch& effect) const {
+    double widest = 0;
+    for (const auto& [index, pass] : passes(effect)) {
+        (void)index;
+        if (pass.kind == 0)
+            widest = std::max(widest, pass.radius_parameter < effect.parameter_count
+                                          ? effect.parameters[pass.radius_parameter]
+                                          : pass.radius);
+    }
+    return widest;
+}
+
+double Renderer::Impl::read_reach(const host::EffectBatch& effect) const {
+    const auto& declared = passes(effect);
+    const bool shaders = std::ranges::any_of(
+        declared, [](const auto& entry) { return entry.second.kind == 1; });
+    return gpu::effect_read_reach(shaders, widest_blur(effect));
+}
+
+host::Scissor Renderer::Impl::sample_region(const host::EffectBatch& effect,
+                                            const Target& target) const {
+    // As D3D11: the prelude's sample reach, or the widest blur's padding when that is further.
+    const double sx = target.width / logical_width, sy = target.height / logical_height;
+    const double scale = std::max(sx, sy);
+    const double reach =
+        std::ceil(std::max(gpu::effect_sample_reach * scale,
+                           std::clamp(std::ceil(widest_blur(effect) * scale), 1.0, 256.0)));
+    const auto edge = [](double value, std::uint32_t limit) {
+        return static_cast<std::uint32_t>(std::clamp(value, 0.0, static_cast<double>(limit)));
+    };
+    const auto left = edge(std::floor(effect.x * sx) - reach, target.width);
+    const auto top = edge(std::floor(effect.y * sy) - reach, target.height);
+    const auto right = edge(std::ceil((effect.x + effect.width) * sx) + reach, target.width);
+    const auto bottom = edge(std::ceil((effect.y + effect.height) * sy) + reach, target.height);
+    return {left, top, right > left ? right - left : 0, bottom > top ? bottom - top : 0};
+}
+
+Renderer::Impl::CachedEffect* Renderer::Impl::reusable(const host::EffectBatch& batch,
+                                                        const bool content,
+                                                        const Target& destination) {
+    if (!(batch.refresh_rate > 0))
+        return nullptr;
+    const auto found = cached_effects.find(EffectKey{active_layer, batch.source_order, content});
+    if (found == cached_effects.end())
+        return nullptr;
+    CachedEffect& cached = found->second;
+    const bool due = !cached.output || cached.stale || !(cached.batch == batch) ||
+                     !(cached.clip == bounds(batch, destination)) ||
+                     cached.width != destination.width || cached.height != destination.height ||
+                     cached.output->format != destination.format ||
+                     cached.logical_width != logical_width ||
+                     cached.logical_height != logical_height || seconds < cached.time ||
+                     seconds - cached.time + 1.0e-9 >= 1.0 / batch.refresh_rate;
+    return due ? nullptr : &cached;
+}
+
+void Renderer::Impl::invalidate_effects(const host::RenderPacket& packet) {
+    const auto retained = geometry.find(active_layer);
+    const gpu::EffectChanges changes(
+        packet, retained != geometry.end() && retained->second.seen
+                    ? std::optional(retained->second.epoch)
+                    : std::nullopt);
+    if (changes.none())
+        return;
+    for (auto& [key, cached] : cached_effects) {
+        if (std::get<0>(key) == active_layer && changes.touch(cached.batch, read_reach(cached.batch)))
+            cached.stale = true;
+    }
+}
+
+void Renderer::Impl::effect(Target& destination, const host::EffectBatch& batch,
+                            const bool content, Image* source, Image* backdrop) {
+    const host::Scissor clip = bounds(batch, destination);
+    if (!clip.width || !clip.height)
+        return;
+    const auto key = EffectKey{active_layer, batch.source_order, content};
     const auto constants = effect_constants(batch, destination);
-    const bool reusable =
-        cached.output && cached.batch == batch && cached.epoch == active_epoch &&
-        cached.width == destination.width && cached.height == destination.height &&
-        cached.output->format == destination.format && cached.logical_width == logical_width &&
-        cached.logical_height == logical_height && batch.refresh_rate > 0 &&
-        seconds >= cached.time && seconds - cached.time < 1.0 / batch.refresh_rate;
-    if (reusable) {
-        draw(destination, "composite", "premultiplied_alpha",
-             arena->upload(&constants, sizeof(constants)),
+    const auto composite_cached = [&](CachedEffect& cached) {
+        cached.used = render_count;
+        // The cached composite reads its origin where authored passes read the tone.
+        auto placed = constants;
+        placed.padding[0] = static_cast<float>(cached.clip.x);
+        placed.padding[1] = static_cast<float>(cached.clip.y);
+        draw(destination, "cached_composite", "premultiplied_alpha",
+             arena->upload(&placed, sizeof(placed)),
              clip_constants(batch.rounded_clips, gpu::RoundedClipMode::premultiplied_alpha),
-             *cached.output, *cached.output, bounds(batch, destination));
+             *cached.output, *cached.output, clip);
+        ++telemetry.effect_passes;
+    };
+    if (CachedEffect* cached = reusable(batch, content, destination)) {
+        composite_cached(*cached);
         return;
     }
-    // An effect with no declared passes composites its input unchanged, as D3D11 does, and a
-    // parameter the batch does not carry leaves the pass's declared value in place.
-    const auto found = effects.find(batch.effect);
-    static const decltype(found->second) no_passes;
-    Image* current = &source;
-    for (const auto& [index, pass] : found != effects.end() ? found->second : no_passes) {
+    // Refreshing reads only the effect's sample region, as on D3D11: a pass writes inside the
+    // clipped bounds and samples at most the sample reach beyond them.
+    const auto& declared = passes(batch);
+    const bool shader_passes =
+        std::ranges::any_of(declared, [](const auto& entry) { return entry.second.kind == 1; });
+    const bool blur_passes =
+        std::ranges::any_of(declared, [](const auto& entry) { return entry.second.kind == 0; });
+    Image* current = source;
+    Image* sampled_backdrop = backdrop;
+    if (!content) {
+        const host::Scissor region = sample_region(batch, destination);
+        current = &temporary(destination.width, destination.height, destination.format);
+        if (source) {
+            auto surface = target_of(*source);
+            copy(surface, *current, region, static_cast<std::int32_t>(region.x),
+                 static_cast<std::int32_t>(region.y));
+            source->layout = surface.layout;
+            sampled_backdrop = source;
+        } else {
+            copy(destination, *current, region, static_cast<std::int32_t>(region.x),
+                 static_cast<std::int32_t>(region.y));
+            // A blur rewrites the capture in place; authored passes still read the raw backdrop.
+            sampled_backdrop =
+                shader_passes && blur_passes ? &capture(destination, region) : current;
+        }
+    }
+    for (const auto& [index, pass] : declared) {
         (void)index;
         if (pass.kind == 0) {
             double radius = pass.radius;
@@ -105,49 +270,52 @@ void Renderer::Impl::effect(Target& destination, Image& source, Image& backdrop,
                 radius = batch.parameters[pass.radius_parameter];
             if (pass.downsample_parameter < batch.parameter_count)
                 downsample = gpu::blur_downsample(batch.parameters[pass.downsample_parameter]);
-            current = &blur(*current, radius * pixel_scale(destination), downsample);
+            auto target = target_of(*current);
+            blur(target, clip, std::max(0.0, radius) * pixel_scale(destination), downsample);
+            current->layout = target.layout;
         } else if (pass.kind == 1) {
             auto& next = temporary(destination.width, destination.height, destination.format);
             clear(next);
             auto target = target_of(next);
             draw(target, pass.program, "opaque", arena->upload(&constants, sizeof(constants)), {},
-                 *current, backdrop, {0, 0, target.width, target.height});
+                 *current, sampled_backdrop ? *sampled_backdrop : *current, clip);
             next.layout = target.layout;
             current = &next;
             ++telemetry.effect_passes;
         }
     }
-    draw(destination, "composite", "premultiplied_alpha",
-         arena->upload(&constants, sizeof(constants)),
-         clip_constants(batch.rounded_clips, gpu::RoundedClipMode::premultiplied_alpha), *current,
-         *current, bounds(batch, destination));
-    ++telemetry.effect_passes;
-    if (batch.refresh_rate > 0) {
-        // Cache only completed effect output; the host target itself is never retained.
-        end_pass();
-        if (!cached.output || cached.output->width != current->width ||
-            cached.output->height != current->height || cached.output->format != current->format) {
-            if (cached.output)
-                retire(std::move(cached.output));
-            cached.output =
-                std::make_unique<Image>(device, current->width, current->height, current->format);
+    if (!(batch.refresh_rate > 0)) {
+        if (const auto found = cached_effects.find(key); found != cached_effects.end()) {
+            retire(std::move(found->second.output));
+            cached_effects.erase(found);
         }
-        transition(command, *current, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-        transition(command, *cached.output, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        VkImageCopy region{};
-        region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        region.dstSubresource = region.srcSubresource;
-        region.extent = {current->width, current->height, 1};
-        vkCmdCopyImage(command, current->image, current->layout, cached.output->image,
-                       cached.output->layout, 1, &region);
-        cached.batch = batch;
-        cached.epoch = active_epoch;
-        cached.time = seconds;
-        cached.logical_width = logical_width;
-        cached.logical_height = logical_height;
-        cached.width = destination.width;
-        cached.height = destination.height;
+        draw(destination, "composite", "premultiplied_alpha",
+             arena->upload(&constants, sizeof(constants)),
+             clip_constants(batch.rounded_clips, gpu::RoundedClipMode::premultiplied_alpha),
+             *current, *current, clip);
+        ++telemetry.effect_passes;
+        return;
     }
+    // Retain only the clipped bounds; the host target itself is never retained.
+    auto& cached = cached_effects[key];
+    if (!cached.output || cached.output->width != clip.width ||
+        cached.output->height != clip.height || cached.output->format != destination.format) {
+        retire(std::move(cached.output));
+        cached.output = std::make_unique<Image>(device, clip.width, clip.height,
+                                                destination.format);
+    }
+    auto processed = target_of(*current);
+    copy(processed, *cached.output, clip, 0, 0);
+    current->layout = processed.layout;
+    cached.batch = batch;
+    cached.clip = clip;
+    cached.stale = false;
+    cached.time = seconds;
+    cached.logical_width = logical_width;
+    cached.logical_height = logical_height;
+    cached.width = destination.width;
+    cached.height = destination.height;
+    composite_cached(cached);
 }
 
 } // namespace strata::vulkan

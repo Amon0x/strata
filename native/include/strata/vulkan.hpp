@@ -55,6 +55,11 @@ struct FrameOptions final {
 struct RenderLayerTelemetry final {
     std::uint64_t blur_passes = 0;
     std::uint64_t effect_passes = 0;
+    /**
+     * Pixels copied between images for blur and effect input and retained effect output. Effects
+     * copy only the region they sample, and nothing on a frame that reuses their retained output.
+     */
+    std::uint64_t copied_pixels = 0;
 };
 struct PresentedFrame final {
     strata_surface_frame_info surface{};

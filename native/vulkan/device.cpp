@@ -65,7 +65,7 @@ void Renderer::Impl::retire(std::unique_ptr<Buffer> buffer) {
 }
 void Renderer::Impl::drop_effects(const std::optional<std::string_view> layer) {
     for (auto entry = cached_effects.begin(); entry != cached_effects.end();) {
-        if (layer && entry->first.first != *layer) {
+        if (layer && std::get<0>(entry->first) != *layer) {
             ++entry;
             continue;
         }
@@ -130,6 +130,8 @@ void Renderer::Impl::initialize() {
                 std::string(gpu::rounded_clip_hlsl) + std::string(gpu::blur_shaders::pixel));
     add_program("composite",
                 std::string(gpu::rounded_clip_hlsl) + std::string(gpu::composite_pixel));
+    add_program("cached_composite",
+                std::string(gpu::rounded_clip_hlsl) + std::string(gpu::cached_composite_pixel));
     identity_groups = std::make_unique<Buffer>(device, sizeof(gpu::PresentationGroupConstants),
                                                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     const gpu::PresentationGroupConstants identity;
@@ -148,7 +150,8 @@ void Renderer::Impl::add_program(const std::string& name, const std::string& sou
 }
 void Renderer::Impl::prune_programs() {
     const auto used = [&](const std::string& name) {
-        if (name == "builtin" || name == "blur" || name == "composite")
+        if (name == "builtin" || name == "blur" || name == "composite" ||
+            name == "cached_composite")
             return true;
         for (const auto& [id, program] : materials) {
             (void)id;
@@ -191,7 +194,13 @@ void Renderer::Impl::begin() {
     slot.pool_index = 0;
     arena = slot.arena.get();
     command = slot.command;
-    scratch_index = 0;
+    ++scratch_frame;
+    std::erase_if(scratch, [this](Scratch& entry) {
+        if (entry.used + scratch_lifetime >= scratch_frame)
+            return false;
+        retire(std::move(entry.image));
+        return true;
+    });
     open_pass.reset();
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;

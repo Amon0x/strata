@@ -39,6 +39,7 @@ std::size_t Renderer::prepare(VkFormat format) {
     }
     impl_->pipeline("blur", "opaque", format, true);
     impl_->pipeline("composite", "premultiplied_alpha", format, true);
+    impl_->pipeline("cached_composite", "premultiplied_alpha", format, true);
     for (const auto& [id, passes] : impl_->effects) {
         (void)id;
         for (const auto& [index, pass] : passes) {

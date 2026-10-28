@@ -27,16 +27,11 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
     logical_height = output.logical_height;
     seconds = options.time_seconds;
     telemetry = {};
-    active_epoch = packet.geometry_epoch;
-    effect_index = 0;
+    ++render_count;
     begin();
-    // A changed group table moves content without changing geometry; the decoder reports where
-    // in geometry_dirty_regions, so cached effect samples are dropped for those frames too.
-    if (packet.full_geometry_payload || packet.geometry_dirty_all ||
-        !packet.geometry_dirty_regions.empty() || !packet.vertex_patches.empty() ||
-        !packet.index_patches.empty() || !packet.resources.empty())
-        drop_effects(active_layer);
     try {
+        // Before upload_geometry advances the layer's epoch, which the change report is against.
+        invalidate_effects(packet);
         resources(packet);
         Target target{output.image,
                       output.view,
@@ -63,13 +58,26 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
             packed_groups.assign(packet.groups);
             groups = arena->upload(packed_groups.values.data(), sizeof(packed_groups.values));
         }
+        // SURFACE effects sample the incoming target. Only those due a refresh need it, and only
+        // within their sample regions.
         Image* surface_backdrop = nullptr;
-        for (const auto& batch : packet.batches) {
-            if (const auto* e = std::get_if<host::EffectBatch>(&batch);
-                e && e->backdrop_source == host::EffectBackdropSource::surface) {
-                surface_backdrop = &capture(target);
-                break;
+        {
+            std::uint32_t left = UINT32_MAX, top = UINT32_MAX, right = 0, bottom = 0;
+            for (const auto& batch : packet.batches) {
+                const auto* e = std::get_if<host::EffectBatch>(&batch);
+                if (!e || e->backdrop_source != host::EffectBackdropSource::surface ||
+                    reusable(*e, false, target))
+                    continue;
+                const host::Scissor region = sample_region(*e, target);
+                if (!region.width || !region.height)
+                    continue;
+                left = std::min(left, region.x);
+                top = std::min(top, region.y);
+                right = std::max(right, region.x + region.width);
+                bottom = std::max(bottom, region.y + region.height);
             }
+            if (left < right && top < bottom)
+                surface_backdrop = &capture(target, {left, top, right - left, bottom - top});
         }
         struct Content {
             Target parent;
@@ -114,39 +122,39 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                 draw(target, program, blend, constants, clip_constants(batch->rounded_clips, mode),
                      *texture, *texture, batch->scissor, batch, vertices, indices);
             } else if (const auto* blur_batch = std::get_if<host::BlurBatch>(&submission)) {
-                Image& original = capture(target);
-                Image& blurred = blur(original, blur_batch->radius * pixel_scale(target),
-                                      blur_batch->downsample);
-                BlurData data;
-                data.composite = 1;
-                data.logical[0] = static_cast<float>(logical_width);
-                data.logical[1] = static_cast<float>(logical_height);
-                data.target[0] = static_cast<float>(target.width);
-                data.target[1] = static_cast<float>(target.height);
                 host::EffectBatch region;
                 region.x = blur_batch->x;
                 region.y = blur_batch->y;
                 region.width = blur_batch->width;
                 region.height = blur_batch->height;
                 region.scissor = blur_batch->scissor;
-                draw(target, "blur", "opaque", arena->upload(&data, sizeof(data)),
-                     clip_constants(blur_batch->rounded_clips,
-                                    gpu::RoundedClipMode::premultiplied_alpha),
-                     blurred, original, bounds(region, target));
+                if (!(blur_batch->radius > 0))
+                    continue;
+                blur(target, bounds(region, target), blur_batch->radius * pixel_scale(target),
+                     blur_batch->downsample, blur_batch->rounded_clips);
             } else if (const auto* effect_batch = std::get_if<host::EffectBatch>(&submission)) {
-                Image& backdrop =
-                    effect_batch->backdrop_source == host::EffectBackdropSource::surface
-                        ? *surface_backdrop
-                        : capture(target);
                 if (effect_batch->kind == host::EffectBatchKind::content_begin) {
                     if (stack.size() >= host::maximum_content_effect_depth)
                         throw std::length_error("content effect stack overflow");
+                    // Authored passes read what is behind the content as the backdrop; it is
+                    // captured only when the effect refreshes this frame.
+                    Image* backdrop = nullptr;
+                    if (!reusable(*effect_batch, true, target) &&
+                        std::ranges::any_of(passes(*effect_batch), [](const auto& entry) {
+                            return entry.second.kind == 1;
+                        }))
+                        backdrop = &capture(target, sample_region(*effect_batch, target));
                     auto& content = temporary(target.width, target.height, target.format);
                     clear(content);
-                    stack.push_back({target, &content, &backdrop, *effect_batch});
+                    stack.push_back({target, &content, backdrop, *effect_batch});
                     target = target_of(content);
+                } else if (effect_batch->backdrop_source == host::EffectBackdropSource::surface) {
+                    if (!surface_backdrop && !reusable(*effect_batch, false, target) &&
+                        bounds(*effect_batch, target).width && bounds(*effect_batch, target).height)
+                        throw std::logic_error("Vulkan SURFACE effect refresh has no captured input");
+                    effect(target, *effect_batch, false, surface_backdrop, nullptr);
                 } else
-                    effect(target, backdrop, backdrop, *effect_batch);
+                    effect(target, *effect_batch, false, nullptr, nullptr);
             } else {
                 if (stack.empty())
                     throw std::invalid_argument("unbalanced content effect end");
@@ -154,11 +162,19 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
                 stack.pop_back();
                 content.image->layout = target.layout;
                 target = content.parent;
-                effect(target, *content.image, *content.backdrop, content.batch);
+                effect(target, content.batch, true, content.image, content.backdrop);
             }
         }
         if (!stack.empty())
             throw std::invalid_argument("unterminated content effect");
+        // A sample this frame did not composite belongs to an effect that is gone.
+        for (auto entry = cached_effects.begin(); entry != cached_effects.end();) {
+            if (std::get<0>(entry->first) == active_layer && entry->second.used != render_count) {
+                retire(std::move(entry->second.output));
+                entry = cached_effects.erase(entry);
+            } else
+                ++entry;
+        }
         barrier(target, output.final_layout);
         finish();
         return telemetry;

@@ -97,11 +97,14 @@ replaces matching programs; an invalid shader leaves the previously compiled sha
 compilation is synchronous. Vulkan does not claim support for arbitrary standalone GLSL entrypoints
 or additional shader bindings outside the existing Strata HLSL contract.
 
-Settled geometry stays in GPU buffers; compact packets upload their patches. Effects reuse output
-within their declared refresh interval when geometry, resources, parameters, layout, and dimensions
-remain compatible. Clock rollback and shader reload invalidate reuse. Intermediate images and
-upload/descriptor storage are reused across frames. Effects currently invalidate conservatively
-for any geometry/resource change, and scratch images cover the full target (with blur downsampling).
+Settled geometry stays in GPU buffers; compact packets apply their patches to the previous epoch.
+As on D3D11, an effect captures and filters only the region it samples (its bounds plus the shader
+sample reach or blur radius), and blurs run at the downsampled size of that region. An effect with a
+refresh rate retains only its clipped output and, until the rate is due, composites it without
+capturing or filtering anything. Parameter, bounds, layout and dimension changes, clock rollback and
+shader reload invalidate reuse, as do geometry, group and texture changes the decoder reports within
+the region the effect sampled (`native/gpu/effect_policy.hpp`). Intermediate images are matched by
+size and reused across frames, as is upload/descriptor storage.
 Consecutive draws into one target share a render pass and framebuffer; a new pass orders itself
 after earlier writes through its attachment barrier, and textures already in a shader-readable
 layout are sampled without another barrier. Broad image barriers remain at every layout change; no
