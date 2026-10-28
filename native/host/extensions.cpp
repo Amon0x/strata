@@ -24,7 +24,14 @@
 #include "data/json.hpp"
 
 namespace strata::host {
+
 namespace {
+
+/** Diagnostic text for a path; a narrow-code-page conversion would throw for some names. */
+[[nodiscard]] std::string utf8(const std::filesystem::path& path) {
+    const std::u8string text = path.generic_u8string();
+    return std::string(text.begin(), text.end());
+}
 
 [[nodiscard]] std::string copied(const strata_string_view value, const std::string_view label) {
     if (value.size != 0U && value.data == nullptr) {
@@ -144,7 +151,7 @@ resolve_library(const std::string_view id, const std::vector<std::filesystem::pa
         }
         if (!searched.empty())
             searched += ", ";
-        searched += directory.generic_string();
+        searched += utf8(directory);
     }
     throw std::runtime_error(
         "could not find external extension package '" + std::string(id) + "' as " + name +
@@ -153,19 +160,20 @@ resolve_library(const std::string_view id, const std::vector<std::filesystem::pa
 
 [[nodiscard]] void* open_library(const std::filesystem::path& path) {
 #if defined(_WIN32)
-    HMODULE library = LoadLibraryW(path.c_str());
+    // Dependencies resolve from the extension's own directory and the system's safe default
+    // directories only, never from the current directory or PATH.
+    HMODULE library = LoadLibraryExW(
+        path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (library == nullptr) {
-        throw std::runtime_error(
-            std::format("could not load external extension '{}' (Win32 error {})",
-                        path.generic_string(), GetLastError()));
+        throw std::runtime_error(std::format(
+            "could not load external extension '{}' (Win32 error {})", utf8(path), GetLastError()));
     }
     return library;
 #else
     void* const library = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (library == nullptr) {
         const char* const detail = dlerror();
-        throw std::runtime_error("could not load external extension '" + path.generic_string() +
-                                 "': " +
+        throw std::runtime_error("could not load external extension '" + utf8(path) + "': " +
                                  (detail == nullptr ? std::string("unknown dynamic-loader error")
                                                     : std::string(detail)));
     }
@@ -185,8 +193,8 @@ resolve_library(const std::string_view id, const std::vector<std::filesystem::pa
     std::memcpy(&entry, &symbol, sizeof(entry));
 #endif
     if (entry == nullptr) {
-        throw std::runtime_error("external extension '" + path.generic_string() +
-                                 "' does not export " + STRATA_EXTENSION_PLUGIN_ENTRY_NAME);
+        throw std::runtime_error("external extension '" + utf8(path) + "' does not export " +
+                                 STRATA_EXTENSION_PLUGIN_ENTRY_NAME);
     }
     return entry;
 }
@@ -237,7 +245,7 @@ LoadedExtension load_extension(const std::string_view expected_id,
     plugin.struct_size = sizeof(plugin);
     const strata_status status = query(STRATA_EXTENSION_PLUGIN_ABI_VERSION_CURRENT, &plugin);
     if (status != STRATA_STATUS_OK) {
-        throw std::runtime_error("external extension '" + result.path_.generic_string() +
+        throw std::runtime_error("external extension '" + utf8(result.path_) +
                                  "' rejected its package query with status " +
                                  std::to_string(status));
     }
@@ -257,13 +265,13 @@ LoadedExtension load_extension(const std::string_view expected_id,
         (plugin.extensions->struct_size >= sizeof(strata_surface_extension_bundle) &&
          plugin.extensions->behavior_input_count != 0U &&
          plugin.extensions->behavior_inputs == nullptr)) {
-        throw std::runtime_error("external extension '" + result.path_.generic_string() +
+        throw std::runtime_error("external extension '" + utf8(result.path_) +
                                  "' returned an incompatible package descriptor");
     }
     result.id_ = copied(plugin.package_id, "package id");
     result.schema_json_ = copied(plugin.schema_json, "schema document");
     if (result.id_ != expected_id) {
-        throw std::runtime_error("external extension '" + result.path_.generic_string() +
+        throw std::runtime_error("external extension '" + utf8(result.path_) +
                                  "' exports package '" + result.id_ + "', expected '" +
                                  std::string(expected_id) + "'");
     }

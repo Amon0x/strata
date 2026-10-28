@@ -255,6 +255,10 @@ LRESULT CALLBACK window_procedure(const HWND window, const UINT message, const W
     } catch (const std::exception& error) {
         app->failed(error);
         return 0;
+    } catch (...) {
+        // Nothing may unwind into the Win32 message dispatcher.
+        app->failed(std::runtime_error("the desktop window procedure failed"));
+        return 0;
     }
 }
 
