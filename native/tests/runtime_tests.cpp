@@ -853,6 +853,31 @@ void test_transactional_activation_and_last_good_reload(const std::filesystem::p
           "stale activation generation regressed the active application");
 }
 
+// A host path with a computed index reads the item the index selects, not the list it indexes:
+// it extends its receiver's path, whose own fixed path must not carry over.
+void test_dynamic_host_index_reads_the_selected_item() {
+    using namespace strata::runtime;
+    const auto bundle = ApplicationBundle::create();
+    HostStore host;
+    static_cast<void>(host.adopt(HostSnapshot::from_json(
+        "dynamic-host", 1U,
+        strata::data::parse_json(R"({"app":{"items":[{"name":"zero"},{"name":"one"}]}})"))));
+    ExpressionScope scope;
+    scope.bind("position", Value(1.0));
+    ExpressionRuntime runtime(host, bundle->action_registry());
+    const auto selected = strata::data::parse_json(R"({
+      "kind":"property","name":"name","path":"/name",
+      "receiver":{"kind":"index","path":"/item",
+        "receiver":{"kind":"property","name":"items","path":"/items",
+          "receiver":{"kind":"variable","binding":"host","name":"app","path":"/app"}},
+        "index":{"kind":"variable","binding":"local","name":"position","path":"/position"}}
+    })");
+    const ExpressionValue value = runtime.evaluate(selected, scope);
+    check(value.value() != nullptr && value.value()->string() != nullptr &&
+              *value.value()->string() == "one" && runtime.diagnostics().empty(),
+          "a computed host index did not read the item it selects");
+}
+
 void test_portable_ir_expression_runtime() {
     using namespace strata::runtime;
     const auto bundle = ApplicationBundle::create();
@@ -2078,6 +2103,7 @@ int strata_test_runtime(const int argument_count, const char* const* const argum
             [&] { test_authoring_mistakes_get_actionable_diagnostics(); });
         run("application isolation", [&] { test_application_bundle_and_runtime_isolation(); });
         run("portable expression runtime", [&] { test_portable_ir_expression_runtime(); });
+        run("dynamic host index", [&] { test_dynamic_host_index_reads_the_selected_item(); });
         run("duplicate named arguments",
             [&] { test_portable_ir_rejects_duplicate_named_arguments(); });
         if (argument_count >= 2 && std::string_view(arguments[1]).size() != 0U) {

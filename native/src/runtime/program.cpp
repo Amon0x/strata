@@ -509,6 +509,8 @@ class ProgramLowering final {
     }
 
     [[nodiscard]] std::uint32_t add_host_path(ProgramHostPath path) {
+        // A path extends its receiver's, whose fixed path is the receiver's alone.
+        path.fixed.reset();
         if (std::ranges::none_of(path.steps, &ProgramHostStep::dynamic)) {
             std::vector<HostPathSegment> fixed;
             fixed.reserve(path.steps.size() + 1U);
