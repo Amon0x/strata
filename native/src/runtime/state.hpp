@@ -56,8 +56,18 @@ struct LexicalStateBinding final {
     [[nodiscard]] friend bool operator==(const LexicalStateBinding&, const LexicalStateBinding&) = default;
 };
 
+/**
+ * The type id of a state whose values need not share one kind (a nullable or application type,
+ * or an initializer read from elsewhere): its declared schema, not its kind, says what it holds.
+ */
+inline constexpr std::string_view any_state_type_id = "dsl.any";
+
+/** Whether a slot of `type_id` holds `value`: its kind, unless the slot takes any. */
+[[nodiscard]] bool state_type_accepts(std::string_view type_id, const Value& value) noexcept;
+
 struct StateSlot final {
     std::string name;
+    /** Stable for the declaration: a value kind (`Value::state_type_id`) or `any_state_type_id`. */
     std::string type_id;
     Value initial_value;
     std::string declaration_scope;
@@ -163,6 +173,8 @@ struct StateMutation final {
     StateMutationKind kind;
     std::vector<std::pair<std::string, Value>> arguments;
     std::string declaration_scope{};
+    /** The declaration's slot type id; empty takes the initial value's kind. */
+    std::string type_id{};
 
     [[nodiscard]] StateMutationResult apply(StateStore& state) const;
 };

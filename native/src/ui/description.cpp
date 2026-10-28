@@ -906,12 +906,11 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
                     ? evaluate(statement.expression, declaring.expressions)
                     : ExpressionValue{};
             const runtime::Value initial = require_value(evaluated, statement.source);
-            const std::string slot_type = declaration.type_id == "dsl.unknown"
-                                              ? std::string(initial.state_type_id())
-                                              : declaration.type_id;
+            // The declaration's type, never this build's initial value: a state keeps one slot
+            // type whatever its initializer reads.
             const runtime::StateSlot slot{
                 name,
-                slot_type,
+                declaration.type_id,
                 initial,
                 std::string(declaring.declaration_scope),
             };

@@ -468,13 +468,16 @@ ActionDispatchOutcome ApplicationContext::dispatch(
             arguments.emplace_back("value", event.value);
         }
         const StateSnapshot before = state_.snapshot();
+        // A state that takes any kind is held to its declared schema instead.
         const StateMutationResult result = StateMutation{
             resolved->address,
             *initial,
-            state_schema(declaration->type_id),
+            declaration->type_id == any_state_type_id ? declaration->schema
+                                                      : state_schema(declaration->type_id),
             mutation_kind,
             std::move(arguments),
             std::string(declaration_scope),
+            declaration->type_id,
         }.apply(state_);
         if (result.status == StateMutationStatus::rejected) return framework_failure(action, result.message);
         if (result.status == StateMutationStatus::changed) {

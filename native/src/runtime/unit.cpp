@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "compiler/portable_ir.hpp"
+#include "runtime/state.hpp"
 
 namespace strata::runtime {
 namespace {
@@ -84,23 +85,32 @@ using JsonArray = data::JsonArrayView;
     };
 }
 
+/**
+ * The slot type id a state keeps for its declaration's lifetime: the one value kind it can hold,
+ * or `any_state_type_id` when its values may differ in kind (a nullable, union or application
+ * type, or an initializer read from elsewhere), whose declared schema then says what it holds.
+ * It comes from the declared schema, not the type's display name ("list of string", "Todo").
+ */
 [[nodiscard]] std::string runtime_type_id(const JsonValue statement) {
-    const JsonValue declared = statement.find("declaredType");
-    if (const std::optional<std::string_view> encoded = declared.string(); encoded.has_value()) {
-        const std::string_view type = *encoded;
-        if (type == "boolean") return "dsl.boolean";
-        if (type == "number") return "dsl.number";
-        if (type == "duration") return "dsl.duration";
-        if (type == "string") return "dsl.string";
-        if (type == "color") return "dsl.color";
-        if (type.starts_with("list")) return "dsl.list";
-        if (type.starts_with("map") || type == "record") return "dsl.map";
-        if (type == "null") return "dsl.null";
-        return "dsl." + std::string(type);
+    if (const JsonValue schema = statement.find("declaredSchema"); schema && !schema.is_null()) {
+        const std::optional<std::string_view> kind = schema.find("kind").string();
+        if (kind == "boolean") return "dsl.boolean";
+        if (kind == "number") return "dsl.number";
+        if (kind == "duration") return "dsl.duration";
+        if (kind == "string" || kind == "stringLiteral" || kind == "enum") return "dsl.string";
+        if (kind == "color") return "dsl.color";
+        if (kind == "image") return "dsl.image";
+        if (kind == "key") return "dsl.key";
+        if (kind == "list" || kind == "collection") return "dsl.list";
+        if (kind == "map" || kind == "hostObject") return "dsl.map";
+        return std::string(any_state_type_id);
     }
-    const JsonValue literal = statement.find("initializer").find("value");
-    const std::optional<std::string_view> kind = literal.find("kind").string();
-    if (!kind.has_value()) return "dsl.unknown";
+    const JsonValue initializer = statement.find("initializer");
+    const std::optional<std::string_view> expression = initializer.find("kind").string();
+    if (expression == "list") return "dsl.list";
+    if (expression == "map") return "dsl.map";
+    const std::optional<std::string_view> kind = initializer.find("value").find("kind").string();
+    if (!kind.has_value() || *kind == "null") return std::string(any_state_type_id);
     if (*kind == "themeToken") return "dsl.theme-token";
     return "dsl." + std::string(*kind);
 }

@@ -8034,6 +8034,69 @@ overlay Second {
           "describing one surface again unbound the state scopes of another");
 }
 
+void test_state_types_follow_declarations_not_values() {
+    using namespace strata;
+    const data::JsonValue schemas = data::parse_json(R"({
+      "extensionPackages":[],
+      "widgets":{"registry":"state-types","required":[],"definitions":[]},
+      "actions":{"registry":"state-types","required":[],"definitions":[]},
+      "host":[
+        {"path":"app","nullable":false,"type":{"kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[{"name":"title","type":{"kind":"string"},"required":true,"nullable":true}]}}
+      ]
+    })");
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
+    runtime::ApplicationContext application("state-types", bundle);
+    const auto publish = [&](const std::uint64_t generation, const std::string_view title) {
+        static_cast<void>(application.host().adopt(bundle->host_snapshot(
+            "state-types-app", generation,
+            data::parse_json("{\"app\":{\"title\":" + std::string(title) + "}}"))));
+    };
+    publish(1U, "null");
+    activate_description_fixture(application, "state-types", R"(
+overlay Inferred {
+  state title = app.title;
+  root Text(key: "inferred.text", text: format("{0}", title))
+}
+overlay Nullable {
+  state picked: string? = null;
+  root Button(key: "nullable.set", label: format("{0}", picked), onClick: action("state.set", name: "picked", value: "chosen"))
+}
+)");
+    const auto label = [](const ui::DescriptionBuildResult& built, const std::string_view key,
+                          const std::string_view property) {
+        const std::shared_ptr<const ui::DescriptionNode> node = find_description_key(built.root, key);
+        const runtime::Value* value =
+            node != nullptr ? node->properties.at(std::string(property)).value() : nullptr;
+        return value != nullptr && value->string() != nullptr ? *value->string() : std::string();
+    };
+    ui::DescriptionBuilder builder(application);
+    // An untyped state initialized from a nullable host value keeps one slot type while the
+    // value it reads changes kind.
+    const ui::DescriptionBuildResult inferred_null =
+        builder.build(runtime::LayerRole::overlay, "Inferred");
+    check(inferred_null.diagnostics.empty(), "inferred-state fixture produced diagnostics");
+    publish(2U, "\"Hello\"");
+    const ui::DescriptionBuildResult inferred_text =
+        builder.build(runtime::LayerRole::overlay, "Inferred");
+    check(inferred_text.diagnostics.empty(),
+          "an inferred state's slot changed type when its initializer read another kind");
+
+    // A nullable typed state starts null and takes a string.
+    ui::RetainedTree tree;
+    static_cast<void>(tree.reconcile(builder.build(runtime::LayerRole::overlay, "Nullable").root));
+    const ui::RetainedNode* button = tree.find_key("nullable.set");
+    check(button != nullptr, "nullable-state fixture lost its button");
+    const runtime::ActionDispatchOutcome outcome = application.dispatch(
+        runtime::ActionEvent{"activated", std::string("nullable.set"), runtime::Value{}},
+        *(*button->description().properties.at("onClick").action())->action,
+        button->description().state_scope);
+    check(outcome.status == runtime::ActionDispatchStatus::handled,
+          "a nullable state did not take a value of its declared type");
+    check(label(builder.build(runtime::LayerRole::overlay, "Nullable"), "nullable.set", "label") ==
+              "chosen",
+          "a nullable state did not describe the value it took");
+}
+
 int strata_test_ui(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--collections") {
@@ -8114,6 +8177,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_repeater_keys_are_kept_by_their_generation();
             test_lazy_rows_follow_what_they_read();
             test_surfaces_keep_their_own_state_scope_bindings();
+            test_state_types_follow_declarations_not_values();
         }
         std::cout << "strata_ui_tests: OK\n";
         return 0;

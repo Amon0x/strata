@@ -43,6 +43,10 @@ void validate_non_blank(const std::string_view value, const std::string_view lab
 
 } // namespace
 
+bool state_type_accepts(const std::string_view type_id, const Value& value) noexcept {
+    return type_id == any_state_type_id || value.state_type_id() == type_id;
+}
+
 StateSlot StateSlot::from_initial(
     std::string name,
     Value initial_value,
@@ -85,7 +89,7 @@ bool StateStore::write(const StateAddress& address, const StateSlot& slot, Value
     validate_address(address);
     validate_slot(slot);
     initial_values_.insert_or_assign(address, slot.initial_value);
-    if (value.state_type_id() != slot.type_id) {
+    if (!state_type_accepts(slot.type_id, value)) {
         throw std::invalid_argument("state value does not match its slot type id");
     }
     const std::string declaration_scope = slot.declaration_scope.empty()
@@ -152,7 +156,7 @@ bool StateStore::restore(const StateSnapshot& snapshot_value) {
                                                   ? entry.address.scope
                                                   : entry.declaration_scope;
         validate_non_blank(declaration_scope, "state snapshot declaration scope");
-        if (entry.value.state_type_id() != entry.type_id) {
+        if (!state_type_accepts(entry.type_id, entry.value)) {
             throw std::invalid_argument("state snapshot value does not match its type id");
         }
         if (!restored.emplace(
@@ -258,7 +262,7 @@ void StateStore::validate_address(const StateAddress& address) {
 void StateStore::validate_slot(const StateSlot& slot) {
     validate_non_blank(slot.name, "state slot name");
     validate_non_blank(slot.type_id, "state slot type id");
-    if (slot.initial_value.state_type_id() != slot.type_id) {
+    if (!state_type_accepts(slot.type_id, slot.initial_value)) {
         throw std::invalid_argument("state slot initial value does not match its type id");
     }
     if (!slot.declaration_scope.empty()) {
@@ -267,11 +271,9 @@ void StateStore::validate_slot(const StateSlot& slot) {
 }
 
 StateMutationResult StateMutation::apply(StateStore& state) const {
-    const StateSlot slot = StateSlot::from_initial(
-        address.name,
-        initial_value,
-        declaration_scope
-    );
+    const StateSlot slot = type_id.empty()
+                               ? StateSlot::from_initial(address.name, initial_value, declaration_scope)
+                               : StateSlot{address.name, type_id, initial_value, declaration_scope};
     if (kind == StateMutationKind::reset) {
         return StateMutationResult{
             state.reset(address) ? StateMutationStatus::changed : StateMutationStatus::unchanged,
@@ -283,7 +285,7 @@ StateMutationResult StateMutation::apply(StateStore& state) const {
     switch (kind) {
     case StateMutationKind::set: {
         const Value* value = argument(arguments, "value");
-        if (value == nullptr || value->state_type_id() != slot.type_id ||
+        if (value == nullptr || !state_type_accepts(slot.type_id, *value) ||
             (declared_schema != nullptr && !declared_schema->accepts(*value))) {
             return rejected("state.set value does not satisfy the retained slot type");
         }
