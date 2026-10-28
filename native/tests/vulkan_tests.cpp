@@ -1,8 +1,10 @@
 #include "vulkan/offscreen.hpp"
+#include "tests/png_fixture.hpp"
 #include <array>
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <fstream>
 #include <stdexcept>
 #include <strata/render_packet.hpp>
@@ -175,6 +177,26 @@ void run() {
         packet.resources.clear();
         image = render(packet);
         near(pixel(image, 32, 4, 16), {0, 255, 0, 255}, "retained resources");
+        // PNG textures decode as on D3D11 (WIC): each 16-bit sample narrowed to its high byte,
+        // with no gamma conversion whether or not the file declares gAMA.
+        for (const std::optional<std::uint32_t> gamma :
+             {std::optional<std::uint32_t>{}, std::optional<std::uint32_t>{100000U},
+              std::optional<std::uint32_t>{45455U}}) {
+            constexpr std::array<std::uint16_t, 4> sample{0x00FFU, 0xFF00U, 0x8080U, 0xFFFFU};
+            auto encoded = packet;
+            encoded.resources = {{host::resource_encoded_image,
+                                  "test.png",
+                                  host::texture_encoding_png,
+                                  host::texture_sampling_nearest,
+                                  0,
+                                  0,
+                                  1,
+                                  1,
+                                  test::rgba16_png(1, 1, sample, gamma)}};
+            std::get<host::DrawBatch>(encoded.batches[0]).texture = "test.png";
+            near(pixel(render(encoded), 32, 16, 16), {0, 255, 128, 255},
+                 "16-bit PNG texels match the D3D11 decode", 0);
+        }
         host::RenderPacket release;
         release.resources.push_back({host::resource_release, "test.texture"});
         renderer.consume_resources(release);

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -19,6 +20,7 @@
 #include <strata/render_packet.hpp>
 
 #include "d3d11/effect_pass.hpp"
+#include "tests/png_fixture.hpp"
 
 namespace {
 
@@ -238,6 +240,43 @@ void test_unused_effect_samples_are_evicted() {
           "samples of effects the frame no longer draws were retained");
 }
 
+// PNG textures decode to the same texels on every backend: the 8-bit value nearest each 16-bit
+// sample, as stored, whatever gamma the file declares (the Vulkan test pins the same values).
+void test_sixteen_bit_png_texels() {
+    Fixture fixture;
+    d3d11::Renderer renderer(fixture.device.Get(), fixture.context.Get());
+    d3d11::FrameOptions options;
+    options.load_action = d3d11::TargetLoadAction::clear;
+    constexpr std::array<std::uint16_t, 4> sample{0x00FFU, 0xFF00U, 0x8080U, 0xFFFFU};
+    for (const std::optional<std::uint32_t> gamma :
+         {std::optional<std::uint32_t>{}, std::optional<std::uint32_t>{100000U},
+          std::optional<std::uint32_t>{45455U}}) {
+        host::RenderPacket packet = quad(1U, 255U, 255U, 255U);
+        packet.full_geometry_payload = true;
+        packet.geometry_dirty_all = true;
+        for (std::size_t vertex = 0U; vertex < 4U; ++vertex) {
+            float position[2]{};
+            std::memcpy(position, packet.vertices.data() + vertex * 88U, sizeof(position));
+            write_float(packet.vertices, vertex, 12U, position[0] / 4.0F);
+            write_float(packet.vertices, vertex, 16U, position[1] / 4.0F);
+            write_float(packet.vertices, vertex, 80U, 1.0F);
+        }
+        std::get<host::DrawBatch>(packet.batches[0]).texture = "png";
+        host::ResourceOperation image;
+        image.kind = host::resource_encoded_image;
+        image.texture = "png";
+        image.format = host::texture_encoding_png;
+        image.sampling = host::texture_sampling_nearest;
+        image.width = 1U;
+        image.height = 1U;
+        image.bytes = test::rgba16_png(1U, 1U, sample, gamma);
+        packet.resources.push_back(std::move(image));
+        static_cast<void>(renderer.render("png", packet, fixture.target(), options));
+        check(fixture.center() == std::array<int, 4>{0, 255, 128, 255},
+              "a 16-bit PNG texture did not decode to the high byte of each sample");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -246,6 +285,7 @@ int main() {
         test_png_upload_without_com();
         test_target_is_validated_on_its_own();
         test_unused_effect_samples_are_evicted();
+        test_sixteen_bit_png_texels();
         std::cout << "strata_d3d11_renderer_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {
