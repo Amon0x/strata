@@ -18,6 +18,7 @@
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#include <psapi.h>
 #include <wincodec.h>
 #include <wrl/client.h>
 #endif
@@ -192,6 +193,271 @@ void test_malformed_streams_are_rejected() {
     check(decode_png_rgba8(png(1U, 1U, 8U, 0U, false, gray, {Chunk{"tRNS", {0U, 7U}, true}}),
                            {1U, 1U})[3U] == 255U,
           "a damaged ancillary chunk was applied");
+}
+
+/** LSB-first deflate bit writer for hand-built streams. */
+class DeflateBits final {
+  public:
+    /** Extra bits and block headers: least significant bit first. */
+    void bits(const std::uint32_t value, const std::uint32_t count) {
+        for (std::uint32_t bit = 0U; bit < count; ++bit)
+            push(((value >> bit) & 1U) != 0U);
+    }
+
+    /** Huffman codes: most significant bit first. */
+    void code(const std::uint32_t value, const std::uint32_t length) {
+        for (std::uint32_t bit = length; bit > 0U; --bit)
+            push(((value >> (bit - 1U)) & 1U) != 0U);
+    }
+
+    /** One symbol of the fixed literal/length code. */
+    void fixed_literal(const std::uint32_t symbol) {
+        if (symbol < 144U)
+            code(0x30U + symbol, 8U);
+        else if (symbol < 256U)
+            code(0x190U + symbol - 144U, 9U);
+        else if (symbol < 280U)
+            code(symbol - 256U, 7U);
+        else
+            code(0xC0U + symbol - 280U, 8U);
+    }
+
+    [[nodiscard]] std::vector<std::uint8_t> bytes() const {
+        return bytes_;
+    }
+
+  private:
+    void push(const bool bit) {
+        if (count_ % 8U == 0U)
+            bytes_.push_back(0U);
+        if (bit)
+            bytes_.back() = static_cast<std::uint8_t>(bytes_.back() | 1U << (count_ % 8U));
+        ++count_;
+    }
+
+    std::vector<std::uint8_t> bytes_;
+    std::size_t count_ = 0U;
+};
+
+std::uint32_t adler32(const std::span<const std::uint8_t> bytes) {
+    std::uint32_t a = 1U;
+    std::uint32_t b = 0U;
+    for (const std::uint8_t byte : bytes) {
+        a = (a + byte) % 65521U;
+        b = (b + a) % 65521U;
+    }
+    return b << 16U | a;
+}
+
+/** A PNG whose IDAT is exactly `zlib`, for streams the stored-block builder cannot express. */
+std::vector<std::uint8_t> png_with_stream(const std::uint32_t width, const std::uint32_t height,
+                                          const std::uint8_t depth, const std::uint8_t color,
+                                          const bool interlaced,
+                                          const std::vector<std::uint8_t>& zlib) {
+    std::vector<std::uint8_t> result{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    const auto chunk = [&result](const std::string_view type,
+                                 const std::vector<std::uint8_t>& data) {
+        u32(result, static_cast<std::uint32_t>(data.size()));
+        std::vector<std::uint8_t> body(type.begin(), type.end());
+        body.insert(body.end(), data.begin(), data.end());
+        result.insert(result.end(), body.begin(), body.end());
+        u32(result, crc(body));
+    };
+    std::vector<std::uint8_t> header;
+    u32(header, width);
+    u32(header, height);
+    header.insert(header.end(), {depth, color, 0U, 0U, static_cast<std::uint8_t>(interlaced)});
+    chunk("IHDR", header);
+    chunk("IDAT", zlib);
+    chunk("IEND", {});
+    return result;
+}
+
+std::string rejection(const std::vector<std::uint8_t>& bytes, const ImageDimensions dimensions) {
+    try {
+        static_cast<void>(decode_png_rgba8(bytes, dimensions));
+    } catch (const std::invalid_argument& error) {
+        return error.what();
+    }
+    return {};
+}
+
+#if defined(_WIN32)
+/** Bytes this process has committed at its peak. */
+std::size_t peak_commit() {
+    PROCESS_MEMORY_COUNTERS counters{};
+    counters.cb = sizeof(counters);
+    if (!GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters)))
+        throw std::runtime_error("process memory counters are unavailable");
+    return counters.PeakPagefileUsage;
+}
+#endif
+
+void test_declared_size_does_not_allocate_before_its_data() {
+    // A 32768 x 2048 16-bit RGBA header (exactly the pixel cap) promises 512 MiB of scanlines;
+    // its data inflates to 16 bytes. The decoder must fail on the data without first reserving
+    // what the header promised.
+    std::vector<std::uint8_t> zlib{0x78U, 0x01U, 0x01U, 16U, 0U, 0xEFU, 0xFFU};
+    const std::vector<std::uint8_t> zeros(16U, 0U);
+    zlib.insert(zlib.end(), zeros.begin(), zeros.end());
+    u32(zlib, adler32(zeros));
+    const std::vector<std::uint8_t> bomb = png_with_stream(32768U, 2048U, 16U, 6U, false, zlib);
+#if defined(_WIN32)
+    const std::size_t before = peak_commit();
+#endif
+    check(rejects(bomb, {32768U, 2048U}), "a header larger than its image data was accepted");
+#if defined(_WIN32)
+    check(peak_commit() - before < std::size_t{64U} << 20U,
+          "the decoder allocated what an image header declared before its data supplied it");
+#endif
+}
+
+void test_decoded_pixels_are_capped() {
+    // 1-bit rows inflate a thousandfold and expand 32 times into RGBA8, so the pixel count, not
+    // the file, bounds the result.
+    static_assert(strata::resource::maximum_png_decode_pixels == 64U * 1024U * 1024U);
+    const std::vector<std::uint8_t> huge =
+        png_with_stream(32768U, 2049U, 1U, 0U, false, {0x78U, 0x01U, 0x03U, 0x00U});
+    check(rejection(huge, {32768U, 2049U}).find("more pixels") != std::string::npos,
+          "an image past the decode pixel cap was not refused by its header");
+    bool inspected = false;
+    try {
+        static_cast<void>(strata::resource::inspect_png(huge));
+    } catch (const std::invalid_argument&) {
+        inspected = true;
+    }
+    check(inspected, "inspection accepted an image past the decode pixel cap");
+}
+
+void test_back_references_stay_within_the_window() {
+    // One 304-byte gray row: filter 0, 300 literals, then a 3-byte copy from 300 bytes back.
+    DeflateBits deflate;
+    deflate.bits(1U, 1U); // final
+    deflate.bits(1U, 2U); // fixed codes
+    std::vector<std::uint8_t> row{0U};
+    for (std::uint32_t index = 0U; index < 300U; ++index)
+        row.push_back(static_cast<std::uint8_t>(index * 7U));
+    for (const std::uint8_t byte : row)
+        deflate.fixed_literal(byte);
+    deflate.fixed_literal(257U); // length 3
+    deflate.code(16U, 5U);       // distance 257 + 7 extra bits
+    deflate.bits(300U - 257U, 7U);
+    deflate.fixed_literal(256U);
+    for (std::size_t index = 0U; index < 3U; ++index)
+        row.push_back(row[row.size() - 300U]);
+    const std::vector<std::uint8_t> body = deflate.bytes();
+    const auto stream = [&](const std::uint8_t method, const std::uint8_t flags) {
+        std::vector<std::uint8_t> zlib{method, flags};
+        zlib.insert(zlib.end(), body.begin(), body.end());
+        u32(zlib, adler32(row));
+        return png_with_stream(303U, 1U, 8U, 0U, false, zlib);
+    };
+    std::vector<std::uint8_t> expected;
+    for (std::size_t index = 1U; index < row.size(); ++index)
+        expected.insert(expected.end(), {row[index], row[index], row[index], 255U});
+    check(decode_png_rgba8(stream(0x78U, 0x01U), {303U, 1U}) == expected,
+          "a back-reference within a 32 KiB window did not copy its bytes");
+    // CINFO 0 declares a 256-byte window, which a 300-byte distance overreaches.
+    check(rejection(stream(0x08U, 0x1DU), {303U, 1U}).find("window") != std::string::npos,
+          "a back-reference beyond the zlib header's window was accepted");
+
+    // Fixed distance codes 30 and 31 exist in the code but name no distance.
+    DeflateBits invalid;
+    invalid.bits(1U, 1U);
+    invalid.bits(1U, 2U);
+    invalid.fixed_literal(0U);
+    invalid.fixed_literal(257U);
+    invalid.code(30U, 5U);
+    invalid.fixed_literal(256U);
+    std::vector<std::uint8_t> zlib{0x78U, 0x01U};
+    const std::vector<std::uint8_t> invalid_body = invalid.bytes();
+    zlib.insert(zlib.end(), invalid_body.begin(), invalid_body.end());
+    u32(zlib, 0U);
+    check(rejects(png_with_stream(3U, 1U, 8U, 0U, false, zlib), {3U, 1U}),
+          "a fixed block using distance code 30 was accepted");
+}
+
+void test_incomplete_huffman_codes_are_rejected() {
+    // One final dynamic block whose literal code holds 0 and end-of-block, and whose distance code
+    // holds one symbol, every length `bits`, then a 1x1 gray row of two zero literals.
+    const auto stream = [](const std::uint32_t bits) {
+        DeflateBits deflate;
+        deflate.bits(1U, 1U);
+        deflate.bits(2U, 2U);
+        deflate.bits(0U, 5U);  // 257 literal/length codes
+        deflate.bits(0U, 5U);  // 1 distance code
+        deflate.bits(14U, 4U); // 18 code-length codes, through symbol 1
+        constexpr std::array<std::uint32_t, 18U> order{16U, 17U, 18U, 0U, 8U, 7U, 9U, 6U, 10U,
+                                                       5U,  11U, 4U,  12U, 3U, 13U, 2U, 14U, 1U};
+        for (const std::uint32_t symbol : order)
+            deflate.bits(symbol == 18U || symbol == bits ? 1U : 0U, 3U);
+        // Code-length codes: `bits` is 0, the zero-run 18 is 1.
+        deflate.code(0U, 1U);
+        deflate.code(1U, 1U);
+        deflate.bits(138U - 11U, 7U); // literals 1..138 unused
+        deflate.code(1U, 1U);
+        deflate.bits(117U - 11U, 7U); // literals 139..255 unused
+        deflate.code(0U, 1U);         // end-of-block
+        deflate.code(0U, 1U);         // the one distance
+        // Two literal zeros, then end-of-block, in the code the block declared.
+        const std::uint32_t literal_zero = 0U;
+        const std::uint32_t end_of_block = 1U;
+        deflate.code(literal_zero, bits);
+        deflate.code(literal_zero, bits);
+        deflate.code(end_of_block, bits);
+        std::vector<std::uint8_t> zlib{0x78U, 0x01U};
+        const std::vector<std::uint8_t> body = deflate.bytes();
+        zlib.insert(zlib.end(), body.begin(), body.end());
+        u32(zlib, adler32(std::vector<std::uint8_t>{0U, 0U}));
+        return png_with_stream(1U, 1U, 8U, 0U, false, zlib);
+    };
+    // Two one-bit literal codes are complete; one one-bit distance code is the incompleteness zlib
+    // allows.
+    check(decode_png_rgba8(stream(1U), {1U, 1U}) == std::vector<std::uint8_t>({0U, 0U, 0U, 255U}),
+          "a complete literal code with a single one-bit distance code was rejected");
+    // Two two-bit literal codes leave half the code unassigned, which zlib rejects.
+    check(rejection(stream(2U), {1U, 1U}).find("incomplete") != std::string::npos,
+          "an incomplete literal/length code was accepted");
+}
+
+void test_empty_blocks_reuse_the_fixed_codes() {
+    // Two hundred thousand empty fixed blocks cost ten bits each to read; they must not each
+    // rebuild the fixed tables. Then a fixed block that does carry the row.
+    DeflateBits deflate;
+    for (int block = 0; block < 200'000; ++block) {
+        deflate.bits(0U, 1U);
+        deflate.bits(1U, 2U);
+        deflate.fixed_literal(256U);
+    }
+    deflate.bits(1U, 1U);
+    deflate.bits(1U, 2U);
+    const std::vector<std::uint8_t> row{0U, 9U, 200U};
+    for (const std::uint8_t byte : row)
+        deflate.fixed_literal(byte);
+    deflate.fixed_literal(256U);
+    std::vector<std::uint8_t> zlib{0x78U, 0x01U};
+    const std::vector<std::uint8_t> body = deflate.bytes();
+    zlib.insert(zlib.end(), body.begin(), body.end());
+    u32(zlib, adler32(row));
+    for (int decode = 0; decode < 2; ++decode) {
+        check(decode_png_rgba8(png_with_stream(2U, 1U, 8U, 0U, false, zlib), {2U, 1U}) ==
+                  std::vector<std::uint8_t>({9U, 9U, 9U, 255U, 200U, 200U, 200U, 255U}),
+              "a stream of empty fixed blocks did not decode its final block");
+    }
+}
+
+void test_adam7_passes_take_exactly_their_scanlines() {
+    // 1x1: only pass 1 has a pixel. 2x1: passes 1 and 6. Empty passes carry no filter byte.
+    check(decode_png_rgba8(png(1U, 1U, 8U, 0U, true, {0U, 42U}), {1U, 1U}) ==
+              std::vector<std::uint8_t>({42U, 42U, 42U, 255U}),
+          "a 1x1 interlaced image did not decode from its single pass");
+    check(rejects(png(1U, 1U, 8U, 0U, true, {0U, 42U, 0U}), {1U, 1U}),
+          "an interlaced image with a filter byte for an empty pass was accepted");
+    check(decode_png_rgba8(png(2U, 1U, 8U, 0U, true, {0U, 10U, 0U, 20U}), {2U, 1U}) ==
+              std::vector<std::uint8_t>({10U, 10U, 10U, 255U, 20U, 20U, 20U, 255U}),
+          "a 2x1 interlaced image did not place passes 1 and 6");
+    check(rejects(png(2U, 1U, 8U, 0U, true, {0U, 10U}), {2U, 1U}),
+          "an interlaced image missing its sixth pass was accepted");
 }
 
 #if defined(_WIN32)
@@ -387,6 +653,12 @@ int strata_test_png_decode() {
         test_palette_and_low_depth_gray();
         test_filters_and_interlacing();
         test_malformed_streams_are_rejected();
+        test_declared_size_does_not_allocate_before_its_data();
+        test_decoded_pixels_are_capped();
+        test_back_references_stay_within_the_window();
+        test_incomplete_huffman_codes_are_rejected();
+        test_empty_blocks_reuse_the_fixed_codes();
+        test_adam7_passes_take_exactly_their_scanlines();
 #if defined(_WIN32)
         test_decoding_matches_wic();
 #endif

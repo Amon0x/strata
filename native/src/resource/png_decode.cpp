@@ -97,42 +97,57 @@ class Bits final {
 };
 
 /**
- * A canonical Huffman code. Codes of up to fast_bits bits resolve in one table lookup; longer
- * codes walk the canonical counts one bit at a time.
+ * A canonical Huffman code. Codes no longer than the lookup width (the longest code, at most
+ * fast_bits) resolve in one table lookup; longer codes walk the canonical counts one bit at a time.
+ * A small code builds a small table, so a stream of tiny dynamic blocks costs little per block.
  */
 class Huffman final {
   public:
     static constexpr std::uint32_t fast_bits = 10U;
+    static constexpr std::size_t maximum_symbols = 288U;
 
-    void build(const std::span<const std::uint8_t> lengths) {
+    /** Whether a code may leave bit patterns unassigned, as zlib lets literal and distance codes. */
+    enum class Completeness : std::uint8_t { required, single_code_allowed };
+
+    void build(const std::span<const std::uint8_t> lengths, const Completeness completeness) {
         counts_.fill(0U);
         for (const std::uint8_t length : lengths)
             ++counts_[length];
         counts_[0U] = 0U;
+        std::uint32_t longest = 0U;
         int left = 1;
-        for (std::size_t length = 1U; length < counts_.size(); ++length) {
+        for (std::uint32_t length = 1U; length < counts_.size(); ++length) {
+            if (counts_[length] != 0U)
+                longest = length;
             left = left * 2 - counts_[length];
             if (left < 0)
                 fail("a Huffman code is over-subscribed");
         }
+        // As zlib decides: a code that leaves patterns unassigned is corrupt, except an empty code
+        // and, for literal and distance codes, a single one-bit code.
+        if (left > 0 && longest != 0U &&
+            (completeness == Completeness::required || longest != 1U)) {
+            fail("a Huffman code is incomplete");
+        }
         std::array<std::uint16_t, 16U> offsets{};
         for (std::size_t length = 1U; length + 1U < offsets.size(); ++length)
             offsets[length + 1U] = static_cast<std::uint16_t>(offsets[length] + counts_[length]);
-        symbols_.assign(lengths.size(), 0U);
         for (std::size_t symbol = 0U; symbol < lengths.size(); ++symbol) {
             if (lengths[symbol] != 0U)
                 symbols_[offsets[lengths[symbol]]++] = static_cast<std::uint16_t>(symbol);
         }
-        fast_.fill(0U);
+        width_ = std::clamp(longest, 1U, fast_bits);
+        const std::size_t entries = std::size_t{1U} << width_;
+        std::fill_n(fast_.begin(), entries, std::uint16_t{0U});
         std::uint32_t code = 0U;
         std::size_t index = 0U;
-        for (std::uint32_t length = 1U; length <= fast_bits; ++length) {
+        for (std::uint32_t length = 1U; length <= width_; ++length) {
             for (std::uint32_t entry = 0U; entry < counts_[length]; ++entry, ++code, ++index) {
                 std::uint32_t reversed = 0U;
                 for (std::uint32_t bit = 0U; bit < length; ++bit)
                     reversed |= ((code >> bit) & 1U) << (length - 1U - bit);
                 const auto value = static_cast<std::uint16_t>(length << 12U | symbols_[index]);
-                for (std::uint32_t fill = reversed; fill < fast_.size(); fill += 1U << length)
+                for (std::size_t fill = reversed; fill < entries; fill += std::size_t{1U} << length)
                     fast_[fill] = value;
             }
             code <<= 1U;
@@ -140,10 +155,10 @@ class Huffman final {
     }
 
     [[nodiscard]] std::uint32_t decode(Bits& input) const {
-        if (input.available() < fast_bits)
+        if (input.available() < width_)
             input.refill();
-        if (input.available() >= fast_bits) {
-            const std::uint16_t entry = fast_[input.peek(fast_bits)];
+        if (input.available() >= width_) {
+            const std::uint16_t entry = fast_[input.peek(width_)];
             if (entry != 0U) {
                 input.drop(entry >> 12U);
                 return entry & 0x0FFFU;
@@ -167,8 +182,9 @@ class Huffman final {
 
   private:
     std::array<std::uint16_t, 16U> counts_{};
-    std::vector<std::uint16_t> symbols_;
+    std::array<std::uint16_t, maximum_symbols> symbols_{};
     std::array<std::uint16_t, std::size_t{1U} << fast_bits> fast_{};
+    std::uint32_t width_ = 1U;
 };
 
 constexpr std::array<std::uint16_t, 29U> length_base{
@@ -189,8 +205,32 @@ constexpr std::array<std::uint8_t, 30U> distance_extra{
     6U, 7U, 7U, 8U, 8U, 9U, 9U, 10U, 10U, 11U, 11U, 12U, 12U, 13U, 13U,
 };
 
+/** The fixed codes of RFC 1951 3.2.6, built once rather than for every fixed block. */
+struct FixedCodes final {
+    FixedCodes() {
+        std::array<std::uint8_t, 288U> lengths{};
+        std::fill(lengths.begin(), lengths.begin() + 144, std::uint8_t{8U});
+        std::fill(lengths.begin() + 144, lengths.begin() + 256, std::uint8_t{9U});
+        std::fill(lengths.begin() + 256, lengths.begin() + 280, std::uint8_t{7U});
+        std::fill(lengths.begin() + 280, lengths.end(), std::uint8_t{8U});
+        literals.build(lengths, Huffman::Completeness::required);
+        // Distance codes 30 and 31 complete the code but name no distance; decoding rejects them.
+        std::array<std::uint8_t, 32U> distance_lengths{};
+        distance_lengths.fill(5U);
+        distances.build(distance_lengths, Huffman::Completeness::required);
+    }
+
+    Huffman literals;
+    Huffman distances;
+};
+
+/**
+ * Decodes one block's symbols. `limit` is the scanline size, which no stream may inflate past, and
+ * `window` the zlib header's window, which no back-reference may reach beyond.
+ */
 void inflate_codes(Bits& input, const Huffman& literals, const Huffman& distances,
-                   std::vector<std::uint8_t>& output, const std::size_t limit) {
+                   std::vector<std::uint8_t>& output, const std::size_t limit,
+                   const std::size_t window) {
     for (;;) {
         const std::uint32_t symbol = literals.decode(input);
         if (symbol < 256U) {
@@ -213,6 +253,8 @@ void inflate_codes(Bits& input, const Huffman& literals, const Huffman& distance
             distance_base[distance_symbol] + input.take(distance_extra[distance_symbol]);
         if (distance > output.size())
             fail("compressed image data refers before its start");
+        if (distance > window)
+            fail("compressed image data refers beyond its window");
         if (length > limit - output.size())
             fail("image data inflates beyond its scanlines");
         const std::size_t from = output.size() - distance;
@@ -232,9 +274,18 @@ void inflate_codes(Bits& input, const Huffman& literals, const Huffman& distance
         (flags & 0x20U) != 0U) {
         fail("image data is not a zlib deflate stream");
     }
+    // CINFO is the base-two logarithm of the window minus eight; 7 is the 32 KiB deflate maximum.
+    const std::size_t window = std::size_t{1U} << ((method >> 4U) + 8U);
     Bits input(stream.subspan(2U));
     std::vector<std::uint8_t> output;
-    output.reserve(expected);
+    // Reserve only what the data present can inflate to: a header that declares a large image
+    // must not allocate it before its data does. Deflate's densest code expands 2 bits into 258
+    // bytes.
+    constexpr std::size_t maximum_expansion = 258U * 4U;
+    output.reserve(stream.size() < expected / maximum_expansion
+                       ? stream.size() * maximum_expansion
+                       : expected);
+    static const FixedCodes fixed;
     Huffman literals;
     Huffman distances;
     bool final_block = false;
@@ -252,16 +303,7 @@ void inflate_codes(Bits& input, const Huffman& literals, const Huffman& distance
             for (std::uint32_t index = 0U; index < length; ++index)
                 output.push_back(static_cast<std::uint8_t>(input.take(8U)));
         } else if (type == 1U) {
-            std::array<std::uint8_t, 288U> lengths{};
-            std::fill(lengths.begin(), lengths.begin() + 144, std::uint8_t{8U});
-            std::fill(lengths.begin() + 144, lengths.begin() + 256, std::uint8_t{9U});
-            std::fill(lengths.begin() + 256, lengths.begin() + 280, std::uint8_t{7U});
-            std::fill(lengths.begin() + 280, lengths.end(), std::uint8_t{8U});
-            literals.build(lengths);
-            std::array<std::uint8_t, 30U> distance_lengths{};
-            distance_lengths.fill(5U);
-            distances.build(distance_lengths);
-            inflate_codes(input, literals, distances, output, expected);
+            inflate_codes(input, fixed.literals, fixed.distances, output, expected, window);
         } else if (type == 2U) {
             const std::uint32_t literal_count = input.take(5U) + 257U;
             const std::uint32_t distance_count = input.take(5U) + 1U;
@@ -275,7 +317,7 @@ void inflate_codes(Bits& input, const Huffman& literals, const Huffman& distance
             for (std::uint32_t index = 0U; index < code_count; ++index)
                 code_lengths[order[index]] = static_cast<std::uint8_t>(input.take(3U));
             Huffman lengths_code;
-            lengths_code.build(code_lengths);
+            lengths_code.build(code_lengths, Huffman::Completeness::required);
             std::array<std::uint8_t, 316U> lengths{};
             std::uint32_t index = 0U;
             while (index < literal_count + distance_count) {
@@ -303,10 +345,12 @@ void inflate_codes(Bits& input, const Huffman& literals, const Huffman& distance
             }
             if (lengths[256U] == 0U)
                 fail("a dynamic block has no end-of-block code");
-            literals.build(std::span<const std::uint8_t>(lengths.data(), literal_count));
+            literals.build(std::span<const std::uint8_t>(lengths.data(), literal_count),
+                           Huffman::Completeness::single_code_allowed);
             distances.build(
-                std::span<const std::uint8_t>(lengths.data() + literal_count, distance_count));
-            inflate_codes(input, literals, distances, output, expected);
+                std::span<const std::uint8_t>(lengths.data() + literal_count, distance_count),
+                Huffman::Completeness::single_code_allowed);
+            inflate_codes(input, literals, distances, output, expected, window);
         } else {
             fail("compressed image data uses a reserved block type");
         }
@@ -455,6 +499,10 @@ std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> b
             if (header.width != expected.width || header.height != expected.height)
                 fail("dimensions disagree with the resource declaration");
             validate_image_dimensions(ImageDimensions{header.width, header.height});
+            if (static_cast<std::uint64_t>(header.width) * header.height >
+                maximum_png_decode_pixels) {
+                fail("the image has more pixels than the decoder accepts");
+            }
             have_header = true;
         } else if (type == "PLTE") {
             if (!compressed.empty() || length % 3U != 0U || length == 0U || length > 768U)

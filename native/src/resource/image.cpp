@@ -44,6 +44,11 @@ ImageDimensions inspect_png(const std::vector<std::uint8_t>& bytes) {
     }
     const ImageDimensions dimensions{big_endian_u32(bytes, 16U), big_endian_u32(bytes, 20U)};
     validate_image_dimensions(dimensions);
+    // Refused here, at Surface creation, rather than when a frame first samples the image.
+    if (static_cast<std::uint64_t>(dimensions.width) * dimensions.height >
+        maximum_png_decode_pixels) {
+        throw std::invalid_argument("PNG has more pixels than the decoder accepts");
+    }
     return dimensions;
 }
 

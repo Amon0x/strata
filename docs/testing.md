@@ -25,8 +25,16 @@ this Windows host.
 For incremental work, use `cmake --build --preset <platform>` followed by
 `ctest --preset <platform>`. Sanitizer configurations use separate CMake build directories so the
 ordinary build remains incremental. Likewise, `-DSTRATA_BUILD_FUZZERS=ON` (MSVC or Clang) in its own
-build directory instruments the Strata targets for coverage and builds `strata_opentype_fuzzer`, a
-libFuzzer harness for the OpenType reader; seed its corpus with the bundled fonts.
+build directory instruments the Strata targets for coverage and builds a libFuzzer harness for each
+parser of untrusted input (add `-DSTRATA_ENABLE_ASAN=ON` to catch memory errors as well as crashes):
+
+| Harness | Input | Seed corpus |
+| --- | --- | --- |
+| `strata_opentype_fuzzer` | an OpenType font, parsed and shaped | the bundled fonts |
+| `strata_png_fuzzer` | a mode byte, then a PNG (CRCs rewritten) or a header and scanlines | the bundled PNGs, each prefixed with a 0 byte |
+
+Each harness's header comment gives its input format and a typical command line. Run them with
+`-malloc_limit_mb` and `-rss_limit_mb` so an unbounded allocation is a finding.
 
 ## Deterministic headless application tests
 

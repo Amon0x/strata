@@ -64,11 +64,20 @@ void validate_image_dimensions(ImageDimensions dimensions);
 [[nodiscard]] ImageDimensions inspect_png(const std::vector<std::uint8_t>& bytes);
 
 /**
+ * The most pixels decode_png_rgba8 accepts: 64 Mpx, a 256 MiB RGBA8 result (8192 x 8192, say).
+ * Deflate shrinks uniform rows a thousandfold and a 1-bit row is a 32nd of its RGBA8 expansion, so
+ * this, not the encoded size, is what bounds the memory a small PNG can demand.
+ */
+inline constexpr std::uint64_t maximum_png_decode_pixels = std::uint64_t{64U} * 1024U * 1024U;
+
+/**
  * Decodes a PNG into tightly packed, top-down RGBA8 rows with straight (unpremultiplied) alpha:
  * the texel convention every packet image carries. Samples are taken as stored, with no gamma,
  * sRGB or ICC conversion; 16-bit samples keep their high byte; low bit depths expand by bit
  * replication; palette and tRNS transparency become alpha, and images without alpha are opaque.
- * Throws std::invalid_argument for a malformed stream or dimensions other than `expected`.
+ * Throws std::invalid_argument for a malformed stream, dimensions other than `expected`, or more
+ * than maximum_png_decode_pixels. Inflating never produces more than the image's scanlines (its
+ * rows plus their filter bytes), and back-references must stay within the zlib header's window.
  */
 [[nodiscard]] std::vector<std::uint8_t> decode_png_rgba8(std::span<const std::uint8_t> bytes,
                                                          ImageDimensions expected);

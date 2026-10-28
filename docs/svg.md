@@ -41,7 +41,10 @@ authoring and render packets carry only logical or Surface-scoped ids.
 
 PNG bytes are inspected at Surface creation, reach the host through packet v14 the first time a
 frame samples them as straight-alpha RGBA8 the core decoded once, and are sampled as ordinary
-textures; no backend needs an image codec. SVG documents are parsed at Surface creation into immutable
+textures; no backend needs an image codec. The decoder treats every PNG as untrusted: it accepts at
+most 64 Mpx (a 256 MiB RGBA8 result, refused at Surface creation), never inflates past the image's
+scanlines or allocates them before the data supplies them, and rejects back-references beyond the
+zlib window and the incomplete Huffman codes zlib rejects. SVG documents are parsed at Surface creation into immutable
 display lists. During widget presentation, Strata projects their curves, fills, strokes,
 transforms, `viewBox`, and `preserveAspectRatio` into ordinary clipped path commands. Submission
 then tessellates those paths at the current logical size and device scale.
