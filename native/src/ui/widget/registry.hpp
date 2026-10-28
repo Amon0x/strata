@@ -75,8 +75,8 @@ using WidgetFrameHook = std::function<void(WidgetInputScope& scope, const Widget
 enum class WidgetFrameCost { paint, layout };
 using WidgetDescriptionHook = std::function<void(WidgetDescriptionScope& scope)>;
 using WidgetParticipationHook = bool (*)(const RetainedNode& node) noexcept;
-using WidgetSubtargetsHook = std::function<std::vector<WidgetSubtarget>(
-    const RetainedNode& node, const LayoutRecord& layout)>;
+using WidgetSubtargetsHook =
+    std::function<std::vector<WidgetSubtarget>(const WidgetSubtargetContext& context)>;
 using WidgetLayoutDefaultsHook = std::function<void(WidgetLayoutDefaultsScope& scope)>;
 /** Resolves a default action from the attached retained node, including its final key. */
 using WidgetDefaultActionFactory = std::function<std::shared_ptr<const runtime::ActionValue>(
@@ -149,7 +149,10 @@ struct WidgetSemanticsPhase final {
 
 struct WidgetInspectionPhase final {
     WidgetInspectionHook derive = nullptr;
+    /** Presenter-owned pointer regions; the one projection input routing and inspection share. */
     WidgetSubtargetsHook subtargets = nullptr;
+    /** Some regions may lie outside the retained bounds (popup rows) and are hit above the tree. */
+    bool detached_subtargets = false;
 };
 
 struct WidgetCommandPhase final {
@@ -186,6 +189,8 @@ struct WidgetPresentPhase final {
     WidgetPresentHook overlay = nullptr;
     WidgetClipHook descendant_clip = nullptr;
     bool detached_overlay = false;
+    /** Plane of this widget's detached overlay and detached subtargets; higher paints above. */
+    int overlay_z = detached_overlay_menu_z;
     /** When set, the overlay is presented only while this holds: a detached overlay that shows
      * rarely (a hover tooltip) costs nothing on the frames it does not. */
     WidgetOverlayShown overlay_shown = nullptr;
@@ -247,6 +252,11 @@ class WidgetRegistry final {
     [[nodiscard]] std::span<const std::string_view> authored_presentation_types() const noexcept;
     /** Types that present a detached overlay. */
     [[nodiscard]] std::span<const std::string_view> detached_overlay_types() const noexcept;
+    /** Types whose subtargets can lie outside their retained bounds. */
+    [[nodiscard]] std::span<const std::string_view> detached_subtarget_types() const noexcept;
+    /** Sets only the subtarget projection of a type, keeping the rest of its inspection phase. */
+    void register_subtargets(std::string type, WidgetSubtargetsHook subtargets,
+                             bool detached = false);
 
     void apply_layout_defaults(std::string_view type,
                                DescriptionNode::Properties& properties) const;
@@ -272,6 +282,7 @@ class WidgetRegistry final {
     std::vector<std::string_view> command_declaration_types_;
     std::vector<std::string_view> authored_presentation_types_;
     std::vector<std::string_view> detached_overlay_types_;
+    std::vector<std::string_view> detached_subtarget_types_;
     std::vector<std::string_view> text_editable_types_;
     std::uint64_t revision_ = 0U;
 };

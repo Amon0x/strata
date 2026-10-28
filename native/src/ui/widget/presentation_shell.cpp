@@ -623,9 +623,11 @@ void add(
     const WidgetPresentHook overlay = nullptr,
     const bool detached_overlay = false,
     const WidgetVisualProfile visual = {},
-    const WidgetOverlayShown overlay_shown = nullptr
+    const WidgetOverlayShown overlay_shown = nullptr,
+    const int overlay_z = detached_overlay_menu_z
 ) {
     WidgetPresentPhase phase{content, nullptr, overlay, nullptr, detached_overlay};
+    phase.overlay_z = overlay_z;
     phase.overlay_shown = overlay_shown;
     phase.visual = visual;
     registry.register_present_phase(std::move(type), std::move(phase));
@@ -636,14 +638,16 @@ void add(
 void register_shell_widget_presenters(WidgetRegistry& registry) {
     add(registry, "MenuBar", &menu_bar_content, &indexed_command_overlay, true);
     add(registry, "Toolbar", &toolbar_content, &indexed_command_overlay, true);
-    add(registry, "CommandPalette", nullptr, &command_palette_overlay, true);
+    add(registry, "CommandPalette", nullptr, &command_palette_overlay, true, {}, nullptr,
+        detached_overlay_palette_z);
     add(registry, "ChipInput", &chip_input_content);
     add(registry, "Breadcrumbs", &breadcrumbs_content);
     add(registry, "Banner", &banner_content);
-    add(registry, "ToastRegion", nullptr, &toast_region_overlay, true);
+    add(registry, "ToastRegion", nullptr, &toast_region_overlay, true, {}, nullptr,
+        detached_overlay_toast_z);
     add(registry, "Modal", &modal_content);
     add(registry, "Tooltip", nullptr, &tooltip_overlay, true, {false, true, false},
-        &tooltip_overlay_shown);
+        &tooltip_overlay_shown, detached_overlay_tooltip_z);
 }
 
 } // namespace strata::ui

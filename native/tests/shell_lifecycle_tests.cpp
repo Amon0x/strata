@@ -975,7 +975,8 @@ overlay Main { root ShellFixture() }
     const std::vector<ui::DetachedOverlayRoot> overlay_roots = ui::detached_overlay_roots(
         surface.tree(),
         surface.layout(),
-        ui::detached_subtarget_types(),
+        surface.widget_registry(),
+        surface.widget_registry().detached_subtarget_types(),
         false,
         [&surface](const ui::RetainedNode& node) {
             return std::ranges::any_of(
@@ -1003,7 +1004,8 @@ overlay Main { root ShellFixture() }
         ui::detached_overlay_roots(
             surface.tree(),
             surface.layout(),
-            ui::detached_subtarget_types(),
+            surface.widget_registry(),
+            surface.widget_registry().detached_subtarget_types(),
             false,
             [](const ui::RetainedNode& node) {
                 return node.description().type == "Menu";

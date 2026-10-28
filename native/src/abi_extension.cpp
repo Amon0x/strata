@@ -722,13 +722,12 @@ ExtensionRegistries extension_registries(const strata_surface_extension_bundle* 
             };
         }
         if (has_subtargets) {
-            lifecycle.inspection.subtargets = [descriptor,
-                                               fields](const strata::ui::RetainedNode& node,
-                                                       const strata::ui::LayoutRecord& layout) {
+            lifecycle.inspection.subtargets =
+                [descriptor, fields](const strata::ui::WidgetSubtargetContext& projection) {
                 std::vector<strata::ui::WidgetSubtarget> targets;
                 strata_widget_subtargets_context context{
-                    &node,
-                    &layout,
+                    &projection.node,
+                    &projection.record,
                     fields.get(),
                     &targets,
                 };

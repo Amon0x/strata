@@ -194,7 +194,7 @@ void InputRouter::activate(RetainedNode& requested_target, InputOperationResult&
     if (RetainedNode* modal = active_modal(); modal != nullptr) {
         const bool detached_above_modal = subtarget.has_value() && subtarget->detached &&
                                           subtarget->owner_identity == target->identity() &&
-                                          subtarget->z_index > detached_overlay_z_index(*modal);
+                                          subtarget->z_index > detached_overlay_z_index(widgets_, *modal);
         const RetainedNode* focused =
             focused_.has_value() ? tree_->find_identity(*focused_) : nullptr;
         if (focused == nullptr || !descendant_of(*focused, *modal)) {

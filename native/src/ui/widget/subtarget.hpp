@@ -24,6 +24,7 @@ class CommandIndex;
 class NotificationService;
 class RetainedNode;
 class RetainedTree;
+class WidgetRegistry;
 
 using WidgetTextWidthResolver = std::function<double(
     const RetainedNode& node,
@@ -50,7 +51,11 @@ struct DetachedOverlayRoot final {
 
 using DetachedOverlayPredicate = std::function<bool(const RetainedNode&)>;
 
-[[nodiscard]] int detached_overlay_z_index(const RetainedNode& node) noexcept;
+/** The detached plane a node's overlay and detached subtargets occupy, from its lifecycle. */
+[[nodiscard]] int detached_overlay_z_index(
+    const WidgetRegistry& widgets,
+    const RetainedNode& node
+) noexcept;
 /**
  * Ascending paint order; reverse iteration is topmost-first hit order. Only nodes of the candidate
  * types, and nodes with behaviors when asked, can participate, so the tree is not walked.
@@ -58,12 +63,11 @@ using DetachedOverlayPredicate = std::function<bool(const RetainedNode&)>;
 [[nodiscard]] std::vector<DetachedOverlayRoot> detached_overlay_roots(
     const RetainedTree& tree,
     const LayoutResult& layout,
+    const WidgetRegistry& widgets,
     std::span<const std::string_view> candidate_types,
     bool behavior_candidates,
     const DetachedOverlayPredicate& participates
 );
-/** The types whose nodes can project detached subtargets. */
-[[nodiscard]] std::span<const std::string_view> detached_subtarget_types() noexcept;
 
 enum class WidgetSubtargetKind {
     control,
@@ -115,19 +119,24 @@ struct WidgetSubtarget final {
     std::optional<Rect> presentation_clip = std::nullopt;
 };
 
-/** True when this widget type can project presenter-owned pointer regions. */
-[[nodiscard]] bool widget_projects_subtargets(std::string_view type) noexcept;
-/** True when the widget can project pointer regions outside its retained layout bounds. */
-[[nodiscard]] bool widget_projects_detached_subtargets(std::string_view type) noexcept;
-/** Shared geometry projection consumed by both widget presenters and input hit testing. */
-[[nodiscard]] std::vector<WidgetSubtarget> widget_subtargets(
-    const RetainedNode& node,
-    const LayoutResult& layout,
-    const CommandIndex* commands,
-    const WidgetTextWidthResolver& text_width = {},
-    const WidgetTextLayoutResolver& text_layout = {},
-    const NotificationService* notifications = nullptr,
-    std::string_view edited_text = {}
-);
+/**
+ * Everything one lifecycle `inspection.subtargets` hook may read to project its regions. Built-in
+ * and extension widgets receive the same context; the hook owns all widget-specific geometry.
+ */
+struct WidgetSubtargetContext final {
+    const RetainedNode& node;
+    const LayoutResult& layout;
+    /** The node's own layout record. */
+    const LayoutRecord& record;
+    const CommandIndex* commands = nullptr;
+    const WidgetTextWidthResolver* text_width = nullptr;
+    const WidgetTextLayoutResolver* text_layout = nullptr;
+    const NotificationService* notifications = nullptr;
+    /** The node's live editor draft, when it has one. */
+    std::string_view edited_text{};
+};
+
+/** Built-in widgets' `inspection.subtargets` hooks, registered with each widget type. */
+void register_builtin_widget_subtargets(WidgetRegistry& registry);
 
 } // namespace strata::ui

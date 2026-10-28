@@ -398,6 +398,8 @@ class InputRouter final {
      */
     [[nodiscard]] const std::vector<WidgetSubtarget>&
     projected_subtargets(const RetainedNode& node) const;
+    /** Runs the node's lifecycle `inspection.subtargets` hook afresh, uncached. */
+    [[nodiscard]] std::vector<WidgetSubtarget> project_subtargets(const RetainedNode& node) const;
     [[nodiscard]] bool subtarget_hovered(std::uint64_t identity,
                                          std::string_view id) const noexcept;
     [[nodiscard]] bool subtarget_active(std::uint64_t identity, std::string_view id) const noexcept;

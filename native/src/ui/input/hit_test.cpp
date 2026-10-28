@@ -860,27 +860,31 @@ InputRouter::projected_subtargets(const RetainedNode& node) const {
     const auto found = projected_subtargets_.find(node.identity());
     if (found != projected_subtargets_.end())
         return found->second;
-    const WidgetLifecycle* const lifecycle = widgets_.find(node.description().type);
-    const bool extension_subtargets =
-        lifecycle != nullptr && lifecycle->inspection.subtargets != nullptr;
-    if (inside_native_presentation(node) || !node_participates(node) ||
-        (!extension_subtargets && !widget_projects_subtargets(node.description().type))) {
-        return projected_subtargets_.emplace(node.identity(), std::vector<WidgetSubtarget>{})
-            .first->second;
-    }
     std::vector<WidgetSubtarget> targets;
-    ++subtarget_projection_count_;
-    if (extension_subtargets) {
-        const LayoutRecord* const record = layout_->find(node.identity());
-        if (record != nullptr)
-            targets = lifecycle->inspection.subtargets(node, *record);
-    } else {
-        const std::string* query = edited_text(node.identity());
-        targets = widget_subtargets(
-            node, *layout_, commands_, text_width_resolver_, text_layout_resolver_, &notifications_,
-            query != nullptr ? std::string_view(*query) : std::string_view{});
-    }
+    if (!inside_native_presentation(node) && node_participates(node))
+        targets = project_subtargets(node);
     return projected_subtargets_.emplace(node.identity(), std::move(targets)).first->second;
+}
+
+std::vector<WidgetSubtarget> InputRouter::project_subtargets(const RetainedNode& node) const {
+    const WidgetLifecycle* const lifecycle = widgets_.find(node.description().type);
+    if (lifecycle == nullptr || lifecycle->inspection.subtargets == nullptr || layout_ == nullptr)
+        return {};
+    const LayoutRecord* const record = layout_->find(node.identity());
+    if (record == nullptr)
+        return {};
+    ++subtarget_projection_count_;
+    const std::string* query = edited_text(node.identity());
+    return lifecycle->inspection.subtargets(WidgetSubtargetContext{
+        node,
+        *layout_,
+        *record,
+        commands_,
+        &text_width_resolver_,
+        &text_layout_resolver_,
+        &notifications_,
+        query != nullptr ? std::string_view(*query) : std::string_view{},
+    });
 }
 
 void InputRouter::prepare_detached_subtargets() const {
@@ -888,10 +892,8 @@ void InputRouter::prepare_detached_subtargets() const {
     if (!pointer_geometry_ready_ || detached_subtargets_ready_)
         return;
     const std::vector<DetachedOverlayRoot> overlays =
-        detached_overlay_roots(*tree_, *layout_, detached_subtarget_types(), false,
-                               [this](const RetainedNode& node) {
-            if (!widget_projects_detached_subtargets(node.description().type))
-                return false;
+        detached_overlay_roots(*tree_, *layout_, widgets_, widgets_.detached_subtarget_types(),
+                               false, [this](const RetainedNode& node) {
             return std::ranges::any_of(projected_subtargets(node), &WidgetSubtarget::detached);
         });
     for (auto root = overlays.rbegin(); root != overlays.rend(); ++root) {
@@ -946,17 +948,7 @@ std::vector<WidgetSubtarget> InputRouter::subtargets(const std::uint64_t identit
     // ranks all of its commands, so it is reused until something it depends on changes.
     if (!preparing_pointer_geometry_)
         return projected_subtargets(*node);
-    const WidgetLifecycle* const lifecycle = widgets_.find(node->description().type);
-    ++subtarget_projection_count_;
-    if (lifecycle != nullptr && lifecycle->inspection.subtargets != nullptr) {
-        const LayoutRecord* const record = layout_->find(identity);
-        return record != nullptr ? lifecycle->inspection.subtargets(*node, *record)
-                                 : std::vector<WidgetSubtarget>{};
-    }
-    const std::string* query = edited_text(identity);
-    return widget_subtargets(*node, *layout_, commands_, text_width_resolver_,
-                             text_layout_resolver_, &notifications_,
-                             query != nullptr ? std::string_view(*query) : std::string_view{});
+    return project_subtargets(*node);
 }
 
 bool InputRouter::subtarget_hovered(const std::uint64_t identity,
@@ -1079,7 +1071,7 @@ void InputRouter::refresh_hover() {
     if (RetainedNode* modal = active_modal(); modal != nullptr) {
         const bool above_modal = subtarget.has_value() && subtarget->detached &&
                                  subtarget->owner_identity != modal->identity() &&
-                                 subtarget->z_index > detached_overlay_z_index(*modal);
+                                 subtarget->z_index > detached_overlay_z_index(widgets_, *modal);
         if (!above_modal && (hover_target == nullptr || !descendant_of(*hover_target, *modal)))
             hover_target = modal;
     }
@@ -1344,7 +1336,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
         const bool routed_above_modal =
             routed_subtarget_.has_value() && routed_subtarget_->detached &&
             routed_subtarget_->owner_identity != modal->identity() &&
-            routed_subtarget_->z_index > detached_overlay_z_index(*modal);
+            routed_subtarget_->z_index > detached_overlay_z_index(widgets_, *modal);
         const RetainedNode* focused =
             focused_.has_value() ? tree_->find_identity(*focused_) : nullptr;
         if (focused == nullptr || !descendant_of(*focused, *modal)) {

@@ -457,6 +457,7 @@ add_library(
         src/ui/widget/input.cpp
         src/ui/widget/menu_model.cpp
         src/ui/widget/subtarget.cpp
+        src/ui/widget/subtarget_projections.cpp
         src/ui/widget/editor_geometry.cpp
         src/ui/widget/input_collection_common.cpp
         src/ui/widget/input_tree.cpp
