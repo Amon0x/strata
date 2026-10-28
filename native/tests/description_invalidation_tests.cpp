@@ -354,6 +354,53 @@ overlay Main {
           "the pane that read the ratio did not take its new value");
 }
 
+void test_a_failed_build_changes_nothing_outside_the_builder() {
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("invalidation-pure", bundle);
+    application.configure_durable_store(runtime::DurableStoreAdapter{
+        [](const std::string_view) -> std::optional<std::string> {
+            return R"({"application":{"pure.count":"not a number"},"commands":{},"format":"strata.durable","shell":{},"version":1,"widgets":{}})";
+        },
+        [](const std::string_view, const std::string_view) {},
+    });
+    activate(application, "invalidation-pure", R"(
+overlay Broken {
+  state count: number = persisted("pure.count", 1);
+  root Repeater(key: "pure.rows", estimatedItemExtent: 24) {
+    for item in [{ label: "same" }, { label: "SAME" }] {
+      Panel(key: upper(item.label))
+    }
+  }
+}
+overlay Fine {
+  state count: number = 1;
+  root Text(key: "pure.text", text: format("{0}", count))
+}
+)");
+    check(application.durability().application_value("pure.count") != nullptr,
+          "the purity fixture's durable value was not loaded");
+    // Describing reads only: a build that fails after a state was declared stores no state,
+    // binds no scope and discards no durable value.
+    ui::DescriptionBuilder builder(application);
+    bool rejected = false;
+    try {
+        static_cast<void>(builder.build(runtime::LayerRole::overlay, "Broken"));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    check(rejected, "the duplicate Repeater keys were not rejected");
+    check(application.state().size() == 0U &&
+              !application.resolve_state_scope("overlay Broken", "count").has_value() &&
+              application.durability().application_value("pure.count") != nullptr,
+          "a failed build stored state, bound a scope or discarded a durable value");
+
+    // A build that succeeds commits what it described.
+    const ui::DescriptionBuildResult fine = builder.build(runtime::LayerRole::overlay, "Fine");
+    check(text(find(fine.root, "pure.text")) == "1" && application.state().size() == 1U &&
+              application.resolve_state_scope("overlay Fine", "count").has_value(),
+          "a successful build did not store its state or bind it");
+}
+
 } // namespace
 
 int strata_test_description_invalidation() {
@@ -363,6 +410,7 @@ int strata_test_description_invalidation() {
         test_a_stale_row_is_described_alone();
         test_rows_of_a_new_generation_keep_what_did_not_change();
         test_a_retained_write_beside_a_repeater_describes_only_its_reader();
+        test_a_failed_build_changes_nothing_outside_the_builder();
         std::cout << "strata_description_invalidation_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

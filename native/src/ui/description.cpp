@@ -1054,8 +1054,9 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
                     if (widget->persistence.accepts == nullptr ||
                         widget->persistence.accepts(field, *value)) {
                         durable_retained.retained_values.emplace(field, *value);
-                    } else {
-                        application_.services().report(runtime::RuntimeDiagnostic{
+                    } else if (transaction_ != nullptr) {
+                        // Discarded when the build commits; until then the field reads as unset.
+                        transaction_->reports.push_back(runtime::RuntimeDiagnostic{
                             "STRATA.DURABILITY.TYPE_MISMATCH",
                             "Persisted widget field '" + field + "' for '" + *persistence_key +
                                 "' has an invalid value and was discarded.",
@@ -1064,8 +1065,7 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
                             runtime::DiagnosticSeverity::warning,
                             std::nullopt,
                         });
-                        static_cast<void>(
-                            application_.durability().erase_widget_value(*persistence_key, field));
+                        transaction_->erased_widget_values.emplace_back(*persistence_key, field);
                     }
                 }
             }
