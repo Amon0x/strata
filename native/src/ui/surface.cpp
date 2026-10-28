@@ -1663,7 +1663,10 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         const auto input_started = std::chrono::steady_clock::now();
         const std::size_t dirty_before = tree_.dirty_count();
         auto input_profile = profiler_.section("input");
-        InputOperationResult queued_input = input_.process_queued();
+        InputOperationResult queued_input = input_.process_queued([this] {
+            return description_invalidated_ ||
+                   application_.dirty_generation() != observed_application_generation_;
+        });
         processed_queued_input = queued_input.processed_events != 0U;
         append_input(next.lifecycle_input, std::move(queued_input));
         const std::size_t dirty_after = tree_.dirty_count();
@@ -1718,23 +1721,36 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     }
     layout_tree(next, frame_time_nanos);
     input_.publish_layout(layout_engine_.result());
-    const std::uint64_t pre_input_layout_generation = tree_.layout_invalidation_generation();
-    if (!input_processed_before_layout)
-        process_queued_input();
+    // A queued event that invalidates the description ends its batch; the rest of the batch is
+    // routed against the rebuilt and laid out tree, in this frame for a bounded number of rounds.
+    constexpr std::size_t maximum_input_rounds = 4U;
+    bool process_input = !input_processed_before_layout;
+    for (std::size_t round = 1U;; ++round) {
+        const std::uint64_t pre_input_layout_generation = tree_.layout_invalidation_generation();
+        if (process_input)
+            process_queued_input();
 
-    std::optional<std::string_view> input_restore_focus;
-    const bool input_rebuilt = rebuild_tree(next, input_restore_focus);
-    if (input_rebuilt) {
-        append_input(next.lifecycle_input, input_.prepare(tree_, input_restore_focus));
-    }
-    // Queued pointer/key processing can change interaction channels after the first layout pass.
-    // Discover those targets at the current timestamp without advancing active animation clocks.
-    if ((!input_processed_before_layout && processed_queued_input) || input_rebuilt) {
-        sample_motion(next, frame_time_nanos, false);
-    }
-    if (input_rebuilt || (!input_processed_before_layout &&
-                          tree_.layout_invalidation_generation() != pre_input_layout_generation)) {
-        layout_tree(next, frame_time_nanos);
+        std::optional<std::string_view> input_restore_focus;
+        const bool input_rebuilt = rebuild_tree(next, input_restore_focus);
+        if (input_rebuilt) {
+            append_input(next.lifecycle_input, input_.prepare(tree_, input_restore_focus));
+        }
+        // Queued pointer/key processing can change interaction channels after the first layout
+        // pass. Discover those targets at the current timestamp without advancing active
+        // animation clocks.
+        if ((process_input && processed_queued_input) || input_rebuilt) {
+            sample_motion(next, frame_time_nanos, false);
+        }
+        if (input_rebuilt || (process_input && tree_.layout_invalidation_generation() !=
+                                                   pre_input_layout_generation)) {
+            layout_tree(next, frame_time_nanos);
+            input_.publish_layout(layout_engine_.result());
+        }
+        if (!input_.input_batch_split() || input_.queued_event_count() == 0U ||
+            round == maximum_input_rounds) {
+            break;
+        }
+        process_input = true;
     }
     tree_.consume_layout_dirty();
     const LayoutResult& laid_out = layout_engine_.result();

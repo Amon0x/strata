@@ -2499,6 +2499,56 @@ overlay SlidingTabs {
           "a tab inside a moving panel was hit where it is laid out instead of where it is drawn");
 }
 
+void test_queued_batch_sees_rebuilt_tree(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay BatchedReveal {
+  state open = false;
+  state draft = "";
+  root Panel(key: "batch.root", layout: { kind: "COLUMN", width: 300, height: 200, gap: 8 }) {
+    Button(key: "batch.open", label: "Open", onClick: action("state.set", name: "open", value: true))
+    if open {
+      TextBox(key: "batch.field", bind: draft, layout: { width: 160, height: 28 })
+    }
+    Text(key: "batch.draft", text: draft)
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("batched-reveal", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "BatchedReveal", 300.0, 200.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    static_cast<void>(surface->dispatch_action(
+        "focus.request", object({{"key", runtime::Value(runtime::KeyValue{"batch.open"})}}),
+        "test", std::nullopt, runtime::Value{}));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(surface->input().focused_key() == std::optional<std::string_view>("batch.open") &&
+              surface->tree().find_key("batch.field") == nullptr,
+          "batched reveal fixture did not start focused on its closed trigger");
+
+    // One platform batch: Enter reveals a field, Tab moves into it, and the text lands there.
+    // Tab and the text must be routed against the tree the Enter rebuilt.
+    std::vector<ui::SurfaceInputEvent> events;
+    events.emplace_back(ui::KeyInputEvent{"enter"});
+    events.emplace_back(ui::KeyInputEvent{"tab"});
+    events.emplace_back(ui::TextInputEvent{"typed"});
+    static_cast<void>(surface->input().enqueue(std::move(events)));
+    for (int frame = 0; frame < 2; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    check(surface->input().focused_key() == std::optional<std::string_view>("batch.field"),
+          "Tab after the key revealing a field was routed against the tree without it");
+    const ui::RetainedNode* draft = surface->tree().find_key("batch.draft");
+    const auto text = draft != nullptr ? draft->description().properties.find("text")
+                                       : ui::DescriptionNode::Properties::const_iterator{};
+    const runtime::Value* value = draft != nullptr &&
+                                          text != draft->description().properties.end()
+                                      ? text->second.value()
+                                      : nullptr;
+    check(value != nullptr && value->string() != nullptr && *value->string() == "typed",
+          "text after the key revealing a field did not reach it");
+}
+
 } // namespace
 
 int strata_test_interaction_residual(const int argument_count, const char* const* const arguments) {
@@ -2535,6 +2585,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_post_layout_reveal_reaches_layout(resources);
         test_sticky_table_header_blocks_hits(resources);
         test_subtargets_hit_in_presented_space(resources);
+        test_queued_batch_sees_rebuilt_tree(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

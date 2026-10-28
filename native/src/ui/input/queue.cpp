@@ -288,8 +288,12 @@ InputOperationResult InputRouter::enqueue_ime_preedit(
     return InputOperationResult{{}, {}, accepted ? 1U : 0U, 0U};
 }
 
-InputOperationResult InputRouter::process_queued() {
+bool InputRouter::input_batch_split() const noexcept { return input_batch_split_; }
+
+InputOperationResult InputRouter::process_queued(const std::function<bool()>& stale) {
     InputOperationResult result;
+    input_batch_split_ = false;
+    const bool stale_before = stale && stale();
     while (!queued_inputs_.empty() &&
            result.processed_events < input_config_.max_events_per_frame) {
         SurfaceInputEvent input = std::move(queued_inputs_.front());
@@ -327,6 +331,12 @@ InputOperationResult InputRouter::process_queued() {
                 }, traversal));
             }
         }, std::move(input)));
+        // A key that opens a popup, say, leaves the popup to the rebuild: the next key must not
+        // be routed against the tree without it.
+        if (!stale_before && !queued_inputs_.empty() && stale && stale()) {
+            input_batch_split_ = true;
+            break;
+        }
     }
     if (queued_inputs_.empty()) input_queue_overflow_reported_ = false;
     synchronize_authored_presentations();

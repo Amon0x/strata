@@ -344,8 +344,15 @@ class InputRouter final {
     [[nodiscard]] InputOperationResult enqueue(std::vector<SurfaceInputEvent> events);
     /** Cancels all surface-owned focus, capture, hover, press, drag, and queued input state. */
     [[nodiscard]] InputOperationResult cancel_interactions();
-    /** Drains queued platform events at the surface input phase. */
-    [[nodiscard]] InputOperationResult process_queued();
+    /**
+     * Drains queued platform events at the surface input phase. With `stale` (whether the tree
+     * routing them is out of date, its description invalidated), the drain stops after an event
+     * that makes it stale, so the rest can be routed against the tree that event rebuilds.
+     */
+    [[nodiscard]] InputOperationResult
+    process_queued(const std::function<bool()>& stale = nullptr);
+    /** Whether the last drain stopped at a stale tree with events still queued. */
+    [[nodiscard]] bool input_batch_split() const noexcept;
     /** Injects a typed or explicitly dynamic action through the surface event pipeline. */
     [[nodiscard]] InjectedActionResult
     dispatch_action(std::string action_id, runtime::Value payload, std::string event_kind,
@@ -821,6 +828,7 @@ class InputRouter final {
     mutable bool pointer_geometry_ready_ = false;
     mutable bool detached_subtargets_ready_ = false;
     bool input_queue_overflow_reported_ = false;
+    bool input_batch_split_ = false;
     std::vector<runtime::RuntimeDiagnostic> pending_diagnostics_;
     std::int64_t frame_time_nanos_ = 0;
 };
