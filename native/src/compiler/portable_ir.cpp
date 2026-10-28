@@ -441,9 +441,8 @@ public:
 
 private:
     /**
-     * Where an expression lowers. An expression lowered at a synthesized node (a `bind:` shorthand
-     * as its controlled value, a binding's undo arguments under its event action) keeps its
-     * subtree's shape below the new position.
+     * Where an expression lowers. An expression lowered again at a synthesized node (a binding's
+     * undo arguments under its event action) keeps its subtree's shape below the new position.
      */
     [[nodiscard]] Placement placed(const NodeId id) const {
         Placement placement = model_.placement(id);
@@ -655,13 +654,9 @@ private:
         }
         for (const BindingExpansion& expansion : resolved.bindings) {
             const Argument& shorthand = call.arguments[expansion.shorthand];
-            const std::string& value = expansion.binding->value_parameter;
-            arguments.emplace_back(
-                value,
-                compile_at(*shorthand.value,
-                           Placement{child(child(placement.path, "arguments"), value),
-                                     placement.component_path + "." + value})
-            );
+            // Analysis placed the shorthand at the controlled value it lowers as.
+            arguments.emplace_back(expansion.binding->value_parameter,
+                                   compile_expression(*shorthand.value));
             const Placement event{
                 child(child(placement.path, "arguments"), expansion.binding->event_parameter),
                 placement.component_path + "." + expansion.binding->event_parameter,

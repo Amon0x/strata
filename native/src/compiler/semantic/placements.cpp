@@ -292,9 +292,9 @@ private:
                 if (found != resolved->bindings.end()) expansion = &*found;
             }
             if (expansion != nullptr) {
-                // The shorthand is read as the controlled value it binds.
-                const std::string& shorthand = expansion->binding->shorthand_parameter;
-                expression(*argument.value, child(arguments, shorthand), runtime + "." + shorthand,
+                // The shorthand lowers as the controlled value it binds, so it sits there.
+                const std::string& value = expansion->binding->value_parameter;
+                expression(*argument.value, child(arguments, value), runtime + "." + value,
                            expansion->controlled->type.get());
                 continue;
             }

@@ -1006,6 +1006,31 @@ void test_analysis_runs_despite_syntax_and_import_errors() {
           "a failed import cascaded into unknown names:" + describe(missing));
 }
 
+/** Every "path" an IR value carries, at any depth. */
+void collect_ir_paths(const strata::data::JsonValue& value, std::vector<std::string>& paths) {
+    if (const auto* object = value.object()) {
+        for (const auto& [key, child] : *object) {
+            if (key == "path" && child.string() != nullptr) paths.push_back(*child.string());
+            collect_ir_paths(child, paths);
+        }
+    } else if (const auto* array = value.array()) {
+        for (const auto& child : *array) collect_ir_paths(child, paths);
+    }
+}
+
+// The source map names the IR node each authored expression lowers to, so a compiled path from
+// the runtime leads back to source; a bind: shorthand lowers as its controlled value.
+void test_source_map_paths_name_ir_nodes() {
+    const auto bound = compile_source("screen Main { state name = \"\"; root TextBox(bind: name) }");
+    check(bound.succeeded(), "the bound fixture did not compile:" + describe(bound));
+    std::vector<std::string> paths;
+    collect_ir_paths(*bound.unit, paths);
+    for (const auto& entry : bound.source_map.entries) {
+        check(std::ranges::find(paths, entry.path) != paths.end(),
+              "source map path '" + entry.path + "' names no IR node");
+    }
+}
+
 // What semantic analysis and the runtime need to know about a built-in comes from the catalog:
 // types have names, widget roles are flags, and every helper names its runtime evaluator.
 void test_catalog_declares_roles_and_names() {
@@ -1063,6 +1088,7 @@ int strata_test_compiler() {
         test_bind_shorthand_needs_a_retained_target();
         test_analysis_runs_despite_syntax_and_import_errors();
         test_catalog_declares_roles_and_names();
+        test_source_map_paths_name_ir_nodes();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {
