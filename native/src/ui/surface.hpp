@@ -107,6 +107,54 @@ struct SurfaceFrame final {
     InputOperationResult lifecycle_input;
 };
 
+/** Why the input router was prepared against the tree during a frame. */
+enum class InputPrepareReason : std::uint8_t {
+    /** The description was rebuilt and reconciled at the start of the frame. */
+    rebuilt,
+    /** Scrolling attached a predicted virtual window before the frame's layout. */
+    predicted_realization,
+    /** Finished exit motion pruned retained nodes. */
+    pruned_exits,
+    /** A layout convergence round realized virtual children. */
+    lazy_realization,
+    /** A queued event re-described the tree mid-batch; the batch continues against it. */
+    input_rebuild,
+};
+
+/**
+ * What changed since the last completed frame, and so which phases must run. The frame reads
+ * every dirty source once through this model instead of re-checking them per phase; its fast
+ * paths are expressed against it.
+ */
+struct FrameDirtyModel final {
+    /** Something asked for a frame (invalidate_frame). */
+    bool requested = false;
+    /** The description must be rebuilt: invalidated, or application state moved. */
+    bool description = false;
+    /** Retained nodes carry dirty marks (any reason lane). */
+    bool retained = false;
+    /** The layout engine needs a pass: environment, invalidation generation or transitions. */
+    bool layout = false;
+    /** Motion players are running. */
+    bool motion = false;
+    /** Scroll animations or layout transitions are running. */
+    bool animation = false;
+    /** The input router needs time to advance (presses, hover disclosures, frame requests). */
+    bool input = false;
+    /** Lifecycle input from outside the frame is waiting to be published. */
+    bool lifecycle_input = false;
+    /** Host services have frame work pending. */
+    bool services = false;
+
+    /** Nothing but queued input could make this frame do work. */
+    [[nodiscard]] bool settled() const noexcept {
+        return !requested && !description && !retained && !layout && !motion && !animation &&
+               !input && !lifecycle_input && !services;
+    }
+    /** The layout phase must run (otherwise the previous layout stands). */
+    [[nodiscard]] bool needs_layout() const noexcept { return retained || motion || layout; }
+};
+
 struct SurfaceEventRecord final {
     std::uint64_t sequence = 0U;
     std::uint64_t frame_index = 0U;
@@ -306,8 +354,18 @@ class Surface final {
     [[nodiscard]] const RetainedNode* inspected_node() const noexcept;
     [[nodiscard]] bool set_focus_containment(std::optional<std::string_view> key);
     [[nodiscard]] bool focus_contained() const noexcept;
+    /**
+     * Each time the last frame prepared input against the tree, and why. Every entry follows a
+     * tree change; the count is bounded by one rebuild, the layout convergence rounds, exit
+     * pruning and the bounded mid-batch input rounds.
+     */
+    [[nodiscard]] std::span<const InputPrepareReason> last_frame_input_prepares() const noexcept;
 
   private:
+    [[nodiscard]] FrameDirtyModel observe_dirty(std::int64_t frame_time_nanos, bool requested,
+                                                bool pending_lifecycle) const;
+    void prepare_input(SurfaceFrame& frame, InputPrepareReason reason,
+                       std::optional<std::string_view> restore_focus = std::nullopt);
     void advance_environment_generation();
     void invalidate_frame() noexcept;
     void invalidate_description() noexcept;
@@ -389,6 +447,7 @@ class Surface final {
     /** Surface frame index whose temporal motion clocks were sampled; discovery is separate. */
     std::uint64_t motion_sampled_frame_index_ = 0U;
     bool advancing_scroll_animation_ = false;
+    std::vector<InputPrepareReason> input_prepares_;
     bool frame_invalidated_ = true;
     bool description_invalidated_ = true;
     InputOperationResult pending_lifecycle_input_;

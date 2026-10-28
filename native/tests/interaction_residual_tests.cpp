@@ -2624,6 +2624,59 @@ overlay SlidingTabs {
           "a tab inside a moving panel was hit where it is laid out instead of where it is drawn");
 }
 
+void test_frame_input_prepares_are_explained(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay ChoiceFrame {
+  state tab = "two";
+  root Panel(key: "choice.root", layout: { kind: "COLUMN", width: 640, height: 200 }) {
+    Tabs(
+      key: "choice.tabs",
+      tabs: [{ id: "one", label: "One" }, { id: "two", label: "Two" }],
+      bind: tab,
+      layout: { width: 300, height: 32 }
+    )
+    Text(key: "choice.value", text: tab)
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("choice-frame", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "ChoiceFrame", 640.0, 200.0, false);
+    static_cast<void>(surface->frame(1'000'000));
+    const std::span<const ui::InputPrepareReason> first = surface->last_frame_input_prepares();
+    check(!first.empty() && first.front() == ui::InputPrepareReason::rebuilt,
+          "the first frame did not prepare input once for its rebuilt tree");
+    static_cast<void>(surface->frame(2'000'000));
+    check(surface->last_frame_input_prepares().empty(),
+          "a settled frame prepared input although nothing changed");
+
+    const ui::RetainedNode* tabs = surface->tree().find_key("choice.tabs");
+    const std::vector<ui::WidgetSubtarget> targets = surface->input().subtargets(tabs->identity());
+    const auto first_tab = std::ranges::find(targets, std::string("one"), &ui::WidgetSubtarget::id);
+    check(first_tab != targets.end(), "choice fixture did not project its tabs");
+    std::vector<ui::SurfaceInputEvent> events;
+    events.emplace_back(
+        ui::PointerInputEvent{center(first_tab->bounds), ui::PointerEventType::press, 9, 0});
+    events.emplace_back(
+        ui::PointerInputEvent{center(first_tab->bounds), ui::PointerEventType::release, 9, 0});
+    static_cast<void>(surface->input().enqueue(std::move(events)));
+    static_cast<void>(surface->frame(3'000'000));
+    const std::span<const ui::InputPrepareReason> clicked = surface->last_frame_input_prepares();
+    // The click re-describes the tree once; every preparation follows a tree change.
+    check(!clicked.empty() && clicked.size() <= 2U &&
+              std::ranges::all_of(clicked,
+                                  [](const ui::InputPrepareReason reason) {
+                                      return reason == ui::InputPrepareReason::rebuilt ||
+                                             reason == ui::InputPrepareReason::input_rebuild;
+                                  }),
+          "a state-changing click prepared input an unexplained number of times");
+    static_cast<void>(surface->frame(4'000'000));
+    static_cast<void>(surface->frame(5'000'000));
+    check(surface->last_frame_input_prepares().empty(),
+          "input preparation continued after the click settled");
+}
+
 void test_item_grid_header_clip(const std::filesystem::path& resources) {
     const std::string source = R"(
 overlay GroupedGrid {
@@ -2908,6 +2961,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_sticky_table_header_blocks_hits(resources);
         test_subtargets_hit_in_presented_space(resources);
         test_item_grid_header_clip(resources);
+        test_frame_input_prepares_are_explained(resources);
         test_queued_batch_sees_rebuilt_tree(resources);
         test_hover_follows_content_under_still_pointer(resources);
         test_palette_projection_is_cached_across_frames(resources);

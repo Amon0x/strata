@@ -1283,9 +1283,7 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
         record_profiler_counters(frame);
         layout_profile.close();
     };
-    const LayoutEnvironment stable_environment = environment_.layout_environment(frame_time_nanos);
-    if (tree_.dirty_count() == 0U && motion_.active_count() == 0U &&
-        !layout_engine_.requires_layout(tree_, stable_environment)) {
+    if (!observe_dirty(frame_time_nanos, false, false).needs_layout()) {
         finish_layout_profile();
         return;
     }
@@ -1298,7 +1296,7 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
         const ReconcileStats predicted = realize_virtual_children(layout_engine_.result());
         if (predicted.changed()) {
             auto prepare_profile = profiler_.section("input-prepare");
-            append_input(frame.lifecycle_input, input_.prepare(tree_));
+            prepare_input(frame, InputPrepareReason::predicted_realization);
         }
     }
     const bool temporal_motion_sample = motion_sampled_frame_index_ != frame.frame_index;
@@ -1317,7 +1315,7 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
                     return motion_.exit_finished(node);
                 }) != 0U) {
                 auto prepare_profile = profiler_.section("input-prepare");
-                append_input(frame.lifecycle_input, input_.prepare(tree_));
+                prepare_input(frame, InputPrepareReason::pruned_exits);
             }
         }
         std::vector<MotionMoveOrigin> move_origins;
@@ -1424,11 +1422,40 @@ void Surface::layout_tree(SurfaceFrame& frame, const std::int64_t frame_time_nan
         }
         {
             auto prepare_profile = profiler_.section("input-prepare");
-            append_input(frame.lifecycle_input, input_.prepare(tree_));
+            prepare_input(frame, InputPrepareReason::lazy_realization);
         }
         sample_motion(frame, frame_time_nanos, false);
     }
     finish_layout_profile();
+}
+
+FrameDirtyModel Surface::observe_dirty(const std::int64_t frame_time_nanos, const bool requested,
+                                       const bool pending_lifecycle) const {
+    return FrameDirtyModel{
+        .requested = requested,
+        .description = description_invalidated_ ||
+                       application_.dirty_generation() != observed_application_generation_,
+        .retained = tree_.dirty_count() != 0U,
+        // Work raised after the frame's last layout (a post-layout reveal scrolling) only bumps
+        // the layout generation: its dirty marks were cleared with the frame that raised it.
+        .layout =
+            layout_engine_.requires_layout(tree_, environment_.layout_environment(frame_time_nanos)),
+        .motion = motion_.active_count() != 0U,
+        .animation = !scroll_animations_.empty() || layout_engine_.active_transition_count() != 0U,
+        .input = input_.requires_frame_advance(),
+        .lifecycle_input = pending_lifecycle,
+        .services = application_.services().has_pending_frame_work(),
+    };
+}
+
+void Surface::prepare_input(SurfaceFrame& frame, const InputPrepareReason reason,
+                            const std::optional<std::string_view> restore_focus) {
+    input_prepares_.push_back(reason);
+    append_input(frame.lifecycle_input, input_.prepare(tree_, restore_focus));
+}
+
+std::span<const InputPrepareReason> Surface::last_frame_input_prepares() const noexcept {
+    return input_prepares_;
 }
 
 void Surface::commit_lazy_materializations(SurfaceFrame& frame) {
@@ -1597,18 +1624,11 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
                                    !pending_lifecycle_input_.action_outcomes.empty() ||
                                    pending_lifecycle_input_.injected_events != 0U ||
                                    pending_lifecycle_input_.processed_events != 0U;
+    input_prepares_.clear();
     const bool requested_frame = std::exchange(frame_invalidated_, false);
     const bool settled_except_input =
-        last_frame_.frame_index != 0U && !requested_frame && !description_invalidated_ &&
-        tree_.root() != nullptr &&
-        application_.dirty_generation() == observed_application_generation_ &&
-        tree_.dirty_count() == 0U && !input_.requires_frame_advance() && !pending_lifecycle &&
-        scroll_animations_.empty() && motion_.active_count() == 0U &&
-        layout_engine_.active_transition_count() == 0U &&
-        // Work raised after the frame's last layout (a post-layout reveal scrolling) only bumps
-        // the layout generation: its dirty marks were cleared with the frame that raised it.
-        !layout_engine_.requires_layout(tree_, environment_.layout_environment(frame_time_nanos)) &&
-        !application_.services().has_pending_frame_work();
+        last_frame_.frame_index != 0U && tree_.root() != nullptr &&
+        observe_dirty(frame_time_nanos, requested_frame, pending_lifecycle).settled();
     if (settled_except_input && input_.queued_event_count() == 0U) {
         SurfaceFrame next;
         next.frame_index = last_frame_.frame_index + 1U;
@@ -1664,14 +1684,9 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     if (settled_except_input) {
         input_processed_before_layout = true;
         process_queued_input();
-        if (processed_queued_input && !frame_invalidated_ && !description_invalidated_ &&
-            tree_.dirty_count() == 0U &&
-            application_.dirty_generation() == observed_application_generation_ &&
-            !layout_engine_.requires_layout(tree_,
-                                            environment_.layout_environment(frame_time_nanos)) &&
-            !input_.requires_frame_advance() && scroll_animations_.empty() &&
-            motion_.active_count() == 0U && layout_engine_.active_transition_count() == 0U &&
-            !application_.services().has_pending_frame_work()) {
+        // Input alone changed nothing the frame draws: finish without the other phases.
+        if (processed_queued_input &&
+            observe_dirty(frame_time_nanos, frame_invalidated_, false).settled()) {
             next.operations.injected_events = next.lifecycle_input.injected_events;
             next.operations.input_fast_path_frames = 1U;
             return complete_frame(std::move(next));
@@ -1687,7 +1702,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         auto input_profile = profiler_.section("input");
         append_input(next.lifecycle_input, std::move(pending_lifecycle_input_));
         pending_lifecycle_input_ = InputOperationResult{};
-        append_input(next.lifecycle_input, input_.prepare(tree_, restore_focus));
+        prepare_input(next, InputPrepareReason::rebuilt, restore_focus);
         append_input(next.lifecycle_input, input_.advance_frame());
         const std::size_t dirty_after = tree_.dirty_count();
         next.operations.input_mutated_nodes +=
@@ -1713,9 +1728,8 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
 
         std::optional<std::string_view> input_restore_focus;
         const bool input_rebuilt = rebuild_tree(next, input_restore_focus);
-        if (input_rebuilt) {
-            append_input(next.lifecycle_input, input_.prepare(tree_, input_restore_focus));
-        }
+        if (input_rebuilt)
+            prepare_input(next, InputPrepareReason::input_rebuild, input_restore_focus);
         // Queued pointer/key processing can change interaction channels after the first layout
         // pass. Discover those targets at the current timestamp without advancing active
         // animation clocks.
