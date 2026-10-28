@@ -23,16 +23,19 @@ inline constexpr std::string_view system_font_scheme = "system-font:";
  * directory separator is never looked up, so a font id cannot read outside the font directories.
  */
 [[nodiscard]] std::filesystem::path find_system_font(std::string_view file_name);
+/** Searches `directories` (recursively, in order) instead of the platform font directories. */
+[[nodiscard]] std::filesystem::path
+find_system_font(std::string_view file_name, std::span<const std::filesystem::path> directories);
 
 /**
  * The first candidate that is installed, as a `system-font:` resource id, or nullopt when none is.
  * Candidates are file names in preference order.
  */
-[[nodiscard]] std::optional<std::string> select_system_font(
-    std::span<const std::string> candidates);
+[[nodiscard]] std::optional<std::string>
+select_system_font(std::span<const std::string> candidates);
 
 /** The bytes behind a `system-font:` resource id; nullopt when `resource_id` is not one. */
-[[nodiscard]] std::optional<std::vector<std::uint8_t>> read_system_font(
-    std::string_view resource_id);
+[[nodiscard]] std::optional<std::vector<std::uint8_t>>
+read_system_font(std::string_view resource_id);
 
 } // namespace strata::host

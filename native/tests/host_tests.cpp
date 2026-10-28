@@ -5,6 +5,7 @@
 #include <strata/render_packet.hpp>
 
 #include "host/resource_root.hpp"
+#include "host/system_fonts.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -653,6 +654,27 @@ void resource_root_maps_failures_and_confines_links() {
     fs::remove_all(base);
 }
 
+/** A font directory holding names outside the narrow code page is still searchable. */
+void system_font_search_tolerates_unicode_names() {
+    namespace fs = std::filesystem;
+    const fs::path directory = fs::temp_directory_path() / "strata-system-font-test";
+    fs::remove_all(directory);
+    fs::create_directories(directory);
+    // U+5B57 and U+00FC: no single-byte code page holds both, so a narrow conversion throws.
+    for (const std::string_view name : {std::string_view("\xE5\xAD\x97\xC3\xBC.ttf"),
+                                        std::string_view("Target.TTF")}) {
+        std::ofstream font(directory / strata::host::utf8_path(name), std::ios::binary);
+        font << "font";
+    }
+    const std::vector<fs::path> directories{directory};
+    check(strata::host::find_system_font("target.ttf", directories) == directory / "Target.TTF",
+          "a system font search failed on a directory entry outside the narrow code page");
+    check(strata::host::find_system_font("\xE5\xAD\x97\xC3\xBC.ttf", directories).filename() ==
+              strata::host::utf8_path("\xE5\xAD\x97\xC3\xBC.ttf"),
+          "a system font with a Unicode file name was not found by its UTF-8 name");
+    fs::remove_all(directory);
+}
+
 #if defined(_WIN32)
 [[nodiscard]] std::string read_text_file(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
@@ -749,6 +771,7 @@ int strata_test_host() {
         public_runtime_facade_owns_host_boundaries();
         runtime_images_upload_only_when_sampled();
         resource_root_maps_failures_and_confines_links();
+        system_font_search_tolerates_unicode_names();
 #if defined(_WIN32)
         durable_writer_isolates_and_retries_failures();
 #endif

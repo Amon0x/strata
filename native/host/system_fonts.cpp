@@ -71,20 +71,29 @@ namespace {
 } // namespace
 
 std::filesystem::path find_system_font(const std::string_view file_name) {
+    return find_system_font(file_name, font_directories());
+}
+
+std::filesystem::path find_system_font(const std::string_view file_name,
+                                       const std::span<const std::filesystem::path> directories) {
     if (file_name.empty() || file_name.find_first_of("/\\:") != std::string_view::npos ||
         file_name == "." || file_name == "..") {
         return {};
     }
     const std::string wanted = lowered(file_name);
-    for (const std::filesystem::path& directory : font_directories()) {
+    for (const std::filesystem::path& directory : directories) {
         std::error_code error;
         // Distributions nest fonts by family, so the directories are searched recursively.
         std::filesystem::recursive_directory_iterator entry(
             directory, std::filesystem::directory_options::skip_permission_denied, error);
         const std::filesystem::recursive_directory_iterator end;
         for (; !error && entry != end; entry.increment(error)) {
-            if (lowered(entry->path().filename().string()) != wanted)
+            // Compare UTF-8 bytes: a narrow-code-page conversion throws for names it cannot map.
+            const std::u8string name = entry->path().filename().u8string();
+            if (lowered(std::string_view(reinterpret_cast<const char*>(name.data()),
+                                         name.size())) != wanted) {
                 continue;
+            }
             std::error_code status_error;
             if (entry->is_regular_file(status_error) && !status_error)
                 return entry->path();
