@@ -144,7 +144,6 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.RUNTIME_UNKNOWN_HELPER` | `native/src/runtime/expression.cpp` |
 | `STRATA.DSL.RUNTIME_UNKNOWN_LITERAL` | `native/src/runtime/expression.cpp` |
 | `STRATA.DSL.RUNTIME_UNKNOWN_OPERATOR` | `native/src/runtime/expression.cpp` |
-| `STRATA.DSL.SECURITY_BOUNDARY` | `native/src/compiler/security.cpp` |
 | `STRATA.DSL.SEMANTIC_AMBIGUOUS_SLOT_SHORTHAND` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_ANIMATION_DURATION_BOUNDS` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_ANIMATION_FRAME_MISMATCH` | `native/src/compiler/semantic.cpp` |

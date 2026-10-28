@@ -300,7 +300,6 @@ add_library(
         src/compiler/parser.cpp
         src/compiler/portable_ir.cpp
         src/compiler/portable_ir_validation.cpp
-        src/compiler/security.cpp
         src/compiler/schema.cpp
         src/compiler/semantic.cpp
         src/compiler/source.cpp

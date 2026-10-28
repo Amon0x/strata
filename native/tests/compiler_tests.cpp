@@ -153,9 +153,8 @@ void test_parser_errors_point_at_the_missing_token() {
           "an unclosed block was not traced to its opening line");
 }
 
-void test_parser_and_security_recovery_match_the_corpus_contract() {
+void test_parser_recovery_matches_the_corpus_contract() {
     const std::string source =
-        "/* Runtime.getRuntime is deliberately prohibited in source, including comments. */\n"
         "screen Broken {\n"
         "  state value = 12wat;\n"
         "  root Panel {\n"
@@ -164,21 +163,25 @@ void test_parser_and_security_recovery_match_the_corpus_contract() {
         "  }\n"
         "}\n";
     const auto result = strata::compiler::parse_source("app/main.strata", source);
-    check(result.diagnostics.size() == 5U, "syntax/security recovery diagnostic count changed");
+    check(result.diagnostics.size() == 4U, "syntax recovery diagnostic count changed");
     check(
         result.diagnostics[0].code == "STRATA.DSL.LEX_INVALID_NUMBER_SUFFIX" &&
             result.diagnostics[1].code == "STRATA.DSL.LEX_UNEXPECTED_CHAR" &&
-            result.diagnostics[2].code == "STRATA.DSL.SECURITY_BOUNDARY" &&
-            result.diagnostics[3].code == "STRATA.DSL.PARSE_EXPECTED_EXPRESSION" &&
-            result.diagnostics[4].code == "STRATA.DSL.PARSE_ARGUMENT_LIST",
-        "syntax/security recovery diagnostic ordering changed"
-    );
-    check(
-        result.diagnostics[2].range->start == strata::compiler::SourcePosition{1U, 4U, 3U} &&
-            result.diagnostics[2].range->end == strata::compiler::SourcePosition{1U, 22U, 21U},
-        "security diagnostic range changed"
+            result.diagnostics[2].code == "STRATA.DSL.PARSE_EXPECTED_EXPRESSION" &&
+            result.diagnostics[3].code == "STRATA.DSL.PARSE_ARGUMENT_LIST",
+        "syntax recovery diagnostic ordering changed"
     );
     check(result.file.declarations.size() == 1U, "broken declaration did not recover");
+}
+
+// Source is data the runtime interprets, never host code, so names that happen to match JVM APIs
+// are ordinary text wherever they appear.
+void test_host_api_names_are_ordinary_text() {
+    const auto result = compile_source(
+        "/* ProcessBuilder and Class.forName in a comment. */\n"
+        "screen Main { root Text(text: \"Runtime.getRuntime and ProcessBuilder\") }"
+    );
+    check(result.succeeded(), "text naming a JVM API was rejected:" + describe(result));
 }
 
 void test_full_language_ast() {
@@ -573,7 +576,8 @@ int strata_test_compiler() {
         test_lexer_contract();
         test_recovery_diagnostics();
         test_parser_errors_point_at_the_missing_token();
-        test_parser_and_security_recovery_match_the_corpus_contract();
+        test_parser_recovery_matches_the_corpus_contract();
+        test_host_api_names_are_ordinary_text();
         test_full_language_ast();
         test_compiler_limits_are_structured_and_terminal();
         test_fixed_seed_malformed_programs_terminate_with_valid_spans();

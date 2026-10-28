@@ -14,8 +14,6 @@
 #include <variant>
 #include <vector>
 
-#include "compiler/security.hpp"
-
 namespace strata::compiler {
 namespace {
 
@@ -1300,12 +1298,6 @@ ParseResult parse_source(
         return ParseResult{std::move(file), std::move(diagnostics)};
     }
     LexResult lexed = Lexer(source_id, source, limits.max_tokens, scratch).lex();
-    std::vector<Diagnostic> security = scan_security_boundary(source_id, source);
-    lexed.diagnostics.insert(
-        lexed.diagnostics.end(),
-        std::make_move_iterator(security.begin()),
-        std::make_move_iterator(security.end())
-    );
     return Parser(
         std::move(source_id),
         std::move(lexed.tokens),
