@@ -78,6 +78,12 @@ class WidgetRenderScope final {
     [[nodiscard]] const TextEngine* text_engine() const noexcept;
     [[nodiscard]] const MotionComputedValues* motion_values() const noexcept;
     [[nodiscard]] const WidgetVisualStyle& visual() const noexcept;
+    /**
+     * A named presentation color from the node's effective theme (see theme_palette_tokens);
+     * an unthemed node gets the default theme's. `alpha` replaces the token's own alpha.
+     */
+    [[nodiscard]] RenderColor palette(std::string_view name,
+                                      std::optional<std::uint8_t> alpha = std::nullopt) const;
     [[nodiscard]] bool enabled() const noexcept;
     [[nodiscard]] bool focused() const noexcept;
     [[nodiscard]] bool focus_visible() const noexcept;

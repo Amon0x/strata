@@ -159,6 +159,37 @@ void test_defaults_and_validation() {
         mistyped = true;
     }
     check(mistyped, "a standard token accepted a value of the wrong type");
+
+    // Presentation colors are palette tokens: the default (dark) theme keeps the colors it always
+    // drew, a light theme gets legible ones, and an explicit token wins over both.
+    const ui::ThemeTokens dark;
+    check(!dark.light() && light.light(), "theme lightness did not follow its surface");
+    check(dark.palette("popupSurface") == runtime::ColorValue{34U, 38U, 46U, 245U} &&
+              dark.palette("compositionUnderline") == runtime::ColorValue{255U, 255U, 255U, 160U},
+          "the dark palette moved away from the colors presentation drew");
+    check(light.palette("compositionUnderline").red == 0U &&
+              light.palette("popupSurface").red == 255U,
+          "a light theme kept dark-theme presentation colors");
+    ui::ThemeTokens branded = light;
+    branded.set("marqueeFill", runtime::ColorValue{1U, 2U, 3U, 4U});
+    check(branded.palette("marqueeFill") == runtime::ColorValue{1U, 2U, 3U, 4U},
+          "an explicit palette token did not override its default");
+    for (const ui::ThemePaletteToken& token : ui::theme_palette_tokens()) {
+        check(token.light != token.dark || token.name == "shadow",
+              "a palette token has no light-theme value of its own");
+    }
+    ui::ThemeCatalog light_catalog;
+    check(light_catalog.set_root(ui::Theme("light-root", light)), "light root did not install");
+    const ui::ThemeMaterializationResult light_tree =
+        ui::materialize_theme_tree(node("Panel", "palette.root"), light_catalog, widget_schemas(""));
+    const auto palette = light_tree.root->properties.find("$themePalette");
+    const runtime::Value* materialized =
+        palette != light_tree.root->properties.end() ? palette->second.value() : nullptr;
+    const runtime::Value* popup =
+        materialized != nullptr ? materialized->field("popupSurface") : nullptr;
+    check(popup != nullptr && popup->color() != nullptr &&
+              *popup->color() == light.palette("popupSurface"),
+          "materialization did not carry the effective theme's palette to its nodes");
     check(compact.visual->radius == 0.0 && compact.text_layout->pixel_size == 10.8 &&
               compact.text_layout->primary_font == "strata:fonts/default-medium",
           "compact control typography or theme semantics changed");

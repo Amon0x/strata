@@ -346,7 +346,7 @@ void text_input_content(WidgetRenderScope& scope, const TextInputMode mode) {
                 utf16_offset_for_utf8_byte(*editor->preedit, editor->preedit_selection_end);
             for (const Rect rect :
                  text_layout_selection_rects(text_layout, origin, selection_start, selection_end)) {
-                scope.solid_rect(rect, RenderColor{255U, 255U, 255U, 72U});
+                scope.solid_rect(rect, scope.palette("compositionSelection"));
             }
         }
         scope.text(text_layout, origin, color);
@@ -355,7 +355,7 @@ void text_input_content(WidgetRenderScope& scope, const TextInputMode mode) {
                      text_layout, origin, composition_range->first, composition_range->second)) {
                 rect.y += rect.height - 1.0;
                 rect.height = 1.0;
-                scope.solid_rect(rect, RenderColor{255U, 255U, 255U, 160U});
+                scope.solid_rect(rect, scope.palette("compositionUnderline"));
             }
         }
         if (editor.has_value() && scope.input().focused(scope.node().identity())) {
@@ -542,10 +542,10 @@ void select_overlay(WidgetRenderScope& scope) {
         popup = Rect{left, top, right - left, bottom - top};
     }
     if (!authored_popup) {
-        scope.shadow(popup, CornerRadii::all(scope.visual().radius), RenderColor{0U, 0U, 0U, 90U},
+        scope.shadow(popup, CornerRadii::all(scope.visual().radius), scope.palette("shadow", std::uint8_t{90U}),
                      12.0, 1.0);
         scope.rounded_rect(popup,
-                           scope.visual().background.value_or(RenderColor{34U, 38U, 46U, 245U}),
+                           scope.visual().background.value_or(scope.palette("popupSurface")),
                            scope.visual().border);
     }
     if (authored_items)
@@ -612,7 +612,8 @@ void radio_foreground(WidgetRenderScope& scope) {
                            child->bounds.x + 28.0,
                            child->bounds.y + (child->bounds.height - shaped.metrics.height) * 0.5,
                        },
-                       enabled ? scope.visual().foreground : RenderColor{160U, 168U, 178U, 220U});
+                       enabled ? scope.visual().foreground
+                               : scope.palette("disabledForeground", std::uint8_t{220U}));
         }
         if (id != nullptr)
             scope.interaction(child->bounds, *id);

@@ -14,6 +14,9 @@
 namespace strata::ui {
 namespace {
 
+/** The tint that leaves an image's own pixels as they are; not a theme color. */
+constexpr RenderColor untinted{255U, 255U, 255U, 255U};
+
 void container_content(WidgetRenderScope& scope) {
     if (scope.visual().background.has_value()) {
         scope.rounded_rect(scope.layout().bounds, *scope.visual().background);
@@ -169,7 +172,7 @@ void image_content(WidgetRenderScope& scope) {
     if (image == nullptr)
         return;
     scope.image(scope.layout().bounds, *image,
-                widget_color(scope.property("tint"), RenderColor{255U, 255U, 255U, 255U}),
+                widget_color(scope.property("tint"), untinted),
                 widget_texture_region(scope.property("source")));
 }
 
@@ -195,7 +198,7 @@ void image_shape(WidgetRenderScope& scope, const runtime::Value& shape) {
         right.y - origin.y, down.y - origin.y, origin.y,
     });
     scope.image(Rect{0.0, 0.0, 1.0, 1.0}, *image,
-                widget_color(shape.field("tint"), RenderColor{255U, 255U, 255U, 255U}),
+                widget_color(shape.field("tint"), untinted),
                 widget_texture_region(shape.field("source")));
     scope.pop_transform();
 }
@@ -233,11 +236,11 @@ void menu_overlay(WidgetRenderScope& scope) {
         return;
     const MenuProjection projection =
         project_menu(scope.node(), scope.layout_result(), &scope.command_index());
-    const Paint background = scope.visual().background.value_or(RenderColor{34U, 38U, 46U, 245U});
+    const Paint background = scope.visual().background.value_or(scope.palette("popupSurface"));
     if (!authored_popup) {
         for (const MenuPanelModel& panel : projection.panels) {
             scope.shadow(panel.bounds, CornerRadii::all(scope.visual().radius),
-                         RenderColor{0U, 0U, 0U, 105U}, 8.0, 1.0);
+                         scope.palette("shadow", std::uint8_t{105U}), 8.0, 1.0);
             scope.rounded_rect(panel.bounds, background, scope.visual().border);
         }
     }
@@ -270,7 +273,8 @@ void menu_overlay(WidgetRenderScope& scope) {
         }
         scope.interaction(bounds, identity);
         const RenderColor foreground =
-            item.enabled ? scope.visual().foreground : RenderColor{160U, 168U, 178U, 135U};
+            item.enabled ? scope.visual().foreground
+                         : scope.palette("disabledForeground", std::uint8_t{135U});
         if (item.has_checked && item.checked) {
             scope.shape(
                 Rect{
@@ -324,7 +328,8 @@ void status_content(WidgetRenderScope& scope) {
             scope.layout().bounds.y + (scope.layout().bounds.height - shaped.metrics.height) * 0.5,
         },
         scope.visual().border.has_value() ? scope.visual().border->color
-                                          : RenderColor{160U, 168U, 178U, 220U},
+                                          : scope.palette("disabledForeground",
+                                                          std::uint8_t{220U}),
         std::max(0.0, scope.layout().bounds.width - 20.0), WidgetTextAlignment::end);
 }
 

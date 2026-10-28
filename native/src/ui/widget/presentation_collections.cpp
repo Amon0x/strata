@@ -159,7 +159,7 @@ void table_foreground(WidgetRenderScope& scope) {
             Rect{viewport.x, std::max(viewport.y, row->bounds.bottom() - 1.0), viewport.width, 1.0},
             scope.visual().border.has_value()
                 ? scope.visual().border->color
-                : RenderColor{86U, 102U, 126U, 120U}
+                : scope.palette("tableRowDivider")
         );
     }
     scope.solid_rect(Rect{viewport.x, viewport.y, viewport.width, header_height},
@@ -199,7 +199,7 @@ void table_foreground(WidgetRenderScope& scope) {
                        scope.visual().foreground);
             scope.solid_rect(
                 Rect{track.end() - 1.0, viewport.y + 5.0, 1.0, header_height - 10.0},
-                RenderColor{92U, 107U, 130U, 140U}
+                scope.palette("tableColumnDivider")
             );
         };
         for (const collection::TableTrack& track : geometry.tracks) {
@@ -217,7 +217,7 @@ void table_foreground(WidgetRenderScope& scope) {
                     1.0,
                     std::max(0.0, viewport.height - header_height),
                 },
-                RenderColor{86U, 102U, 126U, 150U}
+                scope.palette("tablePinnedDivider")
             );
         }
         const runtime::Value* preview = scope.retained("strata.table.columnInsertion");
@@ -228,7 +228,7 @@ void table_foreground(WidgetRenderScope& scope) {
                 : geometry.tracks.empty() ? viewport.x : geometry.tracks.back().end();
             scope.solid_rect(
                 Rect{x - 1.5, viewport.y + 2.0, 3.0, std::max(0.0, header_height - 4.0)},
-                RenderColor{103U, 225U, 164U, 255U}
+                scope.palette("insertionIndicator")
             );
         }
     }
@@ -288,8 +288,8 @@ void item_grid_overlay(WidgetRenderScope& scope) {
             std::abs(start->x - current->x),
             std::abs(start->y - current->y),
         };
-        scope.rounded_rect(bounds, RenderColor{70U, 137U, 230U, 50U},
-                           RenderBorder{1.0, RenderColor{104U, 169U, 255U, 220U}, true},
+        scope.rounded_rect(bounds, scope.palette("marqueeFill"),
+                           RenderBorder{1.0, scope.palette("marqueeStroke"), true},
                            scope.visual().radius);
     }
     scope.pop_clip();

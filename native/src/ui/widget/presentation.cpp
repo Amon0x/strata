@@ -721,7 +721,7 @@ void WidgetRenderScope::rich_text(const Point origin, const RenderColor fallback
                       resolved_run.color->alpha,
                   }
                 : resolved_run.interactive
-                    ? RenderColor{100U, 165U, 255U, 255U}
+                    ? palette("link")
                     : fallback,
             alpha()
         );
@@ -804,6 +804,21 @@ void WidgetRenderScope::discard() noexcept {
 
 bool WidgetRenderScope::discarded() const noexcept {
     return discarded_;
+}
+
+RenderColor WidgetRenderScope::palette(const std::string_view name,
+                                       const std::optional<std::uint8_t> alpha) const {
+    const auto found = node_.description().properties.find("$themePalette");
+    const runtime::Value* materialized = found != node_.description().properties.end()
+                                             ? found->second.value()
+                                             : nullptr;
+    const runtime::Value* field = materialized != nullptr ? materialized->field(name) : nullptr;
+    RenderColor color = field != nullptr && field->color() != nullptr
+                            ? *field->color()
+                            : fallback_tokens().palette(name);
+    if (alpha.has_value())
+        color.alpha = *alpha;
+    return color;
 }
 
 std::vector<RenderCommand>

@@ -71,7 +71,7 @@ void present_editable_text(
         for (const Rect rect : text_layout_selection_rects(
                  text_layout, origin, selection_start, selection_end
              )) {
-            scope.solid_rect(rect, RenderColor{255U, 255U, 255U, 72U});
+            scope.solid_rect(rect, scope.palette("compositionSelection"));
         }
     }
     if (!value.empty()) {
@@ -87,7 +87,7 @@ void present_editable_text(
              )) {
             rect.y += std::max(0.0, rect.height - 1.0);
             rect.height = 1.0;
-            scope.solid_rect(rect, RenderColor{255U, 255U, 255U, 160U});
+            scope.solid_rect(rect, scope.palette("compositionUnderline"));
         }
     }
     if (editor.has_value() && focused && !placeholder && !text_layout.lines.empty()) {

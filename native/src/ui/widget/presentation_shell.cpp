@@ -31,8 +31,9 @@ void draw_text_layout(
     const Rect clip,
     const RenderColor color,
     const std::vector<QuickPickMatchSpan>& highlights = {},
-    const RenderColor highlight_color = RenderColor{114U, 170U, 255U, 255U}
+    const std::optional<RenderColor> highlight = std::nullopt
 ) {
+    const RenderColor highlight_color = highlight.value_or(scope.palette("matchHighlight"));
     const TextEngine* engine = scope.text_engine();
     if (engine == nullptr || clip.empty()) return;
     scope.push_clip(clip);
@@ -190,7 +191,7 @@ void indexed_command_overlay(WidgetRenderScope& scope) {
     }
     scope.rounded_rect(
         popup,
-        scope.visual().background.value_or(RenderColor{34U, 38U, 46U, 245U}),
+        scope.visual().background.value_or(scope.palette("popupSurface")),
         scope.visual().border
     );
     for (const WidgetSubtarget& row : rows) {
@@ -201,7 +202,8 @@ void indexed_command_overlay(WidgetRenderScope& scope) {
             row.label,
             Point{row.bounds.x + 7.0,
                   row.bounds.y + (row.bounds.height - shaped.metrics.height) * 0.5},
-            row.enabled ? scope.visual().foreground : RenderColor{160U, 168U, 178U, 180U}
+            row.enabled ? scope.visual().foreground
+                        : scope.palette("disabledForeground", std::uint8_t{180U})
         );
     }
     indexed_focus(scope, targets, true);
@@ -225,7 +227,7 @@ void toolbar_content(WidgetRenderScope& scope) {
                   target.bounds.y + (target.bounds.height - shaped.metrics.height) * 0.5},
             target.enabled
                 ? scope.visual().foreground
-                : RenderColor{160U, 168U, 178U, 220U},
+                : scope.palette("disabledForeground", std::uint8_t{220U}),
             target.bounds.width,
             WidgetTextAlignment::center
         );
@@ -257,11 +259,11 @@ void chip_input_content(WidgetRenderScope& scope) {
         scope.rounded_rect(
             target.bounds,
             selected
-                ? RenderColor{91U, 141U, 239U, 175U}
-                : RenderColor{91U, 141U, 239U, 95U},
+                ? scope.palette("tokenActive")
+                : scope.palette("tokenFill"),
             selected
                 ? std::optional(RenderBorder{
-                      1.0, RenderColor{145U, 185U, 255U, 255U}, true
+                      1.0, scope.palette("tokenActiveBorder"), true
                   })
                 : std::nullopt,
             target.bounds.height * 0.5
@@ -329,11 +331,11 @@ void breadcrumbs_content(WidgetRenderScope& scope) {
 void banner_content(WidgetRenderScope& scope) {
     const BannerProjection banner = project_banner(scope.node());
     if (!banner.active) return;
-    RenderColor accent{96U, 165U, 250U, 255U};
     const std::string severity = scope.string("severity", "INFO");
-    if (severity == "SUCCESS") accent = RenderColor{74U, 222U, 128U, 255U};
-    else if (severity == "WARNING") accent = RenderColor{250U, 204U, 21U, 255U};
-    else if (severity == "ERROR") accent = RenderColor{248U, 113U, 113U, 255U};
+    RenderColor accent = scope.palette(severity == "SUCCESS"   ? "severitySuccess"
+                                       : severity == "WARNING" ? "severityWarning"
+                                       : severity == "ERROR"   ? "severityError"
+                                                               : "severityInfo");
     RenderColor background = accent;
     background.alpha = 36U;
     scope.rounded_rect(
@@ -398,9 +400,9 @@ void command_palette_overlay(WidgetRenderScope& scope) {
     );
     scope.solid_rect(scope.root_bounds(), scope.visual().scrim);
     scope.shadow(projection.bounds, CornerRadii::all(scope.visual().radius),
-                 RenderColor{0U, 0U, 0U, 135U}, 14.0, 2.0);
+                 scope.palette("shadow", std::uint8_t{135U}), 14.0, 2.0);
     scope.rounded_rect(projection.bounds,
-                       scope.visual().background.value_or(RenderColor{28U, 32U, 40U, 252U}),
+                       scope.visual().background.value_or(scope.palette("paletteSurface")),
                        scope.visual().border, scope.visual().radius);
     scope.rounded_rect(projection.input_bounds, scope.visual().track, scope.visual().border,
                        scope.visual().radius);
@@ -505,14 +507,14 @@ void command_palette_overlay(WidgetRenderScope& scope) {
     scope.focus(projection.input_bounds);
 }
 
-[[nodiscard]] RenderColor toast_accent(const NotificationSeverity severity) noexcept {
+[[nodiscard]] std::string_view toast_accent(const NotificationSeverity severity) noexcept {
     switch (severity) {
-    case NotificationSeverity::success: return RenderColor{74U, 222U, 128U, 255U};
-    case NotificationSeverity::warning: return RenderColor{250U, 204U, 21U, 255U};
-    case NotificationSeverity::error: return RenderColor{248U, 113U, 113U, 255U};
-    case NotificationSeverity::info: return RenderColor{96U, 165U, 250U, 255U};
+    case NotificationSeverity::success: return "severitySuccess";
+    case NotificationSeverity::warning: return "severityWarning";
+    case NotificationSeverity::error: return "severityError";
+    case NotificationSeverity::info: return "severityInfo";
     }
-    return RenderColor{96U, 165U, 250U, 255U};
+    return "severityInfo";
 }
 
 void toast_region_overlay(WidgetRenderScope& scope) {
@@ -531,9 +533,9 @@ void toast_region_overlay(WidgetRenderScope& scope) {
             : ToastTextLayoutResolver{}
     );
     for (const ToastCardModel& card : projection.cards) {
-        const RenderColor accent = toast_accent(card.notification.request.severity);
+        const RenderColor accent = scope.palette(toast_accent(card.notification.request.severity));
         scope.shadow(card.bounds, CornerRadii::all(scope.visual().radius),
-                     RenderColor{0U, 0U, 0U, 105U}, 9.0, 1.0);
+                     scope.palette("shadow", std::uint8_t{105U}), 9.0, 1.0);
         scope.rounded_rect(card.bounds, scope.visual().background.value_or(scope.visual().track),
                            scope.visual().border, scope.visual().radius);
         scope.solid_rect(Rect{card.bounds.x, card.bounds.y, 4.0, card.bounds.height}, accent);
@@ -598,7 +600,7 @@ void tooltip_overlay(WidgetRenderScope& scope) {
     if (!projection.has_value()) return;
     scope.rounded_rect(
         projection->bounds,
-        scope.visual().background.value_or(RenderColor{24U, 24U, 42U, 240U}),
+        scope.visual().background.value_or(scope.palette("tooltipSurface")),
         scope.visual().border
     );
     scope.text(

@@ -640,6 +640,15 @@ void apply_motion(ValueFields& fields, const ThemeNullable<ThemeAnimationSet>& v
     return std::nullopt;
 }
 
+/** Every palette token resolved for one theme; materialized once per theme onto its nodes. */
+[[nodiscard]] runtime::Value palette_value(const ThemeTokens& tokens) {
+    std::vector<std::pair<std::string, runtime::Value>> fields;
+    fields.reserve(theme_palette_tokens().size());
+    for (const ThemePaletteToken& token : theme_palette_tokens())
+        fields.emplace_back(std::string(token.name), runtime::Value(tokens.palette(token.name)));
+    return runtime::Value(std::move(fields));
+}
+
 [[nodiscard]] runtime::Value motion_policy_value(const ThemeMotionPolicy& policy) {
     const auto easing_value = [](const MotionEasing& easing) {
         if (easing.kind != MotionEasingKind::cubic_bezier) {
@@ -950,7 +959,15 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
             shared = cache->motion_policy(effective);
         }
         properties.insert_or_assign("$motionPolicy", runtime::ExpressionValue(*shared));
+        const runtime::Value* palette = cache->palette(effective);
+        if (palette == nullptr) {
+            cache->store_palette(effective, palette_value(effective->tokens()));
+            palette = cache->palette(effective);
+        }
+        properties.insert_or_assign("$themePalette", runtime::ExpressionValue(*palette));
     } else {
+        properties.insert_or_assign("$themePalette",
+                                    runtime::ExpressionValue(palette_value(effective->tokens())));
         properties.insert_or_assign(
             "$motionPolicy", runtime::ExpressionValue(motion_policy_value(effective->motion_policy())));
     }
@@ -1251,6 +1268,61 @@ std::optional<double> ThemeTokens::number(const std::string_view name) const noe
     const auto found = custom.find(name);
     const double* value = found != custom.end() ? std::get_if<double>(&found->second) : nullptr;
     return value != nullptr ? std::optional<double>(*value) : std::nullopt;
+}
+
+namespace {
+
+// Dark defaults are the colors presentation drew before it named them, so the default theme
+// renders exactly as it did; light defaults keep each one legible on a light surface.
+constexpr ThemePaletteToken palette_tokens[] = {
+    {"compositionSelection", {255U, 255U, 255U, 72U}, {0U, 0U, 0U, 40U}},
+    {"compositionUnderline", {255U, 255U, 255U, 160U}, {0U, 0U, 0U, 160U}},
+    {"disabledForeground", {160U, 168U, 178U, 255U}, {116U, 122U, 132U, 255U}},
+    {"insertionIndicator", {103U, 225U, 164U, 255U}, {22U, 163U, 74U, 255U}},
+    {"link", {100U, 165U, 255U, 255U}, {29U, 78U, 216U, 255U}},
+    {"marqueeFill", {70U, 137U, 230U, 50U}, {37U, 99U, 235U, 40U}},
+    {"marqueeStroke", {104U, 169U, 255U, 220U}, {37U, 99U, 235U, 200U}},
+    {"matchHighlight", {114U, 170U, 255U, 255U}, {29U, 78U, 216U, 255U}},
+    {"paletteSurface", {28U, 32U, 40U, 252U}, {250U, 250U, 252U, 252U}},
+    {"popupSurface", {34U, 38U, 46U, 245U}, {255U, 255U, 255U, 250U}},
+    {"severityError", {248U, 113U, 113U, 255U}, {220U, 38U, 38U, 255U}},
+    {"severityInfo", {96U, 165U, 250U, 255U}, {37U, 99U, 235U, 255U}},
+    {"severitySuccess", {74U, 222U, 128U, 255U}, {22U, 163U, 74U, 255U}},
+    {"severityWarning", {250U, 204U, 21U, 255U}, {202U, 138U, 4U, 255U}},
+    {"shadow", {0U, 0U, 0U, 255U}, {0U, 0U, 0U, 255U}},
+    {"tableColumnDivider", {92U, 107U, 130U, 140U}, {190U, 196U, 206U, 200U}},
+    {"tablePinnedDivider", {86U, 102U, 126U, 150U}, {176U, 184U, 196U, 220U}},
+    {"tableRowDivider", {86U, 102U, 126U, 120U}, {206U, 211U, 219U, 200U}},
+    {"tokenActive", {91U, 141U, 239U, 175U}, {37U, 99U, 235U, 70U}},
+    {"tokenActiveBorder", {145U, 185U, 255U, 255U}, {37U, 99U, 235U, 255U}},
+    {"tokenFill", {91U, 141U, 239U, 95U}, {37U, 99U, 235U, 36U}},
+    {"tooltipSurface", {24U, 24U, 42U, 240U}, {255U, 255U, 255U, 245U}},
+};
+
+[[nodiscard]] double channel_luminance(const std::uint8_t value) noexcept {
+    const double c = static_cast<double>(value) / 255.0;
+    return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+}
+
+} // namespace
+
+std::span<const ThemePaletteToken> theme_palette_tokens() noexcept {
+    return palette_tokens;
+}
+
+bool ThemeTokens::light() const noexcept {
+    return 0.2126 * channel_luminance(surface.red) + 0.7152 * channel_luminance(surface.green) +
+               0.0722 * channel_luminance(surface.blue) >
+           0.5;
+}
+
+runtime::ColorValue ThemeTokens::palette(const std::string_view name) const noexcept {
+    if (const runtime::ColorValue* authored = color(name); authored != nullptr)
+        return *authored;
+    const auto found = std::ranges::find(palette_tokens, name, &ThemePaletteToken::name);
+    if (found == std::end(palette_tokens))
+        return foreground;
+    return light() ? found->light : found->dark;
 }
 
 void ThemeTokens::set(std::string name, ThemeTokenValue value) {
@@ -1948,6 +2020,19 @@ void ThemeMaterializationCache::store_motion_policy(const std::shared_ptr<const 
     motion_policies_.insert_or_assign(theme.get(), MotionPolicyEntry{theme, std::move(value)});
 }
 
+const runtime::Value*
+ThemeMaterializationCache::palette(const std::shared_ptr<const Theme>& theme) const {
+    const auto found = palettes_.find(theme.get());
+    return found != palettes_.end() && found->second.theme.lock() == theme ? &found->second.value
+                                                                           : nullptr;
+}
+
+void ThemeMaterializationCache::store_palette(const std::shared_ptr<const Theme>& theme,
+                                              runtime::Value value) {
+    std::erase_if(palettes_, [](const auto& entry) { return entry.second.theme.expired(); });
+    palettes_.insert_or_assign(theme.get(), MotionPolicyEntry{theme, std::move(value)});
+}
+
 void ThemeMaterializationCache::store(const std::shared_ptr<const DescriptionNode>& source,
                                       const std::shared_ptr<const Theme>& effective_theme,
                                       std::optional<std::string> scope_namespace,
@@ -2003,6 +2088,7 @@ void ThemeMaterializationCache::clear() noexcept {
     purge_threshold_ = 0U;
     entries_.clear();
     motion_policies_.clear();
+    palettes_.clear();
     contributions_.clear();
 }
 

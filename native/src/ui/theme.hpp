@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -23,6 +24,19 @@ namespace strata::ui {
 inline constexpr std::string_view default_theme_name = "strata-default";
 inline constexpr std::string_view default_widget_variant = "default";
 inline constexpr std::string_view default_motion_timing_name = "standard";
+
+/**
+ * A presentation color a theme can name: popup surfaces, dividers, IME marks, severities. It is
+ * set like any custom token; unset, it takes its dark or light default by the theme's surface.
+ */
+struct ThemePaletteToken final {
+    std::string_view name;
+    runtime::ColorValue dark;
+    runtime::ColorValue light;
+};
+
+/** Every palette token presentation reads, in name order. */
+[[nodiscard]] std::span<const ThemePaletteToken> theme_palette_tokens() noexcept;
 
 /** A theme token's typed value: a color or a number. */
 using ThemeTokenValue = std::variant<runtime::ColorValue, double>;
@@ -50,6 +64,10 @@ struct ThemeTokens final {
     [[nodiscard]] std::optional<double> number(std::string_view name) const noexcept;
     /** Sets a token by name: a standard token must keep its type; any other name is custom. */
     void set(std::string name, ThemeTokenValue value);
+    /** The surface is light: its relative luminance is above one half. */
+    [[nodiscard]] bool light() const noexcept;
+    /** A palette token: the color token of that name when set, else its light or dark default. */
+    [[nodiscard]] runtime::ColorValue palette(std::string_view name) const noexcept;
     [[nodiscard]] friend bool operator==(const ThemeTokens&, const ThemeTokens&) = default;
 };
 
@@ -408,6 +426,8 @@ public:
      * theme and shared, so nodes do not rebuild it and comparisons of it are pointer checks. */
     [[nodiscard]] const runtime::Value* motion_policy(const std::shared_ptr<const Theme>& theme) const;
     void store_motion_policy(const std::shared_ptr<const Theme>& theme, runtime::Value value);
+    [[nodiscard]] const runtime::Value* palette(const std::shared_ptr<const Theme>& theme) const;
+    void store_palette(const std::shared_ptr<const Theme>& theme, runtime::Value value);
     /** The contribution built once per theme, widget type, variant and scope, as nodes share it. */
     [[nodiscard]] const ThemeWidgetContribution*
     widget_contribution(const std::shared_ptr<const Theme>& theme, std::string_view type,
@@ -439,6 +459,7 @@ private:
         runtime::Value value;
     };
     std::map<const Theme*, MotionPolicyEntry> motion_policies_;
+    std::map<const Theme*, MotionPolicyEntry> palettes_;
     struct Entry final {
         std::weak_ptr<const DescriptionNode> source;
         std::weak_ptr<const Theme> effective_theme;
