@@ -107,10 +107,10 @@ base::Result Diagnostics::emit(
 }
 
 base::Result Diagnostics::publish(
-    const runtime::RuntimeDiagnosticRecord& record,
+    const base::RuntimeDiagnosticRecord& record,
     const std::uint64_t dropped_count
 ) noexcept {
-    const runtime::RuntimeDiagnostic& value = record.diagnostic;
+    const base::RuntimeDiagnostic& value = record.diagnostic;
     const SourceRange range = value.range.has_value()
         ? SourceRange{
               value.range->start.offset.value_or(0U),
@@ -123,9 +123,9 @@ base::Result Diagnostics::publish(
         : SourceRange{};
     const DiagnosticSeverity severity = [&value] {
         switch (value.severity) {
-        case runtime::DiagnosticSeverity::info: return DiagnosticSeverity::info;
-        case runtime::DiagnosticSeverity::warning: return DiagnosticSeverity::warning;
-        case runtime::DiagnosticSeverity::error: return DiagnosticSeverity::error;
+        case base::DiagnosticSeverity::info: return DiagnosticSeverity::info;
+        case base::DiagnosticSeverity::warning: return DiagnosticSeverity::warning;
+        case base::DiagnosticSeverity::error: return DiagnosticSeverity::error;
         }
         return DiagnosticSeverity::error;
     }();

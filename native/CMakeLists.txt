@@ -215,26 +215,78 @@ if(STRATA_BUILD_FUZZERS AND NOT MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clan
 endif()
 
 
-# Strict JSON and UTF-8 have exactly one owner. Every consumer, including the installed C++ host
-# facade, links this archive instead of compiling the sources again.
-add_library(
-    strata_internal_data
-    STATIC
-        src/base/utf8.cpp
-        src/data/json.cpp
-        src/data/json_view.cpp
-)
-target_include_directories(
-    strata_internal_data
-    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-)
-set_target_properties(
-    strata_internal_data
-    PROPERTIES
-        EXPORT_NAME internal_data
-        POSITION_INDEPENDENT_CODE ON
-)
-strata_target_defaults(strata_internal_data)
+# Portable engine layers. Each directory under src/ belongs to exactly one library, and each
+# library links only the layers beneath it:
+#
+#     base (base/, data/)      geometry
+#        |      \              /    |
+#        |       compiler -----'     |
+#        |          |                |
+#     resource   runtime             |
+#        |          |                |
+#      font         |                |
+#         \         |               /
+#          '------- ui -----------'
+#                   |
+#                 core     engine composition root (Strata::core)
+#                   |
+#        strata_c / strata_c_static   the C ABI shell over core
+#
+# Sources are globbed per directory, so a file added to a layer joins its library without editing
+# this file. Includes must follow the link graph: cmake/StrataLayering.cmake derives what each
+# directory may include from these links and checks it at configure time and in strata.layering.
+include(cmake/StrataLayering.cmake)
+
+function(strata_add_layer target)
+    cmake_parse_arguments(PARSE_ARGV 1 layer "" "" "DIRECTORIES;PUBLIC;PRIVATE")
+    set(sources)
+    foreach(directory IN LISTS layer_DIRECTORIES)
+        file(GLOB_RECURSE directory_sources CONFIGURE_DEPENDS
+             "${CMAKE_CURRENT_SOURCE_DIR}/src/${directory}/*.cpp")
+        list(APPEND sources ${directory_sources})
+    endforeach()
+    list(SORT sources)
+    add_library(${target} STATIC ${sources})
+    target_include_directories(${target} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+    target_link_libraries(${target} PUBLIC ${layer_PUBLIC} PRIVATE ${layer_PRIVATE})
+    set_target_properties(
+        ${target}
+        PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            STRATA_LAYER_DIRECTORIES "${layer_DIRECTORIES}"
+    )
+    strata_target_defaults(${target})
+endfunction()
+
+function(strata_precompile_standard_headers target)
+    if(STRATA_ENABLE_PCH)
+        target_precompile_headers(
+            ${target}
+            PRIVATE
+                <algorithm>
+                <array>
+                <cmath>
+                <cstddef>
+                <cstdint>
+                <limits>
+                <memory>
+                <optional>
+                <ranges>
+                <stdexcept>
+                <string>
+                <string_view>
+                <utility>
+                <vector>
+        )
+    endif()
+endfunction()
+
+# UTF-8, allocation, identities, status, diagnostics vocabulary and the strict JSON model. Every
+# consumer, including the installed C++ host facade, links this archive instead of compiling the
+# sources again.
+strata_add_layer(strata_base DIRECTORIES base data)
+add_library(strata_internal_data ALIAS strata_base)
+set_target_properties(strata_base PROPERTIES EXPORT_NAME base)
 
 # Standalone, dependency-free static SVG parser and deterministic reference rasterizer. The UI
 # runtime consumes the same parsed display list directly, while external tools can use Strata::svg
@@ -257,6 +309,7 @@ set_target_properties(
     PROPERTIES
         EXPORT_NAME svg
         POSITION_INDEPENDENT_CODE ON
+        STRATA_PUBLIC_HEADERS svg.hpp
 )
 strata_target_defaults(strata_svg)
 target_compile_features(strata_svg PUBLIC cxx_std_23)
@@ -302,7 +355,7 @@ target_include_directories(
 )
 target_link_libraries(
     strata_host_support
-    PUBLIC strata_internal_data Strata::render_host
+    PUBLIC strata_base Strata::render_host
     PRIVATE ${CMAKE_DL_LIBS}
 )
 set_target_properties(
@@ -313,224 +366,29 @@ set_target_properties(
 )
 strata_target_defaults(strata_host_support)
 
-add_library(
-    strata_core
-    STATIC
-        src/base/allocator.cpp
-        src/core/diagnostics.cpp
-        src/core/runtime.cpp
-        src/compiler/artifact.cpp
-        src/compiler/ast.cpp
-        src/compiler/builtin_catalog.cpp
-        src/compiler/builtin_catalog_actions.cpp
-        src/compiler/builtin_catalog_helpers.cpp
-        src/compiler/builtin_catalog_properties.cpp
-        src/compiler/builtin_catalog_types.cpp
-        src/compiler/builtin_catalog_widgets_collections.cpp
-        src/compiler/builtin_catalog_widgets_controls.cpp
-        src/compiler/builtin_catalog_widgets_primitives.cpp
-        src/compiler/builtin_catalog_widgets_shell.cpp
-        src/compiler/compile.cpp
-        src/compiler/lexer.cpp
-        src/compiler/module.cpp
-        src/compiler/parser.cpp
-        src/compiler/portable_ir.cpp
-        src/compiler/portable_ir_validation.cpp
-        src/compiler/schema.cpp
-        src/compiler/semantic.cpp
-        src/compiler/semantic/animations.cpp
-        src/compiler/semantic/declarations.cpp
-        src/compiler/semantic/path_outline.cpp
-        src/compiler/semantic/placements.cpp
-        src/compiler/semantic/policy.cpp
-        src/compiler/semantic/resolve.cpp
-        src/compiler/semantic/support.cpp
-        src/compiler/semantic/type_check.cpp
-        src/compiler/semantic/types.cpp
-        src/compiler/source.cpp
-        src/compiler/source_map.cpp
-        src/geometry/path.cpp
-        src/geometry/primitives.cpp
-        src/font/opentype.cpp
-        src/font/atlas.cpp
-        src/font/msdf.cpp
-        src/font/raster.cpp
-        src/font/registry.cpp
-        src/font/truetype_outline.cpp
-        src/resource/assets.cpp
-        src/resource/image.cpp
-        src/resource/resource.cpp
-        src/resource/runtime_images.cpp
-        src/resource/svg_image.cpp
-        src/runtime/action.cpp
-        src/runtime/application.cpp
-        src/runtime/async.cpp
-        src/runtime/diagnostic.cpp
-        src/runtime/durability.cpp
-        src/runtime/diagnostic_json.cpp
-        src/runtime/expression.cpp
-        src/runtime/host.cpp
-        src/runtime/layer.cpp
-        src/runtime/profiler.cpp
-        src/runtime/program.cpp
-        src/runtime/registry.cpp
-        src/runtime/services.cpp
-        src/runtime/startup.cpp
-        src/runtime/state.cpp
-        src/runtime/symbol.cpp
-        src/runtime/undo.cpp
-        src/runtime/unit.cpp
-        src/runtime/value.cpp
-        src/runtime/value_schema.cpp
-        src/ui/description.cpp
-        src/ui/description_instances.cpp
-        src/ui/behavior/input.cpp
-        src/ui/behavior/manipulation.cpp
-        src/ui/behavior/collection_marquee.cpp
-        src/ui/behavior/registry.cpp
-        src/ui/behavior/presentation.cpp
-        src/ui/command.cpp
-        src/ui/quick_pick.cpp
-        src/ui/collection/model.cpp
-        src/ui/collection/table_model.cpp
-        src/ui/collection/virtualization.cpp
-        src/ui/inspection.cpp
-        src/ui/frame_snapshot.cpp
-        src/ui/input/router.cpp
-        src/ui/input/action_encoding.cpp
-        src/ui/input/action_dispatch.cpp
-        src/ui/input/framework_actions.cpp
-        src/ui/input/diagnostics.cpp
-        src/ui/input/forms.cpp
-        src/ui/input/focus_navigation.cpp
-        src/ui/input/cancellation.cpp
-        src/ui/input/drag.cpp
-        src/ui/input/drag_session.cpp
-        src/ui/input/hit_test.cpp
-        src/ui/input/interaction.cpp
-        src/ui/input/queue.cpp
-        src/ui/input/scroll.cpp
-        src/ui/input/editor.cpp
-        src/ui/input/grapheme.cpp
-        src/ui/input/text_editing.cpp
-        src/ui/layout/geometry.cpp
-        src/ui/layout/style.cpp
-        src/ui/layout/motion.cpp
-        src/ui/layout/snap.cpp
-        src/ui/layout/engine.cpp
-        src/ui/layout/measure.cpp
-        src/ui/layout/arrange.cpp
-        src/ui/motion.cpp
-        src/ui/motion/catalog.cpp
-        src/ui/motion/config.cpp
-        src/ui/motion/disclosure.cpp
-        src/ui/motion/lifecycle.cpp
-        src/ui/motion/model.cpp
-        src/ui/motion/move.cpp
-        src/ui/motion/players.cpp
-        src/ui/notification.cpp
-        src/ui/paint.cpp
-        src/ui/path.cpp
-        src/ui/presentation_geometry.cpp
-        src/ui/render.cpp
-        src/ui/render/paint_geometry.cpp
-        src/ui/render/path_geometry.cpp
-        src/ui/render/serialization.cpp
-        src/ui/render/packet.cpp
-        src/ui/render/packet_native.cpp
-        src/ui/render/submission.cpp
-        src/ui/render/submission_cache.cpp
-        src/ui/render/submission_planner.cpp
-        src/ui/render/submission_mesh.cpp
-        src/ui/render/surface_textures.cpp
-        src/ui/render/material_registry.cpp
-        src/ui/scale.cpp
-        src/ui/scheduler.cpp
-        src/ui/scroll_geometry.cpp
-        src/ui/semantics.cpp
-        src/ui/status.cpp
-        src/ui/surface.cpp
-        src/ui/svg_image.cpp
-        src/ui/text.cpp
-        src/ui/text_geometry.cpp
-        src/ui/theme.cpp
-        src/ui/tree.cpp
-        src/ui/tree_reconcile.cpp
-        src/ui/widget/registry.cpp
-        src/ui/widget/description.cpp
-        src/ui/widget/description_primitives.cpp
-        src/ui/widget/description_controls.cpp
-        src/ui/widget/description_shell.cpp
-        src/ui/widget/description_collection_common.cpp
-        src/ui/widget/description_tree.cpp
-        src/ui/widget/description_table.cpp
-        src/ui/widget/description_item_grid.cpp
-        src/ui/widget/description_collections.cpp
-        src/ui/widget/input.cpp
-        src/ui/widget/menu_model.cpp
-        src/ui/widget/subtarget.cpp
-        src/ui/widget/subtarget_projections.cpp
-        src/ui/widget/editor_geometry.cpp
-        src/ui/widget/input_collection_common.cpp
-        src/ui/widget/input_tree.cpp
-        src/ui/widget/input_table.cpp
-        src/ui/widget/input_item_grid.cpp
-        src/ui/widget/input_primitives.cpp
-        src/ui/widget/input_controls.cpp
-        src/ui/widget/input_shell.cpp
-        src/ui/widget/input_collections.cpp
-        src/ui/widget/inspection.cpp
-        src/ui/widget/inspection_primitives.cpp
-        src/ui/widget/inspection_shell.cpp
-        src/ui/widget/inspection_collections.cpp
-        src/ui/widget/semantics.cpp
-        src/ui/widget/semantics_primitives.cpp
-        src/ui/widget/semantics_controls.cpp
-        src/ui/widget/semantics_shell.cpp
-        src/ui/widget/semantics_collections.cpp
-        src/ui/widget/shell_model.cpp
-        src/ui/widget/presentation.cpp
-        src/ui/widget/presentation_editor.cpp
-        src/ui/widget/presentation_primitives.cpp
-        src/ui/widget/presentation_controls.cpp
-        src/ui/widget/presentation_shell.cpp
-        src/ui/widget/presentation_collections.cpp
-)
-add_library(Strata::core ALIAS strata_core)
-target_include_directories(
-    strata_core
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-set_target_properties(strata_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(strata_core PRIVATE freetype strata_internal_data Strata::svg)
+strata_add_layer(strata_geometry DIRECTORIES geometry)
+strata_add_layer(strata_compiler DIRECTORIES compiler PUBLIC strata_base strata_geometry)
+strata_precompile_standard_headers(strata_compiler)
+strata_add_layer(strata_runtime DIRECTORIES runtime PUBLIC strata_compiler)
+strata_precompile_standard_headers(strata_runtime)
 if(STRATA_ENABLE_TRACY)
-    target_link_libraries(strata_core PRIVATE Tracy::TracyClient)
-    target_compile_definitions(strata_core PRIVATE STRATA_ENABLE_TRACY)
+    target_link_libraries(strata_runtime PRIVATE Tracy::TracyClient)
+    target_compile_definitions(strata_runtime PRIVATE STRATA_ENABLE_TRACY)
 endif()
-strata_target_defaults(strata_core)
-if(STRATA_ENABLE_PCH)
-    target_precompile_headers(
-        strata_core
-        PRIVATE
-            <algorithm>
-            <array>
-            <cmath>
-            <cstddef>
-            <cstdint>
-            <limits>
-            <memory>
-            <optional>
-            <ranges>
-            <stdexcept>
-            <string>
-            <string_view>
-            <utility>
-            <vector>
-    )
-endif()
+strata_add_layer(strata_resource DIRECTORIES resource PUBLIC strata_base Strata::svg)
+strata_add_layer(strata_font DIRECTORIES font PUBLIC strata_resource PRIVATE freetype)
+strata_add_layer(
+    strata_ui
+    DIRECTORIES ui
+    PUBLIC strata_runtime strata_font strata_geometry Strata::svg
+)
+strata_precompile_standard_headers(strata_ui)
+strata_add_layer(strata_core DIRECTORIES core PUBLIC strata_ui)
+add_library(Strata::core ALIAS strata_core)
+target_include_directories(strata_core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+set(STRATA_LAYER_RULES "${CMAKE_CURRENT_BINARY_DIR}/strata-layer-rules.txt")
+strata_write_layer_rules("${STRATA_LAYER_RULES}")
+strata_check_layer_includes("${CMAKE_CURRENT_SOURCE_DIR}/src" "${STRATA_LAYER_RULES}")
 
 set(
     strata_c_sources
@@ -582,7 +440,7 @@ strata_target_defaults(strata_c)
 set(strata_host_cpp_sources src/host.cpp)
 add_library(strata_host_cpp STATIC ${strata_host_cpp_sources})
 add_library(Strata::host ALIAS strata_host_cpp)
-target_link_libraries(strata_host_cpp PUBLIC Strata::c PRIVATE strata_internal_data)
+target_link_libraries(strata_host_cpp PUBLIC Strata::c PRIVATE strata_base)
 target_include_directories(
     strata_host_cpp
     PUBLIC
@@ -616,7 +474,7 @@ strata_target_defaults(strata_c_static)
 
 add_library(strata_host_cpp_static STATIC ${strata_host_cpp_sources})
 add_library(Strata::host_static ALIAS strata_host_cpp_static)
-target_link_libraries(strata_host_cpp_static PUBLIC Strata::c_static PRIVATE strata_internal_data)
+target_link_libraries(strata_host_cpp_static PUBLIC Strata::c_static PRIVATE strata_base)
 target_include_directories(
     strata_host_cpp_static
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -918,7 +776,7 @@ if(STRATA_BUILD_TOOLS)
         PUBLIC
             Strata::c
             strata_host_support
-            strata_internal_data
+            strata_base
     )
     target_include_directories(
         strata_headless_host
@@ -1300,6 +1158,14 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         endif()
     endif()
 
+    add_test(
+        NAME strata.layering
+        COMMAND ${CMAKE_COMMAND}
+            -DSTRATA_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/src
+            -DSTRATA_LAYER_RULES=${STRATA_LAYER_RULES}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/StrataLayering.cmake
+    )
+
     add_executable(
         strata_host_tests
         tests/host_test_runner.cpp
@@ -1651,7 +1517,7 @@ install(
         strata_extensions
         strata_render_host
         strata_svg
-        strata_internal_data
+        strata_base
         strata_host_support
     EXPORT StrataTargets
     RUNTIME DESTINATION bin

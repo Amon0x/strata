@@ -12,6 +12,9 @@
 
 namespace strata::ui {
 
+/** Packet format the encoder writes. The C ABI pins it to STRATA_RENDER_PACKET_VERSION_CURRENT. */
+inline constexpr std::uint32_t render_packet_version = 13U;
+
 struct HostRenderPacketTelemetry final {
     std::size_t vertices = 0U;
     std::size_t batches = 0U;

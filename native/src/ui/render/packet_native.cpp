@@ -14,8 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include <strata/strata.h>
-
 #include "font/atlas.hpp"
 #include "resource/image.hpp"
 #include "ui/render/submission.hpp"
@@ -295,7 +293,7 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
     constexpr std::string_view magic = "STRATARP";
     output.raw(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(magic.data()),
                                              magic.size()));
-    output.integer(STRATA_RENDER_PACKET_VERSION_CURRENT);
+    output.integer(render_packet_version);
     if (texture_uploads.size() > std::numeric_limits<std::size_t>::max() - resources.size()) {
         throw std::length_error("render resource count exceeds size_t");
     }

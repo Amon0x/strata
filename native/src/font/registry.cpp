@@ -7,7 +7,7 @@
 
 namespace strata::font {
 
-FontRegistry::FontRegistry(runtime::DiagnosticReporter reporter)
+FontRegistry::FontRegistry(base::DiagnosticReporter reporter)
     : reporter_(std::move(reporter)) {}
 
 std::shared_ptr<const OpenTypeFont> FontRegistry::load_font(
@@ -24,13 +24,13 @@ std::shared_ptr<const OpenTypeFont> FontRegistry::load_font(
         return font;
     } catch (const FontError&) {
         if (reporter_) {
-            reporter_(runtime::RuntimeDiagnostic{
+            reporter_(base::RuntimeDiagnostic{
                 "STRATA.FONT.REGISTRATION_FAILED",
                 "Font '" + id + "' could not be registered because '" + source_id +
                     "' did not parse as a valid OpenType font.",
                 {},
                 std::nullopt,
-                runtime::DiagnosticSeverity::warning,
+                base::DiagnosticSeverity::warning,
                 std::nullopt,
             });
         }

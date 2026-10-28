@@ -12,9 +12,11 @@
 ## Native source ownership
 
 - `native/include/strata` — installed C ABI, low-level C++ RAII facade, and typed C++ host-model/action bindings.
-- `native/src/core` — allocator telemetry, arenas, clocks, UTF-8, identities, and base lifetime
-  machinery.
+- `native/src/base` — UTF-8, allocator telemetry, arenas, identities, the internal status/result,
+  and the diagnostic vocabulary every layer reports with.
 - `native/src/data` — strict JSON model, views, parsing, and canonical encoding.
+- `native/src/geometry` — points, sizes, rectangles, and path outlines with their parser and
+  flattening.
 - `native/src/compiler` — source/module graph, lexer/parser, schema/semantic checks, and portable IR.
 - `native/src/runtime` — application units, values, bindings, actions, state, collections, layers,
   async host data, durability, undo, diagnostics, and host services.
@@ -22,6 +24,10 @@
   semantics/inspection, text, render planning, and packet encoding.
 - `native/src/font` — OpenType reading, shaping/fallback, rasterization, and glyph atlas ownership.
 - `native/src/resource` — encoded image and resource handling.
+- `native/src/core` — the engine composition root: one runtime's allocator, clock, identities,
+  diagnostics, host snapshots, images, and application. It knows nothing of the C ABI.
+- `native/src/*.cpp` — the C ABI shell: argument checks, the exception firewall, and conversion
+  between C structures and engine types.
 - `native/host` — reusable packet decoding, extension selection, and safe module-path resolution.
 - `native/d3d11` — target-independent packet-v10 pipeline, textures, blur, HLSL materials, low-level
   packet submission, and the optional host-owned-target Surface presenter with C/C++ handles.
@@ -39,6 +45,24 @@ Large subsystems have explicit directories and translation-unit boundaries. Feat
 owning subsystem rather than adding application-specific branches to the ABI or hosts.
 
 ## Dependency direction
+
+Each engine directory is one static library, and each library links only the layers beneath it.
+The include rules are derived from these links and checked at configure time and by
+`strata.layering`:
+
+```text
+strata_base (base/, data/)   strata_geometry
+strata_compiler   -> base, geometry
+strata_runtime    -> compiler
+strata_resource   -> base, Strata::svg
+strata_font       -> resource, FreeType
+strata_ui         -> runtime, font, geometry
+strata_core       -> ui                     (Strata::core, the composition root)
+strata_c          -> core                   (the C ABI shell)
+```
+
+The compiler never includes the runtime: data flows from compiled schemas, portable IR, and source
+maps into the runtime, which also invokes the compiler for live source activation.
 
 ```text
 .strata/resources -> strata_core -> strata_c

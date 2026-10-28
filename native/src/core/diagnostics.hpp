@@ -6,8 +6,8 @@
 #include <string>
 #include <string_view>
 
+#include "base/diagnostic.hpp"
 #include "base/status.hpp"
-#include "runtime/diagnostic.hpp"
 
 namespace strata::core {
 
@@ -71,7 +71,7 @@ public:
 
     /** Publishes a record already canonicalized by RuntimeDiagnosticStore without re-aggregating. */
     [[nodiscard]] base::Result publish(
-        const runtime::RuntimeDiagnosticRecord& record,
+        const base::RuntimeDiagnosticRecord& record,
         std::uint64_t dropped_count
     ) noexcept;
     void clear() noexcept;

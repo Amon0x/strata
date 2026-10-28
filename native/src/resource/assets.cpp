@@ -42,7 +42,7 @@ std::filesystem::path AssetId::relative_path() const {
 
 AssetResolver::AssetResolver(
     std::vector<std::filesystem::path> roots,
-    runtime::DiagnosticReporter reporter
+    base::DiagnosticReporter reporter
 ) : roots_(std::move(roots)), reporter_(std::move(reporter)) {}
 
 AssetLoadResult AssetResolver::load_bytes(
@@ -64,12 +64,12 @@ AssetLoadResult AssetResolver::load_bytes(
             // published only after every configured source declines the identity.
         }
     }
-    runtime::RuntimeDiagnostic diagnostic{
+    base::RuntimeDiagnostic diagnostic{
         "STRATA.ASSET.RESOURCE_MISSING",
         "Resource '" + id.value() + "' was not found in configured asset sources.",
         {},
         std::nullopt,
-        runtime::DiagnosticSeverity::error,
+        base::DiagnosticSeverity::error,
         std::nullopt,
     };
     AssetLoadResult result{{}, {diagnostic}};

@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "resource/resource.hpp"
-#include "runtime/diagnostic.hpp"
+#include "base/diagnostic.hpp"
 
 namespace strata::resource {
 
@@ -26,7 +26,7 @@ private:
 
 struct AssetLoadResult final {
     std::optional<ResourceBytes> bytes;
-    std::vector<runtime::RuntimeDiagnostic> diagnostics;
+    std::vector<base::RuntimeDiagnostic> diagnostics;
 
     [[nodiscard]] bool loaded() const noexcept { return bytes.has_value(); }
 };
@@ -36,7 +36,7 @@ class AssetResolver final {
 public:
     explicit AssetResolver(
         std::vector<std::filesystem::path> roots = {},
-        runtime::DiagnosticReporter reporter = {}
+        base::DiagnosticReporter reporter = {}
     );
 
     [[nodiscard]] AssetLoadResult load_bytes(
@@ -46,7 +46,7 @@ public:
 
 private:
     std::vector<std::filesystem::path> roots_;
-    runtime::DiagnosticReporter reporter_;
+    base::DiagnosticReporter reporter_;
 };
 
 } // namespace strata::resource

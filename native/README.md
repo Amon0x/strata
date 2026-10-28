@@ -1,7 +1,9 @@
 # Strata native runtime
 
-`strata_core` is the portable C++23 implementation. `strata_c` is the stable shared-library
-boundary. C++ hosts use the ownership facade in `include/strata/strata.hpp`, which calls the same C ABI
+`strata_core` is the portable C++23 implementation, linked from layered static libraries
+(`strata_base`, `strata_geometry`, `strata_compiler`, `strata_runtime`, `strata_resource`,
+`strata_font`, `strata_ui`) whose include direction the build checks. `strata_c` is the stable
+shared-library boundary. C++ hosts use the ownership facade in `include/strata/strata.hpp`, which calls the same C ABI
 rather than exposing implementation classes.
 
 ## ABI and ownership

@@ -33,6 +33,9 @@
 #include "ui/surface.hpp"
 #include "ui/svg_image.hpp"
 
+static_assert(strata::ui::render_packet_version == STRATA_RENDER_PACKET_VERSION_CURRENT,
+              "the core encodes the packet version the C ABI publishes");
+
 namespace {
 
 using strata::abi_detail::AbiCall;

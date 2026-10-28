@@ -1,11 +1,11 @@
-#include "runtime/diagnostic.hpp"
+#include "base/diagnostic.hpp"
 
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <utility>
 
-namespace strata::runtime {
+namespace strata::base {
 
 RuntimeDiagnosticStore::RuntimeDiagnosticStore(const std::size_t max_records)
     : max_records_(max_records) {
@@ -63,4 +63,4 @@ void RuntimeDiagnosticStore::clear() noexcept {
     dropped_count_ = 0U;
 }
 
-} // namespace strata::runtime
+} // namespace strata::base

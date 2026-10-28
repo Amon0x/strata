@@ -6,7 +6,7 @@
 #include <string_view>
 
 #include "font/opentype.hpp"
-#include "runtime/diagnostic.hpp"
+#include "base/diagnostic.hpp"
 
 namespace strata::font {
 
@@ -16,7 +16,7 @@ namespace strata::font {
  */
 class FontRegistry final {
 public:
-    explicit FontRegistry(runtime::DiagnosticReporter reporter = {});
+    explicit FontRegistry(base::DiagnosticReporter reporter = {});
 
     [[nodiscard]] std::shared_ptr<const OpenTypeFont> load_font(
         std::string id,
@@ -26,7 +26,7 @@ public:
     [[nodiscard]] std::shared_ptr<const OpenTypeFont> find(std::string_view id) const noexcept;
 
 private:
-    runtime::DiagnosticReporter reporter_;
+    base::DiagnosticReporter reporter_;
     std::map<std::string, std::shared_ptr<const OpenTypeFont>, std::less<>> fonts_;
 };
 
