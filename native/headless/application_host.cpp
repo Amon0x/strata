@@ -419,6 +419,16 @@ struct ApplicationHost::Impl final {
     void frame(const std::int64_t time_nanoseconds) {
         const host::SurfacePacketFrame framed = session->frame(time_nanoseconds);
         const strata_surface_frame_info& info = framed.surface;
+        if (options.packet_observer) {
+            options.packet_observer(RecordedPacket{
+                time_nanoseconds,
+                static_cast<std::uint32_t>(std::llround(logical_width * display_scale)),
+                static_cast<std::uint32_t>(std::llround(logical_height * display_scale)),
+                logical_width,
+                logical_height,
+                std::vector<std::uint8_t>(framed.bytes.begin(), framed.bytes.end()),
+            });
+        }
         renderer->render(*framed.packet, time_nanoseconds);
         frame_available = true;
         const std::vector<strata_backdrop_sample> backdrop = renderer->take_backdrop_samples();

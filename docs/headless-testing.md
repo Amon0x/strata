@@ -252,5 +252,32 @@ CPU implementation of built-in unified materials. Because arbitrary HLSL has no 
 meaning, it uses the built-in shape fallback and records the material id in
 `result.json.materialFallbacks`; it is not the visual-regression default.
 
+### What the reference renderer is an oracle for
+
+The reference renderer is an oracle only for what it implements the same way as the GPU pipelines:
+
+- the unified material (`strata:unified_ui`): solid, rounded, border, image, coverage and MSDF
+  text, and shadow draw modes, with presentation-group placement, opacity and tone;
+- every packet blend (`DrawBlend`) and rounded-clip coverage mode (`ClipCoverage`), applied exactly
+  as the packet states them, and the GPU's 1/256 subpixel vertex snap;
+- blur batches and the blur passes of effect programs, including downsampled blur;
+- decoded RGBA8 images and atlas uploads, sampled nearest or bilinear as declared;
+- effect-sample retention: it reuses a sample exactly when a GPU backend would (the decoder's
+  `sample_revision` and the refresh interval).
+
+It is not an oracle for authored HLSL materials or shader effect passes (it draws the unified
+fallback and skips shader passes), for GPU rasterization rules beyond the subpixel snap (its edges
+can differ by one step of antialiasing), or for render-target formats other than RGBA8. Frames that
+use authored materials or shader effects are compared between GPU backends only.
+
+`strata.render.differential` enforces this scope. It records a headless scenario's packet stream
+(`surface.recordPackets: true` writes `packets.strp` beside the captures; see
+`native/headless/packet_stream.hpp`), replays it through every backend the build has (reference,
+D3D11/WARP on Windows, Vulkan where a device exists) and requires every portable frame to agree
+within a mean channel difference of 0.5 and 0.2% of pixels differing by more than 32. It also
+replays scripted effect-cache sequences (content changing beside a blur edge and beyond its reach,
+a presentation group moving under the glass, an image swapped under its edge) and requires each
+backend's retained samples to match, exactly, a twin of the same backend that never reuses one.
+
 The offscreen backend establishes renderer and shader output without pretending to replace physical
 clipboard/IME integration or final hardware/driver acceptance.

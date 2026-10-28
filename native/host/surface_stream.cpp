@@ -69,7 +69,7 @@ SurfacePacketFrame SurfacePacketStream::frame(const std::int64_t time_nanosecond
     );
     read_bytes(surface_, bytes_, false);
     const RenderPacket& packet = decoder_.decode(bytes_);
-    return SurfacePacketFrame{frame, &packet, bytes_.size()};
+    return SurfacePacketFrame{frame, &packet, bytes_.size(), bytes_};
 }
 
 const RenderPacket& SurfacePacketStream::prepare_release() {

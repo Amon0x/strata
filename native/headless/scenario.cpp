@@ -392,6 +392,9 @@ Scenario load_scenario(const std::filesystem::path& path) {
     if (const JsonValue* value = optional(surface, "clearColor"); value != nullptr) {
         result.clear_color = color(*value);
     }
+    if (const JsonValue* value = optional(surface, "recordPackets"); value != nullptr) {
+        result.record_packets = boolean(*value, "surface.recordPackets");
+    }
     if (result.root_role != "screen" && result.root_role != "overlay") {
         throw std::invalid_argument("surface.role must be 'screen' or 'overlay'");
     }

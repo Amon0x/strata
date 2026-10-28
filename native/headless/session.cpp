@@ -122,9 +122,20 @@ struct Session::Impl final {
     Impl(const Scenario& scenario, std::filesystem::path resource_root,
          std::filesystem::path output_root)
         : scenario_(scenario), output_root_(std::move(output_root)),
-          host_(scenario, std::move(resource_root)), viewport_width_(scenario.width),
+          host_(scenario, std::move(resource_root), recording_options()),
+          viewport_width_(scenario.width),
           viewport_height_(scenario.height), viewport_scale_(scenario.scale) {
         std::filesystem::create_directories(output_root_);
+    }
+
+    [[nodiscard]] ApplicationHostOptions recording_options() {
+        ApplicationHostOptions options;
+        if (scenario_.record_packets) {
+            options.packet_observer = [this](const RecordedPacket& packet) {
+                recorded_packets_.push_back(packet);
+            };
+        }
+        return options;
     }
 
     void execute_step(const ScenarioStep& step) {
@@ -377,6 +388,8 @@ struct Session::Impl final {
     }
 
     void write_result() const {
+        if (scenario_.record_packets)
+            write_packet_stream(output_root_ / "packets.strp", recorded_packets_);
         std::vector<JsonValue> captures;
         for (const std::string& capture : captures_)
             captures.emplace_back(capture);
@@ -413,6 +426,7 @@ struct Session::Impl final {
 
     const Scenario& scenario_;
     std::filesystem::path output_root_;
+    std::vector<RecordedPacket> recorded_packets_;
     ApplicationHost host_;
     std::vector<std::string> captures_;
     std::int64_t time_nanoseconds_ = 0;

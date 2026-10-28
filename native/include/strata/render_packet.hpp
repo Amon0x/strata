@@ -345,6 +345,8 @@ struct SurfacePacketFrame final {
     strata_surface_frame_info surface{};
     const RenderPacket* packet = nullptr;
     std::size_t packet_bytes = 0U;
+    /** The framed packet as read, valid until the stream frames again (for recording). */
+    std::span<const std::uint8_t> bytes;
 };
 
 /**

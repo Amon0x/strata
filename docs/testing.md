@@ -34,6 +34,10 @@ libFuzzer harness for the OpenType reader; seed its corpus with the bundled font
 viewport, host snapshots/services, extension packages, and ordinary input routing. Captures pair
 canonical frame JSON with PNG output.
 
+`strata.render.differential` replays recorded headless packet streams and scripted effect-cache
+sequences through every backend the build has and compares them; see
+[the reference renderer's oracle scope](headless-testing.md#what-the-reference-renderer-is-an-oracle-for).
+
 `strata.headless.portable` and `strata.headless.portable.interactive` run everywhere through the CPU
 reference backend. They verify fonts, packet generation and decoding, geometry rendering, physical
 pointer input, state mutation, PNG capture, and the persistent JSON-lines protocol. Windows also

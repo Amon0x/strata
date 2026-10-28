@@ -766,6 +766,7 @@ if(STRATA_BUILD_TOOLS)
             headless/application_host.cpp
             headless/capture_renderer.cpp
             headless/interactive.cpp
+            headless/packet_stream.cpp
             headless/png.cpp
             headless/runner.cpp
             headless/scenario.cpp
@@ -1280,6 +1281,21 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         )
         strata_target_defaults(strata_effect_refresh_tests)
         add_test(NAME strata.effect_refresh COMMAND strata_effect_refresh_tests)
+
+        # Replays recorded and scripted packet streams through every backend this build has.
+        add_executable(strata_render_differential_tests tests/render_differential_tests.cpp)
+        target_link_libraries(strata_render_differential_tests PRIVATE strata_headless_host)
+        strata_target_defaults(strata_render_differential_tests)
+        add_test(
+            NAME strata.render.differential
+            COMMAND strata_render_differential_tests
+                ${STRATA_RESOURCE_ROOT}
+                ${CMAKE_CURRENT_BINARY_DIR}/render-differential
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/headless/portable.json
+        )
+        if(STRATA_BUILD_VULKAN AND STRATA_TEST_VULKAN)
+            set_tests_properties(strata.render.differential PROPERTIES LABELS "gpu;vulkan")
+        endif()
     endif()
 
     add_test(

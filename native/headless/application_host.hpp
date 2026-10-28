@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -12,6 +13,7 @@
 #include <strata/strata.h>
 
 #include "data/json.hpp"
+#include "packet_stream.hpp"
 #include "scenario.hpp"
 
 namespace strata::headless {
@@ -63,6 +65,8 @@ struct ApplicationHostOptions final {
     std::optional<strata_ime_adapter> ime;
     // Batch tests retain their complete trace. Live previews drain observations after each frame.
     bool capture_frames = true;
+    /** Receives every framed render packet in stream order, for recording and replay. */
+    std::function<void(const RecordedPacket&)> packet_observer;
 };
 
 /** One complete public-ABI application/Surface host with deterministic in-memory services. */

@@ -108,6 +108,8 @@ struct Scenario final {
     double scale = 1.0;
     bool reduced_motion = false;
     std::array<std::uint8_t, 4U> clear_color{9U, 11U, 15U, 255U};
+    /** Writes the Surface's render packet stream to packets.strp for backend replay. */
+    bool record_packets = false;
 };
 
 [[nodiscard]] Scenario load_scenario(const std::filesystem::path& path);
