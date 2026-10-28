@@ -329,37 +329,48 @@ void set_layout_field(DescriptionNode::Properties& properties, std::string name,
     properties.insert_or_assign("$layout", ExpressionValue(map_value(std::move(fields))));
 }
 
-void collect_slot_names(const std::shared_ptr<const DescriptionNode>& node,
-                        std::set<std::string, std::less<>>& names) {
-    if (node->type == "Slot") {
-        const auto property = node->properties.find("name");
-        const runtime::Value* value =
-            property != node->properties.end() ? property->second.value() : nullptr;
-        if (value != nullptr && value->string() != nullptr && !value->string()->empty()) {
-            names.insert(*value->string());
-        }
+/**
+ * The name of a slot a component declares itself, or none. A component's output also holds the
+ * slots of the components it calls; only those described from its own body (its source path)
+ * are its own, as the compiler counts them. One it forwards into a child's fill stays its own.
+ */
+[[nodiscard]] const std::string* own_slot_name(const DescriptionNode& node,
+                                               const std::string_view component_path) {
+    if (node.type != "Slot" || !node.source_path.starts_with(component_path) ||
+        node.source_path.size() <= component_path.size() ||
+        node.source_path[component_path.size()] != '/') {
+        return nullptr;
     }
+    const auto property = node.properties.find("name");
+    const runtime::Value* value =
+        property != node.properties.end() ? property->second.value() : nullptr;
+    return value != nullptr && value->string() != nullptr && !value->string()->empty()
+               ? value->string()
+               : nullptr;
+}
+
+void collect_slot_names(const std::shared_ptr<const DescriptionNode>& node,
+                        const std::string_view component_path,
+                        std::set<std::string, std::less<>>& names) {
+    if (const std::string* name = own_slot_name(*node, component_path))
+        names.insert(*name);
     for (std::size_t index = 0U; index < node->children->size(); ++index) {
-        collect_slot_names(node->children->at(index), names);
+        collect_slot_names(node->children->at(index), component_path, names);
     }
 }
 
 [[nodiscard]] std::shared_ptr<const DescriptionNode>
 project_slots(const std::shared_ptr<const DescriptionNode>& node,
+              const std::string_view component_path,
               const std::map<std::string, std::vector<std::shared_ptr<const DescriptionNode>>,
                              std::less<>>& projected) {
-    if (node->type == "Slot") {
-        const auto property = node->properties.find("name");
-        const runtime::Value* value =
-            property != node->properties.end() ? property->second.value() : nullptr;
-        if (value != nullptr && value->string() != nullptr) {
-            const auto replacement = projected.find(*value->string());
-            if (replacement != projected.end()) {
-                auto resolved = std::make_shared<DescriptionNode>(*node);
-                resolved->children =
-                    std::make_shared<const EagerDescriptionChildren>(replacement->second);
-                return resolved;
-            }
+    if (const std::string* name = own_slot_name(*node, component_path)) {
+        const auto replacement = projected.find(*name);
+        if (replacement != projected.end()) {
+            auto resolved = std::make_shared<DescriptionNode>(*node);
+            resolved->children =
+                std::make_shared<const EagerDescriptionChildren>(replacement->second);
+            return resolved;
         }
     }
 
@@ -368,7 +379,8 @@ project_slots(const std::shared_ptr<const DescriptionNode>& node,
     children.reserve(node->children->size());
     for (std::size_t index = 0U; index < node->children->size(); ++index) {
         const std::shared_ptr<const DescriptionNode> source = node->children->at(index);
-        std::shared_ptr<const DescriptionNode> resolved = project_slots(source, projected);
+        std::shared_ptr<const DescriptionNode> resolved =
+            project_slots(source, component_path, projected);
         changed = changed || resolved != source;
         children.push_back(std::move(resolved));
     }
@@ -378,6 +390,7 @@ project_slots(const std::shared_ptr<const DescriptionNode>& node,
     resolved->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
     return resolved;
 }
+
 
 } // namespace
 
@@ -1705,7 +1718,7 @@ DescriptionBuilder::build_component_call(const runtime::ProgramCall& call, const
     }
     if (call.children != runtime::no_program_id) {
         std::set<std::string, std::less<>> declared_slots;
-        collect_slot_names(component_root, declared_slots);
+        collect_slot_names(component_root, component.path, declared_slots);
         if (!raw_content.empty()) {
             const std::string shorthand = declared_slots.size() == 1U ? *declared_slots.begin()
                                           : declared_slots.contains("content")
@@ -1721,7 +1734,7 @@ DescriptionBuilder::build_component_call(const runtime::ProgramCall& call, const
                 ++content;
         }
         if (!projected_content.empty())
-            component_root = project_slots(component_root, projected_content);
+            component_root = project_slots(component_root, component.path, projected_content);
     }
     if (behaviors.empty())
         return component_root;

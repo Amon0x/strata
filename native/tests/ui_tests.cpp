@@ -8097,6 +8097,56 @@ overlay Nullable {
           "a nullable state did not describe the value it took");
 }
 
+void test_forwarded_slot_is_the_shorthand_target() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("forwarded-slot", bundle);
+    activate_description_fixture(application, "forwarded-slot", R"(
+component Card() {
+  Panel(key: "card.panel") {
+    Slot(name: "content")
+  }
+}
+component Outer() {
+  Card {
+    Slot(name: "content") { Slot(name: "body") }
+  }
+}
+overlay Forwarded {
+  root Outer() {
+    Text(key: "forwarded.raw", text: "raw")
+  }
+}
+)");
+    // Outer declares one slot, "body", which it forwards into Card's "content": raw content passed
+    // to Outer fills Outer's slot, as the compiler resolves it, never the child's own slot.
+    ui::DescriptionBuilder builder(application);
+    const ui::DescriptionBuildResult built = builder.build(runtime::LayerRole::overlay, "Forwarded");
+    check(built.diagnostics.empty(), "forwarded-slot fixture produced diagnostics");
+    const auto find_slot = [](const auto& self,
+                              const std::shared_ptr<const ui::DescriptionNode>& node,
+                              const std::string_view name)
+        -> std::shared_ptr<const ui::DescriptionNode> {
+        if (node->type == "Slot") {
+            const auto property = node->properties.find("name");
+            if (property != node->properties.end() && property->second.value() != nullptr &&
+                property->second.value()->string() != nullptr &&
+                *property->second.value()->string() == name) {
+                return node;
+            }
+        }
+        for (std::size_t index = 0U; index < node->children->size(); ++index) {
+            if (auto found = self(self, node->children->at(index), name); found != nullptr)
+                return found;
+        }
+        return nullptr;
+    };
+    const std::shared_ptr<const ui::DescriptionNode> body = find_slot(find_slot, built.root, "body");
+    check(body != nullptr && body->children->size() == 1U &&
+              body->children->at(0U)->key == std::optional<std::string>("forwarded.raw"),
+          "raw content filled a child component's slot instead of the one its component forwards");
+}
+
 int strata_test_ui(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--collections") {
@@ -8178,6 +8228,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_lazy_rows_follow_what_they_read();
             test_surfaces_keep_their_own_state_scope_bindings();
             test_state_types_follow_declarations_not_values();
+            test_forwarded_slot_is_the_shorthand_target();
         }
         std::cout << "strata_ui_tests: OK\n";
         return 0;
