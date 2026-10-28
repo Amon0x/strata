@@ -12,6 +12,7 @@
 #include <string_view>
 #include <vector>
 
+#include "compiler/builtin_catalog.hpp"
 #include "data/json.hpp"
 #include "data/json_view.hpp"
 #include "runtime/action.hpp"
@@ -76,51 +77,8 @@ enum class BinaryOperator : std::uint8_t {
     coalesce,
 };
 
-enum class HelperKind : std::uint8_t {
-    filter,
-    map,
-    sort_by,
-    distinct_by,
-    group_by,
-    flatten,
-    take_while,
-    window,
-    page,
-    persisted,
-    sequence,
-    parallel,
-    choose,
-    count,
-    any,
-    all,
-    min,
-    max,
-    clamp,
-    abs,
-    floor,
-    ceil,
-    round,
-    length,
-    size,
-    is_empty,
-    join,
-    lower,
-    upper,
-    trim,
-    title,
-    contains,
-    starts_with,
-    ends_with,
-    format,
-    format_number,
-    rgb,
-    rgba,
-    animation,
-    style,
-    when_style,
-    effect,
-    unknown,
-};
+/** The evaluator computing a helper call; the catalog names one per helper. */
+using HelperKind = compiler::HelperEvaluator;
 
 /** A list position from a number value: its integer part, or nullopt when negative or too large. */
 [[nodiscard]] std::optional<std::size_t> bounded_index(const Value& value);

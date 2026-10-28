@@ -1042,11 +1042,16 @@ void test_catalog_declares_roles_and_names() {
                             });
         check(!opaque, "catalog type '" + type.id + "' has an opaque id");
     }
+    std::vector<bool> evaluated(static_cast<std::size_t>(compiler::HelperEvaluator::unknown));
     for (const compiler::DeclaredHelper& helper : catalog.helpers) {
         const bool lowered_as_node = helper.name == "action" || helper.name == "material";
-        check(helper.evaluator.empty() == lowered_as_node,
+        check((helper.evaluator == compiler::HelperEvaluator::unknown) == lowered_as_node,
               "catalog helper '" + helper.name + "' does not name its runtime evaluator");
+        if (!lowered_as_node) evaluated[static_cast<std::size_t>(helper.evaluator)] = true;
     }
+    // The runtime switches over these evaluators; one no helper names is dead code.
+    check(std::ranges::all_of(evaluated, [](const bool named) { return named; }),
+          "a runtime helper evaluator is named by no catalog helper");
     static const compiler::SchemaRegistry registry = compiler::SchemaRegistry::builtins();
     check(registry.widget("Repeater")->lazy_rows && registry.widget("Slot")->slot &&
               registry.widget("Panel")->layout_kind == "PANEL" &&

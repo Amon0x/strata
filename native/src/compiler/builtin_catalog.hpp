@@ -141,14 +141,65 @@ struct DeclaredAction final {
     std::string summary;
 };
 
+/**
+ * The runtime evaluators helpers are computed by. The runtime switches over these directly
+ * (runtime::HelperKind is this type), so a helper names its evaluator once, here in the catalog.
+ */
+enum class HelperEvaluator : std::uint8_t {
+    filter,
+    map,
+    sort_by,
+    distinct_by,
+    group_by,
+    flatten,
+    take_while,
+    window,
+    page,
+    persisted,
+    sequence,
+    parallel,
+    choose,
+    count,
+    any,
+    all,
+    min,
+    max,
+    clamp,
+    abs,
+    floor,
+    ceil,
+    round,
+    length,
+    size,
+    is_empty,
+    join,
+    lower,
+    upper,
+    trim,
+    title,
+    contains,
+    starts_with,
+    ends_with,
+    format,
+    format_number,
+    rgb,
+    rgba,
+    animation,
+    style,
+    when_style,
+    effect,
+    /** No evaluator: lowering turns the call into its own IR node, or nothing names a helper. */
+    unknown,
+};
+
 struct DeclaredHelper final {
     std::string name;
     std::string implementation;
     /**
-     * The runtime evaluator that computes the helper; empty for helpers lowering turns into
+     * The runtime evaluator that computes the helper; `unknown` for helpers lowering turns into
      * their own IR nodes. The runtime derives its helper table from this.
      */
-    std::string evaluator;
+    HelperEvaluator evaluator = HelperEvaluator::unknown;
     std::vector<DeclaredParameter> parameters;
     DeclaredTypePtr return_type;
     DeclaredTypePtr vararg_type;

@@ -85,67 +85,13 @@ using JsonObject = data::JsonObjectView;
     return ColorValue{channels[0], channels[1], channels[2], channels[3]};
 }
 
-/** The evaluator a built-in catalog helper names, by the evaluator's own name. */
-[[nodiscard]] HelperKind evaluator_kind(const std::string_view evaluator) noexcept {
-    static constexpr std::pair<std::string_view, HelperKind> evaluators[] = {
-        {"filter", HelperKind::filter},
-        {"map", HelperKind::map},
-        {"sort_by", HelperKind::sort_by},
-        {"distinct_by", HelperKind::distinct_by},
-        {"group_by", HelperKind::group_by},
-        {"flatten", HelperKind::flatten},
-        {"take_while", HelperKind::take_while},
-        {"window", HelperKind::window},
-        {"page", HelperKind::page},
-        {"persisted", HelperKind::persisted},
-        {"sequence", HelperKind::sequence},
-        {"parallel", HelperKind::parallel},
-        {"choose", HelperKind::choose},
-        {"count", HelperKind::count},
-        {"any", HelperKind::any},
-        {"all", HelperKind::all},
-        {"min", HelperKind::min},
-        {"max", HelperKind::max},
-        {"clamp", HelperKind::clamp},
-        {"abs", HelperKind::abs},
-        {"floor", HelperKind::floor},
-        {"ceil", HelperKind::ceil},
-        {"round", HelperKind::round},
-        {"length", HelperKind::length},
-        {"size", HelperKind::size},
-        {"is_empty", HelperKind::is_empty},
-        {"join", HelperKind::join},
-        {"lower", HelperKind::lower},
-        {"upper", HelperKind::upper},
-        {"trim", HelperKind::trim},
-        {"title", HelperKind::title},
-        {"contains", HelperKind::contains},
-        {"starts_with", HelperKind::starts_with},
-        {"ends_with", HelperKind::ends_with},
-        {"format", HelperKind::format},
-        {"format_number", HelperKind::format_number},
-        {"rgb", HelperKind::rgb},
-        {"rgba", HelperKind::rgba},
-        {"animation", HelperKind::animation},
-        {"style", HelperKind::style},
-        {"when_style", HelperKind::when_style},
-        {"effect", HelperKind::effect},
-    };
-    for (const auto& [evaluator_name, kind] : evaluators) {
-        if (evaluator_name == evaluator) return kind;
-    }
-    return HelperKind::unknown;
-}
-
 /** Helper names and aliases come from the built-in catalog, which names each one's evaluator. */
 [[nodiscard]] HelperKind helper_kind(const std::string_view name) {
     static const std::map<std::string, HelperKind, std::less<>> helpers = [] {
         std::map<std::string, HelperKind, std::less<>> result;
         for (const compiler::DeclaredHelper& helper : compiler::builtin_catalog().helpers) {
-            if (const HelperKind kind = evaluator_kind(helper.evaluator);
-                kind != HelperKind::unknown) {
-                result.emplace(helper.name, kind);
-            }
+            if (helper.evaluator != HelperKind::unknown)
+                result.emplace(helper.name, helper.evaluator);
         }
         return result;
     }();
