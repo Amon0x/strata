@@ -194,6 +194,8 @@ function(strata_target_defaults target)
 endfunction()
 
 
+# Strict JSON and UTF-8 have exactly one owner. Every consumer, including the installed C++ host
+# facade, links this archive instead of compiling the sources again.
 add_library(
     strata_internal_data
     STATIC
@@ -205,7 +207,12 @@ target_include_directories(
     strata_internal_data
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
-set_target_properties(strata_internal_data PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(
+    strata_internal_data
+    PROPERTIES
+        EXPORT_NAME internal_data
+        POSITION_INDEPENDENT_CODE ON
+)
 strata_target_defaults(strata_internal_data)
 
 # Standalone, dependency-free static SVG parser and deterministic reference rasterizer. The UI
@@ -254,6 +261,8 @@ set_target_properties(
 )
 strata_target_defaults(strata_render_host)
 
+# Extension loading, module and resource paths, and system fonts for every native host. The
+# installed desktop host links this archive rather than compiling its sources a second time.
 add_library(
     strata_host_support
     STATIC
@@ -275,7 +284,12 @@ target_link_libraries(
     PUBLIC strata_internal_data Strata::render_host
     PRIVATE ${CMAKE_DL_LIBS}
 )
-set_target_properties(strata_host_support PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(
+    strata_host_support
+    PROPERTIES
+        EXPORT_NAME host_support
+        POSITION_INDEPENDENT_CODE ON
+)
 strata_target_defaults(strata_host_support)
 
 add_library(
@@ -530,16 +544,10 @@ strata_target_defaults(strata_c)
 
 # Pleasant typed C++ host bindings over the stable C ABI. This is static by design: STL model
 # types never become part of strata_c's compiler-independent DLL boundary.
-set(
-    strata_host_cpp_sources
-    src/host.cpp
-    src/core/utf8.cpp
-    src/data/json.cpp
-    src/data/json_view.cpp
-)
+set(strata_host_cpp_sources src/host.cpp)
 add_library(strata_host_cpp STATIC ${strata_host_cpp_sources})
 add_library(Strata::host ALIAS strata_host_cpp)
-target_link_libraries(strata_host_cpp PUBLIC Strata::c)
+target_link_libraries(strata_host_cpp PUBLIC Strata::c PRIVATE strata_internal_data)
 target_include_directories(
     strata_host_cpp
     PUBLIC
@@ -573,7 +581,7 @@ strata_target_defaults(strata_c_static)
 
 add_library(strata_host_cpp_static STATIC ${strata_host_cpp_sources})
 add_library(Strata::host_static ALIAS strata_host_cpp_static)
-target_link_libraries(strata_host_cpp_static PUBLIC Strata::c_static)
+target_link_libraries(strata_host_cpp_static PUBLIC Strata::c_static PRIVATE strata_internal_data)
 target_include_directories(
     strata_host_cpp_static
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -727,8 +735,8 @@ if(WIN32)
 endif()
 
 if(WIN32 AND STRATA_BUILD_DESKTOP)
-    # Complete consumer-facing Win32 host. Its backend implementation is deliberately contained in
-    # this archive so the installed target does not depend on repository-private host libraries.
+    # Complete consumer-facing Win32 host. Shared host support is linked, not recompiled, and is
+    # installed alongside so the exported target stays self-contained.
     add_library(
         strata_desktop_host
         STATIC
@@ -736,10 +744,6 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             desktop/host_services.cpp
             desktop/ime.cpp
             desktop/renderer.cpp
-            host/extensions.cpp
-            host/module_path.cpp
-            host/resource_root.cpp
-            host/system_fonts.cpp
     )
     add_library(Strata::desktop ALIAS strata_desktop_host)
     target_link_libraries(
@@ -748,6 +752,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         PRIVATE
             Strata::d3d11
             Strata::render_host
+            strata_host_support
             d3d11
             d3dcompiler
             imm32
@@ -1593,7 +1598,14 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
 endif()
 
 install(
-    TARGETS strata_c strata_host_cpp strata_extensions strata_render_host strata_svg
+    TARGETS
+        strata_c
+        strata_host_cpp
+        strata_extensions
+        strata_render_host
+        strata_svg
+        strata_internal_data
+        strata_host_support
     EXPORT StrataTargets
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
@@ -1763,3 +1775,30 @@ if(STRATA_BUILD_TESTS AND STRATA_BUILD_TOOLS AND STRATA_BUILD_VULKAN AND STRATA_
         set_tests_properties(strata.vulkan.${scenario} PROPERTIES LABELS "vulkan;gpu" RUN_SERIAL TRUE)
     endforeach()
 endif()
+
+# Every library source has exactly one owning library; other targets link that library instead of
+# compiling the source again, so no binary can link two copies of one definition. The `_static`
+# targets are deliberate static-linkage variants of their shared or installed counterparts.
+get_property(strata_library_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(strata_target IN LISTS strata_library_targets)
+    get_target_property(strata_target_type ${strata_target} TYPE)
+    if(NOT strata_target_type MATCHES "^(STATIC|SHARED|MODULE|OBJECT)_LIBRARY$" OR
+       strata_target MATCHES "_static$")
+        continue()
+    endif()
+    get_target_property(strata_target_sources ${strata_target} SOURCES)
+    foreach(strata_source IN LISTS strata_target_sources)
+        if(NOT strata_source MATCHES "\.(c|cc|cpp)$" OR strata_source MATCHES "^\$<")
+            continue()
+        endif()
+        cmake_path(ABSOLUTE_PATH strata_source BASE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                   NORMALIZE OUTPUT_VARIABLE strata_source_path)
+        string(MAKE_C_IDENTIFIER "${strata_source_path}" strata_source_key)
+        if(DEFINED strata_source_owner_${strata_source_key})
+            message(FATAL_ERROR
+                "${strata_source} is compiled into both "
+                "${strata_source_owner_${strata_source_key}} and ${strata_target}; link the owner")
+        endif()
+        set(strata_source_owner_${strata_source_key} ${strata_target})
+    endforeach()
+endforeach()
