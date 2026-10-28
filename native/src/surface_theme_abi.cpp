@@ -728,7 +728,7 @@ template <typename Mutation>
     Mutation&& mutation
 ) {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (surface->release_packet_prepared) {
+    if (surface->packets.release_prepared()) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
     if (out_changed != nullptr) *out_changed = 0U;
@@ -929,7 +929,7 @@ strata_result strata_surface_unregister_theme(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (surface->release_packet_prepared) {
+    if (surface->packets.release_prepared()) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
     if (out_removed != nullptr) *out_removed = 0U;
@@ -958,7 +958,7 @@ strata_result strata_surface_set_scoped_theme(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (surface->release_packet_prepared) return strata::abi_detail::terminal_surface_failure(*surface);
+    if (surface->packets.release_prepared()) return strata::abi_detail::terminal_surface_failure(*surface);
     if (out_changed != nullptr) *out_changed = 0U;
     if (source == nullptr || out_changed == nullptr ||
         !strata::abi_detail::valid_view(node_key, false)) {
@@ -988,7 +988,7 @@ strata_result strata_surface_clear_scoped_theme(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (surface->release_packet_prepared) return strata::abi_detail::terminal_surface_failure(*surface);
+    if (surface->packets.release_prepared()) return strata::abi_detail::terminal_surface_failure(*surface);
     if (out_removed != nullptr) *out_removed = 0U;
     if (out_removed == nullptr || !strata::abi_detail::valid_view(node_key, false)) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_THEME_SCOPE", "Clearing a scoped theme requires a node key and output pointer.");
@@ -1009,7 +1009,7 @@ strata_result strata_surface_animate_scroll_to(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (surface->release_packet_prepared) return strata::abi_detail::terminal_surface_failure(*surface);
+    if (surface->packets.release_prepared()) return strata::abi_detail::terminal_surface_failure(*surface);
     if (out_started != nullptr) *out_started = 0U;
     if (source == nullptr || out_started == nullptr ||
         !has_struct(source) ||

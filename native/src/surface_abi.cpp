@@ -622,20 +622,12 @@ strata_result strata_surface_prepare_release_packet(strata_surface* const surfac
                                "Preparing a Surface release packet requires a complete byte sink.");
     }
     return surface_call(surface, AbiCall{"Surface release-packet preparation or delivery"}, [&] {
-        if (!surface->release_packet_prepared) {
-            surface->core.cancel_interactions();
-            const std::uint64_t last_frame = surface->core.last_frame().frame_index;
-            const std::uint64_t release_frame =
-                last_frame == std::numeric_limits<std::uint64_t>::max() ? last_frame
-                                                                        : last_frame + 1U;
-            const std::vector<std::string> resident = surface->textures.resident();
-            static_cast<void>(surface->host_render_packet_cache.prepare_resource_release(
-                release_frame, surface->glyph_atlas, resident));
+        if (!surface->packets.release_prepared()) {
+            static_cast<void>(surface->packets.prepare_release(surface->core));
             surface->frame_json.clear();
             surface->frame_snapshot_available = false;
-            surface->release_packet_prepared = true;
         }
-        const std::vector<std::uint8_t>& packet = surface->current_render_packet();
+        const std::vector<std::uint8_t>& packet = surface->packets.packet();
         sink->emit(sink->user_data, strata_bytes_view{packet.data(), packet.size()});
         return strata::abi_detail::result(STRATA_STATUS_OK);
     });
@@ -647,7 +639,7 @@ strata_result strata_surface_acknowledge_release_packet(strata_surface* const su
         return entry.refusal();
     if (surface == nullptr || surface->owner == nullptr)
         return invalid_argument();
-    if (!surface->release_packet_prepared) {
+    if (!surface->packets.release_prepared()) {
         return surface_failure(
             *surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.SURFACE.RELEASE_PACKET_NOT_PREPARED",
             "Release-packet consumption cannot be acknowledged before terminal preparation.");
@@ -664,7 +656,7 @@ strata_result strata_surface_release(strata_surface* const surface) noexcept {
         return strata::abi_detail::result(STRATA_STATUS_OK);
     if (surface->owner == nullptr)
         return invalid_argument();
-    if (!surface->release_packet_prepared || !surface->release_packet_consumed) {
+    if (!surface->packets.release_prepared() || !surface->release_packet_consumed) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
                                "STRATA.SURFACE.RELEASE_BARRIER_INCOMPLETE",
                                "Surface release requires a prepared, synchronously consumed, and "
@@ -698,7 +690,7 @@ strata_result strata_surface_adopt_environment(strata_surface* const surface,
         return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
-    if (surface->release_packet_prepared)
+    if (surface->packets.release_prepared())
         return terminal_surface_failure(*surface);
     if (out_adopted != nullptr)
         *out_adopted = 0U;
@@ -723,7 +715,7 @@ strata_surface_enqueue_input(strata_surface* const surface, const strata_input_e
         return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
-    if (surface->release_packet_prepared)
+    if (surface->packets.release_prepared())
         return terminal_surface_failure(*surface);
     if (out_info == nullptr || !has_struct(out_info) || (events == nullptr && event_count != 0U)) {
         return surface_failure(
@@ -765,7 +757,7 @@ strata_result strata_surface_cancel_interactions(strata_surface* const surface) 
         return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
-    if (surface->release_packet_prepared)
+    if (surface->packets.release_prepared())
         return terminal_surface_failure(*surface);
     return surface_call(surface, AbiCall{"Interaction cancellation"}, [&] {
         surface->core.cancel_interactions();
@@ -779,7 +771,7 @@ strata_result strata_surface_reveal(strata_surface* const surface) noexcept {
         return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
-    if (surface->release_packet_prepared)
+    if (surface->packets.release_prepared())
         return terminal_surface_failure(*surface);
     return surface_call(surface, AbiCall{"Surface reveal"}, [&] {
         surface->core.reveal();
@@ -795,7 +787,7 @@ strata_result strata_surface_report_backdrop(strata_surface* const surface,
         return entry.refusal();
     if (surface == nullptr || (samples == nullptr && sample_count != 0U))
         return invalid_argument();
-    if (surface->release_packet_prepared)
+    if (surface->packets.release_prepared())
         return terminal_surface_failure(*surface);
     return surface_call(surface, AbiCall{"Surface backdrop report"}, [&] {
         std::vector<strata::ui::Surface::BackdropSample> reports;
@@ -816,7 +808,7 @@ strata_surface_dispatch_action_json(strata_surface* const surface,
         return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
-    if (surface->release_packet_prepared)
+    if (surface->packets.release_prepared())
         return terminal_surface_failure(*surface);
     if (!strata::abi_detail::valid_action_dispatch_config(config) || out_info == nullptr ||
         !has_struct(out_info)) {
@@ -864,7 +856,7 @@ strata_result strata_surface_frame(strata_surface* const surface,
         return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
-    if (surface->release_packet_prepared)
+    if (surface->packets.release_prepared())
         return terminal_surface_failure(*surface);
     if (out_info == nullptr || !has_struct(out_info)) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
@@ -875,70 +867,8 @@ strata_result strata_surface_frame(strata_surface* const surface,
     out_info->struct_size = sizeof(strata_surface_frame_info);
     return surface_call(surface, AbiCall{"Surface framing", "STRATA.SURFACE.INVALID_FRAME"}, [&] {
         const strata::ui::SurfaceFrame frame = surface->core.frame(frame_time_nanoseconds);
-        const auto packet_started = std::chrono::steady_clock::now();
-        const strata::ui::TextEngine* const engine = surface->core.text_engine();
-        const bool textures_changed = surface->textures.sync(surface->owner->core.images());
-        const bool settled = frame.operations.render.nodes_visited == 0U &&
-                             frame.operations.render.commands_emitted == 0U && !textures_changed;
-        if (!settled || !surface->host_render_packet_cache.reuse(frame.frame_index)) {
-            static_cast<void>(surface->host_render_packet_cache.encode(
-                surface->core.render_commands(), frame.frame_index, &surface->textures,
-                surface->glyph_atlas, engine, surface->core.environment().scale,
-                surface->core.environment().framebuffer_width,
-                surface->core.environment().framebuffer_height,
-                surface->core.environment().logical_width,
-                surface->core.environment().logical_height));
-        }
-        const std::int64_t packet_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                              std::chrono::steady_clock::now() - packet_started)
-                                              .count();
-        const strata::ui::HostRenderPacketTelemetry& packet =
-            surface->host_render_packet_cache.telemetry();
-        surface->core.profiler().record_counters({
-            {strata::runtime::ProfilerCounter::packet_bytes,
-             static_cast<std::uint64_t>(surface->current_render_packet().size())},
-            {strata::runtime::ProfilerCounter::batch_texture_breaks, packet.texture_batch_breaks},
-            {strata::runtime::ProfilerCounter::batch_clip_breaks, packet.clip_batch_breaks},
-            {strata::runtime::ProfilerCounter::batch_material_breaks, packet.material_batch_breaks},
-            {strata::runtime::ProfilerCounter::batch_effect_breaks, packet.effect_batch_breaks},
-            {strata::runtime::ProfilerCounter::encoded_geometry_cache_hits,
-             packet.geometry_reused ? 1U : 0U},
-            {strata::runtime::ProfilerCounter::encoded_geometry_cache_misses,
-             packet.geometry_reused ? 0U : 1U},
-            {strata::runtime::ProfilerCounter::render_submission_nanos,
-             static_cast<std::uint64_t>(packet_nanos)},
-        });
-        surface->core.profiler().record_external_timing("packet-encode", packet_nanos);
-        if (!packet.geometry_reused) {
-            surface->core.profiler().record_external_timing("packet-submission",
-                                                            packet.submission_nanos);
-            surface->core.profiler().record_external_timing("packet-submission-plan",
-                                                            packet.submission_planning_nanos);
-            surface->core.profiler().record_external_timing("packet-submission-atlas",
-                                                            packet.submission_atlas_warmup_nanos);
-            surface->core.profiler().record_external_timing(
-                "packet-submission-text", packet.submission_text_preparation_nanos);
-            surface->core.profiler().record_external_timing("packet-submission-mesh",
-                                                            packet.submission_mesh_encoding_nanos);
-            surface->core.profiler().record_external_timing("packet-geometry",
-                                                            packet.geometry_packet_nanos);
-        }
-        if (packet.cold_encode_profiled) {
-            surface->core.profiler().record_external_timing("packet-cold-submission",
-                                                            packet.cold_submission_nanos);
-            surface->core.profiler().record_external_timing("packet-cold-submission-plan",
-                                                            packet.cold_submission_planning_nanos);
-            surface->core.profiler().record_external_timing(
-                "packet-cold-submission-atlas", packet.cold_submission_atlas_warmup_nanos);
-            surface->core.profiler().record_external_timing(
-                "packet-cold-submission-text", packet.cold_submission_text_preparation_nanos);
-            surface->core.profiler().record_external_timing(
-                "packet-cold-submission-mesh", packet.cold_submission_mesh_encoding_nanos);
-            surface->core.profiler().record_external_timing("packet-cold-geometry",
-                                                            packet.cold_geometry_packet_nanos);
-            surface->core.profiler().record_external_timing("packet-cold-resources",
-                                                            packet.cold_resource_packet_nanos);
-        }
+        const std::vector<std::uint8_t>& packet =
+            surface->packets.encode(surface->core, frame, surface->owner->core.images());
         // Canonical inspection JSON is expensive and optional; materialize it on first read.
         surface->frame_json.clear();
         surface->frame_snapshot_available = true;
@@ -953,7 +883,7 @@ strata_result strata_surface_frame(strata_surface* const surface,
                           static_cast<std::uint64_t>(surface->core.render_commands().size()),
                           surface->core.semantics().generation(),
                           static_cast<std::uint64_t>(surface->core.input().queued_event_count()),
-                          static_cast<std::uint64_t>(surface->current_render_packet().size()),
+                          static_cast<std::uint64_t>(packet.size()),
                       }));
         return strata::abi_detail::result(STRATA_STATUS_OK);
     });
@@ -1019,7 +949,7 @@ strata_result strata_surface_drain_events_json(strata_surface* const surface,
         return entry.refusal();
     if (surface == nullptr)
         return invalid_argument();
-    if (surface->release_packet_prepared)
+    if (surface->packets.release_prepared())
         return terminal_surface_failure(*surface);
     if (sink == nullptr || !has_struct(sink) || sink->emit == nullptr) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
@@ -1062,7 +992,7 @@ strata_result strata_surface_read_render_packet(const strata_surface* const surf
                                "STRATA.ABI.INVALID_BYTES_SINK",
                                "Reading a surface render packet requires a complete byte sink.");
     }
-    const std::vector<std::uint8_t>& packet = surface->current_render_packet();
+    const std::vector<std::uint8_t>& packet = surface->packets.packet();
     if (packet.empty()) {
         return surface_failure(*surface, STRATA_STATUS_NOT_FOUND,
                                "STRATA.SURFACE.FRAME_UNAVAILABLE",

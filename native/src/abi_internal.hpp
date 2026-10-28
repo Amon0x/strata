@@ -17,12 +17,11 @@
 #include "base/allocator.hpp"
 #include "base/utf8.hpp"
 #include "core/runtime.hpp"
-#include "font/atlas.hpp"
 #include "resource/image.hpp"
 #include "resource/svg_image.hpp"
 #include "runtime/application.hpp"
 #include "runtime/host_services.hpp"
-#include "ui/render/packet.hpp"
+#include "ui/render/surface_packets.hpp"
 #include "ui/surface.hpp"
 
 struct strata_surface;
@@ -218,10 +217,9 @@ struct strata_surface final {
           owner(host_runtime),
           host_resource_namespace(std::move(resource_namespace)),
           host_service_owner_token(host_resource_namespace + "/host-owner"),
-          glyph_atlas(host_resource_namespace),
           fonts(std::move(font_bindings)),
           image_bindings(std::move(owned_image_bindings)),
-          textures(host_resource_namespace, std::move(texture_resources)),
+          packets(host_resource_namespace, std::move(texture_resources)),
           core(
               std::move(id),
               host_runtime->core.application(),
@@ -237,10 +235,6 @@ struct strata_surface final {
               std::move(svg_images)
           ) {}
 
-    [[nodiscard]] const std::vector<std::uint8_t>& current_render_packet() const noexcept {
-        return host_render_packet_cache.packet();
-    }
-
     strata::base::HostAllocator allocator;
     strata_runtime* owner;
     /** Collision-free host-facing namespace; source adapter ids never escape through packets. */
@@ -250,15 +244,15 @@ struct strata_surface final {
      * Surface/InputRouter construction must use this token instead of the public Surface id.
      */
     std::string host_service_owner_token;
-    strata::font::GlyphAtlas glyph_atlas;
     std::vector<strata_surface_font_binding> fonts;
     std::vector<strata_surface_image_binding> image_bindings;
-    strata::ui::SurfaceTextures textures;
-    /** Preparing the final atlas-release packet is a terminal Surface lifecycle transition. */
-    bool release_packet_prepared = false;
+    /**
+     * Glyph atlas, host textures and the encoded packet. Preparing its terminal release packet is
+     * the Surface's terminal lifecycle transition.
+     */
+    strata::ui::SurfacePackets packets;
     /** Set only after the host confirms synchronous consumption of the terminal packet. */
     bool release_packet_consumed = false;
-    strata::ui::HostRenderPacketCache host_render_packet_cache;
     strata::ui::Surface core;
     mutable std::string frame_json;
     bool frame_snapshot_available = false;

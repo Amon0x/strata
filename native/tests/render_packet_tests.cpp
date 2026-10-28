@@ -1,17 +1,25 @@
 #include <strata/render_packet.hpp>
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 
+#include "compiler/module.hpp"
 #include "font/atlas.hpp"
 #include "resource/resource.hpp"
+#include "resource/runtime_images.hpp"
+#include "runtime/application.hpp"
+#include "runtime/profiler.hpp"
 #include "runtime/value.hpp"
 #include "ui/render.hpp"
 #include "ui/render/packet.hpp"
+#include "ui/render/surface_packets.hpp"
+#include "ui/surface.hpp"
 #include "ui/text.hpp"
 
 namespace {
@@ -765,6 +773,87 @@ void test_texture_changes_report_dirty_regions() {
           "a retained packet without resource changes reported dirty regions");
 }
 
+/**
+ * A Surface frame becomes a complete host packet in the core: text reaches the glyph atlas, a
+ * settled frame re-sends the retained epoch, the profiler records the packet, and the terminal
+ * packet releases every atlas page the host was given.
+ */
+void test_surface_frames_encode_complete_packets(const std::filesystem::path& resources) {
+    using namespace strata;
+    runtime::ApplicationContext application("surface-packets",
+                                            runtime::ApplicationBundle::create());
+    const runtime::ActivationResult activation = application.compile_and_activate(
+        compiler::ModuleSource{
+            "surface-packets.strata",
+            "overlay Main { root Panel(key: \"root\") { Text(text: \"Packets\") } }",
+        },
+        [](const std::string_view, const std::string_view path) -> compiler::ModuleSource {
+            throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+        },
+        0U);
+    check(activation.activated(), "surface packet fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 320;
+    environment.framebuffer_height = 200;
+    environment.logical_width = 320.0;
+    environment.logical_height = 200.0;
+    environment.reduced_motion = true;
+    ui::Surface surface(
+        "surface-packets", application, runtime::LayerRole::overlay, "Main", environment,
+        ui::TextEngine::load_control_font(
+            resources, resource::ResourceId::parse("assets/strata/fonts/medium.ttf")));
+    surface.profiler().set_capture_enabled(true);
+    ui::SurfacePackets packets("strata:test/surface-packets", {});
+    const resource::RuntimeImageStore images;
+    host::RenderPacketDecoder decoder;
+
+    const ui::SurfaceFrame first = surface.frame(1'000'000);
+    const host::RenderPacket& full = decoder.decode(packets.encode(surface, first, images));
+    check(full.frame_index == first.frame_index && full.full_geometry_payload &&
+              !full.batches.empty() && !full.vertices.empty(),
+          "the first Surface frame did not encode complete geometry");
+    std::vector<std::string> atlas_pages;
+    for (const host::ResourceOperation& operation : full.resources) {
+        if (operation.kind == host::resource_create) atlas_pages.push_back(operation.texture);
+    }
+    check(!atlas_pages.empty() && atlas_pages.front().find("strata:test/surface-packets") != std::string::npos,
+          "text did not create a namespaced glyph atlas page");
+    const std::uint64_t epoch = full.geometry_epoch;
+    const runtime::ProfilerSnapshot profile = surface.profiler().snapshot();
+    check(std::ranges::any_of(profile.counters,
+                              [](const runtime::ProfilerCounterSnapshot& counter) {
+                                  return counter.counter == runtime::ProfilerCounter::packet_bytes &&
+                                         counter.value > 0U;
+                              }),
+          "packet encoding was not recorded in the Surface profiler");
+
+    const ui::SurfaceFrame settled = surface.frame(2'000'000);
+    const host::RenderPacket& reused = decoder.decode(packets.encode(surface, settled, images));
+    check(reused.frame_index == settled.frame_index && reused.geometry_epoch == epoch &&
+              !reused.full_geometry_payload && packets.telemetry().geometry_reused,
+          "a settled frame did not re-send the retained geometry epoch");
+
+    const host::RenderPacket& terminal = decoder.decode(packets.prepare_release(surface));
+    check(packets.release_prepared(), "the terminal packet was not recorded as prepared");
+    for (const std::string& page : atlas_pages) {
+        check(std::ranges::any_of(terminal.resources,
+                                  [&page](const host::ResourceOperation& operation) {
+                                      return operation.kind == host::resource_release &&
+                                             operation.texture == page;
+                                  }),
+              "the terminal packet did not release glyph atlas page " + page);
+    }
+    check(&packets.prepare_release(surface) == &packets.packet(),
+          "preparing the terminal packet twice did not return the same packet");
+    bool refused = false;
+    try {
+        static_cast<void>(packets.encode(surface, surface.frame(3'000'000), images));
+    } catch (const std::logic_error&) {
+        refused = true;
+    }
+    check(refused, "a released Surface encoded another packet");
+}
+
 } // namespace
 
 int strata_test_render_packet(const int argument_count, const char* const* const arguments) {
@@ -785,6 +874,7 @@ int strata_test_render_packet(const int argument_count, const char* const* const
         test_effect_batch_change_invalidates_retained_samples(arguments[1]);
         test_effect_refresh_defaults_to_unbounded(arguments[1]);
         test_texture_changes_report_dirty_regions();
+        test_surface_frames_encode_complete_packets(arguments[1]);
         std::cout << "strata_render_packet_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

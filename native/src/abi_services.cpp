@@ -198,7 +198,7 @@ strata_result strata_runtime_set_ime_adapter(strata_runtime* const runtime,
     if (adapter == nullptr) {
         runtime->ime.reset();
         for (strata_surface* const surface : runtime->surfaces) {
-            if (surface != nullptr && !surface->release_packet_prepared) {
+            if (surface != nullptr && !surface->packets.release_prepared()) {
                 surface->core.invalidate();
             }
         }
@@ -206,7 +206,7 @@ strata_result strata_runtime_set_ime_adapter(strata_runtime* const runtime,
     }
     runtime->ime = *adapter;
     for (strata_surface* const surface : runtime->surfaces) {
-        if (surface != nullptr && !surface->release_packet_prepared) {
+        if (surface != nullptr && !surface->packets.release_prepared()) {
             surface->core.invalidate();
         }
     }

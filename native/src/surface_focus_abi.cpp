@@ -37,7 +37,7 @@ strata_result strata_surface_set_focus_containment(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (surface->release_packet_prepared) {
+    if (surface->packets.release_prepared()) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
     if (out_contained != nullptr) *out_contained = 0U;

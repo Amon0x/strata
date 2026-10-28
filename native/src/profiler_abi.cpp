@@ -185,7 +185,7 @@ strata_result strata_surface_set_profiler_capture(
     if (surface == nullptr || enabled > 1U) {
         return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
-    if (surface->release_packet_prepared) {
+    if (surface->packets.release_prepared()) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
     return strata::abi_detail::guarded([&] {
@@ -207,7 +207,7 @@ strata_result strata_surface_record_host_frame(
         telemetry->reserved != 0U || telemetry->submit_nanos < 0) {
         return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
-    if (surface->release_packet_prepared) {
+    if (surface->packets.release_prepared()) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
     return strata::abi_detail::guarded([&] {

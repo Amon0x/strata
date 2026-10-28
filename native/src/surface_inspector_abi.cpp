@@ -41,7 +41,7 @@ strata_result strata_surface_inspector_select(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (surface->release_packet_prepared) {
+    if (surface->packets.release_prepared()) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
     if (out_selected != nullptr) *out_selected = 0U;
@@ -72,7 +72,7 @@ strata_result strata_surface_inspector_pick(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (surface->release_packet_prepared) {
+    if (surface->packets.release_prepared()) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
     if (out_selected != nullptr) *out_selected = 0U;
@@ -90,7 +90,7 @@ strata_result strata_surface_inspector_clear(strata_surface* const surface) noex
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
-    if (surface->release_packet_prepared) {
+    if (surface->packets.release_prepared()) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
     surface->core.inspect_clear();
