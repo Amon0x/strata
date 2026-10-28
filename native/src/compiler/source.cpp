@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <stdexcept>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::compiler {
 namespace {
@@ -63,7 +63,7 @@ SourceBuffer::SourceBuffer(
     if (source_id_.empty()) {
         throw std::invalid_argument("source identity must not be empty");
     }
-    if (!strata::core::valid_utf8(source_id_) || !strata::core::valid_utf8(text_)) {
+    if (!strata::base::valid_utf8(source_id_) || !strata::base::valid_utf8(text_)) {
         throw std::invalid_argument("source identity and text must be valid UTF-8");
     }
 

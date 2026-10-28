@@ -135,11 +135,11 @@ strata_result strata_runtime_read_profiler(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr || !valid_sink(sink) || !runtime->core.has_application()) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return strata::abi_detail::guarded([&] {
         emit_snapshot(runtime->core.application().profiler().snapshot(), *sink);
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -151,11 +151,11 @@ strata_result strata_runtime_set_profiler_capture(
     if (entry.refused())
         return entry.refusal();
     if (runtime == nullptr || enabled > 1U || !runtime->core.has_application()) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return strata::abi_detail::guarded([&] {
         runtime->core.application().profiler().set_capture_enabled(enabled != 0U);
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -167,11 +167,11 @@ strata_result strata_surface_read_profiler(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr || !valid_sink(sink)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return strata::abi_detail::guarded([&] {
         emit_snapshot(surface->core.profiler().snapshot(), *sink);
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -183,14 +183,14 @@ strata_result strata_surface_set_profiler_capture(
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr || enabled > 1U) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
     return strata::abi_detail::guarded([&] {
         surface->core.profiler().set_capture_enabled(enabled != 0U);
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -205,7 +205,7 @@ strata_result strata_surface_record_host_frame(
         !has_struct(telemetry) ||
         telemetry->version != STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT ||
         telemetry->reserved != 0U || telemetry->submit_nanos < 0) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
@@ -230,6 +230,6 @@ strata_result strata_surface_record_host_frame(
             telemetry->blur_nanos,
             telemetry->submit_nanos,
         });
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }

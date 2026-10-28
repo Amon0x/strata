@@ -1,9 +1,9 @@
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 #include <cstddef>
 #include <cstdint>
 
-namespace strata::core {
+namespace strata::base {
 namespace {
 
 [[nodiscard]] bool decode(
@@ -114,4 +114,4 @@ std::optional<std::string_view> trim_utf8_white_space(
     );
 }
 
-} // namespace strata::core
+} // namespace strata::base

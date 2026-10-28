@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::runtime {
 namespace {
@@ -58,8 +58,8 @@ std::optional<std::uint64_t> AsyncDataService::query(
     const std::int64_t now_nanos,
     const std::int64_t debounce_nanos
 ) {
-    if (binding.empty() || owner.empty() || !core::valid_utf8(binding) ||
-        !core::valid_utf8(owner) || debounce_nanos < 0 ||
+    if (binding.empty() || owner.empty() || !base::valid_utf8(binding) ||
+        !base::valid_utf8(owner) || debounce_nanos < 0 ||
         now_nanos > std::numeric_limits<std::int64_t>::max() - debounce_nanos ||
         (validator_ && !validator_(binding))) {
         return std::nullopt;
@@ -118,7 +118,7 @@ bool AsyncDataService::progress(
     Binding* state = active(request_id);
     if (state == nullptr) return false;
     if (!std::isfinite(next_progress.completed) || next_progress.completed < 0.0 ||
-        !core::valid_utf8(next_progress.message) ||
+        !base::valid_utf8(next_progress.message) ||
         (next_progress.total.has_value() &&
          (!std::isfinite(*next_progress.total) || *next_progress.total < 0.0 ||
           next_progress.completed > *next_progress.total))) {
@@ -166,8 +166,8 @@ bool AsyncDataService::fail(
     AsyncFailure failure
 ) {
     Binding* state = active(request_id);
-    if (state == nullptr || failure.message.empty() || !core::valid_utf8(failure.message) ||
-        !core::valid_utf8(failure.code)) {
+    if (state == nullptr || failure.message.empty() || !base::valid_utf8(failure.message) ||
+        !base::valid_utf8(failure.code)) {
         return false;
     }
     state->status = AsyncStatus::failed;
@@ -184,7 +184,7 @@ bool AsyncDataService::post_progress(
     AsyncProgress next_progress
 ) {
     if (request_id == 0U || !std::isfinite(next_progress.completed) || next_progress.completed < 0.0 ||
-        !core::valid_utf8(next_progress.message) ||
+        !base::valid_utf8(next_progress.message) ||
         (next_progress.total.has_value() &&
          (!std::isfinite(*next_progress.total) || *next_progress.total < 0.0 ||
           next_progress.completed > *next_progress.total))) {
@@ -210,8 +210,8 @@ bool AsyncDataService::post_fail(
     const std::uint64_t request_id,
     AsyncFailure failure
 ) {
-    if (request_id == 0U || failure.message.empty() || !core::valid_utf8(failure.message) ||
-        !core::valid_utf8(failure.code)) {
+    if (request_id == 0U || failure.message.empty() || !base::valid_utf8(failure.message) ||
+        !base::valid_utf8(failure.code)) {
         return false;
     }
     std::scoped_lock lock(completion_mutex_);

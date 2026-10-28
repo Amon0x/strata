@@ -11,7 +11,7 @@
 
 #include "abi_internal.hpp"
 #include "abi_support.hpp"
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "data/json.hpp"
 
 using namespace strata::abi_detail;
@@ -41,7 +41,7 @@ strata_runtime_set_resource_adapter(strata_runtime* const runtime,
                                "Runtime to change it.");
     }
     runtime->resources = *adapter;
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_runtime_read_resource(strata_runtime* const runtime,
@@ -66,7 +66,7 @@ strata_result strata_runtime_read_resource(strata_runtime* const runtime,
     constexpr AbiCall call{"Resource loading or its byte sink", "STRATA.RESOURCE.INVALID_RESULT"};
     return runtime_call(runtime, call, [&] {
         const std::string id = copied_string(resource_id);
-        if (!strata::core::valid_utf8(id))
+        if (!strata::base::valid_utf8(id))
             throw std::invalid_argument("resource id must be valid UTF-8");
         strata_bytes_view borrowed{nullptr, 0U};
         const strata_status status = runtime->resources->load(
@@ -82,7 +82,7 @@ strata_result strata_runtime_read_resource(strata_runtime* const runtime,
         if (borrowed.size != 0U)
             copied.assign(borrowed.data, borrowed.data + borrowed.size);
         sink->emit(sink->user_data, strata_bytes_view{copied.data(), copied.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -96,7 +96,7 @@ strata_runtime_set_clipboard_adapter(strata_runtime* const runtime,
         return invalid_argument();
     if (adapter == nullptr) {
         runtime->clipboard.reset();
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     }
     if (!has_struct(adapter) || adapter->read == nullptr || adapter->write == nullptr) {
         return runtime_failure(*runtime, STRATA_STATUS_INVALID_ARGUMENT,
@@ -104,7 +104,7 @@ strata_runtime_set_clipboard_adapter(strata_runtime* const runtime,
                                "A clipboard adapter requires complete read and write callbacks.");
     }
     runtime->clipboard = *adapter;
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_runtime_clipboard_read(strata_runtime* const runtime,
@@ -138,13 +138,13 @@ strata_result strata_runtime_clipboard_read(strata_runtime* const runtime,
                                    "clipboard adapter returned an invalid string view");
         }
         const std::string copied = copied_string(borrowed);
-        if (!strata::core::valid_utf8(copied)) {
+        if (!strata::base::valid_utf8(copied)) {
             return runtime_failure(*runtime, STRATA_STATUS_INVALID_UTF8,
                                    "STRATA.CLIPBOARD.INVALID_TEXT",
                                    "clipboard adapter returned invalid UTF-8");
         }
         text_sink->emit(text_sink->user_data, strata_string_view{copied.data(), copied.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -167,7 +167,7 @@ strata_result strata_runtime_clipboard_write(strata_runtime* const runtime,
     }
     return runtime_call(runtime, AbiCall{"Clipboard write"}, [&] {
         const std::string copied = copied_string(text);
-        if (!strata::core::valid_utf8(copied)) {
+        if (!strata::base::valid_utf8(copied)) {
             return runtime_failure(*runtime, STRATA_STATUS_INVALID_UTF8,
                                    "STRATA.CLIPBOARD.INVALID_TEXT",
                                    "Clipboard text must be valid UTF-8.");
@@ -175,7 +175,7 @@ strata_result strata_runtime_clipboard_write(strata_runtime* const runtime,
         const strata_status status = runtime->clipboard->write(
             runtime->clipboard->user_data, strata_string_view{copied.data(), copied.size()});
         return status == STRATA_STATUS_OK
-                   ? strata::core::result(STRATA_STATUS_OK)
+                   ? strata::abi_detail::result(STRATA_STATUS_OK)
                    : runtime_failure(*runtime, status, "STRATA.CLIPBOARD.WRITE_FAILED",
                                      "The host clipboard adapter rejected a write.");
     });
@@ -202,7 +202,7 @@ strata_result strata_runtime_set_ime_adapter(strata_runtime* const runtime,
                 surface->core.invalidate();
             }
         }
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     }
     runtime->ime = *adapter;
     for (strata_surface* const surface : runtime->surfaces) {
@@ -210,7 +210,7 @@ strata_result strata_runtime_set_ime_adapter(strata_runtime* const runtime,
             surface->core.invalidate();
         }
     }
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_runtime_ime_set_active(strata_runtime* const runtime,
@@ -233,7 +233,7 @@ strata_result strata_runtime_ime_set_active(strata_runtime* const runtime,
     return runtime_call(runtime, AbiCall{"IME active-state update"}, [&] {
         const strata_status status = runtime->ime->set_active(runtime->ime->user_data, active);
         return status == STRATA_STATUS_OK
-                   ? strata::core::result(STRATA_STATUS_OK)
+                   ? strata::abi_detail::result(STRATA_STATUS_OK)
                    : runtime_failure(*runtime, status, "STRATA.IME.UPDATE_FAILED",
                                      "The host IME adapter rejected active state.");
     });
@@ -262,7 +262,7 @@ strata_result strata_runtime_ime_set_cursor_rect(strata_runtime* const runtime,
         const strata_status status =
             runtime->ime->set_cursor_rect(runtime->ime->user_data, logical_rect);
         return status == STRATA_STATUS_OK
-                   ? strata::core::result(STRATA_STATUS_OK)
+                   ? strata::abi_detail::result(STRATA_STATUS_OK)
                    : runtime_failure(*runtime, status, "STRATA.IME.UPDATE_FAILED",
                                      "The host IME adapter rejected cursor geometry.");
     });
@@ -278,7 +278,7 @@ strata_runtime_set_effect_adapter(strata_runtime* const runtime,
         return invalid_argument();
     if (adapter == nullptr) {
         runtime->effects.reset();
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     }
     if (!has_struct(adapter) || adapter->emit == nullptr) {
         return runtime_failure(
@@ -286,7 +286,7 @@ strata_runtime_set_effect_adapter(strata_runtime* const runtime,
             "An effect adapter requires the complete ABI structure and emit callback.");
     }
     runtime->effects = *adapter;
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_runtime_emit_effect_json(strata_runtime* const runtime,
@@ -311,7 +311,7 @@ strata_result strata_runtime_emit_effect_json(strata_runtime* const runtime,
                            "STRATA.EFFECT.INVALID_JSON"};
     return runtime_call(runtime, call, [&] {
         const std::string id = copied_string(effect_id);
-        if (!strata::core::valid_utf8(id)) {
+        if (!strata::base::valid_utf8(id)) {
             return runtime_failure(*runtime, STRATA_STATUS_INVALID_UTF8, "STRATA.EFFECT.INVALID_ID",
                                    "effect id must be valid UTF-8");
         }
@@ -322,7 +322,7 @@ strata_result strata_runtime_emit_effect_json(strata_runtime* const runtime,
         const strata_status status =
             static_cast<strata_status>(runtime->host_services.emit_effect(id, canonical));
         return status == STRATA_STATUS_OK
-                   ? strata::core::result(STRATA_STATUS_OK)
+                   ? strata::abi_detail::result(STRATA_STATUS_OK)
                    : runtime_failure(*runtime, status, "STRATA.EFFECT.EMIT_FAILED",
                                      "The host effect adapter rejected an effect.");
     });
@@ -352,7 +352,7 @@ void configure_durable_store(strata_runtime& runtime_handle) {
                     ? std::string{}
                     : std::string(reinterpret_cast<const char*>(bytes.data),
                                   reinterpret_cast<const char*>(bytes.data) + bytes.size);
-            if (!strata::core::valid_utf8(copied)) {
+            if (!strata::base::valid_utf8(copied)) {
                 throw std::invalid_argument("durable payload must be UTF-8");
             }
             return copied;
@@ -398,7 +398,7 @@ strata_result strata_runtime_set_durable_store_adapter(
             runtime->durable_store.reset();
             throw;
         }
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -422,11 +422,11 @@ strata_runtime_read_durable_shell_value_json(strata_runtime* const runtime,
         const strata::runtime::Value* value =
             runtime->core.application().durability().shell_value(copied_key);
         if (value == nullptr)
-            return strata::core::result(STRATA_STATUS_NOT_FOUND);
+            return strata::abi_detail::result(STRATA_STATUS_NOT_FOUND);
         const std::string json =
             strata::data::encode_canonical_json(strata::runtime::value_to_json(*value));
         sink->emit(sink->user_data, strata_string_view{json.data(), json.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -450,7 +450,7 @@ strata_runtime_write_durable_shell_value_json(strata_runtime* const runtime,
         runtime->core.application().durability().set_shell_value(
             copied_string(key),
             strata::runtime::value_from_json(strata::data::parse_json(copied_string(value_json))));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -470,7 +470,7 @@ strata_result strata_runtime_flush_durable_state(strata_runtime* const runtime) 
             runtime->core.application().durability().flush();
         return issue.has_value() ? runtime_failure(*runtime, STRATA_STATUS_INTERNAL_ERROR,
                                                    issue->code.c_str(), issue->message.c_str())
-                                 : strata::core::result(STRATA_STATUS_OK);
+                                 : strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -517,7 +517,7 @@ strata_runtime_set_async_host_adapter(strata_runtime* const runtime,
             runtime->async_host.reset();
             throw;
         }
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -529,7 +529,7 @@ strata_result strata_runtime_async_progress(strata_runtime* const runtime,
     if (!runtime->core.has_application() || progress == nullptr || !has_struct(progress) ||
         progress->has_total > 1U || progress->reserved != 0U ||
         !valid_view(progress->message, true)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     // Completions may arrive on any thread, so failures report bare statuses, not diagnostics.
     return guarded([&] {
@@ -540,7 +540,7 @@ strata_result strata_runtime_async_progress(strata_runtime* const runtime,
                 progress->has_total != 0U ? std::optional<double>(progress->total) : std::nullopt,
                 copied_string(progress->message),
             });
-        return strata::core::result(accepted ? STRATA_STATUS_OK : STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(accepted ? STRATA_STATUS_OK : STRATA_STATUS_INVALID_ARGUMENT);
     });
 }
 
@@ -550,14 +550,14 @@ strata_result strata_runtime_async_succeed_json(strata_runtime* const runtime,
     if (runtime == nullptr)
         return invalid_argument();
     if (!runtime->core.has_application() || !valid_view(value_json, false)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     // Completions may arrive on any thread, so failures report bare statuses, not diagnostics.
     return guarded([&] {
         const bool accepted = runtime->core.application().async().post_succeed(
             request_id,
             strata::runtime::value_from_json(strata::data::parse_json(copied_string(value_json))));
-        return strata::core::result(accepted ? STRATA_STATUS_OK : STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(accepted ? STRATA_STATUS_OK : STRATA_STATUS_INVALID_ARGUMENT);
     });
 }
 
@@ -569,12 +569,12 @@ strata_result strata_runtime_async_fail(strata_runtime* const runtime,
         return invalid_argument();
     if (!runtime->core.has_application() || !valid_view(message, false) ||
         !valid_view(code, true)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     // Completions may arrive on any thread, so failures report bare statuses, not diagnostics.
     return guarded([&] {
         const bool accepted = runtime->core.application().async().post_fail(
             request_id, strata::runtime::AsyncFailure{copied_string(message), copied_string(code)});
-        return strata::core::result(accepted ? STRATA_STATUS_OK : STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(accepted ? STRATA_STATUS_OK : STRATA_STATUS_INVALID_ARGUMENT);
     });
 }

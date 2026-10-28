@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::font {
 
@@ -15,7 +15,7 @@ std::shared_ptr<const OpenTypeFont> FontRegistry::load_font(
     resource::ResourceBytes bytes,
     std::string source_id
 ) {
-    if (id.empty() || source_id.empty() || !core::valid_utf8(id) || !core::valid_utf8(source_id)) {
+    if (id.empty() || source_id.empty() || !base::valid_utf8(id) || !base::valid_utf8(source_id)) {
         throw std::invalid_argument("font id and source id must be non-empty valid UTF-8");
     }
     try {

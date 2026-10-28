@@ -1,34 +1,76 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
 
-#include <strata/strata.h>
-
-#include "core/result.hpp"
+#include "base/status.hpp"
 #include "runtime/diagnostic.hpp"
 
 namespace strata::core {
 
+/** Severity of a published diagnostic. Values match the C ABI's `strata_diagnostic_severity`. */
+enum class DiagnosticSeverity : std::uint32_t { info = 0U, warning = 1U, error = 2U, fatal = 3U };
+
+/** Byte and line/column extent of a diagnostic in its source. */
+struct SourceRange final {
+    std::uint64_t byte_start = 0U;
+    std::uint64_t byte_end = 0U;
+    std::uint32_t line_start = 0U;
+    std::uint32_t column_start = 0U;
+    std::uint32_t line_end = 0U;
+    std::uint32_t column_end = 0U;
+
+    [[nodiscard]] friend bool operator==(const SourceRange&, const SourceRange&) = default;
+};
+
+/** One diagnostic as published to the host. Its views are valid only for the sink call. */
+struct DiagnosticEvent final {
+    std::uint64_t id = 0U;
+    DiagnosticSeverity severity = DiagnosticSeverity::error;
+    std::string_view code;
+    std::string_view message;
+    std::string_view source_id;
+    /** All zero when the diagnostic has no source location. */
+    SourceRange range;
+    std::uint64_t occurrence_count = 0U;
+    std::uint64_t sequence = 0U;
+    std::uint64_t first_frame_index = 0U;
+    std::uint64_t frame_index = 0U;
+    std::uint64_t dropped_count = 0U;
+    std::string_view component_path;
+    std::string_view expected;
+};
+
+/** Receives published diagnostics. Whatever it throws is contained by the publisher. */
+using DiagnosticSink = std::function<void(const DiagnosticEvent&)>;
+
+/** Delivers one event, containing any exception the sink raises. */
+void deliver(const DiagnosticSink& sink, const DiagnosticEvent& event) noexcept;
+
 class Diagnostics final {
 public:
-    explicit Diagnostics(strata_diagnostic_sink sink) noexcept;
+    explicit Diagnostics(DiagnosticSink sink);
 
-    [[nodiscard]] strata_result emit(
-        strata_status status,
-        strata_diagnostic_severity severity,
+    /**
+     * Publishes one diagnostic and returns `status` with the diagnostic's id. Repeating an
+     * identical diagnostic reuses its id and counts the occurrence.
+     */
+    [[nodiscard]] base::Result emit(
+        base::Status status,
+        DiagnosticSeverity severity,
         std::string_view code,
         std::string_view message,
         std::string_view source_id = {},
-        const strata_source_range* range = nullptr,
+        const SourceRange* range = nullptr,
         std::string_view component_path = {},
         std::string_view expected = {}
     ) noexcept;
 
     /** Publishes a record already canonicalized by RuntimeDiagnosticStore without re-aggregating. */
-    [[nodiscard]] strata_result publish(
+    [[nodiscard]] base::Result publish(
         const runtime::RuntimeDiagnosticRecord& record,
         std::uint64_t dropped_count
     ) noexcept;
@@ -36,14 +78,14 @@ public:
 
 private:
     struct Fingerprint final {
-        strata_diagnostic_severity severity;
+        DiagnosticSeverity severity;
         std::string code;
         std::string message;
         std::string source_id;
         std::string component_path;
         std::string expected;
         bool has_range;
-        strata_source_range range;
+        SourceRange range;
         [[nodiscard]] bool operator<(const Fingerprint& other) const noexcept;
     };
 
@@ -52,16 +94,9 @@ private:
         std::uint64_t count;
     };
 
-    strata_diagnostic_sink sink_;
+    DiagnosticSink sink_;
     std::uint64_t next_id_ = 1U;
     std::map<Fingerprint, Occurrence> occurrences_;
 };
-
-[[nodiscard]] strata_result emit_without_runtime(
-    const strata_diagnostic_sink& sink,
-    strata_status status,
-    std::string_view code,
-    std::string_view message
-) noexcept;
 
 } // namespace strata::core

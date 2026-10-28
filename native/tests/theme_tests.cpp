@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "compiler/source.hpp"
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "data/json.hpp"
 #include "runtime/application.hpp"
 #include "runtime/expression.hpp"
@@ -701,11 +701,11 @@ void test_unicode_recursive_layout_and_typed_motion_contracts() {
             return true;
         }
     };
-    check(core::utf8_blankness("\xE2\x80\x83\xC2\xA0") == core::Utf8Blankness::blank,
+    check(base::utf8_blankness("\xE2\x80\x83\xC2\xA0") == base::Utf8Blankness::blank,
           "Unicode White_Space was not classified as blank");
-    check(core::utf8_blankness("\xE2\x80\x83x") == core::Utf8Blankness::non_blank,
+    check(base::utf8_blankness("\xE2\x80\x83x") == base::Utf8Blankness::non_blank,
           "Unicode whitespace hid non-blank text");
-    check(core::utf8_blankness("\xF0\x28\x8C\x28") == core::Utf8Blankness::malformed,
+    check(base::utf8_blankness("\xF0\x28\x8C\x28") == base::Utf8Blankness::malformed,
           "malformed UTF-8 was not distinguished from blank text");
     check(rejects([] { static_cast<void>(ui::Theme("\xE2\x80\x83", ui::ThemeTokens{})); }) &&
               rejects([] {

@@ -45,13 +45,13 @@ namespace {
         activation.active_generation.value_or(0U),
         static_cast<std::uint64_t>(activation.diagnostics.size()),
     };
-    if (activation.activated()) return strata::core::result(STRATA_STATUS_OK);
+    if (activation.activated()) return strata::abi_detail::result(STRATA_STATUS_OK);
 
     const strata_status status =
         activation.status == strata::runtime::ActivationStatus::rejected_compile
         ? STRATA_STATUS_COMPILE_FAILED
         : STRATA_STATUS_ACTIVATION_REJECTED;
-    strata_result result = strata::core::result(status);
+    strata_result result = strata::abi_detail::result(status);
     for (const strata::runtime::ActivationDiagnostic& diagnostic : activation.diagnostics) {
         const std::optional<strata_source_range> range = diagnostic.range.has_value()
             ? std::optional(strata_source_range{
@@ -76,7 +76,7 @@ namespace {
             }
             return STRATA_DIAGNOSTIC_ERROR;
         }();
-        result = runtime.core.diagnostics().emit(
+        result = strata::abi_detail::emit(runtime.core.diagnostics(), 
             status,
             severity,
             diagnostic.code,
@@ -92,7 +92,7 @@ namespace {
         );
     }
     if (activation.diagnostics.empty()) {
-        result = runtime.core.diagnostics().emit(
+        result = strata::abi_detail::emit(runtime.core.diagnostics(), 
             status,
             STRATA_DIAGNOSTIC_ERROR,
             "STRATA.RUNTIME.ACTIVATION_REJECTED",
@@ -142,7 +142,7 @@ strata_result strata_runtime_publish_host_snapshot(
             snapshot->generation,
             values
         ));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -176,7 +176,7 @@ strata_result strata_runtime_publish_image(
                 : strata::resource::TextureSampling::linear,
             std::vector<std::uint8_t>(image->pixels, image->pixels + image->pixel_bytes)
         ));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -198,7 +198,7 @@ strata_result strata_runtime_release_image(
     }
     return runtime_call(runtime, AbiCall{"Runtime image release"}, [&] {
         static_cast<void>(runtime->core.images().release(copied_string(id)));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -221,7 +221,7 @@ strata_result strata_runtime_get_host_snapshot_info(
         snapshot != nullptr ? 1U : 0U,
         0U,
     }));
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_runtime_get_host_snapshot_generation(
@@ -238,7 +238,7 @@ strata_result strata_runtime_get_host_snapshot_generation(
     const std::optional<std::uint64_t> generation =
         runtime->core.host_snapshot_generation(copied_string(id));
     *out_generation = generation.value_or(0U);
-    return strata::core::result(
+    return strata::abi_detail::result(
         generation.has_value() ? STRATA_STATUS_OK : STRATA_STATUS_NOT_FOUND
     );
 }
@@ -260,7 +260,7 @@ strata_result strata_runtime_read_diagnostics(
             ? runtime->core.application().services().diagnostics_snapshot()
             : strata::runtime::RuntimeDiagnosticsSnapshot{};
         emit_diagnostics_snapshot(snapshot, *sink);
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -278,7 +278,7 @@ strata_result strata_runtime_clear_diagnostics(strata_runtime* const runtime) no
             surface->core.clear_diagnostics();
             surface->frame_json.clear();
         }
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -316,7 +316,7 @@ strata_result strata_runtime_read_host_value_json(
             strata::runtime::value_to_json(*value)
         );
         sink->emit(sink->user_data, strata_string_view{encoded.data(), encoded.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -377,7 +377,7 @@ strata_result strata_runtime_configure_application(
             schemas.has_value() ? &*schemas : nullptr,
             extension_declarations
         );
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -562,7 +562,7 @@ strata_result strata_runtime_read_material_declarations(
             ++written;
         }
         *out_count = declared;
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -645,7 +645,7 @@ strata_result strata_runtime_read_effect_pass_declarations(
             }
         }
         *out_count = declared;
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -678,7 +678,7 @@ strata_result strata_runtime_read_active_unit_json(
             runtime->core.application().active_unit()->portable_ir()
         );
         sink->emit(sink->user_data, strata_string_view{encoded.data(), encoded.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -724,7 +724,7 @@ strata_result strata_runtime_read_source_map_entry_json(
             strata::compiler::source_map_entry_json(*entry)
         );
         sink->emit(sink->user_data, strata_string_view{encoded.data(), encoded.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -768,7 +768,7 @@ strata_result strata_runtime_read_source_map_entries_at_json(
             strata::data::JsonValue(std::move(values))
         );
         sink->emit(sink->user_data, strata_string_view{encoded.data(), encoded.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -853,7 +853,7 @@ strata_result strata_runtime_register_action_handler(
                     throw std::runtime_error("foreign action handler returned an invalid result");
                 }
             );
-        const strata::core::HostAllocator allocator = runtime->core.allocator();
+        const strata::base::HostAllocator allocator = runtime->core.allocator();
         void* const storage = allocator.allocate(
             sizeof(strata_action_registration),
             alignof(strata_action_registration)
@@ -871,13 +871,13 @@ strata_result strata_runtime_register_action_handler(
             allocator,
             std::move(registration)
         );
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
 void strata_action_registration_release(strata_action_registration* const registration) noexcept {
     if (registration == nullptr) return;
-    const strata::core::HostAllocator allocator = registration->allocator;
+    const strata::base::HostAllocator allocator = registration->allocator;
     std::destroy_at(registration);
     allocator.deallocate(
         registration,
@@ -965,6 +965,6 @@ strata_result strata_runtime_dispatch_action_json(
             0U,
             static_cast<std::uint64_t>(outcome.handler_owners.size()),
         }));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }

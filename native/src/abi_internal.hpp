@@ -13,9 +13,10 @@
 
 #include <strata/strata.h>
 
-#include "core/allocator.hpp"
+#include "abi_boundary.hpp"
+#include "base/allocator.hpp"
+#include "base/utf8.hpp"
 #include "core/runtime.hpp"
-#include "core/utf8.hpp"
 #include "font/atlas.hpp"
 #include "resource/image.hpp"
 #include "resource/svg_image.hpp"
@@ -62,13 +63,14 @@ struct strata_surface_image_binding final {
 
 struct strata_runtime final {
     strata_runtime(
-        const strata::core::HostAllocator allocator,
+        const strata::base::HostAllocator allocator,
         const strata_clock clock,
         const strata_diagnostic_sink diagnostics,
         const std::uint64_t stable_identity_seed
     )
         : resource_owner_id(strata::abi_detail::allocate_runtime_resource_owner_id()),
-          core(allocator, clock, diagnostics, stable_identity_seed),
+          core(allocator, strata::core::Clock{clock.user_data, clock.now_nanoseconds},
+               strata::abi_detail::diagnostic_sink(diagnostics), stable_identity_seed),
           host_services(
               [this] { return clipboard.has_value(); },
               [this] {
@@ -92,7 +94,7 @@ struct strata_runtime final {
                   std::string copied = borrowed.size == 0U
                       ? std::string{}
                       : std::string(borrowed.data, borrowed.size);
-                  if (!strata::core::valid_utf8(copied)) {
+                  if (!strata::base::valid_utf8(copied)) {
                       return strata::runtime::HostClipboardRead{
                           STRATA_STATUS_INVALID_UTF8, std::nullopt,
                       };
@@ -165,39 +167,39 @@ struct strata_runtime final {
 
 struct strata_snapshot final {
     strata_snapshot(
-        const strata::core::HostAllocator host_allocator,
+        const strata::base::HostAllocator host_allocator,
         const strata::core::SnapshotData snapshot_data
     ) noexcept
         : allocator(host_allocator), data(snapshot_data) {}
 
-    strata::core::HostAllocator allocator;
+    strata::base::HostAllocator allocator;
     const strata::core::SnapshotData data;
 };
 
 struct strata_action_registration final {
     strata_action_registration(
-        const strata::core::HostAllocator host_allocator,
+        const strata::base::HostAllocator host_allocator,
         strata::runtime::ActionRegistration host_registration
     ) noexcept
         : allocator(host_allocator), registration(std::move(host_registration)) {}
 
-    strata::core::HostAllocator allocator;
+    strata::base::HostAllocator allocator;
     strata::runtime::ActionRegistration registration;
 };
 
 struct strata_application_state_snapshot final {
     strata_application_state_snapshot(
-        const strata::core::HostAllocator host_allocator,
+        const strata::base::HostAllocator host_allocator,
         strata::runtime::StateSnapshot snapshot
     ) : allocator(host_allocator), data(std::move(snapshot)) {}
 
-    strata::core::HostAllocator allocator;
+    strata::base::HostAllocator allocator;
     strata::runtime::StateSnapshot data;
 };
 
 struct strata_surface final {
     strata_surface(
-        const strata::core::HostAllocator host_allocator,
+        const strata::base::HostAllocator host_allocator,
         strata_runtime* const host_runtime,
         std::string id,
         const strata::runtime::LayerRole root_role,
@@ -239,7 +241,7 @@ struct strata_surface final {
         return host_render_packet_cache.packet();
     }
 
-    strata::core::HostAllocator allocator;
+    strata::base::HostAllocator allocator;
     strata_runtime* owner;
     /** Collision-free host-facing namespace; source adapter ids never escape through packets. */
     std::string host_resource_namespace;

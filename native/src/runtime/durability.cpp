@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "data/json.hpp"
 
 namespace strata::runtime {
@@ -262,7 +262,7 @@ void DurableState::set_command_recency(
     validate_key(scope, "command recency scope");
     command_ids.erase(
         std::ranges::remove_if(command_ids, [](const std::string& id) {
-            return id.empty() || !core::valid_utf8(id);
+            return id.empty() || !base::valid_utf8(id);
         }).begin(),
         command_ids.end()
     );
@@ -330,7 +330,7 @@ void DurableState::changed() {
 }
 
 void DurableState::validate_key(const std::string_view key, const std::string_view kind) {
-    if (key.empty() || !core::valid_utf8(key)) {
+    if (key.empty() || !base::valid_utf8(key)) {
         throw std::invalid_argument(std::string(kind) + " must be non-empty valid UTF-8");
     }
 }

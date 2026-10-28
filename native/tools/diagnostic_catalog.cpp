@@ -11,7 +11,7 @@
 #include <string_view>
 #include <system_error>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::tools {
 namespace {
@@ -28,7 +28,7 @@ namespace {
     std::ostringstream output;
     output << input.rdbuf();
     std::string text = output.str();
-    if (!core::valid_utf8(text)) throw std::runtime_error("diagnostic source is not valid UTF-8");
+    if (!base::valid_utf8(text)) throw std::runtime_error("diagnostic source is not valid UTF-8");
     return text;
 }
 

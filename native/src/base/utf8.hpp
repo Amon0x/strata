@@ -3,7 +3,7 @@
 #include <optional>
 #include <string_view>
 
-namespace strata::core {
+namespace strata::base {
 
 enum class Utf8Blankness { malformed, blank, non_blank };
 
@@ -15,4 +15,4 @@ enum class Utf8Blankness { malformed, blank, non_blank };
     std::string_view value
 ) noexcept;
 
-} // namespace strata::core
+} // namespace strata::base

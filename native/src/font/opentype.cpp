@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "font/truetype_outline.hpp"
 
 namespace strata::font {
@@ -2291,7 +2291,7 @@ ShapedText OpenTypeFont::shape_utf8(
         !std::isfinite(letter_spacing)) {
         throw std::invalid_argument("text shaping parameters must be finite and text sizes positive");
     }
-    if (!core::valid_utf8(text)) throw FontError("text to shape is not valid UTF-8");
+    if (!base::valid_utf8(text)) throw FontError("text to shape is not valid UTF-8");
 
     const double scale = pixel_size / static_cast<double>(implementation_->units);
     const double ascent_value = std::max(0.0, static_cast<double>(implementation_->ascent) * scale);

@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "ui/input/grapheme.hpp"
 
 namespace strata::ui {
@@ -23,7 +23,7 @@ struct CodePoint final {
 };
 
 [[nodiscard]] std::vector<CodePoint> decode(const std::string_view text) {
-    if (!core::valid_utf8(text)) throw std::invalid_argument("editor text must be valid UTF-8");
+    if (!base::valid_utf8(text)) throw std::invalid_argument("editor text must be valid UTF-8");
     std::vector<CodePoint> result;
     result.reserve(text.size());
     std::size_t index = 0U;
@@ -279,7 +279,7 @@ TextEditorMutation operator+(
 TextEditor::TextEditor(std::string controlled_text)
     : text_(std::move(controlled_text)), controlled_text_(text_), caret_(text_.size()),
       selection_start_(caret_), selection_end_(caret_) {
-    if (!core::valid_utf8(text_)) throw std::invalid_argument("controlled editor text must be valid UTF-8");
+    if (!base::valid_utf8(text_)) throw std::invalid_argument("controlled editor text must be valid UTF-8");
     clamp_offsets();
 }
 
@@ -317,7 +317,7 @@ std::string TextEditor::visual_text() const {
 }
 
 TextEditorMutation TextEditor::reconcile_controlled(const std::string_view source) {
-    if (!core::valid_utf8(source)) throw std::invalid_argument("controlled editor text must be valid UTF-8");
+    if (!base::valid_utf8(source)) throw std::invalid_argument("controlled editor text must be valid UTF-8");
     if (source == text_) {
         controlled_text_.assign(source);
         user_edited_ = false;
@@ -339,7 +339,7 @@ TextEditorMutation TextEditor::reconcile_controlled(const std::string_view sourc
 }
 
 TextEditorMutation TextEditor::restore_controlled(const std::string_view source) {
-    if (!core::valid_utf8(source)) throw std::invalid_argument("controlled editor text must be valid UTF-8");
+    if (!base::valid_utf8(source)) throw std::invalid_argument("controlled editor text must be valid UTF-8");
     const bool text_changed = source != text_;
     const bool composition_changed = composition_.has_value();
     text_.assign(source);
@@ -647,7 +647,7 @@ TextEditorMutation TextEditor::replace_range(
     const std::string_view replacement,
     const std::int64_t now_nanos
 ) {
-    if (!core::valid_utf8(replacement)) throw std::invalid_argument("editor insertion must be valid UTF-8");
+    if (!base::valid_utf8(replacement)) throw std::invalid_argument("editor insertion must be valid UTF-8");
     const Boundaries& boundaries = this->boundaries();
     const std::size_t from = floor_boundary(boundaries, start);
     const std::size_t to = floor_boundary(boundaries, std::max(from, end));

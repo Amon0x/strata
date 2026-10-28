@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "ui/presentation_geometry.hpp"
 #include "ui/text_geometry.hpp"
 #include "ui/widget/editor_geometry.hpp"
@@ -112,7 +112,7 @@ std::size_t surface_detail::MaterializationPublicationLedger::tracked_count() co
 namespace {
 
 [[nodiscard]] bool blank(const std::string_view value) noexcept {
-    return core::utf8_blankness(value) != core::Utf8Blankness::non_blank;
+    return base::utf8_blankness(value) != base::Utf8Blankness::non_blank;
 }
 
 class RuntimeFrameGuard final {

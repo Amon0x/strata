@@ -8,7 +8,7 @@
 #include <system_error>
 #include <vector>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::resource {
 namespace {
@@ -61,7 +61,7 @@ ResourceId ResourceId::parse(const std::string_view value) {
     if (value.empty()) {
         throw ResourceError("resource identity must not be empty");
     }
-    if (!strata::core::valid_utf8(value)) {
+    if (!strata::base::valid_utf8(value)) {
         throw ResourceError("resource identity must be valid UTF-8");
     }
     if (value.front() == '/' || value.back() == '/' || value.contains('\\') ||
@@ -134,7 +134,7 @@ std::string load_utf8_resource(
     if (bytes.starts_with("\xEF\xBB\xBF")) {
         throw ResourceError("UTF-8 byte-order marks are not permitted in Strata resources");
     }
-    if (!strata::core::valid_utf8(bytes)) {
+    if (!strata::base::valid_utf8(bytes)) {
         throw ResourceError("resource is not valid UTF-8");
     }
     return bytes;

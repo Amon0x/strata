@@ -220,7 +220,7 @@ endif()
 add_library(
     strata_internal_data
     STATIC
-        src/core/utf8.cpp
+        src/base/utf8.cpp
         src/data/json.cpp
         src/data/json_view.cpp
 )
@@ -316,7 +316,7 @@ strata_target_defaults(strata_host_support)
 add_library(
     strata_core
     STATIC
-        src/core/allocator.cpp
+        src/base/allocator.cpp
         src/core/diagnostics.cpp
         src/core/runtime.cpp
         src/compiler/artifact.cpp

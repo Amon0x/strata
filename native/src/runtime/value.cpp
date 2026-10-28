@@ -7,17 +7,17 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::runtime {
 namespace {
 
 void validate_text(const std::string_view value, const std::string_view label, const bool non_blank) {
-    const core::Utf8Blankness blankness = core::utf8_blankness(value);
-    if (blankness == core::Utf8Blankness::malformed) {
+    const base::Utf8Blankness blankness = base::utf8_blankness(value);
+    if (blankness == base::Utf8Blankness::malformed) {
         throw std::invalid_argument(std::string(label) + " must be valid UTF-8");
     }
-    if (non_blank && blankness == core::Utf8Blankness::blank) {
+    if (non_blank && blankness == base::Utf8Blankness::blank) {
         throw std::invalid_argument(std::string(label) + " must not be blank");
     }
 }

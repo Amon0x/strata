@@ -7,6 +7,8 @@
 #include <string_view>
 #include <utility>
 
+#include "base/status.hpp"
+
 namespace strata::runtime {
 
 /** Logical host-space rectangle used by the platform IME candidate-window service. */
@@ -184,8 +186,10 @@ public:
         }
     }
 
-    static constexpr std::uint32_t unavailable_status = 12U;
-    static constexpr std::uint32_t callback_failure_status = 8U;
+    static constexpr std::uint32_t unavailable_status =
+        static_cast<std::uint32_t>(base::Status::service_unavailable);
+    static constexpr std::uint32_t callback_failure_status =
+        static_cast<std::uint32_t>(base::Status::internal_error);
 
 private:
     [[nodiscard]] static bool probe(const InstalledProbe& value) noexcept {

@@ -5,7 +5,7 @@
 #include <new>
 #include <utility>
 
-namespace strata::core {
+namespace strata::base {
 
 class Arena final {
 public:
@@ -49,4 +49,4 @@ private:
     Arena& arena_;
 };
 
-} // namespace strata::core
+} // namespace strata::base

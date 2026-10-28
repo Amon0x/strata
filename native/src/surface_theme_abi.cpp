@@ -17,7 +17,7 @@
 
 #include "abi_internal.hpp"
 #include "abi_support.hpp"
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "ui/theme.hpp"
 
 using strata::abi_detail::AbiCall;
@@ -51,7 +51,7 @@ namespace {
         throw std::invalid_argument(std::string(label) + " view is invalid");
     }
     std::string result = strata::abi_detail::copied_string(value);
-    if (!strata::core::valid_utf8(result)) {
+    if (!strata::base::valid_utf8(result)) {
         throw std::invalid_argument(std::string(label) + " must be valid UTF-8");
     }
     return result;
@@ -742,7 +742,7 @@ template <typename Mutation>
     }
     return surface_call(surface, AbiCall{"Surface theme mutation", "STRATA.THEME.INVALID"}, [&] {
         *out_changed = mutation(surface->core, theme(*surface, *source)) ? 1U : 0U;
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -784,7 +784,7 @@ strata_result strata_theme_tokens_defaults(strata_theme_tokens* const out_tokens
         source.density,
         0U,
     }));
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_theme_visual_style_defaults(
@@ -802,7 +802,7 @@ strata_result strata_theme_visual_style_defaults(
     result.scale_x = 1.0;
     result.scale_y = 1.0;
     *out_style = result;
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_theme_text_visual_style_defaults(
@@ -819,7 +819,7 @@ strata_result strata_theme_text_visual_style_defaults(
         strata_color{255U, 255U, 255U, 255U},
         0U,
     }));
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_theme_text_layout_style_defaults(
@@ -841,7 +841,7 @@ strata_result strata_theme_text_layout_style_defaults(
         1.0,
         0.0,
     }));
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_theme_layout_style_defaults(
@@ -870,7 +870,7 @@ strata_result strata_theme_layout_style_defaults(
     result.portal_target = strata_string_view{root, sizeof(root) - 1U};
     result.detach_from_parent_clip = 1U;
     *out_style = result;
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_theme_animation_set_defaults(
@@ -881,7 +881,7 @@ strata_result strata_theme_animation_set_defaults(
     }
     static_cast<void>(write_struct(out_set, strata_theme_animation_set{}));
     out_set->struct_size = sizeof(strata_theme_animation_set);
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_surface_register_theme(
@@ -944,7 +944,7 @@ strata_result strata_surface_unregister_theme(
     return surface_call(surface, AbiCall{"Surface theme removal", "STRATA.THEME.INVALID"}, [&] {
         const std::string value = string(name, "theme name", false);
         *out_removed = surface->core.unregister_theme(value) ? 1U : 0U;
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -975,7 +975,7 @@ strata_result strata_surface_set_scoped_theme(
             std::move(key),
             theme(*surface, *source)
         ) ? 1U : 0U;
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -996,7 +996,7 @@ strata_result strata_surface_clear_scoped_theme(
     return surface_call(surface, AbiCall{"Scoped theme removal", "STRATA.THEME.INVALID"}, [&] {
         const std::string key = string(node_key, "theme scope node key", false);
         *out_removed = surface->core.clear_scoped_theme(key) ? 1U : 0U;
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1031,7 +1031,7 @@ strata_result strata_surface_animate_scroll_to(
         if (source->has_y != 0U) request.y = source->y;
         if (source->has_duration != 0U) request.duration_nanos = source->duration_nanoseconds;
         *out_started = surface->core.animate_scroll_to(std::move(request)) ? 1U : 0U;
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 

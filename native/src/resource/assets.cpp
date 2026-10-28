@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::resource {
 
@@ -13,7 +13,7 @@ AssetId::AssetId(std::string value, const std::size_t separator)
     : value_(std::move(value)), separator_(separator) {}
 
 AssetId AssetId::parse(const std::string_view value) {
-    if (value.empty() || !core::valid_utf8(value)) {
+    if (value.empty() || !base::valid_utf8(value)) {
         throw std::invalid_argument("asset identity must be non-empty valid UTF-8");
     }
     const std::size_t separator = value.find(':');

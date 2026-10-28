@@ -4,7 +4,7 @@
 #include <limits>
 #include <optional>
 
-namespace strata::core {
+namespace strata::base {
 
 class StableIdentitySource final {
 public:
@@ -56,4 +56,4 @@ private:
     std::uint64_t value_;
 };
 
-} // namespace strata::core
+} // namespace strata::base

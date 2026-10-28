@@ -1,11 +1,11 @@
-#include "core/allocator.hpp"
+#include "base/allocator.hpp"
 
 #include <atomic>
 #include <cstdint>
 #include <limits>
 #include <new>
 
-namespace strata::core {
+namespace strata::base {
 namespace {
 
 struct AtomicAllocationStatistics final {
@@ -116,7 +116,7 @@ void default_deallocate(
 
 } // namespace
 
-HostAllocator::HostAllocator(const strata_allocator& allocator)
+HostAllocator::HostAllocator(const AllocatorCallbacks& allocator)
     : allocator_(allocator), telemetry_(std::make_shared<AllocationTelemetry>()) {}
 
 void* HostAllocator::allocate(
@@ -153,7 +153,7 @@ void HostAllocator::deallocate(
     }
 }
 
-const strata_allocator& HostAllocator::abi() const noexcept {
+const AllocatorCallbacks& HostAllocator::callbacks() const noexcept {
     return allocator_;
 }
 
@@ -184,20 +184,16 @@ bool HostMemoryResource::do_is_equal(const std::pmr::memory_resource& other) con
     return this == &other;
 }
 
-strata_allocator default_allocator() noexcept {
-    return strata_allocator{
-        sizeof(strata_allocator),
+AllocatorCallbacks default_allocator() noexcept {
+    return AllocatorCallbacks{
         nullptr,
         &default_allocate,
         &default_deallocate,
     };
 }
 
-bool valid_allocator(const strata_allocator& allocator) noexcept {
-    if (allocator.struct_size < sizeof(strata_allocator)) {
-        return false;
-    }
+bool valid_allocator(const AllocatorCallbacks& allocator) noexcept {
     return allocator.allocate != nullptr && allocator.deallocate != nullptr;
 }
 
-} // namespace strata::core
+} // namespace strata::base

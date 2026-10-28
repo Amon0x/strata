@@ -14,7 +14,7 @@
 #include "authoring_grammar.hpp"
 #include "authoring_registry.hpp"
 #include "compiler/builtin_catalog.hpp"
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "data/json.hpp"
 #include "diagnostic_catalog.hpp"
 #include "resource/resource.hpp"
@@ -28,7 +28,7 @@ namespace {
     std::ostringstream output;
     output << input.rdbuf();
     std::string text = output.str();
-    if (!core::valid_utf8(text)) throw std::runtime_error("authoring artifact is not valid UTF-8");
+    if (!base::valid_utf8(text)) throw std::runtime_error("authoring artifact is not valid UTF-8");
     return text;
 }
 

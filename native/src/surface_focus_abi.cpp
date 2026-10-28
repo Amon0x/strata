@@ -6,7 +6,7 @@
 
 #include "abi_internal.hpp"
 #include "abi_support.hpp"
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 using strata::abi_detail::AbiCall;
 using strata::abi_detail::EntryGuard;
@@ -52,10 +52,10 @@ strata_result strata_surface_set_focus_containment(
     return surface_call(surface, AbiCall{"Focus containment"}, [&] {
         if (key.size == 0U) {
             static_cast<void>(surface->core.set_focus_containment(std::nullopt));
-            return strata::core::result(STRATA_STATUS_OK);
+            return strata::abi_detail::result(STRATA_STATUS_OK);
         }
         const std::string value = strata::abi_detail::copied_string(key);
-        if (!strata::core::valid_utf8(value)) {
+        if (!strata::base::valid_utf8(value)) {
             return surface_failure(
                 *surface,
                 STRATA_STATUS_INVALID_ARGUMENT,
@@ -73,7 +73,7 @@ strata_result strata_surface_set_focus_containment(
             );
         }
         *out_contained = 1U;
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 

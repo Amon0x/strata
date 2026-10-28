@@ -14,9 +14,9 @@
 
 #include "abi_internal.hpp"
 #include "abi_support.hpp"
-#include "core/allocator.hpp"
+#include "base/allocator.hpp"
 #include "core/runtime.hpp"
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "data/json.hpp"
 #include "runtime/value.hpp"
 
@@ -30,7 +30,7 @@ namespace {
     const char* const operation
 ) noexcept {
     const CaughtException caught = classify_current_exception(AbiCall{operation});
-    return strata::core::emit_without_runtime(
+    return strata::abi_detail::emit_without_runtime(
         sink,
         caught.status,
         caught.code,
@@ -61,7 +61,7 @@ strata_result strata_get_api_info(
     }
     if (requested_abi < STRATA_ABI_VERSION_MINIMUM ||
         requested_abi > STRATA_ABI_VERSION_CURRENT) {
-        return strata::core::result(STRATA_STATUS_UNSUPPORTED_ABI);
+        return strata::abi_detail::result(STRATA_STATUS_UNSUPPORTED_ABI);
     }
     static_cast<void>(write_struct(out_info, strata_api_info{
         sizeof(strata_api_info),
@@ -69,7 +69,7 @@ strata_result strata_get_api_info(
         STRATA_ABI_VERSION_MINIMUM,
         capabilities,
     }));
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_runtime_create(
@@ -88,7 +88,7 @@ strata_result strata_runtime_create(
         config->diagnostics.struct_size == 0U ? empty_sink() : config->diagnostics;
     if (config->diagnostics.struct_size != 0U &&
         !has_struct(&config->diagnostics)) {
-        return strata::core::emit_without_runtime(
+        return strata::abi_detail::emit_without_runtime(
             empty_sink(),
             STRATA_STATUS_INVALID_ARGUMENT,
             "STRATA.ABI.INVALID_DIAGNOSTIC_SINK",
@@ -97,7 +97,7 @@ strata_result strata_runtime_create(
     }
     if (config->abi_version < STRATA_ABI_VERSION_MINIMUM ||
         config->abi_version > STRATA_ABI_VERSION_CURRENT) {
-        return strata::core::emit_without_runtime(
+        return strata::abi_detail::emit_without_runtime(
             sink,
             STRATA_STATUS_UNSUPPORTED_ABI,
             "STRATA.ABI.UNSUPPORTED_VERSION",
@@ -105,7 +105,7 @@ strata_result strata_runtime_create(
         );
     }
     if (config->reserved != 0U) {
-        return strata::core::emit_without_runtime(
+        return strata::abi_detail::emit_without_runtime(
             sink,
             STRATA_STATUS_INVALID_ARGUMENT,
             "STRATA.ABI.RESERVED_FIELD",
@@ -113,7 +113,7 @@ strata_result strata_runtime_create(
         );
     }
     if ((config->required_capabilities & ~capabilities) != 0U) {
-        return strata::core::emit_without_runtime(
+        return strata::abi_detail::emit_without_runtime(
             sink,
             STRATA_STATUS_UNSUPPORTED_CAPABILITY,
             "STRATA.ABI.UNSUPPORTED_CAPABILITY",
@@ -122,7 +122,7 @@ strata_result strata_runtime_create(
     }
     if (!has_struct(&config->clock) ||
         config->clock.now_nanoseconds == nullptr) {
-        return strata::core::emit_without_runtime(
+        return strata::abi_detail::emit_without_runtime(
             sink,
             STRATA_STATUS_INVALID_ARGUMENT,
             "STRATA.ABI.CLOCK_REQUIRED",
@@ -130,14 +130,19 @@ strata_result strata_runtime_create(
         );
     }
 
-    strata_allocator allocator_abi = config->allocator;
-    if (allocator_abi.allocate == nullptr && allocator_abi.deallocate == nullptr &&
-        (allocator_abi.struct_size == 0U ||
-         allocator_abi.struct_size >= sizeof(strata_allocator))) {
-        allocator_abi = strata::core::default_allocator();
+    const strata_allocator& allocator_abi = config->allocator;
+    strata::base::AllocatorCallbacks callbacks{
+        allocator_abi.user_data, allocator_abi.allocate, allocator_abi.deallocate,
+    };
+    const bool default_requested = allocator_abi.allocate == nullptr &&
+        allocator_abi.deallocate == nullptr &&
+        (allocator_abi.struct_size == 0U || allocator_abi.struct_size >= sizeof(strata_allocator));
+    if (default_requested) {
+        callbacks = strata::base::default_allocator();
     }
-    if (!strata::core::valid_allocator(allocator_abi)) {
-        return strata::core::emit_without_runtime(
+    if ((!default_requested && allocator_abi.struct_size < sizeof(strata_allocator)) ||
+        !strata::base::valid_allocator(callbacks)) {
+        return strata::abi_detail::emit_without_runtime(
             sink,
             STRATA_STATUS_INVALID_ARGUMENT,
             "STRATA.ABI.INVALID_ALLOCATOR",
@@ -145,15 +150,15 @@ strata_result strata_runtime_create(
         );
     }
 
-    std::optional<strata::core::HostAllocator> allocator;
+    std::optional<strata::base::HostAllocator> allocator;
     try {
-        allocator.emplace(allocator_abi);
+        allocator.emplace(callbacks);
     } catch (...) {
         return creation_failure(sink, "Runtime allocator initialization");
     }
     void* const storage = allocator->allocate(sizeof(strata_runtime), alignof(strata_runtime));
     if (storage == nullptr) {
-        return strata::core::emit_without_runtime(
+        return strata::abi_detail::emit_without_runtime(
             sink,
             STRATA_STATUS_OUT_OF_MEMORY,
             "STRATA.CORE.OUT_OF_MEMORY",
@@ -168,7 +173,7 @@ strata_result strata_runtime_create(
             sink,
             config->stable_identity_seed
         );
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     } catch (...) {
         allocator->deallocate(storage, sizeof(strata_runtime), alignof(strata_runtime));
         return creation_failure(sink, "Runtime initialization");
@@ -177,7 +182,7 @@ strata_result strata_runtime_create(
 
 strata_result strata_runtime_release(strata_runtime* const runtime) noexcept {
     if (runtime == nullptr) {
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     }
     {
         // The guard must end before destruction; it only admits the release.
@@ -192,10 +197,10 @@ strata_result strata_runtime_release(strata_runtime* const runtime) noexcept {
             );
         }
     }
-    const strata::core::HostAllocator allocator = runtime->core.allocator();
+    const strata::base::HostAllocator allocator = runtime->core.allocator();
     std::destroy_at(runtime);
     allocator.deallocate(runtime, sizeof(strata_runtime), alignof(strata_runtime));
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_runtime_get_memory_info(
@@ -209,7 +214,7 @@ strata_result strata_runtime_get_memory_info(
         !has_struct(out_info)) {
         return invalid_argument();
     }
-    const strata::core::AllocatorStatistics statistics = runtime->core.allocator_statistics();
+    const strata::base::AllocatorStatistics statistics = runtime->core.allocator_statistics();
     static_cast<void>(write_struct(out_info, strata_runtime_memory_info{
         sizeof(strata_runtime_memory_info),
         statistics.routed.current_bytes,
@@ -227,7 +232,7 @@ strata_result strata_runtime_get_memory_info(
         statistics.arena.allocation_count,
         statistics.arena.deallocation_count,
     }));
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_runtime_next_identity(
@@ -250,7 +255,7 @@ strata_result strata_runtime_next_identity(
     }
     *out_identity = 0U;
     return runtime_call(runtime, AbiCall{"Stable identity allocation"}, [&] {
-        return runtime->core.next_identity(*out_identity);
+        return strata::abi_detail::to_abi(runtime->core.next_identity(*out_identity));
     });
 }
 
@@ -276,7 +281,7 @@ strata_result strata_runtime_create_snapshot(
         );
     }
 
-    const strata::core::HostAllocator allocator = runtime->core.allocator();
+    const strata::base::HostAllocator allocator = runtime->core.allocator();
     void* const storage = allocator.allocate(sizeof(strata_snapshot), alignof(strata_snapshot));
     if (storage == nullptr) {
         return runtime_failure(
@@ -289,7 +294,8 @@ strata_result strata_runtime_create_snapshot(
     return runtime_call(runtime, AbiCall{"Snapshot creation"}, [&] {
         try {
             strata::core::SnapshotData data{};
-            const strata_result snapshot_result = runtime->core.create_snapshot(data);
+            const strata_result snapshot_result =
+                strata::abi_detail::to_abi(runtime->core.create_snapshot(data));
             if (snapshot_result.status != STRATA_STATUS_OK) {
                 allocator.deallocate(storage, sizeof(strata_snapshot), alignof(strata_snapshot));
                 return snapshot_result;
@@ -299,7 +305,7 @@ strata_result strata_runtime_create_snapshot(
                 allocator,
                 data
             );
-            return strata::core::result(STRATA_STATUS_OK);
+            return strata::abi_detail::result(STRATA_STATUS_OK);
         } catch (...) {
             allocator.deallocate(storage, sizeof(strata_snapshot), alignof(strata_snapshot));
             throw;
@@ -321,14 +327,14 @@ strata_result strata_snapshot_get_info(
         snapshot->data.time_nanoseconds,
         snapshot->data.last_stable_identity,
     }));
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 void strata_snapshot_release(strata_snapshot* const snapshot) noexcept {
     if (snapshot == nullptr) {
         return;
     }
-    const strata::core::HostAllocator allocator = snapshot->allocator;
+    const strata::base::HostAllocator allocator = snapshot->allocator;
     std::destroy_at(snapshot);
     allocator.deallocate(snapshot, sizeof(strata_snapshot), alignof(strata_snapshot));
 }

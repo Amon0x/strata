@@ -22,7 +22,7 @@ strata_result strata_runtime_create_application_state_snapshot(
     if (runtime == nullptr || out_snapshot == nullptr || !runtime->core.has_application()) {
         return strata::abi_detail::invalid_argument();
     }
-    const strata::core::HostAllocator allocator = runtime->core.allocator();
+    const strata::base::HostAllocator allocator = runtime->core.allocator();
     void* const storage = allocator.allocate(
         sizeof(strata_application_state_snapshot),
         alignof(strata_application_state_snapshot)
@@ -43,7 +43,7 @@ strata_result strata_runtime_create_application_state_snapshot(
                 allocator,
                 runtime->core.application().state().snapshot()
             );
-            return strata::core::result(STRATA_STATUS_OK);
+            return strata::abi_detail::result(STRATA_STATUS_OK);
         } catch (...) {
             allocator.deallocate(
                 storage,
@@ -75,7 +75,7 @@ strata_result strata_runtime_restore_application_state(
             runtime->core.application().undo().clear_all();
             runtime->core.application().synchronize_durable_state();
         }
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -83,7 +83,7 @@ void strata_application_state_snapshot_release(
     strata_application_state_snapshot* const snapshot
 ) noexcept {
     if (snapshot == nullptr) return;
-    const strata::core::HostAllocator allocator = snapshot->allocator;
+    const strata::base::HostAllocator allocator = snapshot->allocator;
     std::destroy_at(snapshot);
     allocator.deallocate(
         snapshot,

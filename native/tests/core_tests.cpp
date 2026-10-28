@@ -7,11 +7,12 @@
 #include <string>
 #include <string_view>
 
-#include "core/allocator.hpp"
-#include "core/arena.hpp"
+#include "base/allocator.hpp"
+#include "base/arena.hpp"
+#include "base/identity.hpp"
+#include "base/status.hpp"
+#include "base/utf8.hpp"
 #include "core/diagnostics.hpp"
-#include "core/identity.hpp"
-#include "core/utf8.hpp"
 
 namespace {
 
@@ -46,32 +47,31 @@ void deallocate(
     ::operator delete(allocation, std::align_val_t(alignment));
 }
 
-void throwing_diagnostic(void*, const strata_diagnostic*) {
+void throwing_diagnostic(const strata::core::DiagnosticEvent&) {
     throw std::runtime_error("foreign diagnostic callback");
 }
 
 void test_utf8() {
-    check(strata::core::valid_utf8("plain ASCII"), "ASCII must be valid UTF-8");
-    check(strata::core::valid_utf8("\xC4\xB0stanbul \xF0\x9F\x8C\x8D"), "Unicode must be valid UTF-8");
-    check(!strata::core::valid_utf8("\xC0\xAF"), "overlong UTF-8 must be rejected");
-    check(!strata::core::valid_utf8("\xED\xA0\x80"), "UTF-8 surrogate must be rejected");
-    check(!strata::core::valid_utf8("\xF4\x90\x80\x80"), "out-of-range UTF-8 must be rejected");
-    check(!strata::core::valid_utf8("\xE2\x82"), "truncated UTF-8 must be rejected");
+    check(strata::base::valid_utf8("plain ASCII"), "ASCII must be valid UTF-8");
+    check(strata::base::valid_utf8("\xC4\xB0stanbul \xF0\x9F\x8C\x8D"), "Unicode must be valid UTF-8");
+    check(!strata::base::valid_utf8("\xC0\xAF"), "overlong UTF-8 must be rejected");
+    check(!strata::base::valid_utf8("\xED\xA0\x80"), "UTF-8 surrogate must be rejected");
+    check(!strata::base::valid_utf8("\xF4\x90\x80\x80"), "out-of-range UTF-8 must be rejected");
+    check(!strata::base::valid_utf8("\xE2\x82"), "truncated UTF-8 must be rejected");
 }
 
 void test_arena_uses_host_allocator() {
     AllocationCounts counts;
-    const strata_allocator callbacks{
-        sizeof(strata_allocator),
+    const strata::base::AllocatorCallbacks callbacks{
         &counts,
         &allocate,
         &deallocate,
     };
-    const strata::core::HostAllocator host_allocator(callbacks);
-    strata::core::HostMemoryResource resource{host_allocator};
-    strata::core::AllocatorStatistics active_statistics{};
+    const strata::base::HostAllocator host_allocator(callbacks);
+    strata::base::HostMemoryResource resource{host_allocator};
+    strata::base::AllocatorStatistics active_statistics{};
     {
-        strata::core::Arena arena(resource);
+        strata::base::Arena arena(resource);
         const auto* const value = arena.create<std::uint64_t>(42U);
         check(*value == 42U, "arena object construction failed");
         active_statistics = host_allocator.statistics();
@@ -82,7 +82,7 @@ void test_arena_uses_host_allocator() {
         );
         arena.reset();
     }
-    const strata::core::AllocatorStatistics released_statistics =
+    const strata::base::AllocatorStatistics released_statistics =
         host_allocator.statistics();
     check(released_statistics.routed.current_bytes == 0U, "released routed bytes remained live");
     check(released_statistics.arena.current_bytes == 0U, "released arena bytes remained live");
@@ -100,34 +100,29 @@ void test_arena_uses_host_allocator() {
 }
 
 void test_stable_identity_and_resource_handles() {
-    strata::core::StableIdentitySource identities(40U);
+    strata::base::StableIdentitySource identities(40U);
     check(identities.next() == 41U, "stable identity seed was not honored");
     check(identities.next() == 42U, "stable identities must be monotonic");
-    strata::core::StableIdentitySource exhausted(std::numeric_limits<std::uint64_t>::max());
+    strata::base::StableIdentitySource exhausted(std::numeric_limits<std::uint64_t>::max());
     check(!exhausted.next().has_value(), "stable identity overflow must fail");
 
-    const auto handle = strata::core::ResourceHandle::create(7U, 19U);
+    const auto handle = strata::base::ResourceHandle::create(7U, 19U);
     check(handle.has_value(), "valid resource handle was rejected");
     check(handle->generation() == 7U && handle->slot() == 19U, "resource handle parts changed");
     check(handle->value() == ((UINT64_C(7) << 32U) | UINT64_C(19)), "resource encoding changed");
-    check(!strata::core::ResourceHandle::create(0U, 1U).has_value(), "zero generation must be invalid");
-    check(!strata::core::ResourceHandle::create(1U, 0U).has_value(), "zero slot must be invalid");
+    check(!strata::base::ResourceHandle::create(0U, 1U).has_value(), "zero generation must be invalid");
+    check(!strata::base::ResourceHandle::create(1U, 0U).has_value(), "zero slot must be invalid");
 }
 
 void test_foreign_diagnostic_exception_is_contained() {
-    const strata_diagnostic_sink sink{
-        sizeof(strata_diagnostic_sink),
-        nullptr,
-        &throwing_diagnostic,
-    };
-    strata::core::Diagnostics diagnostics(sink);
-    const strata_result emitted = diagnostics.emit(
-        STRATA_STATUS_INTERNAL_ERROR,
-        STRATA_DIAGNOSTIC_FATAL,
+    strata::core::Diagnostics diagnostics(&throwing_diagnostic);
+    const strata::base::Result emitted = diagnostics.emit(
+        strata::base::Status::internal_error,
+        strata::core::DiagnosticSeverity::fatal,
         "STRATA.TEST",
         "test"
     );
-    check(emitted.status == STRATA_STATUS_INTERNAL_ERROR, "diagnostic status changed");
+    check(emitted.status == strata::base::Status::internal_error, "diagnostic status changed");
     check(emitted.diagnostic_id == 1U, "diagnostic identity must be deterministic per runtime");
 }
 

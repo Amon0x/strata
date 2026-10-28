@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "runtime/expression.hpp"
 
 namespace strata::runtime {
@@ -205,7 +205,7 @@ ApplicationContext::ApplicationContext(
           }
       ),
       profiler_(ProfilerScope::runtime, id_) {
-    if (id_.empty() || !core::valid_utf8(id_)) {
+    if (id_.empty() || !base::valid_utf8(id_)) {
         throw std::invalid_argument("application context id must be non-empty valid UTF-8");
     }
     if (bundle_ == nullptr) throw std::invalid_argument("application context bundle must not be null");
@@ -609,8 +609,8 @@ void ApplicationContext::bind_state_scope(
     }
     if (runtime_scope.empty() || state_name.empty() || declaration_scope.empty() ||
         address_scope.empty() ||
-        !core::valid_utf8(runtime_scope) || !core::valid_utf8(state_name) ||
-        !core::valid_utf8(declaration_scope) || !core::valid_utf8(address_scope)) {
+        !base::valid_utf8(runtime_scope) || !base::valid_utf8(state_name) ||
+        !base::valid_utf8(declaration_scope) || !base::valid_utf8(address_scope)) {
         throw std::invalid_argument("state scope binding names must be non-empty valid UTF-8");
     }
     state_scope_bindings_.emplace_hint(

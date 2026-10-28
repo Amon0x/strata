@@ -6,13 +6,13 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::runtime {
 namespace {
 
 void validate_text(const std::string_view value, const std::string_view label) {
-    if (value.empty() || !core::valid_utf8(value)) {
+    if (value.empty() || !base::valid_utf8(value)) {
         throw std::invalid_argument(std::string(label) + " must be non-empty valid UTF-8");
     }
 }

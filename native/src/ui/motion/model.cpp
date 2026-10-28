@@ -5,7 +5,7 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::ui {
 namespace {
@@ -69,7 +69,7 @@ constexpr std::array property_names{
 }
 
 [[nodiscard]] std::string normalized_easing(const std::string_view value) {
-    const std::optional<std::string_view> trimmed = core::trim_utf8_white_space(value);
+    const std::optional<std::string_view> trimmed = base::trim_utf8_white_space(value);
     if (!trimmed.has_value()) {
         throw std::invalid_argument("motion easing name must be valid UTF-8");
     }

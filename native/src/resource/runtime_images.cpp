@@ -4,14 +4,14 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::resource {
 
 std::uint64_t RuntimeImageStore::publish(std::string id, const ImageDimensions dimensions,
                                          const TextureSampling sampling,
                                          std::vector<std::uint8_t> pixels) {
-    if (id.empty() || !core::valid_utf8(id)) {
+    if (id.empty() || !base::valid_utf8(id)) {
         throw std::invalid_argument("a runtime image id must be non-empty UTF-8");
     }
     validate_image_dimensions(dimensions);

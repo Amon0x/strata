@@ -40,14 +40,14 @@ inline constexpr strata_capabilities capabilities =
 }
 
 [[nodiscard]] inline strata_result invalid_argument() noexcept {
-    return core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
 }
 
 [[nodiscard]] inline strata_result runtime_failure(strata_runtime& runtime,
                                                    const strata_status status,
                                                    const char* const code,
                                                    const char* const message) noexcept {
-    return runtime.core.diagnostics().emit(status, STRATA_DIAGNOSTIC_ERROR, code, message);
+    return strata::abi_detail::emit(runtime.core.diagnostics(), status, STRATA_DIAGNOSTIC_ERROR, code, message);
 }
 
 /** Whether an ABI call may run while a host callback of the same runtime is executing. */
@@ -106,7 +106,7 @@ class EntryGuard final {
     }
 
     [[nodiscard]] strata_result refusal() const noexcept {
-        return core::result(status_);
+        return strata::abi_detail::result(status_);
     }
 
   private:

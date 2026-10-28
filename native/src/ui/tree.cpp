@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::ui {
 namespace {
@@ -28,7 +28,7 @@ namespace {
 
 void validate_text(const std::string_view value, const std::string_view label,
                    const bool allow_empty = false) {
-    if ((!allow_empty && value.empty()) || !core::valid_utf8(value)) {
+    if ((!allow_empty && value.empty()) || !base::valid_utf8(value)) {
         throw std::invalid_argument(std::string(label) + " must be valid UTF-8" +
                                     (allow_empty ? "" : " and non-empty"));
     }

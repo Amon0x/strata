@@ -20,7 +20,7 @@
 #include <unistd.h>
 #endif
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "data/json.hpp"
 
 namespace strata::host {
@@ -38,7 +38,7 @@ namespace {
         throw std::runtime_error("external extension returned a null " + std::string(label));
     }
     std::string result(value.data == nullptr ? "" : value.data, value.size);
-    if (!core::valid_utf8(result)) {
+    if (!base::valid_utf8(result)) {
         throw std::runtime_error("external extension returned invalid UTF-8 in " +
                                  std::string(label));
     }

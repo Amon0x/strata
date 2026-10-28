@@ -101,11 +101,11 @@ strata_result strata_scale_policy_defaults(
     strata_scale_policy_config* const out_policy
 ) noexcept {
     if (out_policy == nullptr || !has_struct(out_policy)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return strata::abi_detail::guarded([&] {
         *out_policy = defaults(kind);
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -120,7 +120,7 @@ strata_result strata_resolve_scale_context(
         !has_struct(out_context) ||
         policy->reserved != 0U || policy->prefer_integer_scale > 1U ||
         !valid_policy_kind(policy->kind) || !valid_snapping(*policy)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return strata::abi_detail::guarded([&] {
         const strata::ui::ScaleContext resolved = resolve(
@@ -139,7 +139,7 @@ strata_result strata_resolve_scale_context(
             policy->rectangle_snapping,
             0U,
         }));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 

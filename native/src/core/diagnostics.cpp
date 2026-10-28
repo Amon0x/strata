@@ -1,62 +1,22 @@
 #include "core/diagnostics.hpp"
 
 #include <limits>
+#include <optional>
 #include <tuple>
 #include <utility>
 
 namespace strata::core {
-namespace {
 
-[[nodiscard]] strata_string_view view(const std::string_view value) noexcept {
-    return strata_string_view{value.data(), value.size()};
-}
-
-void dispatch(
-    const strata_diagnostic_sink& sink,
-    const std::uint64_t id,
-    const strata_diagnostic_severity severity,
-    const std::string_view code,
-    const std::string_view message,
-    const std::string_view source_id,
-    const strata_source_range* const range,
-    const std::uint64_t occurrence_count,
-    const std::uint64_t sequence,
-    const std::uint64_t first_frame_index,
-    const std::uint64_t frame_index,
-    const std::uint64_t dropped_count,
-    const std::string_view component_path,
-    const std::string_view expected
-) noexcept {
-    if (sink.emit == nullptr || sink.struct_size < sizeof(strata_diagnostic_sink)) {
-        return;
-    }
-    const strata_diagnostic diagnostic{
-        sizeof(strata_diagnostic),
-        id,
-        severity,
-        STRATA_DIAGNOSTIC_VERSION_CURRENT,
-        view(code),
-        view(message),
-        view(source_id),
-        range != nullptr ? *range : strata_source_range{0U, 0U, 0U, 0U, 0U, 0U},
-        occurrence_count,
-        sequence,
-        first_frame_index,
-        frame_index,
-        dropped_count,
-        view(component_path),
-        view(expected),
-    };
+void deliver(const DiagnosticSink& sink, const DiagnosticEvent& event) noexcept {
+    if (!sink) return;
     try {
-        sink.emit(sink.user_data, &diagnostic);
+        sink(event);
     } catch (...) {
-        /* A foreign callback cannot be allowed to unwind through the C ABI. */
+        /* A foreign callback cannot be allowed to unwind through the engine. */
     }
 }
 
-} // namespace
-
-Diagnostics::Diagnostics(const strata_diagnostic_sink sink) noexcept : sink_(sink) {}
+Diagnostics::Diagnostics(DiagnosticSink sink) : sink_(std::move(sink)) {}
 
 bool Diagnostics::Fingerprint::operator<(const Fingerprint& other) const noexcept {
     return std::tie(
@@ -91,13 +51,13 @@ bool Diagnostics::Fingerprint::operator<(const Fingerprint& other) const noexcep
            );
 }
 
-strata_result Diagnostics::emit(
-    const strata_status status,
-    const strata_diagnostic_severity severity,
+base::Result Diagnostics::emit(
+    const base::Status status,
+    const DiagnosticSeverity severity,
     const std::string_view code,
     const std::string_view message,
     const std::string_view source_id,
-    const strata_source_range* const range,
+    const SourceRange* const range,
     const std::string_view component_path,
     const std::string_view expected
 ) noexcept {
@@ -112,7 +72,7 @@ strata_result Diagnostics::emit(
             std::string(component_path),
             std::string(expected),
             range != nullptr,
-            range != nullptr ? *range : strata_source_range{0U, 0U, 0U, 0U, 0U, 0U},
+            range != nullptr ? *range : SourceRange{},
         };
         const auto existing = occurrences_.find(fingerprint);
         if (existing != occurrences_.end()) {
@@ -128,72 +88,68 @@ strata_result Diagnostics::emit(
     } catch (...) {
         if (next_id_ != std::numeric_limits<std::uint64_t>::max()) ++next_id_;
     }
-    dispatch(
-        sink_, id, severity, code, message, source_id, range, occurrence_count,
-        id, 0U, 0U, 0U, component_path, expected
-    );
-    return result(status, id);
+    deliver(sink_, DiagnosticEvent{
+        id,
+        severity,
+        code,
+        message,
+        source_id,
+        range != nullptr ? *range : SourceRange{},
+        occurrence_count,
+        id,
+        0U,
+        0U,
+        0U,
+        component_path,
+        expected,
+    });
+    return base::result(status, id);
 }
 
-strata_result Diagnostics::publish(
+base::Result Diagnostics::publish(
     const runtime::RuntimeDiagnosticRecord& record,
     const std::uint64_t dropped_count
 ) noexcept {
     const runtime::RuntimeDiagnostic& value = record.diagnostic;
-    const std::optional<strata_source_range> range = value.range.has_value()
-        ? std::optional(strata_source_range{
+    const SourceRange range = value.range.has_value()
+        ? SourceRange{
               value.range->start.offset.value_or(0U),
               value.range->end.offset.value_or(0U),
               value.range->start.line,
               value.range->start.column,
               value.range->end.line,
               value.range->end.column,
-          })
-        : std::nullopt;
-    const strata_diagnostic_severity severity = [&value] {
+          }
+        : SourceRange{};
+    const DiagnosticSeverity severity = [&value] {
         switch (value.severity) {
-        case runtime::DiagnosticSeverity::info: return STRATA_DIAGNOSTIC_INFO;
-        case runtime::DiagnosticSeverity::warning: return STRATA_DIAGNOSTIC_WARNING;
-        case runtime::DiagnosticSeverity::error: return STRATA_DIAGNOSTIC_ERROR;
+        case runtime::DiagnosticSeverity::info: return DiagnosticSeverity::info;
+        case runtime::DiagnosticSeverity::warning: return DiagnosticSeverity::warning;
+        case runtime::DiagnosticSeverity::error: return DiagnosticSeverity::error;
         }
-        return STRATA_DIAGNOSTIC_ERROR;
+        return DiagnosticSeverity::error;
     }();
-    dispatch(
-        sink_,
+    deliver(sink_, DiagnosticEvent{
         record.sequence,
         severity,
         value.code,
         value.message,
         value.range.has_value() ? std::string_view(value.range->source_id) : std::string_view{},
-        range.has_value() ? &*range : nullptr,
+        range,
         static_cast<std::uint64_t>(record.occurrence_count),
         record.sequence,
         record.first_frame_index,
         record.frame_index,
         dropped_count,
         value.path,
-        value.expected.has_value() ? std::string_view(*value.expected) : std::string_view{}
-    );
-    return result(STRATA_STATUS_OK, record.sequence);
+        value.expected.has_value() ? std::string_view(*value.expected) : std::string_view{},
+    });
+    return base::result(base::Status::ok, record.sequence);
 }
 
 void Diagnostics::clear() noexcept {
     occurrences_.clear();
     next_id_ = 1U;
-}
-
-strata_result emit_without_runtime(
-    const strata_diagnostic_sink& sink,
-    const strata_status status,
-    const std::string_view code,
-    const std::string_view message
-) noexcept {
-    constexpr std::uint64_t diagnostic_id = 1U;
-    dispatch(
-        sink, diagnostic_id, STRATA_DIAGNOSTIC_ERROR, code, message, {}, nullptr, 1U,
-        diagnostic_id, 0U, 0U, 0U, {}, {}
-    );
-    return result(status, diagnostic_id);
 }
 
 } // namespace strata::core

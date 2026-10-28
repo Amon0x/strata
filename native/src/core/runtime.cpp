@@ -8,23 +8,23 @@
 
 namespace strata::core {
 Runtime::Runtime(
-    const HostAllocator allocator,
-    const strata_clock clock,
-    const strata_diagnostic_sink diagnostics,
+    const base::HostAllocator allocator,
+    const Clock clock,
+    DiagnosticSink diagnostics,
     const std::uint64_t stable_identity_seed
 )
     : allocator_(allocator),
       memory_resource_(allocator),
       scratch_arena_(memory_resource_),
-      diagnostics_(diagnostics),
+      diagnostics_(std::move(diagnostics)),
       clock_(clock),
       identities_(stable_identity_seed) {}
 
-HostAllocator Runtime::allocator() const noexcept {
+base::HostAllocator Runtime::allocator() const noexcept {
     return allocator_;
 }
 
-AllocatorStatistics Runtime::allocator_statistics() const noexcept {
+base::AllocatorStatistics Runtime::allocator_statistics() const noexcept {
     return allocator_.statistics();
 }
 
@@ -32,44 +32,44 @@ Diagnostics& Runtime::diagnostics() noexcept {
     return diagnostics_;
 }
 
-strata_result Runtime::next_identity(std::uint64_t& identity) noexcept {
+base::Result Runtime::next_identity(std::uint64_t& identity) noexcept {
     const auto next = identities_.next();
     if (!next.has_value()) {
         return diagnostics_.emit(
-            STRATA_STATUS_INVARIANT_FAILURE,
-            STRATA_DIAGNOSTIC_FATAL,
+            base::Status::invariant_failure,
+            DiagnosticSeverity::fatal,
             "STRATA.CORE.IDENTITY_EXHAUSTED",
             "The runtime-local stable identity space is exhausted."
         );
     }
     identity = *next;
-    return result(STRATA_STATUS_OK);
+    return base::result(base::Status::ok);
 }
 
-strata_result Runtime::create_snapshot(SnapshotData& snapshot) noexcept {
+base::Result Runtime::create_snapshot(SnapshotData& snapshot) noexcept {
     std::int64_t now = 0;
     try {
         now = clock_.now_nanoseconds(clock_.user_data);
     } catch (...) {
         return diagnostics_.emit(
-            STRATA_STATUS_INTERNAL_ERROR,
-            STRATA_DIAGNOSTIC_FATAL,
+            base::Status::internal_error,
+            DiagnosticSeverity::fatal,
             "STRATA.ABI.CLOCK_CALLBACK_FAILED",
             "The caller-owned clock callback raised an exception."
         );
     }
     if (has_sampled_time_ && now < last_time_nanoseconds_) {
         return diagnostics_.emit(
-            STRATA_STATUS_CLOCK_REGRESSION,
-            STRATA_DIAGNOSTIC_ERROR,
+            base::Status::clock_regression,
+            DiagnosticSeverity::error,
             "STRATA.RUNTIME.CLOCK_REGRESSION",
             "The caller-owned monotonic clock moved backwards."
         );
     }
     if (generation_ == std::numeric_limits<std::uint64_t>::max()) {
         return diagnostics_.emit(
-            STRATA_STATUS_INVARIANT_FAILURE,
-            STRATA_DIAGNOSTIC_FATAL,
+            base::Status::invariant_failure,
+            DiagnosticSeverity::fatal,
             "STRATA.CORE.GENERATION_EXHAUSTED",
             "The runtime snapshot generation is exhausted."
         );
@@ -78,7 +78,7 @@ strata_result Runtime::create_snapshot(SnapshotData& snapshot) noexcept {
     has_sampled_time_ = true;
     ++generation_;
     snapshot = SnapshotData{generation_, now, identities_.last()};
-    return result(STRATA_STATUS_OK);
+    return base::result(base::Status::ok);
 }
 
 bool Runtime::publish_host_snapshot(
@@ -151,7 +151,7 @@ runtime::ActivationResult Runtime::compile_and_activate(
     const std::uint64_t generation
 ) {
     auto profiler_frame = application().profiler().frame(generation);
-    ArenaScope scratch_scope(scratch_arena_);
+    base::ArenaScope scratch_scope(scratch_arena_);
     return application().compile_and_activate(
         entry,
         loader,

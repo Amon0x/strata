@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::runtime {
 
@@ -15,7 +15,7 @@ ApplicationStartupStatus ApplicationStartup::start(
     const ApplicationStartupDefinition& definition
 ) const {
     if (definition.id.empty() || definition.module.empty() ||
-        !core::valid_utf8(definition.id) || !core::valid_utf8(definition.module)) {
+        !base::valid_utf8(definition.id) || !base::valid_utf8(definition.module)) {
         throw std::invalid_argument("application id and module must be non-empty valid UTF-8");
     }
     std::set<std::string, std::less<>> unique_layers;

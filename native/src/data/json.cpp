@@ -9,7 +9,7 @@
 #include <string>
 #include <system_error>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "data/json_view.hpp"
 
 namespace strata::data {
@@ -22,7 +22,7 @@ class JsonReader final {
         if (source.size() > limits.maximum_input_bytes) {
             fail("input exceeds the configured byte limit");
         }
-        if (!strata::core::valid_utf8(source)) {
+        if (!strata::base::valid_utf8(source)) {
             fail("input is not valid UTF-8");
         }
     }
@@ -588,7 +588,7 @@ JsonValue::JsonValue(const double value) : storage_(value == 0.0 ? 0.0 : value) 
 JsonValue::JsonValue(const char* const value) : JsonValue(std::string(value)) {}
 
 JsonValue::JsonValue(std::string value) : storage_(std::move(value)) {
-    if (!strata::core::valid_utf8(std::get<std::string>(storage_))) {
+    if (!strata::base::valid_utf8(std::get<std::string>(storage_))) {
         throw std::invalid_argument("JSON string must be valid UTF-8");
     }
 }

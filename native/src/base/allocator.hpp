@@ -5,9 +5,18 @@
 #include <memory>
 #include <memory_resource>
 
-#include <strata/strata.h>
+namespace strata::base {
 
-namespace strata::core {
+using AllocateFunction = void* (*)(void* user_data, std::size_t size, std::size_t alignment);
+using DeallocateFunction =
+    void (*)(void* user_data, void* allocation, std::size_t size, std::size_t alignment);
+
+/** Caller-owned allocation callbacks; both are required. Exceptions they throw are contained. */
+struct AllocatorCallbacks final {
+    void* user_data = nullptr;
+    AllocateFunction allocate = nullptr;
+    DeallocateFunction deallocate = nullptr;
+};
 
 enum class AllocationDomain : std::uint8_t {
     persistent,
@@ -33,7 +42,7 @@ class AllocationTelemetry;
 
 class HostAllocator final {
 public:
-    explicit HostAllocator(const strata_allocator& allocator);
+    explicit HostAllocator(const AllocatorCallbacks& allocator);
 
     [[nodiscard]] void* allocate(
         std::size_t size,
@@ -46,11 +55,11 @@ public:
         std::size_t alignment,
         AllocationDomain domain = AllocationDomain::persistent
     ) const noexcept;
-    [[nodiscard]] const strata_allocator& abi() const noexcept;
+    [[nodiscard]] const AllocatorCallbacks& callbacks() const noexcept;
     [[nodiscard]] AllocatorStatistics statistics() const noexcept;
 
 private:
-    strata_allocator allocator_;
+    AllocatorCallbacks allocator_;
     std::shared_ptr<AllocationTelemetry> telemetry_;
 };
 
@@ -66,7 +75,8 @@ private:
     HostAllocator allocator_;
 };
 
-[[nodiscard]] strata_allocator default_allocator() noexcept;
-[[nodiscard]] bool valid_allocator(const strata_allocator& allocator) noexcept;
+/** Aligned global operator new/delete. */
+[[nodiscard]] AllocatorCallbacks default_allocator() noexcept;
+[[nodiscard]] bool valid_allocator(const AllocatorCallbacks& allocator) noexcept;
 
-} // namespace strata::core
+} // namespace strata::base

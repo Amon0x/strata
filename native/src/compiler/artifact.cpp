@@ -20,7 +20,7 @@
 #include <variant>
 #include <vector>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::compiler {
 namespace {
@@ -180,7 +180,7 @@ public:
                 reinterpret_cast<const char*>(encoded.data()),
                 encoded.size()
             );
-            if (!core::valid_utf8(value)) {
+            if (!base::valid_utf8(value)) {
                 throw std::runtime_error("compiled module artifact string is not valid UTF-8");
             }
             strings_.push_back(value);

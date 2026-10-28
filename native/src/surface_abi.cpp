@@ -20,7 +20,7 @@
 #include "abi_internal.hpp"
 #include "abi_support.hpp"
 #include "core/diagnostics.hpp"
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "data/json.hpp"
 #include "font/opentype.hpp"
 #include "resource/image.hpp"
@@ -61,7 +61,7 @@ class ResourceLoader final {
             throw std::invalid_argument("resource id view is invalid");
         }
         const std::string id = copied_string(resource_id);
-        if (!strata::core::valid_utf8(id)) {
+        if (!strata::base::valid_utf8(id)) {
             throw std::invalid_argument("resource id must be valid UTF-8");
         }
         if (!adapter_.has_value()) {
@@ -93,13 +93,13 @@ class ResourceLoader final {
 };
 
 [[nodiscard]] strata_result invalid_argument() noexcept {
-    return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+    return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
 }
 
 [[nodiscard]] strata_result runtime_failure(strata_runtime& runtime, const strata_status status,
                                             const char* const code,
                                             const char* const message) noexcept {
-    return runtime.core.diagnostics().emit(status, STRATA_DIAGNOSTIC_ERROR, code, message);
+    return strata::abi_detail::emit(runtime.core.diagnostics(), status, STRATA_DIAGNOSTIC_ERROR, code, message);
 }
 
 [[nodiscard]] strata_result surface_failure(const strata_surface& surface,
@@ -258,7 +258,7 @@ image_bindings(const strata_surface_config& config) {
         }
         std::string id = copied_string(entry.id);
         std::string resource_id = copied_string(entry.resource_id);
-        if (!strata::core::valid_utf8(id) || !strata::core::valid_utf8(resource_id)) {
+        if (!strata::base::valid_utf8(id) || !strata::base::valid_utf8(resource_id)) {
             throw std::invalid_argument("Surface image ids must be valid UTF-8");
         }
         if (std::ranges::any_of(result, [&](const auto& image) { return image.id == id; })) {
@@ -314,7 +314,7 @@ image_resources(const ResourceLoader& resources,
             continue;
         }
         const std::string source(bytes.begin(), bytes.end());
-        if (!strata::core::valid_utf8(source)) {
+        if (!strata::base::valid_utf8(source)) {
             throw std::invalid_argument("image resource '" + binding.resource_id +
                                         "' is neither PNG nor UTF-8 SVG");
         }
@@ -361,7 +361,7 @@ font_bindings(const strata_surface_config& config) {
         }
         std::string id = copied_string(entry.id);
         std::string resource_id = copied_string(entry.resource_id);
-        if (!strata::core::valid_utf8(id) || !strata::core::valid_utf8(resource_id)) {
+        if (!strata::base::valid_utf8(id) || !strata::base::valid_utf8(resource_id)) {
             throw std::invalid_argument("Surface font ids must be valid UTF-8");
         }
         if (std::ranges::any_of(result, [&](const auto& font) { return font.id == id; })) {
@@ -411,7 +411,7 @@ void require_finite(const double value, const char* const message) {
     if (!valid_view(value, allow_empty))
         throw std::invalid_argument("input text view is invalid");
     std::string result = copied_string(value);
-    if (!strata::core::valid_utf8(result))
+    if (!strata::base::valid_utf8(result))
         throw std::invalid_argument("input text is not valid UTF-8");
     return result;
 }
@@ -513,7 +513,7 @@ void destroy_surface(strata_surface* const surface, const bool unlink_from_runti
     if (unlink_from_runtime && surface->owner != nullptr) {
         std::erase(surface->owner->surfaces, surface);
     }
-    const core::HostAllocator allocator = surface->allocator;
+    const base::HostAllocator allocator = surface->allocator;
     std::destroy_at(surface);
     allocator.deallocate(surface, sizeof(strata_surface), alignof(strata_surface));
 }
@@ -549,7 +549,7 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
                                "STRATA.APPLICATION.NOT_CONFIGURED",
                                "Configure an application before creating a surface.");
     }
-    const strata::core::HostAllocator allocator = runtime->core.allocator();
+    const strata::base::HostAllocator allocator = runtime->core.allocator();
     void* const storage = allocator.allocate(sizeof(strata_surface), alignof(strata_surface));
     if (storage == nullptr) {
         return runtime_failure(*runtime, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
@@ -560,7 +560,7 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
         try {
             std::string id = copied_string(config->id);
             std::string root_name = copied_string(config->root_name);
-            if (!strata::core::valid_utf8(id) || !strata::core::valid_utf8(root_name)) {
+            if (!strata::base::valid_utf8(id) || !strata::base::valid_utf8(root_name)) {
                 throw std::invalid_argument("surface id and root name must be valid UTF-8");
             }
             if (std::ranges::any_of(runtime->surfaces, [&](const strata_surface* const surface) {
@@ -596,7 +596,7 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
                 throw;
             }
             *out_surface = created;
-            return strata::core::result(STRATA_STATUS_OK);
+            return strata::abi_detail::result(STRATA_STATUS_OK);
         } catch (...) {
             if (*out_surface == nullptr) {
                 allocator.deallocate(storage, sizeof(strata_surface), alignof(strata_surface));
@@ -634,7 +634,7 @@ strata_result strata_surface_prepare_release_packet(strata_surface* const surfac
         }
         const std::vector<std::uint8_t>& packet = surface->current_render_packet();
         sink->emit(sink->user_data, strata_bytes_view{packet.data(), packet.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -650,7 +650,7 @@ strata_result strata_surface_acknowledge_release_packet(strata_surface* const su
             "Release-packet consumption cannot be acknowledged before terminal preparation.");
     }
     surface->release_packet_consumed = true;
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_surface_release(strata_surface* const surface) noexcept {
@@ -658,7 +658,7 @@ strata_result strata_surface_release(strata_surface* const surface) noexcept {
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr)
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     if (surface->owner == nullptr)
         return invalid_argument();
     if (!surface->release_packet_prepared || !surface->release_packet_consumed) {
@@ -668,7 +668,7 @@ strata_result strata_surface_release(strata_surface* const surface) noexcept {
                                "acknowledged terminal packet.");
     }
     strata::abi_detail::destroy_surface(surface, true);
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_surface_abandon(strata_surface* const surface) noexcept {
@@ -676,10 +676,10 @@ strata_result strata_surface_abandon(strata_surface* const surface) noexcept {
     if (entry.refused())
         return entry.refusal();
     if (surface == nullptr)
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     if (surface->owner == nullptr)
         return invalid_argument();
-    const strata_result warning = surface->owner->core.diagnostics().emit(
+    const strata_result warning = strata::abi_detail::emit(surface->owner->core.diagnostics(), 
         STRATA_STATUS_OK, STRATA_DIAGNOSTIC_WARNING, "STRATA.SURFACE.RELEASE_ABANDONED",
         "Surface ownership was abandoned without the ordered terminal packet barrier; the host "
         "must independently discard any remaining GPU resources.");
@@ -707,7 +707,7 @@ strata_result strata_surface_adopt_environment(strata_surface* const surface,
     constexpr AbiCall call{"Environment adoption", "STRATA.SURFACE.INVALID_ENVIRONMENT"};
     return surface_call(surface, call, [&] {
         *out_adopted = surface->core.adopt_environment(environment(*value)) ? 1U : 0U;
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -748,7 +748,7 @@ strata_surface_enqueue_input(strata_surface* const surface, const strata_input_e
         out_info->accepted_event_count = enqueued.injected_events;
         out_info->queued_event_count = surface->core.input().queued_event_count();
         if (enqueued.injected_events == event_count) {
-            return strata::core::result(STRATA_STATUS_OK);
+            return strata::abi_detail::result(STRATA_STATUS_OK);
         }
         return surface_failure(*surface, STRATA_STATUS_INPUT_QUEUE_FULL,
                                "STRATA.UI.INPUT_QUEUE_FULL",
@@ -766,7 +766,7 @@ strata_result strata_surface_cancel_interactions(strata_surface* const surface) 
         return terminal_surface_failure(*surface);
     return surface_call(surface, AbiCall{"Interaction cancellation"}, [&] {
         surface->core.cancel_interactions();
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -780,7 +780,7 @@ strata_result strata_surface_reveal(strata_surface* const surface) noexcept {
         return terminal_surface_failure(*surface);
     return surface_call(surface, AbiCall{"Surface reveal"}, [&] {
         surface->core.reveal();
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -800,7 +800,7 @@ strata_result strata_surface_report_backdrop(strata_surface* const surface,
         for (size_t index = 0U; index < sample_count; ++index)
             reports.push_back({samples[index].probe, samples[index].luminance});
         surface->core.report_backdrop(reports);
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -849,7 +849,7 @@ strata_surface_dispatch_action_json(strata_surface* const surface,
                                        0U,
                                        static_cast<std::uint64_t>(outcome.handler_owners.size()),
                                    }));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -952,7 +952,7 @@ strata_result strata_surface_frame(strata_surface* const surface,
                           static_cast<std::uint64_t>(surface->core.input().queued_event_count()),
                           static_cast<std::uint64_t>(surface->current_render_packet().size()),
                       }));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -991,7 +991,7 @@ strata_result strata_surface_read_frame_json(const strata_surface* const surface
         }
         sink->emit(sink->user_data,
                    strata_string_view{surface->frame_json.data(), surface->frame_json.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1043,7 +1043,7 @@ strata_result strata_surface_drain_events_json(strata_surface* const surface,
                 {"records", strata::data::JsonValue(std::move(records))},
             }));
         sink->emit(sink->user_data, strata_string_view{encoded.data(), encoded.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1067,7 +1067,7 @@ strata_result strata_surface_read_render_packet(const strata_surface* const surf
     }
     return surface_call(surface, AbiCall{"Surface render packet delivery"}, [&] {
         sink->emit(sink->user_data, strata_bytes_view{packet.data(), packet.size()});
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 

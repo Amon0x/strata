@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "compiler/schema.hpp"
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::tools {
 namespace {
@@ -65,7 +65,7 @@ using data::JsonValue;
     std::ostringstream output;
     output << input.rdbuf();
     std::string text = output.str();
-    if (!core::valid_utf8(text)) {
+    if (!base::valid_utf8(text)) {
         throw std::runtime_error("contract input is not valid UTF-8: " + path.string());
     }
     return text;

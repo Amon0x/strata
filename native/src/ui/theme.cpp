@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::ui {
 namespace {
@@ -563,7 +563,7 @@ void apply_motion(ValueFields& fields, const ThemeNullable<ThemeAnimationSet>& v
 }
 
 [[nodiscard]] bool blank(const std::string_view value) noexcept {
-    return core::utf8_blankness(value) != core::Utf8Blankness::non_blank;
+    return base::utf8_blankness(value) != base::Utf8Blankness::non_blank;
 }
 
 [[nodiscard]] std::string node_variant(const DescriptionNode& node) {
@@ -1104,10 +1104,10 @@ void validate_theme_layout(const ThemeWidgetLayoutStyle& style) {
     validate_non_negative(style.scrollbar_gutter, "theme scrollbar gutter");
     validate_finite(style.scroll_offset.x, "theme horizontal scroll offset");
     validate_finite(style.scroll_offset.y, "theme vertical scroll offset");
-    if (blank(style.portal_target) || !core::valid_utf8(style.portal_target)) {
+    if (blank(style.portal_target) || !base::valid_utf8(style.portal_target)) {
         throw std::invalid_argument("theme portal target must be non-blank valid UTF-8");
     }
-    if (!style.anchor_target.empty() && !core::valid_utf8(style.anchor_target)) {
+    if (!style.anchor_target.empty() && !base::valid_utf8(style.anchor_target)) {
         throw std::invalid_argument("theme anchor target must be valid UTF-8");
     }
     if (style.anchor_point.has_value()) {
@@ -1132,7 +1132,7 @@ void validate_theme_layout(const ThemeWidgetLayoutStyle& style) {
     std::set<std::string, std::less<>> keys;
     for (std::size_t index = 0U; index < list.item_count(); ++index) {
         const std::string key = list.items->key_at(index);
-        if (blank(key) || !core::valid_utf8(key) || !keys.insert(key).second) {
+        if (blank(key) || !base::valid_utf8(key) || !keys.insert(key).second) {
             throw std::invalid_argument(
                 "theme virtual item keys must be unique non-blank valid UTF-8");
         }
@@ -1140,7 +1140,7 @@ void validate_theme_layout(const ThemeWidgetLayoutStyle& style) {
     if (list.item_members != nullptr) {
         for (const std::vector<std::string>& band : *list.item_members) {
             for (const std::string& key : band) {
-                if (blank(key) || !core::valid_utf8(key)) {
+                if (blank(key) || !base::valid_utf8(key)) {
                     throw std::invalid_argument(
                         "theme virtual item member keys must be non-blank valid UTF-8");
                 }
@@ -1150,7 +1150,7 @@ void validate_theme_layout(const ThemeWidgetLayoutStyle& style) {
 }
 
 void validate_motion_reference(const std::string& value, const std::string_view label) {
-    if (blank(value) || !core::valid_utf8(value)) {
+    if (blank(value) || !base::valid_utf8(value)) {
         throw std::invalid_argument(std::string(label) + " must be non-blank valid UTF-8");
     }
 }
@@ -1326,7 +1326,7 @@ runtime::ColorValue ThemeTokens::palette(const std::string_view name) const noex
 }
 
 void ThemeTokens::set(std::string name, ThemeTokenValue value) {
-    if (name.empty() || !core::valid_utf8(name))
+    if (name.empty() || !base::valid_utf8(name))
         throw std::invalid_argument("theme token name must be non-empty valid UTF-8");
     for (const StandardColorToken& token : standard_color_tokens) {
         if (token.name != name)
@@ -1390,11 +1390,11 @@ void ThemeWidgetVisualStyle::validate() const {
 }
 
 void ThemeTextLayoutStyle::validate() const {
-    if (blank(primary_font) || !core::valid_utf8(primary_font)) {
+    if (blank(primary_font) || !base::valid_utf8(primary_font)) {
         throw std::invalid_argument("theme primary font id must be non-blank valid UTF-8");
     }
     for (const std::string& fallback : fallback_fonts) {
-        if (blank(fallback) || !core::valid_utf8(fallback)) {
+        if (blank(fallback) || !base::valid_utf8(fallback)) {
             throw std::invalid_argument("theme fallback font ids must be non-blank valid UTF-8");
         }
     }
@@ -1610,7 +1610,7 @@ void ThemeWidgetKey::validate() const {
     if (blank(component_type) || blank(variant)) {
         throw std::invalid_argument("theme widget type and variant must not be empty");
     }
-    if (!core::valid_utf8(component_type) || !core::valid_utf8(variant)) {
+    if (!base::valid_utf8(component_type) || !base::valid_utf8(variant)) {
         throw std::invalid_argument("theme widget type and variant must be valid UTF-8");
     }
 }
@@ -1645,7 +1645,7 @@ ThemeMotionPolicy::ThemeMotionPolicy(const bool reduced_motion,
         throw std::invalid_argument("motion policy must define 'standard'");
     }
     for (const auto& [name, timing] : timings_) {
-        if (blank(name) || !core::valid_utf8(name)) {
+        if (blank(name) || !base::valid_utf8(name)) {
             throw std::invalid_argument("motion timing names must be non-empty valid UTF-8");
         }
         if (timing.duration_nanos <= 0 || timing.delay_nanos < 0 ||
@@ -1682,7 +1682,7 @@ Theme::Theme(std::string name, ThemeTokens tokens, std::shared_ptr<const Theme> 
                      : parent_ != nullptr      ? parent_->motion_policy()
                                                : ThemeMotionPolicy{}),
       widget_styles_(std::move(widget_styles)) {
-    if (blank(name_) || !core::valid_utf8(name_)) {
+    if (blank(name_) || !base::valid_utf8(name_)) {
         throw std::invalid_argument("theme name must be non-empty valid UTF-8");
     }
     tokens_.validate();
@@ -1801,7 +1801,7 @@ ResolvedThemeWidgetStyle Theme::resolved_style(const std::string_view component_
                                                const std::string_view variant,
                                                const ThemeStyleSchema& schema) const {
     if (blank(component_type) || (!variant.empty() && blank(variant)) ||
-        !core::valid_utf8(component_type) || !core::valid_utf8(variant)) {
+        !base::valid_utf8(component_type) || !base::valid_utf8(variant)) {
         throw std::invalid_argument(
             "theme style component type and non-empty variant must be non-blank valid UTF-8");
     }
@@ -1873,7 +1873,7 @@ bool ThemeCatalog::set_root(Theme theme) {
 }
 
 bool ThemeCatalog::unregister_theme(const std::string_view name) {
-    if (blank(name) || !core::valid_utf8(name)) {
+    if (blank(name) || !base::valid_utf8(name)) {
         throw std::invalid_argument("theme name must be non-blank valid UTF-8");
     }
     if (name == root_->name())
@@ -1893,7 +1893,7 @@ ThemeCatalog::scoped_theme(const std::string_view node_key) const noexcept {
 }
 
 bool ThemeCatalog::set_scoped_theme(std::string node_key, Theme theme) {
-    if (blank(node_key) || !core::valid_utf8(node_key)) {
+    if (blank(node_key) || !base::valid_utf8(node_key)) {
         throw std::invalid_argument("theme scope node keys must be non-blank valid UTF-8");
     }
     const auto found = scoped_themes_.find(node_key);
@@ -1906,7 +1906,7 @@ bool ThemeCatalog::set_scoped_theme(std::string node_key, Theme theme) {
 }
 
 bool ThemeCatalog::clear_scoped_theme(const std::string_view node_key) {
-    if (blank(node_key) || !core::valid_utf8(node_key)) {
+    if (blank(node_key) || !base::valid_utf8(node_key)) {
         throw std::invalid_argument("theme scope node keys must be non-blank valid UTF-8");
     }
     const auto found = scoped_themes_.find(node_key);

@@ -16,7 +16,7 @@
 #include "abi_boundary.hpp"
 #include "abi_struct.hpp"
 #include "core/runtime.hpp"
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 #include "data/json.hpp"
 #include "runtime/expression.hpp"
 #include "runtime/value.hpp"
@@ -60,7 +60,7 @@ template <typename Body> void semantics_call(Body&& body) noexcept {
     if (!valid_view(value, allow_empty))
         throw std::invalid_argument(std::string(name) + " view is invalid");
     const std::string_view result(value.data != nullptr ? value.data : "", value.size);
-    if (!strata::core::valid_utf8(result))
+    if (!strata::base::valid_utf8(result))
         throw std::invalid_argument(std::string(name) + " must be valid UTF-8");
     return result;
 }
@@ -261,18 +261,18 @@ retained_invalidation(const strata_widget_invalidation value, const std::string_
 [[nodiscard]] strata_result copied_text(const std::string* const value, char* const buffer,
                                         const std::size_t capacity, std::size_t* const out_length) {
     if (out_length == nullptr || (buffer == nullptr && capacity != 0U)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     if (value == nullptr) {
         *out_length = 0U;
-        return strata::core::result(STRATA_STATUS_NOT_FOUND);
+        return strata::abi_detail::result(STRATA_STATUS_NOT_FOUND);
     }
     *out_length = value->size();
     if (value->size() > capacity)
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     if (!value->empty())
         std::copy(value->begin(), value->end(), buffer);
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 template <typename Context>
@@ -299,29 +299,29 @@ template <typename Context>
                                                 const strata_string_view name, void* const buffer,
                                                 const std::size_t size) {
     if (buffer == nullptr || size == 0U) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         const std::span<const std::byte> value = declared_retained_bytes(context, name);
         if (value.empty())
-            return strata::core::result(STRATA_STATUS_NOT_FOUND);
+            return strata::abi_detail::result(STRATA_STATUS_NOT_FOUND);
         if (value.size() != size)
-            return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+            return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
         std::memcpy(buffer, value.data(), value.size());
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
 [[nodiscard]] strata_result set_declared_retained(strata_widget_input_context* const context,
                                                   const strata_string_view name, Value value) {
     if (context == nullptr || context->scope == nullptr || context->fields == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         const std::string_view field = checked_view(name, false, "retained field");
         const strata_widget_invalidation* const field_invalidation = context->fields->find(field);
         if (field_invalidation == nullptr)
-            return strata::core::result(STRATA_STATUS_NOT_FOUND);
+            return strata::abi_detail::result(STRATA_STATUS_NOT_FOUND);
         if (*field_invalidation == STRATA_WIDGET_INVALIDATION_PAINT) {
             context->scope->set_paint(field, std::move(value));
         } else if (*field_invalidation == STRATA_WIDGET_INVALIDATION_INPUT) {
@@ -330,7 +330,7 @@ template <typename Context>
             context->scope->set_retained(field, std::move(value),
                                          dirty_invalidation(*field_invalidation));
         }
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -340,13 +340,13 @@ template <typename Context>
                                                         const std::size_t size) {
     if (context == nullptr || context->scope == nullptr || context->fields == nullptr ||
         value == nullptr || size == 0U) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         std::string field = checked_string(name, false, "retained field");
         const strata_widget_invalidation* const field_invalidation = context->fields->find(field);
         if (field_invalidation == nullptr)
-            return strata::core::result(STRATA_STATUS_NOT_FOUND);
+            return strata::abi_detail::result(STRATA_STATUS_NOT_FOUND);
         const std::span bytes(static_cast<const std::byte*>(value), size);
         if (*field_invalidation == STRATA_WIDGET_INVALIDATION_INPUT) {
             context->scope->set_input_bytes(std::move(field), bytes);
@@ -354,7 +354,7 @@ template <typename Context>
             context->scope->set_retained_bytes(std::move(field), bytes,
                                                dirty_invalidation(*field_invalidation));
         }
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -367,7 +367,7 @@ template <typename Scope>
     const std::string kind = checked_string(event_kind_value, false, "extension event kind");
     const bool emitted = scope.emit_action(id, json_value(payload_json, true), kind,
                                            json_value(event_value_json, true));
-    return strata::core::result(emitted ? STRATA_STATUS_OK : STRATA_STATUS_NOT_FOUND);
+    return strata::abi_detail::result(emitted ? STRATA_STATUS_OK : STRATA_STATUS_NOT_FOUND);
 }
 
 [[nodiscard]] const Value* runtime_value(const strata_widget_value* const value) noexcept {
@@ -401,10 +401,10 @@ void finish_fragment(strata_widget_render_context& context, strata::core::Diagno
             (context.failure == STRATA_STATUS_OK
                  ? "' left its clip pushes and pops unbalanced; its fragment was dropped."
                  : "' failed to present; its fragment was dropped.");
-        static_cast<void>(diagnostics.emit(status, STRATA_DIAGNOSTIC_ERROR, code, message));
+        static_cast<void>(strata::abi_detail::emit(diagnostics, status, STRATA_DIAGNOSTIC_ERROR, code, message));
     } catch (...) {
-        static_cast<void>(diagnostics.emit(status, STRATA_DIAGNOSTIC_ERROR, code,
-                                           "A widget extension fragment was dropped."));
+        static_cast<void>(strata::abi_detail::emit(diagnostics, status, STRATA_DIAGNOSTIC_ERROR,
+                                                   code, "A widget extension fragment was dropped."));
     }
 }
 
@@ -1035,28 +1035,28 @@ strata_widget_subtargets_retained_bytes(const strata_widget_subtargets_context* 
                                         const size_t size) noexcept {
     if (context == nullptr || context->node == nullptr || context->fields == nullptr ||
         buffer == nullptr || size == 0U || !valid_view(name, false)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     const std::string_view field(name.data, name.size);
     if (context->fields->find(field) == nullptr) {
-        return strata::core::result(STRATA_STATUS_NOT_FOUND);
+        return strata::abi_detail::result(STRATA_STATUS_NOT_FOUND);
     }
     const std::span<const std::byte> value = context->node->retained_bytes(field);
     if (value.empty())
-        return strata::core::result(STRATA_STATUS_NOT_FOUND);
+        return strata::abi_detail::result(STRATA_STATUS_NOT_FOUND);
     if (value.size() != size)
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     std::memcpy(buffer, value.data(), value.size());
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 
 strata_result strata_widget_subtargets_reserve(strata_widget_subtargets_context* const context,
                                                const size_t capacity) noexcept {
     if (context == nullptr || context->targets == nullptr)
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     return guarded([&] {
         context->targets->reserve(capacity);
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1069,7 +1069,7 @@ strata_widget_subtargets_add(strata_widget_subtargets_context* const context,
         !std::isfinite(subtarget->bounds.y) || !std::isfinite(subtarget->bounds.width) ||
         !std::isfinite(subtarget->bounds.height) || subtarget->bounds.width < 0.0 ||
         subtarget->bounds.height < 0.0 || subtarget->kind > STRATA_WIDGET_SUBTARGET_ITEM) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         strata::ui::WidgetSubtarget target;
@@ -1088,7 +1088,7 @@ strata_widget_subtargets_add(strata_widget_subtargets_context* const context,
                           : strata::ui::WidgetSubtargetKind::control;
         target.z_index = subtarget->z_index;
         context->targets->push_back(std::move(target));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1114,24 +1114,24 @@ uint32_t strata_widget_input_cancel_gesture(strata_widget_input_context* const c
 strata_result strata_widget_input_invalidate(strata_widget_input_context* const context,
                                              const strata_widget_invalidation value) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         context->scope->invalidate(dirty_invalidation(value));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
 strata_result strata_widget_input_request_frame(strata_widget_input_context* const context,
                                                 const strata_widget_frame_cost cost) noexcept {
     if (context == nullptr || context->scope == nullptr || cost > STRATA_WIDGET_FRAME_LAYOUT) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         const bool requested = context->scope->request_frame(
             cost == STRATA_WIDGET_FRAME_LAYOUT ? strata::ui::WidgetFrameCost::layout
                                                : strata::ui::WidgetFrameCost::paint);
-        return strata::core::result(requested ? STRATA_STATUS_OK : STRATA_STATUS_NOT_FOUND);
+        return strata::abi_detail::result(requested ? STRATA_STATUS_OK : STRATA_STATUS_NOT_FOUND);
     });
 }
 
@@ -1193,13 +1193,13 @@ strata_result strata_widget_input_set_target_retained_bytes(
     strata_widget_input_context* const context, const strata_string_view target_key,
     const strata_string_view name, const void* const value, const size_t size) noexcept {
     if (context == nullptr || context->scope == nullptr || value == nullptr || size == 0U) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         const std::string_view key = checked_view(target_key, false, "target widget key");
         const std::string_view field = checked_view(name, false, "target retained field");
         const std::span bytes(static_cast<const std::byte*>(value), size);
-        return strata::core::result(context->scope->set_target_paint_bytes(key, field, bytes)
+        return strata::abi_detail::result(context->scope->set_target_paint_bytes(key, field, bytes)
                                         ? STRATA_STATUS_OK
                                         : STRATA_STATUS_NOT_FOUND);
     });
@@ -1209,7 +1209,7 @@ strata_result strata_widget_input_set_retained_number(strata_widget_input_contex
                                                       const strata_string_view name,
                                                       const double value) noexcept {
     if (!std::isfinite(value))
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     return set_declared_retained(context, name, Value(value));
 }
 
@@ -1217,7 +1217,7 @@ strata_result strata_widget_input_set_retained_boolean(strata_widget_input_conte
                                                        const strata_string_view name,
                                                        const uint32_t value) noexcept {
     if (value > 1U)
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     return set_declared_retained(context, name, Value(value != 0U));
 }
 
@@ -1268,7 +1268,7 @@ strata_result strata_widget_input_property_text(const strata_widget_input_contex
                                                 const size_t capacity,
                                                 size_t* const out_length) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         const Value* const value =
@@ -1283,7 +1283,7 @@ strata_result strata_widget_input_emit_action_json(
     const strata_string_view payload_json, const strata_string_view event_kind_value,
     const strata_string_view event_value_json) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         return emit_action_json(*context->scope, action_id, payload_json, event_kind_value,
@@ -1294,28 +1294,28 @@ strata_result strata_widget_input_emit_property_action_json(
     strata_widget_input_context* const context, const strata_string_view action_property,
     const strata_string_view event_kind_value, const strata_string_view event_value_json) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         context->scope->value_changed(
             checked_string(action_property, false, "extension action property"),
             checked_string(event_kind_value, false, "extension event kind"),
             json_value(event_value_json, true));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 strata_result strata_widget_input_emit_property_color_event(
     strata_widget_input_context* const context, const strata_string_view action_property,
     const strata_string_view event_kind_value, const strata_color value) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         context->scope->value_changed(
             checked_string(action_property, false, "extension action property"),
             checked_string(event_kind_value, false, "extension event kind"),
             Value(strata::runtime::ColorValue{value.red, value.green, value.blue, value.alpha}));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1324,7 +1324,7 @@ strata_result strata_behavior_input_emit_action_json(
     const strata_string_view payload_json, const strata_string_view event_kind_value,
     const strata_string_view event_value_json) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         return emit_action_json(*context->scope, action_id, payload_json, event_kind_value,
@@ -1337,24 +1337,24 @@ strata_widget_input_emit_event_json(strata_widget_input_context* const context,
                                     const strata_string_view event_kind_value,
                                     const strata_string_view event_value_json) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         context->scope->emit_event(checked_string(event_kind_value, false, "extension event kind"),
                                    json_value(event_value_json, true));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 strata_result strata_widget_input_emit_number_event(strata_widget_input_context* const context,
                                                     const strata_string_view event_kind_value,
                                                     const double value) noexcept {
     if (context == nullptr || context->scope == nullptr || !std::isfinite(value)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         context->scope->emit_event(checked_string(event_kind_value, false, "extension event kind"),
                                    Value(value));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1362,12 +1362,12 @@ strata_result strata_widget_input_emit_boolean_event(strata_widget_input_context
                                                      const strata_string_view event_kind_value,
                                                      const uint32_t value) noexcept {
     if (context == nullptr || context->scope == nullptr || value > 1U) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         context->scope->emit_event(checked_string(event_kind_value, false, "extension event kind"),
                                    Value(value != 0U));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1375,12 +1375,12 @@ strata_result strata_widget_input_emit_text_event(strata_widget_input_context* c
                                                   const strata_string_view event_kind_value,
                                                   const strata_string_view value) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         context->scope->emit_event(checked_string(event_kind_value, false, "extension event kind"),
                                    Value(checked_string(value, true, "extension event text")));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1499,7 +1499,7 @@ strata_result strata_widget_render_property_text(const strata_widget_render_cont
                                                  const size_t capacity,
                                                  size_t* const out_length) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         const Value* const value =
@@ -1735,17 +1735,17 @@ strata_result strata_widget_render_text_metrics(const strata_widget_render_conte
                                                 double* const out_height) noexcept {
     if (context == nullptr || context->scope == nullptr || out_width == nullptr ||
         out_height == nullptr || !valid_view(text_value, true)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     const strata::ui::TextEngine* const engine = context->scope->text_engine();
     if (engine == nullptr)
-        return strata::core::result(STRATA_STATUS_NOT_FOUND);
+        return strata::abi_detail::result(STRATA_STATUS_NOT_FOUND);
     return guarded([&] {
         const strata::ui::TextLayout layout = engine->layout(
             context->scope->node(), std::string_view(text_value.data, text_value.size));
         *out_width = layout.shaped.metrics.width;
         *out_height = layout.shaped.metrics.height;
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1758,22 +1758,22 @@ strata_rect strata_widget_inspection_layout_bounds(
 strata_result strata_widget_semantics_set_name(strata_widget_semantics_context* const context,
                                                const strata_string_view value) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         context->scope->name(checked_string(value, true, "semantics name"));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
 strata_result strata_widget_semantics_set_value_text(strata_widget_semantics_context* const context,
                                                      const strata_string_view value) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         context->scope->value_text(checked_string(value, true, "semantics value"));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 void strata_widget_semantics_set_value_range(strata_widget_semantics_context* const context,
@@ -1795,11 +1795,11 @@ void strata_widget_semantics_set_value_range(strata_widget_semantics_context* co
 strata_result strata_widget_semantics_add_action(strata_widget_semantics_context* const context,
                                                  const strata_string_view action) noexcept {
     if (context == nullptr || context->actions == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         context->actions->push_back(checked_string(action, false, "semantics action"));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1809,12 +1809,12 @@ strata_widget_semantics_add_child(strata_widget_semantics_context* const context
     if (context == nullptr || context->scope == nullptr || child == nullptr || !has_struct(child) ||
         !valid_view(child->role, false) || !valid_view(child->name, false) ||
         !valid_view(child->value_text, true)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     const bool has_range = (child->flags & STRATA_WIDGET_SEMANTIC_CHILD_VALUE_RANGE) != 0U;
     if (has_range && (!std::isfinite(child->current) || !std::isfinite(child->minimum) ||
                       !std::isfinite(child->maximum) || child->minimum > child->maximum)) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         const bool disabled = (child->flags & STRATA_WIDGET_SEMANTIC_CHILD_DISABLED) != 0U;
@@ -1837,7 +1837,7 @@ strata_widget_semantics_add_child(strata_widget_semantics_context* const context
             std::nullopt, (child->flags & STRATA_WIDGET_SEMANTIC_CHILD_SELECTED) != 0U, disabled,
             child->index, std::nullopt, {}, std::nullopt, std::nullopt, "off", std::nullopt,
             std::move(range), std::move(value_text)));
-        return strata::core::result(STRATA_STATUS_OK);
+        return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }
 
@@ -1948,7 +1948,7 @@ strata_widget_semantics_property_text(const strata_widget_semantics_context* con
                                       const strata_string_view name, char* const buffer,
                                       const size_t capacity, size_t* const out_length) noexcept {
     if (context == nullptr || context->scope == nullptr) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
+        return strata::abi_detail::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     return guarded([&] {
         const Value* const value =

@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/utf8.hpp"
+#include "base/utf8.hpp"
 
 namespace strata::runtime {
 namespace {
@@ -72,7 +72,7 @@ ValueSchemaPtr ValueSchema::object(
     ValueSchemaPtr unknown_field_schema
 ) {
     for (const ValueSchemaField& field : fields) {
-        if (field.name.empty() || !core::valid_utf8(field.name) || field.schema == nullptr) {
+        if (field.name.empty() || !base::valid_utf8(field.name) || field.schema == nullptr) {
             throw std::invalid_argument("object field schemas require a valid name and type");
         }
     }
