@@ -1004,6 +1004,7 @@ if(STRATA_BUILD_SAMPLES)
         # decoding on a thread that never initialised COM.
         add_executable(strata_d3d11_renderer_tests tests/d3d11_renderer_tests.cpp)
         target_link_libraries(strata_d3d11_renderer_tests PRIVATE Strata::d3d11 Strata::host d3d11)
+        target_include_directories(strata_d3d11_renderer_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
         strata_target_defaults(strata_d3d11_renderer_tests)
     endif()
 endif()

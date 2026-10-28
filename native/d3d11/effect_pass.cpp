@@ -135,6 +135,8 @@ struct EffectPassRenderer::Impl final {
         LONG top = 0;
         double sampled_seconds = 0.0;
         std::uint64_t geometry_epoch = 0U;
+        /** The layer frame (see layer_frames) that last composited this sample. */
+        std::uint64_t used_frame = 0U;
         host::EffectBatch effect;
     };
     /** One queued readback of the probe strip: which layer measured it, and which probes. */
@@ -348,6 +350,7 @@ struct EffectPassRenderer::Impl final {
         const std::span<const host::GeometryDirtyRegion> dirty_regions
     ) {
         const std::string layer(layer_id);
+        ++layer_frames[layer];
         const auto found = layer_epochs.find(layer);
         // A presentation-group move keeps the epoch but still reports the regions it uncovered.
         const bool same_epoch = found != layer_epochs.end() && found->second == geometry_epoch;
@@ -640,7 +643,18 @@ struct EffectPassRenderer::Impl final {
         layer_probes.push_back(effect.probe);
     }
 
+    [[nodiscard]] std::uint64_t layer_frame(const std::string_view layer_id) const {
+        const auto found = layer_frames.find(layer_id);
+        return found != layer_frames.end() ? found->second : 0U;
+    }
+
     void end_layer(const std::string_view layer_id) {
+        // A sample this frame did not composite belongs to an effect that has gone or moved to
+        // another source order; keeping it would only hold a texture for as long as the layer.
+        const std::uint64_t frame = layer_frame(layer_id);
+        std::erase_if(cached_samples, [layer_id, frame](const auto& entry) {
+            return entry.first.layer == layer_id && entry.second.used_frame != frame;
+        });
         if (!layer_probes.empty()) {
             const auto free = std::ranges::find_if(
                 probe_readbacks, [](const ProbeReadback& readback) { return !readback.pending; });
@@ -769,6 +783,7 @@ struct EffectPassRenderer::Impl final {
             frame_seconds < cached->second.sampled_seconds ||
             frame_seconds - cached->second.sampled_seconds + 1.0e-9 >= interval;
         if (!refresh_due) {
+            cached->second.used_frame = layer_frame(layer_id);
             draw_cached(cached->second, destination, effect, logical_width, logical_height,
                         frame_seconds);
             return EffectPassTelemetry{
@@ -870,6 +885,7 @@ struct EffectPassRenderer::Impl final {
             context->CopySubresourceRegion(cached->second.texture.Get(), 0U, 0U, 0U, 0U,
                                            current->texture.Get(), 0U, &source_box);
             cached->second.sampled_seconds = frame_seconds;
+            cached->second.used_frame = layer_frame(layer_id);
             cached->second.geometry_epoch =
                 layer_epoch != layer_epochs.end() ? layer_epoch->second : 0U;
             cached->second.effect = effect;
@@ -912,6 +928,8 @@ struct EffectPassRenderer::Impl final {
     std::map<std::string, ShaderProgram, std::less<>> shader_programs;
     std::map<CacheKey, CachedSample> cached_samples;
     std::map<std::string, std::uint64_t, std::less<>> layer_epochs;
+    /** Frames rendered per layer, counted by begin_layer; cache entries record the last use. */
+    std::map<std::string, std::uint64_t, std::less<>> layer_frames;
     bool surface_backdrop_available = false;
     bool asynchronous_shader_compilation = false;
     bool synchronous_backdrop_readback = false;
@@ -970,6 +988,13 @@ void EffectPassRenderer::resize(const std::uint32_t width, const std::uint32_t h
     impl_->resize(width, height, format);
 }
 
+std::size_t EffectPassRenderer::cached_sample_count(const std::string_view layer_id) const noexcept {
+    return static_cast<std::size_t>(std::ranges::count_if(
+        impl_->cached_samples,
+        [layer_id](const auto& entry) { return entry.first.layer == layer_id; }
+    ));
+}
+
 void EffectPassRenderer::invalidate_cache() noexcept {
     impl_->cached_samples.clear();
     impl_->layer_epochs.clear();
@@ -1011,6 +1036,10 @@ void EffectPassRenderer::release_layer(const std::string_view layer_id) noexcept
     const auto epoch = impl_->layer_epochs.find(layer_id);
     if (epoch != impl_->layer_epochs.end())
         impl_->layer_epochs.erase(epoch);
+    if (const auto frames = impl_->layer_frames.find(layer_id);
+        frames != impl_->layer_frames.end()) {
+        impl_->layer_frames.erase(frames);
+    }
     std::erase_if(impl_->cached_samples,
                   [layer_id](const auto& entry) { return entry.first.layer == layer_id; });
     if (const auto completed = impl_->completed_probes.find(layer_id);

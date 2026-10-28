@@ -40,6 +40,8 @@ class EffectPassRenderer final {
 
     void resize(std::uint32_t width, std::uint32_t height, DXGI_FORMAT format);
     void invalidate_cache() noexcept;
+    /** Retained effect samples of one layer; end_layer drops those the frame did not use. */
+    [[nodiscard]] std::size_t cached_sample_count(std::string_view layer_id) const noexcept;
     /** Advances one ordered layer stream and invalidates only samples touched by geometry patches. */
     void begin_layer(
         std::string_view layer_id,

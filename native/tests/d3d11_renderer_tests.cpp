@@ -18,6 +18,8 @@
 #include <strata/d3d11.hpp>
 #include <strata/render_packet.hpp>
 
+#include "d3d11/effect_pass.hpp"
+
 namespace {
 
 using Microsoft::WRL::ComPtr;
@@ -196,6 +198,46 @@ void test_png_upload_without_com() {
     check(failure.empty(), "a PNG upload on a thread without COM failed: " + failure);
 }
 
+/** Drives one layer frame of rate-limited backdrop effects through the effect renderer. */
+void effect_frame(const Fixture& fixture, d3d11::EffectPassRenderer& effects,
+                  const std::uint32_t effect_count, const double seconds) {
+    std::vector<host::SubmissionBatch> batches;
+    for (std::uint32_t order = 0U; order < effect_count; ++order) {
+        host::EffectBatch effect;
+        effect.source_order = order;
+        effect.scissor = host::Scissor{0U, 0U, 4U, 4U};
+        effect.width = 4.0;
+        effect.height = 4.0;
+        effect.effect = "fixture.unprogrammed";
+        effect.refresh_rate = 60.0;
+        batches.emplace_back(std::move(effect));
+    }
+    effects.begin_layer("layer", 1U, false, {});
+    effects.begin_surface(fixture.texture.Get(),
+                          effects.surface_backdrop_required("layer", batches, 4.0, 4.0, seconds));
+    for (const host::SubmissionBatch& batch : batches) {
+        static_cast<void>(effects.apply_backdrop("layer", 0U, std::get<host::EffectBatch>(batch),
+                                                 fixture.texture.Get(), fixture.view.Get(), 4.0,
+                                                 4.0, seconds));
+    }
+    effects.end_layer("layer");
+}
+
+// Retained effect samples follow the effects of the latest frame. An effect that is no longer
+// drawn must not keep its sample texture alive for as long as the layer lives.
+void test_unused_effect_samples_are_evicted() {
+    Fixture fixture;
+    d3d11::EffectPassRenderer effects(fixture.device.Get(), fixture.context.Get());
+    effects.resize(4U, 4U, DXGI_FORMAT_R8G8B8A8_UNORM);
+    effect_frame(fixture, effects, 3U, 0.0);
+    check(effects.cached_sample_count("layer") == 3U, "rate-limited effects were not retained");
+    effect_frame(fixture, effects, 3U, 0.001);
+    check(effects.cached_sample_count("layer") == 3U, "reused effect samples were dropped");
+    effect_frame(fixture, effects, 1U, 0.002);
+    check(effects.cached_sample_count("layer") == 1U,
+          "samples of effects the frame no longer draws were retained");
+}
+
 } // namespace
 
 int main() {
@@ -203,6 +245,7 @@ int main() {
         test_geometry_after_a_failed_frame();
         test_png_upload_without_com();
         test_target_is_validated_on_its_own();
+        test_unused_effect_samples_are_evicted();
         std::cout << "strata_d3d11_renderer_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {
