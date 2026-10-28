@@ -367,6 +367,14 @@ struct File final {
     SourceSpan span;
     /** One past the highest node id the file's nodes use; side tables size themselves by it. */
     NodeId node_id_limit = 0U;
+    /**
+     * The names read in regions the parser could not turn into nodes (a declaration or statement
+     * it abandoned, tokens it skipped to recover, an unreadable token), sorted and unique: what
+     * failed to parse may have declared any of them.
+     */
+    std::vector<std::string> unparsed_names;
+    /** Parsing stopped at a limit, so the source past it may declare anything. */
+    bool truncated = false;
 };
 
 } // namespace strata::compiler

@@ -325,6 +325,25 @@ std::string_view implicit_layout_kind(const WidgetSchema& widget) {
     return widget.layout_kind;
 }
 
+bool MissingDeclarations::may_declare(const std::string_view name, const bool module_level) const {
+    if (truncated || (imports && module_level)) return true;
+    return unparsed_names != nullptr && std::ranges::binary_search(*unparsed_names, name);
+}
+
+void Diagnostics::report_unresolved(
+    std::string code,
+    const std::string_view name,
+    const bool module_level,
+    std::string message,
+    const SourceSpan& span,
+    std::string component_path,
+    std::string expected
+) {
+    if (missing_.may_declare(name, module_level)) return;
+    report(std::move(code), std::move(message), span, std::move(component_path),
+           std::move(expected));
+}
+
 void Diagnostics::report(
     std::string code,
     std::string message,
@@ -332,17 +351,6 @@ void Diagnostics::report(
     std::string component_path,
     std::string expected
 ) {
-    // What a declaration that failed to parse or load would have defined.
-    static constexpr std::array<std::string_view, 7U> unresolved_names{
-        "STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET",
-        "STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER",
-        "STRATA.DSL.SEMANTIC_UNKNOWN_STYLE",
-        "STRATA.DSL.SEMANTIC_UNKNOWN_STYLE_BASE",
-        "STRATA.DSL.SEMANTIC_UNKNOWN_ANIMATION",
-        "STRATA.DSL.SEMANTIC_UNKNOWN_COMPONENT_TEMPLATE",
-        "STRATA.DSL.SEMANTIC_UNKNOWN_STATE",
-    };
-    if (suppress_unresolved_names_ && std::ranges::contains(unresolved_names, code)) return;
     if (!reported_.emplace(code, message, span.source_id, span.start.offset, span.end.offset)
              .second) {
         return;

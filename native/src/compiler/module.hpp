@@ -34,6 +34,8 @@ struct ModuleResult final {
     std::vector<std::string> dependencies;
     File merged_file;
     std::vector<Diagnostic> diagnostics;
+    /** An import failed to load, so the declarations it would have made are missing. */
+    bool missing_imports = false;
 };
 
 [[nodiscard]] ModuleResult load_modules(

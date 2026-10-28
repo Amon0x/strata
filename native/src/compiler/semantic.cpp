@@ -66,7 +66,11 @@ SemanticResult validate_semantics(
 ) {
     SemanticResult result;
     semantic::Analysis analysis(file, registry, result.model);
-    if (input == AnalysisInput::incomplete) analysis.diagnostics.suppress_unresolved_names();
+    analysis.diagnostics.set_missing(semantic::MissingDeclarations{
+        input == AnalysisInput::missing_imports,
+        file.truncated,
+        &file.unparsed_names,
+    });
     semantic::collect_declarations(analysis);
     semantic::resolve_names(analysis);
     semantic::TypeOracle oracle(analysis);

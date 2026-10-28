@@ -1,6 +1,7 @@
 #include "compiler/parser.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <deque>
 #include <functional>
@@ -50,6 +51,10 @@ Parser::Parser(
         limits_.max_collection_items == 0U) {
         throw std::invalid_argument("parser limits must be positive");
     }
+    // The lexer stops at its token limit; what follows was never read.
+    truncated_ = std::ranges::any_of(diagnostics_, [](const Diagnostic& diagnostic) {
+        return diagnostic.code.starts_with("STRATA.DSL.LIMIT_");
+    });
     tokens_.reserve(tokens.size());
     for (Token& token : tokens) {
         if (token.type == TokenType::trivia) {
@@ -92,6 +97,7 @@ ParseResult Parser::parse() {
                     declarations.push_back(std::move(*declaration));
                 }
             } else if (match(TokenType::error)) {
+                record_unparsed(current_ - 1U);
                 continue;
             } else {
                 static_cast<void>(error(
@@ -99,13 +105,18 @@ ParseResult Parser::parse() {
                     "STRATA.DSL.PARSE_EXPECTED_DECLARATION",
                     "Expected import, screen, overlay, component, style, or animation declaration."
                 ));
+                const std::size_t first = current_;
                 static_cast<void>(advance());
                 synchronize_top_level();
+                record_unparsed(first);
             }
         }
     } catch (const LimitPanic&) {
         // A limit diagnostic is terminal for this source so recovery cannot consume more budget.
+        truncated_ = true;
     }
+    std::ranges::sort(unparsed_names_);
+    unparsed_names_.erase(std::ranges::unique(unparsed_names_).begin(), unparsed_names_.end());
     const SourceSpan file_span = covering(first_span, previous_or_peek().span);
     File file{
         source_id_,
@@ -114,6 +125,8 @@ ParseResult Parser::parse() {
         std::move(trivia_),
         file_span,
         next_node_id_,
+        std::move(unparsed_names_),
+        truncated_,
     };
     return ParseResult{std::move(file), std::move(diagnostics_)};
 }
@@ -134,6 +147,7 @@ Import Parser::parse_import(const Token& keyword) {
 }
 
 std::optional<Declaration> Parser::parse_declaration() {
+    const std::size_t first = current_;
     try {
         if (match(TokenType::screen)) {
             return parse_named_block_declaration(previous_token(), DeclarationKind::screen);
@@ -152,6 +166,7 @@ std::optional<Declaration> Parser::parse_declaration() {
         }
     } catch (const ParsePanic&) {
         synchronize_top_level();
+        record_unparsed(first);
     }
     return std::nullopt;
 }
@@ -349,6 +364,7 @@ BlockPtr Parser::parse_block(const BodyKind kind) {
 
 StatementPtr Parser::parse_statement(const BodyKind kind) {
     count_statement();
+    const std::size_t first = current_;
     try {
         if (name_token() && check_next(TokenType::colon)) return parse_property_statement();
         if (match(TokenType::state)) return parse_state_declaration(previous_token());
@@ -364,6 +380,7 @@ StatementPtr Parser::parse_statement(const BodyKind kind) {
         if (widget_name()) return parse_widget_statement();
         if (match(TokenType::semicolon)) return nullptr;
         if (match(TokenType::error)) {
+            record_unparsed(first);
             return make_statement(next_node_id_, ErrorStatement{}, previous_token().span);
         }
         static_cast<void>(error(
@@ -373,10 +390,12 @@ StatementPtr Parser::parse_statement(const BodyKind kind) {
         ));
         const Token& token = advance();
         synchronize_block();
+        record_unparsed(first);
         return make_statement(next_node_id_, ErrorStatement{}, token.span);
     } catch (const ParsePanic&) {
         const SourceSpan span = previous_or_peek().span;
         synchronize_block();
+        record_unparsed(first);
         return make_statement(next_node_id_, ErrorStatement{}, span);
     }
 }
@@ -1199,6 +1218,35 @@ void Parser::synchronize_top_level() {
     }
 }
 
+void Parser::record_unparsed(const std::size_t first) {
+    const auto word = [](const char character) {
+        const auto byte = static_cast<unsigned char>(character);
+        return byte >= 0x80U || std::isalnum(byte) != 0 || character == '_';
+    };
+    for (std::size_t index = first; index < current_ && index < tokens_.size(); ++index) {
+        const Token& token = tokens_[index];
+        if (token.type == TokenType::string || token.type == TokenType::number ||
+            token.type == TokenType::color) {
+            continue;
+        }
+        // An unreadable token may hold several words, the rest of an unterminated string among
+        // them; any of them could have been a name.
+        const std::string_view lexeme = token.lexeme;
+        std::size_t start = 0U;
+        while (start < lexeme.size()) {
+            if (!word(lexeme[start])) {
+                ++start;
+                continue;
+            }
+            std::size_t end = start;
+            while (end < lexeme.size() && word(lexeme[end])) ++end;
+            if (std::isdigit(static_cast<unsigned char>(lexeme[start])) == 0)
+                unparsed_names_.emplace_back(lexeme.substr(start, end - start));
+            start = end;
+        }
+    }
+}
+
 void Parser::synchronize_block() {
     while (!at_end()) {
         if (previous_or_peek().type == TokenType::semicolon ||
@@ -1352,6 +1400,8 @@ ParseResult parse_source(
             {},
             SourceSpan{source_id, start, start, 0U},
             first_node_id,
+            {},
+            true,
         };
         std::vector<Diagnostic> diagnostics;
         diagnostics.push_back(Diagnostic{

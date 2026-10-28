@@ -268,11 +268,12 @@ private:
                            base.span, "style " + style->name, "unique style base");
                 }
                 if (!styles.contains(base.name)) {
-                    report("STRATA.DSL.SEMANTIC_UNKNOWN_STYLE_BASE",
-                           "Style '" + style->name + "' extends unknown style '" + base.name +
-                               "'." + did_you_mean(base.name, analysis_.style_names),
-                           base.span, "style " + style->name,
-                           expected_names(analysis_.style_names));
+                    analysis_.diagnostics.report_unresolved(
+                        "STRATA.DSL.SEMANTIC_UNKNOWN_STYLE_BASE", base.name, true,
+                        "Style '" + style->name + "' extends unknown style '" + base.name +
+                            "'." + did_you_mean(base.name, analysis_.style_names),
+                        base.span, "style " + style->name,
+                        expected_names(analysis_.style_names));
                 }
             }
         }

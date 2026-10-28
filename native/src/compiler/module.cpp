@@ -33,6 +33,7 @@ ModuleResult load_modules(
     std::vector<std::string> dependencies;
     std::vector<Diagnostic> diagnostics;
     std::vector<std::string> visiting;
+    bool missing_imports = false;
     // Every module numbers its nodes from where the previous one stopped, so ids stay unique once
     // the modules' declarations are merged into one file.
     NodeId next_node_id = 0U;
@@ -83,6 +84,7 @@ ModuleResult load_modules(
                 add_dependency(imported.source_id);
                 visit(imported, import.span);
             } catch (const ModuleLoadError& failure) {
+                missing_imports = true;
                 if (failure.dependency_source_id().has_value()) {
                     add_dependency(*failure.dependency_source_id());
                 }
@@ -95,6 +97,7 @@ ModuleResult load_modules(
                     std::string("readable DSL module within configured roots"),
                 });
             } catch (const std::exception& failure) {
+                missing_imports = true;
                 diagnostics.push_back(Diagnostic{
                     "STRATA.DSL.IMPORT_LOAD_FAILED",
                     DiagnosticSeverity::error,
@@ -123,6 +126,7 @@ ModuleResult load_modules(
     merged.imports.clear();
     merged.declarations.clear();
     merged.node_id_limit = next_node_id;
+    merged.unparsed_names.clear();
     for (const auto& [source_id, module] : modules) {
         static_cast<void>(source_id);
         merged.declarations.insert(
@@ -130,13 +134,27 @@ ModuleResult load_modules(
             module.file.declarations.begin(),
             module.file.declarations.end()
         );
+        // Declarations are global across modules, so what one module failed to parse may be
+        // what another one names.
+        merged.unparsed_names.insert(
+            merged.unparsed_names.end(),
+            module.file.unparsed_names.begin(),
+            module.file.unparsed_names.end()
+        );
+        merged.truncated = merged.truncated || module.file.truncated;
     }
+    std::ranges::sort(merged.unparsed_names);
+    merged.unparsed_names.erase(
+        std::ranges::unique(merged.unparsed_names).begin(),
+        merged.unparsed_names.end()
+    );
     std::ranges::sort(dependencies);
     return ModuleResult{
         entry.source_id,
         std::move(dependencies),
         std::move(merged),
         std::move(diagnostics),
+        missing_imports,
     };
 }
 

@@ -104,6 +104,18 @@ private:
                                      std::move(expected));
     }
 
+    /**
+     * Reports a name that resolves to nothing, unless a declaration that failed to parse or load
+     * could be what it names; `module_level` when a module declaration could declare it.
+     */
+    void unresolved(std::string code, const std::string_view name, const bool module_level,
+                    std::string message, const SourceSpan& span, std::string path,
+                    std::string expected) {
+        analysis_.diagnostics.report_unresolved(std::move(code), name, module_level,
+                                                std::move(message), span, std::move(path),
+                                                std::move(expected));
+    }
+
     void declaration_check(const Declaration& declaration) {
         if (const auto* screen = std::get_if<ScreenDeclaration>(&declaration.node)) {
             block(*screen->body, "screen " + screen->name, maximum_eager_loop_items,
@@ -328,10 +340,10 @@ private:
             std::vector<std::string> names = registry_.widget_names();
             names.insert(names.end(), analysis_.component_names.begin(),
                          analysis_.component_names.end());
-            report("STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET",
-                   "Widget or component '" + call.name + "' is not declared." +
-                       did_you_mean(call.name, names),
-                   call.span, call_path, expected_names(names));
+            unresolved("STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET", call.name, true,
+                       "Widget or component '" + call.name + "' is not declared." +
+                           did_you_mean(call.name, names),
+                       call.span, call_path, expected_names(names));
             if (call.body != nullptr)
                 block(*call.body, call_path, maximum_loop_items, nested_context(context));
             return;
@@ -638,10 +650,10 @@ private:
         if (name == nullptr) return;
         const std::vector<std::string>& states = analysis_.state_names;
         if (!std::ranges::binary_search(states, *name)) {
-            report("STRATA.DSL.SEMANTIC_UNKNOWN_STATE",
-                   "Action '" + id + "' targets state '" + *name + "', which no state declares." +
-                       did_you_mean(*name, states),
-                   name_expression->span, component_path + ".name", expected_names(states));
+            unresolved("STRATA.DSL.SEMANTIC_UNKNOWN_STATE", *name, true,
+                       "Action '" + id + "' targets state '" + *name +
+                           "', which no state declares." + did_you_mean(*name, states),
+                       name_expression->span, component_path + ".name", expected_names(states));
             return;
         }
         SemanticTypePtr state = state_in_scope(expression, *name);
@@ -765,10 +777,10 @@ private:
         }
         const auto component = model_.components.find(template_name);
         if (component == model_.components.end()) {
-            report("STRATA.DSL.SEMANTIC_UNKNOWN_COMPONENT_TEMPLATE",
-                   "Component template '" + template_name + "' is not declared." +
-                       did_you_mean(template_name, analysis_.component_names),
-                   expression.span, component_path, expected_names(analysis_.component_names));
+            unresolved("STRATA.DSL.SEMANTIC_UNKNOWN_COMPONENT_TEMPLATE", template_name, true,
+                       "Component template '" + template_name + "' is not declared." +
+                           did_you_mean(template_name, analysis_.component_names),
+                       expression.span, component_path, expected_names(analysis_.component_names));
             return;
         }
         checked_[expression.id] = true;
@@ -1009,10 +1021,10 @@ private:
             const Symbol* symbol = model_.symbol(expression);
             if (symbol != nullptr && reads_value(symbol->kind)) return false;
             if (model_.styles.contains(identifier->name)) return true;
-            report("STRATA.DSL.SEMANTIC_UNKNOWN_STYLE",
-                   "Style '" + identifier->name + "' is not declared." +
-                       did_you_mean(identifier->name, analysis_.style_names),
-                   expression.span, component_path, expected_names(analysis_.style_names));
+            unresolved("STRATA.DSL.SEMANTIC_UNKNOWN_STYLE", identifier->name, true,
+                       "Style '" + identifier->name + "' is not declared." +
+                           did_you_mean(identifier->name, analysis_.style_names),
+                       expression.span, component_path, expected_names(analysis_.style_names));
             return true;
         }
         if (const auto* style = std::get_if<MapExpression>(&expression.node)) {
@@ -1082,9 +1094,10 @@ private:
         const std::vector<std::string>& animations = analysis_.animation_names;
         if (name.has_value()) {
             if (!std::ranges::binary_search(animations, *name)) {
-                report("STRATA.DSL.SEMANTIC_UNKNOWN_ANIMATION",
-                       "Animation '" + *name + "' is not declared." + did_you_mean(*name, animations),
-                       expression.span, component_path, expected_names(animations));
+                unresolved("STRATA.DSL.SEMANTIC_UNKNOWN_ANIMATION", *name, true,
+                           "Animation '" + *name + "' is not declared." +
+                               did_you_mean(*name, animations),
+                           expression.span, component_path, expected_names(animations));
             }
             return true;
         }
@@ -1096,10 +1109,10 @@ private:
         const std::string* animation_name =
             !call->arguments.empty() ? string_literal_value(*call->arguments.front().value) : nullptr;
         if (animation_name != nullptr && !std::ranges::binary_search(animations, *animation_name)) {
-            report("STRATA.DSL.SEMANTIC_UNKNOWN_ANIMATION",
-                   "Animation '" + *animation_name + "' is not declared." +
-                       did_you_mean(*animation_name, animations),
-                   call->arguments.front().span, component_path, expected_names(animations));
+            unresolved("STRATA.DSL.SEMANTIC_UNKNOWN_ANIMATION", *animation_name, true,
+                       "Animation '" + *animation_name + "' is not declared." +
+                           did_you_mean(*animation_name, animations),
+                       call->arguments.front().span, component_path, expected_names(animations));
         }
         return true;
     }
@@ -1343,10 +1356,12 @@ private:
                 ? " An action receives its event through fromEvent: true or state.setFromEvent."
             : suggestion.has_value() ? " Did you mean '" + *suggestion + "'?"
                                      : std::string{};
-        report("STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER",
-               "'" + identifier.name + "' is not a state, parameter, local value or declared host "
-               "root." + hint,
-               expression.span, component_path, expected_names(names));
+        // Only a local declaration makes an identifier a value: the state, derived value or
+        // parameter it names would be in this module, not in one that failed to load.
+        unresolved("STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER", identifier.name, false,
+                   "'" + identifier.name +
+                       "' is not a state, parameter, local value or declared host root." + hint,
+                   expression.span, component_path, expected_names(names));
     }
 
     /**

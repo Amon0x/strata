@@ -336,7 +336,7 @@ void test_fixed_seed_malformed_programs_terminate_with_valid_spans() {
         const auto parsed = strata::compiler::parse_source("generated.strata", source);
         // Analysis runs on whatever the parser recovered, recovery nodes included.
         const auto analysed = strata::compiler::validate_semantics(
-            parsed.file, registry, strata::compiler::AnalysisInput::incomplete
+            parsed.file, registry, strata::compiler::AnalysisInput::missing_imports
         );
         std::vector<strata::compiler::Diagnostic> diagnostics = parsed.diagnostics;
         diagnostics.insert(diagnostics.end(), analysed.diagnostics.begin(),
@@ -1007,6 +1007,92 @@ void test_analysis_runs_despite_syntax_and_import_errors() {
           "a failed import cascaded into unknown names:" + describe(missing));
 }
 
+// Broken input hides only the unknown names a missing declaration could explain: names read where
+// the parser abandoned a declaration or statement, and module-level names a failed import could
+// have declared. A typo anywhere else is still reported.
+void test_broken_input_hides_only_names_a_missing_declaration_explains() {
+    static const compiler::SchemaRegistry registry = [] {
+        compiler::SchemaRegistry schemas = compiler::SchemaRegistry::builtins();
+        schemas.apply_scenario_declarations(strata::data::parse_json(R"({
+          "widgets": { "registry": "test", "required": [], "definitions": [] },
+          "actions": { "registry": "test", "required": [], "definitions": [] },
+          "host": []
+        })"));
+        return schemas;
+    }();
+    const auto analyse = [](const std::string_view main,
+                            const std::vector<compiler::ModuleSource>& modules = {}) {
+        const compiler::ModuleResult loaded = load(main, modules);
+        return compiler::validate_semantics(loaded.merged_file, registry,
+                                            loaded.missing_imports
+                                                ? compiler::AnalysisInput::missing_imports
+                                                : compiler::AnalysisInput::complete)
+            .diagnostics;
+    };
+    const auto unknown = [](const std::vector<compiler::Diagnostic>& diagnostics,
+                            const std::string_view code) {
+        std::vector<std::string> messages;
+        for (const compiler::Diagnostic& diagnostic : diagnostics) {
+            if (diagnostic.code == code) messages.push_back(diagnostic.message);
+        }
+        return messages;
+    };
+
+    // The component's parameter list does not parse, so the whole declaration is dropped, and so
+    // is the derived value whose '=' is missing; a typo of a declared name is still an error.
+    const auto parse_broken = analyse(
+        "component Card(title string) { Text(text: title) }\n"
+        "screen Main {\n"
+        "  state count = 1\n"
+        "  derived totals count * 2\n"
+        "  root Panel {\n"
+        "    Card(title: \"x\")\n"
+        "    Text(text: format(\"{0}\", totals))\n"
+        "    Crad(title: \"y\")\n"
+        "    Text(text: format(\"{0}\", cuont))\n"
+        "  }\n"
+        "}");
+    const std::vector<std::string> widgets =
+        unknown(parse_broken, "STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET");
+    const std::vector<std::string> identifiers =
+        unknown(parse_broken, "STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER");
+    check(widgets.size() == 1U && widgets.front().contains("'Crad'"),
+          "only the misspelled widget should be unknown after a broken component");
+    check(identifiers.size() == 1U && identifiers.front().contains("'cuont'"),
+          "only the misspelled state should be unknown after a broken derived value");
+
+    // A module that failed to load may declare components, styles, animations and their states,
+    // but not the values a screen reads by name.
+    const auto import_failed = analyse(
+        "import \"missing.strata\";\n"
+        "screen Main {\n"
+        "  state count = 1\n"
+        "  root Panel(style: Shared) {\n"
+        "    Missing()\n"
+        "    Button(label: \"+\", onClick: action(\"state.adjust\", name: \"clicks\", amount: 1))\n"
+        "    Text(text: format(\"{0}\", cuont))\n"
+        "  }\n"
+        "}");
+    check(unknown(import_failed, "STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET").empty() &&
+              unknown(import_failed, "STRATA.DSL.SEMANTIC_UNKNOWN_STYLE").empty() &&
+              unknown(import_failed, "STRATA.DSL.SEMANTIC_UNKNOWN_STATE").empty(),
+          "a name the failed import could declare was reported");
+    const std::vector<std::string> values =
+        unknown(import_failed, "STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER");
+    check(values.size() == 1U && values.front().contains("'cuont'"),
+          "a misspelled local value was hidden by an unrelated failed import");
+
+    // Past a parse limit anything may be declared, so nothing unresolved is reported.
+    compiler::ParserLimits limits;
+    limits.max_statements = 2U;
+    const compiler::ParseResult truncated = compiler::parse_source(
+        "limited.strata",
+        "screen Main { state count = 1; root Text(text: format(\"{0}\", cuont)) Lable() }", limits);
+    check(truncated.file.truncated, "a source cut off at a limit was not marked truncated");
+    check(compiler::validate_semantics(truncated.file, registry).diagnostics.empty(),
+          "a name past a parse limit was reported as unknown");
+}
+
 /** Every "path" an IR value carries, at any depth. */
 void collect_ir_paths(const strata::data::JsonValue& value, std::vector<std::string>& paths) {
     if (const auto* object = value.object()) {
@@ -1237,6 +1323,7 @@ int strata_test_compiler() {
         test_analysis_records_a_resolved_typed_tree();
         test_bind_shorthand_needs_a_retained_target();
         test_analysis_runs_despite_syntax_and_import_errors();
+        test_broken_input_hides_only_names_a_missing_declaration_explains();
         test_catalog_declares_roles_and_names();
         test_lambda_bodies_are_checked_against_the_helper_signature();
         test_theme_reads_palette_and_declared_tokens();

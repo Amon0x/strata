@@ -135,6 +135,8 @@ private:
     void check_collection_size(std::size_t size);
     void synchronize_top_level();
     void synchronize_block();
+    /** Records the names in tokens `first` up to the current one, which produced no node. */
+    void record_unparsed(std::size_t first);
 
     [[nodiscard]] bool declaration_start() const noexcept;
     [[nodiscard]] bool name_token() const noexcept;
@@ -158,6 +160,8 @@ private:
     std::vector<SourceSpan> trivia_;
     std::vector<Token> tokens_;
     std::vector<Diagnostic> diagnostics_;
+    std::vector<std::string> unparsed_names_;
+    bool truncated_ = false;
     ParserLimits limits_;
     std::size_t current_ = 0U;
     std::size_t nesting_depth_ = 0U;

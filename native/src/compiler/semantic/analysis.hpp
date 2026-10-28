@@ -84,6 +84,23 @@ struct RootCardinality final {
 /** Why a path outline is malformed, or nothing when it parses; see path_outline.cpp. */
 [[nodiscard]] std::optional<std::string> path_outline_error(const std::string& commands);
 
+/** What analysis may lack because a module failed to parse or load; see `validate_semantics`. */
+struct MissingDeclarations final {
+    /** An import failed to load: any module-level declaration may be one it made. */
+    bool imports = false;
+    /** A module stopped parsing at a limit: anything may be declared past it. */
+    bool truncated = false;
+    /** Names read where the parser abandoned a declaration or statement, sorted. */
+    const std::vector<std::string>* unparsed_names = nullptr;
+
+    /**
+     * Whether a missing declaration could have declared `name`; `module_level` when a module's own
+     * declaration (a component, style, animation, or a component's state) could, rather than only
+     * a local one.
+     */
+    [[nodiscard]] bool may_declare(std::string_view name, bool module_level) const;
+};
+
 class Diagnostics final {
 public:
     /**
@@ -97,14 +114,26 @@ public:
         std::string component_path,
         std::string expected
     );
-    /** Drops reports of names that resolve to nothing; see `AnalysisInput::incomplete`. */
-    void suppress_unresolved_names() noexcept { suppress_unresolved_names_ = true; }
+    /**
+     * Records a name that resolves to nothing, unless a missing declaration could explain it;
+     * `module_level` as for `MissingDeclarations::may_declare`.
+     */
+    void report_unresolved(
+        std::string code,
+        std::string_view name,
+        bool module_level,
+        std::string message,
+        const SourceSpan& span,
+        std::string component_path,
+        std::string expected
+    );
+    void set_missing(const MissingDeclarations& missing) noexcept { missing_ = missing; }
     [[nodiscard]] std::size_t size() const noexcept { return diagnostics_.size(); }
     [[nodiscard]] std::vector<Diagnostic> take() { return std::move(diagnostics_); }
 
 private:
     std::vector<Diagnostic> diagnostics_;
-    bool suppress_unresolved_names_ = false;
+    MissingDeclarations missing_;
     std::set<std::tuple<std::string, std::string, std::string, std::uint64_t, std::uint64_t>>
         reported_;
 };

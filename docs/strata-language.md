@@ -24,6 +24,12 @@ import "components/forms.strata";
 Imports form one compiled module. Duplicate declarations and import cycles are errors. Editing any
 dependency recompiles the module atomically; a rejected edit leaves the last-good unit active.
 
+A module with syntax errors, or an import that cannot be loaded, is still checked, so every problem
+shows at once. An unknown name is left unreported only when a missing declaration could explain
+it: a name written inside a declaration or statement the parser had to skip, any name once a module
+stops at a compiler limit, or a component, style, animation, or state name while an import is
+missing. Other misspellings, such as a local value read under the wrong name, are still errors.
+
 ## Lexical forms
 
 - Identifiers begin with `_` or a Unicode letter and continue with letters, digits, or `_`.

@@ -24,7 +24,7 @@ CompileResult compile_program(
     SemanticResult semantic = validate_semantics(
         modules.merged_file,
         registry,
-        modules.diagnostics.empty() ? AnalysisInput::complete : AnalysisInput::incomplete
+        modules.missing_imports ? AnalysisInput::missing_imports : AnalysisInput::complete
     );
     CompileResult result{
         modules.entry_source_id,

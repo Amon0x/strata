@@ -85,14 +85,17 @@ struct SemanticResult final {
     SemanticModel model;
 };
 
-/** Whether every module parsed and loaded, so every declaration an author wrote is present. */
-enum class AnalysisInput { complete, incomplete };
+/** Whether every import loaded, so every module's declarations are in the analysed file. */
+enum class AnalysisInput { complete, missing_imports };
 
 /**
  * Analyses a module in passes: collect declarations, resolve names, type check, policy lints and
  * placement. It runs on files with syntax errors too: a node the parser could not read types as
- * unknown and draws no further diagnostics, and with `incomplete` input a name that resolves to
- * nothing is not reported, since its declaration may be what failed to parse or load.
+ * unknown and draws no further diagnostics. A name that resolves to nothing is not reported when a
+ * missing declaration could explain it: a name read in a region the parser abandoned (see
+ * `File::unparsed_names`), any name past a parse limit, or, with `missing_imports`, a component,
+ * style, animation or state name, which a module that failed to load could have declared. Every
+ * other unresolved name is still reported.
  */
 [[nodiscard]] SemanticResult validate_semantics(
     const File& file,
