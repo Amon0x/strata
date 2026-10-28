@@ -156,6 +156,12 @@ class DescriptionBuilder final {
         std::map<runtime::StateAddress, StateBindingEffect, std::less<>> local_state_bindings;
         runtime::StateScopeSet local_owned_state_scopes;
         bool local_captures_retained_snapshot = false;
+        /**
+         * The body itself (not a component inside it) raised an error. Build diagnostics are
+         * reported by every build, so such a body is described again by each one; the bodies
+         * around it stay cached and patch its new subtree in.
+         */
+        bool raised_errors = false;
     };
 
     struct ComponentCacheEntry final {
@@ -172,6 +178,8 @@ class DescriptionBuilder final {
         std::string cache_key;
         /** The build that last reached this entry: others are the first evicted. */
         std::uint64_t visited_epoch = 0U;
+        /** The build that last settled this entry, built or refreshed: it is current for it. */
+        std::uint64_t refreshed_epoch = 0U;
         bool refreshing = false;
     };
 
@@ -223,11 +231,19 @@ class DescriptionBuilder final {
                                    const RetainedDescriptionSnapshot::Node* retained);
     void capture_retained_snapshot();
     void replay_component_effects(const ComponentEffects& effects);
-    void absorb_uncached_component_effects(const ComponentEffects& effects);
     [[nodiscard]] bool aggregate_component_effects(ComponentEffects& effects) const;
     [[nodiscard]] std::shared_ptr<const DescriptionNode>
     build_component_body(std::uint32_t component, const Scope& scope, ComponentEffects& effects);
     [[nodiscard]] ComponentRefreshResult refresh_component_cache_entry(ComponentId id);
+    /** Old component roots and the subtrees that replace them. */
+    using SubtreeReplacements =
+        std::map<const DescriptionNode*, std::shared_ptr<const DescriptionNode>>;
+    /**
+     * Refreshes a current body's components, which it calls with unchanged inputs: their new
+     * roots by their old ones, or none when one has no entry left to refresh.
+     */
+    [[nodiscard]] std::optional<SubtreeReplacements>
+    refresh_direct_descendants(const std::vector<ComponentId>& children);
     /** The id of a cache key, assigned on first use. */
     [[nodiscard]] ComponentId component_id(const std::string& cache_key);
     /** Drops a cache entry and its key's id. */
@@ -235,10 +251,9 @@ class DescriptionBuilder final {
     static void add_descendant(std::vector<ComponentId>& sorted, ComponentId id);
     static void add_descendants(std::vector<ComponentId>& sorted,
                                 const std::vector<ComponentId>& more);
-    [[nodiscard]] static std::shared_ptr<const DescriptionNode> replace_component_subtrees(
-        const std::shared_ptr<const DescriptionNode>& root,
-        const std::map<const DescriptionNode*, std::shared_ptr<const DescriptionNode>>&
-            replacements);
+    [[nodiscard]] static std::shared_ptr<const DescriptionNode>
+    replace_component_subtrees(const std::shared_ptr<const DescriptionNode>& root,
+                               const SubtreeReplacements& replacements);
     [[nodiscard]] bool component_cache_entry_current(const ComponentCacheEntry& entry,
                                                      std::string_view source_path,
                                                      const ComponentInputs& inputs) const;

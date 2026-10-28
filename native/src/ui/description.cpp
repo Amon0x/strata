@@ -728,47 +728,26 @@ DescriptionBuilder::build_layer(const runtime::LayerRole role, const std::string
     if (auto cached = layer_cache_.find(cache_key);
         cached != layer_cache_.end() && cached->second.role == role &&
         cached->second.name == name && cached->second.source_path == source_path &&
-        same_contextual_host_roots(cached->second.contextual_host_roots)) {
-        std::map<const DescriptionNode*, std::shared_ptr<const DescriptionNode>> replacements;
-        bool valid = true;
-        for (const ComponentId child : cached->second.effects.direct_descendants) {
-            const auto child_before = component_cache_.find(child);
-            if (child_before == component_cache_.end()) {
-                valid = false;
-                break;
-            }
-            const std::shared_ptr<const DescriptionNode> previous = child_before->second.root;
-            if (refresh_component_cache_entry(child) == ComponentRefreshResult::invalid) {
-                valid = false;
-                break;
-            }
-            const auto child_after = component_cache_.find(child);
-            if (child_after == component_cache_.end()) {
-                valid = false;
-                break;
-            }
-            if (child_after->second.root != previous)
-                replacements.insert_or_assign(previous.get(), child_after->second.root);
-        }
-        if (valid) {
-            const bool direct_current = component_effects_current(
-                cached->second.effects, cached->second.host_invalidation_count,
-                cached->second.contextual_host_roots);
-            if (replacements.empty() && direct_current) {
+        same_contextual_host_roots(cached->second.contextual_host_roots) &&
+        component_effects_current(cached->second.effects, cached->second.host_invalidation_count,
+                                  cached->second.contextual_host_roots)) {
+        // The layer's own reads are current, so its components are called with the inputs they
+        // were cached for: only what they read themselves can have changed.
+        if (const std::optional<SubtreeReplacements> replacements =
+                refresh_direct_descendants(cached->second.effects.direct_descendants);
+            replacements.has_value()) {
+            if (replacements->empty()) {
                 cached->second.host_invalidation_count = application_.host().invalidation_count();
                 replay_component_effects(cached->second.effects);
                 return cached->second.root;
             }
-            if (direct_current) {
-                std::shared_ptr<const DescriptionNode> patched =
-                    replace_component_subtrees(cached->second.root, replacements);
-                if (patched != nullptr && aggregate_component_effects(cached->second.effects)) {
-                    cached->second.host_invalidation_count =
-                        application_.host().invalidation_count();
-                    cached->second.root = patched;
-                    replay_component_effects(cached->second.effects);
-                    return patched;
-                }
+            std::shared_ptr<const DescriptionNode> patched =
+                replace_component_subtrees(cached->second.root, *replacements);
+            if (patched != nullptr && aggregate_component_effects(cached->second.effects)) {
+                cached->second.host_invalidation_count = application_.host().invalidation_count();
+                cached->second.root = patched;
+                replay_component_effects(cached->second.effects);
+                return patched;
             }
         }
     }
@@ -1656,33 +1635,24 @@ DescriptionBuilder::build_component_call(const runtime::ProgramCall& call, const
     }
     if (component_root == nullptr) {
         ComponentEffects effects;
-        const std::size_t diagnostics_before = diagnostics_.size();
         component_root = share_unchanged_description(
             previous_root, build_component_body(call.component_index, instance, effects));
-        if (diagnostics_.size() == diagnostics_before) {
-            component_cache_.insert_or_assign(id, ComponentCacheEntry{
-                                                      type,
-                                                      call.component_index,
-                                                      source_path,
-                                                      std::move(inputs),
-                                                      application_.host().invalidation_count(),
-                                                      component_cache_epoch_,
-                                                      contextual_host_roots_,
-                                                      std::move(effects),
-                                                      component_root,
-                                                      std::move(instance),
-                                                      cache_key,
-                                                      component_cache_epoch_,
-                                                      false,
-                                                  });
-        } else {
-            for (ComponentEffects* const component_effect : component_effect_stack_) {
-                std::erase(component_effect->direct_descendants, id);
-                std::erase(component_effect->descendants, id);
-            }
-            forget_component(id);
-            absorb_uncached_component_effects(effects);
-        }
+        component_cache_.insert_or_assign(id, ComponentCacheEntry{
+                                                  type,
+                                                  call.component_index,
+                                                  source_path,
+                                                  std::move(inputs),
+                                                  application_.host().invalidation_count(),
+                                                  component_cache_epoch_,
+                                                  contextual_host_roots_,
+                                                  std::move(effects),
+                                                  component_root,
+                                                  std::move(instance),
+                                                  cache_key,
+                                                  component_cache_epoch_,
+                                                  component_cache_epoch_,
+                                                  false,
+                                              });
     }
     if (call.children != runtime::no_program_id) {
         std::set<std::string, std::less<>> declared_slots;
@@ -1978,51 +1948,61 @@ DescriptionBuilder::refresh_component_cache_entry(const ComponentId id) {
 
     // Entries are nodes: refreshing others (which may add entries) leaves this reference valid.
     ComponentCacheEntry& entry = found->second;
-    std::map<const DescriptionNode*, std::shared_ptr<const DescriptionNode>> replacements;
-    for (const ComponentId child : entry.effects.direct_descendants) {
-        const auto child_before = component_cache_.find(child);
-        if (child_before == component_cache_.end())
-            return ComponentRefreshResult::invalid;
-        const std::shared_ptr<const DescriptionNode> previous = child_before->second.root;
-        const ComponentRefreshResult refreshed = refresh_component_cache_entry(child);
-        const auto child_after = component_cache_.find(child);
-        if (refreshed == ComponentRefreshResult::invalid || child_after == component_cache_.end())
-            return ComponentRefreshResult::invalid;
-        if (child_after->second.root != previous)
-            replacements.insert_or_assign(previous.get(), child_after->second.root);
-    }
-
-    // The inputs are the entry's own: only what its body read can have changed.
-    const bool direct_current = component_effects_current(
-        entry.effects, entry.host_invalidation_count, entry.contextual_host_roots);
-    if (replacements.empty() && direct_current)
+    // Nothing a build reads changes during it: what this one already settled stays settled, and
+    // is never described twice.
+    if (entry.refreshed_epoch == component_cache_epoch_)
         return ComponentRefreshResult::unchanged;
-    // Only descendants changed: the body would describe the same nodes around them, so their new
-    // subtrees are patched in and the aggregate is recomputed from the descendants' entries.
-    if (direct_current) {
-        std::shared_ptr<const DescriptionNode> patched =
-            replace_component_subtrees(entry.root, replacements);
-        if (patched != nullptr && aggregate_component_effects(entry.effects)) {
-            entry.host_invalidation_count = application_.host().invalidation_count();
-            entry.last_used_epoch = component_cache_epoch_;
-            entry.root = std::move(patched);
-            return ComponentRefreshResult::changed;
+    entry.refreshed_epoch = component_cache_epoch_;
+
+    // The inputs are the entry's own: only what its body read can have changed. A body that is
+    // stale is described again, and calls its components with what it reads now; refreshing them
+    // first would describe them from the inputs it no longer passes.
+    if (component_effects_current(entry.effects, entry.host_invalidation_count,
+                                  entry.contextual_host_roots)) {
+        const std::optional<SubtreeReplacements> replacements =
+            refresh_direct_descendants(entry.effects.direct_descendants);
+        if (replacements.has_value() && replacements->empty())
+            return ComponentRefreshResult::unchanged;
+        // Only descendants changed: the body would describe the same nodes around them, so their
+        // new subtrees are patched in and the aggregate is recomputed from their entries.
+        if (replacements.has_value()) {
+            std::shared_ptr<const DescriptionNode> patched =
+                replace_component_subtrees(entry.root, *replacements);
+            if (patched != nullptr && aggregate_component_effects(entry.effects)) {
+                entry.host_invalidation_count = application_.host().invalidation_count();
+                entry.last_used_epoch = component_cache_epoch_;
+                entry.root = std::move(patched);
+                return ComponentRefreshResult::changed;
+            }
         }
     }
 
-    const std::size_t diagnostics_before = diagnostics_.size();
     ComponentEffects effects;
     std::shared_ptr<const DescriptionNode> rebuilt =
         build_component_body(entry.component_index, entry.rebuild_scope, effects);
-    if (diagnostics_.size() != diagnostics_before) {
-        forget_component(id);
-        return ComponentRefreshResult::invalid;
-    }
     entry.host_invalidation_count = application_.host().invalidation_count();
     entry.last_used_epoch = component_cache_epoch_;
     entry.effects = std::move(effects);
     entry.root = share_unchanged_description(entry.root, rebuilt);
     return ComponentRefreshResult::changed;
+}
+
+std::optional<DescriptionBuilder::SubtreeReplacements>
+DescriptionBuilder::refresh_direct_descendants(const std::vector<ComponentId>& children) {
+    SubtreeReplacements replacements;
+    for (const ComponentId child : children) {
+        const auto child_before = component_cache_.find(child);
+        if (child_before == component_cache_.end())
+            return std::nullopt;
+        const std::shared_ptr<const DescriptionNode> previous = child_before->second.root;
+        const ComponentRefreshResult refreshed = refresh_component_cache_entry(child);
+        const auto child_after = component_cache_.find(child);
+        if (refreshed == ComponentRefreshResult::invalid || child_after == component_cache_.end())
+            return std::nullopt;
+        if (child_after->second.root != previous)
+            replacements.insert_or_assign(previous.get(), child_after->second.root);
+    }
+    return replacements;
 }
 
 void DescriptionBuilder::replay_component_effects(const ComponentEffects& effects) {
@@ -2100,53 +2080,6 @@ void DescriptionBuilder::add_descendants(std::vector<ComponentId>& sorted,
     sorted = std::move(merged);
 }
 
-void DescriptionBuilder::absorb_uncached_component_effects(const ComponentEffects& effects) {
-    if (component_effect_stack_.empty())
-        return;
-    ComponentEffects& parent = *component_effect_stack_.back();
-    parent.host_values.insert(effects.host_values.begin(), effects.host_values.end());
-    parent.state_values.insert(effects.state_values.begin(), effects.state_values.end());
-    parent.state_bindings.insert(effects.state_bindings.begin(), effects.state_bindings.end());
-    parent.owned_state_scopes.insert(effects.owned_state_scopes.begin(),
-                                     effects.owned_state_scopes.end());
-    // An uncached component has no entry to aggregate from later, so what it contributed itself
-    // becomes its parent's own contribution.
-    parent.local_state_bindings.insert(effects.local_state_bindings.begin(),
-                                       effects.local_state_bindings.end());
-    parent.local_owned_state_scopes.insert(effects.local_owned_state_scopes.begin(),
-                                           effects.local_owned_state_scopes.end());
-    parent.local_captures_retained_snapshot =
-        parent.local_captures_retained_snapshot || effects.local_captures_retained_snapshot;
-    for (const ComponentId child : effects.direct_descendants) {
-        if (std::ranges::find(parent.direct_descendants, child) == parent.direct_descendants.end())
-            parent.direct_descendants.push_back(child);
-    }
-    add_descendants(parent.descendants, effects.descendants);
-    for (const RetainedValueEffects& source : effects.retained_values) {
-        auto destination =
-            std::ranges::find(parent.retained_values, source.query, &RetainedValueEffects::query);
-        if (destination == parent.retained_values.end()) {
-            parent.retained_values.push_back(source);
-            continue;
-        }
-        destination->values.insert(source.values.begin(), source.values.end());
-    }
-    for (const RetainedSequenceEffect& source : effects.retained_sequences) {
-        auto destination = std::ranges::find(parent.retained_sequences, source.query,
-                                             &RetainedSequenceEffect::query);
-        if (destination == parent.retained_sequences.end()) {
-            parent.retained_sequences.push_back(source);
-            continue;
-        }
-        destination->sequence = source.sequence;
-        destination->generation = source.generation;
-    }
-    if (effects.captures_retained_snapshot) {
-        parent.captures_retained_snapshot = true;
-        parent.retained_snapshot = effects.retained_snapshot;
-    }
-}
-
 bool DescriptionBuilder::component_cache_entry_current(const ComponentCacheEntry& entry,
                                                        const std::string_view source_path,
                                                        const ComponentInputs& inputs) const {
@@ -2200,7 +2133,7 @@ bool DescriptionBuilder::same_contextual_host_roots(
 bool DescriptionBuilder::component_effects_current(
     const ComponentEffects& effects, const std::uint64_t host_invalidation_count,
     const std::shared_ptr<const runtime::HostRoots>& contextual_host_roots) const {
-    if (!same_contextual_host_roots(contextual_host_roots))
+    if (effects.raised_errors || !same_contextual_host_roots(contextual_host_roots))
         return false;
     if (effects.captures_retained_snapshot && effects.retained_snapshot != retained_snapshot_)
         return false;
@@ -2256,6 +2189,8 @@ runtime::Value DescriptionBuilder::require_value(const ExpressionValue& value,
     if (value.collection() != nullptr)
         return (*value.collection())->items;
     const std::optional<std::string_view> expression_path = source.find("path").string();
+    if (!component_effect_stack_.empty())
+        component_effect_stack_.back()->raised_errors = true;
     diagnostics_.push_back(runtime::RuntimeDiagnostic{
         "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
         "Description expression did not produce a scalar value.",
@@ -2268,6 +2203,13 @@ runtime::Value DescriptionBuilder::require_value(const ExpressionValue& value,
 }
 
 void DescriptionBuilder::append_diagnostics(runtime::ExpressionRuntime& expressions) {
+    // The body being described raised them; the bodies around it did not.
+    if (!component_effect_stack_.empty() &&
+        std::ranges::any_of(expressions.diagnostics(), [](const runtime::RuntimeDiagnostic& item) {
+            return item.severity == runtime::DiagnosticSeverity::error;
+        })) {
+        component_effect_stack_.back()->raised_errors = true;
+    }
     diagnostics_.insert(diagnostics_.end(), expressions.diagnostics().begin(),
                         expressions.diagnostics().end());
     expressions.clear_diagnostics();

@@ -7800,6 +7800,85 @@ overlay Segments {
     check(segment_scopes.size() == 3U, "a loop item identity collided with a repeated one");
 }
 
+void test_component_refresh_checks_the_body_before_its_components() {
+    using namespace strata;
+    const data::JsonValue schemas = data::parse_json(R"({
+      "extensionPackages":[],
+      "widgets":{"registry":"refresh-order","required":[],"definitions":[]},
+      "actions":{"registry":"refresh-order","required":[],"definitions":[]},
+      "host":[
+        {"path":"clock","nullable":false,"type":{"kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[{"name":"value","type":{"kind":"string"},"required":true,"nullable":false}]}}
+      ]
+    })");
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
+    runtime::ApplicationContext application("refresh-order", bundle);
+    const auto publish = [&](const std::uint64_t generation, const std::string_view value) {
+        static_cast<void>(application.host().adopt(bundle->host_snapshot(
+            "refresh-order-clock", generation,
+            data::parse_json("{\"clock\":{\"value\":\"" + std::string(value) + "\"}}"))));
+    };
+    publish(1U, "1");
+    activate_description_fixture(application, "refresh-order", R"(
+component Echo(label: string, probe: any) {
+  Text(key: "echo.text", text: label == clock.value ? label : format("{0}", -probe["missing"]))
+}
+component Clock() {
+  Panel(key: "clock.panel") {
+    Echo(label: clock.value, probe: { present: 1 })
+  }
+}
+component Fixed() {
+  Text(key: "fixed.text", text: "fixed")
+}
+component Broken(probe: any) {
+  Text(key: "broken.text", text: format("{0}", -probe["missing"]))
+}
+component Holder() {
+  Panel(key: "holder.panel") {
+    Fixed()
+    Broken(probe: { present: 1 })
+  }
+}
+overlay Refresh { root Clock() }
+overlay Errors {
+  root Panel(key: "errors.root") {
+    Text(key: "errors.clock", text: clock.value)
+    Holder()
+  }
+}
+)");
+    ui::DescriptionBuilder builder(application);
+    const ui::DescriptionBuildResult first = builder.build(runtime::LayerRole::overlay, "Refresh");
+    check(first.diagnostics.empty() &&
+              description_text(find_description_key(first.root, "echo.text")) == "1",
+          "refresh-order fixture did not describe its echo");
+    // The body passing the clock to Echo read it too: Echo is described once, from the value the
+    // body passes now, never from the one it passed before.
+    publish(2U, "2");
+    const ui::DescriptionBuildResult second = builder.build(runtime::LayerRole::overlay, "Refresh");
+    check(second.diagnostics.empty(),
+          "a component was described from inputs its stale caller no longer passes");
+    check(description_text(find_description_key(second.root, "echo.text")) == "2" &&
+              second.described_nodes == 2U,
+          "a stale body and its component were not each described exactly once");
+
+    // A component that raised an error is described again by the next build, alone: the bodies
+    // around it keep their cache and its unchanged output. (Expression diagnostics are reported
+    // once, so that build raises none and caches it.)
+    const ui::DescriptionBuildResult broken = builder.build(runtime::LayerRole::overlay, "Errors");
+    check(broken.diagnostics.size() == 1U, "the broken component did not report its error");
+    const ui::DescriptionBuildResult again = builder.build(runtime::LayerRole::overlay, "Errors");
+    check(again.root == broken.root && again.described_nodes == 1U,
+          "a component that raised an error was cached");
+    publish(3U, "3");
+    const ui::DescriptionBuildResult relayered =
+        builder.build(runtime::LayerRole::overlay, "Errors");
+    check(find_description_key(relayered.root, "holder.panel") ==
+                  find_description_key(broken.root, "holder.panel") &&
+              relayered.described_nodes == 3U,
+          "one component's error kept the body around it from being cached");
+}
+
 int strata_test_ui(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--collections") {
@@ -7876,6 +7955,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_tree_rows_without_a_parent_are_reachable(arguments[1]);
             test_repeater_follows_host_rows_it_reads();
             test_loop_component_keys_name_their_instances();
+            test_component_refresh_checks_the_body_before_its_components();
         }
         std::cout << "strata_ui_tests: OK\n";
         return 0;
