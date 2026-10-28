@@ -1,10 +1,13 @@
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "ui/input/editor.hpp"
+#include "ui/input/grapheme.hpp"
 
 namespace {
 
@@ -21,6 +24,70 @@ void test_grapheme_navigation_and_deletion() {
     check(editor.snapshot().caret == 4U, "left split a joined emoji grapheme");
     static_cast<void>(editor.backspace(false, 1'000));
     check(editor.text() == "A\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBBZ", "backspace split a combining sequence");
+}
+
+void test_extended_grapheme_clusters() {
+    using namespace strata::ui;
+    struct Case final {
+        std::string_view name;
+        std::string_view text;
+        std::vector<std::size_t> boundaries;
+    };
+    // Expected boundaries are Intl.Segmenter's (ICU, Unicode 17.0): Indic conjuncts and vowel
+    // signs, Gurmukhi consonants that stay apart, Thai/Khmer/Myanmar/Sinhala marks, Hangul jamo
+    // syllables, emoji tag and ZWJ sequences, flags, prepended marks, and CR LF.
+    const std::vector<Case> cases{
+        {"devanagari", "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7\xE0\xA4\xBF\xE0\xA4\xA8\xE0\xA4\xAE\xE0\xA4\xB8\xE0\xA5\x8D\xE0\xA4\xA4\xE0\xA5\x87", {0, 12, 15, 18, 30}},
+        {"gurmukhi", "\xE0\xA8\x95\xE0\xA8\x96\xE0\xA8\xBF", {0, 3, 9}},
+        {"gujarati", "\xE0\xAA\x95\xE0\xAA\xBF\xE0\xAA\x95\xE0\xAB\x8D\xE0\xAA\xB7", {0, 6, 15}},
+        {"thai", "\xE0\xB8\x81\xE0\xB8\xB3\xE0\xB8\x97\xE0\xB8\xB5\xE0\xB9\x88", {0, 6, 15}},
+        {"kannada", "\xE0\xB2\x95\xE0\xB2\xBF\xE0\xB2\x95", {0, 6, 9}},
+        {"tamil", "\xE0\xAE\x95\xE0\xAF\x81\xE0\xAE\x95\xE0\xAF\x8D\xE0\xAE\xB7", {0, 6, 12, 15}},
+        {"sinhala", "\xE0\xB6\x9A\xE0\xB7\x8F\xE0\xB6\x9A", {0, 6, 9}},
+        {"khmer", "\xE1\x9E\x80\xE1\x9E\xB6\xE1\x9E\x80\xE1\x9F\x92\xE1\x9E\x80", {0, 6, 15}},
+        {"myanmar", "\xE1\x80\x80\xE1\x80\xB1\xE1\x80\x80\xE1\x80\xBA", {0, 6, 12}},
+        {"hangul", "\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8\xE1\x84\x80\xE1\x84\x80\xE1\x85\xA1\xEA\xB0\x80\xE1\x86\xA8\xE1\x85\xA1\xE1\x84\x80", {0, 9, 18, 24, 27, 30}},
+        {"emoji", "\xF0\x9F\x8F\xB4\xF3\xA0\x81\xA7\xF3\xA0\x81\xA2\xF3\xA0\x81\xA5\xF3\xA0\x81\xAE\xF3\xA0\x81\xA7\xF3\xA0\x81\xBF\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8\xF0\x9F\x87\xAB\xF0\x9F\x87\xB7\xF0\x9F\x87\xBA\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD", {0, 28, 36, 44, 48, 59, 67}},
+        {"prepend", "\xD8\x80\xD9\xA1\xD9\xA1", {0, 4, 6}},
+        {"controls", "\x61\x0D\x0A\x62\xCC\x88\x0D\xCC\x88", {0, 1, 3, 6, 7, 9}},
+    };
+    check(grapheme_unicode_version() == "17.0",
+          "grapheme data is not the documented Unicode version");
+    for (const Case& value : cases) {
+        if (grapheme_boundaries(value.text) != value.boundaries) {
+            throw std::runtime_error("UAX #29 grapheme clusters differ for " +
+                                     std::string(value.name));
+        }
+    }
+    check(grapheme_boundaries("") == std::vector<std::size_t>{0U}, "empty text has one boundary");
+
+    // A caret never stops inside a Devanagari conjunct.
+    TextEditor editor("\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7\xE0\xA4\xBF");
+    static_cast<void>(editor.move_left(false, false));
+    check(editor.snapshot().caret == 0U, "left stopped inside an Indic conjunct");
+    static_cast<void>(editor.place_caret(6U, false));
+    check(editor.snapshot().caret == 0U, "a caret was placed inside an Indic conjunct");
+}
+
+void test_long_text_navigation_is_not_quadratic() {
+    using namespace strata::ui;
+    // One 20,000-grapheme word: word movement walks every boundary in it, and every boundary
+    // lookup used to segment the whole text again.
+    std::string word;
+    for (int index = 0; index < 20'000; ++index) word += "e\xCC\x81";
+    TextEditor editor(word);
+    const auto started = std::chrono::steady_clock::now();
+    static_cast<void>(editor.move_left(true, false));
+    check(editor.snapshot().caret == 0U, "word-left did not cross the long word");
+    static_cast<void>(editor.move_right(true, false));
+    for (int step = 0; step < 2'000; ++step) {
+        static_cast<void>(editor.move_left(false, false));
+        static_cast<void>(editor.reconcile_controlled(word));
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    check(editor.snapshot().caret == word.size() - 6'000U, "grapheme movement lost its place");
+    check(elapsed < std::chrono::seconds(2),
+          "editor navigation re-segments its text per operation");
 }
 
 void test_word_selection_undo_and_redo() {
@@ -103,6 +170,8 @@ void test_pointer_selection_primitives() {
 int strata_test_input_editor() {
     try {
         test_grapheme_navigation_and_deletion();
+        test_extended_grapheme_clusters();
+        test_long_text_navigation_is_not_quadratic();
         test_word_selection_undo_and_redo();
         test_controlled_reconciliation_and_composition();
         test_filter_length_and_commit_format();

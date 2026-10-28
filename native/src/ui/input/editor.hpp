@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace strata::ui {
 
@@ -119,8 +120,14 @@ private:
     void push_undo(std::size_t replaced_bytes, std::size_t replacement_bytes, std::int64_t now_nanos);
     void clear_composition() noexcept;
     void clamp_offsets();
+    /** The text's grapheme boundaries, segmented once per text revision. */
+    [[nodiscard]] const std::vector<std::size_t>& boundaries() const;
 
     std::string text_;
+    // Advanced by every change to `text_`; the boundary cache is keyed by it.
+    std::uint64_t text_revision_ = 0U;
+    mutable std::uint64_t boundaries_revision_ = 0U;
+    mutable std::vector<std::size_t> boundaries_;
     std::string controlled_text_;
     std::size_t caret_ = 0U;
     std::size_t selection_start_ = 0U;

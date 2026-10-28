@@ -399,6 +399,7 @@ add_library(
         src/ui/input/queue.cpp
         src/ui/input/scroll.cpp
         src/ui/input/editor.cpp
+        src/ui/input/grapheme.cpp
         src/ui/input/text_editing.cpp
         src/ui/layout/geometry.cpp
         src/ui/layout/style.cpp
