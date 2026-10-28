@@ -328,11 +328,98 @@ struct ExpressionDependencyValue final {
 [[nodiscard]] ExpressionDependencyValue capture_expression_dependency(const ExpressionValue& value);
 [[nodiscard]] ExpressionValue restore_expression_dependency(const ExpressionDependencyValue& value);
 
-class ExpressionDependencyObserver {
+/**
+ * What an evaluation reads: the lexical bindings and the host paths its value depends on. The
+ * evaluator is handed a recorder by reference and tells it each read where the read is made;
+ * nothing is installed on the evaluator. A recorder opened for part of an evaluation (a
+ * collection view's inputs, a lambda's body, a Repeater's source) names the recorder it was opened
+ * under and forwards every read it does not hide to it, so the chain is explicit and each link is
+ * a plain call.
+ */
+class DependencyRecorder final {
   public:
-    virtual ~ExpressionDependencyObserver() = default;
-    virtual void lexical(Symbol name, const ExpressionValue& value) = 0;
-    virtual void host(const ExpressionHostDependency& dependency) = 0;
+    /** Which reads of one name or host path a recorder keeps; it forwards every read. */
+    enum class Keep : std::uint8_t { none, first, latest };
+
+    using LexicalReads = std::map<Symbol, ExpressionDependencyValue>;
+    using HostReads = std::map<std::string, ExpressionHostDependency, std::less<>>;
+    /** A kept read, in the order reads were first kept: a lexical name or a host path key. */
+    struct Read final {
+        Symbol name;
+        /** The key of a host read in host_reads(); none for a lexical read. */
+        const std::string* host = nullptr;
+    };
+
+    /** Keeps and forwards nothing: an evaluation whose reads matter to no one. */
+    DependencyRecorder() noexcept = default;
+    DependencyRecorder(DependencyRecorder* upstream, Keep lexical, Keep host) noexcept
+        : upstream_(upstream), lexical_(lexical), host_(host) {}
+    DependencyRecorder(const DependencyRecorder&) = delete;
+    DependencyRecorder& operator=(const DependencyRecorder&) = delete;
+    DependencyRecorder(DependencyRecorder&&) noexcept = default;
+    DependencyRecorder& operator=(DependencyRecorder&&) noexcept = default;
+
+    /** Reads of the name are this recorder's own business: neither kept nor forwarded. */
+    void hide(Symbol name) {
+        hidden_.push_back(name);
+    }
+    /**
+     * Keeps a lexical read only when it reads the value `outer` binds the name to: a row's
+     * inputs are what its body read of the scope enclosing it.
+     */
+    void keep_only_reads_of(const ExpressionScope* outer) noexcept {
+        outer_ = outer;
+    }
+    /** Remembers the order reads were first kept in (see order()). */
+    void keep_order() noexcept {
+        ordered_ = true;
+    }
+
+    void lexical(Symbol name, const ExpressionValue& value) {
+        if (upstream_ != nullptr || lexical_ != Keep::none)
+            record_lexical(name, value);
+    }
+    void host(const ExpressionHostDependency& dependency) {
+        if (upstream_ != nullptr || host_ != Keep::none)
+            record_host(dependency);
+    }
+
+    [[nodiscard]] DependencyRecorder* upstream() const noexcept {
+        return upstream_;
+    }
+    [[nodiscard]] LexicalReads& lexical_reads() {
+        return kept().lexical;
+    }
+    [[nodiscard]] HostReads& host_reads() {
+        return kept().host;
+    }
+    [[nodiscard]] const std::vector<Read>& order() {
+        return kept().order;
+    }
+
+  private:
+    /** Allocated on the first read kept: a recorder that only forwards costs nothing more. */
+    struct Kept final {
+        LexicalReads lexical;
+        HostReads host;
+        std::vector<Read> order;
+    };
+
+    [[nodiscard]] Kept& kept() {
+        if (kept_ == nullptr)
+            kept_ = std::make_unique<Kept>();
+        return *kept_;
+    }
+    void record_lexical(Symbol name, const ExpressionValue& value);
+    void record_host(const ExpressionHostDependency& dependency);
+
+    DependencyRecorder* upstream_ = nullptr;
+    Keep lexical_ = Keep::none;
+    Keep host_ = Keep::none;
+    bool ordered_ = false;
+    const ExpressionScope* outer_ = nullptr;
+    std::vector<Symbol> hidden_;
+    std::unique_ptr<Kept> kept_;
 };
 
 /** Decodes the canonical authored range retained on a portable expression, when present. */
@@ -343,21 +430,21 @@ class ExpressionRuntime final {
   public:
     ExpressionRuntime(const HostStore& host, const RuntimeActionRegistry& actions);
 
+    /** Evaluates an expression, telling `reads` what it reads. */
+    [[nodiscard]] ExpressionValue evaluate(const Program& program, ExpressionId expression,
+                                           const ExpressionScope& scope, DependencyRecorder& reads);
+    /** Evaluates an expression whose reads matter to no one. */
     [[nodiscard]] ExpressionValue evaluate(const Program& program, ExpressionId expression,
                                            const ExpressionScope& scope);
     /** Lowers a portable expression, once per content, and evaluates it: tooling and tests. */
     [[nodiscard]] ExpressionValue evaluate(data::JsonView expression,
                                            const ExpressionScope& scope = {});
+    [[nodiscard]] ExpressionValue evaluate(data::JsonView expression, const ExpressionScope& scope,
+                                           DependencyRecorder& reads);
     [[nodiscard]] const std::vector<RuntimeDiagnostic>& diagnostics() const noexcept;
     void clear_diagnostics();
     /** Drops cached collection views, as when the programs they were derived by are replaced. */
     void clear_caches() noexcept;
-    /** Installs a synchronous observer and returns the previous observer. */
-    ExpressionDependencyObserver*
-    exchange_dependency_observer(ExpressionDependencyObserver* observer) noexcept;
-    [[nodiscard]] ExpressionDependencyObserver* dependency_observer() const noexcept {
-        return dependency_observer_;
-    }
     [[nodiscard]] ExpressionHostDependency
     read_host_dependency(const std::shared_ptr<const HostPathKey>& path,
                          const ExpressionScope& scope) const;
@@ -372,8 +459,8 @@ class ExpressionRuntime final {
     };
 
     struct CollectionCacheEntry final {
-        std::map<Symbol, ExpressionValue> lexical_dependencies;
-        std::map<std::string, ExpressionHostDependency, std::less<>> host_dependencies;
+        DependencyRecorder::LexicalReads lexical_dependencies;
+        DependencyRecorder::HostReads host_dependencies;
         std::vector<CollectionDependencyRead> dependency_order;
         std::shared_ptr<const CollectionViewValue> view;
     };
@@ -393,27 +480,36 @@ class ExpressionRuntime final {
     };
 
     [[nodiscard]] ExpressionValue evaluate_node(const Program& program, ExpressionId expression,
-                                                const ExpressionScope& scope);
+                                                const ExpressionScope& scope,
+                                                DependencyRecorder& reads);
     [[nodiscard]] ExpressionValue evaluate_variable(const Program& program,
                                                     const ProgramExpression& node,
-                                                    const ExpressionScope& scope);
+                                                    const ExpressionScope& scope,
+                                                    DependencyRecorder& reads);
     [[nodiscard]] ExpressionValue evaluate_property(const Program& program,
                                                     const ProgramExpression& node,
-                                                    const ExpressionScope& scope);
+                                                    const ExpressionScope& scope,
+                                                    DependencyRecorder& reads);
     [[nodiscard]] ExpressionValue evaluate_index(const Program& program,
                                                  const ProgramExpression& node,
-                                                 const ExpressionScope& scope);
+                                                 const ExpressionScope& scope,
+                                                 DependencyRecorder& reads);
     [[nodiscard]] ExpressionValue evaluate_binary(const Program& program,
                                                   const ProgramExpression& node,
-                                                  const ExpressionScope& scope);
+                                                  const ExpressionScope& scope,
+                                                  DependencyRecorder& reads);
     [[nodiscard]] ExpressionValue evaluate_helper(const Program& program, ExpressionId expression,
-                                                  const ExpressionScope& scope);
+                                                  const ExpressionScope& scope,
+                                                  DependencyRecorder& reads);
     [[nodiscard]] ExpressionValue evaluate_action(const Program& program,
                                                   const ProgramExpression& node,
-                                                  const ExpressionScope& scope);
+                                                  const ExpressionScope& scope,
+                                                  DependencyRecorder& reads);
     /** The host read a host-rooted node makes, unless a local shadows its root. */
-    [[nodiscard]] std::optional<ExpressionHostDependency>
-    host_read(const Program& program, const ProgramExpression& node, const ExpressionScope& scope);
+    [[nodiscard]] std::optional<ExpressionHostDependency> host_read(const Program& program,
+                                                                    const ProgramExpression& node,
+                                                                    const ExpressionScope& scope,
+                                                                    DependencyRecorder& reads);
     [[nodiscard]] Value require_value(const ExpressionValue& value, const ProgramExpression& node,
                                       const ExpressionScope& scope);
     [[nodiscard]] const ProgramArgument* argument(const Program& program,
@@ -421,14 +517,17 @@ class ExpressionRuntime final {
                                                   std::size_t position) const;
     [[nodiscard]] Value argument_value(const Program& program, const ProgramExpression& node,
                                        const ExpressionScope& scope, Symbol name,
-                                       std::size_t position);
-    [[nodiscard]] Value evaluate_lambda(const LambdaValue& lambda, const Value& input);
+                                       std::size_t position, DependencyRecorder& reads);
+    [[nodiscard]] Value evaluate_lambda(const LambdaValue& lambda, const Value& input,
+                                        DependencyRecorder& upstream);
     [[nodiscard]] std::shared_ptr<const CollectionViewValue>
-    collection_view(const Program& program, ExpressionId expression, const ExpressionScope& scope);
+    collection_view(const Program& program, ExpressionId expression, const ExpressionScope& scope,
+                    DependencyRecorder& upstream);
     [[nodiscard]] std::shared_ptr<const ActionValue> composed_action(const Program& program,
                                                                      const ProgramExpression& node,
                                                                      const ExpressionScope& scope,
-                                                                     ActionCompositionMode mode);
+                                                                     ActionCompositionMode mode,
+                                                                     DependencyRecorder& reads);
     [[nodiscard]] std::optional<ActionOrigin> action_origin(const Program& program,
                                                             const ProgramExpression& node,
                                                             const ExpressionScope& scope) const;
@@ -452,7 +551,6 @@ class ExpressionRuntime final {
     std::size_t collection_cache_entries_ = 0U;
     /** Programs lowered from standalone expressions, by content. */
     std::unordered_map<std::string, std::shared_ptr<const Program>> standalone_programs_;
-    ExpressionDependencyObserver* dependency_observer_ = nullptr;
 };
 
 } // namespace strata::runtime

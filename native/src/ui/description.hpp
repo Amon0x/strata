@@ -294,7 +294,8 @@ class DescriptionBuilder final {
         std::set<std::uint32_t> slot_templates;
         /** A row's enclosing scope: reads of its bindings are the row's inputs. */
         const runtime::ExpressionScope* outer = nullptr;
-        std::map<runtime::Symbol, runtime::ExpressionDependencyValue> outer_reads;
+        /** What the body's expressions read: host paths, and a row's reads of `outer`. */
+        runtime::DependencyRecorder expression_reads;
     };
 
     /** A state a body declared, to be stored when the build that described it commits. */
@@ -316,17 +317,6 @@ class DescriptionBuilder final {
         std::vector<runtime::RuntimeDiagnostic> reports;
         /** Instances whose bindings, owned scopes or attachment may have changed. */
         std::vector<InstanceId> touched;
-    };
-
-    /** Records the reads expressions make into the body being described. */
-    class FrameObserver final : public runtime::ExpressionDependencyObserver {
-      public:
-        explicit FrameObserver(DescriptionBuilder& builder) noexcept : builder_(builder) {}
-        void lexical(runtime::Symbol name, const runtime::ExpressionValue& value) override;
-        void host(const runtime::ExpressionHostDependency& dependency) override;
-
-      private:
-        DescriptionBuilder& builder_;
     };
 
     /**
@@ -418,7 +408,11 @@ class DescriptionBuilder final {
                           std::string_view declaration_scope, std::string_view address_scope);
     void own_state_scope(std::string_view scope);
     void observe_state_value(const runtime::StateAddress& address, const runtime::Value& value);
-    void observe_host_dependency(const runtime::ExpressionHostDependency& dependency);
+    /**
+     * Where an expression evaluated now records what it reads: what an enclosing evaluation
+     * records (a Repeater's generation, a style), else the body being described, else nowhere.
+     */
+    [[nodiscard]] runtime::DependencyRecorder& expression_reads() noexcept;
     void observe_retained_value(const RetainedQuery& query, std::string_view name,
                                 const runtime::Value* value);
     [[nodiscard]] Frame* frame() noexcept {
@@ -522,7 +516,9 @@ class DescriptionBuilder final {
     std::size_t described_instances_ = 0U;
     std::map<std::string, ResolvedStyle, std::less<>> styles_;
     std::unique_ptr<runtime::ExpressionRuntime> expressions_;
-    FrameObserver frame_observer_;
+    /** The recorder of an evaluation that records its reads itself; see expression_reads(). */
+    runtime::DependencyRecorder* recording_ = nullptr;
+    runtime::DependencyRecorder unrecorded_reads_;
     std::shared_ptr<const runtime::HostRoots> contextual_host_roots_;
     bool contextual_host_roots_changed_ = false;
     std::shared_ptr<const RetainedDescriptionSnapshot> retained_snapshot_;

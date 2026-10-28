@@ -162,6 +162,14 @@ DescriptionBuilder::describe_body(ComponentInstance& instance,
     Frame recording;
     recording.instance = &instance;
     recording.outer = outer;
+    // A row's inputs are the values of its enclosing scope it read: a read of a name the row
+    // binds itself (a state, a derived value, a nested loop's item) reads no input.
+    recording.expression_reads =
+        runtime::DependencyRecorder(nullptr,
+                                    outer != nullptr ? runtime::DependencyRecorder::Keep::first
+                                                     : runtime::DependencyRecorder::Keep::none,
+                                    runtime::DependencyRecorder::Keep::latest);
+    recording.expression_reads.keep_only_reads_of(outer);
     frames_.push_back(&recording);
     std::shared_ptr<const DescriptionNode> root;
     try {
@@ -191,9 +199,10 @@ void DescriptionBuilder::install_frame(ComponentInstance& instance, Frame& recor
     }
     instance.children = std::move(recording.children);
     unindex_reads(instance);
+    recording.reads.host = std::move(recording.expression_reads.host_reads());
     instance.reads = std::move(recording.reads);
     index_reads(instance);
-    instance.outer_reads = std::move(recording.outer_reads);
+    instance.outer_reads = std::move(recording.expression_reads.lexical_reads());
     instance.bindings = std::move(recording.bindings);
     instance.owned_scopes = std::move(recording.owned_scopes);
     instance.generated_slots = std::move(recording.generated_slots);
@@ -1048,7 +1057,7 @@ DescriptionBuilder::realize_row(const std::shared_ptr<const RowSource>& source,
               described_instances(owner.described_instances_),
               emitted_changed(std::exchange(owner.emitted_changed_, {})),
               outer_transaction(std::exchange(owner.transaction_, &transaction)),
-              observer(owner.expressions_->exchange_dependency_observer(&owner.frame_observer_)) {}
+              recording(std::exchange(owner.recording_, nullptr)) {}
         ~Realization() {
             builder.frames_ = std::move(frames);
             builder.diagnostics_ = std::move(diagnostics);
@@ -1058,7 +1067,7 @@ DescriptionBuilder::realize_row(const std::shared_ptr<const RowSource>& source,
             // Whatever the row called took its outputs as the row was described.
             builder.emitted_changed_ = std::move(emitted_changed);
             builder.transaction_ = outer_transaction;
-            static_cast<void>(builder.expressions_->exchange_dependency_observer(observer));
+            builder.recording_ = recording;
         }
         Realization(const Realization&) = delete;
         Realization& operator=(const Realization&) = delete;
@@ -1072,7 +1081,7 @@ DescriptionBuilder::realize_row(const std::shared_ptr<const RowSource>& source,
         std::size_t described_instances;
         std::vector<InstanceId> emitted_changed;
         Transaction* outer_transaction;
-        runtime::ExpressionDependencyObserver* observer;
+        runtime::DependencyRecorder* recording;
     } realization(*this);
 
     ComponentInstance* const owner = find_instance(source->generator);

@@ -903,20 +903,14 @@ void test_portable_ir_expression_runtime() {
     scope.bind("items", Value(std::vector<Value>{Value("alpha"), Value("beta")}));
     scope.bind("count", Value(2.0));
     ExpressionRuntime runtime(host, bundle->action_registry());
-    struct DependencyCapture final : ExpressionDependencyObserver {
-        void lexical(const Symbol, const ExpressionValue&) override {}
-        void host(const ExpressionHostDependency& dependency) override {
-            reads.push_back(dependency);
-        }
-        std::vector<ExpressionHostDependency> reads;
-    } dependencies;
-    static_cast<void>(runtime.exchange_dependency_observer(&dependencies));
+    DependencyRecorder dependencies(nullptr, DependencyRecorder::Keep::none,
+                                    DependencyRecorder::Keep::latest);
 
     const auto host_expression = strata::data::parse_json(R"({
       "kind":"property","name":"title","path":"/host/title",
       "receiver":{"kind":"variable","binding":"host","name":"app","path":"/host"}
     })");
-    const ExpressionValue host_value = runtime.evaluate(host_expression, scope);
+    const ExpressionValue host_value = runtime.evaluate(host_expression, scope, dependencies);
     check(host_value.value() != nullptr && *host_value.value()->string() == "Lazy title" &&
               host_snapshot->evaluated_scalar_count() == 1U,
           "portable IR host property evaluation was eager or incorrect");
@@ -925,24 +919,28 @@ void test_portable_ir_expression_runtime() {
       "receiver":{"kind":"property","name":"items","path":"/host/items",
         "receiver":{"kind":"variable","binding":"host","name":"app","path":"/host"}}
     })");
-    const ExpressionValue host_list_is_empty = runtime.evaluate(host_list_is_empty_expression, scope);
+    const ExpressionValue host_list_is_empty =
+        runtime.evaluate(host_list_is_empty_expression, scope, dependencies);
     check(host_list_is_empty.value() != nullptr &&
               host_list_is_empty.value()->boolean() != nullptr &&
               *host_list_is_empty.value()->boolean(),
           "computed host-list property was resolved as a structural host field");
-    dependencies.reads.clear();
+    dependencies.host_reads().clear();
     const auto indexed_host_expression = strata::data::parse_json(R"({
       "kind":"index","path":"/host/indexed",
       "receiver":{"kind":"variable","binding":"host","name":"app","path":"/host"},
       "index":{"kind":"literal","path":"/host/key","value":{"kind":"string","value":"title"}}
     })");
-    const ExpressionValue indexed_host_value = runtime.evaluate(indexed_host_expression, scope);
+    const ExpressionValue indexed_host_value =
+        runtime.evaluate(indexed_host_expression, scope, dependencies);
     check(indexed_host_value.value() != nullptr &&
               *indexed_host_value.value()->string() == "Lazy title" &&
-              dependencies.reads.size() == 1U && dependencies.reads.front().path().size() == 2U &&
-              dependencies.reads.front().path().back().kind == HostPathSegmentKind::lookup,
+              dependencies.host_reads().size() == 1U &&
+              dependencies.host_reads().begin()->second.path().size() == 2U &&
+              dependencies.host_reads().begin()->second.path().back().kind ==
+                  HostPathSegmentKind::lookup,
           "indexed host evaluation did not publish one exact structural leaf read");
-    dependencies.reads.clear();
+    dependencies.host_reads().clear();
     const auto short_circuit_host_expression = strata::data::parse_json(R"({
       "kind":"binary","operator":"and","path":"/host/short-circuit",
       "left":{"kind":"literal","path":"/false","value":{"kind":"boolean","value":false}},
@@ -951,10 +949,9 @@ void test_portable_ir_expression_runtime() {
         "index":{"kind":"literal","path":"/host/unused-key","value":{"kind":"string","value":"unused"}}
       }
     })");
-    static_cast<void>(runtime.evaluate(short_circuit_host_expression, scope));
-    check(dependencies.reads.empty() && host_snapshot->evaluated_scalar_count() == 1U,
+    static_cast<void>(runtime.evaluate(short_circuit_host_expression, scope, dependencies));
+    check(dependencies.host_reads().empty() && host_snapshot->evaluated_scalar_count() == 1U,
           "short-circuited host branch was observed or evaluated");
-    static_cast<void>(runtime.exchange_dependency_observer(nullptr));
 
     const auto arithmetic = strata::data::parse_json(R"({
       "kind":"binary","operator":"multiply","path":"/arithmetic",

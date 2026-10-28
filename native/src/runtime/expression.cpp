@@ -156,73 +156,6 @@ struct Names final {
     return instance;
 }
 
-/** Records what one collection expression reads, while still telling the outer observer. */
-struct CollectionDependencyTrace final : ExpressionDependencyObserver {
-    explicit CollectionDependencyTrace(ExpressionDependencyObserver* source_parent)
-        : parent(source_parent) {}
-
-    void lexical(const Symbol name, const ExpressionValue& value) override {
-        if (parent != nullptr)
-            parent->lexical(name, value);
-        if (lexical_values.try_emplace(name, value).second)
-            order.push_back({false, name, {}});
-    }
-
-    void host(const ExpressionHostDependency& dependency) override {
-        if (parent != nullptr)
-            parent->host(dependency);
-        std::string key = dependency.canonical();
-        if (host_values.try_emplace(key, dependency).second)
-            order.push_back({true, {}, std::move(key)});
-    }
-
-    struct Read final {
-        bool host = false;
-        Symbol name;
-        std::string host_key;
-    };
-
-    ExpressionDependencyObserver* parent;
-    std::map<Symbol, ExpressionValue> lexical_values;
-    std::map<std::string, ExpressionHostDependency, std::less<>> host_values;
-    std::vector<Read> order;
-};
-
-/** Hides one helper's data-domain input while preserving outer/nested lexical dependencies. */
-struct LambdaDependencyFilter final : ExpressionDependencyObserver {
-    LambdaDependencyFilter(ExpressionDependencyObserver* source_parent,
-                           const Symbol source_parameter)
-        : parent(source_parent), parameter(source_parameter) {}
-
-    void lexical(const Symbol name, const ExpressionValue& value) override {
-        if (parent != nullptr && name != parameter)
-            parent->lexical(name, value);
-    }
-
-    void host(const ExpressionHostDependency& dependency) override {
-        if (parent != nullptr)
-            parent->host(dependency);
-    }
-
-    ExpressionDependencyObserver* parent;
-    Symbol parameter;
-};
-
-class ObserverRestore final {
-  public:
-    ObserverRestore(ExpressionDependencyObserver*& slot, ExpressionDependencyObserver* next)
-        : slot_(slot), previous_(std::exchange(slot, next)) {}
-    ~ObserverRestore() {
-        slot_ = previous_;
-    }
-    ObserverRestore(const ObserverRestore&) = delete;
-    ObserverRestore& operator=(const ObserverRestore&) = delete;
-
-  private:
-    ExpressionDependencyObserver*& slot_;
-    ExpressionDependencyObserver* previous_;
-};
-
 [[nodiscard]] bool same_state_binding(const LexicalStateBinding* const left,
                                       const LexicalStateBinding* const right) {
     return left == right || (left != nullptr && right != nullptr && *left == *right);
@@ -599,18 +532,66 @@ std::string canonical_host_dependency_path(const std::span<const HostPathSegment
 ExpressionRuntime::ExpressionRuntime(const HostStore& host, const RuntimeActionRegistry& actions)
     : host_(host), actions_(actions) {}
 
+void DependencyRecorder::record_lexical(const Symbol name, const ExpressionValue& value) {
+    if (!hidden_.empty() && std::ranges::find(hidden_, name) != hidden_.end())
+        return;
+    if (upstream_ != nullptr)
+        upstream_->lexical(name, value);
+    if (lexical_ == Keep::none)
+        return;
+    if (outer_ != nullptr) {
+        const ExpressionValue* const bound = outer_->find(name);
+        if (bound == nullptr || !same_expression_value(*bound, value))
+            return;
+    }
+    if (lexical_ == Keep::latest) {
+        kept().lexical.insert_or_assign(name, capture_expression_dependency(value));
+    } else if (kept().lexical.try_emplace(name, capture_expression_dependency(value)).second &&
+               ordered_) {
+        kept_->order.push_back(Read{name, nullptr});
+    }
+}
+
+void DependencyRecorder::record_host(const ExpressionHostDependency& dependency) {
+    if (upstream_ != nullptr)
+        upstream_->host(dependency);
+    if (host_ == Keep::none)
+        return;
+    if (host_ == Keep::latest) {
+        kept().host.insert_or_assign(dependency.canonical(), dependency);
+        return;
+    }
+    const auto [read, inserted] = kept().host.try_emplace(dependency.canonical(), dependency);
+    if (inserted && ordered_)
+        kept_->order.push_back(Read{{}, &read->first});
+}
+
+ExpressionValue ExpressionRuntime::evaluate(const Program& program, const ExpressionId expression,
+                                            const ExpressionScope& scope,
+                                            DependencyRecorder& reads) {
+    return evaluate_node(program, expression, scope, reads);
+}
+
 ExpressionValue ExpressionRuntime::evaluate(const Program& program, const ExpressionId expression,
                                             const ExpressionScope& scope) {
-    return evaluate_node(program, expression, scope);
+    DependencyRecorder ignored;
+    return evaluate_node(program, expression, scope, ignored);
 }
 
 ExpressionValue ExpressionRuntime::evaluate(const data::JsonView expression,
                                             const ExpressionScope& scope) {
+    DependencyRecorder ignored;
+    return evaluate(expression, scope, ignored);
+}
+
+ExpressionValue ExpressionRuntime::evaluate(const data::JsonView expression,
+                                            const ExpressionScope& scope,
+                                            DependencyRecorder& reads) {
     std::shared_ptr<const Program>& program =
         standalone_programs_[data::encode_canonical_json(expression)];
     if (program == nullptr)
         program = Program::lower_expression(expression);
-    return evaluate_node(*program, program->root(), scope);
+    return evaluate_node(*program, program->root(), scope, reads);
 }
 
 const std::vector<RuntimeDiagnostic>& ExpressionRuntime::diagnostics() const noexcept {
@@ -625,11 +606,6 @@ void ExpressionRuntime::clear_caches() noexcept {
     collection_cache_.clear();
     collection_cache_entries_ = 0U;
     dynamic_host_paths_.clear();
-}
-
-ExpressionDependencyObserver* ExpressionRuntime::exchange_dependency_observer(
-    ExpressionDependencyObserver* const observer) noexcept {
-    return std::exchange(dependency_observer_, observer);
 }
 
 ExpressionHostDependency
@@ -677,17 +653,15 @@ ExpressionRuntime::read_host_dependency(const std::shared_ptr<const HostPathKey>
         }
     }
     return ExpressionHostDependency{
-        key,
-        true,
-        current != nullptr ? std::optional<Value>(*current) : std::nullopt,
-        std::nullopt,
-        0U,
+        key,          true, current != nullptr ? std::optional<Value>(*current) : std::nullopt,
+        std::nullopt, 0U,
     };
 }
 
 std::optional<ExpressionHostDependency> ExpressionRuntime::host_read(const Program& program,
                                                                      const ProgramExpression& node,
-                                                                     const ExpressionScope& scope) {
+                                                                     const ExpressionScope& scope,
+                                                                     DependencyRecorder& reads) {
     const ProgramHostPath& path = program.host_path(node.host);
     // A local of the root's name shadows the host root.
     if (scope.find(path.root) != nullptr)
@@ -712,7 +686,8 @@ std::optional<ExpressionHostDependency> ExpressionRuntime::host_read(const Progr
             continue;
         }
         const ProgramExpression& index = program.expression(step.index);
-        const Value lookup = require_value(evaluate_node(program, step.index, scope), index, scope);
+        const Value lookup =
+            require_value(evaluate_node(program, step.index, scope, reads), index, scope);
         const std::string* text = lookup.string();
         const std::optional<std::size_t> bounded = bounded_index(lookup);
         if (!rebuilt) {
@@ -726,8 +701,8 @@ std::optional<ExpressionHostDependency> ExpressionRuntime::host_read(const Progr
             segments.assign(cached->segments.begin(),
                             cached->segments.begin() + static_cast<std::ptrdiff_t>(position + 1U));
         }
-        segments.push_back(HostPathSegment::lookup(
-            text != nullptr ? *text : display_string(lookup), bounded));
+        segments.push_back(
+            HostPathSegment::lookup(text != nullptr ? *text : display_string(lookup), bounded));
     }
     if (rebuilt)
         cached = HostPathKey::make(std::move(segments));
@@ -736,17 +711,18 @@ std::optional<ExpressionHostDependency> ExpressionRuntime::host_read(const Progr
 
 ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
                                                  const ExpressionId expression,
-                                                 const ExpressionScope& scope) {
+                                                 const ExpressionScope& scope,
+                                                 DependencyRecorder& reads) {
     const ProgramExpression& node = program.expression(expression);
     switch (node.kind) {
     case ExpressionKind::literal:
         return ExpressionValue(node.value);
     case ExpressionKind::variable:
-        return evaluate_variable(program, node, scope);
+        return evaluate_variable(program, node, scope, reads);
     case ExpressionKind::property:
-        return evaluate_property(program, node, scope);
+        return evaluate_property(program, node, scope, reads);
     case ExpressionKind::index:
-        return evaluate_index(program, node, scope);
+        return evaluate_index(program, node, scope, reads);
     case ExpressionKind::list: {
         // Plain data, the common case, is a list Value; the first element that is more than
         // data makes the literal an executable composite of its elements.
@@ -754,7 +730,7 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
         std::vector<Value> data;
         data.reserve(elements.size());
         for (std::size_t index = 0U; index < elements.size(); ++index) {
-            ExpressionValue value = evaluate_node(program, elements[index].value, scope);
+            ExpressionValue value = evaluate_node(program, elements[index].value, scope, reads);
             if (plain_data(value)) {
                 data.push_back(std::move(value).take_value());
                 continue;
@@ -765,8 +741,9 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
                 executable.emplace_back(std::move(element));
             executable.push_back(std::move(value));
             for (++index; index < elements.size(); ++index)
-                executable.push_back(evaluate_node(program, elements[index].value, scope));
-            return ExpressionValue(std::make_shared<const ExpressionListValue>(std::move(executable)));
+                executable.push_back(evaluate_node(program, elements[index].value, scope, reads));
+            return ExpressionValue(
+                std::make_shared<const ExpressionListValue>(std::move(executable)));
         }
         return ExpressionValue(Value(std::move(data)));
     }
@@ -775,7 +752,7 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
         std::vector<std::pair<std::string, Value>> data;
         data.reserve(entries.size());
         for (std::size_t index = 0U; index < entries.size(); ++index) {
-            ExpressionValue value = evaluate_node(program, entries[index].value, scope);
+            ExpressionValue value = evaluate_node(program, entries[index].value, scope, reads);
             if (plain_data(value)) {
                 data.emplace_back(std::string(entries[index].name.name()),
                                   std::move(value).take_value());
@@ -788,7 +765,7 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
             executable.emplace_back(std::string(entries[index].name.name()), std::move(value));
             for (++index; index < entries.size(); ++index) {
                 executable.emplace_back(std::string(entries[index].name.name()),
-                                        evaluate_node(program, entries[index].value, scope));
+                                        evaluate_node(program, entries[index].value, scope, reads));
             }
             return ExpressionValue(
                 std::make_shared<const ExpressionObjectValue>(std::move(executable)));
@@ -799,7 +776,7 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
         std::map<std::string, ExpressionValue, std::less<>> arguments;
         for (const ProgramArgument& argument : program.arguments(node)) {
             arguments.insert_or_assign(std::string(argument.name.name()),
-                                       evaluate_node(program, argument.value, scope));
+                                       evaluate_node(program, argument.value, scope, reads));
         }
         return ExpressionValue(std::make_shared<const ComponentTemplateValue>(
             ComponentTemplateValue{node.text, std::move(arguments), Value(node.text)}));
@@ -813,16 +790,17 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
             scope,
         }));
     case ExpressionKind::action:
-        return evaluate_action(program, node, scope);
+        return evaluate_action(program, node, scope, reads);
     case ExpressionKind::helper:
-        return evaluate_helper(program, expression, scope);
+        return evaluate_helper(program, expression, scope, reads);
     case ExpressionKind::conditional: {
         const Value condition =
-            require_value(evaluate_node(program, node.first, scope), node, scope);
-        return evaluate_node(program, truthy(condition) ? node.second : node.third, scope);
+            require_value(evaluate_node(program, node.first, scope, reads), node, scope);
+        return evaluate_node(program, truthy(condition) ? node.second : node.third, scope, reads);
     }
     case ExpressionKind::unary: {
-        const Value operand = require_value(evaluate_node(program, node.first, scope), node, scope);
+        const Value operand =
+            require_value(evaluate_node(program, node.first, scope, reads), node, scope);
         if (node.unary == UnaryOperator::logical_not)
             return ExpressionValue(Value(!truthy(operand)));
         if (operand.number() != nullptr)
@@ -834,7 +812,7 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
         return ExpressionValue(Value(0.0));
     }
     case ExpressionKind::binary:
-        return evaluate_binary(program, node, scope);
+        return evaluate_binary(program, node, scope, reads);
     case ExpressionKind::material: {
         std::vector<std::pair<std::string, Value>> material{
             {"id", Value(node.text)},
@@ -844,7 +822,7 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
             for (const ProgramArgument& parameter : program.arguments(node)) {
                 parameters.emplace_back(
                     std::string(parameter.name.name()),
-                    require_value(evaluate_node(program, parameter.value, scope),
+                    require_value(evaluate_node(program, parameter.value, scope, reads),
                                   program.expression(parameter.value), scope));
             }
             material.emplace_back("parameters", Value(std::move(parameters)));
@@ -866,11 +844,11 @@ ExpressionValue ExpressionRuntime::evaluate_node(const Program& program,
 
 ExpressionValue ExpressionRuntime::evaluate_variable(const Program& program,
                                                      const ProgramExpression& node,
-                                                     const ExpressionScope& scope) {
+                                                     const ExpressionScope& scope,
+                                                     DependencyRecorder& reads) {
     if (node.host != no_program_id) {
-        if (std::optional<ExpressionHostDependency> read = host_read(program, node, scope)) {
-            if (dependency_observer_ != nullptr)
-                dependency_observer_->host(*read);
+        if (std::optional<ExpressionHostDependency> read = host_read(program, node, scope, reads)) {
+            reads.host(*read);
             if (read->value.has_value())
                 return ExpressionValue(std::move(*read->value));
             report(node, scope, "STRATA.DSL.RUNTIME_MISSING_HOST_ROOT",
@@ -881,16 +859,14 @@ ExpressionValue ExpressionRuntime::evaluate_variable(const Program& program,
     }
     if (const ExpressionValue* bound = scope.find(node.name)) {
         if (bound->executable()) {
-            if (dependency_observer_ != nullptr)
-                dependency_observer_->lexical(node.name, *bound);
+            reads.lexical(node.name, *bound);
             return *bound;
         }
         const std::shared_ptr<const LexicalStateBinding>* binding =
             node.state_binding ? scope.state_binding(node.name) : nullptr;
         ExpressionValue value = binding != nullptr ? ExpressionValue(*bound->value(), *binding)
                                                    : ExpressionValue(*bound->value());
-        if (dependency_observer_ != nullptr)
-            dependency_observer_->lexical(node.name, value);
+        reads.lexical(node.name, value);
         return value;
     }
     switch (node.fallback) {
@@ -909,11 +885,12 @@ ExpressionValue ExpressionRuntime::evaluate_variable(const Program& program,
 
 ExpressionValue ExpressionRuntime::evaluate_property(const Program& program,
                                                      const ProgramExpression& node,
-                                                     const ExpressionScope& scope) {
+                                                     const ExpressionScope& scope,
+                                                     DependencyRecorder& reads) {
     const Names& known = names();
     const Symbol name = node.name;
     if (node.host != no_program_id) {
-        if (std::optional<ExpressionHostDependency> read = host_read(program, node, scope)) {
+        if (std::optional<ExpressionHostDependency> read = host_read(program, node, scope, reads)) {
             // A size of a host list or string is computed, not a host field.
             bool computed = false;
             if (!read->value.has_value() &&
@@ -921,7 +898,7 @@ ExpressionValue ExpressionRuntime::evaluate_property(const Program& program,
                 const ProgramExpression& receiver = program.expression(node.first);
                 if (receiver.host != no_program_id) {
                     if (const std::optional<ExpressionHostDependency> receiver_read =
-                            host_read(program, receiver, scope);
+                            host_read(program, receiver, scope, reads);
                         receiver_read.has_value() && receiver_read->value.has_value()) {
                         const Value& value = *receiver_read->value;
                         computed = value.list() != nullptr ||
@@ -930,8 +907,7 @@ ExpressionValue ExpressionRuntime::evaluate_property(const Program& program,
                 }
             }
             if (!computed) {
-                if (dependency_observer_ != nullptr)
-                    dependency_observer_->host(*read);
+                reads.host(*read);
                 if (read->value.has_value())
                     return ExpressionValue(std::move(*read->value));
                 report(node, scope, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
@@ -940,7 +916,7 @@ ExpressionValue ExpressionRuntime::evaluate_property(const Program& program,
             }
         }
     }
-    const ExpressionValue receiver = evaluate_node(program, node.first, scope);
+    const ExpressionValue receiver = evaluate_node(program, node.first, scope, reads);
     if (const auto* object_value = receiver.object()) {
         if (const ExpressionValue* field = (**object_value).field(node.text); field != nullptr)
             return *field;
@@ -994,11 +970,11 @@ ExpressionValue ExpressionRuntime::evaluate_property(const Program& program,
 
 ExpressionValue ExpressionRuntime::evaluate_index(const Program& program,
                                                   const ProgramExpression& node,
-                                                  const ExpressionScope& scope) {
+                                                  const ExpressionScope& scope,
+                                                  DependencyRecorder& reads) {
     if (node.host != no_program_id) {
-        if (std::optional<ExpressionHostDependency> read = host_read(program, node, scope)) {
-            if (dependency_observer_ != nullptr)
-                dependency_observer_->host(*read);
+        if (std::optional<ExpressionHostDependency> read = host_read(program, node, scope, reads)) {
+            reads.host(*read);
             if (read->value.has_value())
                 return ExpressionValue(std::move(*read->value));
             report(node, scope, "STRATA.DSL.RUNTIME_MISSING_PROPERTY",
@@ -1006,8 +982,9 @@ ExpressionValue ExpressionRuntime::evaluate_index(const Program& program,
             return ExpressionValue{};
         }
     }
-    const ExpressionValue receiver = evaluate_node(program, node.first, scope);
-    const Value index = require_value(evaluate_node(program, node.second, scope), node, scope);
+    const ExpressionValue receiver = evaluate_node(program, node.first, scope, reads);
+    const Value index =
+        require_value(evaluate_node(program, node.second, scope, reads), node, scope);
     if (const auto* list_value = receiver.list()) {
         const auto position = bounded_index(index);
         return position.has_value() && *position < (**list_value).values.size()
@@ -1038,10 +1015,11 @@ ExpressionValue ExpressionRuntime::evaluate_index(const Program& program,
 
 ExpressionValue ExpressionRuntime::evaluate_binary(const Program& program,
                                                    const ProgramExpression& node,
-                                                   const ExpressionScope& scope) {
+                                                   const ExpressionScope& scope,
+                                                   DependencyRecorder& reads) {
     const BinaryOperator operation = node.binary;
     const bool known = node.text.empty();
-    const Value left = require_value(evaluate_node(program, node.first, scope), node, scope);
+    const Value left = require_value(evaluate_node(program, node.first, scope, reads), node, scope);
     if (known) {
         if (operation == BinaryOperator::logical_and && !truthy(left))
             return ExpressionValue(Value(false));
@@ -1050,7 +1028,8 @@ ExpressionValue ExpressionRuntime::evaluate_binary(const Program& program,
         if (operation == BinaryOperator::coalesce && left.kind() != ValueKind::null_value)
             return ExpressionValue(left);
     }
-    const Value right = require_value(evaluate_node(program, node.second, scope), node, scope);
+    const Value right =
+        require_value(evaluate_node(program, node.second, scope, reads), node, scope);
     if (known) {
         switch (operation) {
         case BinaryOperator::logical_and:
@@ -1137,7 +1116,8 @@ ExpressionValue ExpressionRuntime::evaluate_binary(const Program& program,
 
 ExpressionValue ExpressionRuntime::evaluate_action(const Program& program,
                                                    const ProgramExpression& node,
-                                                   const ExpressionScope& scope) {
+                                                   const ExpressionScope& scope,
+                                                   DependencyRecorder& reads) {
     const std::string& id = node.text;
     const auto contract = actions_.contract(id);
     if (contract == nullptr) {
@@ -1151,7 +1131,7 @@ ExpressionValue ExpressionRuntime::evaluate_action(const Program& program,
         fields.reserve(node.arguments_count);
         for (const ProgramArgument& argument : program.arguments(node)) {
             fields.emplace_back(std::string(argument.name.name()),
-                                require_value(evaluate_node(program, argument.value, scope),
+                                require_value(evaluate_node(program, argument.value, scope, reads),
                                               program.expression(argument.value), scope));
         }
         payload = Value(std::move(fields));
@@ -1248,20 +1228,21 @@ const ProgramArgument* ExpressionRuntime::argument(const Program& program,
 
 Value ExpressionRuntime::argument_value(const Program& program, const ProgramExpression& node,
                                         const ExpressionScope& scope, const Symbol name,
-                                        const std::size_t position) {
+                                        const std::size_t position, DependencyRecorder& reads) {
     const ProgramArgument* found = argument(program, node, name, position);
-    return found != nullptr ? require_value(evaluate_node(program, found->value, scope),
+    return found != nullptr ? require_value(evaluate_node(program, found->value, scope, reads),
                                             program.expression(found->value), scope)
                             : Value{};
 }
 
 ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
                                                    const ExpressionId expression,
-                                                   const ExpressionScope& scope) {
+                                                   const ExpressionScope& scope,
+                                                   DependencyRecorder& reads) {
     const ProgramExpression& node = program.expression(expression);
     const Names& known = names();
     const auto value_of = [&](const ProgramArgument& entry) {
-        return require_value(evaluate_node(program, entry.value, scope),
+        return require_value(evaluate_node(program, entry.value, scope, reads),
                              program.expression(entry.value), scope);
     };
     switch (node.helper) {
@@ -1274,23 +1255,24 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
     case HelperKind::take_while:
     case HelperKind::window:
     case HelperKind::page:
-        return ExpressionValue(collection_view(program, expression, scope));
+        return ExpressionValue(collection_view(program, expression, scope, reads));
     case HelperKind::persisted: {
         const ProgramArgument* initial = argument(program, node, known.initial, 1U);
-        return initial != nullptr ? evaluate_node(program, initial->value, scope)
+        return initial != nullptr ? evaluate_node(program, initial->value, scope, reads)
                                   : ExpressionValue{};
     }
     case HelperKind::sequence:
         return ExpressionValue(
-            composed_action(program, node, scope, ActionCompositionMode::sequence));
+            composed_action(program, node, scope, ActionCompositionMode::sequence, reads));
     case HelperKind::parallel:
         return ExpressionValue(
-            composed_action(program, node, scope, ActionCompositionMode::parallel));
+            composed_action(program, node, scope, ActionCompositionMode::parallel, reads));
     case HelperKind::choose: {
-        const bool condition = truthy(argument_value(program, node, scope, known.condition, 0U));
+        const bool condition =
+            truthy(argument_value(program, node, scope, known.condition, 0U, reads));
         const ProgramArgument* selected = argument(
             program, node, condition ? known.when_true : known.when_false, condition ? 1U : 2U);
-        return selected != nullptr ? evaluate_node(program, selected->value, scope)
+        return selected != nullptr ? evaluate_node(program, selected->value, scope, reads)
                                    : ExpressionValue{};
     }
     case HelperKind::count:
@@ -1300,7 +1282,7 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         const ProgramArgument* source_argument = argument(program, node, known.source, 0U);
         if (source_argument == nullptr)
             return ExpressionValue(helper == HelperKind::count ? Value(0.0) : Value(false));
-        const ExpressionValue source = evaluate_node(program, source_argument->value, scope);
+        const ExpressionValue source = evaluate_node(program, source_argument->value, scope, reads);
         const ValueList* items = collection_items(source);
         if (items == nullptr) {
             report(node, scope, "STRATA.DSL.RUNTIME_COLLECTION_SOURCE",
@@ -1309,12 +1291,13 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         }
         const ProgramArgument* predicate_argument = argument(program, node, known.predicate, 1U);
         const ExpressionValue predicate_value =
-            predicate_argument != nullptr ? evaluate_node(program, predicate_argument->value, scope)
-                                          : ExpressionValue{};
+            predicate_argument != nullptr
+                ? evaluate_node(program, predicate_argument->value, scope, reads)
+                : ExpressionValue{};
         const auto* predicate = predicate_value.lambda();
         std::size_t matches = 0U;
         for (const Value& item : items->values) {
-            if (predicate == nullptr || truthy(evaluate_lambda(**predicate, item)))
+            if (predicate == nullptr || truthy(evaluate_lambda(**predicate, item, reads)))
                 ++matches;
             if (helper == HelperKind::any && matches != 0U)
                 break;
@@ -1340,9 +1323,9 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         return ExpressionValue(Value(result));
     }
     case HelperKind::clamp: {
-        const Value value_argument = argument_value(program, node, scope, known.value, 0U);
-        const Value minimum_argument = argument_value(program, node, scope, known.min, 1U);
-        const Value maximum_argument = argument_value(program, node, scope, known.max, 2U);
+        const Value value_argument = argument_value(program, node, scope, known.value, 0U, reads);
+        const Value minimum_argument = argument_value(program, node, scope, known.min, 1U, reads);
+        const Value maximum_argument = argument_value(program, node, scope, known.max, 2U, reads);
         const double value = value_argument.number() != nullptr ? *value_argument.number() : 0.0;
         const double minimum =
             minimum_argument.number() != nullptr ? *minimum_argument.number() : value;
@@ -1359,10 +1342,11 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
     case HelperKind::floor:
     case HelperKind::ceil:
     case HelperKind::round: {
-        const Value value = argument_value(program, node, scope, known.value, 0U);
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
         const double number = value.number() != nullptr ? *value.number() : 0.0;
         if (node.helper == HelperKind::round) {
-            const Value precision_value = argument_value(program, node, scope, known.precision, 1U);
+            const Value precision_value =
+                argument_value(program, node, scope, known.precision, 1U, reads);
             const int precision =
                 precision_value.number() != nullptr
                     ? std::clamp(static_cast<int>(*precision_value.number()), 0, 12)
@@ -1377,7 +1361,7 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
     case HelperKind::length:
     case HelperKind::size:
     case HelperKind::is_empty: {
-        const Value value = argument_value(program, node, scope, known.value, 0U);
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
         const std::size_t size = value.string() != nullptr   ? utf16_length(*value.string())
                                  : value.list() != nullptr   ? value.list()->values.size()
                                  : value.object() != nullptr ? value.object()->fields.size()
@@ -1387,8 +1371,9 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
                                    : Value(static_cast<double>(size)));
     }
     case HelperKind::join: {
-        const Value values = argument_value(program, node, scope, known.value, 0U);
-        const Value separator_value = argument_value(program, node, scope, known.separator, 1U);
+        const Value values = argument_value(program, node, scope, known.value, 0U, reads);
+        const Value separator_value =
+            argument_value(program, node, scope, known.separator, 1U, reads);
         const std::string separator = separator_value.kind() == ValueKind::null_value
                                           ? ", "
                                           : display_string(separator_value);
@@ -1406,7 +1391,8 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
     case HelperKind::upper:
     case HelperKind::trim:
     case HelperKind::title: {
-        std::string value = display_string(argument_value(program, node, scope, known.value, 0U));
+        std::string value =
+            display_string(argument_value(program, node, scope, known.value, 0U, reads));
         if (node.helper == HelperKind::lower) {
             value = lower_ascii(std::move(value));
         } else if (node.helper == HelperKind::upper) {
@@ -1432,8 +1418,8 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         return ExpressionValue(Value(std::move(value)));
     }
     case HelperKind::contains: {
-        const Value value = argument_value(program, node, scope, known.value, 0U);
-        const Value needle = argument_value(program, node, scope, known.needle, 1U);
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
+        const Value needle = argument_value(program, node, scope, known.needle, 1U, reads);
         if (value.string() != nullptr)
             return ExpressionValue(Value(value.string()->contains(display_string(needle))));
         if (value.list() != nullptr) {
@@ -1446,9 +1432,9 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
     case HelperKind::ends_with: {
         const bool starts = node.helper == HelperKind::starts_with;
         const std::string value =
-            display_string(argument_value(program, node, scope, known.value, 0U));
+            display_string(argument_value(program, node, scope, known.value, 0U, reads));
         const std::string part = display_string(
-            argument_value(program, node, scope, starts ? known.prefix : known.suffix, 1U));
+            argument_value(program, node, scope, starts ? known.prefix : known.suffix, 1U, reads));
         return ExpressionValue(Value(starts ? value.starts_with(part) : value.ends_with(part)));
     }
     case HelperKind::format: {
@@ -1477,8 +1463,9 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         return ExpressionValue(Value(std::move(formatted)));
     }
     case HelperKind::format_number: {
-        const Value value = argument_value(program, node, scope, known.value, 0U);
-        const Value precision_value = argument_value(program, node, scope, known.precision, 1U);
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
+        const Value precision_value =
+            argument_value(program, node, scope, known.precision, 1U, reads);
         const double number = value.number() != nullptr ? *value.number() : 0.0;
         const int precision = precision_value.number() != nullptr
                                   ? std::clamp(static_cast<int>(*precision_value.number()), 0, 12)
@@ -1490,20 +1477,21 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
     }
     case HelperKind::rgb:
     case HelperKind::rgba: {
-        const std::uint8_t red = color_channel(argument_value(program, node, scope, known.red, 0U));
+        const std::uint8_t red =
+            color_channel(argument_value(program, node, scope, known.red, 0U, reads));
         const std::uint8_t green =
-            color_channel(argument_value(program, node, scope, known.green, 1U));
+            color_channel(argument_value(program, node, scope, known.green, 1U, reads));
         const std::uint8_t blue =
-            color_channel(argument_value(program, node, scope, known.blue, 2U));
+            color_channel(argument_value(program, node, scope, known.blue, 2U, reads));
         const std::uint8_t alpha =
             node.helper == HelperKind::rgba
-                ? color_channel(argument_value(program, node, scope, known.alpha, 3U))
+                ? color_channel(argument_value(program, node, scope, known.alpha, 3U, reads))
                 : UINT8_MAX;
         return ExpressionValue(Value(ColorValue{red, green, blue, alpha}));
     }
     case HelperKind::animation:
         return ExpressionValue(
-            Value(display_string(argument_value(program, node, scope, known.name, 0U))));
+            Value(display_string(argument_value(program, node, scope, known.name, 0U, reads))));
     case HelperKind::style: {
         std::vector<Value> bases;
         std::vector<std::pair<std::string, Value>> properties;
@@ -1519,10 +1507,10 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         return ExpressionValue(Value(std::move(properties)));
     }
     case HelperKind::when_style: {
-        const Value condition = argument_value(program, node, scope, known.condition, 0U);
+        const Value condition = argument_value(program, node, scope, known.condition, 0U, reads);
         if (condition.boolean() == nullptr || !*condition.boolean())
             return ExpressionValue(Value{});
-        return ExpressionValue(argument_value(program, node, scope, known.active, 1U));
+        return ExpressionValue(argument_value(program, node, scope, known.active, 1U, reads));
     }
     case HelperKind::effect: {
         std::vector<std::pair<std::string, Value>> arguments;
@@ -1543,7 +1531,7 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         }
         std::vector<std::pair<std::string, Value>> fields{
             {"arguments", Value(std::move(arguments))},
-            {"name", argument_value(program, node, scope, known.name, 0U)},
+            {"name", argument_value(program, node, scope, known.name, 0U, reads)},
         };
         if (backdrop_source.has_value())
             fields.emplace_back("backdropSource", std::move(*backdrop_source));
@@ -1571,7 +1559,8 @@ Value ExpressionRuntime::require_value(const ExpressionValue& evaluated,
     return Value{};
 }
 
-Value ExpressionRuntime::evaluate_lambda(const LambdaValue& lambda, const Value& input) {
+Value ExpressionRuntime::evaluate_lambda(const LambdaValue& lambda, const Value& input,
+                                         DependencyRecorder& upstream) {
     ExpressionScope nested = lambda.captured;
     ScopeFrame frame;
     frame.hides_parent_states = true;
@@ -1580,16 +1569,18 @@ Value ExpressionRuntime::evaluate_lambda(const LambdaValue& lambda, const Value&
     nested.push(std::move(frame));
     nested.set_component_path(lambda.captured.component_path() + "/" +
                               std::string(lambda.parameter.name()));
-    LambdaDependencyFilter dependency_filter(dependency_observer_, lambda.parameter);
-    ObserverRestore restore(dependency_observer_, &dependency_filter);
+    // The body's input is the helper's data, not a dependency of whoever evaluates it.
+    DependencyRecorder reads(&upstream, DependencyRecorder::Keep::none,
+                             DependencyRecorder::Keep::none);
+    reads.hide(lambda.parameter);
     const Program& program = *lambda.program;
-    return require_value(evaluate_node(program, lambda.body, nested),
+    return require_value(evaluate_node(program, lambda.body, nested, reads),
                          program.expression(lambda.body), nested);
 }
 
 std::shared_ptr<const CollectionViewValue>
 ExpressionRuntime::collection_view(const Program& program, const ExpressionId expression,
-                                   const ExpressionScope& scope) {
+                                   const ExpressionScope& scope, DependencyRecorder& upstream) {
     const ProgramExpression& helper = program.expression(expression);
     const Names& known = names();
     const std::string& operation = helper.text;
@@ -1621,7 +1612,8 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
                 if (read.kind == CollectionDependencyKind::lexical) {
                     const ExpressionValue* value = scope.find(read.name);
                     if (value == nullptr ||
-                        !same_expression_value(*value, cached.lexical_dependencies.at(read.name))) {
+                        !same_expression_value(*value,
+                                               cached.lexical_dependencies.at(read.name).value)) {
                         current = false;
                         break;
                     }
@@ -1636,25 +1628,24 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
             }
             if (!current)
                 continue;
-            if (dependency_observer_ != nullptr) {
-                for (const CollectionDependencyRead& read : cached.dependency_order) {
-                    if (read.kind == CollectionDependencyKind::lexical) {
-                        dependency_observer_->lexical(read.name,
-                                                      cached.lexical_dependencies.at(read.name));
-                    } else {
-                        dependency_observer_->host(cached.host_dependencies.at(read.host_key));
-                    }
-                }
+            // Whoever reads the view reads what it was derived from.
+            for (const CollectionDependencyRead& read : cached.dependency_order) {
+                if (read.kind == CollectionDependencyKind::lexical)
+                    upstream.lexical(read.name, cached.lexical_dependencies.at(read.name).value);
+                else
+                    upstream.host(cached.host_dependencies.at(read.host_key));
             }
             static_cast<void>(cached.view->cache_hits.fetch_add(1U, std::memory_order_relaxed));
             return cached.view;
         }
     }
 
-    CollectionDependencyTrace dependencies(dependency_observer_);
-    ObserverRestore restore(dependency_observer_, &dependencies);
+    // What derives the view, recorded for its cache entry and told to whoever reads it.
+    DependencyRecorder reads(&upstream, DependencyRecorder::Keep::first,
+                             DependencyRecorder::Keep::first);
+    reads.keep_order();
 
-    const ExpressionValue source = evaluate_node(program, source_argument->value, scope);
+    const ExpressionValue source = evaluate_node(program, source_argument->value, scope, reads);
     const ValueList* source_items = collection_items(source);
     const auto [total, source_matched] = collection_counts(source);
     if (source_items == nullptr) {
@@ -1668,8 +1659,8 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
     for (std::size_t index = 1U; index < arguments.size(); ++index) {
         const ProgramExpression& value = program.expression(arguments[index].value);
         if (value.kind != ExpressionKind::lambda) {
-            scalar_arguments.push_back(
-                require_value(evaluate_node(program, arguments[index].value, scope), value, scope));
+            scalar_arguments.push_back(require_value(
+                evaluate_node(program, arguments[index].value, scope, reads), value, scope));
         }
     }
 
@@ -1681,22 +1672,24 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
     else if (kind == HelperKind::sort_by || kind == HelperKind::distinct_by ||
              kind == HelperKind::group_by)
         lambda_argument = argument(program, helper, known.selector, 1U);
-    const ExpressionValue lambda_value = lambda_argument != nullptr
-                                             ? evaluate_node(program, lambda_argument->value, scope)
-                                             : ExpressionValue{};
+    const ExpressionValue lambda_value =
+        lambda_argument != nullptr ? evaluate_node(program, lambda_argument->value, scope, reads)
+                                   : ExpressionValue{};
     const auto* lambda_pointer = lambda_value.lambda();
 
     std::vector<Value> result;
     if (kind == HelperKind::filter) {
         for (const Value& value : source_items->values) {
-            if (lambda_pointer != nullptr && truthy(evaluate_lambda(**lambda_pointer, value)))
+            if (lambda_pointer != nullptr &&
+                truthy(evaluate_lambda(**lambda_pointer, value, reads)))
                 result.push_back(value);
         }
     } else if (kind == HelperKind::map) {
         result.reserve(source_items->values.size());
         for (const Value& value : source_items->values) {
-            result.push_back(lambda_pointer != nullptr ? evaluate_lambda(**lambda_pointer, value)
-                                                       : Value{});
+            result.push_back(lambda_pointer != nullptr
+                                 ? evaluate_lambda(**lambda_pointer, value, reads)
+                                 : Value{});
         }
     } else if (kind == HelperKind::sort_by) {
         const bool descending = !scalar_arguments.empty() &&
@@ -1706,7 +1699,7 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
         decorated.reserve(source_items->values.size());
         for (const Value& value : source_items->values) {
             decorated.emplace_back(value, lambda_pointer != nullptr
-                                              ? evaluate_lambda(**lambda_pointer, value)
+                                              ? evaluate_lambda(**lambda_pointer, value, reads)
                                               : Value{});
         }
         std::stable_sort(decorated.begin(), decorated.end(),
@@ -1723,7 +1716,7 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
         std::vector<Value> seen;
         for (const Value& value : source_items->values) {
             const Value distinct =
-                lambda_pointer != nullptr ? evaluate_lambda(**lambda_pointer, value) : value;
+                lambda_pointer != nullptr ? evaluate_lambda(**lambda_pointer, value, reads) : value;
             if (std::ranges::find(seen, distinct) == seen.end()) {
                 seen.push_back(distinct);
                 result.push_back(value);
@@ -1732,8 +1725,9 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
     } else if (kind == HelperKind::group_by) {
         std::vector<std::pair<Value, std::vector<Value>>> groups;
         for (const Value& value : source_items->values) {
-            const Value group_key =
-                lambda_pointer != nullptr ? evaluate_lambda(**lambda_pointer, value) : Value{};
+            const Value group_key = lambda_pointer != nullptr
+                                        ? evaluate_lambda(**lambda_pointer, value, reads)
+                                        : Value{};
             auto found = std::ranges::find_if(
                 groups, [&group_key](const auto& group) { return group.first == group_key; });
             if (found == groups.end()) {
@@ -1755,7 +1749,8 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
         }
     } else if (kind == HelperKind::take_while) {
         for (const Value& value : source_items->values) {
-            if (lambda_pointer == nullptr || !truthy(evaluate_lambda(**lambda_pointer, value)))
+            if (lambda_pointer == nullptr ||
+                !truthy(evaluate_lambda(**lambda_pointer, value, reads)))
                 break;
             result.push_back(value);
         }
@@ -1838,11 +1833,12 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
     }
     std::vector<CollectionCacheEntry>& entries = collection_cache_[key];
     // An entry for the same lexical context is superseded: only its host reads differed.
-    const auto same_context = [&dependencies](const CollectionCacheEntry& entry) {
-        return std::ranges::equal(entry.lexical_dependencies, dependencies.lexical_values,
+    const auto same_context = [&reads](const CollectionCacheEntry& entry) {
+        return std::ranges::equal(entry.lexical_dependencies, reads.lexical_reads(),
                                   [](const auto& left, const auto& right) {
                                       return left.first == right.first &&
-                                             same_expression_value(left.second, right.second);
+                                             same_expression_value(left.second.value,
+                                                                   right.second.value);
                                   });
     };
     if (const auto superseded = std::ranges::find_if(entries, same_context);
@@ -1851,17 +1847,18 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
         --collection_cache_entries_;
     }
     std::vector<CollectionDependencyRead> dependency_order;
-    dependency_order.reserve(dependencies.order.size());
-    for (auto& read : dependencies.order) {
+    dependency_order.reserve(reads.order().size());
+    for (const DependencyRecorder::Read& read : reads.order()) {
         dependency_order.push_back(CollectionDependencyRead{
-            read.host ? CollectionDependencyKind::host : CollectionDependencyKind::lexical,
+            read.host != nullptr ? CollectionDependencyKind::host
+                                 : CollectionDependencyKind::lexical,
             read.name,
-            std::move(read.host_key),
+            read.host != nullptr ? *read.host : std::string{},
         });
     }
     entries.push_back(CollectionCacheEntry{
-        std::move(dependencies.lexical_values),
-        std::move(dependencies.host_values),
+        std::move(reads.lexical_reads()),
+        std::move(reads.host_reads()),
         std::move(dependency_order),
         view,
     });
@@ -1871,10 +1868,11 @@ ExpressionRuntime::collection_view(const Program& program, const ExpressionId ex
 
 std::shared_ptr<const ActionValue>
 ExpressionRuntime::composed_action(const Program& program, const ProgramExpression& node,
-                                   const ExpressionScope& scope, const ActionCompositionMode mode) {
+                                   const ExpressionScope& scope, const ActionCompositionMode mode,
+                                   DependencyRecorder& reads) {
     std::vector<std::shared_ptr<const ActionValue>> children;
     for (const ProgramArgument& argument : program.arguments(node)) {
-        const ExpressionValue evaluated = evaluate_node(program, argument.value, scope);
+        const ExpressionValue evaluated = evaluate_node(program, argument.value, scope, reads);
         if (evaluated.action() == nullptr) {
             report(node, scope, "STRATA.DSL.RUNTIME_ACTION_COMPOSITION",
                    "Action composition requires typed actions.");

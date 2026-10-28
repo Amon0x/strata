@@ -159,38 +159,6 @@ class RepeaterIndexableSequence final : public runtime::IndexableSequence {
     KeyIndexes indexes_;
 };
 
-/**
- * The reads a Repeater generation depends on. The enclosing body is told them too: the generation
- * is part of that body's output, so the body is stale when any of these reads change.
- */
-struct RepeaterExpressionDependencies final : runtime::ExpressionDependencyObserver {
-    explicit RepeaterExpressionDependencies(runtime::ExpressionDependencyObserver* const enclosing)
-        : upstream(enclosing) {}
-
-    void exclude(const Symbol name) {
-        excluded.push_back(name);
-    }
-
-    void lexical(const Symbol name, const ExpressionValue& value) override {
-        if (std::ranges::find(excluded, name) != excluded.end())
-            return;
-        lexical_values.insert_or_assign(name, runtime::capture_expression_dependency(value));
-        if (upstream != nullptr)
-            upstream->lexical(name, value);
-    }
-
-    void host(const runtime::ExpressionHostDependency& dependency) override {
-        host_values.insert_or_assign(dependency.canonical(), dependency);
-        if (upstream != nullptr)
-            upstream->host(dependency);
-    }
-
-    runtime::ExpressionDependencyObserver* upstream = nullptr;
-    std::vector<Symbol> excluded;
-    std::map<Symbol, runtime::ExpressionDependencyValue> lexical_values;
-    std::map<std::string, runtime::ExpressionHostDependency, std::less<>> host_values;
-};
-
 [[nodiscard]] bool repeater_dependencies_current(const DescriptionSequenceGeneration& previous,
                                                  const runtime::ExpressionScope& scope,
                                                  const runtime::ExpressionRuntime& expressions) {
@@ -207,39 +175,20 @@ struct RepeaterExpressionDependencies final : runtime::ExpressionDependencyObser
     return true;
 }
 
-class ExpressionDependencyObserverRestore final {
+/** Points a recorder slot at another recorder for a scope, and back at the one before. */
+class RecordingScope final {
   public:
-    ExpressionDependencyObserverRestore(runtime::ExpressionRuntime& expressions,
-                                        runtime::ExpressionDependencyObserver* observer)
-        : expressions_(expressions), previous_(expressions.exchange_dependency_observer(observer)) {
+    RecordingScope(runtime::DependencyRecorder*& slot, runtime::DependencyRecorder* recorder)
+        : slot_(slot), previous_(std::exchange(slot, recorder)) {}
+    ~RecordingScope() {
+        slot_ = previous_;
     }
-
-    ~ExpressionDependencyObserverRestore() {
-        static_cast<void>(expressions_.exchange_dependency_observer(previous_));
-    }
-
-    ExpressionDependencyObserverRestore(const ExpressionDependencyObserverRestore&) = delete;
-    ExpressionDependencyObserverRestore&
-    operator=(const ExpressionDependencyObserverRestore&) = delete;
-
-    [[nodiscard]] runtime::ExpressionDependencyObserver* previous() const noexcept {
-        return previous_;
-    }
+    RecordingScope(const RecordingScope&) = delete;
+    RecordingScope& operator=(const RecordingScope&) = delete;
 
   private:
-    runtime::ExpressionRuntime& expressions_;
-    runtime::ExpressionDependencyObserver* previous_;
-};
-
-/** The host values one style resolution read. */
-struct StyleDependencies final : runtime::ExpressionDependencyObserver {
-    void lexical(Symbol, const ExpressionValue&) override {}
-
-    void host(const runtime::ExpressionHostDependency& dependency) override {
-        host_values.push_back(dependency);
-    }
-
-    std::vector<runtime::ExpressionHostDependency> host_values;
+    runtime::DependencyRecorder*& slot_;
+    runtime::DependencyRecorder* previous_;
 };
 
 void merge_object(std::map<std::string, runtime::Value, std::less<>>& target,
@@ -558,28 +507,11 @@ std::string DescriptionBuilder::keyed_instance_path(const Scope& scope, const st
     return component_instance_path(scope.instance_path(), type, key, source_path);
 }
 
-void DescriptionBuilder::FrameObserver::lexical(const Symbol name, const ExpressionValue& value) {
-    // A row's inputs are the values of its enclosing scope it read: a read of a name the row
-    // binds itself (a state, a derived value, a nested loop's item) reads no input.
-    Frame* const current = builder_.frame();
-    if (current == nullptr || current->outer == nullptr || current->outer_reads.contains(name))
-        return;
-    const ExpressionValue* const outer = current->outer->find(name);
-    if (outer != nullptr && runtime::same_expression_value(*outer, value))
-        current->outer_reads.emplace(name, runtime::capture_expression_dependency(value));
-}
-
-void DescriptionBuilder::FrameObserver::host(const runtime::ExpressionHostDependency& dependency) {
-    builder_.observe_host_dependency(dependency);
-}
-
 DescriptionBuilder::DescriptionBuilder(runtime::ApplicationContext& application)
     : application_(application), self_(std::make_shared<DescriptionBuilder*>(this)),
       owned_widgets_(std::make_unique<WidgetRegistry>()), widgets_(*owned_widgets_),
       expressions_(std::make_unique<runtime::ExpressionRuntime>(
-          application.host(), application.bundle()->action_registry())),
-      frame_observer_(*this) {
-    static_cast<void>(expressions_->exchange_dependency_observer(&frame_observer_));
+          application.host(), application.bundle()->action_registry())) {
     observe_state_changes();
 }
 
@@ -588,9 +520,7 @@ DescriptionBuilder::DescriptionBuilder(runtime::ApplicationContext& application,
     : application_(application), self_(std::make_shared<DescriptionBuilder*>(this)),
       owned_widgets_(), widgets_(widgets),
       expressions_(std::make_unique<runtime::ExpressionRuntime>(
-          application.host(), application.bundle()->action_registry())),
-      frame_observer_(*this) {
-    static_cast<void>(expressions_->exchange_dependency_observer(&frame_observer_));
+          application.host(), application.bundle()->action_registry())) {
     observe_state_changes();
 }
 
@@ -1005,8 +935,11 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
         // Source reads belong to the retained generation just as filter/identity reads do. The
         // loop domain is excluded only after source evaluation so an outer binding with the same
         // name is still traced when it participates in the source expression.
-        RepeaterExpressionDependencies dependencies(expressions_->dependency_observer());
-        ExpressionDependencyObserverRestore dependency_observer(*expressions_, &dependencies);
+        // Whoever holds the Repeater reads what its generation reads.
+        runtime::DependencyRecorder dependencies(&expression_reads(),
+                                                 runtime::DependencyRecorder::Keep::latest,
+                                                 runtime::DependencyRecorder::Keep::latest);
+        const RecordingScope recording(recording_, &dependencies);
         const ExpressionValue collection = evaluate(statement.expression, scope.expressions);
         const runtime::Value* scalar = collection.value();
         const runtime::ValueList* values = scalar != nullptr ? scalar->list() : nullptr;
@@ -1026,21 +959,20 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
             sequence = previous_sequence;
             // The kept generation still rests on what its filter and keys read, and whoever
             // holds this Repeater reads those values with it.
-            if (dependencies.upstream != nullptr) {
-                for (const auto& [name, value] : stamp.lexical_dependencies) {
-                    static_cast<void>(value);
-                    if (const ExpressionValue* current = scope.expressions.find(name))
-                        dependencies.upstream->lexical(name, *current);
-                }
-                for (const auto& [canonical, dependency] : stamp.host_dependencies) {
-                    static_cast<void>(canonical);
-                    dependencies.upstream->host(dependency);
-                }
+            runtime::DependencyRecorder& holder = *dependencies.upstream();
+            for (const auto& [name, value] : stamp.lexical_dependencies) {
+                static_cast<void>(value);
+                if (const ExpressionValue* current = scope.expressions.find(name))
+                    holder.lexical(name, *current);
+            }
+            for (const auto& [canonical, dependency] : stamp.host_dependencies) {
+                static_cast<void>(canonical);
+                holder.host(dependency);
             }
         } else {
-            dependencies.exclude(item_name);
+            dependencies.hide(item_name);
             if (index_name.has_value())
-                dependencies.exclude(*index_name);
+                dependencies.hide(*index_name);
             std::optional<std::vector<std::size_t>> selection;
             if (statement.filter != runtime::no_program_id) {
                 selection.emplace();
@@ -1076,8 +1008,8 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
                 if (selection.has_value())
                     selection->push_back(index);
             }
-            stamp.lexical_dependencies = std::move(dependencies.lexical_values);
-            stamp.host_dependencies = std::move(dependencies.host_values);
+            stamp.lexical_dependencies = std::move(dependencies.lexical_reads());
+            stamp.host_dependencies = std::move(dependencies.host_reads());
             const std::uint64_t previous_generation =
                 previous_sequence != nullptr ? previous_sequence->generation() : 0U;
             if (previous_generation == std::numeric_limits<std::uint64_t>::max())
@@ -1702,11 +1634,12 @@ void DescriptionBuilder::observe_state_value(const runtime::StateAddress& addres
         current->reads.state.insert_or_assign(address, value);
 }
 
-void DescriptionBuilder::observe_host_dependency(
-    const runtime::ExpressionHostDependency& dependency) {
-    if (Frame* const current = frame(); current != nullptr) {
-        current->reads.host.insert_or_assign(dependency.canonical(), dependency);
-    }
+runtime::DependencyRecorder& DescriptionBuilder::expression_reads() noexcept {
+    if (recording_ != nullptr)
+        return *recording_;
+    if (Frame* const current = frame(); current != nullptr)
+        return current->expression_reads;
+    return unrecorded_reads_;
 }
 
 void DescriptionBuilder::observe_retained_value(const RetainedQuery& query,
@@ -1770,7 +1703,8 @@ bool DescriptionBuilder::same_contextual_host_roots(
 ExpressionValue DescriptionBuilder::evaluate(const runtime::ExpressionId expression,
                                              const runtime::ExpressionScope& scope) {
     ++evaluated_expressions_;
-    ExpressionValue value = expressions_->evaluate(program(), expression, scope);
+    ExpressionValue value =
+        expressions_->evaluate(program(), expression, scope, expression_reads());
     if (!expressions_->diagnostics().empty())
         append_diagnostics(*expressions_);
     return value;
@@ -1846,10 +1780,9 @@ DescriptionBuilder::resolve_named_style(const std::string_view name,
                                         std::set<std::string, std::less<>>& resolving) {
     // Whoever uses a style reads what the style read.
     const auto replay = [this](const ResolvedStyle& style) {
-        if (runtime::ExpressionDependencyObserver* observer = expressions_->dependency_observer()) {
-            for (const runtime::ExpressionHostDependency& dependency : style.host_values)
-                observer->host(dependency);
-        }
+        runtime::DependencyRecorder& reads = expression_reads();
+        for (const runtime::ExpressionHostDependency& dependency : style.host_values)
+            reads.host(dependency);
         return style.value;
     };
     if (const auto cached = styles_.find(name); cached != styles_.end()) {
@@ -1863,10 +1796,12 @@ DescriptionBuilder::resolve_named_style(const std::string_view name,
     const auto [resolving_entry, inserted] = resolving.emplace(name);
     if (!inserted)
         throw std::logic_error("validated portable IR contains a cyclic style inheritance chain");
-    StyleDependencies dependencies;
+    // The style keeps what it read; whoever uses it is told when it is replayed.
+    runtime::DependencyRecorder dependencies(nullptr, runtime::DependencyRecorder::Keep::none,
+                                             runtime::DependencyRecorder::Keep::latest);
     std::map<std::string, runtime::Value, std::less<>> merged;
     {
-        ExpressionDependencyObserverRestore observe(*expressions_, &dependencies);
+        const RecordingScope recording(recording_, &dependencies);
         for (const std::string& base : declaration->bases)
             merge_object(merged, resolve_named_style(base, resolving));
         // A style is a top-level declaration: it sees no locals, only the surface's host roots.
@@ -1879,10 +1814,16 @@ DescriptionBuilder::resolve_named_style(const std::string_view name,
         }
     }
     resolving.erase(resolving_entry);
+    std::vector<runtime::ExpressionHostDependency> host_values;
+    host_values.reserve(dependencies.host_reads().size());
+    for (auto& [canonical, dependency] : dependencies.host_reads()) {
+        static_cast<void>(canonical);
+        host_values.push_back(std::move(dependency));
+    }
     const auto stored =
         styles_.insert_or_assign(std::string(name), ResolvedStyle{
                                                         map_value(std::move(merged)),
-                                                        std::move(dependencies.host_values),
+                                                        std::move(host_values),
                                                         application_.host().invalidation_count(),
                                                         contextual_host_roots_,
                                                     });

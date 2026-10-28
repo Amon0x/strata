@@ -661,9 +661,8 @@ class ProgramLowering final {
                 widget != nullptr && std::ranges::contains(widget->row_templates, name)});
         }
         const JsonValue children = required(source, "children");
-        result.children = children.is_null()
-                              ? no_program_id
-                              : block(children, declaration_scope, result.lazy_rows);
+        result.children = children.is_null() ? no_program_id
+                                             : block(children, declaration_scope, result.lazy_rows);
 
         result.arguments_begin = static_cast<std::uint32_t>(program_.call_arguments_.size());
         result.arguments_count = static_cast<std::uint32_t>(arguments.size());
