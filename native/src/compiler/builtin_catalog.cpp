@@ -465,9 +465,13 @@ data::JsonValue export_builtin_registry(const BuiltinCatalog& catalog) {
             {"bindings", array(std::move(bindings))},
             {"capabilities", strings(widget.capabilities)},
             {"events", array(std::move(events))},
+            {"layoutKind", widget.layout_kind.empty() ? JsonValue(JsonValue::Null{})
+                                                       : JsonValue(widget.layout_kind)},
+            {"lazyRows", JsonValue(widget.lazy_rows)},
             {"name", JsonValue(widget.name)},
             {"parameters", array(std::move(parameters))},
             {"retainedState", array(std::move(retained))},
+            {"slot", JsonValue(widget.slot)},
         }));
     }
     std::vector<JsonValue> actions;

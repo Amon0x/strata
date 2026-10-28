@@ -313,19 +313,16 @@ SymbolId binding_target(const SemanticModel& model, const Expression& value) {
 }
 
 bool is_slot_widget(const SchemaRegistry& registry, const std::string_view name) {
-    static_cast<void>(registry);
-    return name == "Slot";
+    const WidgetSchema* widget = registry.widget(name);
+    return widget != nullptr && widget->slot;
 }
 
 bool generates_lazy_rows(const WidgetSchema& widget) {
-    return widget.name == "Repeater";
+    return widget.lazy_rows;
 }
 
 std::string_view implicit_layout_kind(const WidgetSchema& widget) {
-    return widget.name == "Panel"    ? std::string_view("PANEL")
-           : widget.name == "Grid"   ? std::string_view("GRID")
-           : widget.name == "Scroll" ? std::string_view("SCROLL")
-                                     : std::string_view{};
+    return widget.layout_kind;
 }
 
 void Diagnostics::report(

@@ -534,6 +534,9 @@ SchemaRegistry SchemaRegistry::from_catalog(const BuiltinCatalog& catalog) {
         WidgetSchema schema;
         schema.name = value.name;
         schema.allows_children = value.allows_children;
+        schema.slot = value.slot;
+        schema.lazy_rows = value.lazy_rows;
+        schema.layout_kind = value.layout_kind;
         for (const DeclaredParameter& parameter : composed_widget_parameters(catalog, value)) {
             schema.parameters.push_back(registry.parse_parameter(parameter));
         }

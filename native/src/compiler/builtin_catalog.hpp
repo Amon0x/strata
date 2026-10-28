@@ -125,6 +125,12 @@ struct DeclaredWidget final {
     std::vector<std::string> capabilities;
     std::vector<DeclaredRetainedState> retained_state;
     bool allows_children = false;
+    /** Calls declare or fill component slots instead of drawing a widget. */
+    bool slot = false;
+    /** The widget generates its rows lazily from the one keyed loop its body holds. */
+    bool lazy_rows = false;
+    /** The layout kind its children use when no style names one; empty when none applies. */
+    std::string layout_kind;
 };
 
 struct DeclaredAction final {
@@ -138,6 +144,11 @@ struct DeclaredAction final {
 struct DeclaredHelper final {
     std::string name;
     std::string implementation;
+    /**
+     * The runtime evaluator that computes the helper; empty for helpers lowering turns into
+     * their own IR nodes. The runtime derives its helper table from this.
+     */
+    std::string evaluator;
     std::vector<DeclaredParameter> parameters;
     DeclaredTypePtr return_type;
     DeclaredTypePtr vararg_type;

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "compiler/artifact.hpp"
+#include "compiler/builtin_catalog.hpp"
 #include "compiler/compile.hpp"
 #include "compiler/lexer.hpp"
 #include "compiler/parser.hpp"
@@ -1005,6 +1006,31 @@ void test_analysis_runs_despite_syntax_and_import_errors() {
           "a failed import cascaded into unknown names:" + describe(missing));
 }
 
+// What semantic analysis and the runtime need to know about a built-in comes from the catalog:
+// types have names, widget roles are flags, and every helper names its runtime evaluator.
+void test_catalog_declares_roles_and_names() {
+    const compiler::BuiltinCatalog& catalog = compiler::builtin_catalog();
+    for (const compiler::DeclaredNamedType& type : catalog.types) {
+        const bool opaque = type.id.size() > 1U && type.id.front() == 't' &&
+                            std::ranges::all_of(type.id.substr(1U), [](const char character) {
+                                return character >= '0' && character <= '9';
+                            });
+        check(!opaque, "catalog type '" + type.id + "' has an opaque id");
+    }
+    for (const compiler::DeclaredHelper& helper : catalog.helpers) {
+        const bool lowered_as_node = helper.name == "action" || helper.name == "material";
+        check(helper.evaluator.empty() == lowered_as_node,
+              "catalog helper '" + helper.name + "' does not name its runtime evaluator");
+    }
+    static const compiler::SchemaRegistry registry = compiler::SchemaRegistry::builtins();
+    check(registry.widget("Repeater")->lazy_rows && registry.widget("Slot")->slot &&
+              registry.widget("Panel")->layout_kind == "PANEL" &&
+              registry.widget("Grid")->layout_kind == "GRID" &&
+              registry.widget("Scroll")->layout_kind == "SCROLL" &&
+              !registry.widget("Text")->lazy_rows && registry.widget("Text")->layout_kind.empty(),
+          "widget roles did not come from the catalog");
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -1036,6 +1062,7 @@ int strata_test_compiler() {
         test_analysis_records_a_resolved_typed_tree();
         test_bind_shorthand_needs_a_retained_target();
         test_analysis_runs_despite_syntax_and_import_errors();
+        test_catalog_declares_roles_and_names();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {
