@@ -17,7 +17,6 @@ struct SourceSpan final {
     SourcePosition start;
     SourcePosition end;
     std::uint64_t length;
-    std::string excerpt;
 
     [[nodiscard]] SourceRange range() const;
     [[nodiscard]] friend bool operator==(const SourceSpan&, const SourceSpan&) = default;

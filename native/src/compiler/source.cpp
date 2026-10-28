@@ -137,23 +137,11 @@ SourceSpan SourceBuffer::span(const std::size_t start, const std::size_t end) co
     const std::size_t clamped_end = std::clamp(end, clamped_start, text_.size());
     const Boundary& start_boundary = boundary(clamped_start);
     const Boundary& end_boundary = boundary(clamped_end);
-    std::size_t line_end = text_.find('\n', clamped_start);
-    if (line_end == std::string::npos) {
-        line_end = text_.size();
-    }
-    std::size_t line_start = clamped_start == 0U
-                                 ? std::string::npos
-                                 : text_.rfind('\n', clamped_start - 1U);
-    line_start = line_start == std::string::npos ? 0U : line_start + 1U;
-    if (line_end > line_start && text_[line_end - 1U] == '\r') {
-        --line_end;
-    }
     return SourceSpan{
         source_id_,
         start_boundary.position,
         end_boundary.position,
         end_boundary.position.offset - start_boundary.position.offset,
-        text_.substr(line_start, line_end - line_start),
     };
 }
 
@@ -176,7 +164,6 @@ SourceSpan covering(const SourceSpan& left, const SourceSpan& right) {
         start.start,
         end.end,
         end.end.offset - start.start.offset,
-        start.excerpt,
     };
 }
 

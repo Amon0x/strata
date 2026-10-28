@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -374,7 +375,6 @@ void test_compiled_artifact_binary_round_trip_and_validation() {
                     SourcePosition{2U, 3U, 18U},
                     SourcePosition{4U, 9U, 53U},
                     35U,
-                    "root Panel {}",
                 },
                 "Main/root",
             },
@@ -533,6 +533,38 @@ void test_duplicate_components_are_reported_without_reading_the_other_schema() {
           "an imported duplicate component was not reported exactly once:" + describe(imported));
 }
 
+// Compile time grows with the source, not with the length of its longest line: the same list
+// written on one line compiles about as fast as one element per line.
+void test_long_single_line_compiles_in_linear_time() {
+    constexpr std::size_t elements = 20'000U;
+    const auto module = [](const std::string_view separator) {
+        std::string source = "screen Main {\n  state values = [";
+        for (std::size_t index = 0U; index < elements; ++index) {
+            if (index != 0U) source.append(",").append(separator);
+            source.append(std::to_string(index));
+        }
+        source.append("];\n  root Text(text: \"x\")\n}\n");
+        return source;
+    };
+    const auto compile_time = [](const std::string& source) {
+        const auto start = std::chrono::steady_clock::now();
+        const auto result = compile_source(source);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        check(result.succeeded(), "the long-list fixture did not compile:" + describe(result));
+        return elapsed;
+    };
+    const auto multi_line = compile_time(module("\n"));
+    const auto single_line = compile_time(module(" "));
+    check(single_line <= multi_line * 3 + std::chrono::milliseconds(100),
+          "a long single line compiled " +
+              std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(single_line)
+                                 .count()) +
+              "ms against " +
+              std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(multi_line)
+                                 .count()) +
+              "ms for the same source on separate lines");
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -548,6 +580,7 @@ int strata_test_compiler() {
         test_compiled_artifact_binary_round_trip_and_validation();
         test_portable_ir_rejects_duplicate_fields_in_narrow_and_wide_objects();
         test_duplicate_components_are_reported_without_reading_the_other_schema();
+        test_long_single_line_compiles_in_linear_time();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

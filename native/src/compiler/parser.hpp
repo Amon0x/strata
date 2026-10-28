@@ -121,11 +121,11 @@ private:
     [[nodiscard]] static NumberLiteral number_literal(const Token& token);
     [[nodiscard]] static std::string decode_string(const Token& token);
 
-    [[nodiscard]] Token consume_identifier(std::string code, std::string message);
-    [[nodiscard]] Token consume_identifier_like(std::string code, std::string message);
-    [[nodiscard]] Token consume_widget_name(std::string code, std::string message);
-    [[nodiscard]] Token consume_name_token(std::string code, std::string message);
-    [[nodiscard]] Token consume(TokenType type, std::string code, std::string message);
+    [[nodiscard]] const Token& consume_identifier(std::string code, std::string message);
+    [[nodiscard]] const Token& consume_identifier_like(std::string code, std::string message);
+    [[nodiscard]] const Token& consume_widget_name(std::string code, std::string message);
+    [[nodiscard]] const Token& consume_name_token(std::string code, std::string message);
+    [[nodiscard]] const Token& consume(TokenType type, std::string code, std::string message);
     [[nodiscard]] ParsePanic error(const Token& token, std::string code, std::string message);
     [[noreturn]] void limit(std::string code, std::string message);
     void count_declaration();
@@ -146,7 +146,7 @@ private:
     [[nodiscard]] bool check_next(TokenType type) const noexcept;
     /** The message for a missing '}', naming the opening line when the file ended first. */
     [[nodiscard]] std::string unclosed_message(std::string_view what, const Token& open) const;
-    [[nodiscard]] Token advance();
+    [[nodiscard]] const Token& advance();
     [[nodiscard]] bool at_end() const noexcept;
     [[nodiscard]] const Token& peek() const noexcept;
     [[nodiscard]] const Token& previous_token() const noexcept;

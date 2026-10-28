@@ -338,7 +338,6 @@ public:
                     start,
                     end,
                     end.offset - start.offset,
-                    {},
                 },
                 string(),
             });

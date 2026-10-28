@@ -156,20 +156,20 @@ Declaration Parser::parse_named_block_declaration(
     const DeclarationKind kind
 ) {
     const std::string label = kind == DeclarationKind::screen ? "screen" : "overlay";
-    Token name = consume_identifier(
+    const Token& name = consume_identifier(
         "STRATA.DSL.PARSE_DECLARATION_NAME",
         "Expected " + label + " name."
     );
     BlockPtr body = parse_block();
     const SourceSpan span = covering(keyword.span, body->span);
     if (kind == DeclarationKind::screen) {
-        return Declaration{ScreenDeclaration{std::move(name.lexeme), std::move(body)}, span};
+        return Declaration{ScreenDeclaration{name.lexeme, std::move(body)}, span};
     }
-    return Declaration{OverlayDeclaration{std::move(name.lexeme), std::move(body)}, span};
+    return Declaration{OverlayDeclaration{name.lexeme, std::move(body)}, span};
 }
 
 Declaration Parser::parse_component_declaration(const Token& keyword) {
-    Token name = consume_identifier(
+    const Token& name = consume_identifier(
         "STRATA.DSL.PARSE_DECLARATION_NAME",
         "Expected component name."
     );
@@ -180,24 +180,24 @@ Declaration Parser::parse_component_declaration(const Token& keyword) {
     BlockPtr body = parse_block();
     const SourceSpan span = covering(keyword.span, body->span);
     return Declaration{
-        ComponentDeclaration{std::move(name.lexeme), std::move(parameters), std::move(body)},
+        ComponentDeclaration{name.lexeme, std::move(parameters), std::move(body)},
         span,
     };
 }
 
 Declaration Parser::parse_style_declaration(const Token& keyword) {
-    Token name = consume_identifier(
+    const Token& name = consume_identifier(
         "STRATA.DSL.PARSE_DECLARATION_NAME",
         "Expected style name."
     );
     std::vector<StyleBase> bases;
     if (match(TokenType::extends_keyword)) {
         do {
-            Token base = consume_identifier_like(
+            const Token& base = consume_identifier_like(
                 "STRATA.DSL.PARSE_STYLE_BASE",
                 "Expected a style name after 'extends'."
             );
-            bases.push_back(StyleBase{std::move(base.lexeme), std::move(base.span)});
+            bases.push_back(StyleBase{base.lexeme, base.span});
             check_collection_size(bases.size());
         } while (match(TokenType::comma));
     }
@@ -211,7 +211,7 @@ Declaration Parser::parse_style_declaration(const Token& keyword) {
     const SourceSpan span = covering(keyword.span, body->span);
     return Declaration{
         StyleDeclaration{
-            std::move(name.lexeme),
+            name.lexeme,
             std::move(bases),
             std::move(properties),
             std::move(body),
@@ -221,7 +221,7 @@ Declaration Parser::parse_style_declaration(const Token& keyword) {
 }
 
 Declaration Parser::parse_animation_declaration(const Token& keyword) {
-    Token name = consume_identifier(
+    const Token& name = consume_identifier(
         "STRATA.DSL.PARSE_DECLARATION_NAME",
         "Expected animation name."
     );
@@ -237,7 +237,7 @@ Declaration Parser::parse_animation_declaration(const Token& keyword) {
     const SourceSpan span = covering(keyword.span, body->span);
     return Declaration{
         AnimationDeclaration{
-            std::move(name.lexeme),
+            name.lexeme,
             std::move(entries),
             std::move(body),
         },
@@ -249,7 +249,7 @@ std::vector<Parameter> Parser::parse_parameters() {
     std::vector<Parameter> parameters;
     if (!check(TokenType::right_parenthesis)) {
         do {
-            Token name = consume_identifier_like(
+            const Token& name = consume_identifier_like(
                 "STRATA.DSL.PARSE_PARAMETER_NAME",
                 "Expected component parameter name."
             );
@@ -267,7 +267,7 @@ std::vector<Parameter> Parser::parse_parameters() {
                                               ? covering(name.span, type_reference->span)
                                               : name.span;
             parameters.push_back(Parameter{
-                std::move(name.lexeme),
+                name.lexeme,
                 std::move(type_reference),
                 std::move(default_value),
                 span,
@@ -285,7 +285,7 @@ std::vector<Parameter> Parser::parse_parameters() {
 
 TypeReference Parser::parse_type_reference() {
     const NestingGuard nesting(*this);
-    Token name = consume_name_token(
+    const Token& name = consume_name_token(
         "STRATA.DSL.PARSE_PARAMETER_TYPE",
         "Expected parameter type name after ':'."
     );
@@ -308,7 +308,7 @@ TypeReference Parser::parse_type_reference() {
                                     ? previous_token().span
                                     : !arguments.empty() ? arguments.back().span : name.span;
     return TypeReference{
-        std::move(name.lexeme),
+        name.lexeme,
         std::move(arguments),
         nullable,
         covering(name.span, end_span),
@@ -317,7 +317,7 @@ TypeReference Parser::parse_type_reference() {
 
 BlockPtr Parser::parse_block(const BodyKind kind) {
     const NestingGuard nesting(*this);
-    const Token left = consume(
+    const Token& left = consume(
         TokenType::left_brace,
         "STRATA.DSL.PARSE_BLOCK_OPEN",
         "Expected '{' to start block."
@@ -330,7 +330,7 @@ BlockPtr Parser::parse_block(const BodyKind kind) {
             check_collection_size(statements.size());
         }
     }
-    const Token right = consume(
+    const Token& right = consume(
         TokenType::right_brace,
         "STRATA.DSL.PARSE_BLOCK_CLOSE",
         unclosed_message("block", left)
@@ -365,7 +365,7 @@ StatementPtr Parser::parse_statement(const BodyKind kind) {
             "STRATA.DSL.PARSE_EXPECTED_STATEMENT",
             "Expected state, property, widget call, if, when, or for statement."
         ));
-        const Token token = advance();
+        const Token& token = advance();
         synchronize_block();
         return make_statement(ErrorStatement{}, token.span);
     } catch (const ParsePanic&) {
@@ -376,7 +376,7 @@ StatementPtr Parser::parse_statement(const BodyKind kind) {
 }
 
 StatementPtr Parser::parse_state_declaration(const Token& keyword) {
-    Token name = consume_identifier_like(
+    const Token& name = consume_identifier_like(
         "STRATA.DSL.PARSE_STATE_NAME",
         "Expected state name."
     );
@@ -398,13 +398,13 @@ StatementPtr Parser::parse_state_declaration(const Token& keyword) {
     const SourceSpan end_span = initializer != nullptr ? initializer->span : name.span;
     const SourceSpan span = covering(keyword.span, end_span);
     return make_statement(
-        StateStatement{std::move(name.lexeme), std::move(type_reference), initializer},
+        StateStatement{name.lexeme, std::move(type_reference), initializer},
         span
     );
 }
 
 StatementPtr Parser::parse_derived_declaration(const Token& keyword) {
-    Token name = consume_identifier_like(
+    const Token& name = consume_identifier_like(
         "STRATA.DSL.PARSE_DERIVED_NAME",
         "Expected derived value name."
     );
@@ -416,7 +416,7 @@ StatementPtr Parser::parse_derived_declaration(const Token& keyword) {
     ExpressionPtr value = expression();
     static_cast<void>(match(TokenType::semicolon));
     const SourceSpan span = covering(keyword.span, value->span);
-    return make_statement(DerivedStatement{std::move(name.lexeme), value}, span);
+    return make_statement(DerivedStatement{name.lexeme, value}, span);
 }
 
 StatementPtr Parser::parse_root_statement(const Token& keyword) {
@@ -476,7 +476,7 @@ StatementPtr Parser::parse_when_statement(const Token& keyword) {
         static_cast<void>(match(TokenType::comma));
         static_cast<void>(match(TokenType::semicolon));
     }
-    const Token right = consume(
+    const Token& right = consume(
         TokenType::right_brace,
         "STRATA.DSL.PARSE_WHEN_CLOSE",
         "Expected '}' after when branches."
@@ -486,17 +486,17 @@ StatementPtr Parser::parse_when_statement(const Token& keyword) {
 }
 
 StatementPtr Parser::parse_for_statement(const Token& keyword) {
-    Token item = consume_identifier_like(
+    const Token& item = consume_identifier_like(
         "STRATA.DSL.PARSE_FOR_ITEM",
         "Expected loop item name after for."
     );
     std::optional<std::string> index_name;
     if (match(TokenType::comma)) {
-        Token index = consume_identifier_like(
+        const Token& index = consume_identifier_like(
             "STRATA.DSL.PARSE_FOR_INDEX",
             "Expected loop index name after ','."
         );
-        index_name = std::move(index.lexeme);
+        index_name = index.lexeme;
     }
     static_cast<void>(consume(
         TokenType::in_keyword,
@@ -512,7 +512,7 @@ StatementPtr Parser::parse_for_statement(const Token& keyword) {
     const SourceSpan span = covering(keyword.span, body->span);
     return make_statement(
         ForStatement{
-            std::move(item.lexeme),
+            item.lexeme,
             std::move(index_name),
             std::move(collection),
             std::move(filter),
@@ -534,7 +534,7 @@ StatementPtr Parser::parse_animation_frame_statement(const Token& keyword) {
 }
 
 std::pair<std::vector<Property>, SourceSpan> Parser::parse_property_block() {
-    const Token left = consume(
+    const Token& left = consume(
         TokenType::left_brace,
         "STRATA.DSL.PARSE_BLOCK_OPEN",
         "Expected '{' to start property block."
@@ -560,7 +560,7 @@ std::pair<std::vector<Property>, SourceSpan> Parser::parse_property_block() {
             synchronize_block();
         }
     }
-    const Token right = consume(
+    const Token& right = consume(
         TokenType::right_brace,
         "STRATA.DSL.PARSE_BLOCK_CLOSE",
         unclosed_message("property block", left)
@@ -577,7 +577,7 @@ StatementPtr Parser::parse_property_statement() {
 }
 
 Property Parser::parse_property() {
-    Token name = consume_name_token(
+    const Token& name = consume_name_token(
         "STRATA.DSL.PARSE_PROPERTY_NAME",
         "Expected property name."
     );
@@ -588,7 +588,7 @@ Property Parser::parse_property() {
     ));
     ExpressionPtr value = expression();
     const SourceSpan span = covering(name.span, value->span);
-    return Property{std::move(name.lexeme), std::move(value), span};
+    return Property{name.lexeme, std::move(value), span};
 }
 
 StatementPtr Parser::parse_widget_statement() {
@@ -599,7 +599,7 @@ StatementPtr Parser::parse_widget_statement() {
 }
 
 WidgetCall Parser::parse_widget_call() {
-    Token name = consume_widget_name(
+    const Token& name = consume_widget_name(
         "STRATA.DSL.PARSE_WIDGET_NAME",
         "Expected widget name."
     );
@@ -612,7 +612,7 @@ WidgetCall Parser::parse_widget_call() {
         body = parse_block();
     }
     const SourceSpan span = covering(name.span, body != nullptr ? body->span : previous_or_peek().span);
-    return WidgetCall{std::move(name.lexeme), std::move(arguments), std::move(body), span};
+    return WidgetCall{name.lexeme, std::move(arguments), std::move(body), span};
 }
 
 std::vector<Argument> Parser::parse_arguments(const TokenType terminator) {
@@ -649,11 +649,11 @@ std::string Parser::unclosed_message(const std::string_view what, const Token& o
 
 Argument Parser::parse_argument() {
     if (name_token() && check_next(TokenType::colon)) {
-        Token name = advance();
+        const Token& name = advance();
         static_cast<void>(advance());
         ExpressionPtr value = expression();
         const SourceSpan span = covering(name.span, value->span);
-        return Argument{std::move(name.lexeme), std::move(value), span};
+        return Argument{name.lexeme, std::move(value), span};
     }
     ExpressionPtr value = expression();
     const SourceSpan span = value->span;
@@ -662,9 +662,9 @@ Argument Parser::parse_argument() {
 
 ExpressionPtr Parser::parse_condition() {
     if (match(TokenType::left_parenthesis)) {
-        const Token left = previous_token();
+        const Token& left = previous_token();
         ExpressionPtr condition = expression();
-        const Token right = consume(
+        const Token& right = consume(
             TokenType::right_parenthesis,
             "STRATA.DSL.PARSE_CONDITION_CLOSE",
             "Expected ')' after condition."
@@ -715,7 +715,7 @@ ExpressionPtr Parser::parse_prefix() {
         return make_expression(LiteralExpression{NullLiteral{}}, token.span);
     }
     if (identifier_like()) {
-        const Token token = advance();
+        const Token& token = advance();
         if (match(TokenType::arrow)) {
             ExpressionPtr body = expression();
             const SourceSpan span = covering(token.span, body->span);
@@ -729,7 +729,7 @@ ExpressionPtr Parser::parse_prefix() {
     if (match(TokenType::left_bracket)) return parse_list(previous_token());
     if (match(TokenType::left_brace)) return parse_map(previous_token());
 
-    const Token token = peek();
+    const Token& token = peek();
     static_cast<void>(error(
         token,
         "STRATA.DSL.PARSE_EXPECTED_EXPRESSION",
@@ -749,7 +749,7 @@ ExpressionPtr Parser::parse_unary(const Token& token, const UnaryOperator operat
 
 ExpressionPtr Parser::parse_grouping(const Token& left) {
     ExpressionPtr value = expression();
-    const Token right = consume(
+    const Token& right = consume(
         TokenType::right_parenthesis,
         "STRATA.DSL.PARSE_GROUP_CLOSE",
         "Expected ')' after grouped expression."
@@ -766,7 +766,7 @@ ExpressionPtr Parser::parse_list(const Token& left) {
             check_collection_size(elements.size());
         } while (match(TokenType::comma) && !check(TokenType::right_bracket));
     }
-    const Token right = consume(
+    const Token& right = consume(
         TokenType::right_bracket,
         "STRATA.DSL.PARSE_LIST_CLOSE",
         "Expected ']' after list literal."
@@ -802,7 +802,7 @@ ExpressionPtr Parser::parse_map(const Token& left) {
         } while (match(TokenType::comma, TokenType::semicolon) &&
                  !check(TokenType::right_brace));
     }
-    const Token right = consume(
+    const Token& right = consume(
         TokenType::right_brace,
         "STRATA.DSL.PARSE_MAP_CLOSE",
         "Expected '}' after map literal."
@@ -815,11 +815,11 @@ MapEntry Parser::parse_map_entry() {
     MapKey key;
     SourceSpan key_span = peek().span;
     if (name_token() && check_next(TokenType::colon)) {
-        Token token = advance();
+        const Token& token = advance();
         key_span = token.span;
-        key = IdentifierMapKey{std::move(token.lexeme), token.span};
+        key = IdentifierMapKey{token.lexeme, token.span};
     } else if (check(TokenType::string) && check_next(TokenType::colon)) {
-        Token token = advance();
+        const Token& token = advance();
         key_span = token.span;
         key = StringMapKey{decode_string(token), token.span};
     } else {
@@ -891,20 +891,20 @@ std::optional<CallTarget> Parser::call_target(const ExpressionPtr& expression) c
 }
 
 ExpressionPtr Parser::finish_property_access(ExpressionPtr receiver, const Token& dot) {
-    Token name = consume_identifier_like(
+    const Token& name = consume_identifier_like(
         "STRATA.DSL.PARSE_PROPERTY_ACCESS",
         "Expected property name after '.'."
     );
     const SourceSpan span = covering(covering(receiver->span, dot.span), name.span);
     return make_expression(
-        PropertyAccessExpression{std::move(receiver), std::move(name.lexeme)},
+        PropertyAccessExpression{std::move(receiver), name.lexeme},
         span
     );
 }
 
 ExpressionPtr Parser::finish_index(ExpressionPtr receiver, const Token& left_bracket) {
     ExpressionPtr index = expression();
-    const Token right = consume(
+    const Token& right = consume(
         TokenType::right_bracket,
         "STRATA.DSL.PARSE_INDEX_CLOSE",
         "Expected ']' after index expression."
@@ -933,7 +933,7 @@ ExpressionPtr Parser::finish_conditional(ExpressionPtr condition, const Token& q
 }
 
 ExpressionPtr Parser::finish_binary(ExpressionPtr left) {
-    const Token operation = advance();
+    const Token& operation = advance();
     const Precedence operation_precedence = precedence(operation.type);
     const Precedence right_precedence = operation.type == TokenType::question_question
                                             ? previous(Precedence::coalesce)
@@ -1044,27 +1044,27 @@ std::string Parser::decode_string(const Token& token) {
     return result;
 }
 
-Token Parser::consume_identifier(std::string code, std::string message) {
+const Token& Parser::consume_identifier(std::string code, std::string message) {
     if (check(TokenType::identifier)) return advance();
     throw error(peek(), std::move(code), std::move(message));
 }
 
-Token Parser::consume_identifier_like(std::string code, std::string message) {
+const Token& Parser::consume_identifier_like(std::string code, std::string message) {
     if (identifier_like()) return advance();
     throw error(peek(), std::move(code), std::move(message));
 }
 
-Token Parser::consume_widget_name(std::string code, std::string message) {
+const Token& Parser::consume_widget_name(std::string code, std::string message) {
     if (widget_name()) return advance();
     throw error(peek(), std::move(code), std::move(message));
 }
 
-Token Parser::consume_name_token(std::string code, std::string message) {
+const Token& Parser::consume_name_token(std::string code, std::string message) {
     if (name_token()) return advance();
     throw error(peek(), std::move(code), std::move(message));
 }
 
-Token Parser::consume(const TokenType type, std::string code, std::string message) {
+const Token& Parser::consume(const TokenType type, std::string code, std::string message) {
     if (check(type)) return advance();
     throw error(peek(), std::move(code), std::move(message));
 }
@@ -1234,7 +1234,7 @@ bool Parser::check_next(const TokenType type) const noexcept {
     return current_ + 1U < tokens_.size() && tokens_[current_ + 1U].type == type;
 }
 
-Token Parser::advance() {
+const Token& Parser::advance() {
     if (!at_end()) {
         ++current_;
     }
@@ -1286,7 +1286,7 @@ ParseResult parse_source(
             {},
             {},
             {},
-            SourceSpan{source_id, start, start, 0U, {}},
+            SourceSpan{source_id, start, start, 0U},
         };
         std::vector<Diagnostic> diagnostics;
         diagnostics.push_back(Diagnostic{
