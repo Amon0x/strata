@@ -33,6 +33,11 @@ option(STRATA_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(STRATA_ENABLE_ASAN "Enable AddressSanitizer where supported" OFF)
 option(STRATA_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer where supported" OFF)
 option(STRATA_ENABLE_STATIC_ANALYSIS "Enable compiler static analysis" OFF)
+option(
+    STRATA_BUILD_FUZZERS
+    "Build libFuzzer harnesses and instrument Strata targets for coverage (MSVC or Clang)"
+    OFF
+)
 option(STRATA_ENABLE_PCH "Precompile stable standard-library headers for large targets" ON)
 option(STRATA_ENABLE_TRACY "Enable local Tracy instrumentation" OFF)
 option(
@@ -169,6 +174,15 @@ function(strata_target_defaults target)
         if(STRATA_ENABLE_UBSAN)
             message(FATAL_ERROR "MSVC does not provide the UBSan configuration required by Strata")
         endif()
+        if(STRATA_BUILD_FUZZERS)
+            target_compile_options(
+                ${target}
+                PRIVATE
+                    /fsanitize-coverage=inline-8bit-counters
+                    /fsanitize-coverage=edge
+                    /fsanitize-coverage=trace-cmp
+            )
+        endif()
     else()
         target_compile_options(
             ${target}
@@ -190,8 +204,15 @@ function(strata_target_defaults target)
             target_compile_options(${target} PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
             target_link_options(${target} PRIVATE -fsanitize=undefined)
         endif()
+        if(STRATA_BUILD_FUZZERS)
+            target_compile_options(${target} PRIVATE -fsanitize=fuzzer-no-link)
+        endif()
     endif()
 endfunction()
+
+if(STRATA_BUILD_FUZZERS AND NOT MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "STRATA_BUILD_FUZZERS requires MSVC or Clang (libFuzzer)")
+endif()
 
 
 # Strict JSON and UTF-8 have exactly one owner. Every consumer, including the installed C++ host
@@ -1802,3 +1823,19 @@ foreach(strata_target IN LISTS strata_library_targets)
         set(strata_source_owner_${strata_source_key} ${strata_target})
     endforeach()
 endforeach()
+
+if(STRATA_BUILD_FUZZERS)
+    # libFuzzer harnesses for untrusted-input parsers. Not tests: run them by hand against a corpus.
+    add_executable(strata_opentype_fuzzer tests/fuzz/opentype_fuzzer.cpp)
+    target_link_libraries(strata_opentype_fuzzer PRIVATE Strata::core)
+    target_include_directories(strata_opentype_fuzzer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    strata_target_defaults(strata_opentype_fuzzer)
+    if(MSVC)
+        target_compile_options(strata_opentype_fuzzer PRIVATE /fsanitize=fuzzer)
+        # libFuzzer finds its optional hooks by address; incremental-link thunks hide them.
+        target_link_options(strata_opentype_fuzzer PRIVATE /INCREMENTAL:NO)
+    else()
+        target_compile_options(strata_opentype_fuzzer PRIVATE -fsanitize=fuzzer)
+        target_link_options(strata_opentype_fuzzer PRIVATE -fsanitize=fuzzer)
+    endif()
+endif()

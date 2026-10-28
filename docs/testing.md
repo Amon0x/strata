@@ -24,7 +24,9 @@ this Windows host.
 
 For incremental work, use `cmake --build --preset <platform>` followed by
 `ctest --preset <platform>`. Sanitizer configurations use separate CMake build directories so the
-ordinary build remains incremental.
+ordinary build remains incremental. Likewise, `-DSTRATA_BUILD_FUZZERS=ON` (MSVC or Clang) in its own
+build directory instruments the Strata targets for coverage and builds `strata_opentype_fuzzer`, a
+libFuzzer harness for the OpenType reader; seed its corpus with the bundled fonts.
 
 ## Deterministic headless application tests
 
