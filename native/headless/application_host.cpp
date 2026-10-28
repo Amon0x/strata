@@ -22,10 +22,8 @@
 #include <strata/strata.hpp>
 
 #include "capture_renderer.hpp"
-#include "host/extensions.hpp"
-#include "host/module_path.hpp"
 #include "host/resource_root.hpp"
-#include "host/system_fonts.hpp"
+#include "host/session.hpp"
 #include <strata/render_packet.hpp>
 
 namespace strata::headless {
@@ -98,12 +96,10 @@ struct ApplicationHost::Impl final {
         try {
             initialize();
         } catch (const std::exception& error) {
-            if (surface.has_value())
-                surface->abandon();
+            abandon();
             throw std::runtime_error(initialization_failure(error.what(), diagnostics));
         } catch (...) {
-            if (surface.has_value())
-                surface->abandon();
+            abandon();
             throw;
         }
     }
@@ -112,30 +108,13 @@ struct ApplicationHost::Impl final {
         try {
             close();
         } catch (...) {
-            if (surface.has_value())
-                surface->abandon();
+            abandon();
         }
     }
 
-    static std::int64_t clock_now(void* const user_data) noexcept {
-        return static_cast<Impl*>(user_data)->clock_time;
-    }
-
-    static void diagnostic(void* const user_data, const strata_diagnostic* const value) noexcept {
-        if (user_data == nullptr || value == nullptr)
-            return;
-        try {
-            static_cast<Impl*>(user_data)->diagnostics.push_back(CapturedDiagnostic{
-                value->id,
-                value->severity,
-                copy(value->code),
-                copy(value->message),
-                copy(value->source_id),
-                copy(value->component_path),
-                copy(value->expected),
-            });
-        } catch (...) {
-        }
+    void abandon() noexcept {
+        if (session.has_value())
+            session->abandon();
     }
 
     [[nodiscard]] std::string resource_text(const std::filesystem::path& relative) const {
@@ -152,34 +131,6 @@ struct ApplicationHost::Impl final {
             return STRATA_STATUS_INVALID_ARGUMENT;
         return static_cast<Impl*>(user_data)->resource_files.load(
             std::string_view(id.data != nullptr ? id.data : "", id.size), *output);
-    }
-
-    static strata_status load_module(void* const user_data,
-                                     const strata_string_view importer_source_id,
-                                     const strata_string_view import_path,
-                                     strata_module_source* const output) noexcept {
-        if (user_data == nullptr || output == nullptr)
-            return STRATA_STATUS_INVALID_ARGUMENT;
-        try {
-            auto& self = *static_cast<Impl*>(user_data);
-            self.module_id_scratch =
-                host::resolve_module_id(copy(importer_source_id), copy(import_path));
-            self.module_text_scratch = self.resource_text(self.module_id_scratch);
-            *output = strata_module_source{
-                sizeof(strata_module_source),
-                strata::view(self.module_id_scratch),
-                strata::view(self.module_text_scratch),
-            };
-            return STRATA_STATUS_OK;
-        } catch (const std::bad_alloc&) {
-            return STRATA_STATUS_OUT_OF_MEMORY;
-        } catch (const host::ResourceNotFound&) {
-            return STRATA_STATUS_NOT_FOUND;
-        } catch (const std::invalid_argument&) {
-            return STRATA_STATUS_INVALID_ARGUMENT;
-        } catch (...) {
-            return STRATA_STATUS_SERVICE_UNAVAILABLE;
-        }
     }
 
     static strata_action_handler_result action(void* const user_data,
@@ -333,89 +284,65 @@ struct ApplicationHost::Impl final {
         logical_height = scenario.height;
         display_scale = scenario.scale;
 
-        strata_runtime_config runtime_config{};
-        runtime_config.struct_size = sizeof(runtime_config);
-        runtime_config.abi_version = STRATA_ABI_VERSION_CURRENT;
-        runtime_config.required_capabilities =
-            STRATA_CAPABILITY_CORE_LIFECYCLE | STRATA_CAPABILITY_CALLER_CLOCK |
-            STRATA_CAPABILITY_HOST_SNAPSHOTS | STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
-            STRATA_CAPABILITY_COMPILER_ACTIVATION | STRATA_CAPABILITY_ACTION_DISPATCH |
-            STRATA_CAPABILITY_RESOURCE_ADAPTER | STRATA_CAPABILITY_CLIPBOARD_IME_ADAPTER |
-            STRATA_CAPABILITY_DURABLE_STATE | STRATA_CAPABILITY_ASYNC_HOST_DATA |
-            STRATA_CAPABILITY_SURFACE_RUNTIME | STRATA_CAPABILITY_SURFACE_RENDER_PACKET;
-        runtime_config.stable_identity_seed = 0x484541444C455353ULL;
-        runtime_config.clock = strata_clock{sizeof(strata_clock), this, &Impl::clock_now};
-        runtime_config.diagnostics = strata_diagnostic_sink{
-            sizeof(strata_diagnostic_sink),
-            this,
-            &Impl::diagnostic,
+        host::SessionOptions session_options;
+        session_options.application_id = scenario.application_id;
+        session_options.stable_identity_seed = 0x484541444C455353ULL;
+        session_options.schemas =
+            scenario.schemas.empty() ? std::string{} : resource_text(scenario.schemas);
+        session_options.extension_packages = scenario.packages;
+        session_options.extension_search_paths = scenario.extension_search_paths;
+        session_options.read_text = [this](const std::string_view id) {
+            return resource_text(std::string(id));
         };
-        runtime = std::make_unique<strata::Runtime>(runtime_config);
-
-        const strata_resource_adapter resources{
+        session_options.on_diagnostic = [this](const strata_diagnostic& value) {
+            diagnostics.push_back(CapturedDiagnostic{
+                value.id,
+                value.severity,
+                copy(value.code),
+                copy(value.message),
+                copy(value.source_id),
+                copy(value.component_path),
+                copy(value.expected),
+            });
+        };
+        host::SessionAdapters adapters;
+        adapters.resources = strata_resource_adapter{
             sizeof(strata_resource_adapter),
             this,
             &Impl::load_resource,
         };
-        strata::require_ok(
-            strata_runtime_set_resource_adapter(runtime->native_handle(), &resources),
-            "headless resource adapter installation");
-        const strata_clipboard_adapter clipboard_adapter{
+        adapters.clipboard = options.clipboard.value_or(strata_clipboard_adapter{
             sizeof(strata_clipboard_adapter),
             this,
             &Impl::clipboard_read,
             &Impl::clipboard_write,
-        };
-        strata::require_ok(strata_runtime_set_clipboard_adapter(runtime->native_handle(),
-                                                                options.clipboard.has_value()
-                                                                    ? &*options.clipboard
-                                                                    : &clipboard_adapter),
-                           "headless clipboard adapter installation");
-        const strata_ime_adapter ime{
+        });
+        adapters.ime = options.ime.value_or(strata_ime_adapter{
             sizeof(strata_ime_adapter),
             this,
             &Impl::ime_active,
             &Impl::ime_rect,
-        };
-        strata::require_ok(
-            strata_runtime_set_ime_adapter(runtime->native_handle(),
-                                           options.ime.has_value() ? &*options.ime : &ime),
-            "headless IME adapter installation");
-        const strata_effect_adapter effect_adapter{
+        });
+        adapters.effects = strata_effect_adapter{
             sizeof(strata_effect_adapter),
             this,
             &Impl::effect,
         };
-        strata::require_ok(
-            strata_runtime_set_effect_adapter(runtime->native_handle(), &effect_adapter),
-            "headless effect adapter installation");
-
-        const std::string schemas =
-            scenario.schemas.empty() ? std::string{}
-                                     : resource_text(scenario.schemas);
-        std::vector<std::string> packages = host::declared_extension_packages(schemas);
-        if (packages.empty()) {
-            packages = scenario.packages;
-        } else if (!scenario.packages.empty() && scenario.packages != packages) {
-            throw std::invalid_argument(
-                "headless extension packages disagree with the application schema declaration");
-        }
-        extensions = host::select_extensions(packages, scenario.extension_search_paths);
-        std::vector<std::string> extension_schemas = extensions.schemas();
-        std::vector<strata_string_view> extension_schema_views;
-        extension_schema_views.reserve(extension_schemas.size());
-        for (const std::string& schema : extension_schemas) {
-            extension_schema_views.push_back(strata::view(schema));
-        }
-        const strata_application_config application{
-            sizeof(strata_application_config),
-            strata::view(scenario.application_id),
-            strata::view(schemas),
-            extension_schema_views.empty() ? nullptr : extension_schema_views.data(),
-            extension_schema_views.size(),
+        adapters.durable_store = strata_durable_store_adapter{
+            sizeof(strata_durable_store_adapter),
+            this,
+            &Impl::durable_load,
+            &Impl::durable_write,
         };
-        runtime->configure_application(application);
-        for (const strata::MaterialDeclaration& material : runtime->material_declarations("hlsl")) {
+        adapters.async_host = strata_async_host_adapter{
+            sizeof(strata_async_host_adapter),
+            this,
+            &Impl::async_begin,
+            &Impl::async_cancel,
+        };
+        session.emplace(std::move(session_options), adapters);
+        strata::Runtime& runtime = session->runtime();
+        for (const strata::MaterialDeclaration& material : runtime.material_declarations("hlsl")) {
             if (material.source.empty())
                 continue;
             renderer->declare_material(material.id, resource_text(material.source));
@@ -423,28 +350,13 @@ struct ApplicationHost::Impl final {
         const std::string_view effect_backend =
             renderer->backend() == "reference" ? "reference" : "hlsl";
         for (const strata::EffectPassDeclaration& pass :
-             runtime->effect_pass_declarations(effect_backend)) {
+             runtime.effect_pass_declarations(effect_backend)) {
             renderer->declare_effect_pass(
                 pass.effect_id, pass.index, static_cast<std::uint32_t>(pass.kind), pass.radius,
                 pass.downsample, pass.radius_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
                 pass.downsample_parameter.value_or(STRATA_EFFECT_PARAMETER_NONE),
                 pass.source.empty() ? std::string{} : resource_text(pass.source));
         }
-
-        const strata_durable_store_adapter durable_adapter{
-            sizeof(strata_durable_store_adapter),
-            this,
-            &Impl::durable_load,
-            &Impl::durable_write,
-        };
-        runtime->set_durable_store(durable_adapter);
-        const strata_async_host_adapter async_adapter{
-            sizeof(strata_async_host_adapter),
-            this,
-            &Impl::async_begin,
-            &Impl::async_cancel,
-        };
-        runtime->set_async_host(async_adapter);
 
         registrations.reserve(scenario.actions.size());
         for (const std::string& id : scenario.actions) {
@@ -456,8 +368,8 @@ struct ApplicationHost::Impl final {
                 this,
                 &Impl::action,
             };
-            strata::require_ok(strata_runtime_register_action_handler(runtime->native_handle(),
-                                                                      &handler, &registration),
+            strata::require_ok(strata_runtime_register_action_handler(
+                                   session->runtime().native_handle(), &handler, &registration),
                                "headless action registration");
             registrations.emplace_back(registration, &strata_action_registration_release);
         }
@@ -465,59 +377,22 @@ struct ApplicationHost::Impl final {
             publish(snapshot);
 
         const std::string source_id = scenario.module.generic_string();
-        const std::string source = resource_text(source_id);
-        const strata_activation_config activation{
-            sizeof(strata_activation_config),
-            1U,
-            strata::view(source_id),
-            strata::view(source),
-            this,
-            &Impl::load_module,
-        };
-        const strata_activation_info activated = runtime->activate(activation);
+        const strata_activation_info activated = session->activate_source(source_id, 1U);
         if (activated.status != STRATA_ACTIVATION_ACTIVATED) {
             throw std::runtime_error("headless scenario module did not activate");
         }
 
-        // An installed `system` candidate replaces the bundled face for this run.
-        std::vector<std::string> font_resources;
-        font_resources.reserve(scenario.fonts.size());
+        host::SessionSurface surface;
+        surface.id = scenario.surface_id;
+        surface.root_role = scenario.root_role == "screen" ? STRATA_SURFACE_ROOT_SCREEN
+                                                           : STRATA_SURFACE_ROOT_OVERLAY;
+        surface.root_name = scenario.root;
+        surface.environment = environment();
         for (const FontConfig& font : scenario.fonts)
-            font_resources.push_back(
-                host::select_system_font(font.system).value_or(font.resource));
-        std::vector<strata_surface_font_resource> fonts;
-        fonts.reserve(scenario.fonts.size());
-        for (std::size_t index = 0U; index < scenario.fonts.size(); ++index) {
-            fonts.push_back(strata_surface_font_resource{
-                strata::view(scenario.fonts[index].id),
-                strata::view(font_resources[index]),
-            });
-        }
-        std::vector<strata_surface_image_resource> images;
-        images.reserve(scenario.images.size());
-        for (const ImageConfig& image : scenario.images) {
-            images.push_back(strata_surface_image_resource{
-                strata::view(image.id),
-                strata::view(image.resource),
-                image.sampling,
-                0U,
-            });
-        }
-        const strata_surface_config surface_config{
-            sizeof(strata_surface_config),
-            strata::view(scenario.surface_id),
-            scenario.root_role == "screen" ? STRATA_SURFACE_ROOT_SCREEN
-                                           : STRATA_SURFACE_ROOT_OVERLAY,
-            0U,
-            strata::view(scenario.root),
-            environment(),
-            fonts.empty() ? nullptr : fonts.data(),
-            fonts.size(),
-            extensions.pointer(),
-            images.empty() ? nullptr : images.data(),
-            images.size(),
-        };
-        surface.emplace(runtime->create_surface(surface_config));
+            surface.fonts.push_back(host::SessionFont{font.id, font.resource, font.system});
+        for (const ImageConfig& image : scenario.images)
+            surface.images.push_back(host::SessionImage{image.id, image.resource, image.sampling});
+        session->create_surface(surface);
         resize_renderer();
     }
 
@@ -536,23 +411,22 @@ struct ApplicationHost::Impl final {
             next_snapshot_generation++,
             strata::view(values),
         };
-        strata::require_ok(strata_runtime_publish_host_snapshot(runtime->native_handle(), &config),
-                           "headless host snapshot publication");
+        strata::require_ok(
+            strata_runtime_publish_host_snapshot(session->runtime().native_handle(), &config),
+            "headless host snapshot publication");
     }
 
     void frame(const std::int64_t time_nanoseconds) {
-        clock_time = time_nanoseconds;
-        const strata_surface_frame_info info = surface->frame(time_nanoseconds);
-        const std::vector<std::uint8_t> encoded = surface->render_packet();
-        const host::RenderPacket& packet = decoder.decode(encoded);
-        renderer->render(packet, time_nanoseconds);
+        const host::SurfacePacketFrame framed = session->frame(time_nanoseconds);
+        const strata_surface_frame_info& info = framed.surface;
+        renderer->render(*framed.packet, time_nanoseconds);
         frame_available = true;
         const std::vector<strata_backdrop_sample> backdrop = renderer->take_backdrop_samples();
         if (!backdrop.empty())
-            surface->report_backdrop(backdrop);
+            session->surface().report_backdrop(backdrop);
         if (!options.capture_frames)
             return;
-        last_frame_json = surface->frame_json();
+        last_frame_json = session->surface().frame_json();
         data::JsonLimits frame_limits; // the host's own frame: no untrusted-input byte budget
         frame_limits.maximum_input_bytes =
             std::max(frame_limits.maximum_input_bytes, last_frame_json.size());
@@ -569,14 +443,7 @@ struct ApplicationHost::Impl final {
     }
 
     void enqueue(const std::span<const strata_input_event> events) {
-        strata_surface_input_batch_info info{};
-        info.struct_size = sizeof(info);
-        strata::require_ok(strata_surface_enqueue_input(surface->native_handle(), events.data(),
-                                                        events.size(), &info),
-                           "headless input enqueue");
-        if (info.accepted_event_count != events.size()) {
-            throw std::runtime_error("headless input queue accepted only part of a batch");
-        }
+        session->enqueue(events);
     }
 
     void resize(const double width, const double height, const double scale,
@@ -586,52 +453,38 @@ struct ApplicationHost::Impl final {
         logical_height = height;
         display_scale = scale;
         ++environment_generation;
-        const strata_surface_environment next = environment();
-        std::uint32_t adopted = 0U;
-        strata::require_ok(
-            strata_surface_adopt_environment(surface->native_handle(), &next, &adopted),
-            "headless environment adoption");
-        if (adopted == 0U)
+        if (!session->adopt_environment(environment()))
             throw std::runtime_error("headless resize was not adopted");
         resize_renderer();
         frame(time_nanoseconds);
     }
 
     void close() {
-        if (!surface.has_value())
+        if (!session.has_value() || !session->has_surface())
             return;
-        const std::vector<std::uint8_t> encoded = surface->prepare_release_packet();
-        const host::RenderPacket& packet = decoder.decode(encoded);
-        renderer->consume_resources(packet);
-        surface->acknowledge_release_packet();
-        surface->close();
-        surface.reset();
+        session->close_surface(
+            [this](const host::RenderPacket& packet) { renderer->consume_resources(packet); });
+        // Action registrations belong to the runtime, which closes after them.
         registrations.clear();
-        runtime->close();
-        runtime.reset();
+        session->close({});
+        session.reset();
     }
 
     const Scenario& scenario;
     host::ResourceRoot resource_files;
     ApplicationHostOptions options;
-    std::unique_ptr<strata::Runtime> runtime;
-    std::vector<Registration> registrations;
-    host::SelectedExtensions extensions;
-    std::optional<strata::Surface> surface;
-    host::RenderPacketDecoder decoder;
     std::unique_ptr<CaptureRenderer> renderer;
+    std::optional<host::Session> session;
+    std::vector<Registration> registrations;
     std::vector<CapturedDiagnostic> diagnostics;
     std::vector<CapturedAction> actions;
     std::vector<CapturedEffect> effects;
     std::vector<CapturedAsyncRequest> async_requests;
     std::vector<CapturedFrame> frames;
-    std::string module_id_scratch;
-    std::string module_text_scratch;
     std::string clipboard;
     std::string durable;
     std::string last_frame_json;
     data::JsonValue last_frame_document;
-    std::int64_t clock_time = 0;
     std::uint64_t next_snapshot_generation = 1U;
     std::uint64_t environment_generation = 1U;
     double logical_width = 0.0;
@@ -647,8 +500,9 @@ ApplicationHost::ApplicationHost(const Scenario& scenario, std::filesystem::path
 ApplicationHost::~ApplicationHost() = default;
 
 void ApplicationHost::cancel_interactions() {
-    strata::require_ok(strata_surface_cancel_interactions(impl_->surface->native_handle()),
-                       "preview focus cancellation");
+    strata::require_ok(
+        strata_surface_cancel_interactions(impl_->session->surface().native_handle()),
+        "preview focus cancellation");
 }
 
 void ApplicationHost::clear_observations() {
@@ -660,7 +514,7 @@ void ApplicationHost::clear_observations() {
 }
 
 std::string ApplicationHost::inspect() const {
-    return impl_->surface->frame_json();
+    return impl_->session->surface().frame_json();
 }
 
 void ApplicationHost::frame(const std::int64_t time_nanoseconds) {

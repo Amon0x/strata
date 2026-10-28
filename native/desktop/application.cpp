@@ -22,10 +22,7 @@
 
 #include <strata/strata.hpp>
 
-#include "host/extensions.hpp"
-#include "host/module_path.hpp"
-#include "host/resource_root.hpp"
-#include "host/system_fonts.hpp"
+#include "host/session.hpp"
 #include "host_services.hpp"
 #include "ime.hpp"
 #include "window_input.hpp"
@@ -149,58 +146,6 @@ struct ApplicationHost::Impl final {
         }
     }
 
-    static std::int64_t clock(void* const user_data) noexcept {
-        return static_cast<Impl*>(user_data)->frame_time;
-    }
-
-    static void diagnostic(void* const user_data, const strata_diagnostic* const value) noexcept {
-        if (user_data == nullptr || value == nullptr)
-            return;
-        try {
-            static_cast<Impl*>(user_data)->diagnostics.push_back(Diagnostic{
-                value->id,
-                value->severity,
-                copy(value->code),
-                copy(value->message),
-                copy(value->source_id),
-                value->range.line_start,
-                value->range.column_start,
-                copy(value->component_path),
-                copy(value->expected),
-            });
-        } catch (...) {
-        }
-    }
-
-    static strata_status load_module(void* const user_data,
-                                     const strata_string_view importer_source_id,
-                                     const strata_string_view import_path,
-                                     strata_module_source* const output) noexcept {
-        if (user_data == nullptr || output == nullptr)
-            return STRATA_STATUS_INVALID_ARGUMENT;
-        try {
-            auto& self = *static_cast<Impl*>(user_data);
-            self.module_id_scratch =
-                host::resolve_module_id(copy(importer_source_id), copy(import_path));
-            append_unique(self.module_resources, self.module_id_scratch);
-            self.module_text_scratch = self.services.text(self.module_id_scratch);
-            *output = strata_module_source{
-                sizeof(strata_module_source),
-                strata::view(self.module_id_scratch),
-                strata::view(self.module_text_scratch),
-            };
-            return STRATA_STATUS_OK;
-        } catch (const std::bad_alloc&) {
-            return STRATA_STATUS_OUT_OF_MEMORY;
-        } catch (const host::ResourceNotFound&) {
-            return STRATA_STATUS_NOT_FOUND;
-        } catch (const std::invalid_argument&) {
-            return STRATA_STATUS_INVALID_ARGUMENT;
-        } catch (...) {
-            return STRATA_STATUS_SERVICE_UNAVAILABLE;
-        }
-    }
-
     [[nodiscard]] std::int64_t now() const noexcept {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(
                    std::chrono::steady_clock::now() - epoch)
@@ -234,6 +179,20 @@ struct ApplicationHost::Impl final {
         return result;
     }
 
+    void record_diagnostic(const strata_diagnostic& value) {
+        diagnostics.push_back(Diagnostic{
+            value.id,
+            value.severity,
+            copy(value.code),
+            copy(value.message),
+            copy(value.source_id),
+            value.range.line_start,
+            value.range.column_start,
+            copy(value.component_path),
+            copy(value.expected),
+        });
+    }
+
     void initialize() {
         if (config.application_id.empty())
             throw std::invalid_argument("desktop application id must not be empty");
@@ -244,15 +203,10 @@ struct ApplicationHost::Impl final {
         require_resource_id(config.module_resource, "desktop application module");
         if (!config.schemas_resource.empty())
             require_resource_id(config.schemas_resource, "desktop application schemas");
-        for (FontResource& font : config.fonts) {
+        for (const FontResource& font : config.fonts) {
             if (font.id.empty())
                 throw std::invalid_argument("desktop font id must not be empty");
             require_resource_id(font.resource, "desktop font resource");
-            // An installed `system` candidate replaces the bundled face for this run.
-            if (std::optional<std::string> installed = host::select_system_font(font.system);
-                installed.has_value()) {
-                font.resource = std::move(*installed);
-            }
         }
         for (const ImageResource& image : config.images) {
             if (image.id.empty())
@@ -270,70 +224,30 @@ struct ApplicationHost::Impl final {
         const UINT dpi = GetDpiForWindow(window);
         resize_viewport(width, height, dpi == 0U ? 1.0 : static_cast<double>(dpi) / 96.0, false);
 
-        strata_runtime_config runtime_config{};
-        runtime_config.struct_size = sizeof(runtime_config);
-        runtime_config.abi_version = STRATA_ABI_VERSION_CURRENT;
-        runtime_config.required_capabilities =
-            STRATA_CAPABILITY_CORE_LIFECYCLE | STRATA_CAPABILITY_CALLER_CLOCK |
-            STRATA_CAPABILITY_HOST_SNAPSHOTS | STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
-            STRATA_CAPABILITY_COMPILER_ACTIVATION | STRATA_CAPABILITY_ACTION_DISPATCH |
-            STRATA_CAPABILITY_RESOURCE_ADAPTER | STRATA_CAPABILITY_CLIPBOARD_IME_ADAPTER |
-            STRATA_CAPABILITY_SURFACE_RUNTIME | STRATA_CAPABILITY_SURFACE_RENDER_PACKET;
-        runtime_config.stable_identity_seed = 0x5354524154414150ULL;
-        runtime_config.clock = strata_clock{sizeof(strata_clock), this, &Impl::clock};
-        runtime_config.diagnostics = strata_diagnostic_sink{
-            sizeof(strata_diagnostic_sink),
-            this,
-            &Impl::diagnostic,
-        };
-        runtime = std::make_unique<strata::Runtime>(runtime_config);
-
-        const strata_resource_adapter resources = services.resource_adapter();
-        strata::require_ok(
-            strata_runtime_set_resource_adapter(runtime->native_handle(), &resources),
-            "desktop resource adapter installation");
-        const strata_clipboard_adapter clipboard = services.clipboard_adapter();
-        strata::require_ok(
-            strata_runtime_set_clipboard_adapter(runtime->native_handle(), &clipboard),
-            "desktop clipboard adapter installation");
-        const strata_ime_adapter ime = services.ime_adapter(config.application_id);
-        strata::require_ok(strata_runtime_set_ime_adapter(runtime->native_handle(), &ime),
-                           "desktop IME adapter installation");
-
-        schemas = config.schemas_resource.empty() ? std::string{}
-                                                  : services.text(config.schemas_resource);
-        std::vector<std::string> packages = host::declared_extension_packages(schemas);
-        if (packages.empty()) {
-            packages = config.extension_packages;
-        } else if (!config.extension_packages.empty() && config.extension_packages != packages) {
-            throw std::invalid_argument(
-                "desktop application extension packages disagree with its schema declaration");
-        }
-        extensions = host::select_extensions(packages, config.extension_search_paths);
-        extension_schemas = extensions.schemas();
-        std::vector<strata_string_view> extension_views;
-        extension_views.reserve(extension_schemas.size());
-        for (const std::string& document : extension_schemas)
-            extension_views.push_back(strata::view(document));
-        const strata_application_config application{
-            sizeof(strata_application_config),
-            strata::view(config.application_id),
-            strata::view(schemas),
-            extension_views.empty() ? nullptr : extension_views.data(),
-            extension_views.size(),
-        };
-        runtime->configure_application(application);
-        bindings = std::make_unique<strata::host::Bindings>(*runtime, config.application_id);
+        host::SessionOptions options;
+        options.application_id = config.application_id;
+        options.stable_identity_seed = 0x5354524154414150ULL;
+        options.schemas = config.schemas_resource.empty() ? std::string{}
+                                                          : services.text(config.schemas_resource);
+        options.extension_packages = config.extension_packages;
+        options.extension_search_paths = config.extension_search_paths;
+        options.read_text = [this](const std::string_view id) { return services.text(id); };
+        options.on_diagnostic = [this](const strata_diagnostic& value) { record_diagnostic(value); };
+        host::SessionAdapters adapters;
+        adapters.resources = services.resource_adapter();
+        adapters.clipboard = services.clipboard_adapter();
+        adapters.ime = services.ime_adapter(config.application_id);
+        session.emplace(std::move(options), adapters);
 
         for (const strata::MaterialDeclaration& declaration :
-             runtime->material_declarations("hlsl")) {
+             session->runtime().material_declarations("hlsl")) {
             if (declaration.source.empty())
                 continue;
             append_unique(program_resources, declaration.source);
             renderer.declare_material(declaration.id, services.text(declaration.source));
         }
         for (const strata::EffectPassDeclaration& pass :
-             runtime->effect_pass_declarations("hlsl")) {
+             session->runtime().effect_pass_declarations("hlsl")) {
             if (!pass.source.empty())
                 append_unique(program_resources, pass.source);
             renderer.declare_effect_pass(
@@ -348,18 +262,10 @@ struct ApplicationHost::Impl final {
         if (activation_generation == std::numeric_limits<std::uint64_t>::max()) {
             throw std::overflow_error("desktop application activation generation is exhausted");
         }
-        bindings->synchronize();
-        append_unique(module_resources, config.module_resource);
+        session->bindings().synchronize();
         std::string candidate = services.text(config.module_resource);
-        const strata_activation_config activation{
-            sizeof(strata_activation_config),
-            ++activation_generation,
-            strata::view(config.module_resource),
-            strata::view(candidate),
-            this,
-            &Impl::load_module,
-        };
-        const strata_activation_info activated = runtime->activate(activation);
+        const strata_activation_info activated =
+            session->activate_source(config.module_resource, candidate, ++activation_generation);
         if (activated.status != STRATA_ACTIVATION_ACTIVATED)
             return false;
         source = std::move(candidate);
@@ -367,7 +273,7 @@ struct ApplicationHost::Impl final {
     }
 
     void activate() {
-        if (surface.has_value())
+        if (session->has_surface())
             throw std::logic_error("desktop application is already active");
         if (!activate_source()) {
             const std::string detail =
@@ -376,39 +282,19 @@ struct ApplicationHost::Impl final {
             throw std::runtime_error("desktop application activation was rejected: " + detail);
         }
 
-        std::vector<strata_surface_font_resource> fonts;
-        fonts.reserve(config.fonts.size());
-        for (const FontResource& font : config.fonts) {
-            fonts.push_back(strata_surface_font_resource{
-                strata::view(font.id),
-                strata::view(font.resource),
-            });
-        }
-        std::vector<strata_surface_image_resource> images;
-        images.reserve(config.images.size());
+        host::SessionSurface surface;
+        surface.id = config.surface_id;
+        surface.root_role = config.root_role == SurfaceRole::screen ? STRATA_SURFACE_ROOT_SCREEN
+                                                                    : STRATA_SURFACE_ROOT_OVERLAY;
+        surface.root_name = config.root_name;
+        surface.environment = environment();
+        for (const FontResource& font : config.fonts)
+            surface.fonts.push_back(host::SessionFont{font.id, font.resource, font.system});
         for (const ImageResource& image : config.images) {
-            images.push_back(strata_surface_image_resource{
-                strata::view(image.id),
-                strata::view(image.resource),
-                static_cast<std::uint32_t>(image.sampling),
-                0U,
-            });
+            surface.images.push_back(host::SessionImage{
+                image.id, image.resource, static_cast<std::uint32_t>(image.sampling)});
         }
-        const strata_surface_config surface_config{
-            sizeof(strata_surface_config),
-            strata::view(config.surface_id),
-            config.root_role == SurfaceRole::screen ? STRATA_SURFACE_ROOT_SCREEN
-                                                    : STRATA_SURFACE_ROOT_OVERLAY,
-            0U,
-            strata::view(config.root_name),
-            environment(),
-            fonts.empty() ? nullptr : fonts.data(),
-            fonts.size(),
-            extensions.pointer(),
-            images.empty() ? nullptr : images.data(),
-            images.size(),
-        };
-        surface.emplace(runtime->create_surface(surface_config));
+        session->create_surface(surface);
     }
 
     [[nodiscard]] bool reload_program_source(const std::string_view resource_id) {
@@ -417,13 +303,13 @@ struct ApplicationHost::Impl final {
         }
         const std::string hlsl_source = services.text(resource_id);
         for (const strata::MaterialDeclaration& declaration :
-             runtime->material_declarations("hlsl")) {
+             session->runtime().material_declarations("hlsl")) {
             if (declaration.source == resource_id) {
                 renderer.declare_material(declaration.id, hlsl_source);
             }
         }
         for (const strata::EffectPassDeclaration& pass :
-             runtime->effect_pass_declarations("hlsl")) {
+             session->runtime().effect_pass_declarations("hlsl")) {
             if (pass.source != resource_id)
                 continue;
             renderer.declare_effect_pass(
@@ -443,22 +329,18 @@ struct ApplicationHost::Impl final {
         scale = display_scale(width, height, dpi_scale);
         services.set_surface_scale(scale);
         renderer.resize(width, height, logical_width(), logical_height());
-        if (!adopt || !surface.has_value())
+        if (!adopt || !session.has_value() || !session->has_surface())
             return;
         ++environment_generation;
-        const strata_surface_environment next = environment();
-        std::uint32_t adopted = 0U;
-        strata::require_ok(
-            strata_surface_adopt_environment(surface->native_handle(), &next, &adopted),
-            "desktop environment adoption");
-        if (adopted == 0U)
+        if (!session->adopt_environment(environment()))
             throw std::runtime_error("desktop environment generation was rejected");
     }
 
     void enqueue(strata_input_event event, const std::string_view event_text = {}) {
-        if (!surface.has_value())
+        if (!session.has_value() || !session->has_surface())
             return;
         frame_time = now();
+        session->set_time(frame_time);
         event.struct_size = sizeof(event);
         event.version = STRATA_INPUT_EVENT_VERSION_2;
         event.modifiers = current_modifiers();
@@ -466,12 +348,7 @@ struct ApplicationHost::Impl final {
         event.timestamp_nanoseconds = frame_time;
         if (event.kind != STRATA_INPUT_KEY)
             event.key_action = STRATA_KEY_PRESS;
-        strata_surface_input_batch_info info{sizeof(strata_surface_input_batch_info)};
-        strata::require_ok(
-            strata_surface_enqueue_input(surface->native_handle(), &event, 1U, &info),
-            "desktop input enqueue");
-        if (info.accepted_event_count != 1U)
-            throw std::runtime_error("desktop input event was not accepted atomically");
+        session->enqueue(std::span<const strata_input_event>(&event, 1U));
     }
 
     void flush_pointer_move() {
@@ -483,80 +360,47 @@ struct ApplicationHost::Impl final {
     }
 
     void frame() {
-        if (!surface.has_value())
+        if (!session.has_value() || !session->has_surface())
             throw std::logic_error("desktop application must be activated before framing");
         flush_pointer_move();
-        bindings->synchronize();
         frame_time = now();
-        const strata_surface_frame_info info = surface->frame(frame_time);
-        const host::RenderPacket& packet = decoder.decode(surface->render_packet());
+        const host::SurfacePacketFrame framed = session->frame(frame_time);
+        const host::RenderPacket& packet = *framed.packet;
         renderer.render(packet);
         frame_available = true;
         // Backdrop probes read back without waiting on the GPU, so these describe an earlier frame.
         const std::vector<strata_backdrop_sample> backdrop =
             renderer.take_backdrop_samples("default");
         if (!backdrop.empty())
-            surface->report_backdrop(backdrop);
-
-        strata_profiler_host_frame telemetry{};
-        telemetry.struct_size = sizeof(telemetry);
-        telemetry.version = STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT;
-        telemetry.draw_calls = packet.planned_draw_count;
-        telemetry.batches = packet.batches.size();
-        telemetry.vertices = packet.vertices.size() / host::packet_vertex_bytes;
-        telemetry.submit_nanos = 0;
-        static_cast<void>(info);
-        strata::require_ok(strata_surface_record_host_frame(surface->native_handle(), &telemetry),
-                           "desktop host profiler publication");
+            session->surface().report_backdrop(backdrop);
+        session->record_host_frame(packet);
     }
 
     void close() {
         pending_pointer_move.reset();
-        if (surface.has_value()) {
-            const host::RenderPacket& terminal = decoder.decode(surface->prepare_release_packet());
+        if (!session.has_value())
+            return;
+        session->close([this](const host::RenderPacket& terminal) {
             renderer.consume_resources(terminal);
-            surface->acknowledge_release_packet();
-            surface->close();
-            surface.reset();
-        }
-        bindings.reset();
-        if (runtime != nullptr) {
-            runtime->close();
-            runtime.reset();
-        }
+        });
+        session.reset();
     }
 
     void dispose_after_failure() noexcept {
         pending_pointer_move.reset();
-        if (surface.has_value()) {
-            try {
-                surface->abandon();
-            } catch (...) {
-                std::terminate();
-            }
-            surface.reset();
-        }
-        bindings.reset();
-        runtime.reset();
+        if (session.has_value())
+            session->abandon();
+        session.reset();
     }
 
     HWND window = nullptr;
     ApplicationConfig config;
     HostServices services;
     Renderer renderer;
-    std::unique_ptr<strata::Runtime> runtime;
-    std::unique_ptr<strata::host::Bindings> bindings;
-    host::SelectedExtensions extensions;
-    std::optional<strata::Surface> surface;
-    host::RenderPacketDecoder decoder;
+    std::optional<host::Session> session;
     std::vector<Diagnostic> diagnostics;
-    std::vector<std::string> extension_schemas;
-    std::vector<std::string> module_resources;
     std::vector<std::string> program_resources;
-    std::string schemas;
     std::string source;
-    std::string module_id_scratch;
-    std::string module_text_scratch;
     std::optional<strata_input_event> pending_pointer_move;
     std::chrono::steady_clock::time_point epoch = std::chrono::steady_clock::now();
     std::int64_t frame_time = 0;
@@ -576,15 +420,15 @@ ApplicationHost::ApplicationHost(HWND window, std::filesystem::path resource_roo
 ApplicationHost::~ApplicationHost() = default;
 
 strata::Runtime& ApplicationHost::runtime() noexcept {
-    return *impl_->runtime;
+    return impl_->session->runtime();
 }
 strata::host::Bindings& ApplicationHost::bindings() noexcept {
-    return *impl_->bindings;
+    return impl_->session->bindings();
 }
 
 void ApplicationHost::publish(const std::string_view snapshot_id,
                               const strata::host::Value& value) {
-    static_cast<void>(impl_->runtime->publish_host_snapshot(snapshot_id, value.json()));
+    static_cast<void>(impl_->session->runtime().publish_host_snapshot(snapshot_id, value.json()));
 }
 
 void ApplicationHost::activate() {
@@ -592,7 +436,7 @@ void ApplicationHost::activate() {
 }
 
 bool ApplicationHost::reactivate() {
-    if (!impl_->surface.has_value()) {
+    if (!impl_->session->has_surface()) {
         throw std::logic_error("desktop application must be active before source reactivation");
     }
     return impl_->activate_source();
@@ -603,7 +447,7 @@ bool ApplicationHost::reload_program_source(const std::string_view resource_id) 
 }
 
 const std::vector<std::string>& ApplicationHost::module_resources() const noexcept {
-    return impl_->module_resources;
+    return impl_->session->module_resources();
 }
 
 const std::vector<std::string>& ApplicationHost::program_resources() const noexcept {
@@ -702,8 +546,10 @@ ApplicationHost::handle_window_message(const std::uint32_t message, const std::u
 
 void ApplicationHost::cancel_interactions() noexcept {
     impl_->pending_pointer_move.reset();
-    if (impl_->surface.has_value())
-        static_cast<void>(strata_surface_cancel_interactions(impl_->surface->native_handle()));
+    if (impl_->session.has_value() && impl_->session->has_surface()) {
+        static_cast<void>(
+            strata_surface_cancel_interactions(impl_->session->surface().native_handle()));
+    }
 }
 
 void ApplicationHost::frame() {
@@ -713,7 +559,7 @@ void ApplicationHost::close() {
     impl_->close();
 }
 bool ApplicationHost::active() const noexcept {
-    return impl_->surface.has_value();
+    return impl_->session.has_value() && impl_->session->has_surface();
 }
 bool ApplicationHost::has_frame() const noexcept {
     return impl_->frame_available;

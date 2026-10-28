@@ -484,6 +484,22 @@ set_target_properties(strata_host_cpp_static PROPERTIES POSITION_INDEPENDENT_COD
 target_compile_features(strata_host_cpp_static PUBLIC cxx_std_23)
 strata_target_defaults(strata_host_cpp_static)
 
+# One portable application Session over the public C ABI: runtime, adapters, application and
+# extension configuration, activation, the Surface, framing into decoded packets, host-frame
+# telemetry and the release barrier. The desktop, headless and preview hosts are shells over it.
+add_library(strata_host_session STATIC host/session.cpp)
+target_link_libraries(
+    strata_host_session
+    PUBLIC Strata::host Strata::render_host strata_host_support
+)
+set_target_properties(
+    strata_host_session
+    PROPERTIES
+        EXPORT_NAME host_session
+        POSITION_INDEPENDENT_CODE ON
+)
+strata_target_defaults(strata_host_session)
+
 # Generated application contracts are repository-internal consumers of the public host API. The
 # installed generator emits equivalent headers for external application schemas.
 add_library(strata_application_contracts INTERFACE)
@@ -645,7 +661,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         PRIVATE
             Strata::d3d11
             Strata::render_host
-            strata_host_support
+            strata_host_session
             d3d11
             d3dcompiler
             imm32
@@ -775,7 +791,7 @@ if(STRATA_BUILD_TOOLS)
         strata_headless_host
         PUBLIC
             Strata::c
-            strata_host_support
+            strata_host_session
             strata_base
     )
     target_include_directories(
@@ -1177,7 +1193,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
     )
     target_link_libraries(
         strata_host_tests
-        PRIVATE Strata::host Strata::render_host strata_application_contracts strata_host_support
+        PRIVATE Strata::host Strata::render_host strata_application_contracts strata_host_session
     )
     target_include_directories(strata_host_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop)
     if(WIN32)
@@ -1520,6 +1536,7 @@ install(
         strata_svg
         strata_base
         strata_host_support
+        strata_host_session
     EXPORT StrataTargets
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib

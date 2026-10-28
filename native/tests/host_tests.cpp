@@ -5,6 +5,7 @@
 #include <strata/render_packet.hpp>
 
 #include "host/resource_root.hpp"
+#include "host/session.hpp"
 #include "host/system_fonts.hpp"
 
 #include <algorithm>
@@ -755,6 +756,83 @@ void durable_writer_isolates_and_retries_failures() {
 }
 #endif
 
+// The portable Session every host shell uses: imports resolve through the host reader, the Surface
+// frames into decoded packets on the Session's clock, and the release barrier hands the terminal
+// packet to the backend before the Surface and runtime close.
+void portable_session_runs_the_application_lifecycle() {
+    std::vector<std::string> codes;
+    std::vector<std::string> reads;
+    strata::host::SessionOptions options;
+    options.application_id = "host-tests.session";
+    options.stable_identity_seed = 7U;
+    options.read_text = [&reads](const std::string_view id) -> std::string {
+        reads.emplace_back(id);
+        if (id == "session/main.strata")
+            return "import \"part.strata\";\noverlay Main { root Part() }";
+        if (id == "session/part.strata")
+            return "component Part() { Panel(key: \"part\") }";
+        if (id == "session/broken.strata")
+            return "import \"session/missing.strata\";\noverlay Main { root Panel() }";
+        throw strata::host::ResourceNotFound("no module " + std::string(id));
+    };
+    options.on_diagnostic = [&codes](const strata_diagnostic& diagnostic) {
+        codes.emplace_back(diagnostic.code.data, diagnostic.code.size);
+    };
+    strata::host::Session session(std::move(options), strata::host::SessionAdapters{});
+
+    bool rejected = false;
+    try {
+        static_cast<void>(session.activate_source("session/broken.strata", 1U));
+    } catch (const strata::AbiError&) {
+        rejected = true;
+    }
+    check(rejected && std::ranges::find(codes, "STRATA.DSL.IMPORT_LOAD_FAILED") != codes.end(),
+          "a Session activated a module whose import its reader could not find");
+    reads.clear();
+    const strata_activation_info activated = session.activate_source("session/main.strata", 2U);
+    check(activated.status == STRATA_ACTIVATION_ACTIVATED,
+          "a Session did not activate a module with a resolved import");
+    check(reads == std::vector<std::string>{"session/main.strata", "session/part.strata"},
+          "a Session did not read the entry module and its import through the host reader");
+    check(std::ranges::find(session.module_resources(), "session/part.strata") !=
+              session.module_resources().end(),
+          "a Session did not remember the imported module");
+
+    strata::host::SessionSurface surface;
+    surface.root_name = "Main";
+    surface.environment.struct_size = sizeof(surface.environment);
+    surface.environment.generation = 1U;
+    surface.environment.framebuffer_width = 320;
+    surface.environment.framebuffer_height = 200;
+    surface.environment.logical_width = 320.0;
+    surface.environment.logical_height = 200.0;
+    surface.environment.scale = 1.0;
+    session.create_surface(surface);
+    check(session.has_surface(), "a Session did not create its Surface");
+
+    const strata::host::SurfacePacketFrame first = session.frame(5'000'000);
+    check(session.time() == 5'000'000 && first.packet != nullptr &&
+              first.packet->frame_index == first.surface.frame_index &&
+              first.packet_bytes == first.surface.render_packet_size,
+          "a Session frame did not decode the packet of the frame it produced");
+    session.record_host_frame(*first.packet, 1'000);
+    check(session.runtime().snapshot().info().time_nanoseconds == 5'000'000,
+          "the Session clock did not drive the runtime clock");
+
+    strata_surface_environment resized = surface.environment;
+    resized.generation = 2U;
+    resized.framebuffer_width = 640;
+    resized.logical_width = 640.0;
+    check(session.adopt_environment(resized), "a Session did not adopt a new environment");
+
+    bool consumed = false;
+    session.close([&consumed](const strata::host::RenderPacket&) { consumed = true; });
+    check(consumed && !session.has_surface(),
+          "a Session did not hand the terminal packet to its backend before closing");
+    check(std::ranges::find(codes, "STRATA.SURFACE.RELEASE_ABANDONED") == codes.end(),
+          "an ordered Session close abandoned its Surface");
+}
+
 } // namespace
 
 int strata_test_host() {
@@ -772,6 +850,7 @@ int strata_test_host() {
         runtime_images_upload_only_when_sampled();
         resource_root_maps_failures_and_confines_links();
         system_font_search_tolerates_unicode_names();
+        portable_session_runs_the_application_lifecycle();
 #if defined(_WIN32)
         durable_writer_isolates_and_retries_failures();
 #endif
