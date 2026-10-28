@@ -22,7 +22,7 @@
 namespace strata::headless {
 namespace {
 
-constexpr std::size_t vertex_size = 88U;
+constexpr std::size_t vertex_size = host::packet_vertex_bytes;
 
 struct Color final {
     float red = 1.0F;

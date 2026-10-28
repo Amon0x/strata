@@ -397,6 +397,20 @@ void SurfaceEnvironment::validate() const {
         throw std::invalid_argument(
             "surface environment contains invalid framebuffer, logical size, or scale");
     }
+    // The framebuffer is the logical size at `scale`. Either side may have been rounded to whole
+    // pixels (half a logical pixel at scale, plus one device pixel), and an empty axis (a
+    // minimized window) says nothing about the scale.
+    const double tolerance = 0.5 * scale + 1.0;
+    const auto consistent = [this, tolerance](const std::int64_t framebuffer,
+                                              const double logical) {
+        return framebuffer == 0 || logical == 0.0 ||
+               std::abs(static_cast<double>(framebuffer) - logical * scale) <= tolerance;
+    };
+    if (!consistent(framebuffer_width, logical_width) ||
+        !consistent(framebuffer_height, logical_height)) {
+        throw std::invalid_argument(
+            "surface environment scale disagrees with its framebuffer and logical size");
+    }
     layout_environment(0).validate();
 }
 

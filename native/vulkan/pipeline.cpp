@@ -63,7 +63,8 @@ VkPipeline Renderer::Impl::pipeline(std::string_view program, Blend blend, VkFor
         stages[i].module = modules[i];
         stages[i].pName = "main";
     }
-    VkVertexInputBindingDescription binding{0, 88, VK_VERTEX_INPUT_RATE_VERTEX};
+    VkVertexInputBindingDescription binding{
+        0, static_cast<std::uint32_t>(host::packet_vertex_bytes), VK_VERTEX_INPUT_RATE_VERTEX};
     std::array<VkVertexInputAttributeDescription, 7> attributes{};
     const std::array<std::uint32_t, 7> offsets{0, 12, 20, 24, 40, 56, 72};
     for (std::uint32_t i = 0; i < 7; ++i)

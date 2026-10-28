@@ -4515,6 +4515,7 @@ overlay Environment {
     compact_environment.framebuffer_height = 1'440;
     compact_environment.logical_width = 480.0;
     compact_environment.logical_height = 720.0;
+    compact_environment.scale = 2.0;
     compact_environment.safe_insets = ui::Edges{10.0, 0.0, 10.0, 0.0};
     compact_environment.density = ui::SurfaceDensity::compact;
     compact_environment.input = ui::SurfaceInputCapabilities{
@@ -4525,6 +4526,7 @@ overlay Environment {
     wide_environment.framebuffer_height = 1'400;
     wide_environment.logical_width = 1'200.0;
     wide_environment.logical_height = 700.0;
+    wide_environment.scale = 2.0;
     wide_environment.input = ui::SurfaceInputCapabilities{
         true, ui::PointerPrecision::fine, true, false, true, true, true,
     };
@@ -8149,6 +8151,39 @@ overlay Forwarded {
           "raw content filled a child component's slot instead of the one its component forwards");
 }
 
+void test_surface_environment_scale_matches_framebuffer() {
+    strata::ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 1280;
+    environment.framebuffer_height = 800;
+    environment.logical_width = 640.0;
+    environment.logical_height = 400.0;
+    environment.scale = 2.0;
+    environment.validate();
+    // Fractional scales round the framebuffer or the logical size to whole pixels.
+    environment.scale = 1.25;
+    environment.framebuffer_width = 1001;
+    environment.logical_width = 800.0;
+    environment.framebuffer_height = 500;
+    environment.logical_height = 400.0;
+    environment.validate();
+    // An empty framebuffer (a minimized window) carries no scale.
+    environment.framebuffer_width = 0;
+    environment.framebuffer_height = 0;
+    environment.validate();
+    environment.framebuffer_width = 1280;
+    environment.framebuffer_height = 800;
+    environment.logical_width = 640.0;
+    environment.logical_height = 400.0;
+    environment.scale = 1.0;
+    bool rejected = false;
+    try {
+        environment.validate();
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    check(rejected, "a scale that disagrees with the framebuffer and logical size was accepted");
+}
+
 int strata_test_ui(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--collections") {
@@ -8193,6 +8228,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_render_submission_opacity_scope_reuse();
         test_presentation_group_animation();
         test_cached_tone_during_pointer_hold();
+        test_surface_environment_scale_matches_framebuffer();
         if (argument_count >= 3 && std::string_view(arguments[2]).size() != 0U) {
             test_bundled_font_metrics(arguments[1]);
             test_bundled_texture_descriptor(arguments[1]);

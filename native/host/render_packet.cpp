@@ -200,7 +200,7 @@ class Reader final {
 }
 
 void validate_geometry(const RenderPacket& packet) {
-    const std::size_t vertex_count = packet.vertices.size() / 88U;
+    const std::size_t vertex_count = packet.vertices.size() / packet_vertex_bytes;
     for (const SubmissionBatch& batch : packet.batches) {
         const DrawBatch* draw = std::get_if<DrawBatch>(&batch);
         if (draw == nullptr)
@@ -290,7 +290,7 @@ using GroupExtents = std::vector<std::array<double, 4U>>;
         return result;
     constexpr double infinity = std::numeric_limits<double>::infinity();
     result.assign(groups.size(), {infinity, infinity, -infinity, -infinity});
-    for (std::size_t offset = 0U; offset + 88U <= vertices.size(); offset += 88U) {
+    for (std::size_t offset = 0U; offset + packet_vertex_bytes <= vertices.size(); offset += packet_vertex_bytes) {
         const std::uint8_t* const vertex = vertices.data() + offset;
         const std::uint32_t group = vertex_group(vertex);
         if (group == 0U || group >= result.size())
@@ -364,7 +364,7 @@ void append_group_regions(const std::vector<PresentationGroup>& previous,
         maximum_x = std::max(maximum_x, presented_x);
         maximum_y = std::max(maximum_y, presented_y);
     };
-    for (std::size_t offset = 0U; offset < patch.bytes.size(); offset += 88U) {
+    for (std::size_t offset = 0U; offset < patch.bytes.size(); offset += packet_vertex_bytes) {
         include(previous.data() + patch.offset + offset, previous_groups);
         include(patch.bytes.data() + offset, groups);
     }
@@ -452,7 +452,7 @@ void append_texture_regions(const RenderPacket& packet,
             for (std::size_t corner = 0U; corner < corners.size(); ++corner) {
                 const std::size_t vertex =
                     static_cast<std::size_t>(packet.indices[first + corner]) + draw->base_vertex;
-                corners[corner] = packet.vertices.data() + vertex * 88U;
+                corners[corner] = packet.vertices.data() + vertex * packet_vertex_bytes;
             }
             if (exact) {
                 double u0 = infinity;
@@ -804,7 +804,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
         result.vertex_patches = geometry_patches(
             input,
             result.vertices.size(),
-            88U,
+            packet_vertex_bytes,
             "vertex"
         );
         result.index_patches = geometry_patches(

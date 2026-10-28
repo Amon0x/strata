@@ -813,8 +813,8 @@ screen Main {
     strata_surface_environment environment{
         sizeof(strata_surface_environment),
         1U,
-        480,
-        320,
+        600,
+        400,
         480.0,
         320.0,
         1.25,

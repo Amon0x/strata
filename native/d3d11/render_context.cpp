@@ -550,7 +550,7 @@ struct RenderContext::Impl final {
         context->RSSetState(rasterizer.Get());
         context->IASetInputLayout(input_layout.Get());
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        constexpr UINT stride = 88U;
+        constexpr UINT stride = static_cast<UINT>(host::packet_vertex_bytes);
         constexpr UINT offset = 0U;
         ID3D11Buffer* const vertex = buffers.vertices[buffers.active].Get();
         context->IASetVertexBuffers(0U, 1U, &vertex, &stride, &offset);
