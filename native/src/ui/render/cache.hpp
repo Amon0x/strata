@@ -149,6 +149,13 @@ struct RenderEngine::Impl final {
     void publish_groups(RenderCommandBuffer& output);
     std::uint64_t fragment_tree_generation = 0U;
     RenderCommandBuffer retained_base_commands;
+    /**
+     * The base stream plus the detached overlays last appended to it, and those overlays. A
+     * settled frame whose overlays draw the same reuses the composed stream instead of copying
+     * the base into a new one.
+     */
+    RenderCommandBuffer retained_composed_commands;
+    std::vector<RenderCommand> retained_overlay_commands;
     std::optional<RenderGenerationToken> retained_base_generations;
     std::uint64_t retained_tree_generation = 0U;
     std::uint64_t retained_layout_generation = 0U;

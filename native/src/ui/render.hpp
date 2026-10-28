@@ -404,6 +404,13 @@ class RenderCommandBuffer final {
     void clear() noexcept;
     [[nodiscard]] const std::vector<RenderCommand>& commands() const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;
+    /**
+     * Whether both buffers view one stream. Storage is copy-on-write, so shared storage means
+     * equal commands without comparing them.
+     */
+    [[nodiscard]] bool shares_storage(const RenderCommandBuffer& other) const noexcept {
+        return commands_ == other.commands_;
+    }
     /** This frame's presentation groups, ordered by index. Not part of command equality. */
     void set_groups(std::vector<RenderGroup> groups);
     [[nodiscard]] const std::vector<RenderGroup>& groups() const noexcept;

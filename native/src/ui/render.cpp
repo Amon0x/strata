@@ -346,8 +346,24 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     };
 
     if (implementation_->base_matches(tree, layout, input, motion, generations)) {
-        output = implementation_->retained_base_commands;
+        // Overlays are drawn into a scratch stream first: when they match the last frame's, the
+        // composed stream is shared rather than the whole base copied again.
+        output = RenderCommandBuffer{};
         append_detached_overlays(collect_overlays());
+        std::vector<RenderCommand>& retained_overlays = implementation_->retained_overlay_commands;
+        // Composition is cleared whenever the base is retained again, so its size tells whether
+        // it was composed over the current base.
+        if (implementation_->retained_composed_commands.size() !=
+                implementation_->retained_base_commands.size() + retained_overlays.size() ||
+            output.commands() != retained_overlays) {
+            std::vector<RenderCommand> overlays = output.commands();
+            output = implementation_->retained_base_commands;
+            output.append(overlays);
+            implementation_->retained_composed_commands = output;
+            retained_overlays = std::move(overlays);
+        } else {
+            output = implementation_->retained_composed_commands;
+        }
         counters.commands_emitted = output.size();
         return counters;
     }
@@ -1041,6 +1057,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
     // Cache the presentation table with its commands; cache hits must retain tone and motion.
     implementation_->publish_groups(output);
     implementation_->retain_base(tree, layout, input, generations, output);
+    implementation_->retained_composed_commands.clear();
+    implementation_->retained_overlay_commands.clear();
     append_detached_overlays(overlays);
     counters.commands_emitted = output.size();
     return counters;
@@ -1090,6 +1108,8 @@ void RenderEngine::clear() {
     implementation_->next_group_index = 1U;
     implementation_->fragments.clear();
     implementation_->retained_base_commands.clear();
+    implementation_->retained_composed_commands.clear();
+    implementation_->retained_overlay_commands.clear();
     implementation_->retained_base_generations.reset();
     implementation_->fragment_tree_generation = 0U;
 }

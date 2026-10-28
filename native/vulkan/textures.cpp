@@ -111,40 +111,19 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
 
 std::pair<Slice, Slice> Renderer::Impl::upload_geometry(const host::RenderPacket& packet) {
     auto& layer = geometry[active_layer];
-    const auto* index_bytes = reinterpret_cast<const std::uint8_t*>(packet.indices.data());
-    const std::size_t index_byte_count = packet.indices.size() * 4;
-    // A retained packet repeats the epoch and changes nothing. A patch packet is the decoder's step
-    // from the previous epoch (it rejects any other), so it applies only on top of exactly that
-    // epoch; after a skipped epoch (a frame that failed after the decoder applied it) the copy is
-    // older than the patches assume and is replaced from the decoder's complete geometry, as D3D11
-    // does.
-    const bool same_size = layer.seen && !packet.full_geometry_payload &&
-                           packet.vertices.size() == layer.vertices.size() &&
-                           index_byte_count == layer.indices.size();
-    const bool retained = same_size && layer.epoch == packet.geometry_epoch;
-    const bool incremental = same_size && layer.epoch + 1U == packet.geometry_epoch;
-    if (!retained && !incremental) {
-        layer.vertices.assign(packet.vertices.begin(), packet.vertices.end());
-        layer.indices.assign(index_bytes, index_bytes + index_byte_count);
+    // The decoder's arrays are the complete current geometry, patches already applied, so a frame
+    // slot that is behind copies straight from them; no host mirror is kept or patched. A retained
+    // packet repeats the epoch and changes nothing; a complete payload always replaces.
+    if (!layer.seen || layer.epoch != packet.geometry_epoch || packet.full_geometry_payload) {
         ++layer.generation;
         layer.seen = true;
-    } else if (incremental && (!packet.vertex_patches.empty() || !packet.index_patches.empty())) {
-        const auto patch = [](std::vector<std::uint8_t>& bytes, const auto& patches) {
-            for (const auto& update : patches) {
-                if (update.offset > bytes.size() ||
-                    update.bytes.size() > bytes.size() - update.offset)
-                    throw std::invalid_argument("Vulkan geometry patch is out of range");
-                std::copy(update.bytes.begin(), update.bytes.end(),
-                          bytes.begin() + static_cast<std::ptrdiff_t>(update.offset));
-            }
-        };
-        patch(layer.vertices, packet.vertex_patches);
-        patch(layer.indices, packet.index_patches);
-        ++layer.generation;
     }
     layer.epoch = packet.geometry_epoch;
-    const auto vertex_size = std::max<std::size_t>(16, layer.vertices.size());
-    const auto index_size = std::max<std::size_t>(16, layer.indices.size());
+    const std::span<const std::uint8_t> vertices = packet.vertices;
+    const std::span<const std::uint8_t> indices{
+        reinterpret_cast<const std::uint8_t*>(packet.indices.data()), packet.indices.size() * 4};
+    const auto vertex_size = std::max<std::size_t>(16, vertices.size());
+    const auto index_size = std::max<std::size_t>(16, indices.size());
     auto& slot = layer.slots[frame_index];
     bool stale = slot.generation != layer.generation;
     if (!slot.vertices || slot.vertices->size < vertex_size) {
@@ -161,10 +140,10 @@ std::pair<Slice, Slice> Renderer::Impl::upload_geometry(const host::RenderPacket
     }
     if (stale) {
         // This slot's previous frame has completed (begin waited for it), so the host may write.
-        if (!layer.vertices.empty())
-            std::memcpy(slot.vertices->mapped, layer.vertices.data(), layer.vertices.size());
-        if (!layer.indices.empty())
-            std::memcpy(slot.indices->mapped, layer.indices.data(), layer.indices.size());
+        if (!vertices.empty())
+            std::memcpy(slot.vertices->mapped, vertices.data(), vertices.size());
+        if (!indices.empty())
+            std::memcpy(slot.indices->mapped, indices.data(), indices.size());
         slot.generation = layer.generation;
     }
     return {{slot.vertices->buffer, 0, vertex_size}, {slot.indices->buffer, 0, index_size}};

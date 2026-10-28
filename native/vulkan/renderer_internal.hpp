@@ -143,11 +143,9 @@ struct Renderer::Impl {
         std::unique_ptr<Buffer> vertices, indices;
         std::uint64_t generation = 0;
     };
-    /** The layer's current geometry, patched on the CPU exactly as a single GPU buffer would be. */
+    /** Which epoch each frame slot of a layer holds; the decoder owns the geometry itself. */
     struct Geometry {
         std::array<SlotGeometry, frames_in_flight> slots;
-        std::vector<std::uint8_t> vertices;
-        std::vector<std::uint8_t> indices;
         std::uint64_t generation = 0;
         std::uint64_t epoch = 0;
         bool seen = false;

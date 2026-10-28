@@ -45,7 +45,7 @@ const RenderSubmission& RenderSubmissionCache::resolve(
           glyph_atlas_generation_ == glyph_atlas.generation() && text_engine_ == text_engine;
     if (submission_.has_value() && text_resources_match &&
         environment_ == environment &&
-        commands_.commands() == commands.commands() &&
+        (commands_.shares_storage(commands) || commands_.commands() == commands.commands()) &&
         std::ranges::equal(texture_descriptors_, textures)) {
         ++hits_;
         return *submission_;

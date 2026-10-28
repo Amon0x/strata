@@ -834,7 +834,13 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
             );
         }
     }
-    RenderPacket result = has_geometry_patches ? std::move(*retained_) : RenderPacket{};
+    // A complete payload decodes into the buffers of the packet before last, so steady frames
+    // reuse their allocations; the retained packet stays intact until the new one is valid.
+    RenderPacket result = has_geometry_patches ? std::move(*retained_)
+                          : spare_.has_value() ? std::move(*spare_)
+                                               : RenderPacket{};
+    if (!has_geometry_patches)
+        spare_.reset();
     std::optional<PatchDecodeTransaction> patch_transaction;
     if (has_geometry_patches) {
         patch_transaction.emplace(retained_, result);
@@ -873,10 +879,21 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     } else {
         const std::span<const std::uint8_t> vertices = input.raw(vertex_bytes);
         result.vertices.assign(vertices.begin(), vertices.end());
-        result.indices.clear();
-        result.indices.reserve(input.plausible(index_count, 4U));
-        for (std::uint32_t index = 0U; index < index_count; ++index)
-            result.indices.push_back(input.u32());
+        const std::span<const std::uint8_t> indices =
+            input.raw(static_cast<std::size_t>(index_count) * sizeof(std::uint32_t));
+        result.indices.resize(index_count);
+        if constexpr (std::endian::native == std::endian::little) {
+            if (!indices.empty())
+                std::memcpy(result.indices.data(), indices.data(), indices.size());
+        } else {
+            for (std::size_t index = 0U; index < index_count; ++index) {
+                const std::uint8_t* const at = indices.data() + index * sizeof(std::uint32_t);
+                result.indices[index] = static_cast<std::uint32_t>(at[0U]) |
+                                        static_cast<std::uint32_t>(at[1U]) << 8U |
+                                        static_cast<std::uint32_t>(at[2U]) << 16U |
+                                        static_cast<std::uint32_t>(at[3U]) << 24U;
+            }
+        }
     }
     result.materials = id_table(input, "material");
     result.effects = id_table(input, "effect");
@@ -1020,14 +1037,19 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     if (effect_depth != 0U) {
         throw std::invalid_argument("render content effect stack is unbalanced");
     }
-    if (has_geometry_patches && patch_transaction->batches_changed(result)) {
+    const bool batches_changed =
+        !has_geometry_patches || patch_transaction->batches_changed(result);
+    if (has_geometry_patches && batches_changed) {
         result.geometry_dirty_all = true;
         result.geometry_dirty_regions.clear();
     }
     GroupExtents extents = group_extents(result.vertices, groups);
     if (!result.geometry_dirty_all && groups != result.groups)
         append_group_regions(result.groups, groups, extents, result.geometry_dirty_regions);
-    validate_geometry(result);
+    // A vertex patch keeps the vertex count, so ranges validated for the retained epoch stay valid
+    // unless an index or a batch changed.
+    if (batches_changed || !result.index_patches.empty())
+        validate_geometry(result);
     if (retained_geometry) {
         if (result.vertices != retained_->vertices || result.indices != retained_->indices) {
             throw std::invalid_argument(
@@ -1045,6 +1067,8 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
                                result.geometry_dirty_regions);
     }
     result.groups = std::move(groups);
+    if (!has_geometry_patches && retained_.has_value())
+        spare_ = std::move(*retained_);
     retained_ = std::move(result);
     if (patch_transaction.has_value()) patch_transaction->commit();
     grouped_batches_.swap(grouped);
@@ -1092,6 +1116,7 @@ void RenderPacketDecoder::assign_sample_revisions(RenderPacket& packet) {
 
 void RenderPacketDecoder::reset() noexcept {
     retained_.reset();
+    spare_.reset();
     grouped_batches_.clear();
     group_extents_.clear();
     texture_sizes_.clear();

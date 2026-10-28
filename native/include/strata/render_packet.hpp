@@ -322,6 +322,8 @@ class RenderPacketDecoder final {
 
   private:
     std::optional<RenderPacket> retained_;
+    /** The previous complete packet's buffers, reused by the next complete payload. */
+    std::optional<RenderPacket> spare_;
     /** Group-local copies of grouped blur/effect batches, re-presented when the table changes. */
     std::vector<std::pair<std::size_t, SubmissionBatch>> grouped_batches_;
     /** Layout-space left/top/right/bottom of each group's retained vertices, by group index. */
