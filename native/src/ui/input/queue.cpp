@@ -169,26 +169,7 @@ Point InputRouter::injection_point(const std::string_view key) const {
         throw std::invalid_argument("input target key is not retained and arranged");
     }
     Rect hit = hit_bounds_resolver_ ? hit_bounds_resolver_(*node, *record) : record->hit_bounds;
-    if (motion_ != nullptr) {
-        MotionTransform transform;
-        std::vector<const RetainedNode*> route;
-        for (const RetainedNode* current = node; current != nullptr; current = current->parent()) {
-            route.push_back(current);
-        }
-        for (auto current = route.rbegin(); current != route.rend(); ++current) {
-            const LayoutRecord* current_layout = layout_->find((*current)->identity());
-            if (current_layout == nullptr) continue;
-            transform = concatenate_presentation_transform(
-                transform,
-                local_presentation_transform(
-                    **current,
-                    *motion_,
-                    current_layout->bounds
-                )
-            );
-        }
-        hit = transform_presentation_bounds(hit, transform);
-    }
+    hit = presented_bounds(*node, hit);
     return Point{hit.x + hit.width * 0.5, hit.y + hit.height * 0.5};
 }
 

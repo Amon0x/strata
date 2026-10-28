@@ -121,21 +121,7 @@ bool InputRouter::move_focus_spatial(const std::string_view direction,
             return std::nullopt;
         Rect bounds =
             hit_bounds_resolver_ ? hit_bounds_resolver_(node, *record) : record->hit_bounds;
-        if (motion_ == nullptr)
-            return bounds;
-        MotionTransform transform;
-        std::vector<const RetainedNode*> route;
-        for (const RetainedNode* item = &node; item != nullptr; item = item->parent()) {
-            route.push_back(item);
-        }
-        for (auto item = route.rbegin(); item != route.rend(); ++item) {
-            const LayoutRecord* item_layout = layout_->find((*item)->identity());
-            if (item_layout == nullptr)
-                continue;
-            transform = concatenate_presentation_transform(
-                transform, local_presentation_transform(**item, *motion_, item_layout->bounds));
-        }
-        return transform_presentation_bounds(bounds, transform);
+        return presented_bounds(node, bounds);
     };
     const std::optional<Rect> source = presented(*current);
     if (!source.has_value())

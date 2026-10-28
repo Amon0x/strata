@@ -240,15 +240,11 @@ void table_foreground(WidgetRenderScope& scope) {
 }
 
 std::optional<Rect> item_grid_descendant_clip(WidgetRenderScope& scope) {
-    const runtime::ValueList* entries = scope.list("entries");
-    if (entries == nullptr) return std::nullopt;
-    const bool has_header = std::ranges::any_of(entries->values, [](const runtime::Value& entry) {
-        const std::string* kind = widget_string_value(entry.field("kind"));
-        return kind != nullptr && *kind == "HEADER";
-    });
-    if (!has_header) return std::nullopt;
+    // The description publishes its group header band height only when the grid has headers.
+    const double header = scope.number("$headerBandHeight", 0.0);
+    if (header <= 0.0) return std::nullopt;
     const Rect viewport = scope.layout().viewport.value_or(scope.layout().bounds);
-    const double inset = std::min(28.0, viewport.height);
+    const double inset = std::min(header, viewport.height);
     return Rect{viewport.x, viewport.y + inset, viewport.width, viewport.height - inset};
 }
 

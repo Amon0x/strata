@@ -502,22 +502,7 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
               const Point origin = editable_text_origin(*viewport, text_layout, multiline,
                                                         input_.editor_scroll(node.identity()));
               Rect caret = text_layout_caret_rect(text_layout, origin, editor.text, editor.caret);
-              MotionTransform transform;
-              std::vector<const RetainedNode*> route;
-              for (const RetainedNode* current = &node; current != nullptr;
-                   current = current->parent()) {
-                  route.push_back(current);
-              }
-              for (auto current = route.rbegin(); current != route.rend(); ++current) {
-                  const LayoutRecord* current_layout =
-                      layout_engine_.result().find((*current)->identity());
-                  if (current_layout == nullptr)
-                      continue;
-                  transform = concatenate_presentation_transform(
-                      transform,
-                      local_presentation_transform(**current, motion_, current_layout->bounds));
-              }
-              caret = transform_presentation_bounds(caret, transform);
+              caret = input_.presented_bounds(node, caret);
               return runtime::HostServiceRect{
                   caret.x,
                   caret.y,
@@ -1791,22 +1776,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
                         CornerRadii{},
                     });
                 }
-                MotionTransform transform;
-                std::vector<const RetainedNode*> route;
-                for (const RetainedNode* current = inspected; current != nullptr;
-                     current = current->parent()) {
-                    route.push_back(current);
-                }
-                for (auto current = route.rbegin(); current != route.rend(); ++current) {
-                    const LayoutRecord* current_layout = laid_out.find((*current)->identity());
-                    if (current_layout == nullptr)
-                        continue;
-                    transform = concatenate_presentation_transform(
-                        transform,
-                        local_presentation_transform(**current, motion_, current_layout->bounds));
-                }
-                const Rect hit_bounds =
-                    transform_presentation_bounds(record->hit_bounds, transform);
+                const Rect hit_bounds = input_.presented_bounds(*inspected, record->hit_bounds);
                 if (hit_bounds != record->bounds) {
                     render_commands_.append(BorderRenderCommand{
                         hit_bounds,

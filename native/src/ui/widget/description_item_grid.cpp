@@ -6,6 +6,9 @@
 namespace strata::ui::collection_description {
 namespace {
 
+/** Height of a group header band; the band's virtual extent adds the grid gap below it. */
+constexpr double header_band_height = 26.0;
+
 [[nodiscard]] bool header_kind(const runtime::Value* entry) noexcept {
     const std::string* kind = entry != nullptr
         ? widget_description_string(entry->field("kind"))
@@ -77,6 +80,12 @@ void expand(WidgetDescriptionScope& scope) {
         }
     }
     flush();
+    // Presentation clips descendants below the header strip; it reads the band's real height
+    // from here rather than repeating it.
+    if (std::ranges::any_of(bands, &Band::header)) {
+        description.properties.insert_or_assign(
+            "$headerBandHeight", runtime::ExpressionValue(runtime::Value(header_band_height)));
+    }
     scope.set_layout("clip", runtime::Value(true));
     scope.set_layout("scrollHorizontal", runtime::Value(true));
     scope.set_layout("scrollVertical", runtime::Value(true));
@@ -90,7 +99,7 @@ void expand(WidgetDescriptionScope& scope) {
     band_members.reserve(bands.size());
     for (const Band& band : bands) {
         band_keys.emplace_back(runtime::KeyValue{band.key});
-        band_extents.push_back(band.header ? 26.0 + gap : cell_height + gap);
+        band_extents.push_back(band.header ? header_band_height + gap : cell_height + gap);
         std::vector<std::string> members;
         if (!band.header) {
             members.reserve(band.entries.size());
@@ -125,7 +134,7 @@ void expand(WidgetDescriptionScope& scope) {
             DescriptionNode::Properties properties = widget_text_properties(
                 label != nullptr ? *label : band.key,
                 widget_object({
-                    {"height", runtime::Value(26.0)},
+                    {"height", runtime::Value(header_band_height)},
                     {"width", runtime::Value(band_width)},
                 })
             );

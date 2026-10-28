@@ -2596,6 +2596,13 @@ overlay SlidingTabs {
     const std::vector<ui::WidgetSubtarget> targets = surface->input().subtargets(tabs->identity());
     const auto first = std::ranges::find(targets, std::string("one"), &ui::WidgetSubtarget::id);
     check(first != targets.end(), "Tabs did not project its tab subtargets");
+    // IME placement, injection and spatial navigation take the presented transform from the same
+    // pass that places hit regions, so the drawn bounds are where hit testing finds the node.
+    const ui::LayoutRecord* tabs_layout = surface->layout().find(tabs->identity());
+    const ui::Rect drawn_tabs = surface->input().presented_bounds(*tabs, tabs_layout->bounds);
+    check(std::abs(drawn_tabs.x - (tabs_layout->bounds.x + 100.0)) < 2.0 &&
+              surface->input().inspection_target(center(drawn_tabs)) == tabs,
+          "presented bounds disagreed with where hit testing places a moving node");
     // Press where the first tab is drawn, which is where the second one is laid out.
     const ui::Point drawn{center(first->bounds).x + 100.0, center(first->bounds).y};
     std::vector<ui::SurfaceInputEvent> events;
@@ -2615,6 +2622,44 @@ overlay SlidingTabs {
                                          : nullptr;
     check(selected != nullptr && selected->string() != nullptr && *selected->string() == "one",
           "a tab inside a moving panel was hit where it is laid out instead of where it is drawn");
+}
+
+void test_item_grid_header_clip(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay GroupedGrid {
+  root Panel(key: "grid.root", layout: { kind: "COLUMN", width: 640, height: 300 }) {
+    ItemGrid(
+      key: "grid.items",
+      entries: [
+        { key: "group", kind: "HEADER", label: "Group" },
+        { key: "a", kind: "ITEM", label: "A" },
+        { key: "b", kind: "ITEM", label: "B" }
+      ],
+      gap: 10,
+      layout: { width: 400, height: 240 }
+    )
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("grouped-grid", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "GroupedGrid", 640.0, 300.0, false);
+    static_cast<void>(surface->frame(1'000'000));
+    const ui::RetainedNode* grid = surface->tree().find_key("grid.items");
+    const ui::LayoutRecord* record =
+        grid != nullptr ? surface->layout().find(grid->identity()) : nullptr;
+    check(record != nullptr, "grouped grid fixture was not laid out");
+    const ui::Rect viewport = record->viewport.value_or(record->bounds);
+    // The descendant clip strip is the header band's own height, not a constant or the band's
+    // virtual extent (which adds the grid gap).
+    const bool clipped_at_header = std::ranges::any_of(
+        surface->render_commands().commands(), [&viewport](const ui::RenderCommand& command) {
+            const auto* clip = std::get_if<ui::ClipPushRenderCommand>(&command);
+            return clip != nullptr && std::abs(clip->rect.y - (viewport.y + 26.0)) < 0.01 &&
+                   std::abs(clip->rect.height - (viewport.height - 26.0)) < 0.01;
+        });
+    check(clipped_at_header, "item grid did not clip its descendants at the header band height");
 }
 
 void test_queued_batch_sees_rebuilt_tree(const std::filesystem::path& resources) {
@@ -2862,6 +2907,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_post_layout_reveal_reaches_layout(resources);
         test_sticky_table_header_blocks_hits(resources);
         test_subtargets_hit_in_presented_space(resources);
+        test_item_grid_header_clip(resources);
         test_queued_batch_sees_rebuilt_tree(resources);
         test_hover_follows_content_under_still_pointer(resources);
         test_palette_projection_is_cached_across_frames(resources);

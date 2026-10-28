@@ -352,23 +352,33 @@ std::optional<std::size_t> InputRouter::resolve_text_offset(const RetainedNode& 
 }
 
 Point InputRouter::logical_pointer_position(const RetainedNode& node, Point position) const {
-    if (motion_ != nullptr) {
-        MotionTransform transform;
-        std::vector<const RetainedNode*> route;
-        for (const RetainedNode* current = &node; current != nullptr; current = current->parent()) {
-            route.push_back(current);
-        }
-        for (auto current = route.rbegin(); current != route.rend(); ++current) {
-            const LayoutRecord* current_layout = layout_->find((*current)->identity());
-            if (current_layout == nullptr)
-                continue;
-            transform = concatenate_presentation_transform(
-                transform,
-                local_presentation_transform(**current, *motion_, current_layout->bounds));
-        }
-        position = inverse_presentation_point(position, transform);
-    }
+    if (motion_ != nullptr)
+        position = inverse_presentation_point(position, presentation_transform(node));
     return position;
+}
+
+MotionTransform InputRouter::presentation_transform(const RetainedNode& node) const {
+    if (tree_ == nullptr || layout_ == nullptr || motion_ == nullptr)
+        return MotionTransform{};
+    if (!preparing_pointer_geometry_)
+        prepare_pointer_geometry();
+    if (const auto found = presentation_transforms_.find(node.identity());
+        found != presentation_transforms_.end()) {
+        return found->second;
+    }
+    // The hit pass skips exiting subtrees; compose from the nearest node it placed.
+    const MotionTransform inherited =
+        node.parent() != nullptr ? presentation_transform(*node.parent()) : MotionTransform{};
+    const LayoutRecord* record = layout_->find(node.identity());
+    return record != nullptr
+               ? concatenate_presentation_transform(
+                     inherited, local_presentation_transform(node, *motion_, record->bounds))
+               : inherited;
+}
+
+Rect InputRouter::presented_bounds(const RetainedNode& node, const Rect bounds) const {
+    return motion_ != nullptr ? transform_presentation_bounds(bounds, presentation_transform(node))
+                              : bounds;
 }
 
 void InputRouter::seed_pointer_text_navigation(const RetainedNode& node,
@@ -728,6 +738,7 @@ void InputRouter::prepare_pointer_geometry() const {
     if (tree_ == nullptr || tree_->root() == nullptr || layout_ == nullptr) {
         pointer_hit_entries_.clear();
         pointer_hit_index_.clear();
+        presentation_transforms_.clear();
         projected_subtargets_.clear();
         detached_subtargets_.clear();
         pointer_geometry_ready_ = false;
@@ -755,6 +766,7 @@ void InputRouter::prepare_pointer_geometry() const {
     } prepared{preparing_pointer_geometry_};
     pointer_hit_entries_.clear();
     pointer_hit_index_.clear();
+    presentation_transforms_.clear();
     projected_subtargets_.clear();
     detached_subtargets_.clear();
     pointer_hit_entries_.reserve(layout_->records.size());
@@ -782,14 +794,17 @@ void InputRouter::prepare_pointer_geometry() const {
             return;
         if (!visit_portals && record->kind == LayoutKind::portal)
             return;
-        const double opacity = inherited_opacity * local_presentation_opacity(node, motion_);
-        if (opacity <= 1.0e-3)
-            return;
+        // Every placed node keeps the transform it is presented with, hittable or not: pointer
+        // inversion, IME placement, spatial navigation and injection read it from here.
         const MotionTransform transform =
             motion_ != nullptr
                 ? concatenate_presentation_transform(
                       inherited, local_presentation_transform(node, *motion_, record->bounds))
                 : inherited;
+        presentation_transforms_.insert_or_assign(node.identity(), transform);
+        const double opacity = inherited_opacity * local_presentation_opacity(node, motion_);
+        if (opacity <= 1.0e-3)
+            return;
         std::optional<Rect> child_clip = traversal_clip;
         const auto clip_children = [&child_clip, &inherited](const Rect clip) {
             const Rect transformed = transform_presentation_bounds(clip, inherited);
