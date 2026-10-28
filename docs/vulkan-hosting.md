@@ -57,6 +57,15 @@ actual initial layout and desired final layout. Preservation requires initialize
 use `TargetLoadAction::clear` for an undefined target. The host owns subsequent layout tracking.
 Use premultiplied-alpha compositing when sampling a transparent Strata output into another target.
 
+An RGBA16F target is not a different colour space. Strata draws in the encoded (sRGB-curve) space
+its colours are authored in, exactly as for an RGBA8 target: no linearization, no scRGB, and text
+coverage weighted for that encoded space (`host::text_coverage`). Every shader output, built-in,
+authored material or authored effect pass, is clamped to [0, 1] before blending, so a float target
+holds the values an RGBA8 target would before quantization, and its effect intermediates match an
+RGBA8 target's. Only fixed-function blending is unclamped: an `additive` draw can sum past 1.0 in a
+float target where an UNORM target saturates, so a compositor reading the float target should clamp
+(or treat it as display-referred SDR) before presenting it.
+
 ```cpp
 strata::vulkan::Device gpu{physicalDevice, device, graphicsQueue, graphicsQueueFamily};
 strata::vulkan::Presenter presenter(runtime, gpu);

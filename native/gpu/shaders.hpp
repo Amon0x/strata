@@ -222,7 +222,9 @@ float4 strataShade(PixelInput input) {
 /** Entry point of the built-in pixel shader; the shading itself lives in the shared block. */
 constexpr std::string_view builtin_entry = R"hlsl(
 float4 main(PixelInput input) : SV_TARGET {
-    float4 color = strataShade(input);
+    // Shading writes the encoded [0, 1] values an RGBA8 target would hold, whatever the target's
+    // format: an RGBA16F target receives the same values, not extended-range or linear light.
+    float4 color = saturate(strataShade(input));
     float2 logicalPixel =
         input.position.xy * logicalSize / max(framebufferSize, 1.0);
     color = strataApplyRoundedClips(color, logicalPixel);
@@ -291,7 +293,7 @@ float4 main(PixelInput input) : SV_TARGET {
     // A material describes a filled surface, so only fills reach it. Text, images, borders and
     // shadows drawn inside its scope keep the built-in shading: handing a material glyph coverage
     // to shade as though it were a rounded rectangle is what turns legible text into a smear.
-    float4 color = (mode == 0 || mode == 2) ? material(input) : strataShade(input);
+    float4 color = saturate((mode == 0 || mode == 2) ? material(input) : strataShade(input));
     float2 logicalPixel =
         input.position.xy * logicalSize / max(framebufferSize, 1.0);
     color = strataApplyRoundedClips(color, logicalPixel);

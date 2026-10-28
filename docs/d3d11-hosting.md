@@ -170,6 +170,11 @@ renderer.render("main.surface", packet, target, frame);
 `render()` never presents. Submit at the point in the host frame where the UI should be composited,
 then continue the host's normal resolve and presentation path.
 
+A floating-point target (`DXGI_FORMAT_R16G16B16A16_FLOAT`) is not a different colour space: Strata
+writes the same encoded [0, 1] values it writes to an RGBA8 target, with no linearization, and only
+`additive` blending can exceed 1.0 there (see [Vulkan hosting](vulkan-hosting.md) for the full
+rule, which both backends share).
+
 ## Context-state ownership
 
 By default, `ContextStatePolicy::preserve` uses D3D11.1 device-context state swapping. Strata draws

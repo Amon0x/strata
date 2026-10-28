@@ -112,7 +112,9 @@ float4 main(PixelInput pixelInput) : SV_TARGET {
     input.pixel = pixelInput.position.xy;
     input.logicalPixel = input.pixel * effectLogicalSize / max(effectTargetSize, 1.0);
     input.localUv = (input.pixel - effectBounds.xy) / max(effectBounds.zw, 1.0);
-    float4 color = effect(input);
+    // As the material entry: an authored pass yields the encoded [0, 1] values an RGBA8
+    // intermediate would hold, so RGBA16F workspaces and targets carry the same image.
+    float4 color = saturate(effect(input));
     color.rgb *= color.a;
     return color;
 }
