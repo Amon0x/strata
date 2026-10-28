@@ -539,10 +539,11 @@ strata_add_extension_package(
 )
 target_include_directories(strata_demo_extension PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 strata_target_defaults(strata_demo_extension)
+# Packages for the bundled demonstration applications, built like any external package.
 strata_add_extension_package(
     TARGET strata_control_deck_extension
     PACKAGE strata.control-deck.v1
-    SOURCES src/extensions/control_deck_package.cpp
+    SOURCES packages/control_deck/control_deck_package.cpp
     INSTALL
 )
 strata_target_defaults(strata_control_deck_extension)
@@ -898,18 +899,24 @@ if(STRATA_BUILD_SAMPLES)
 endif()
 
 if(WIN32 AND STRATA_BUILD_DESKTOP)
+    # The desktop launcher: application manifests run on Strata::desktop, and with no manifest it
+    # runs the bundled showcase application from apps/showcase.
     add_executable(
         strata_desktop
+        apps/showcase/host.cpp
+        apps/showcase/performance.cpp
+        apps/showcase/showcase.cpp
         desktop/durable_writer.cpp
-        desktop/host.cpp
         desktop/launch.cpp
         desktop/launch_manifest.cpp
         desktop/main.cpp
-        desktop/performance.cpp
         desktop/preview.cpp
-        desktop/showcase.cpp
         desktop/window_placement.cpp
         headless/scenario.cpp
+    )
+    target_include_directories(
+        strata_desktop
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps/showcase ${CMAKE_CURRENT_SOURCE_DIR}/desktop
     )
     target_link_libraries(
         strata_desktop
@@ -1189,13 +1196,16 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         tests/browser_model_tests.cpp
         tests/showcase_model_tests.cpp
         headless/scenario.cpp
-        desktop/showcase.cpp
+        apps/showcase/showcase.cpp
     )
     target_link_libraries(
         strata_host_tests
         PRIVATE Strata::host Strata::render_host strata_application_contracts strata_host_session
     )
-    target_include_directories(strata_host_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/desktop)
+    target_include_directories(
+        strata_host_tests
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps/showcase ${CMAKE_CURRENT_SOURCE_DIR}/desktop
+    )
     if(WIN32)
         target_sources(strata_host_tests PRIVATE desktop/durable_writer.cpp)
     endif()
@@ -1643,6 +1653,9 @@ if(STRATA_CLANG_FORMAT)
         CONFIGURE_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h
         ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/*.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/apps/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packages/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/desktop/*.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/desktop/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/preview/*.hpp

@@ -433,7 +433,7 @@ semantic work. These assertions defend the lifecycle contract instead of benchma
 machine-dependent wall-clock timing.
 
 The shipped packages are the references: `strata_demo_extension` covers activation, children,
-disclosure, motion, overlays, and behaviors; `strata_control_deck_extension` implements both a
+disclosure, motion, overlays, and behaviors; `strata_control_deck_extension` (`native/packages/control_deck`) implements both a
 multi-region continuous color control and a production gradient editor through public headers only.
 The gradient workspace covers stable overlapping stop handles, add/remove/reorder, retained and
 controlled values, palette selection, keyboard editing, semantic children, typed style colors, a

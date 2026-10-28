@@ -14,6 +14,15 @@ Both paths use the same public C ABI, packet-v13 decoder, D3D11 renderer, resour
 clipboard/IMM32 adapters, source-import resolver, complete window-message translator, and ordered
 GPU-resource release barrier.
 
+`ApplicationHost` is a Win32 shell over `strata::host::Session` (`native/host/session.hpp`,
+installed as `Strata::host_session`), the portable application session the headless host and the
+SDL preview also run on. A Session owns the runtime with its caller clock and diagnostics, installs
+the host's adapters, configures the application and its extension packages, activates source while
+resolving imports through the host's reader, creates the Surface, frames it into decoded packets,
+records host-frame telemetry, and performs the release barrier; the host keeps its window, input
+translation and renderer. The showcase that `strata_desktop.exe` opens without a manifest lives in
+`native/apps/showcase`, and its `strata.control-deck.v1` package in `native/packages/control_deck`.
+
 ## Build and install the SDK from source
 
 From a Windows command shell at the repository root:

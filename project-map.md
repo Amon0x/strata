@@ -28,12 +28,17 @@
   diagnostics, host snapshots, images, and application. It knows nothing of the C ABI.
 - `native/src/*.cpp` — the C ABI shell: argument checks, the exception firewall, and conversion
   between C structures and engine types.
-- `native/host` — reusable packet decoding, extension selection, and safe module-path resolution.
+- `native/host` — reusable packet decoding, extension selection, safe module-path resolution, and
+  `host::Session`, the portable application session every native host shell runs on.
 - `native/d3d11` — target-independent packet-v10 pipeline, textures, blur, HLSL materials, low-level
   packet submission, and the optional host-owned-target Surface presenter with C/C++ handles.
 - `native/win32` — optional Win32 message-to-Surface input translation with C/C++ handles for
   embedding hosts.
-- `native/desktop` — Win32 input/services, swap-chain ownership, and multi-window executable.
+- `native/desktop` — Win32 input/services, swap-chain ownership, the `Strata::desktop` application
+  host, and the `strata_desktop` launcher.
+- `native/apps/showcase` — the bundled multi-window showcase and its performance scenarios, which
+  `strata_desktop` opens without a manifest.
+- `native/packages` — extension packages of the bundled demonstration applications.
 - `native/preview` — SDL interactive test window, native clipboard/IME, and input translation.
 - `native/headless` — persistent semantic browser/control sessions, deterministic replay, offscreen
   D3D11/WARP capture, optional CPU reference rendering, and PNG output.
