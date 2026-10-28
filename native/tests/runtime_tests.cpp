@@ -476,7 +476,7 @@ animation Validated {
         compiler::parse_source("animation-valid.strata", valid_source);
     check(valid_parsed.diagnostics.empty(), "validated animation fixture did not parse");
     const compiler::SemanticResult valid = compiler::validate_semantics(valid_parsed.file, schema);
-    check(valid.diagnostics.empty() && valid.lowering_diagnostics.empty() &&
+    check(valid.diagnostics.empty() &&
               valid.animations.size() == 1U,
           "valid animation did not produce exactly one typed lowering payload");
     const compiler::PortableIrResult lowered =

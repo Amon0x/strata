@@ -34,11 +34,6 @@ CompileResult compile_program(
         std::make_move_iterator(semantic.diagnostics.begin()),
         std::make_move_iterator(semantic.diagnostics.end())
     );
-    result.diagnostics.insert(
-        result.diagnostics.end(),
-        std::make_move_iterator(semantic.lowering_diagnostics.begin()),
-        std::make_move_iterator(semantic.lowering_diagnostics.end())
-    );
     if (!result.diagnostics.empty()) return result;
 
     PortableIrResult lowered = lower_portable_ir(

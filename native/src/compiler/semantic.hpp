@@ -67,7 +67,6 @@ inline constexpr std::array<std::string_view, 1U> contextual_host_roots{"env"};
 
 struct SemanticResult final {
     std::vector<Diagnostic> diagnostics;
-    std::vector<Diagnostic> lowering_diagnostics;
     std::map<std::string, ValidatedAnimation, std::less<>> animations;
 };
 

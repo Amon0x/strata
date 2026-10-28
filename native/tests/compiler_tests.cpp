@@ -633,6 +633,29 @@ void test_computed_map_keys_are_rejected() {
           "a member-access map key was accepted:" + describe(member_key));
 }
 
+// Each problem is reported once, however many checks look at the expression behind it.
+void test_each_problem_is_reported_once() {
+    const auto single = [](const std::string_view source, const std::string_view code) {
+        const auto result = compile_source(source);
+        check(result.diagnostics.size() == 1U && result.diagnostics.front().code == code,
+              std::string(code) + " was not reported exactly once:" + describe(result));
+    };
+    single("screen Main { root Panel(material: \"nope\") { Text(text: \"a\") } }",
+           "STRATA.DSL.SEMANTIC_UNKNOWN_MATERIAL");
+    single("screen Main { root Panel(material: material(\"nope\")) { Text(text: \"a\") } }",
+           "STRATA.DSL.SEMANTIC_UNKNOWN_MATERIAL");
+    single("screen Main { root Panel(animation: Nope) { Text(text: \"a\") } }",
+           "STRATA.DSL.SEMANTIC_UNKNOWN_ANIMATION");
+    single("screen Main { root Panel(style: { justifyContent: theme.nope }) { Text(text: \"a\") } }",
+           "STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN");
+    single("style Centered { justifyContent: theme.nope }\n"
+           "screen Main { root Panel {\n"
+           "  Panel(style: Centered) { Text(text: \"a\") }\n"
+           "  Panel(style: Centered) { Text(text: \"b\") }\n"
+           "} }",
+           "STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN");
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -653,6 +676,7 @@ int strata_test_compiler() {
         test_statement_keywords_are_member_names();
         test_when_arm_matches_a_bare_name();
         test_computed_map_keys_are_rejected();
+        test_each_problem_is_reported_once();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

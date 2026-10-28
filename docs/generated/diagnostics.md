@@ -76,8 +76,6 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.CORE.IDENTITY_EXHAUSTED` | `native/src/core/runtime.cpp` |
 | `STRATA.CORE.OUT_OF_MEMORY` | `native/src/abi.cpp`<br>`native/src/abi_application.cpp`<br>`native/src/abi_services.cpp`<br>`native/src/state_abi.cpp`<br>`native/src/surface_abi.cpp`<br>`native/src/surface_theme_abi.cpp` |
 | `STRATA.DSL.ACTION_HANDLER_MISSING` | `native/src/runtime/application.cpp` |
-| `STRATA.DSL.COMPILE_UNKNOWN_ANIMATION` | `native/src/compiler/semantic.cpp` |
-| `STRATA.DSL.COMPILE_UNKNOWN_MATERIAL` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.IMPORT_CYCLE` | `native/src/compiler/module.cpp` |
 | `STRATA.DSL.IMPORT_LOAD_FAILED` | `native/src/compiler/module.cpp` |
 | `STRATA.DSL.LEX_INVALID_COLOR` | `native/src/compiler/lexer.cpp` |

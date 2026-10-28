@@ -13,6 +13,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -462,7 +463,6 @@ class Validator final {
             validate_declaration(declaration);
         return SemanticResult{
             std::move(diagnostics_),
-            std::move(lowering_diagnostics_),
             std::move(validated_animations_),
         };
     }
@@ -801,19 +801,13 @@ class Validator final {
 
     void report(std::string code, std::string message, const SourceSpan& span,
                 std::string component_path, std::string expected) {
+        // Checks re-infer shared expressions (a layout property, a style used by several widgets),
+        // so the same problem can be found more than once; the author sees it once.
+        if (!reported_.emplace(code, message, span.source_id, span.start.offset, span.end.offset)
+                 .second) {
+            return;
+        }
         diagnostics_.push_back(Diagnostic{
-            std::move(code),
-            DiagnosticSeverity::error,
-            std::move(message),
-            span.range(),
-            std::move(component_path),
-            std::move(expected),
-        });
-    }
-
-    void report_lowering(std::string code, std::string message, const SourceSpan& span,
-                         std::string component_path, std::string expected) {
-        lowering_diagnostics_.push_back(Diagnostic{
             std::move(code),
             DiagnosticSeverity::error,
             std::move(message),
@@ -2759,9 +2753,6 @@ class Validator final {
                            "Material '" + *id + "' is not a built-in material." +
                                did_you_mean(*id, registry_.material_ids()),
                            expression.span, component_path, names);
-                    report_lowering("STRATA.DSL.COMPILE_UNKNOWN_MATERIAL",
-                                    "Material '" + *id + "' is not a built-in material.",
-                                    expression.span, component_path, names);
                 }
                 return;
             }
@@ -2786,9 +2777,6 @@ class Validator final {
                            "Material '" + *id + "' is not a built-in material." +
                                did_you_mean(*id, registry_.material_ids()),
                            call->arguments.front().span, component_path, names);
-                    report_lowering("STRATA.DSL.COMPILE_UNKNOWN_MATERIAL",
-                                    "Material '" + *id + "' is not a built-in material.",
-                                    call->arguments.front().span, component_path, names);
                 }
                 std::set<std::string, std::less<>> seen;
                 for (std::size_t index = 1U; index < call->arguments.size(); ++index) {
@@ -2847,9 +2835,6 @@ class Validator final {
                            "Animation '" + *name + "' is not declared." +
                                did_you_mean(*name, animations_),
                            expression.span, component_path, names);
-                    report_lowering("STRATA.DSL.COMPILE_UNKNOWN_ANIMATION",
-                                    "Animation '" + *name + "' is not declared.", expression.span,
-                                    component_path, names);
                 }
                 return;
             }
@@ -3648,7 +3633,9 @@ class Validator final {
     std::vector<std::string> animations_;
     std::optional<std::vector<std::string>> declared_state_names_;
     std::vector<Diagnostic> diagnostics_;
-    std::vector<Diagnostic> lowering_diagnostics_;
+    /** Code, message, source and offsets of every reported diagnostic. */
+    std::set<std::tuple<std::string, std::string, std::string, std::uint64_t, std::uint64_t>>
+        reported_;
     std::map<std::string, ValidatedAnimation, std::less<>> validated_animations_;
     std::map<std::string, std::string, std::less<>> persistence_keys_;
     std::set<const Expression*> diagnosed_layout_properties_;
