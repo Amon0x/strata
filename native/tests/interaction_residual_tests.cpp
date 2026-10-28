@@ -2672,6 +2672,41 @@ overlay PaletteFrames {
     check(projections == 0U, "an unchanged palette was re-projected every frame");
 }
 
+void test_environment_set_rebuilds_once(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay EnvironmentOnce {
+  root Panel(key: "environment.root", layout: { kind: "COLUMN", width: 600, height: 200 }) {
+    Button(key: "environment.inset", label: "Inset", onClick: action("environment.set", safeLeft: 200))
+    Text(key: "environment.class", text: env.viewport)
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("environment-once", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "EnvironmentOnce", 640.0, 240.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    check(surface->viewport_class() == "regular", "environment fixture is not a regular viewport");
+
+    // A click sets insets that make the viewport compact. The frame routing it rebuilds once,
+    // with the new class, and the next frame has nothing left to rebuild.
+    static_cast<void>(surface->input().enqueue_click("environment.inset"));
+    const ui::SurfaceFrame changed = surface->frame(now += 16'000'000);
+    check(changed.operations.rebuilds == 1U && surface->viewport_class() == "compact",
+          "environment.set did not rebuild into the compact class");
+    const ui::RetainedNode* label = surface->tree().find_key("environment.class");
+    const auto text = label != nullptr ? label->description().properties.find("text")
+                                       : ui::DescriptionNode::Properties::const_iterator{};
+    check(label != nullptr && text != label->description().properties.end() &&
+              text->second.value() != nullptr && text->second.value()->string() != nullptr &&
+              *text->second.value()->string() == "compact",
+          "the rebuilt description did not read the new viewport class");
+    const ui::SurfaceFrame after = surface->frame(now += 16'000'000);
+    check(after.operations.rebuilds == 0U,
+          "environment.set rebuilt the surface again a frame later for its viewport class");
+}
+
 } // namespace
 
 int strata_test_interaction_residual(const int argument_count, const char* const* const arguments) {
@@ -2711,6 +2746,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_queued_batch_sees_rebuilt_tree(resources);
         test_hover_follows_content_under_still_pointer(resources);
         test_palette_projection_is_cached_across_frames(resources);
+        test_environment_set_rebuilds_once(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

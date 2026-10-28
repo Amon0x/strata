@@ -391,7 +391,6 @@ class Surface final {
     bool advancing_scroll_animation_ = false;
     bool frame_invalidated_ = true;
     bool description_invalidated_ = true;
-    bool declarative_environment_pending_ = false;
     InputOperationResult pending_lifecycle_input_;
     SurfaceFrame last_frame_;
     std::deque<SurfaceEventRecord> published_events_;

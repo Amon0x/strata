@@ -956,7 +956,9 @@ runtime::ActionDispatchOutcome Surface::execute_environment_action(const runtime
     next.generation = environment_.generation + 1U;
     next.validate();
     environment_ = std::move(next);
-    declarative_environment_pending_ = true;
+    // The description this invalidation rebuilds already reads the new environment; its class is
+    // resolved with it so the next frame does not rebuild once more for the class alone.
+    viewport_class_ = resolved_viewport_class(environment_);
     invalidate_description();
     return outcome(runtime::ActionDispatchStatus::handled);
 }
@@ -1601,18 +1603,6 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
     input_.publish_frame_time(frame_time_nanos);
     input_.publish_reduced_motion(environment_.reduced_motion);
     application_.async().advance(frame_time_nanos);
-    if (declarative_environment_pending_) {
-        const std::string resolved = resolved_viewport_class(environment_);
-        if (resolved != viewport_class_) {
-            if (environment_.generation == std::numeric_limits<std::uint64_t>::max()) {
-                throw std::overflow_error("surface environment generation exhausted");
-            }
-            ++environment_.generation;
-            viewport_class_ = resolved;
-            invalidate_description();
-        }
-        declarative_environment_pending_ = false;
-    }
     const bool pending_lifecycle = !pending_lifecycle_input_.events.empty() ||
                                    !pending_lifecycle_input_.action_outcomes.empty() ||
                                    pending_lifecycle_input_.injected_events != 0U ||
