@@ -14,6 +14,7 @@
 #include <string>
 #include <utility>
 
+#include "ui/description_detail.hpp"
 #include "ui/widget/description.hpp"
 
 namespace strata::ui {
@@ -21,8 +22,6 @@ namespace {
 
 using runtime::ExpressionValue;
 using runtime::Symbol;
-
-constexpr std::size_t maximum_component_cache_entries = 512U;
 
 [[nodiscard]] std::optional<std::string> key_from_value(const ExpressionValue& value) {
     const runtime::Value* scalar = value.value();
@@ -37,31 +36,8 @@ constexpr std::size_t maximum_component_cache_entries = 512U;
     return std::nullopt;
 }
 
-/**
- * An authored identity as one instance path segment. Paths are walked segment by segment ('/')
- * and loop items are told apart by a ':' suffix, so neither may appear unescaped.
- */
-[[nodiscard]] std::string path_segment(const std::string_view identity) {
-    std::string escaped;
-    escaped.reserve(identity.size());
-    for (const char character : identity) {
-        switch (character) {
-        case '%':
-            escaped += "%25";
-            break;
-        case '/':
-            escaped += "%2F";
-            break;
-        case ':':
-            escaped += "%3A";
-            break;
-        default:
-            escaped += character;
-            break;
-        }
-    }
-    return escaped;
-}
+using description_detail::item_frame;
+using description_detail::path_segment;
 
 [[nodiscard]] std::string component_instance_path(const std::string_view parent,
                                                   const std::string_view type,
@@ -109,21 +85,6 @@ declared_binding(const Symbol name, const ExpressionValue& value,
     return runtime::ScopeBinding{name, true, state,
                                  value.executable() ? value : value.without_state_binding(),
                                  std::move(binding)};
-}
-
-/** A loop's item (and index) over the scope it repeats in. */
-[[nodiscard]] runtime::ScopeFrame item_frame(const Symbol item, const runtime::Value& value,
-                                             const std::optional<Symbol> index,
-                                             const std::size_t position) {
-    runtime::ScopeFrame frame;
-    frame.bindings.push_back(runtime::ScopeBinding{item, true, runtime::ScopeStateBinding::inherit,
-                                                   ExpressionValue(value), nullptr});
-    if (index.has_value()) {
-        frame.bindings.push_back(runtime::ScopeBinding{
-            *index, true, runtime::ScopeStateBinding::inherit,
-            ExpressionValue(runtime::Value(static_cast<double>(position))), nullptr});
-    }
-    return frame;
 }
 
 struct TransparentStringHash final {
@@ -270,22 +231,6 @@ class ExpressionDependencyObserverRestore final {
     runtime::ExpressionDependencyObserver* previous_;
 };
 
-struct ComponentExpressionDependencies final : runtime::ExpressionDependencyObserver {
-    std::function<void(const runtime::ExpressionHostDependency&)> observe_host;
-    runtime::ExpressionDependencyObserver* upstream = nullptr;
-
-    void lexical(const Symbol name, const ExpressionValue& value) override {
-        if (upstream != nullptr)
-            upstream->lexical(name, value);
-    }
-
-    void host(const runtime::ExpressionHostDependency& dependency) override {
-        observe_host(dependency);
-        if (upstream != nullptr)
-            upstream->host(dependency);
-    }
-};
-
 /** The host values one style resolution read. */
 struct StyleDependencies final : runtime::ExpressionDependencyObserver {
     void lexical(Symbol, const ExpressionValue&) override {}
@@ -349,11 +294,21 @@ void set_layout_field(DescriptionNode::Properties& properties, std::string name,
                : nullptr;
 }
 
+/**
+ * Whether a node's children are described with it: a generated provider's rows are described
+ * when they are realized, and a walk over a body's output never realizes them.
+ */
+[[nodiscard]] bool eager_children(const DescriptionNode& node) {
+    return dynamic_cast<const EagerDescriptionChildren*>(node.children.get()) != nullptr;
+}
+
 void collect_slot_names(const std::shared_ptr<const DescriptionNode>& node,
                         const std::string_view component_path,
                         std::set<std::string, std::less<>>& names) {
     if (const std::string* name = own_slot_name(*node, component_path))
         names.insert(*name);
+    if (!eager_children(*node))
+        return;
     for (std::size_t index = 0U; index < node->children->size(); ++index) {
         collect_slot_names(node->children->at(index), component_path, names);
     }
@@ -374,6 +329,8 @@ project_slots(const std::shared_ptr<const DescriptionNode>& node,
         }
     }
 
+    if (!eager_children(*node))
+        return node;
     bool changed = false;
     std::vector<std::shared_ptr<const DescriptionNode>> children;
     children.reserve(node->children->size());
@@ -391,8 +348,59 @@ project_slots(const std::shared_ptr<const DescriptionNode>& node,
     return resolved;
 }
 
-
 } // namespace
+
+namespace description_detail {
+
+std::string path_segment(const std::string_view identity) {
+    std::string escaped;
+    escaped.reserve(identity.size());
+    for (const char character : identity) {
+        switch (character) {
+        case '%':
+            escaped += "%25";
+            break;
+        case '/':
+            escaped += "%2F";
+            break;
+        case ':':
+            escaped += "%3A";
+            break;
+        default:
+            escaped += character;
+            break;
+        }
+    }
+    return escaped;
+}
+
+runtime::ScopeFrame item_frame(const Symbol item, const runtime::Value& value,
+                               const std::optional<Symbol> index, const std::size_t position) {
+    runtime::ScopeFrame frame;
+    frame.bindings.push_back(runtime::ScopeBinding{item, true, runtime::ScopeStateBinding::inherit,
+                                                   ExpressionValue(value), nullptr});
+    if (index.has_value()) {
+        frame.bindings.push_back(runtime::ScopeBinding{
+            *index, true, runtime::ScopeStateBinding::inherit,
+            ExpressionValue(runtime::Value(static_cast<double>(position))), nullptr});
+    }
+    return frame;
+}
+
+void declared_slot_names(const std::shared_ptr<const DescriptionNode>& root,
+                         const std::string_view component_path,
+                         std::set<std::string, std::less<>>& names) {
+    collect_slot_names(root, component_path, names);
+}
+
+std::shared_ptr<const DescriptionNode> project_slot_content(
+    const std::shared_ptr<const DescriptionNode>& root, const std::string_view component_path,
+    const std::map<std::string, std::vector<std::shared_ptr<const DescriptionNode>>, std::less<>>&
+        projected) {
+    return project_slots(root, component_path, projected);
+}
+
+} // namespace description_detail
 
 const std::string& DescriptionBuilder::Scope::instance_path() const noexcept {
     static const std::string none;
@@ -430,245 +438,53 @@ std::string DescriptionBuilder::keyed_instance_path(const Scope& scope, const st
     return component_instance_path(scope.instance_path(), type, key, source_path);
 }
 
-/**
- * Describes the rows of one generated child provider when they are first realized, after the
- * build that made the provider. Each row's reads are recorded as a body's are, so the body holding
- * the provider is stale when a realized row would read something else, and the state scopes rows
- * bind are bound again when that body is replayed from its cache.
- */
-struct DescriptionBuilder::GeneratedRowEvaluationContext final {
-    GeneratedRowEvaluationContext(runtime::ApplicationContext& application,
-                                  std::shared_ptr<const WidgetRegistry> source_widgets,
-                                  const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-                                  std::shared_ptr<const runtime::HostRoots> contextual_host_roots,
-                                  std::shared_ptr<const RetainedDescriptionSnapshot> retained)
-        : widgets(std::move(source_widgets)),
-          evaluator(std::make_unique<DescriptionBuilder>(application, *widgets)) {
-        // Rows nested in these rows describe with the same registry.
-        evaluator->widget_snapshot_ = widgets;
-        evaluator->widget_snapshot_revision_ = widgets->revision();
-        evaluator->use_unit(unit);
-        evaluator->contextual_host_roots_ = std::move(contextual_host_roots);
-        evaluator->retained_snapshot_ = std::move(retained);
-    }
+void DescriptionBuilder::FrameObserver::lexical(const Symbol name, const ExpressionValue& value) {
+    // A row's inputs are the values of its enclosing scope it read: a read of a name the row
+    // binds itself (a state, a derived value, a nested loop's item) reads no input.
+    Frame* const current = builder_.frame();
+    if (current == nullptr || current->outer == nullptr || current->outer_reads.contains(name))
+        return;
+    const ExpressionValue* const outer = current->outer->find(name);
+    if (outer != nullptr && runtime::same_expression_value(*outer, value))
+        current->outer_reads.emplace(name, runtime::capture_expression_dependency(value));
+}
 
-    /** Describes the row at `index` with `describe`, recording what it reads. */
-    template <typename Describe>
-    [[nodiscard]] std::shared_ptr<const DescriptionNode> describe_row(const std::size_t index,
-                                                                      Describe&& describe) {
-        std::scoped_lock lock(mutex);
-        DescriptionBuilder& builder = *evaluator;
-        builder.diagnostics_.clear();
-        builder.evaluated_expressions_ = 0U;
-        builder.described_nodes_ = 0U;
-        builder.current_layer_state_scopes_.clear();
-        ComponentEffects effects;
-        std::shared_ptr<const DescriptionNode> row;
-        builder.component_effect_stack_.push_back(&effects);
-        {
-            ComponentExpressionDependencies dependencies;
-            dependencies.observe_host = [&builder](const runtime::ExpressionHostDependency& read) {
-                builder.observe_host_dependency(read);
-            };
-            ExpressionDependencyObserverRestore observer(*builder.expressions_, &dependencies);
-            dependencies.upstream = observer.previous();
-            try {
-                row = describe();
-            } catch (...) {
-                builder.component_effect_stack_.pop_back();
-                throw;
-            }
-        }
-        builder.component_effect_stack_.pop_back();
-        // A row's diagnostics travel with its materialization: it is realized again only when
-        // what it read changes.
-        effects.raised_errors = false;
-        rows.insert_or_assign(index, Row{row, std::move(effects),
-                                         builder.application_.host().invalidation_count()});
-        return row;
-    }
-
-    /** Whether every row still realized would be described the same now. */
-    [[nodiscard]] bool current() const {
-        std::scoped_lock lock(mutex);
-        return std::ranges::all_of(rows, [this](const auto& entry) {
-            const Row& row = entry.second;
-            return row.node.expired() ||
-                   evaluator->effects_subtree_current(row.effects, row.host_invalidation_count);
-        });
-    }
-
-    /** Binds again the state scopes the rows still realized bound. */
-    void rebind() const {
-        std::scoped_lock lock(mutex);
-        for (const auto& [index, row] : rows) {
-            static_cast<void>(index);
-            if (row.node.expired())
-                continue;
-            for (const auto& [address, binding] : row.effects.state_bindings) {
-                evaluator->application_.bind_state_scope(
-                    evaluator->binding_owner_, address.scope, address.name,
-                    binding.declaration_scope, binding.address_scope);
-            }
-            evaluator->rebind_generated_rows(row.effects);
-        }
-    }
-
-    [[nodiscard]] std::shared_ptr<const DescriptionNode>
-    finish(std::shared_ptr<const DescriptionNode> node, const std::size_t synthesized_nodes,
-           std::string materialization_key) {
-        if (node == nullptr)
-            throw std::logic_error("generated row evaluator returned a null description");
-        auto anchored = std::make_shared<DescriptionNode>(*node);
-        if (!anchored->materialization_key.has_value())
-            anchored->materialization_key = std::move(materialization_key);
-        DescriptionMaterialization result{
-            std::move(evaluator->current_layer_state_scopes_),
-            std::move(evaluator->diagnostics_),
-            evaluator->evaluated_expressions_,
-            evaluator->described_nodes_,
-        };
-        if (synthesized_nodes > std::numeric_limits<std::size_t>::max() - result.described_nodes) {
-            throw std::overflow_error("generated row described-node count exhausted");
-        }
-        result.described_nodes += synthesized_nodes;
-        if (anchored->materialization_result != nullptr) {
-            const DescriptionMaterialization& nested = *anchored->materialization_result;
-            result.owned_state_scopes.insert(nested.owned_state_scopes.begin(),
-                                             nested.owned_state_scopes.end());
-            result.diagnostics.insert(result.diagnostics.end(), nested.diagnostics.begin(),
-                                      nested.diagnostics.end());
-            if (nested.evaluated_expressions >
-                    std::numeric_limits<std::size_t>::max() - result.evaluated_expressions ||
-                nested.described_nodes >
-                    std::numeric_limits<std::size_t>::max() - result.described_nodes) {
-                throw std::overflow_error("nested generated row counters exhausted");
-            }
-            result.evaluated_expressions += nested.evaluated_expressions;
-            result.described_nodes += nested.described_nodes;
-        }
-        anchored->materialization_result =
-            std::make_shared<const DescriptionMaterialization>(std::move(result));
-        return anchored;
-    }
-
-    struct Row final {
-        /** The row as described: its record matters while someone still holds it. */
-        std::weak_ptr<const DescriptionNode> node;
-        ComponentEffects effects;
-        std::uint64_t host_invalidation_count = 0U;
-    };
-
-    /** The registry rows describe with, shared by every provider made from one revision. */
-    std::shared_ptr<const WidgetRegistry> widgets;
-    std::unique_ptr<DescriptionBuilder> evaluator;
-    /** Guards the evaluator and the rows: rows are realized wherever the provider is asked. */
-    mutable std::mutex mutex;
-    std::map<std::size_t, Row> rows;
-};
-
-struct DescriptionBuilder::LazyRowEvaluationState final {
-    LazyRowEvaluationState(runtime::ApplicationContext& application,
-                           std::shared_ptr<const WidgetRegistry> source_widgets,
-                           const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-                           Scope source_scope, const Symbol source_item,
-                           const std::optional<Symbol> source_index,
-                           const runtime::BlockId source_block,
-                           std::shared_ptr<const RetainedDescriptionSnapshot> retained)
-        : evaluation(std::make_shared<GeneratedRowEvaluationContext>(
-              application, std::move(source_widgets), unit,
-              source_scope.expressions.shared_contextual_host_roots(), std::move(retained))),
-          scope(std::move(source_scope)), item(source_item), index(source_index),
-          block(source_block) {}
-
-    [[nodiscard]] std::shared_ptr<const DescriptionNode>
-    materialize(const runtime::IndexableSequence& sequence, const std::size_t lazy_index) {
-        return evaluation->describe_row(lazy_index, [&] {
-            const runtime::Value& value = sequence.item_at(lazy_index);
-            const std::size_t source_index = sequence.source_index_at(lazy_index);
-            const std::string canonical_key = sequence.key_at(lazy_index);
-            Scope item_scope = scope;
-            item_scope.expressions.push(item_frame(item, value, index, source_index));
-            // The row's root key already names it among the rows: keyed calls inside stay in it.
-            item_scope.set_instance(item_scope.instance_path() + "/" + std::string(item.name()) +
-                                    ":" + path_segment(canonical_key));
-            std::vector<std::shared_ptr<const DescriptionNode>> nodes =
-                evaluation->evaluator->build_block(block, item_scope);
-            if (nodes.size() != 1U) {
-                throw std::logic_error(
-                    "validated Repeater identity selected a row body that did not produce one root");
-            }
-            auto anchored = std::make_shared<DescriptionNode>(*nodes.front());
-            anchored->key = canonical_key;
-            return evaluation->finish(std::move(anchored), 0U, canonical_key);
-        });
-    }
-
-    std::shared_ptr<GeneratedRowEvaluationContext> evaluation;
-    Scope scope;
-    Symbol item;
-    std::optional<Symbol> index;
-    runtime::BlockId block;
-};
-
-struct DescriptionBuilder::WidgetRowEvaluationState final {
-    WidgetRowEvaluationState(runtime::ApplicationContext& application,
-                             std::shared_ptr<const WidgetRegistry> source_widgets,
-                             const std::shared_ptr<const runtime::RuntimeUnit>& unit,
-                             Scope source_scope, WidgetGeneratedChildHook source_factory,
-                             std::shared_ptr<const RetainedDescriptionSnapshot> retained)
-        : evaluation(std::make_shared<GeneratedRowEvaluationContext>(
-              application, std::move(source_widgets), unit,
-              source_scope.expressions.shared_contextual_host_roots(), std::move(retained))),
-          caller(std::move(source_scope)), factory(std::move(source_factory)),
-          actions(&application.bundle()->action_registry()) {}
-
-    [[nodiscard]] std::shared_ptr<const DescriptionNode> materialize(const std::size_t index) {
-        return evaluation->describe_row(index, [&] {
-            WidgetDescriptionExpansion item;
-            WidgetDescriptionScope item_scope(
-                item, caller.instance_path(), *actions, *evaluation->widgets, nullptr,
-                [this](const std::string_view component, std::string key,
-                       WidgetTemplateArguments arguments) {
-                    return evaluation->evaluator->build_component_template(
-                        component, std::move(key), std::move(arguments), caller);
-                },
-                {});
-            std::shared_ptr<const DescriptionNode> row = factory(item_scope, index);
-            const std::string materialization_key =
-                row != nullptr && row->key.has_value() ? *row->key
-                                                       : "widget-generated-" + std::to_string(index);
-            return evaluation->finish(std::move(row), item.synthesized_nodes, materialization_key);
-        });
-    }
-
-    std::shared_ptr<GeneratedRowEvaluationContext> evaluation;
-    Scope caller;
-    WidgetGeneratedChildHook factory;
-    const runtime::RuntimeActionRegistry* actions;
-};
+void DescriptionBuilder::FrameObserver::host(const runtime::ExpressionHostDependency& dependency) {
+    builder_.observe_host_dependency(dependency);
+}
 
 DescriptionBuilder::DescriptionBuilder(runtime::ApplicationContext& application)
-    : application_(application), owned_widgets_(std::make_unique<WidgetRegistry>()),
-      widgets_(*owned_widgets_), expressions_(std::make_unique<runtime::ExpressionRuntime>(
-                                     application.host(), application.bundle()->action_registry())) {
+    : application_(application), self_(std::make_shared<DescriptionBuilder*>(this)),
+      owned_widgets_(std::make_unique<WidgetRegistry>()), widgets_(*owned_widgets_),
+      expressions_(std::make_unique<runtime::ExpressionRuntime>(
+          application.host(), application.bundle()->action_registry())),
+      frame_observer_(*this) {
+    static_cast<void>(expressions_->exchange_dependency_observer(&frame_observer_));
 }
 
 DescriptionBuilder::DescriptionBuilder(runtime::ApplicationContext& application,
                                        const WidgetRegistry& widgets)
-    : application_(application), owned_widgets_(), widgets_(widgets),
+    : application_(application), self_(std::make_shared<DescriptionBuilder*>(this)),
+      owned_widgets_(), widgets_(widgets),
       expressions_(std::make_unique<runtime::ExpressionRuntime>(
-          application.host(), application.bundle()->action_registry())) {}
+          application.host(), application.bundle()->action_registry())),
+      frame_observer_(*this) {
+    static_cast<void>(expressions_->exchange_dependency_observer(&frame_observer_));
+}
+
+DescriptionBuilder::~DescriptionBuilder() {
+    // Rows realized from now on are described by a builder of their own.
+    *self_ = nullptr;
+}
 
 DescriptionBuildResult DescriptionBuilder::build(const runtime::LayerRole role,
                                                  const std::string_view name) {
     const LayerDescriptionRequest request{role, std::string(name)};
     DescriptionLayersBuildResult result = build_layers(std::span(&request, 1U));
     return DescriptionBuildResult{
-        std::move(result.roots.front()),
-        std::move(result.diagnostics),
-        result.evaluated_expressions,
-        result.described_nodes,
+        std::move(result.roots.front()), std::move(result.diagnostics),
+        result.evaluated_expressions,    result.described_nodes,
+        result.described_instances,
     };
 }
 
@@ -676,52 +492,23 @@ void DescriptionBuilder::set_retained_tree(const RetainedTree* const tree) {
     retained_snapshot_ = tree != nullptr ? tree->description_snapshot() : nullptr;
 }
 
-bool DescriptionBuilder::observes_retained_value(const RetainedNode& node,
-                                                 const std::string_view name,
-                                                 const bool include_lazy_snapshots) const {
-    if (retained_snapshot_ == nullptr || layer_cache_.empty())
-        return true;
-    const auto effects_observe = [this, &node, name,
-                                  include_lazy_snapshots](const ComponentEffects& effects) {
-        if (include_lazy_snapshots && effects.captures_retained_snapshot)
-            return true;
-        return std::ranges::any_of(
-            effects.retained_values, [this, &node, name](const RetainedValueEffects& effect) {
-                if (!effect.values.contains(name))
-                    return false;
-                const RetainedDescriptionSnapshot::Node* const retained =
-                    retained_widget(effect.query);
-                return retained != nullptr && retained->identity == node.identity();
-            });
-    };
-    if (std::ranges::any_of(layer_cache_, [&effects_observe](const auto& entry) {
-            return effects_observe(entry.second.effects);
-        })) {
-        return true;
-    }
-    return std::ranges::any_of(component_cache_, [&effects_observe](const auto& entry) {
-        return effects_observe(entry.second.effects);
-    });
-}
-
 void DescriptionBuilder::set_contextual_host_roots(
     std::map<std::string, runtime::Value, std::less<>> roots) {
-    // Unchanged roots keep their identity, which is what cache entries compare first.
+    // Unchanged roots keep their identity, which is what instances compare first.
     if (contextual_host_roots_ != nullptr && *contextual_host_roots_ == roots)
         return;
     if (contextual_host_roots_ == nullptr && roots.empty())
         return;
     contextual_host_roots_ = std::make_shared<const runtime::HostRoots>(std::move(roots));
+    contextual_host_roots_changed_ = true;
 }
 
 void DescriptionBuilder::use_unit(const std::shared_ptr<const runtime::RuntimeUnit>& unit) {
     if (unit_ == unit)
         return;
-    component_cache_.clear();
-    component_ids_.clear();
-    layer_cache_.clear();
+    reset();
     styles_.clear();
-    component_cache_epoch_ = 0U;
+    epoch_ = 0U;
     expressions_->clear_caches();
     unit_ = unit;
     call_widgets_.assign(unit_ != nullptr ? program().call_count() : 0U, std::nullopt);
@@ -745,127 +532,6 @@ const WidgetLifecycle* DescriptionBuilder::call_widget(const runtime::CallId cal
     if (!widget.has_value())
         widget = widgets_.find(program().call(call).type);
     return *widget;
-}
-
-DescriptionLayersBuildResult
-DescriptionBuilder::build_layers(const std::span<const LayerDescriptionRequest> layers) {
-    if (layers.empty())
-        throw std::invalid_argument("description layer list must not be empty");
-    const std::shared_ptr<const runtime::RuntimeUnit>& active = application_.active_unit();
-    if (active == nullptr)
-        throw std::logic_error("description build requires an active runtime unit");
-    if (component_cache_epoch_ == std::numeric_limits<std::uint64_t>::max())
-        use_unit(nullptr);
-    use_unit(active);
-    ++component_cache_epoch_;
-    diagnostics_.clear();
-    evaluated_expressions_ = 0U;
-    described_nodes_ = 0U;
-    application_.clear_state_scope_bindings(binding_owner_);
-    std::vector<std::shared_ptr<const DescriptionNode>> roots;
-    std::vector<runtime::StateScopeSet> layer_state_scopes;
-    roots.reserve(layers.size());
-    layer_state_scopes.reserve(layers.size());
-    for (const LayerDescriptionRequest& layer : layers) {
-        current_layer_state_scopes_.clear();
-        roots.push_back(build_layer(layer.role, layer.name));
-        layer_state_scopes.push_back(current_layer_state_scopes_);
-    }
-    if (component_cache_.size() > maximum_component_cache_entries) {
-        std::vector<std::pair<std::uint64_t, ComponentId>> eviction_candidates;
-        eviction_candidates.reserve(component_cache_.size());
-        for (const auto& [id, entry] : component_cache_) {
-            if (entry.visited_epoch != component_cache_epoch_)
-                eviction_candidates.emplace_back(entry.last_used_epoch, id);
-        }
-        std::ranges::sort(eviction_candidates);
-        const std::size_t removal_count = std::min(
-            component_cache_.size() - maximum_component_cache_entries, eviction_candidates.size());
-        for (std::size_t index = 0U; index < removal_count; ++index) {
-            forget_component(eviction_candidates[index].second);
-        }
-    }
-    return DescriptionLayersBuildResult{
-        std::move(roots),        std::move(layer_state_scopes),
-        std::move(diagnostics_), evaluated_expressions_,
-        described_nodes_,
-    };
-}
-
-std::shared_ptr<const DescriptionNode>
-DescriptionBuilder::build_layer(const runtime::LayerRole role, const std::string_view name) {
-    const runtime::ProgramLayer* declaration =
-        role == runtime::LayerRole::screen ? program().screen(name) : program().overlay(name);
-    if (declaration == nullptr)
-        throw std::invalid_argument("requested layer declaration is not active");
-    const std::string& source_path = declaration->path;
-    const std::string cache_key =
-        std::string(role == runtime::LayerRole::screen ? "screen\n" : "overlay\n") +
-        std::string(name);
-    if (auto cached = layer_cache_.find(cache_key);
-        cached != layer_cache_.end() && cached->second.role == role &&
-        cached->second.name == name && cached->second.source_path == source_path &&
-        same_contextual_host_roots(cached->second.contextual_host_roots) &&
-        component_effects_current(cached->second.effects, cached->second.host_invalidation_count,
-                                  cached->second.contextual_host_roots)) {
-        // The layer's own reads are current, so its components are called with the inputs they
-        // were cached for: only what they read themselves can have changed.
-        if (const std::optional<SubtreeReplacements> replacements =
-                refresh_direct_descendants(cached->second.effects.direct_descendants);
-            replacements.has_value()) {
-            if (replacements->empty()) {
-                cached->second.host_invalidation_count = application_.host().invalidation_count();
-                replay_component_effects(cached->second.effects);
-                return cached->second.root;
-            }
-            std::shared_ptr<const DescriptionNode> patched =
-                replace_component_subtrees(cached->second.root, *replacements);
-            if (patched != nullptr && aggregate_component_effects(cached->second.effects)) {
-                cached->second.host_invalidation_count = application_.host().invalidation_count();
-                cached->second.root = patched;
-                replay_component_effects(cached->second.effects);
-                return patched;
-            }
-        }
-    }
-
-    Scope scope;
-    scope.expressions.set_contextual_host_roots(contextual_host_roots_);
-    scope.set_instance(declaration->declaration_scope);
-    scope.declaration_scope = declaration->declaration_scope;
-    ComponentEffects effects;
-    component_effect_stack_.push_back(&effects);
-    ComponentExpressionDependencies dependencies;
-    dependencies.observe_host = [this](const runtime::ExpressionHostDependency& dependency) {
-        observe_host_dependency(dependency);
-    };
-    ExpressionDependencyObserverRestore dependency_observer(*expressions_, &dependencies);
-    dependencies.upstream = dependency_observer.previous();
-    std::vector<std::shared_ptr<const DescriptionNode>> roots;
-    try {
-        roots = build_block(declaration->body, scope);
-    } catch (...) {
-        component_effect_stack_.pop_back();
-        throw;
-    }
-    component_effect_stack_.pop_back();
-    auto declaration_children = std::make_shared<const EagerDescriptionChildren>(std::move(roots));
-    auto root = DescriptionNode::create(role == runtime::LayerRole::screen ? "$screen" : "$overlay",
-                                        std::nullopt, source_path, declaration->declaration_scope,
-                                        {}, std::move(declaration_children));
-    ++described_nodes_;
-    if (const auto previous = layer_cache_.find(cache_key); previous != layer_cache_.end())
-        root = share_unchanged_description(previous->second.root, root);
-    layer_cache_.insert_or_assign(cache_key, LayerCacheEntry{
-                                                 role,
-                                                 std::string(name),
-                                                 source_path,
-                                                 application_.host().invalidation_count(),
-                                                 contextual_host_roots_,
-                                                 std::move(effects),
-                                                 root,
-                                             });
-    return root;
 }
 
 std::vector<std::shared_ptr<const DescriptionNode>>
@@ -928,15 +594,18 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
                 std::string(declaring.declaration_scope),
             };
             const runtime::StateAddress address{address_scope, name};
-            if (declaration.persistence_key.has_value() &&
-                application_.state().find(address) == nullptr) {
+            // Describing stores nothing: a state the store does not hold yet starts from its
+            // durable value or its initializer, and is stored when the build commits.
+            const runtime::Value* const stored = application_.state().peek(address, slot);
+            std::optional<runtime::Value> persisted_value;
+            if (stored == nullptr && declaration.persistence_key.has_value()) {
                 if (const runtime::Value* persisted =
                         application_.durability().application_value(*declaration.persistence_key);
                     persisted != nullptr) {
                     if (declaration.schema != nullptr && declaration.schema->accepts(*persisted)) {
-                        static_cast<void>(application_.state().write(address, slot, *persisted));
-                    } else {
-                        application_.services().report(runtime::RuntimeDiagnostic{
+                        persisted_value = *persisted;
+                    } else if (transaction_ != nullptr) {
+                        transaction_->reports.push_back(runtime::RuntimeDiagnostic{
                             "STRATA.DURABILITY.TYPE_MISMATCH",
                             "Persisted value '" + *declaration.persistence_key +
                                 "' no longer matches state '" + name + "' and was discarded.",
@@ -945,12 +614,17 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
                             runtime::DiagnosticSeverity::warning,
                             std::nullopt,
                         });
-                        static_cast<void>(application_.durability().erase_application_value(
-                            *declaration.persistence_key));
+                        transaction_->erased_application_values.push_back(
+                            *declaration.persistence_key);
                     }
                 }
             }
-            const runtime::Value& state = application_.state().read(address, slot);
+            const runtime::Value state =
+                stored != nullptr ? *stored : persisted_value.value_or(slot.initial_value);
+            if (transaction_ != nullptr) {
+                transaction_->states.push_back(
+                    StateInitialization{address, slot, std::move(persisted_value)});
+            }
             observe_state_value(address, state);
             declaring.expressions.set_frame(outer);
             runtime::ScopeFrame declared;
@@ -1038,17 +712,13 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
                     const bool staggered = iteration[item]->properties.contains("stagger");
                     if (!anchor && !staggered)
                         continue;
-                    auto annotated = std::make_shared<DescriptionNode>(*iteration[item]);
-                    if (anchor) {
-                        annotated->materialization_key =
-                            lazy_item_key(values->values[index], index);
-                    }
-                    if (staggered) {
-                        annotated->properties.insert_or_assign(
-                            "$loopPosition",
-                            ExpressionValue(runtime::Value(static_cast<double>(position))));
-                    }
-                    iteration[item] = std::move(annotated);
+                    iteration[item] = annotate_loop_item(
+                        iteration[item],
+                        anchor ? std::optional<std::string>(
+                                     lazy_item_key(values->values[index], index))
+                               : std::nullopt,
+                        staggered ? std::optional<double>(static_cast<double>(position))
+                                  : std::nullopt);
                 }
                 if (!iteration.empty())
                     ++position;
@@ -1060,6 +730,40 @@ DescriptionBuilder::build_block(const runtime::BlockId block, const Scope& enclo
         throw std::logic_error("validated portable IR contains an unknown statement kind");
     }
     return nodes;
+}
+
+std::shared_ptr<const DescriptionNode>
+DescriptionBuilder::annotate_loop_item(const std::shared_ptr<const DescriptionNode>& node,
+                                       std::optional<std::string> materialization_key,
+                                       const std::optional<double> loop_position) {
+    // A child instance's output is annotated where the instance places it, so a change of the
+    // instance alone is placed again with the same annotations instead of describing this body.
+    if (Frame* const current = frame(); current != nullptr) {
+        if (const auto found = current->child_index.find(node.get());
+            found != current->child_index.end()) {
+            const std::size_t position = found->second;
+            if (ComponentInstance* const child = find_instance(current->children[position].id);
+                child != nullptr) {
+                if (materialization_key.has_value())
+                    child->call_site.materialization_key = std::move(materialization_key);
+                if (loop_position.has_value())
+                    child->call_site.loop_position = loop_position;
+                emit(*child);
+                current->child_index.erase(found);
+                current->children[position].seen = child->emitted;
+                current->child_index.insert_or_assign(child->emitted.get(), position);
+                return child->emitted;
+            }
+        }
+    }
+    auto annotated = std::make_shared<DescriptionNode>(*node);
+    if (materialization_key.has_value())
+        annotated->materialization_key = std::move(materialization_key);
+    if (loop_position.has_value()) {
+        annotated->properties.insert_or_assign("$loopPosition",
+                                               ExpressionValue(runtime::Value(*loop_position)));
+    }
+    return annotated;
 }
 
 std::string DescriptionBuilder::evaluate_repeater_identity(const runtime::IdentityId identity,
@@ -1136,7 +840,7 @@ DescriptionBuilder::retained_widget(const RetainedQuery& query) const noexcept {
 }
 
 DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children(
-    const runtime::BlockId block, const Scope& scope,
+    const runtime::BlockId block, const Scope& scope, ComponentInstance& generator,
     const RetainedDescriptionSnapshot::Node* const retained_widget) {
     const runtime::Program& program = this->program();
     const std::span<const runtime::ProgramStatement> statements =
@@ -1153,10 +857,15 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
     DescriptionSequenceGeneration stamp;
     stamp.active_unit = application_.active_generation().value_or(0U);
     std::shared_ptr<const runtime::IndexableSequence> sequence;
+    // The generator keeps its last generation; a new one takes the retained tree's, if any.
+    const bool kept = generator.sequence != nullptr && generator.sequence_generation.has_value();
     const std::shared_ptr<const runtime::IndexableSequence> previous_sequence =
-        retained_widget != nullptr ? retained_widget->virtual_sequence.lock() : nullptr;
+        kept                         ? generator.sequence
+        : retained_widget != nullptr ? retained_widget->virtual_sequence.lock()
+                                     : nullptr;
     const DescriptionSequenceGeneration* const previous_stamp =
-        retained_widget != nullptr && retained_widget->virtual_sequence_generation.has_value()
+        kept ? &*generator.sequence_generation
+        : retained_widget != nullptr && retained_widget->virtual_sequence_generation.has_value()
             ? &*retained_widget->virtual_sequence_generation
             : nullptr;
     {
@@ -1246,17 +955,31 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
         }
     }
 
-    capture_retained_snapshot();
-    auto evaluation =
-        std::make_shared<LazyRowEvaluationState>(application_, widget_snapshot(), unit_, scope, item_name,
-                                                 index_name, statement.block, retained_snapshot_);
-    hold_generated_rows(evaluation->evaluation);
-    auto source = std::make_shared<const GeneratedDescriptionChildren>(
-        sequence->count(),
-        [evaluation = std::move(evaluation), sequence](const std::size_t lazy_index) {
-            return evaluation->materialize(*sequence, lazy_index);
-        });
-    return RepeaterChildren{std::move(source), std::move(sequence), std::move(stamp)};
+    if (sequence != generator.sequence) {
+        // Rows whose keys the new generation lacks are never asked for by its provider.
+        for (auto row = generator.rows.begin(); row != generator.rows.end();) {
+            if (sequence->index_of_key(row->first).has_value()) {
+                ++row;
+                continue;
+            }
+            const InstanceId id = row->second;
+            row = generator.rows.erase(row);
+            if (ComponentInstance* const stale = find_instance(id); stale != nullptr)
+                forget(*stale);
+        }
+    }
+    generator.sequence = sequence;
+    generator.sequence_generation = stamp;
+    auto rows = std::make_shared<RowSource>();
+    rows->kind = RowSource::Kind::repeater;
+    rows->scope = scope;
+    rows->count = sequence->count();
+    rows->sequence = sequence;
+    rows->item = item_name;
+    rows->index = index_name;
+    rows->block = statement.block;
+    std::shared_ptr<const DescriptionChildren> provider = provide(generator, std::move(rows));
+    return RepeaterChildren{std::move(provider), std::move(sequence), std::move(stamp)};
 }
 
 std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runtime::CallId id,
@@ -1341,10 +1064,17 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
             }
         }
     }
+    // A call providing generated rows is an instance of its own: its rows are its children.
+    ComponentInstance* rows_generator = nullptr;
     RepeaterChildren repeater_children;
     if (type == "Repeater" && call.children != runtime::no_program_id) {
-        observe_retained_sequence(retained_query, retained);
-        repeater_children = build_repeater_children(call.children, scope, retained);
+        const std::span<const runtime::ProgramStatement> statements =
+            program().statements(program().block(call.children));
+        if (statements.size() == 1U && statements.front().kind == runtime::StatementKind::loop) {
+            rows_generator = &generator(scope, call, key);
+            repeater_children =
+                build_repeater_children(call.children, scope, *rows_generator, retained);
+        }
     }
     widgets_.apply_layout_defaults(type, properties);
 
@@ -1369,13 +1099,10 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
             return build_component_template(component, std::move(template_key),
                                             std::move(arguments), scope);
         },
-        component_effect_stack_.empty()
-            ? WidgetRetainedDependencyObserver{}
-            : WidgetRetainedDependencyObserver{
-                  [this, retained_query](const std::string_view name,
-                                         const runtime::Value* const value) {
-                      observe_retained_value(retained_query, name, value);
-                  }});
+        WidgetRetainedDependencyObserver{
+            [this, retained_query](const std::string_view name, const runtime::Value* const value) {
+                observe_retained_value(retained_query, name, value);
+            }});
     std::shared_ptr<const DescriptionChildren> generated_children =
         std::move(expansion.generated_children);
     WidgetGeneratedVirtualization generated_virtualization;
@@ -1385,14 +1112,13 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
         const std::shared_ptr<const WidgetGeneratedChildren> generated =
             std::move(expansion.generated_widget_children);
         generated_virtualization = generated->virtualization;
-        capture_retained_snapshot();
-        auto evaluation = std::make_shared<WidgetRowEvaluationState>(
-            application_, widget_snapshot(), unit_, scope, generated->factory, retained_snapshot_);
-        hold_generated_rows(evaluation->evaluation);
-        generated_children = std::make_shared<const GeneratedDescriptionChildren>(
-            generated->count, [evaluation = std::move(evaluation)](const std::size_t index) {
-                return evaluation->materialize(index);
-            });
+        rows_generator = &generator(scope, call, retained_query.key);
+        auto rows = std::make_shared<RowSource>();
+        rows->kind = RowSource::Kind::widget;
+        rows->scope = scope;
+        rows->count = generated->count;
+        rows->factory = generated->factory;
+        generated_children = provide(*rows_generator, std::move(rows));
     }
     type = std::move(expansion.type);
     key = std::move(expansion.key);
@@ -1530,7 +1256,19 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
         ranged->materialization = MaterializationRange{};
         result = std::move(ranged);
     }
-    return result;
+    if (rows_generator == nullptr)
+        return result;
+    // The generator's output is this node; a changed row hands out a copy with a new provider.
+    ComponentInstance& rows = *rows_generator;
+    rows.root = share_unchanged_description(rows.root, std::move(result));
+    rows.call_site = CallSite{};
+    rows.dirty = false;
+    rows.reprovision = false;
+    rows.settled_epoch = epoch_;
+    rows.last_used_epoch = epoch_;
+    emit(rows);
+    hold_child(rows);
+    return rows.emitted;
 }
 
 DescriptionBuilder::Scope DescriptionBuilder::component_scope(
@@ -1660,94 +1398,50 @@ DescriptionBuilder::build_component_call(const runtime::ProgramCall& call, const
         }
     }
 
-    const std::string cache_key = type + "\n" + instance.instance_path();
-    const ComponentId id = component_id(cache_key);
-    for (ComponentEffects* const component_effect : component_effect_stack_)
-        add_descendant(component_effect->descendants, id);
-    if (!component_effect_stack_.empty()) {
-        std::vector<ComponentId>& direct = component_effect_stack_.back()->direct_descendants;
-        if (std::ranges::find(direct, id) == direct.end())
-            direct.push_back(id);
-    }
-    std::shared_ptr<const DescriptionNode> component_root;
-    std::shared_ptr<const DescriptionNode> previous_root;
-    auto cached = component_cache_.find(id);
-    bool current = false;
-    if (cached != component_cache_.end() &&
-        cached->second.component_index == call.component_index &&
-        cached->second.source_path == source_path && same_inputs(cached->second.inputs, inputs) &&
-        same_contextual_host_roots(cached->second.contextual_host_roots)) {
-        const bool refreshing = cached->second.refreshing;
-        const ComponentRefreshResult refreshed = refresh_component_cache_entry(id);
-        cached = component_cache_.find(id);
-        // A refresh leaves a surviving entry current for the inputs it was matched on,
-        // unless it was already refreshing and so returned without looking.
-        current =
-            cached != component_cache_.end() && refreshed != ComponentRefreshResult::invalid &&
-            (!refreshing || component_cache_entry_current(cached->second, source_path, inputs));
-    }
+    ComponentInstance& called =
+        this->instance(InstanceKind::component, type + "\n" + instance.instance_path(),
+                       frame() != nullptr ? frame()->instance : nullptr);
+    // The instance is described again only when it is stale or called with other inputs.
+    const bool current =
+        called.root != nullptr && !called.dirty &&
+        called.component_index == call.component_index &&
+        called.source_path == source_path && same_inputs(called.inputs, inputs) &&
+        same_contextual_host_roots(called.contextual_host_roots);
+    called.scope = std::move(instance);
     if (current) {
-        cached->second.host_invalidation_count = application_.host().invalidation_count();
-        cached->second.last_used_epoch = component_cache_epoch_;
-        cached->second.visited_epoch = component_cache_epoch_;
-        replay_component_effects(cached->second.effects);
-        component_root = cached->second.root;
-    } else if (cached != component_cache_.end()) {
-        previous_root = cached->second.root;
+        called.last_used_epoch = epoch_;
+    } else {
+        called.component_index = call.component_index;
+        called.source_path = source_path;
+        called.inputs = std::move(inputs);
+        called.contextual_host_roots = contextual_host_roots_;
+        describe_component(called);
     }
-    if (component_root == nullptr) {
-        ComponentEffects effects;
-        component_root = share_unchanged_description(
-            previous_root, build_component_body(call.component_index, instance, effects));
-        component_cache_.insert_or_assign(id, ComponentCacheEntry{
-                                                  type,
-                                                  call.component_index,
-                                                  source_path,
-                                                  std::move(inputs),
-                                                  application_.host().invalidation_count(),
-                                                  component_cache_epoch_,
-                                                  contextual_host_roots_,
-                                                  std::move(effects),
-                                                  component_root,
-                                                  std::move(instance),
-                                                  cache_key,
-                                                  component_cache_epoch_,
-                                                  component_cache_epoch_,
-                                                  false,
-                                              });
-    }
+
+    CallSite site;
+    site.component_path = component.path;
     if (call.children != runtime::no_program_id) {
-        std::set<std::string, std::less<>> declared_slots;
-        collect_slot_names(component_root, component.path, declared_slots);
+        const std::set<std::string, std::less<>>& slots = declared_slots(called);
         if (!raw_content.empty()) {
-            const std::string shorthand = declared_slots.size() == 1U ? *declared_slots.begin()
-                                          : declared_slots.contains("content")
-                                              ? std::string("content")
-                                              : std::string{};
+            const std::string shorthand = slots.size() == 1U       ? *slots.begin()
+                                          : slots.contains("content") ? std::string("content")
+                                                                      : std::string{};
             if (!shorthand.empty())
                 projected_content.insert_or_assign(shorthand, std::move(raw_content));
         }
         for (auto content = projected_content.begin(); content != projected_content.end();) {
-            if (!declared_slots.contains(content->first))
+            if (!slots.contains(content->first))
                 content = projected_content.erase(content);
             else
                 ++content;
         }
-        if (!projected_content.empty())
-            component_root = project_slots(component_root, component.path, projected_content);
+        site.projected = std::move(projected_content);
     }
-    if (behaviors.empty())
-        return component_root;
-
-    auto expanded = std::make_shared<DescriptionNode>(*component_root);
-    for (DescriptionBehavior& behavior : behaviors) {
-        const auto duplicate =
-            std::ranges::find(expanded->behaviors, behavior.id, &DescriptionBehavior::id);
-        if (duplicate != expanded->behaviors.end())
-            throw std::logic_error("component call attaches a duplicate root behavior");
-        expanded->behaviors.push_back(std::move(behavior));
-    }
-    return expanded;
+    site.behaviors = std::move(behaviors);
+    called.call_site = std::move(site);
+    emit(called);
+    hold_child(called);
+    return called.emitted;
 }
 
 std::shared_ptr<const DescriptionNode>
@@ -1832,359 +1526,51 @@ DescriptionBuilder::build_behaviors(const runtime::ProgramCall& call,
 void DescriptionBuilder::bind_state_scope(const std::string_view runtime_scope,
                                           const std::string_view state_name,
                                           const std::string_view declaration_scope,
-                                          const std::string_view address_scope,
-                                          const bool replayed) {
-    const runtime::StateAddressView address{runtime_scope, state_name};
-    const auto record =
-        [&](std::map<runtime::StateAddress, StateBindingEffect, std::less<>>& bindings) {
-            const auto found = bindings.lower_bound(address);
-            if (found != bindings.end() && found->first == address) {
-                if (found->second.declaration_scope != declaration_scope)
-                    found->second.declaration_scope = declaration_scope;
-                if (found->second.address_scope != address_scope)
-                    found->second.address_scope = address_scope;
-                return;
-            }
-            bindings.emplace_hint(
-                found, runtime::StateAddress{std::string(runtime_scope), std::string(state_name)},
-                StateBindingEffect{std::string(declaration_scope), std::string(address_scope)});
-        };
-    for (ComponentEffects* const component : component_effect_stack_) {
-        record(component->state_bindings);
-    }
-    if (!replayed && !component_effect_stack_.empty()) {
-        record(component_effect_stack_.back()->local_state_bindings);
-    }
-    application_.bind_state_scope(binding_owner_, runtime_scope, state_name, declaration_scope,
-                                 address_scope);
+                                          const std::string_view address_scope) {
+    Frame* const current = frame();
+    if (current == nullptr)
+        return;
+    current->bindings.insert_or_assign(
+        runtime::StateAddress{std::string(runtime_scope), std::string(state_name)},
+        StateBindingEffect{std::string(declaration_scope), std::string(address_scope)});
 }
 
-void DescriptionBuilder::own_state_scope(const std::string_view scope, const bool replayed) {
-    current_layer_state_scopes_.insert(std::string(scope));
-    application_.state().mark_owned_scope(std::string(scope));
-    for (ComponentEffects* const component : component_effect_stack_) {
-        component->owned_state_scopes.insert(std::string(scope));
-    }
-    if (!replayed && !component_effect_stack_.empty()) {
-        component_effect_stack_.back()->local_owned_state_scopes.insert(std::string(scope));
-    }
+void DescriptionBuilder::own_state_scope(const std::string_view scope) {
+    if (Frame* const current = frame(); current != nullptr)
+        current->owned_scopes.insert(std::string(scope));
 }
 
 void DescriptionBuilder::observe_state_value(const runtime::StateAddress& address,
                                              const runtime::Value& value) {
-    if (!component_effect_stack_.empty())
-        component_effect_stack_.back()->state_values.insert_or_assign(address, value);
+    if (Frame* const current = frame(); current != nullptr)
+        current->reads.state.insert_or_assign(address, value);
 }
 
 void DescriptionBuilder::observe_host_dependency(
     const runtime::ExpressionHostDependency& dependency) {
-    if (component_effect_stack_.empty())
-        return;
-    component_effect_stack_.back()->host_values.insert_or_assign(
-        runtime::canonical_host_dependency_path(dependency.path), dependency);
+    if (Frame* const current = frame(); current != nullptr) {
+        current->reads.host.insert_or_assign(
+            runtime::canonical_host_dependency_path(dependency.path), dependency);
+    }
 }
 
 void DescriptionBuilder::observe_retained_value(const RetainedQuery& query,
                                                 const std::string_view name,
                                                 const runtime::Value* const value) {
-    const std::optional<runtime::Value> observed =
+    Frame* const current = frame();
+    if (current == nullptr)
+        return;
+    std::optional<runtime::Value> observed =
         value != nullptr ? std::optional(*value) : std::nullopt;
-    if (component_effect_stack_.empty())
-        return;
-    ComponentEffects& component = *component_effect_stack_.back();
-    auto effect = std::ranges::find(component.retained_values, query, &RetainedValueEffects::query);
-    if (effect == component.retained_values.end()) {
-        component.retained_values.push_back(RetainedValueEffects{query, {}});
-        effect = std::prev(component.retained_values.end());
-    }
-    effect->values.insert_or_assign(std::string(name), observed);
-}
-
-void DescriptionBuilder::observe_retained_sequence(
-    const RetainedQuery& query, const RetainedDescriptionSnapshot::Node* const retained) {
-    if (component_effect_stack_.empty())
-        return;
-    const std::shared_ptr<const runtime::IndexableSequence> sequence =
-        retained != nullptr ? retained->virtual_sequence.lock() : nullptr;
-    const std::optional<DescriptionSequenceGeneration> generation =
-        retained != nullptr ? retained->virtual_sequence_generation : std::nullopt;
-    ComponentEffects& component = *component_effect_stack_.back();
-    auto effect =
-        std::ranges::find(component.retained_sequences, query, &RetainedSequenceEffect::query);
-    if (effect == component.retained_sequences.end()) {
-        component.retained_sequences.push_back(RetainedSequenceEffect{query, sequence, generation});
-    } else {
-        effect->sequence = sequence;
-        effect->generation = generation;
-    }
-}
-
-void DescriptionBuilder::capture_retained_snapshot() {
-    for (ComponentEffects* const component : component_effect_stack_) {
-        component->captures_retained_snapshot = true;
-        component->retained_snapshot = retained_snapshot_;
-    }
-    if (!component_effect_stack_.empty())
-        component_effect_stack_.back()->local_captures_retained_snapshot = true;
-}
-
-std::shared_ptr<const DescriptionNode>
-DescriptionBuilder::build_component_body(const std::uint32_t component, const Scope& scope,
-                                         ComponentEffects& effects) {
-    component_effect_stack_.push_back(&effects);
-    ComponentExpressionDependencies dependencies;
-    dependencies.observe_host = [this](const runtime::ExpressionHostDependency& dependency) {
-        observe_host_dependency(dependency);
-    };
-    ExpressionDependencyObserverRestore dependency_observer(*expressions_, &dependencies);
-    dependencies.upstream = dependency_observer.previous();
-    std::vector<std::shared_ptr<const DescriptionNode>> roots;
-    try {
-        roots = build_block(program().component(component).body, scope);
-    } catch (...) {
-        component_effect_stack_.pop_back();
-        throw;
-    }
-    component_effect_stack_.pop_back();
-    if (roots.size() != 1U)
-        throw std::logic_error("validated component body must describe exactly one root node");
-    return std::move(roots.front());
-}
-
-std::shared_ptr<const DescriptionNode> DescriptionBuilder::replace_component_subtrees(
-    const std::shared_ptr<const DescriptionNode>& root,
-    const std::map<const DescriptionNode*, std::shared_ptr<const DescriptionNode>>& replacements) {
-    if (root == nullptr || replacements.empty())
-        return root;
-    std::set<const DescriptionNode*> applied;
-    const auto replace = [&replacements,
-                          &applied](const auto& self,
-                                    const std::shared_ptr<const DescriptionNode>& current)
-        -> std::shared_ptr<const DescriptionNode> {
-        if (const auto replacement = replacements.find(current.get());
-            replacement != replacements.end()) {
-            applied.insert(replacement->first);
-            return replacement->second;
-        }
-        if (current->materialization.has_value())
-            return current;
-        bool changed = false;
-        std::vector<std::shared_ptr<const DescriptionNode>> children;
-        children.reserve(current->children->size());
-        for (std::size_t index = 0U; index < current->children->size(); ++index) {
-            const std::shared_ptr<const DescriptionNode> child = current->children->at(index);
-            std::shared_ptr<const DescriptionNode> next = self(self, child);
-            changed = changed || next != child;
-            children.push_back(std::move(next));
-        }
-        if (!changed)
-            return current;
-        auto result = std::make_shared<DescriptionNode>(*current);
-        result->children = std::make_shared<const EagerDescriptionChildren>(std::move(children));
-        result->children_replaced_from = current;
-        return result;
-    };
-    std::shared_ptr<const DescriptionNode> result = replace(replace, root);
-    // A loop or slot projection may have cloned a component root to annotate it. In that case a
-    // partial pointer rewrite would leave stale descendants, so the caller must use its rebuild.
-    if (applied.size() != replacements.size())
-        return nullptr;
-    return result;
-}
-
-DescriptionBuilder::ComponentRefreshResult
-DescriptionBuilder::refresh_component_cache_entry(const ComponentId id) {
-    auto found = component_cache_.find(id);
-    if (found == component_cache_.end())
-        return ComponentRefreshResult::invalid;
-    if (found->second.refreshing)
-        return ComponentRefreshResult::unchanged;
-    found->second.refreshing = true;
-    struct RefreshGuard final {
-        std::unordered_map<ComponentId, ComponentCacheEntry>& cache;
-        ComponentId id;
-        ~RefreshGuard() {
-            if (const auto entry = cache.find(id); entry != cache.end())
-                entry->second.refreshing = false;
-        }
-    } guard{component_cache_, id};
-
-    // Entries are nodes: refreshing others (which may add entries) leaves this reference valid.
-    ComponentCacheEntry& entry = found->second;
-    // Nothing a build reads changes during it: what this one already settled stays settled, and
-    // is never described twice.
-    if (entry.refreshed_epoch == component_cache_epoch_)
-        return ComponentRefreshResult::unchanged;
-    entry.refreshed_epoch = component_cache_epoch_;
-
-    // The inputs are the entry's own: only what its body read can have changed. A body that is
-    // stale is described again, and calls its components with what it reads now; refreshing them
-    // first would describe them from the inputs it no longer passes.
-    if (component_effects_current(entry.effects, entry.host_invalidation_count,
-                                  entry.contextual_host_roots)) {
-        const std::optional<SubtreeReplacements> replacements =
-            refresh_direct_descendants(entry.effects.direct_descendants);
-        if (replacements.has_value() && replacements->empty())
-            return ComponentRefreshResult::unchanged;
-        // Only descendants changed: the body would describe the same nodes around them, so their
-        // new subtrees are patched in and the aggregate is recomputed from their entries.
-        if (replacements.has_value()) {
-            std::shared_ptr<const DescriptionNode> patched =
-                replace_component_subtrees(entry.root, *replacements);
-            if (patched != nullptr && aggregate_component_effects(entry.effects)) {
-                entry.host_invalidation_count = application_.host().invalidation_count();
-                entry.last_used_epoch = component_cache_epoch_;
-                entry.root = std::move(patched);
-                return ComponentRefreshResult::changed;
-            }
-        }
-    }
-
-    ComponentEffects effects;
-    std::shared_ptr<const DescriptionNode> rebuilt =
-        build_component_body(entry.component_index, entry.rebuild_scope, effects);
-    entry.host_invalidation_count = application_.host().invalidation_count();
-    entry.last_used_epoch = component_cache_epoch_;
-    entry.effects = std::move(effects);
-    entry.root = share_unchanged_description(entry.root, rebuilt);
-    return ComponentRefreshResult::changed;
-}
-
-std::optional<DescriptionBuilder::SubtreeReplacements>
-DescriptionBuilder::refresh_direct_descendants(const std::vector<ComponentId>& children) {
-    SubtreeReplacements replacements;
-    for (const ComponentId child : children) {
-        const auto child_before = component_cache_.find(child);
-        if (child_before == component_cache_.end())
-            return std::nullopt;
-        const std::shared_ptr<const DescriptionNode> previous = child_before->second.root;
-        const ComponentRefreshResult refreshed = refresh_component_cache_entry(child);
-        const auto child_after = component_cache_.find(child);
-        if (refreshed == ComponentRefreshResult::invalid || child_after == component_cache_.end())
-            return std::nullopt;
-        if (child_after->second.root != previous)
-            replacements.insert_or_assign(previous.get(), child_after->second.root);
-    }
-    return replacements;
-}
-
-void DescriptionBuilder::replay_component_effects(const ComponentEffects& effects) {
-    for (const ComponentId id : effects.descendants) {
-        if (const auto entry = component_cache_.find(id); entry != component_cache_.end())
-            entry->second.visited_epoch = component_cache_epoch_;
-    }
-    for (ComponentEffects* const component : component_effect_stack_) {
-        add_descendants(component->descendants, effects.descendants);
-    }
-    for (const std::string& scope : effects.owned_state_scopes)
-        own_state_scope(scope, true);
-    for (const auto& [binding_address, binding] : effects.state_bindings) {
-        bind_state_scope(binding_address.scope, binding_address.name, binding.declaration_scope,
-                         binding.address_scope, true);
-    }
-    // Rows realized after the cached build bound their scopes then; every build starts unbound.
-    rebind_generated_rows(effects);
-}
-
-void DescriptionBuilder::hold_generated_rows(
-    const std::shared_ptr<GeneratedRowEvaluationContext>& rows) {
-    // Rows bind on behalf of the surface this builder describes, which clears them.
-    rows->evaluator->binding_owner_ = binding_owner_;
-    if (!component_effect_stack_.empty())
-        component_effect_stack_.back()->generated_rows.push_back(rows);
-}
-
-void DescriptionBuilder::rebind_generated_rows(const ComponentEffects& effects) const {
-    for (const auto& rows : effects.generated_rows)
-        rows->rebind();
-    for (const ComponentId id : effects.descendants) {
-        if (const auto entry = component_cache_.find(id); entry != component_cache_.end()) {
-            for (const auto& rows : entry->second.effects.generated_rows)
-                rows->rebind();
-        }
-    }
-}
-
-bool DescriptionBuilder::effects_subtree_current(const ComponentEffects& effects,
-                                                 const std::uint64_t host_invalidation_count) const {
-    if (!component_effects_current(effects, host_invalidation_count, contextual_host_roots_))
-        return false;
-    return std::ranges::all_of(effects.direct_descendants, [this](const ComponentId id) {
-        const auto entry = component_cache_.find(id);
-        return entry != component_cache_.end() &&
-               effects_subtree_current(entry->second.effects,
-                                       entry->second.host_invalidation_count);
+    std::vector<RetainedRead>& reads = current->reads.retained;
+    const auto found = std::ranges::find_if(reads, [&](const RetainedRead& read) {
+        return read.name == name && read.query == query;
     });
-}
-
-bool DescriptionBuilder::aggregate_component_effects(ComponentEffects& effects) const {
-    effects.state_bindings = effects.local_state_bindings;
-    effects.owned_state_scopes = effects.local_owned_state_scopes;
-    effects.captures_retained_snapshot = effects.local_captures_retained_snapshot;
-    effects.descendants.clear();
-    for (const ComponentId child_id : effects.direct_descendants) {
-        const auto child = component_cache_.find(child_id);
-        if (child == component_cache_.end())
-            return false;
-        const ComponentEffects& descendant = child->second.effects;
-        effects.descendants.push_back(child_id);
-        effects.descendants.insert(effects.descendants.end(), descendant.descendants.begin(),
-                                   descendant.descendants.end());
-        for (const auto& [address, binding] : descendant.state_bindings) {
-            effects.state_bindings.insert_or_assign(address, binding);
-        }
-        effects.owned_state_scopes.insert(descendant.owned_state_scopes.begin(),
-                                          descendant.owned_state_scopes.end());
-        effects.captures_retained_snapshot =
-            effects.captures_retained_snapshot || descendant.captures_retained_snapshot;
-    }
-    std::ranges::sort(effects.descendants);
-    const auto duplicates = std::ranges::unique(effects.descendants);
-    effects.descendants.erase(duplicates.begin(), duplicates.end());
-    effects.retained_snapshot = effects.captures_retained_snapshot ? retained_snapshot_ : nullptr;
-    return true;
-}
-
-DescriptionBuilder::ComponentId DescriptionBuilder::component_id(const std::string& cache_key) {
-    const auto [found, inserted] = component_ids_.try_emplace(cache_key, next_component_id_);
-    if (inserted)
-        ++next_component_id_;
-    return found->second;
-}
-
-void DescriptionBuilder::forget_component(const ComponentId id) {
-    const auto found = component_cache_.find(id);
-    if (found == component_cache_.end())
+    if (found != reads.end()) {
+        found->value = std::move(observed);
         return;
-    component_ids_.erase(found->second.cache_key);
-    component_cache_.erase(found);
-}
-
-void DescriptionBuilder::add_descendant(std::vector<ComponentId>& sorted, const ComponentId id) {
-    const auto position = std::ranges::lower_bound(sorted, id);
-    if (position == sorted.end() || *position != id)
-        sorted.insert(position, id);
-}
-
-void DescriptionBuilder::add_descendants(std::vector<ComponentId>& sorted,
-                                         const std::vector<ComponentId>& more) {
-    if (more.empty())
-        return;
-    std::vector<ComponentId> merged;
-    merged.reserve(sorted.size() + more.size());
-    std::ranges::set_union(sorted, more, std::back_inserter(merged));
-    sorted = std::move(merged);
-}
-
-bool DescriptionBuilder::component_cache_entry_current(const ComponentCacheEntry& entry,
-                                                       const std::string_view source_path,
-                                                       const ComponentInputs& inputs) const {
-    if (entry.source_path != source_path || !same_inputs(entry.inputs, inputs) ||
-        !same_contextual_host_roots(entry.contextual_host_roots)) {
-        return false;
     }
-    return component_effects_current(entry.effects, entry.host_invalidation_count,
-                                     entry.contextual_host_roots);
+    reads.push_back(RetainedRead{query, std::string(name), std::move(observed)});
 }
 
 bool DescriptionBuilder::host_read_current(
@@ -2226,50 +1612,6 @@ bool DescriptionBuilder::same_contextual_host_roots(
            (contextual_host_roots_ != nullptr ? *contextual_host_roots_ : none);
 }
 
-bool DescriptionBuilder::component_effects_current(
-    const ComponentEffects& effects, const std::uint64_t host_invalidation_count,
-    const std::shared_ptr<const runtime::HostRoots>& contextual_host_roots) const {
-    if (effects.raised_errors || !same_contextual_host_roots(contextual_host_roots))
-        return false;
-    if (effects.captures_retained_snapshot && effects.retained_snapshot != retained_snapshot_)
-        return false;
-    if (host_invalidation_count != application_.host().invalidation_count()) {
-        for (const auto& [path, dependency] : effects.host_values) {
-            if (!host_read_current(path, dependency))
-                return false;
-        }
-    }
-    for (const auto& [address, value] : effects.state_values) {
-        const runtime::Value* const current = application_.state().find(address);
-        if (current == nullptr || *current != value)
-            return false;
-    }
-    for (const RetainedValueEffects& effect : effects.retained_values) {
-        const RetainedDescriptionSnapshot::Node* const retained = retained_widget(effect.query);
-        for (const auto& [name, expected] : effect.values) {
-            const runtime::Value* const current =
-                retained != nullptr ? retained->retained_value(name) : nullptr;
-            if (current == nullptr) {
-                if (expected.has_value())
-                    return false;
-            } else if (!expected.has_value() || *current != *expected) {
-                return false;
-            }
-        }
-    }
-    for (const RetainedSequenceEffect& effect : effects.retained_sequences) {
-        const RetainedDescriptionSnapshot::Node* const retained = retained_widget(effect.query);
-        const std::shared_ptr<const runtime::IndexableSequence> sequence =
-            retained != nullptr ? retained->virtual_sequence.lock() : nullptr;
-        const std::optional<DescriptionSequenceGeneration> generation =
-            retained != nullptr ? retained->virtual_sequence_generation : std::nullopt;
-        if (sequence != effect.sequence.lock() || generation != effect.generation)
-            return false;
-    }
-    return std::ranges::all_of(effects.generated_rows,
-                               [](const auto& rows) { return rows->current(); });
-}
-
 ExpressionValue DescriptionBuilder::evaluate(const runtime::ExpressionId expression,
                                              const runtime::ExpressionScope& scope) {
     ++evaluated_expressions_;
@@ -2286,8 +1628,8 @@ runtime::Value DescriptionBuilder::require_value(const ExpressionValue& value,
     if (value.collection() != nullptr)
         return (*value.collection())->items;
     const std::optional<std::string_view> expression_path = source.find("path").string();
-    if (!component_effect_stack_.empty())
-        component_effect_stack_.back()->raised_errors = true;
+    if (Frame* const current = frame(); current != nullptr)
+        current->reads.raised_errors = true;
     diagnostics_.push_back(runtime::RuntimeDiagnostic{
         "STRATA.DSL.RUNTIME_TYPE_MISMATCH",
         "Description expression did not produce a scalar value.",
@@ -2301,11 +1643,12 @@ runtime::Value DescriptionBuilder::require_value(const ExpressionValue& value,
 
 void DescriptionBuilder::append_diagnostics(runtime::ExpressionRuntime& expressions) {
     // The body being described raised them; the bodies around it did not.
-    if (!component_effect_stack_.empty() &&
+    if (Frame* const current = frame();
+        current != nullptr &&
         std::ranges::any_of(expressions.diagnostics(), [](const runtime::RuntimeDiagnostic& item) {
             return item.severity == runtime::DiagnosticSeverity::error;
         })) {
-        component_effect_stack_.back()->raised_errors = true;
+        current->reads.raised_errors = true;
     }
     diagnostics_.insert(diagnostics_.end(), expressions.diagnostics().begin(),
                         expressions.diagnostics().end());

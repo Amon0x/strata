@@ -440,20 +440,8 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
           widgets_, behaviors_, status_feedback_, notifications_,
           [this](const runtime::Action& action) { return execute_environment_action(action); },
           [this](const RetainedNode* const node, const std::string_view name) {
-              bool inside_lazy_materialization = false;
-              for (const RetainedNode* current = node; current != nullptr;
-                   current = current->parent()) {
-                  if (current->description().materialization_result != nullptr) {
-                      inside_lazy_materialization = true;
-                      break;
-                  }
-              }
-              const bool native_slider_value =
-                  node != nullptr && node->description().type == "Slider" && name == "$value" &&
-                  !node->description().properties.contains("presentationTemplate") &&
-                  !inside_lazy_materialization;
-              if (node == nullptr ||
-                  descriptions_.observes_retained_value(*node, name, !native_slider_value)) {
+              // Only the bodies that read the value are described again.
+              if (node == nullptr || descriptions_.observes_retained_value(*node, name)) {
                   invalidate_description();
               } else {
                   invalidate_frame();

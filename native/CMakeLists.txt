@@ -372,6 +372,7 @@ add_library(
         src/runtime/value.cpp
         src/runtime/value_schema.cpp
         src/ui/description.cpp
+        src/ui/description_instances.cpp
         src/ui/behavior/input.cpp
         src/ui/behavior/manipulation.cpp
         src/ui/behavior/collection_marquee.cpp

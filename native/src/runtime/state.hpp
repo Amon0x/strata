@@ -104,10 +104,20 @@ struct StateDeclarationSchema final {
 class StateStore final {
 public:
     using Invalidation = std::function<void()>;
+    /**
+     * Told the address of each value written, reset or dropped, or null when a restore or a
+     * migration replaced any number of them at once. An observer must not change the store.
+     */
+    using ChangeObserver = std::function<void(const StateAddress* address)>;
 
     explicit StateStore(Invalidation invalidation = {});
 
     [[nodiscard]] const Value& read(const StateAddress& address, const StateSlot& slot);
+    /**
+     * The value the slot holds, checked against the slot as read() checks it, without storing
+     * the slot's initial value: null while it holds none.
+     */
+    [[nodiscard]] const Value* peek(const StateAddress& address, const StateSlot& slot) const;
     [[nodiscard]] bool write(const StateAddress& address, const StateSlot& slot, Value value);
     [[nodiscard]] bool reset(const StateAddress& address);
     [[nodiscard]] const Value* find(const StateAddress& address) const noexcept;
@@ -124,6 +134,10 @@ public:
     [[nodiscard]] std::uint64_t generation() const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;
 
+    /** Registers an observer of changed addresses; the token stops it. */
+    [[nodiscard]] std::uint64_t observe_changes(ChangeObserver observer);
+    void stop_observing_changes(std::uint64_t token) noexcept;
+
 private:
     struct Stored final {
         std::string type_id;
@@ -134,6 +148,7 @@ private:
     };
 
     void changed();
+    void notify(const StateAddress* address) const;
     static void validate_address(const StateAddress& address);
     static void validate_slot(const StateSlot& slot);
 
@@ -143,6 +158,8 @@ private:
     StateScopeSet declaration_scopes_;
     Invalidation invalidation_;
     std::uint64_t generation_ = 0U;
+    std::vector<std::pair<std::uint64_t, ChangeObserver>> change_observers_;
+    std::uint64_t next_change_observer_ = 1U;
 };
 
 enum class StateMutationKind {

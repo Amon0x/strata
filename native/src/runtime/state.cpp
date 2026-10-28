@@ -85,6 +85,26 @@ const Value& StateStore::read(const StateAddress& address, const StateSlot& slot
     return found->second.value;
 }
 
+const Value* StateStore::peek(const StateAddress& address, const StateSlot& slot) const {
+    validate_address(address);
+    validate_slot(slot);
+    const auto found = values_.find(address);
+    if (found == values_.end()) return nullptr;
+    if (found->second.type_id != slot.type_id) {
+        throw std::logic_error(
+            "state slot '" + address.scope + "/" + address.name + "' changed type from '" +
+            found->second.type_id + "' to '" + slot.type_id + "'"
+        );
+    }
+    const std::string_view declaration_scope = slot.declaration_scope.empty()
+                                                   ? std::string_view(address.scope)
+                                                   : std::string_view(slot.declaration_scope);
+    if (found->second.declaration_scope != declaration_scope) {
+        throw std::logic_error("state slot changed declaration ownership");
+    }
+    return &found->second.value;
+}
+
 bool StateStore::write(const StateAddress& address, const StateSlot& slot, Value value) {
     validate_address(address);
     validate_slot(slot);
@@ -98,6 +118,7 @@ bool StateStore::write(const StateAddress& address, const StateSlot& slot, Value
     auto found = values_.find(address);
     if (found == values_.end()) {
         values_.emplace(address, Stored{slot.type_id, std::move(value), declaration_scope});
+        notify(&address);
         changed();
         return true;
     }
@@ -112,6 +133,7 @@ bool StateStore::write(const StateAddress& address, const StateSlot& slot, Value
     }
     if (found->second.value == value) return false;
     found->second.value = std::move(value);
+    notify(&address);
     changed();
     return true;
 }
@@ -119,6 +141,7 @@ bool StateStore::write(const StateAddress& address, const StateSlot& slot, Value
 bool StateStore::reset(const StateAddress& address) {
     validate_address(address);
     if (values_.erase(address) == 0U) return false;
+    notify(&address);
     changed();
     return true;
 }
@@ -169,6 +192,7 @@ bool StateStore::restore(const StateSnapshot& snapshot_value) {
     }
     if (values_ == restored) return false;
     values_ = std::move(restored);
+    notify(nullptr);
     changed();
     return true;
 }
@@ -211,7 +235,10 @@ bool StateStore::migrate_declarations(const std::vector<StateDeclarationSchema>&
         }
     }
     declaration_scopes_ = std::move(scopes);
-    if (removed) changed();
+    if (removed) {
+        notify(nullptr);
+        changed();
+    }
     return removed;
 }
 
@@ -231,6 +258,7 @@ bool StateStore::retain_owned_scopes(const StateScopeSet& attached_scopes) {
         iterator = owned_scopes_.erase(iterator);
         for (auto value = values_.begin(); value != values_.end();) {
             if (value->first.scope == scope) {
+                notify(&value->first);
                 initial_values_.erase(value->first);
                 value = values_.erase(value);
                 removed = true;
@@ -244,6 +272,24 @@ bool StateStore::retain_owned_scopes(const StateScopeSet& attached_scopes) {
 }
 
 std::uint64_t StateStore::generation() const noexcept { return generation_; }
+
+std::uint64_t StateStore::observe_changes(ChangeObserver observer) {
+    if (!observer) throw std::invalid_argument("state change observer must be callable");
+    const std::uint64_t token = next_change_observer_++;
+    change_observers_.emplace_back(token, std::move(observer));
+    return token;
+}
+
+void StateStore::stop_observing_changes(const std::uint64_t token) noexcept {
+    std::erase_if(change_observers_, [token](const auto& entry) { return entry.first == token; });
+}
+
+void StateStore::notify(const StateAddress* const address) const {
+    for (const auto& [token, observer] : change_observers_) {
+        static_cast<void>(token);
+        observer(address);
+    }
+}
 std::size_t StateStore::size() const noexcept { return values_.size(); }
 
 void StateStore::changed() {

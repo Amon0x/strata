@@ -620,6 +620,17 @@ void ApplicationContext::bind_state_scope(
     );
 }
 
+void ApplicationContext::unbind_state_scope(
+    const void* const owner,
+    const std::string_view runtime_scope,
+    const std::string_view state_name
+) noexcept {
+    const auto binding = state_scope_bindings_.find(StateAddressView{runtime_scope, state_name});
+    if (binding == state_scope_bindings_.end()) return;
+    binding->second.owners.erase(owner);
+    if (binding->second.owners.empty()) state_scope_bindings_.erase(binding);
+}
+
 void ApplicationContext::clear_state_scope_bindings(const void* const owner) noexcept {
     for (auto binding = state_scope_bindings_.begin(); binding != state_scope_bindings_.end();) {
         binding->second.owners.erase(owner);

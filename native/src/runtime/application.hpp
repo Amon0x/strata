@@ -179,6 +179,12 @@ public:
         std::string_view declaration_scope,
         std::string_view address_scope
     );
+    /** Drops one binding `owner` made; the binding stays while another owner holds it. */
+    void unbind_state_scope(
+        const void* owner,
+        std::string_view runtime_scope,
+        std::string_view state_name
+    ) noexcept;
     /** Drops the bindings `owner` made; another owner's stay. */
     void clear_state_scope_bindings(const void* owner) noexcept;
     void clear_state_scope_bindings() noexcept;
