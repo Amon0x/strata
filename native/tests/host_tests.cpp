@@ -819,6 +819,29 @@ void portable_session_runs_the_application_lifecycle() {
     check(session.runtime().snapshot().info().time_nanoseconds == 5'000'000,
           "the Session clock did not drive the runtime clock");
 
+    // A backend's own measurements reach the profiler beside the packet's counts, which win.
+    session.surface().set_profiler_capture(true);
+    const strata::host::SurfacePacketFrame measured = session.frame(6'000'000);
+    strata::ProfilerHostFrame backend;
+    backend.draw_calls = measured.packet->planned_draw_count + 7U;
+    backend.blur_passes = 3U;
+    backend.blur_target_width = 160U;
+    backend.blur_target_height = 100U;
+    backend.submit_nanoseconds = 2'000;
+    session.record_host_frame(*measured.packet, backend);
+    const auto counter = [&session](const std::string_view name) -> std::uint64_t {
+        for (const strata::ProfilerCounter& value : session.surface().profiler().counters) {
+            if (value.name == name)
+                return value.value;
+        }
+        throw std::runtime_error("the Surface profiler has no counter " + std::string(name));
+    };
+    check(counter("blur.passes") == 3U && counter("blur.target_width") == 160U &&
+              counter("blur.target_height") == 100U,
+          "a Session did not publish the backend's blur measurements");
+    check(counter("render.draw_calls") == measured.packet->planned_draw_count,
+          "a Session published a backend draw count instead of the packet's");
+
     strata_surface_environment resized = surface.environment;
     resized.generation = 2U;
     resized.framebuffer_width = 640;

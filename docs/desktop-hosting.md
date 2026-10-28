@@ -19,9 +19,12 @@ installed as `Strata::host_session`), the portable application session the headl
 SDL preview also run on. A Session owns the runtime with its caller clock and diagnostics, installs
 the host's adapters, configures the application and its extension packages, activates source while
 resolving imports through the host's reader, creates the Surface, frames it into decoded packets,
-records host-frame telemetry, and performs the release barrier; the host keeps its window, input
-translation and renderer. The showcase that `strata_desktop.exe` opens without a manifest lives in
+records host-frame telemetry (with the backend's own texture, blur and submit measurements when it
+has them), and performs the release barrier; the host keeps its window, input translation and
+renderer. The showcase that `strata_desktop.exe` opens without a manifest lives in
 `native/apps/showcase`, and its `strata.control-deck.v1` package in `native/packages/control_deck`.
+It composites eight applications into one window, each on its own Session drawing into its own
+renderer layer.
 
 ## Build and install the SDK from source
 

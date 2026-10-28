@@ -140,6 +140,12 @@ class Session final {
     [[nodiscard]] SurfacePacketFrame frame(std::int64_t time_nanoseconds);
     /** Publishes the backend's work for the packet the latest frame produced. */
     void record_host_frame(const RenderPacket& packet, std::int64_t submit_nanoseconds = 0);
+    /**
+     * Publishes what the backend measured for the packet the latest frame produced: its texture
+     * traffic, blur passes and targets, and submit time. The packet supplies the draw, batch and
+     * vertex counts, so those fields of `backend` are ignored.
+     */
+    void record_host_frame(const RenderPacket& packet, const ProfilerHostFrame& backend);
 
     /**
      * The ordered release barrier: prepares the terminal packet, hands it to `consume`, which must

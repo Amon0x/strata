@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cmath>
 #include <cctype>
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -17,15 +16,12 @@
 #include <iostream>
 #include <memory>
 #include <map>
-#include <mutex>
 #include <optional>
-#include <set>
 #include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -41,17 +37,17 @@
 #include <strata/host.hpp>
 #include <strata/strata.hpp>
 
-#include "durable_writer.hpp"
-#include "host_services.hpp"
-#include "host/extensions.hpp"
 #include <strata/render_packet.hpp>
+
+#include "durable_writer.hpp"
+#include "host/session.hpp"
+#include "host_services.hpp"
 #include "renderer.hpp"
 #include "showcase.hpp"
 
 namespace strata::desktop {
 
 using host::RenderPacket;
-using host::RenderPacketDecoder;
 
 namespace {
 
@@ -245,18 +241,22 @@ struct Host::Impl final {
         };
 
         Impl* owner = nullptr;
-        strata_runtime* runtime = nullptr;
         std::map<std::uint64_t, Pending> pending;
     };
 
-    struct Session final {
+    /** One of the window's composited applications: its Session and the async host it calls. */
+    struct Layer final {
         std::string id;
-        std::unique_ptr<strata::Runtime> runtime;
+        /** Declared first so it outlives the Session, whose runtime holds it as its async host. */
         std::unique_ptr<AsyncBridge> async;
-        std::unique_ptr<strata::host::Bindings> bindings;
-        host::SelectedExtensions extensions;
-        std::optional<strata::Surface> surface;
-        RenderPacketDecoder decoder;
+        std::unique_ptr<host::Session> session;
+
+        [[nodiscard]] bool live() const noexcept {
+            return session != nullptr && session->has_surface();
+        }
+        [[nodiscard]] strata::Surface& surface() { return session->surface(); }
+        [[nodiscard]] strata::Runtime& runtime() { return session->runtime(); }
+        [[nodiscard]] strata::host::Bindings& bindings() { return session->bindings(); }
     };
 
     Impl(
@@ -330,10 +330,6 @@ struct Host::Impl final {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - epoch
         ).count();
-    }
-
-    static std::int64_t clock(void* const user_data) noexcept {
-        return static_cast<Impl*>(user_data)->frame_time;
     }
 
     [[nodiscard]] std::filesystem::path durable_path(
@@ -478,10 +474,11 @@ struct Host::Impl final {
         return value;
     }
 
-    void advance_async(Session& session) {
-        if (session.async == nullptr || session.runtime == nullptr) return;
+    void advance_async(Layer& layer) {
+        if (layer.async == nullptr || layer.session == nullptr) return;
+        strata_runtime* const runtime = layer.runtime().native_handle();
         std::vector<std::uint64_t> completed;
-        for (auto& [id, request] : session.async->pending) {
+        for (auto& [id, request] : layer.async->pending) {
             const std::int64_t elapsed = frame_time - request.started_nanos;
             const bool tree_children = request.binding == "asyncTreeChildren";
             if (!tree_children && !request.progress_published && elapsed >= 350'000'000) {
@@ -492,7 +489,7 @@ struct Host::Impl final {
                     strata::view(message),
                 };
                 const strata_result result = strata_runtime_async_progress(
-                    session.runtime->native_handle(), id, &progress
+                    runtime, id, &progress
                 );
                 if (result.status != STRATA_STATUS_NOT_FOUND) {
                     strata::require_ok(result, "desktop async progress");
@@ -521,11 +518,11 @@ struct Host::Impl final {
                 }
                 const std::string items = contracts::demo_surface::to_value(children).json();
                 result = strata_runtime_async_succeed_json(
-                    session.runtime->native_handle(), id, strata::view(items)
+                    runtime, id, strata::view(items)
                 );
             } else if (query == "fail") {
                 result = strata_runtime_async_fail(
-                    session.runtime->native_handle(), id,
+                    runtime, id,
                     strata::view("The simulated source rejected the query."),
                     strata::view("SIMULATED_FAILURE")
                 );
@@ -543,7 +540,7 @@ struct Host::Impl final {
                 const std::string value_json =
                     contracts::demo_surface::to_value(values).json();
                 result = strata_runtime_async_succeed_json(
-                    session.runtime->native_handle(), id, strata::view(value_json)
+                    runtime, id, strata::view(value_json)
                 );
             }
             if (result.status != STRATA_STATUS_NOT_FOUND) {
@@ -551,19 +548,11 @@ struct Host::Impl final {
             }
             completed.push_back(id);
         }
-        for (const std::uint64_t id : completed) session.async->pending.erase(id);
+        for (const std::uint64_t id : completed) layer.async->pending.erase(id);
     }
 
-    static void diagnostic(
-        void* const,
-        const strata_diagnostic* const value
-    ) noexcept {
-        if (value == nullptr) return;
-        try {
-            std::cerr << "strata desktop: " << copy(value->code) << ": "
-                      << copy(value->message) << '\n';
-        } catch (...) {
-        }
+    static void diagnostic(const strata_diagnostic& value) {
+        std::cerr << "strata desktop: " << copy(value.code) << ": " << copy(value.message) << '\n';
     }
 
     [[nodiscard]] strata_surface_environment environment() const noexcept {
@@ -613,8 +602,8 @@ struct Host::Impl final {
         }
     }
 
-    void publish(Session& session, const std::string_view id, const std::string& json) {
-        static_cast<void>(session.runtime->publish_host_snapshot(id, json));
+    void publish(Layer& layer, const std::string_view id, const std::string& json) {
+        static_cast<void>(layer.runtime().publish_host_snapshot(id, json));
     }
 
     /**
@@ -643,96 +632,50 @@ struct Host::Impl final {
         }
     }
 
-    [[nodiscard]] Session create_session(
+    [[nodiscard]] Layer create_session(
         std::string id,
         const std::string_view schemas_resource
     ) {
         frame_time = now();
-        strata_runtime_config config{};
-        config.struct_size = sizeof(config);
-        config.abi_version = STRATA_ABI_VERSION_CURRENT;
-        config.required_capabilities = STRATA_CAPABILITY_CORE_LIFECYCLE |
-            STRATA_CAPABILITY_CALLER_CLOCK |
-            STRATA_CAPABILITY_HOST_SNAPSHOTS |
-            STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
-            STRATA_CAPABILITY_COMPILER_ACTIVATION |
-            STRATA_CAPABILITY_COMPILED_MODULE_ACTIVATION |
-            STRATA_CAPABILITY_ACTION_DISPATCH |
-            STRATA_CAPABILITY_RESOURCE_ADAPTER |
-            STRATA_CAPABILITY_CLIPBOARD_IME_ADAPTER |
-            STRATA_CAPABILITY_DURABLE_STATE |
-            STRATA_CAPABILITY_ASYNC_HOST_DATA |
-            STRATA_CAPABILITY_SURFACE_RUNTIME |
-            STRATA_CAPABILITY_SURFACE_RENDER_PACKET;
-        config.stable_identity_seed = 0x5354524154414445ULL;
-        config.clock = strata_clock{sizeof(strata_clock), this, &Impl::clock};
-        config.diagnostics = strata_diagnostic_sink{
-            sizeof(strata_diagnostic_sink), this, &Impl::diagnostic,
-        };
-        Session result;
+        Layer result;
         result.id = std::move(id);
-        result.runtime = std::make_unique<strata::Runtime>(config);
+        result.async = std::make_unique<AsyncBridge>(AsyncBridge{this, {}});
 
-        const strata_resource_adapter resources = services.resource_adapter();
-        strata::require_ok(
-            strata_runtime_set_resource_adapter(result.runtime->native_handle(), &resources),
-            "desktop resource adapter installation"
-        );
-        const strata_clipboard_adapter clipboard = services.clipboard_adapter();
-        strata::require_ok(
-            strata_runtime_set_clipboard_adapter(result.runtime->native_handle(), &clipboard),
-            "desktop clipboard adapter installation"
-        );
-        const strata_ime_adapter ime = services.ime_adapter(result.id);
-        strata::require_ok(
-            strata_runtime_set_ime_adapter(result.runtime->native_handle(), &ime),
-            "desktop IME adapter installation"
-        );
-
-        const std::string schemas = services.text(schemas_resource);
-        result.extensions = host::select_extensions(
-            host::declared_extension_packages(schemas), {}, strata::widget_api()
-        );
-        const std::vector<std::string> extension_schemas = result.extensions.schemas();
-        std::vector<strata_string_view> extension_schema_views;
-        extension_schema_views.reserve(extension_schemas.size());
-        for (const std::string& document : extension_schemas) {
-            extension_schema_views.push_back(strata::view(document));
-        }
-        const strata_application_config application{
-            sizeof(strata_application_config),
-            strata::view(result.id),
-            strata::view(schemas),
-            extension_schema_views.empty() ? nullptr : extension_schema_views.data(),
-            extension_schema_views.size(),
+        host::SessionOptions options;
+        options.application_id = result.id;
+        options.stable_identity_seed = 0x5354524154414445ULL;
+        // The bundled applications activate their checked-in compiled artifacts.
+        options.capabilities = STRATA_CAPABILITY_COMPILED_MODULE_ACTIVATION;
+        options.schemas = services.text(schemas_resource);
+        options.read_text = [this](const std::string_view resource) {
+            return services.text(resource);
         };
-        result.runtime->configure_application(application);
-        const strata_durable_store_adapter durable{
+        options.on_diagnostic = &Impl::diagnostic;
+        options.bindings_owner = "strata.desktop." + result.id;
+        host::SessionAdapters adapters;
+        adapters.resources = services.resource_adapter();
+        adapters.clipboard = services.clipboard_adapter();
+        adapters.ime = services.ime_adapter(result.id);
+        adapters.durable_store = strata_durable_store_adapter{
             sizeof(strata_durable_store_adapter), this, &Impl::durable_load, &Impl::durable_write,
         };
-        result.runtime->set_durable_store(durable);
-        result.async = std::make_unique<AsyncBridge>(AsyncBridge{
-            this, result.runtime->native_handle(), {},
-        });
-        const strata_async_host_adapter async{
+        adapters.async_host = strata_async_host_adapter{
             sizeof(strata_async_host_adapter),
             result.async.get(),
             &Impl::async_begin,
             &Impl::async_cancel,
         };
-        result.runtime->set_async_host(async);
-        result.bindings = std::make_unique<strata::host::Bindings>(
-            *result.runtime, "strata.desktop." + result.id
-        );
-        declare_materials(*result.runtime);
+        result.session = std::make_unique<host::Session>(std::move(options), adapters);
+        result.session->set_time(frame_time);
+        declare_materials(result.runtime());
         return result;
     }
 
     void activate(
-        Session& session,
+        Layer& layer,
         const std::string_view source_resource,
         const std::string_view root_name,
-        const std::span<const strata_surface_image_resource> images = {}
+        std::vector<host::SessionImage> images = {}
     ) {
         if (!source_resource.ends_with(".strata")) {
             throw std::invalid_argument("desktop bundled module must use a .strata resource id");
@@ -741,42 +684,22 @@ struct Host::Impl final {
         artifact_resource.resize(artifact_resource.size() - std::string_view(".strata").size());
         artifact_resource += ".compiled.bin";
         const std::vector<std::uint8_t> artifact = services.bytes(artifact_resource);
-        const strata_compiled_activation_config activation{
-            sizeof(strata_compiled_activation_config),
-            1U,
-            strata_bytes_view{artifact.data(), artifact.size()},
-        };
-        const strata_activation_info activated = session.runtime->activate(activation);
-        if (activated.status != STRATA_ACTIVATION_ACTIVATED) {
+        if (layer.session->activate_compiled(artifact, 1U).status != STRATA_ACTIVATION_ACTIVATED) {
             throw std::runtime_error("desktop compiled Strata module did not activate");
         }
 
-        constexpr std::array fonts{
-            strata_surface_font_resource{
-                strata::view("strata:fonts/default-medium"),
-                strata::view("assets/strata/fonts/medium.ttf"),
-            },
-            strata_surface_font_resource{
-                strata::view("strata:fonts/default"),
-                strata::view("assets/strata/fonts/default.ttf"),
-            },
-            strata_surface_font_resource{
-                strata::view("strata:fonts/mono"),
-                strata::view("assets/strata/fonts/mono.ttf"),
-            },
+        host::SessionSurface surface;
+        surface.id = layer.id;
+        surface.root_role = STRATA_SURFACE_ROOT_OVERLAY;
+        surface.root_name = std::string(root_name);
+        surface.environment = environment();
+        surface.fonts = {
+            {"strata:fonts/default-medium", "assets/strata/fonts/medium.ttf"},
+            {"strata:fonts/default", "assets/strata/fonts/default.ttf"},
+            {"strata:fonts/mono", "assets/strata/fonts/mono.ttf"},
         };
-        strata_surface_config surface_config{};
-        surface_config.struct_size = sizeof(surface_config);
-        surface_config.id = strata::view(session.id);
-        surface_config.root_role = STRATA_SURFACE_ROOT_OVERLAY;
-        surface_config.root_name = strata::view(root_name);
-        surface_config.environment = environment();
-        surface_config.fonts = fonts.data();
-        surface_config.font_count = fonts.size();
-        surface_config.extensions = session.extensions.pointer();
-        surface_config.images = images.empty() ? nullptr : images.data();
-        surface_config.image_count = images.size();
-        session.surface.emplace(session.runtime->create_surface(surface_config));
+        surface.images = std::move(images);
+        layer.session->create_surface(surface);
     }
 
     void create_settings() {
@@ -784,7 +707,7 @@ struct Host::Impl final {
             "settings.desktop",
             "assets/strata/ui/settings_app.schemas.json"
         );
-        settings.bindings->on(
+        settings.bindings().on(
             contracts::settings_app::SettingsSaveAction::id,
             [this](const strata::host::ActionEvent& event) {
                 static_cast<void>(contracts::settings_app::SettingsSaveAction::decode(event));
@@ -793,7 +716,7 @@ struct Host::Impl final {
                 return strata::host::ActionResult::handled;
             }
         );
-        settings.bindings->snapshot(
+        settings.bindings().snapshot(
             "settings.desktop",
             [this] { return settings_revision.value(); },
             [this] {
@@ -821,7 +744,7 @@ struct Host::Impl final {
                 );
             }
         );
-        settings.bindings->synchronize();
+        settings.bindings().synchronize();
         activate(
             settings,
             "assets/strata/ui/settings_app.strata",
@@ -829,82 +752,71 @@ struct Host::Impl final {
         );
     }
 
-    void bind_showcase_model(Session& session) {
+    void bind_showcase_model(Layer& layer) {
         static constexpr std::array extension_action_ids{
             std::string_view("demo.custom.pulse"),
             std::string_view("demo.inspect.pointer"),
         };
         for (const std::string_view action_id : contracts::demo_surface::action_ids) {
-            session.bindings->on(action_id, [this](
+            layer.bindings().on(action_id, [this](
                                                         const strata::host::ActionEvent& event
                                                     ) {
                 return showcase_model.handle(event);
             });
         }
         for (const std::string_view action_id : extension_action_ids) {
-            session.bindings->on(action_id, [this](const strata::host::ActionEvent& event) {
+            layer.bindings().on(action_id, [this](const strata::host::ActionEvent& event) {
                 return showcase_model.handle(event);
             });
         }
-        session.bindings->snapshot(
+        layer.bindings().snapshot(
             "demo.desktop.data.tree",
             [this] { return showcase_model.tree_revision().value(); },
             [this] { return showcase_model.tree_snapshot(); }
         );
-        session.bindings->snapshot(
+        layer.bindings().snapshot(
             "demo.desktop.data.table",
             [this] { return showcase_model.table_revision().value(); },
             [this] { return showcase_model.table_snapshot(); }
         );
-        session.bindings->snapshot(
+        layer.bindings().snapshot(
             "demo.desktop.data.grid",
             [this] { return showcase_model.grid_revision().value(); },
             [this] { return showcase_model.grid_snapshot(); }
         );
-        session.bindings->snapshot(
+        layer.bindings().snapshot(
             "demo.desktop.state",
             [this] { return showcase_model.demo_revision().value(); },
             [this] { return showcase_model.demo_snapshot(); }
         );
-        session.bindings->synchronize();
+        layer.bindings().synchronize();
     }
 
     void create_demo_surface(
-        Session& session,
+        Layer& layer,
         std::string id,
         const std::string_view root_name
     ) {
-        session = create_session(
+        layer = create_session(
             std::move(id),
             "assets/strata/ui/demo_surface.schemas.json"
         );
-        bind_showcase_model(session);
-        static constexpr std::array showcase_images{
-            strata_surface_image_resource{
-                strata::view("strata:ui/icons/chevron-down"),
-                strata::view("assets/strata/images/ui/icons/chevron-down.svg"),
-                STRATA_IMAGE_SAMPLING_LINEAR,
-                0U,
-            },
-            strata_surface_image_resource{
-                strata::view("strata:ui/icons/chevron-up"),
-                strata::view("assets/strata/images/ui/icons/chevron-up.svg"),
-                STRATA_IMAGE_SAMPLING_LINEAR,
-                0U,
-            },
-        };
+        bind_showcase_model(layer);
         activate(
-            session,
+            layer,
             "assets/strata/ui/demo_surface.strata",
             root_name,
-            showcase_images
+            {
+                {"strata:ui/icons/chevron-down", "assets/strata/images/ui/icons/chevron-down.svg"},
+                {"strata:ui/icons/chevron-up", "assets/strata/images/ui/icons/chevron-up.svg"},
+            }
         );
     }
 
     void create_showcase() {
         create_demo_surface(showcase, "demo.desktop", "MainShowcase");
         strata::require_ok(
-            strata_surface_set_profiler_capture(showcase.surface->native_handle(), 1U),
+            strata_surface_set_profiler_capture(showcase.surface().native_handle(), 1U),
             "desktop showcase profiler capture"
         );
     }
@@ -918,7 +830,7 @@ struct Host::Impl final {
     }
 
     void create_control_deck() {
-        if (control_deck.surface.has_value()) return;
+        if (control_deck.live()) return;
         control_deck = create_session(
             "control-deck.desktop",
             "assets/strata/ui/control_deck.schemas.json"
@@ -931,7 +843,7 @@ struct Host::Impl final {
     }
 
     void create_tuning_panel() {
-        if (tuning_panel.surface.has_value()) return;
+        if (tuning_panel.live()) return;
         tuning_panel = create_session(
             "tuning-panel.desktop",
             "assets/strata/ui/tuning_panel.schemas.json"
@@ -948,22 +860,22 @@ struct Host::Impl final {
     }
 
     void capture_profile_snapshot() {
-        Session* const profiled = active_performance_session();
-        if (profiled == nullptr) return;
+        Layer* const profiled = interactive_layer();
+        if (profiled == nullptr || !profiled->live()) return;
         ProfileCapture capture;
         capture.captured_at = frame_time;
         const strata_profiler_snapshot_sink runtime_sink{
             sizeof(strata_profiler_snapshot_sink), &capture.runtime, &Impl::profile,
         };
         strata::require_ok(
-            strata_runtime_read_profiler(profiled->runtime->native_handle(), &runtime_sink),
+            strata_runtime_read_profiler(profiled->runtime().native_handle(), &runtime_sink),
             "desktop runtime profiler sampling"
         );
         const strata_profiler_snapshot_sink surface_sink{
             sizeof(strata_profiler_snapshot_sink), &capture.surface, &Impl::profile,
         };
         strata::require_ok(
-            strata_surface_read_profiler(profiled->surface->native_handle(), &surface_sink),
+            strata_surface_read_profiler(profiled->surface().native_handle(), &surface_sink),
             "desktop surface profiler sampling"
         );
         capture.host = {
@@ -1188,32 +1100,32 @@ struct Host::Impl final {
     }
 
     void create_debug() {
-        if (debug.surface.has_value()) return;
+        if (debug.live()) return;
         debug = create_session(
             "profiler.desktop", "assets/strata/ui/debug_overlay.schemas.json"
         );
-        debug.bindings->on(
+        debug.bindings().on(
             contracts::debug_overlay::StrataDebugCloseAction::id,
             [this](const strata::host::ActionEvent&) {
                 debug_enabled = false;
                 return strata::host::ActionResult::handled;
             }
         );
-        debug.bindings->on(
+        debug.bindings().on(
             contracts::debug_overlay::StrataDebugClearDiagnosticsAction::id,
             [this](const strata::host::ActionEvent&) {
                 clear_diagnostics_pending = true;
                 return strata::host::ActionResult::handled;
             }
         );
-        debug.bindings->on(
+        debug.bindings().on(
             contracts::debug_overlay::StrataDebugCopyProfileAction::id,
             [this](const strata::host::ActionEvent&) {
                 static_cast<void>(services.write_clipboard(debug_export_text()));
                 return strata::host::ActionResult::handled;
             }
         );
-        debug.bindings->on(
+        debug.bindings().on(
             contracts::debug_overlay::StrataDebugSelectModeAction::id,
             [this](const strata::host::ActionEvent& event) {
                 const contracts::debug_overlay::StrataDebugSelectModeAction action =
@@ -1367,8 +1279,8 @@ struct Host::Impl final {
     void launch_from_hub(const std::string_view target) {
         if (target == "hub.self") {
             hub_enabled = false;
-            if (hub.surface.has_value()) {
-                static_cast<void>(strata_surface_cancel_interactions(hub.surface->native_handle()));
+            if (hub.live()) {
+                static_cast<void>(strata_surface_cancel_interactions(hub.surface().native_handle()));
             }
         } else if (target == "hub.control-deck") {
             toggle_control_deck();
@@ -1388,9 +1300,9 @@ struct Host::Impl final {
     }
 
     void create_hub() {
-        if (hub.surface.has_value()) return;
+        if (hub.live()) return;
         hub = create_session("hub.desktop", "assets/strata/ui/strata_hub.schemas.json");
-        hub.bindings->on(
+        hub.bindings().on(
             contracts::strata_hub::HubLaunchAction::id,
             [this](const strata::host::ActionEvent& event) {
                 const contracts::strata_hub::HubLaunchAction action =
@@ -1400,40 +1312,29 @@ struct Host::Impl final {
             }
         );
         publish(hub, "hub.desktop", hub_json());
-        static constexpr std::array hub_images{
-            strata_surface_image_resource{
-                strata::view("strata:brand/mark"),
-                strata::view("assets/strata/images/brand/strata-mark.svg"),
-                STRATA_IMAGE_SAMPLING_LINEAR,
-                0U,
-            },
-            strata_surface_image_resource{
-                strata::view("strata:brand/northstar-hero"),
-                strata::view("assets/strata/images/brand/northstar-hero.svg"),
-                STRATA_IMAGE_SAMPLING_LINEAR,
-                0U,
-            },
-        };
         activate(
             hub,
             "assets/strata/ui/strata_hub.strata",
             "StrataHub",
-            hub_images
+            {
+                {"strata:brand/mark", "assets/strata/images/brand/strata-mark.svg"},
+                {"strata:brand/northstar-hero", "assets/strata/images/brand/northstar-hero.svg"},
+            }
         );
     }
 
     void toggle_hub() {
-        if (!hub_enabled && !hub.surface.has_value()) {
+        if (!hub_enabled && !hub.live()) {
             initialize_overlay([this] { create_hub(); });
         }
         hub_enabled = !hub_enabled;
-        if (!hub_enabled && hub.surface.has_value()) {
-            static_cast<void>(strata_surface_cancel_interactions(hub.surface->native_handle()));
+        if (!hub_enabled && hub.live()) {
+            static_cast<void>(strata_surface_cancel_interactions(hub.surface().native_handle()));
         }
     }
 
     void create_performance_hud() {
-        if (performance_hud.surface.has_value()) return;
+        if (performance_hud.live()) return;
         performance_hud = create_session(
             "performance.desktop", "assets/strata/ui/performance_hud.schemas.json"
         );
@@ -1475,26 +1376,18 @@ struct Host::Impl final {
         last_native_nanos = native_nanos;
     }
 
-    void close_session(Session& session) noexcept {
-        if (!session.surface.has_value()) return;
+    void close_session(Layer& layer) noexcept {
+        if (layer.session == nullptr) return;
         try {
-            renderer.consume_resources(session.decoder.decode(
-                session.surface->prepare_release_packet()
-            ));
-            session.surface->acknowledge_release_packet();
-            session.surface->close();
+            layer.session->close([this](const RenderPacket& terminal) {
+                renderer.consume_resources(terminal);
+            });
         } catch (...) {
-            try {
-                session.surface->abandon();
-            } catch (...) {
-                std::terminate();
-            }
+            layer.session->abandon();
         }
-        session.surface.reset();
-        session.bindings.reset();
-        session.runtime.reset();
-        session.decoder.reset();
-        renderer.release_layer(session.id);
+        layer.session.reset();
+        layer.async.reset();
+        renderer.release_layer(layer.id);
     }
 
     template <typename Create>
@@ -1509,55 +1402,55 @@ struct Host::Impl final {
     }
 
     void toggle_settings() {
-        if (!settings_enabled && !settings.surface.has_value()) {
+        if (!settings_enabled && !settings.live()) {
             initialize_overlay([this] { create_settings(); });
         }
         settings_enabled = !settings_enabled;
-        if (!settings_enabled && settings.surface.has_value()) {
+        if (!settings_enabled && settings.live()) {
             static_cast<void>(strata_surface_cancel_interactions(
-                settings.surface->native_handle()
+                settings.surface().native_handle()
             ));
         }
     }
 
     void toggle_effect_gallery() {
-        if (!effect_gallery_enabled && !effect_gallery.surface.has_value()) {
+        if (!effect_gallery_enabled && !effect_gallery.live()) {
             initialize_overlay([this] { create_effect_gallery(); });
         }
         effect_gallery_enabled = !effect_gallery_enabled;
-        if (!effect_gallery_enabled && effect_gallery.surface.has_value()) {
+        if (!effect_gallery_enabled && effect_gallery.live()) {
             static_cast<void>(strata_surface_cancel_interactions(
-                effect_gallery.surface->native_handle()
+                effect_gallery.surface().native_handle()
             ));
         }
     }
 
     void toggle_control_deck() {
-        if (!control_deck_enabled && !control_deck.surface.has_value()) {
+        if (!control_deck_enabled && !control_deck.live()) {
             initialize_overlay([this] { create_control_deck(); });
         }
         control_deck_enabled = !control_deck_enabled;
-        if (!control_deck_enabled && control_deck.surface.has_value()) {
+        if (!control_deck_enabled && control_deck.live()) {
             static_cast<void>(strata_surface_cancel_interactions(
-                control_deck.surface->native_handle()
+                control_deck.surface().native_handle()
             ));
         }
     }
 
     void toggle_tuning_panel() {
-        if (!tuning_panel_enabled && !tuning_panel.surface.has_value()) {
+        if (!tuning_panel_enabled && !tuning_panel.live()) {
             initialize_overlay([this] { create_tuning_panel(); });
         }
         tuning_panel_enabled = !tuning_panel_enabled;
-        if (!tuning_panel_enabled && tuning_panel.surface.has_value()) {
+        if (!tuning_panel_enabled && tuning_panel.live()) {
             static_cast<void>(strata_surface_cancel_interactions(
-                tuning_panel.surface->native_handle()
+                tuning_panel.surface().native_handle()
             ));
         }
     }
 
     void toggle_showcase() {
-        if (!showcase_enabled && !showcase.surface.has_value()) {
+        if (!showcase_enabled && !showcase.live()) {
             initialize_overlay([this] { create_showcase(); });
         }
         if (showcase_enabled) {
@@ -1565,20 +1458,20 @@ struct Host::Impl final {
             showcase_closing = true;
             showcase_hidden_at = now();
             showcase_model.surface_visible(false);
-            showcase.bindings->synchronize();
-            static_cast<void>(strata_surface_cancel_interactions(showcase.surface->native_handle()));
+            showcase.bindings().synchronize();
+            static_cast<void>(strata_surface_cancel_interactions(showcase.surface().native_handle()));
             return;
         }
         showcase_enabled = true;
         showcase_closing = false;
         showcase_model.surface_visible(true);
-        showcase.bindings->synchronize();
+        showcase.bindings().synchronize();
     }
 
     void cycle_debug(const bool reverse) {
         if (!debug_enabled) {
             debug_mode = reverse ? debug_modes.back() : debug_modes.front();
-            if (!debug.surface.has_value()) {
+            if (!debug.live()) {
                 initialize_overlay([this] { create_debug(); });
             }
             debug_enabled = true;
@@ -1590,9 +1483,9 @@ struct Host::Impl final {
             const std::ptrdiff_t next = index + (reverse ? -1 : 1);
             if (next < 0 || next >= static_cast<std::ptrdiff_t>(debug_modes.size())) {
                 debug_enabled = false;
-                if (debug.surface.has_value()) {
+                if (debug.live()) {
                     static_cast<void>(strata_surface_cancel_interactions(
-                        debug.surface->native_handle()
+                        debug.surface().native_handle()
                     ));
                 }
                 return;
@@ -1606,12 +1499,38 @@ struct Host::Impl final {
     void toggle_performance_hud() {
         performance_hud_enabled = !performance_hud_enabled;
         if (performance_hud_enabled) {
-            if (!performance_hud.surface.has_value()) {
+            if (!performance_hud.live()) {
                 initialize_overlay([this] { create_performance_hud(); });
             }
             performance_snapshot_dirty = true;
             next_performance_snapshot = 0;
         }
+    }
+
+    /** Every layer, in the order the window composites them. */
+    [[nodiscard]] std::array<Layer*, 8U> layers() noexcept {
+        return {
+            &showcase,
+            &effect_gallery,
+            &control_deck,
+            &tuning_panel,
+            &settings,
+            &debug,
+            &hub,
+            &performance_hud,
+        };
+    }
+
+    /** Whether the window draws `layer` this frame; a closing showcase draws its transition. */
+    [[nodiscard]] bool shown(const Layer& layer) const noexcept {
+        if (&layer == &showcase) return showcase_enabled || showcase_closing;
+        if (&layer == &effect_gallery) return effect_gallery_enabled;
+        if (&layer == &control_deck) return control_deck_enabled;
+        if (&layer == &tuning_panel) return tuning_panel_enabled;
+        if (&layer == &settings) return settings_enabled;
+        if (&layer == &debug) return debug_enabled;
+        if (&layer == &hub) return hub_enabled;
+        return performance_hud_enabled;
     }
 
     void resize(
@@ -1627,52 +1546,23 @@ struct Host::Impl final {
         renderer.resize(next_width, next_height, logical_width(), logical_height());
         ++environment_generation;
         const strata_surface_environment next = environment();
-        for (Session* session : {
-                 &showcase,
-                 &control_deck,
-                 &tuning_panel,
-                 &effect_gallery,
-                 &settings,
-                 &debug,
-                 &performance_hud,
-                 &hub,
-             }) {
-            if (!session->surface.has_value()) continue;
-            std::uint32_t adopted = 0U;
-            strata::require_ok(
-                strata_surface_adopt_environment(session->surface->native_handle(), &next, &adopted),
-                "desktop environment adoption"
-            );
-            if (adopted == 0U) {
+        for (Layer* const layer : layers()) {
+            if (layer->live() && !layer->session->adopt_environment(next)) {
                 throw std::runtime_error("desktop environment generation was rejected");
             }
         }
     }
 
     void enqueue(strata_input_event event, const std::string_view input_text = {}) {
-        Session* const session = hub_enabled ? &hub
-            : debug_enabled ? &debug
-            : settings_enabled ? &settings
-            : tuning_panel_enabled ? &tuning_panel
-            : control_deck_enabled ? &control_deck
-            : effect_gallery_enabled ? &effect_gallery
-            : showcase_enabled ? &showcase
-            : nullptr;
-        if (session == nullptr || !session->surface.has_value()) return;
+        Layer* const layer = interactive_layer();
+        if (layer == nullptr || !layer->live()) return;
         event.struct_size = sizeof(event);
         event.version = STRATA_INPUT_EVENT_VERSION_2;
         event.modifiers = current_modifiers();
         event.text = strata::view(input_text);
         event.timestamp_nanoseconds = now();
         if (event.kind != STRATA_INPUT_KEY) event.key_action = STRATA_KEY_PRESS;
-        strata_surface_input_batch_info info{sizeof(strata_surface_input_batch_info)};
-        strata::require_ok(
-            strata_surface_enqueue_input(session->surface->native_handle(), &event, 1U, &info),
-            "desktop input enqueue"
-        );
-        if (info.accepted_event_count != 1U) {
-            throw std::runtime_error("desktop input event was not accepted atomically");
-        }
+        layer->session->enqueue(std::span<const strata_input_event>(&event, 1U));
     }
 
     void flush_pointer_move() {
@@ -1682,24 +1572,32 @@ struct Host::Impl final {
         enqueue(event);
     }
 
-    [[nodiscard]] bool render_session(
-        Session& session,
-        const strata_surface_frame_info& info,
-        std::int64_t* const elapsed_nanos = nullptr,
-        DesktopFrameSample* const sample = nullptr
-    ) {
+    struct LayerFrame final {
+        /** Framing the Session: the core frame, packet read and decode. */
+        std::int64_t core_nanos = 0;
+        /** Drawing the packet into the layer and collecting its backdrop probes. */
+        std::int64_t submit_nanos = 0;
+        bool drew = false;
+    };
+
+    /** Frames one layer's Session, draws its packet into the layer and publishes the work. */
+    [[nodiscard]] LayerFrame frame_layer(Layer& layer, DesktopFrameSample* const sample) {
+        const auto started = std::chrono::steady_clock::now();
+        const host::SurfacePacketFrame framed = layer.session->frame(frame_time);
+        const RenderPacket& packet = *framed.packet;
         const auto submit_started = std::chrono::steady_clock::now();
-        const std::vector<std::uint8_t> encoded = session.surface->render_packet();
-        const RenderPacket& packet = session.decoder.decode(encoded);
-        const RenderLayerTelemetry render_telemetry = renderer.render_layer(session.id, packet);
+        const RenderLayerTelemetry rendered = renderer.render_layer(layer.id, packet);
         const std::vector<strata_backdrop_sample> backdrop =
-            renderer.take_backdrop_samples(session.id);
+            renderer.take_backdrop_samples(layer.id);
         if (!backdrop.empty())
-            session.surface->report_backdrop(backdrop);
-        const auto submit_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - submit_started
-        ).count();
-        if (elapsed_nanos != nullptr) *elapsed_nanos = submit_nanos;
+            layer.surface().report_backdrop(backdrop);
+        const auto finished = std::chrono::steady_clock::now();
+        const strata_surface_frame_info& info = framed.surface;
+        const LayerFrame result{
+            std::chrono::duration_cast<std::chrono::nanoseconds>(submit_started - started).count(),
+            std::chrono::duration_cast<std::chrono::nanoseconds>(finished - submit_started).count(),
+            info.render_command_count > 0U && packet.planned_draw_count > 0U,
+        };
         if (sample != nullptr) {
             sample->frame_index = info.frame_index;
             sample->frame_time_nanos = info.frame_time_nanoseconds;
@@ -1710,27 +1608,20 @@ struct Host::Impl final {
             sample->draw_calls = packet.planned_draw_count;
             sample->batches = packet.batches.size();
             sample->vertices = packet.vertices.size() / host::packet_vertex_bytes;
-            sample->blur_passes = render_telemetry.blur_passes;
+            sample->blur_passes = rendered.blur_passes;
         }
-        strata_profiler_host_frame telemetry{};
-        telemetry.struct_size = sizeof(strata_profiler_host_frame);
-        telemetry.version = STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT;
-        telemetry.draw_calls = packet.planned_draw_count;
-        telemetry.batches = packet.batches.size();
-        telemetry.vertices = packet.vertices.size() / host::packet_vertex_bytes;
-        telemetry.blur_passes = render_telemetry.blur_passes;
-        telemetry.blur_target_width = render_telemetry.blur_target_width;
-        telemetry.blur_target_height = render_telemetry.blur_target_height;
-        telemetry.blur_nanos = render_telemetry.blur_nanos;
-        telemetry.submit_nanos = submit_nanos;
-        strata::require_ok(
-            strata_surface_record_host_frame(session.surface->native_handle(), &telemetry),
-            "desktop host profiler publication"
-        );
-        return info.render_command_count > 0U && packet.planned_draw_count > 0U;
+        ProfilerHostFrame backend;
+        backend.blur_passes = rendered.blur_passes;
+        backend.blur_target_width = rendered.blur_target_width;
+        backend.blur_target_height = rendered.blur_target_height;
+        backend.blur_nanoseconds = rendered.blur_nanos;
+        backend.submit_nanoseconds = result.submit_nanos;
+        layer.session->record_host_frame(packet, backend);
+        return result;
     }
 
-    [[nodiscard]] Session* active_performance_session() noexcept {
+    /** The topmost open layer, which receives input and is the one performance samples describe. */
+    [[nodiscard]] Layer* interactive_layer() noexcept {
         return hub_enabled ? &hub
             : debug_enabled ? &debug
             : settings_enabled ? &settings
@@ -1743,45 +1634,26 @@ struct Host::Impl final {
 
     void frame() {
         const auto host_frame_started = std::chrono::steady_clock::now();
-        Session* const performance_session = active_performance_session();
-        std::int64_t active_core_nanos = 0;
-        std::int64_t active_submit_nanos = 0;
+        Layer* const interactive = interactive_layer();
         std::int64_t tooling_nanos = 0;
-        std::int64_t tooling_update_nanos = 0;
-        std::int64_t debug_native_nanos = 0;
-        std::int64_t debug_submit_nanos = 0;
-        std::int64_t performance_native_nanos = 0;
-        std::int64_t performance_submit_nanos = 0;
         flush_pointer_move();
-        if (clear_diagnostics_pending && showcase.surface.has_value()) {
+        if (clear_diagnostics_pending && showcase.live()) {
             clear_diagnostics_pending = false;
             strata::require_ok(
-                strata_surface_clear_diagnostics(showcase.surface->native_handle()),
+                strata_surface_clear_diagnostics(showcase.surface().native_handle()),
                 "desktop diagnostic clear"
             );
             debug_snapshot_dirty = true;
         }
-        for (Session* session : {
-                 &showcase,
-                 &control_deck,
-                 &tuning_panel,
-                 &effect_gallery,
-                 &settings,
-                 &debug,
-                 &performance_hud,
-                 &hub,
-             }) {
-            if (session->bindings != nullptr) session->bindings->synchronize();
+        for (Layer* const layer : layers()) {
+            if (layer->session != nullptr) layer->bindings().synchronize();
         }
         frame_time = now();
-        advance_async(showcase);
-        advance_async(control_deck);
-        advance_async(tuning_panel);
-        advance_async(effect_gallery);
-        advance_async(settings);
-        advance_async(debug);
-        advance_async(hub);
-        advance_async(performance_hud);
+        // Every layer reads one window clock, framed or not.
+        for (Layer* const layer : layers()) {
+            if (layer->session != nullptr) layer->session->set_time(frame_time);
+        }
+        for (Layer* const layer : layers()) advance_async(*layer);
         const auto tooling_update_started = std::chrono::steady_clock::now();
         if (debug_enabled && (debug_snapshot_dirty || frame_time >= next_debug_snapshot)) {
             debug_snapshot_dirty = false;
@@ -1794,171 +1666,46 @@ struct Host::Impl final {
             publish(performance_hud, "performance.desktop", performance_json());
             next_performance_snapshot = frame_time + 100'000'000;
         }
-        tooling_update_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - tooling_update_started
-        ).count();
+        const std::int64_t tooling_update_nanos =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - tooling_update_started
+            ).count();
         tooling_nanos += tooling_update_nanos;
         renderer.begin_frame();
         bool had_draws = false;
-        std::int64_t showcase_native_nanos = 0;
-        std::int64_t showcase_submit_nanos = 0;
-        std::int64_t tuning_native_nanos = 0;
-        std::int64_t tuning_submit_nanos = 0;
+        LayerFrame active;
+        LayerFrame showcase_frame;
+        LayerFrame tuning_frame;
+        LayerFrame debug_frame;
+        LayerFrame performance_frame;
         DesktopFrameSample sample;
-        if ((showcase_enabled || showcase_closing) && showcase.surface.has_value()) {
-            const auto native_started = std::chrono::steady_clock::now();
-            const strata_surface_frame_info info = showcase.surface->frame(frame_time);
-            showcase_native_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - native_started
-            ).count();
-            if (rendered_frames == 0U) {
-                const std::string canonical_frame = showcase.surface->frame_json();
-                first_render_fingerprint = fingerprint(std::span(canonical_frame));
-                first_frame_contains_instance =
-                    canonical_frame.find(instance_label) != std::string::npos;
+        for (Layer* const layer : layers()) {
+            if (!shown(*layer) || !layer->live()) continue;
+            const LayerFrame result =
+                frame_layer(*layer, layer == interactive ? &sample : nullptr);
+            had_draws = result.drew || had_draws;
+            if (layer == interactive) active = result;
+            if (layer == &showcase) {
+                showcase_frame = result;
+                if (rendered_frames == 0U) {
+                    const std::string canonical_frame = showcase.surface().frame_json();
+                    first_render_fingerprint = fingerprint(std::span(canonical_frame));
+                    first_frame_contains_instance =
+                        canonical_frame.find(instance_label) != std::string::npos;
+                }
+                if (!showcase_enabled &&
+                    frame_time - showcase_hidden_at >= showcase_transition_nanos) {
+                    showcase_closing = false;
+                }
+            } else if (layer == &tuning_panel) {
+                tuning_frame = result;
+            } else if (layer == &debug) {
+                debug_frame = result;
+                tooling_nanos += result.core_nanos + result.submit_nanos;
+            } else if (layer == &performance_hud) {
+                performance_frame = result;
+                tooling_nanos += result.core_nanos + result.submit_nanos;
             }
-            had_draws = render_session(
-                showcase,
-                info,
-                &showcase_submit_nanos,
-                performance_session == &showcase ? &sample : nullptr
-            ) || had_draws;
-            if (performance_session == &showcase) {
-                active_core_nanos = showcase_native_nanos;
-                active_submit_nanos = showcase_submit_nanos;
-            }
-            if (!showcase_enabled &&
-                frame_time - showcase_hidden_at >= showcase_transition_nanos) {
-                showcase_closing = false;
-            }
-        }
-        if (effect_gallery_enabled && effect_gallery.surface.has_value()) {
-            const auto native_started = std::chrono::steady_clock::now();
-            const strata_surface_frame_info info =
-                effect_gallery.surface->frame(frame_time);
-            const std::int64_t native_nanos =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - native_started
-                ).count();
-            std::int64_t submit_nanos = 0;
-            had_draws = render_session(
-                effect_gallery,
-                info,
-                performance_session == &effect_gallery ? &submit_nanos : nullptr,
-                performance_session == &effect_gallery ? &sample : nullptr
-            ) || had_draws;
-            if (performance_session == &effect_gallery) {
-                active_core_nanos = native_nanos;
-                active_submit_nanos = submit_nanos;
-            }
-        }
-        if (control_deck_enabled && control_deck.surface.has_value()) {
-            const auto native_started = std::chrono::steady_clock::now();
-            const strata_surface_frame_info info =
-                control_deck.surface->frame(frame_time);
-            const std::int64_t native_nanos =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - native_started
-                ).count();
-            std::int64_t submit_nanos = 0;
-            had_draws = render_session(
-                control_deck,
-                info,
-                performance_session == &control_deck ? &submit_nanos : nullptr,
-                performance_session == &control_deck ? &sample : nullptr
-            ) || had_draws;
-            if (performance_session == &control_deck) {
-                active_core_nanos = native_nanos;
-                active_submit_nanos = submit_nanos;
-            }
-        }
-        if (tuning_panel_enabled && tuning_panel.surface.has_value()) {
-            const auto native_started = std::chrono::steady_clock::now();
-            const strata_surface_frame_info info =
-                tuning_panel.surface->frame(frame_time);
-            tuning_native_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - native_started
-            ).count();
-            had_draws = render_session(
-                tuning_panel,
-                info,
-                &tuning_submit_nanos,
-                performance_session == &tuning_panel ? &sample : nullptr
-            ) || had_draws;
-            if (performance_session == &tuning_panel) {
-                active_core_nanos = tuning_native_nanos;
-                active_submit_nanos = tuning_submit_nanos;
-            }
-        }
-        if (settings_enabled && settings.surface.has_value()) {
-            const auto native_started = std::chrono::steady_clock::now();
-            const strata_surface_frame_info info = settings.surface->frame(frame_time);
-            const std::int64_t native_nanos =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - native_started
-                ).count();
-            std::int64_t submit_nanos = 0;
-            had_draws = render_session(
-                settings,
-                info,
-                performance_session == &settings ? &submit_nanos : nullptr,
-                performance_session == &settings ? &sample : nullptr
-            ) || had_draws;
-            if (performance_session == &settings) {
-                active_core_nanos = native_nanos;
-                active_submit_nanos = submit_nanos;
-            }
-        }
-        if (debug_enabled && debug.surface.has_value()) {
-            const auto native_started = std::chrono::steady_clock::now();
-            const strata_surface_frame_info info = debug.surface->frame(frame_time);
-            debug_native_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - native_started
-            ).count();
-            had_draws = render_session(
-                debug,
-                info,
-                &debug_submit_nanos,
-                performance_session == &debug ? &sample : nullptr
-            ) || had_draws;
-            if (performance_session == &debug) {
-                active_core_nanos = debug_native_nanos;
-                active_submit_nanos = debug_submit_nanos;
-            }
-            tooling_nanos += debug_native_nanos + debug_submit_nanos;
-        }
-        if (hub_enabled && hub.surface.has_value()) {
-            const auto native_started = std::chrono::steady_clock::now();
-            const strata_surface_frame_info info = hub.surface->frame(frame_time);
-            const std::int64_t native_nanos =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - native_started
-                ).count();
-            std::int64_t submit_nanos = 0;
-            had_draws = render_session(
-                hub,
-                info,
-                performance_session == &hub ? &submit_nanos : nullptr,
-                performance_session == &hub ? &sample : nullptr
-            ) || had_draws;
-            if (performance_session == &hub) {
-                active_core_nanos = native_nanos;
-                active_submit_nanos = submit_nanos;
-            }
-        }
-        if (performance_hud_enabled && performance_hud.surface.has_value()) {
-            const auto native_started = std::chrono::steady_clock::now();
-            const strata_surface_frame_info info = performance_hud.surface->frame(frame_time);
-            performance_native_nanos =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - native_started
-                ).count();
-            had_draws = render_session(
-                performance_hud,
-                info,
-                &performance_submit_nanos
-            ) || had_draws;
-            tooling_nanos += performance_native_nanos + performance_submit_nanos;
         }
         const auto present_started = std::chrono::steady_clock::now();
         const bool presented = renderer.end_frame();
@@ -1971,17 +1718,17 @@ struct Host::Impl final {
         host_total_timings.add(total_nanos);
         frame_history.push_back(static_cast<double>(total_nanos) / 1'000'000.0);
         while (frame_history.size() > 48U) frame_history.pop_front();
-        showcase_core_timings.add(showcase_native_nanos);
-        showcase_submit_timings.add(showcase_submit_nanos);
-        tuning_core_timings.add(tuning_native_nanos);
-        tuning_submit_timings.add(tuning_submit_nanos);
+        showcase_core_timings.add(showcase_frame.core_nanos);
+        showcase_submit_timings.add(showcase_frame.submit_nanos);
+        tuning_core_timings.add(tuning_frame.core_nanos);
+        tuning_submit_timings.add(tuning_frame.submit_nanos);
         tooling_timings.add(tooling_nanos);
         present_timings.add(present_nanos);
         tooling_update_timings.add(tooling_update_nanos);
-        debug_core_timings.add(debug_native_nanos);
-        debug_submit_timings.add(debug_submit_nanos);
-        performance_core_timings.add(performance_native_nanos);
-        performance_submit_timings.add(performance_submit_nanos);
+        debug_core_timings.add(debug_frame.core_nanos);
+        debug_submit_timings.add(debug_frame.submit_nanos);
+        performance_core_timings.add(performance_frame.core_nanos);
+        performance_submit_timings.add(performance_frame.submit_nanos);
         if (profile_sampling_enabled && frame_time >= next_profile_capture) {
             capture_profile_snapshot();
             next_profile_capture = frame_time + 100'000'000;
@@ -1989,16 +1736,16 @@ struct Host::Impl final {
         record_frame_sample(
             now(),
             total_nanos,
-            active_core_nanos
+            active.core_nanos
         );
-        if (rendered_frames == 0U && !showcase_enabled && debug.surface.has_value()) {
-            const std::string canonical_frame = debug.surface->frame_json();
+        if (rendered_frames == 0U && !showcase_enabled && debug.live()) {
+            const std::string canonical_frame = debug.surface().frame_json();
             first_render_fingerprint = fingerprint(std::span(canonical_frame));
             first_frame_contains_instance = true;
         }
         sample.total_nanos = total_nanos;
-        sample.core_nanos = active_core_nanos;
-        sample.submit_nanos = active_submit_nanos;
+        sample.core_nanos = active.core_nanos;
+        sample.submit_nanos = active.submit_nanos;
         sample.tooling_nanos = tooling_nanos;
         sample.present_nanos = present_nanos;
         sample.had_draws = had_draws;
@@ -2015,14 +1762,14 @@ struct Host::Impl final {
     ShowcaseModel showcase_model;
     desktop::DurableWriter durable_writer{&report_durable_failure};
     std::string durable_read_buffer;
-    Session showcase;
-    Session control_deck;
-    Session tuning_panel;
-    Session effect_gallery;
-    Session settings;
-    Session debug;
-    Session performance_hud;
-    Session hub;
+    Layer showcase;
+    Layer control_deck;
+    Layer tuning_panel;
+    Layer effect_gallery;
+    Layer settings;
+    Layer debug;
+    Layer performance_hud;
+    Layer hub;
     std::deque<FrameBucket> frame_buckets;
     std::deque<ProfileCapture> profile_history;
     TimingWindow host_total_timings;
@@ -2188,19 +1935,10 @@ void Host::ime_preedit(
 
 void Host::cancel_interactions() noexcept {
     impl_->pending_pointer_move.reset();
-        for (Impl::Session* session : {
-             &impl_->showcase,
-             &impl_->control_deck,
-             &impl_->tuning_panel,
-             &impl_->effect_gallery,
-             &impl_->settings,
-             &impl_->debug,
-             &impl_->hub,
-             &impl_->performance_hud,
-         }) {
-        if (session->surface.has_value()) {
+    for (Impl::Layer* const layer : impl_->layers()) {
+        if (layer->live()) {
             static_cast<void>(strata_surface_cancel_interactions(
-                session->surface->native_handle()
+                layer->surface().native_handle()
             ));
         }
     }
@@ -2231,13 +1969,13 @@ DesktopHostInfo Host::performance_info() const {
 }
 
 std::string Host::performance_frame_json() {
-    Impl::Session* const session = impl_->active_performance_session();
-    if (session == nullptr || !session->surface.has_value()) {
+    Impl::Layer* const layer = impl_->interactive_layer();
+    if (layer == nullptr || !layer->live()) {
         throw std::logic_error(
             "desktop performance selectors require an open interactive surface"
         );
     }
-    return session->surface->frame_json();
+    return layer->surface().frame_json();
 }
 
 bool Host::smoke_ready() const noexcept {

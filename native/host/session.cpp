@@ -351,16 +351,17 @@ SurfacePacketFrame Session::frame(const std::int64_t time_nanoseconds) {
 }
 
 void Session::record_host_frame(const RenderPacket& packet, const std::int64_t submit_nanoseconds) {
-    strata_profiler_host_frame telemetry{};
-    telemetry.struct_size = sizeof(telemetry);
-    telemetry.version = STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT;
+    ProfilerHostFrame backend;
+    backend.submit_nanoseconds = submit_nanoseconds;
+    record_host_frame(packet, backend);
+}
+
+void Session::record_host_frame(const RenderPacket& packet, const ProfilerHostFrame& backend) {
+    ProfilerHostFrame telemetry = backend;
     telemetry.draw_calls = packet.planned_draw_count;
     telemetry.batches = packet.batches.size();
     telemetry.vertices = packet.vertices.size() / packet_vertex_bytes;
-    telemetry.submit_nanos = submit_nanoseconds;
-    strata::require_ok(
-        strata_surface_record_host_frame(impl_->live_surface().native_handle(), &telemetry),
-        "Session host-frame telemetry");
+    impl_->live_surface().record_host_frame(telemetry);
 }
 
 void Session::close_surface(const std::function<void(const RenderPacket&)>& consume) {

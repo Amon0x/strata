@@ -907,6 +907,7 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
             Strata::host
             Strata::desktop
             strata_application_contracts
+            strata_host_session
             strata_host_support
             strata_d3d11
             dxgi
