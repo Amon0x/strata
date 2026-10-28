@@ -781,6 +781,14 @@ void WidgetRenderScope::interaction(const Rect bounds, const std::string_view su
     }
 }
 
+void WidgetRenderScope::discard() noexcept {
+    discarded_ = true;
+}
+
+bool WidgetRenderScope::discarded() const noexcept {
+    return discarded_;
+}
+
 std::vector<RenderCommand>
 build_widget_fragment(const WidgetRegistry& registry, const RetainedNode& node,
                       const LayoutRecord& layout, const LayoutResult& layout_result,
@@ -798,6 +806,8 @@ build_widget_fragment(const WidgetRegistry& registry, const RetainedNode& node,
                             inherited_opacity, lifecycle->present.visual, output,
                             apply_presentation_opacity);
     lifecycle->present.content(scope);
+    if (scope.discarded())
+        output.clear();
     return output;
 }
 
@@ -819,6 +829,8 @@ build_widget_overlay(const WidgetRegistry& registry, const RetainedNode& node,
                             inherited_opacity, lifecycle->present.visual, output,
                             apply_presentation_opacity);
     lifecycle->present.overlay(scope);
+    if (scope.discarded())
+        output.clear();
     return output;
 }
 

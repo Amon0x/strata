@@ -107,7 +107,7 @@ namespace {
 strata_result strata_runtime_publish_host_snapshot(
     strata_runtime* const runtime,
     const strata_host_snapshot_config* const snapshot
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (snapshot == nullptr || snapshot->struct_size < sizeof(strata_host_snapshot_config) ||
         !valid_view(snapshot->id, false) || !valid_view(snapshot->values_json, false)) {
@@ -118,7 +118,12 @@ strata_result strata_runtime_publish_host_snapshot(
             "A host snapshot requires a complete structure, non-empty id, and JSON object."
         );
     }
-    try {
+    constexpr AbiCall call{
+        "Host snapshot publication",
+        "STRATA.HOST.INVALID_SNAPSHOT",
+        "STRATA.HOST.INVALID_JSON",
+    };
+    return runtime_call(runtime, call, [&] {
         const std::string json_text = copied_string(snapshot->values_json);
         const strata::data::JsonValue values = strata::data::parse_json(json_text);
         if (values.object() == nullptr) {
@@ -135,41 +140,13 @@ strata_result strata_runtime_publish_host_snapshot(
             values
         ));
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Host snapshot publication exhausted memory."
-        );
-    } catch (const strata::data::JsonError&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.HOST.INVALID_JSON",
-            "Host snapshot values are not valid strict JSON."
-        );
-    } catch (const std::invalid_argument& error) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.HOST.INVALID_SNAPSHOT",
-            error.what()
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Host snapshot publication failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_publish_image(
     strata_runtime* const runtime,
     const strata_runtime_image_config* const image
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (image == nullptr || image->struct_size < sizeof(strata_runtime_image_config) ||
         !valid_view(image->id, false) || image->reserved != 0U ||
@@ -183,7 +160,8 @@ strata_result strata_runtime_publish_image(
             "A runtime image requires a complete structure, non-empty id, known sampling, and pixels."
         );
     }
-    try {
+    constexpr AbiCall call{"Runtime image publication", "STRATA.ABI.INVALID_RUNTIME_IMAGE"};
+    return runtime_call(runtime, call, [&] {
         static_cast<void>(runtime->core.images().publish(
             copied_string(image->id),
             strata::resource::ImageDimensions{image->width, image->height},
@@ -193,34 +171,13 @@ strata_result strata_runtime_publish_image(
             std::vector<std::uint8_t>(image->pixels, image->pixels + image->pixel_bytes)
         ));
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Runtime image publication exhausted memory."
-        );
-    } catch (const std::invalid_argument& error) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.ABI.INVALID_RUNTIME_IMAGE",
-            error.what()
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Runtime image publication failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_release_image(
     strata_runtime* const runtime,
     const strata_string_view id
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (!valid_view(id, false)) {
         return runtime_failure(
@@ -230,23 +187,16 @@ strata_result strata_runtime_release_image(
             "Releasing a runtime image requires a non-empty id."
         );
     }
-    try {
+    return runtime_call(runtime, AbiCall{"Runtime image release"}, [&] {
         static_cast<void>(runtime->core.images().release(copied_string(id)));
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Runtime image release failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_get_host_snapshot_info(
     const strata_runtime* const runtime,
     strata_host_snapshot_info* const out_info
-) {
+) noexcept {
     if (runtime == nullptr || out_info == nullptr ||
         out_info->struct_size < sizeof(strata_host_snapshot_info)) {
         return invalid_argument();
@@ -266,7 +216,7 @@ strata_result strata_runtime_get_host_snapshot_generation(
     const strata_runtime* const runtime,
     const strata_string_view id,
     std::uint64_t* const out_generation
-) {
+) noexcept {
     if (runtime == nullptr || out_generation == nullptr || !valid_view(id, false)) {
         return invalid_argument();
     }
@@ -281,43 +231,41 @@ strata_result strata_runtime_get_host_snapshot_generation(
 strata_result strata_runtime_read_diagnostics(
     const strata_runtime* const runtime,
     const strata_diagnostics_snapshot_sink* const sink
-) {
+) noexcept {
     if (runtime == nullptr || sink == nullptr ||
         sink->struct_size < sizeof(strata_diagnostics_snapshot_sink) || sink->emit == nullptr) {
         return invalid_argument();
     }
-    try {
+    // A failed diagnostics read reports a bare status; emitting a diagnostic would recurse.
+    return guarded([&] {
         const strata::runtime::RuntimeDiagnosticsSnapshot snapshot = runtime->core.has_application()
             ? runtime->core.application().services().diagnostics_snapshot()
             : strata::runtime::RuntimeDiagnosticsSnapshot{};
         emit_diagnostics_snapshot(snapshot, *sink);
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return strata::core::result(STRATA_STATUS_OUT_OF_MEMORY);
-    } catch (...) {
-        return strata::core::result(STRATA_STATUS_INTERNAL_ERROR);
-    }
+    });
 }
 
-strata_result strata_runtime_clear_diagnostics(strata_runtime* const runtime) {
-    if (runtime == nullptr) return invalid_argument();
-    runtime->core.diagnostics().clear();
-    if (runtime->core.has_application()) {
-        runtime->core.application().services().clear_diagnostics();
-    }
-    for (strata_surface* const surface : runtime->surfaces) {
-        if (surface == nullptr) continue;
-        surface->core.clear_diagnostics();
-        surface->frame_json.clear();
-    }
-    return strata::core::result(STRATA_STATUS_OK);
+strata_result strata_runtime_clear_diagnostics(strata_runtime* const runtime) noexcept {
+    return runtime_call(runtime, AbiCall{"Diagnostic clearing"}, [&] {
+        runtime->core.diagnostics().clear();
+        if (runtime->core.has_application()) {
+            runtime->core.application().services().clear_diagnostics();
+        }
+        for (strata_surface* const surface : runtime->surfaces) {
+            if (surface == nullptr) continue;
+            surface->core.clear_diagnostics();
+            surface->frame_json.clear();
+        }
+        return strata::core::result(STRATA_STATUS_OK);
+    });
 }
 
 strata_result strata_runtime_read_host_value_json(
     strata_runtime* const runtime,
     const strata_string_view path,
     const strata_value_json_sink* const sink
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (!valid_view(path, false) || sink == nullptr ||
         sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr) {
@@ -328,7 +276,8 @@ strata_result strata_runtime_read_host_value_json(
             "Host value reads require a non-empty path and complete JSON sink."
         );
     }
-    try {
+    constexpr AbiCall call{"Host value evaluation or its JSON sink", "STRATA.HOST.INVALID_PATH"};
+    return runtime_call(runtime, call, [&] {
         const std::optional<strata::runtime::Value> value =
             runtime->core.read_host_value(std::string_view(path.data, path.size));
         if (!value.has_value()) {
@@ -344,34 +293,13 @@ strata_result strata_runtime_read_host_value_json(
         );
         sink->emit(sink->user_data, strata_string_view{encoded.data(), encoded.size()});
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Host value evaluation exhausted memory."
-        );
-    } catch (const std::invalid_argument& error) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.HOST.INVALID_PATH",
-            error.what()
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.CALLBACK_FAILED",
-            "Host value evaluation or its JSON sink failed inside the C ABI boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_configure_application(
     strata_runtime* const runtime,
     const strata_application_config* const config
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (config == nullptr || config->struct_size < sizeof(strata_application_config) ||
         !valid_view(config->id, false) || !valid_view(config->schemas_json, true) ||
@@ -383,7 +311,20 @@ strata_result strata_runtime_configure_application(
             "Application configuration requires an id and an optional schemas JSON object."
         );
     }
-    try {
+    if (runtime->core.has_application()) {
+        return runtime_failure(
+            *runtime,
+            STRATA_STATUS_INVALID_ARGUMENT,
+            "STRATA.APPLICATION.INVALID_CONFIGURATION",
+            "The runtime application is already configured."
+        );
+    }
+    constexpr AbiCall call{
+        "Application configuration",
+        "STRATA.APPLICATION.INVALID_CONFIGURATION",
+        "STRATA.APPLICATION.INVALID_JSON",
+    };
+    return runtime_call(runtime, call, [&] {
         std::optional<strata::data::JsonValue> schemas;
         if (config->schemas_json.size != 0U) {
             schemas = strata::data::parse_json(copied_string(config->schemas_json));
@@ -410,42 +351,14 @@ strata_result strata_runtime_configure_application(
             extension_declarations
         );
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Application configuration exhausted memory."
-        );
-    } catch (const strata::data::JsonError&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.APPLICATION.INVALID_JSON",
-            "Application schemas are not valid strict JSON."
-        );
-    } catch (const std::exception& error) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.APPLICATION.INVALID_CONFIGURATION",
-            error.what()
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Application configuration failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_compile_and_activate(
     strata_runtime* const runtime,
     const strata_activation_config* const config,
     strata_activation_info* const out_info
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (out_info == nullptr || out_info->struct_size < sizeof(strata_activation_info) ||
         config == nullptr || config->struct_size < sizeof(strata_activation_config) ||
@@ -466,7 +379,7 @@ strata_result strata_runtime_compile_and_activate(
             "Configure an application before compiling and activating a unit."
         );
     }
-    try {
+    return runtime_call(runtime, AbiCall{"Compilation or activation"}, [&] {
         const strata::compiler::ModuleLoader loader = [config](
                                                           const std::string_view importer,
                                                           const std::string_view path
@@ -510,28 +423,14 @@ strata_result strata_runtime_compile_and_activate(
                 config->generation
             );
         return finish_activation(*runtime, activation, *out_info);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Compilation or activation exhausted memory."
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Compilation or activation failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_activate_compiled_module(
     strata_runtime* const runtime,
     const strata_compiled_activation_config* const config,
     strata_activation_info* const out_info
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (out_info == nullptr || out_info->struct_size < sizeof(strata_activation_info) ||
         config == nullptr ||
@@ -555,38 +454,33 @@ strata_result strata_runtime_activate_compiled_module(
             "Configure an application before activating a compiled module."
         );
     }
-    try {
-        const strata::runtime::ActivationResult activation =
-            runtime->core.activate_compiled(
-                std::span<const std::uint8_t>(
-                    config->artifact.data,
-                    config->artifact.size
-                ),
-                config->generation
-            );
+    constexpr AbiCall call{
+        "Compiled module activation",
+        "STRATA.RUNTIME.INVALID_COMPILED_ARTIFACT",
+    };
+    return runtime_call(runtime, call, [&] {
+        const strata::runtime::ActivationResult activation = [&] {
+            try {
+                return runtime->core.activate_compiled(
+                    std::span<const std::uint8_t>(
+                        config->artifact.data,
+                        config->artifact.size
+                    ),
+                    config->generation
+                );
+            } catch (const std::bad_alloc&) {
+                throw;
+            } catch (const std::exception& error) {
+                // Artifact decoding reports malformed bytes as runtime errors: caller input.
+                throw StatusError(
+                    STRATA_STATUS_INVALID_ARGUMENT,
+                    "STRATA.RUNTIME.INVALID_COMPILED_ARTIFACT",
+                    error.what()
+                );
+            }
+        }();
         return finish_activation(*runtime, activation, *out_info);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Compiled module decoding or activation exhausted memory."
-        );
-    } catch (const std::exception& error) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.RUNTIME.INVALID_COMPILED_ARTIFACT",
-            error.what()
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Compiled module activation failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_read_material_declarations(
@@ -595,7 +489,7 @@ strata_result strata_runtime_read_material_declarations(
     strata_material_declaration* const out_declarations,
     const size_t capacity,
     size_t* const out_count
-) {
+) noexcept {
     if (runtime == nullptr || out_count == nullptr) return invalid_argument();
     if (!runtime->core.has_application()) {
         return runtime_failure(
@@ -607,7 +501,7 @@ strata_result strata_runtime_read_material_declarations(
     }
     if (!valid_view(backend, false)) return invalid_argument();
     const std::string_view backend_id(backend.data, backend.size);
-    try {
+    return runtime_call(runtime, AbiCall{"Reading material declarations"}, [&] {
         const strata::compiler::SchemaRegistry& schemas =
             runtime->core.application().bundle()->schema_registry();
         std::size_t written = 0U;
@@ -633,14 +527,7 @@ strata_result strata_runtime_read_material_declarations(
         }
         *out_count = declared;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Reading material declarations failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_read_effect_pass_declarations(
@@ -649,7 +536,7 @@ strata_result strata_runtime_read_effect_pass_declarations(
     strata_effect_pass_declaration* const out_declarations,
     const size_t capacity,
     size_t* const out_count
-) {
+) noexcept {
     if (runtime == nullptr || out_count == nullptr) return invalid_argument();
     if (!runtime->core.has_application()) {
         return runtime_failure(
@@ -661,7 +548,7 @@ strata_result strata_runtime_read_effect_pass_declarations(
     }
     if (!valid_view(backend, false)) return invalid_argument();
     const std::string_view backend_id(backend.data, backend.size);
-    try {
+    return runtime_call(runtime, AbiCall{"Reading effect declarations"}, [&] {
         const strata::compiler::SchemaRegistry& schemas =
             runtime->core.application().bundle()->schema_registry();
         std::size_t written = 0U;
@@ -720,20 +607,13 @@ strata_result strata_runtime_read_effect_pass_declarations(
         }
         *out_count = declared;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Reading effect declarations failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_read_active_unit_json(
     strata_runtime* const runtime,
     const strata_value_json_sink* const sink
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr) {
         return runtime_failure(
@@ -751,34 +631,20 @@ strata_result strata_runtime_read_active_unit_json(
             "The runtime has no active application unit."
         );
     }
-    try {
+    return runtime_call(runtime, AbiCall{"Active-unit encoding or its JSON sink"}, [&] {
         const std::string encoded = strata::data::encode_canonical_json(
             runtime->core.application().active_unit()->portable_ir()
         );
         sink->emit(sink->user_data, strata_string_view{encoded.data(), encoded.size()});
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Encoding the active unit exhausted memory."
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.CALLBACK_FAILED",
-            "Active-unit encoding or its JSON sink failed inside the C ABI boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_read_source_map_entry_json(
     strata_runtime* const runtime,
     const strata_string_view compiled_path,
     const strata_value_json_sink* const sink
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (!valid_view(compiled_path, false) || !valid_json_sink(sink)) {
         return runtime_failure(
@@ -796,7 +662,7 @@ strata_result strata_runtime_read_source_map_entry_json(
             "The runtime has no active application unit."
         );
     }
-    try {
+    return runtime_call(runtime, AbiCall{"Source-map lookup or its JSON sink"}, [&] {
         const strata::compiler::CompiledSourceMapEntry* entry =
             runtime->core.application().active_unit()->source_map_entry(
                 std::string_view(compiled_path.data, compiled_path.size)
@@ -814,21 +680,7 @@ strata_result strata_runtime_read_source_map_entry_json(
         );
         sink->emit(sink->user_data, strata_string_view{encoded.data(), encoded.size()});
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Source-map lookup exhausted memory."
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.CALLBACK_FAILED",
-            "Source-map lookup or its JSON sink failed inside the C ABI boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_read_source_map_entries_at_json(
@@ -837,7 +689,7 @@ strata_result strata_runtime_read_source_map_entries_at_json(
     const std::uint32_t line,
     const std::uint32_t column,
     const strata_value_json_sink* const sink
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (!valid_view(source_id, false) || line == 0U || column == 0U || !valid_json_sink(sink)) {
         return runtime_failure(
@@ -855,7 +707,7 @@ strata_result strata_runtime_read_source_map_entries_at_json(
             "The runtime has no active application unit."
         );
     }
-    try {
+    return runtime_call(runtime, AbiCall{"Source-map lookup or its JSON sink"}, [&] {
         const auto entries = runtime->core.application().active_unit()->source_map_entries_at(
             std::string_view(source_id.data, source_id.size), line, column
         );
@@ -869,28 +721,14 @@ strata_result strata_runtime_read_source_map_entries_at_json(
         );
         sink->emit(sink->user_data, strata_string_view{encoded.data(), encoded.size()});
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Source-map lookup exhausted memory."
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.CALLBACK_FAILED",
-            "Source-map lookup or its JSON sink failed inside the C ABI boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_register_action_handler(
     strata_runtime* const runtime,
     const strata_action_handler_config* const config,
     strata_action_registration** const out_registration
-) {
+) noexcept {
     if (out_registration != nullptr) *out_registration = nullptr;
     if (runtime == nullptr) return invalid_argument();
     if (out_registration == nullptr || config == nullptr ||
@@ -912,7 +750,8 @@ strata_result strata_runtime_register_action_handler(
             "Configure an application before registering action handlers."
         );
     }
-    try {
+    constexpr AbiCall call{"Action handler registration", "STRATA.ACTION.INVALID_HANDLER"};
+    return runtime_call(runtime, call, [&] {
         const std::string action_id = copied_string(config->action_id);
         const auto contract = runtime->core.application().bundle()->action_registry().contract(action_id);
         if (contract == nullptr) {
@@ -982,31 +821,10 @@ strata_result strata_runtime_register_action_handler(
             std::move(registration)
         );
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Action handler registration exhausted memory."
-        );
-    } catch (const std::invalid_argument& error) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.ACTION.INVALID_HANDLER",
-            error.what()
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Action handler registration failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
-void strata_action_registration_release(strata_action_registration* const registration) {
+void strata_action_registration_release(strata_action_registration* const registration) noexcept {
     if (registration == nullptr) return;
     const strata::core::HostAllocator allocator = registration->allocator;
     std::destroy_at(registration);
@@ -1021,7 +839,7 @@ strata_result strata_runtime_dispatch_action_json(
     strata_runtime* const runtime,
     const strata_action_dispatch_config* const config,
     strata_action_dispatch_info* const out_info
-) {
+) noexcept {
     if (runtime == nullptr) return invalid_argument();
     if (!valid_action_dispatch_config(config) || out_info == nullptr ||
         out_info->struct_size < sizeof(strata_action_dispatch_info)) {
@@ -1046,7 +864,12 @@ strata_result strata_runtime_dispatch_action_json(
             "Configure an application before dispatching actions."
         );
     }
-    try {
+    constexpr AbiCall call{
+        "Action dispatch",
+        "STRATA.ACTION.INVALID_PAYLOAD",
+        "STRATA.ACTION.INVALID_JSON",
+    };
+    return runtime_call(runtime, call, [&] {
         const std::string action_id = copied_string(config->action_id);
         const bool dynamic = dynamic_action_dispatch(*config);
         const auto contract = runtime->core.application().bundle()->action_registry().contract(action_id);
@@ -1089,33 +912,5 @@ strata_result strata_runtime_dispatch_action_json(
             static_cast<std::uint64_t>(outcome.handler_owners.size()),
         };
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const strata::data::JsonError&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.ACTION.INVALID_JSON",
-            "Action payload or event value is not valid strict JSON."
-        );
-    } catch (const std::invalid_argument& error) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.ACTION.INVALID_PAYLOAD",
-            error.what()
-        );
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Action dispatch exhausted memory."
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Action dispatch failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }

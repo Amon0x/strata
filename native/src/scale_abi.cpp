@@ -5,6 +5,7 @@
 #include <new>
 #include <stdexcept>
 
+#include "abi_boundary.hpp"
 #include "core/diagnostics.hpp"
 #include "ui/scale.hpp"
 
@@ -94,20 +95,14 @@ extern "C" {
 strata_result strata_scale_policy_defaults(
     const strata_scale_policy_kind kind,
     strata_scale_policy_config* const out_policy
-) {
+) noexcept {
     if (out_policy == nullptr || out_policy->struct_size < sizeof(strata_scale_policy_config)) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
-    try {
+    return strata::abi_detail::guarded([&] {
         *out_policy = defaults(kind);
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::invalid_argument&) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
-    } catch (const std::bad_alloc&) {
-        return strata::core::result(STRATA_STATUS_OUT_OF_MEMORY);
-    } catch (...) {
-        return strata::core::result(STRATA_STATUS_INTERNAL_ERROR);
-    }
+    });
 }
 
 strata_result strata_resolve_scale_context(
@@ -115,7 +110,7 @@ strata_result strata_resolve_scale_context(
     const std::int64_t framebuffer_width,
     const std::int64_t framebuffer_height,
     strata_scale_context* const out_context
-) {
+) noexcept {
     if (policy == nullptr || out_context == nullptr ||
         policy->struct_size < sizeof(strata_scale_policy_config) ||
         out_context->struct_size < sizeof(strata_scale_context) ||
@@ -123,7 +118,7 @@ strata_result strata_resolve_scale_context(
         !valid_policy_kind(policy->kind) || !valid_snapping(*policy)) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
-    try {
+    return strata::abi_detail::guarded([&] {
         const strata::ui::ScaleContext resolved = resolve(
             *policy,
             strata::ui::FramebufferSize{framebuffer_width, framebuffer_height}
@@ -141,13 +136,7 @@ strata_result strata_resolve_scale_context(
             0U,
         };
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::invalid_argument&) {
-        return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
-    } catch (const std::bad_alloc&) {
-        return strata::core::result(STRATA_STATUS_OUT_OF_MEMORY);
-    } catch (...) {
-        return strata::core::result(STRATA_STATUS_INTERNAL_ERROR);
-    }
+    });
 }
 
 } // extern "C"

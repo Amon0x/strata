@@ -138,6 +138,12 @@ class WidgetRenderScope final {
     void focus(Rect bounds);
     /** Shared hover/pressed projection for retained widgets and presenter-owned subtargets. */
     void interaction(Rect bounds, std::string_view subtarget = {});
+    /**
+     * Drops every command this hook emitted. Used by extension presenters whose callback failed
+     * or left the clip stack unbalanced, so only their own fragment is lost, not the frame.
+     */
+    void discard() noexcept;
+    [[nodiscard]] bool discarded() const noexcept;
 
   private:
     void draw_text_layout(const TextLayout& layout, Point text_origin, RenderColor color,
@@ -155,6 +161,7 @@ class WidgetRenderScope final {
     std::vector<RenderCommand>& output_;
     WidgetVisualStyle visual_;
     bool enabled_ = true;
+    bool discarded_ = false;
 };
 
 [[nodiscard]] std::vector<RenderCommand> build_widget_fragment(

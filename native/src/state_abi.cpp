@@ -11,7 +11,7 @@ extern "C" {
 strata_result strata_runtime_create_application_state_snapshot(
     strata_runtime* const runtime,
     strata_application_state_snapshot** const out_snapshot
-) {
+) noexcept {
     if (out_snapshot != nullptr) *out_snapshot = nullptr;
     if (runtime == nullptr || out_snapshot == nullptr || !runtime->core.has_application()) {
         return strata::abi_detail::invalid_argument();
@@ -29,58 +29,50 @@ strata_result strata_runtime_create_application_state_snapshot(
             "The application state snapshot handle could not be allocated."
         );
     }
-    try {
-        *out_snapshot = std::construct_at(
-            static_cast<strata_application_state_snapshot*>(storage),
-            allocator,
-            runtime->core.application().state().snapshot()
-        );
-        return strata::core::result(STRATA_STATUS_OK);
-    } catch (...) {
-        allocator.deallocate(
-            storage,
-            sizeof(strata_application_state_snapshot),
-            alignof(strata_application_state_snapshot)
-        );
-        return strata::abi_detail::runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Application state snapshot creation failed inside the C ABI boundary."
-        );
-    }
+    constexpr strata::abi_detail::AbiCall call{"Application state snapshot creation"};
+    return strata::abi_detail::runtime_call(runtime, call, [&] {
+        try {
+            *out_snapshot = std::construct_at(
+                static_cast<strata_application_state_snapshot*>(storage),
+                allocator,
+                runtime->core.application().state().snapshot()
+            );
+            return strata::core::result(STRATA_STATUS_OK);
+        } catch (...) {
+            allocator.deallocate(
+                storage,
+                sizeof(strata_application_state_snapshot),
+                alignof(strata_application_state_snapshot)
+            );
+            throw;
+        }
+    });
 }
 
 strata_result strata_runtime_restore_application_state(
     strata_runtime* const runtime,
     const strata_application_state_snapshot* const snapshot,
     uint32_t* const out_changed
-) {
+) noexcept {
     if (out_changed != nullptr) *out_changed = 0U;
     if (runtime == nullptr || snapshot == nullptr || out_changed == nullptr ||
         !runtime->core.has_application()) {
         return strata::abi_detail::invalid_argument();
     }
-    try {
+    constexpr strata::abi_detail::AbiCall call{"Application state restore"};
+    return strata::abi_detail::runtime_call(runtime, call, [&] {
         *out_changed = runtime->core.application().state().restore(snapshot->data) ? 1U : 0U;
         if (*out_changed != 0U) {
             runtime->core.application().undo().clear_all();
             runtime->core.application().synchronize_durable_state();
         }
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (...) {
-        return strata::abi_detail::runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Application state restore failed inside the C ABI boundary."
-        );
-    }
+    });
 }
 
 void strata_application_state_snapshot_release(
     strata_application_state_snapshot* const snapshot
-) {
+) noexcept {
     if (snapshot == nullptr) return;
     const strata::core::HostAllocator allocator = snapshot->allocator;
     std::destroy_at(snapshot);

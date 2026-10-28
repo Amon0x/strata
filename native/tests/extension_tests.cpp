@@ -1251,6 +1251,149 @@ screen Main {
     strata_runtime_release(runtime);
 }
 
+enum class FaultyHook { none, present, semantics };
+
+FaultyHook faulty_hook = FaultyHook::none;
+
+void faulty_present(Present& present) {
+    present.rounded_rect(present.bounds(), 2.0, rgba(200U, 40U, 40U));
+    if (faulty_hook == FaultyHook::present)
+        throw std::runtime_error("authored presentation hook failed");
+}
+
+void faulty_semantics(Semantics& semantics) {
+    semantics.name("Faulty widget");
+    if (faulty_hook == FaultyHook::semantics)
+        throw std::runtime_error("authored semantics hook failed");
+}
+
+struct FaultyFrame final {
+    strata_status status = STRATA_STATUS_OK;
+    std::uint64_t render_commands = 0U;
+    std::string last_code;
+};
+
+/** Frames one fresh Surface whose authored widget hook may throw. */
+[[nodiscard]] FaultyFrame frame_faulty_widget(const std::filesystem::path& resource_root,
+                                              const FaultyHook hook) {
+    faulty_hook = hook;
+    auto faulty = widget("FaultyWidget")
+                      .no_children()
+                      .intrinsic_size(80.0, 30.0)
+                      .semantics_role("group")
+                      .on_semantics(&faulty_semantics)
+                      .present(&faulty_present);
+    auto created = package("strata.faulty.v1");
+    created->widget(std::move(faulty));
+    const std::string package_schema = created->schema_json();
+
+    Clock clock{8'000};
+    DiagnosticLog diagnostics;
+    strata_runtime_config config = runtime_config(clock, diagnostics);
+    strata_runtime* runtime = nullptr;
+    check(strata_runtime_create(&config, &runtime).status == STRATA_STATUS_OK,
+          "faulty hook runtime creation failed");
+    FileResources resources{resource_root, {}};
+    const strata_resource_adapter adapter{
+        sizeof(strata_resource_adapter),
+        &resources,
+        &load_resource,
+    };
+    check(strata_runtime_set_resource_adapter(runtime, &adapter).status == STRATA_STATUS_OK,
+          "faulty hook resource adapter installation failed");
+    const strata_string_view extension_schemas[]{view(package_schema)};
+    const strata_application_config application{
+        sizeof(strata_application_config), view("strata.extension.faulty"),
+        strata_string_view{nullptr, 0U},   extension_schemas,
+        std::size(extension_schemas),
+    };
+    check(strata_runtime_configure_application(runtime, &application).status == STRATA_STATUS_OK,
+          "faulty hook application configuration failed");
+    const std::string source = R"(
+screen Main {
+  root Panel(key: "faulty.root", layout: { kind: "COLUMN" }) {
+    FaultyWidget(key: "faulty.widget", layout: { width: 80, height: 30 })
+    Button(key: "faulty.sibling", label: "Sibling")
+  }
+}
+)";
+    const strata_activation_config activation{
+        sizeof(strata_activation_config), 1U, view("faulty/main.strata"), view(source), nullptr,
+        nullptr,
+    };
+    strata_activation_info activation_info{};
+    activation_info.struct_size = sizeof(activation_info);
+    check(strata_runtime_compile_and_activate(runtime, &activation, &activation_info).status ==
+              STRATA_STATUS_OK,
+          "faulty hook source did not activate");
+    const strata_surface_font_resource fonts[]{
+        {view("strata:fonts/default-medium"), view("assets/strata/fonts/medium.ttf")},
+        {view("strata:fonts/default"), view("assets/strata/fonts/default.ttf")},
+    };
+    strata_surface_config surface_config{};
+    surface_config.struct_size = sizeof(surface_config);
+    surface_config.id = view("faulty.surface");
+    surface_config.root_role = STRATA_SURFACE_ROOT_SCREEN;
+    surface_config.root_name = view("Main");
+    surface_config.environment = strata_surface_environment{
+        sizeof(strata_surface_environment),
+        1U,
+        320,
+        200,
+        320.0,
+        200.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        STRATA_POINT_SNAP_NEAREST,
+        STRATA_RECTANGLE_SNAP_OUTWARD,
+        STRATA_SURFACE_DENSITY_COMFORTABLE,
+        STRATA_POINTER_PRECISION_FINE,
+        STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD,
+        0U,
+        0U,
+    };
+    surface_config.fonts = fonts;
+    surface_config.font_count = std::size(fonts);
+    surface_config.extensions = &created->bundle();
+    strata_surface* surface = nullptr;
+    check(strata_runtime_create_surface(runtime, &surface_config, &surface).status ==
+              STRATA_STATUS_OK,
+          "faulty hook Surface creation failed");
+    strata_surface_frame_info info{};
+    info.struct_size = sizeof(info);
+    FaultyFrame result;
+    result.status = strata_surface_frame(surface, 8'000, &info).status;
+    result.render_commands = info.render_command_count;
+    result.last_code = diagnostics.last_code;
+    static_cast<void>(strata_surface_abandon(surface));
+    static_cast<void>(strata_runtime_release(runtime));
+    faulty_hook = FaultyHook::none;
+    return result;
+}
+
+/** An authored C++ hook that throws stays inside its plugin: the host frame survives. */
+void test_throwing_hooks_stay_in_the_plugin(const std::filesystem::path& resource_root) {
+    const FaultyFrame healthy = frame_faulty_widget(resource_root, FaultyHook::none);
+    check(healthy.status == STRATA_STATUS_OK, "faulty hook baseline frame failed");
+
+    const FaultyFrame present = frame_faulty_widget(resource_root, FaultyHook::present);
+    check(present.status == STRATA_STATUS_OK,
+          "a throwing presentation hook failed the host frame: " + present.last_code);
+    check(present.render_commands + 1U == healthy.render_commands,
+          "a throwing presentation hook kept its partial fragment");
+    check(present.last_code == "STRATA.EXTENSION.FRAGMENT_DROPPED",
+          "a throwing presentation hook was not reported");
+
+    const FaultyFrame semantics = frame_faulty_widget(resource_root, FaultyHook::semantics);
+    check(semantics.status == STRATA_STATUS_OK,
+          "a throwing semantics hook failed the host frame: " + semantics.last_code);
+    check(semantics.render_commands == healthy.render_commands,
+          "a throwing semantics hook changed presentation");
+}
+
 } // namespace
 
 int main(const int argument_count, const char* const* const arguments) {
@@ -1258,8 +1401,10 @@ int main(const int argument_count, const char* const* const arguments) {
         test_canvas_sdk();
         test_definition_diagnostics();
         test_external_package_and_schema_projection();
-        if (argument_count == 2)
+        if (argument_count == 2) {
             test_surface_lifecycle(std::filesystem::path(arguments[1]));
+            test_throwing_hooks_stay_in_the_plugin(std::filesystem::path(arguments[1]));
+        }
         std::cout << "strata_extension_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

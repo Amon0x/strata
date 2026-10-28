@@ -35,18 +35,14 @@
 
 namespace {
 
-class HostServiceError final : public std::runtime_error {
-  public:
-    HostServiceError(const strata_status status, std::string message)
-        : std::runtime_error(std::move(message)), status_(status) {}
+using strata::abi_detail::AbiCall;
+using strata::abi_detail::StatusError;
+using strata::abi_detail::surface_call;
 
-    [[nodiscard]] strata_status status() const noexcept {
-        return status_;
-    }
-
-  private:
-    strata_status status_;
-};
+/** Host resource-adapter failure; reported with the adapter's own status. */
+[[nodiscard]] StatusError resource_unavailable(const strata_status status, std::string message) {
+    return StatusError(status, "STRATA.SURFACE.RESOURCE_UNAVAILABLE", std::move(message));
+}
 
 [[nodiscard]] bool valid_view(strata_string_view value, bool allow_empty) noexcept;
 [[nodiscard]] std::string copied_string(strata_string_view value);
@@ -65,7 +61,7 @@ class ResourceLoader final {
             throw std::invalid_argument("resource id must be valid UTF-8");
         }
         if (!adapter_.has_value()) {
-            throw HostServiceError(
+            throw resource_unavailable(
                 STRATA_STATUS_SERVICE_UNAVAILABLE,
                 "Surface resource loading requires a configured resource adapter.");
         }
@@ -73,12 +69,13 @@ class ResourceLoader final {
         const strata_status status =
             adapter_->load(adapter_->user_data, strata_string_view{id.data(), id.size()}, &bytes);
         if (status != STRATA_STATUS_OK) {
-            throw HostServiceError(status,
-                                   "The host resource adapter rejected a surface resource.");
+            throw resource_unavailable(status,
+                                       "The host resource adapter rejected a surface resource.");
         }
         if (bytes.data == nullptr || bytes.size == 0U) {
-            throw HostServiceError(STRATA_STATUS_SERVICE_UNAVAILABLE,
-                                   "The host resource adapter returned an empty surface resource.");
+            throw resource_unavailable(
+                STRATA_STATUS_SERVICE_UNAVAILABLE,
+                "The host resource adapter returned an empty surface resource.");
         }
         constexpr std::size_t maximum_surface_resource_bytes = 64U * 1'024U * 1'024U;
         if (bytes.size > maximum_surface_resource_bytes) {
@@ -524,7 +521,7 @@ extern "C" {
 
 strata_result strata_runtime_create_surface(strata_runtime* const runtime,
                                             const strata_surface_config* const config,
-                                            strata_surface** const out_surface) {
+                                            strata_surface** const out_surface) noexcept {
     constexpr std::size_t surface_config_v1_size = offsetof(strata_surface_config, extensions);
     if (out_surface != nullptr)
         *out_surface = nullptr;
@@ -549,68 +546,60 @@ strata_result strata_runtime_create_surface(strata_runtime* const runtime,
         return runtime_failure(*runtime, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
                                "The surface handle could not be allocated.");
     }
-    try {
-        std::string id = copied_string(config->id);
-        std::string root_name = copied_string(config->root_name);
-        if (!strata::core::valid_utf8(id) || !strata::core::valid_utf8(root_name)) {
-            throw std::invalid_argument("surface id and root name must be valid UTF-8");
-        }
-        if (std::ranges::any_of(runtime->surfaces, [&](const strata_surface* const surface) {
-                return surface != nullptr && surface->core.id() == id;
-            })) {
-            throw std::invalid_argument("Surface ids must be unique within a Runtime");
-        }
-        const strata_surface_extension_bundle* const extension_bundle =
-            config->struct_size >= sizeof(strata_surface_config) ? config->extensions : nullptr;
-        strata::abi_detail::ExtensionRegistries extensions =
-            strata::abi_detail::extension_registries(extension_bundle);
-        std::vector<strata_surface_font_binding> owned_fonts = font_bindings(*config);
-        std::vector<strata_surface_image_binding> owned_image_bindings = image_bindings(*config);
-        std::string owned_resource_namespace = runtime->allocate_surface_resource_namespace();
-        const ResourceLoader resources(*runtime);
-        std::shared_ptr<const strata::ui::TextEngine> owned_text_engine =
-            text_engine(resources, owned_fonts);
-        MaterializedImages owned_images =
-            image_resources(resources, owned_image_bindings, owned_resource_namespace);
-        strata_surface* const created = std::construct_at(
-            static_cast<strata_surface*>(storage), allocator, runtime, std::move(id),
-            root_role(config->root_role), std::move(root_name), std::move(owned_resource_namespace),
-            environment(config->environment), std::move(owned_fonts),
-            std::move(owned_image_bindings), std::move(owned_text_engine),
-            std::move(owned_images.svg_images), std::move(owned_images.textures),
-            std::move(extensions.widgets), std::move(extensions.behaviors));
+    constexpr AbiCall call{"Surface creation", "STRATA.SURFACE.INVALID_CONFIGURATION"};
+    return strata::abi_detail::runtime_call(runtime, call, [&] {
         try {
-            runtime->surfaces.push_back(created);
+            std::string id = copied_string(config->id);
+            std::string root_name = copied_string(config->root_name);
+            if (!strata::core::valid_utf8(id) || !strata::core::valid_utf8(root_name)) {
+                throw std::invalid_argument("surface id and root name must be valid UTF-8");
+            }
+            if (std::ranges::any_of(runtime->surfaces, [&](const strata_surface* const surface) {
+                    return surface != nullptr && surface->core.id() == id;
+                })) {
+                throw std::invalid_argument("Surface ids must be unique within a Runtime");
+            }
+            const strata_surface_extension_bundle* const extension_bundle =
+                config->struct_size >= sizeof(strata_surface_config) ? config->extensions : nullptr;
+            strata::abi_detail::ExtensionRegistries extensions =
+                strata::abi_detail::extension_registries(extension_bundle,
+                                                         runtime->core.diagnostics());
+            std::vector<strata_surface_font_binding> owned_fonts = font_bindings(*config);
+            std::vector<strata_surface_image_binding> owned_image_bindings =
+                image_bindings(*config);
+            std::string owned_resource_namespace = runtime->allocate_surface_resource_namespace();
+            const ResourceLoader resources(*runtime);
+            std::shared_ptr<const strata::ui::TextEngine> owned_text_engine =
+                text_engine(resources, owned_fonts);
+            MaterializedImages owned_images =
+                image_resources(resources, owned_image_bindings, owned_resource_namespace);
+            strata_surface* const created = std::construct_at(
+                static_cast<strata_surface*>(storage), allocator, runtime, std::move(id),
+                root_role(config->root_role), std::move(root_name),
+                std::move(owned_resource_namespace), environment(config->environment),
+                std::move(owned_fonts), std::move(owned_image_bindings),
+                std::move(owned_text_engine), std::move(owned_images.svg_images),
+                std::move(owned_images.textures), std::move(extensions.widgets),
+                std::move(extensions.behaviors));
+            try {
+                runtime->surfaces.push_back(created);
+            } catch (...) {
+                std::destroy_at(created);
+                throw;
+            }
+            *out_surface = created;
+            return strata::core::result(STRATA_STATUS_OK);
         } catch (...) {
-            std::destroy_at(created);
+            if (*out_surface == nullptr) {
+                allocator.deallocate(storage, sizeof(strata_surface), alignof(strata_surface));
+            }
             throw;
         }
-        *out_surface = created;
-        return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        if (*out_surface == nullptr) {
-            allocator.deallocate(storage, sizeof(strata_surface), alignof(strata_surface));
-        }
-        return runtime_failure(*runtime, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Surface creation exhausted memory.");
-    } catch (const HostServiceError& error) {
-        allocator.deallocate(storage, sizeof(strata_surface), alignof(strata_surface));
-        return runtime_failure(*runtime, error.status(), "STRATA.SURFACE.RESOURCE_UNAVAILABLE",
-                               error.what());
-    } catch (const std::invalid_argument& error) {
-        allocator.deallocate(storage, sizeof(strata_surface), alignof(strata_surface));
-        return runtime_failure(*runtime, STRATA_STATUS_INVALID_ARGUMENT,
-                               "STRATA.SURFACE.INVALID_CONFIGURATION", error.what());
-    } catch (...) {
-        allocator.deallocate(storage, sizeof(strata_surface), alignof(strata_surface));
-        return runtime_failure(*runtime, STRATA_STATUS_INTERNAL_ERROR,
-                               "STRATA.ABI.UNCAUGHT_EXCEPTION",
-                               "Surface creation failed inside the C ABI exception boundary.");
-    }
+    });
 }
 
 strata_result strata_surface_prepare_release_packet(strata_surface* const surface,
-                                                    const strata_bytes_sink* const sink) {
+                                                    const strata_bytes_sink* const sink) noexcept {
     if (surface == nullptr || surface->owner == nullptr)
         return invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_bytes_sink) || sink->emit == nullptr) {
@@ -618,7 +607,7 @@ strata_result strata_surface_prepare_release_packet(strata_surface* const surfac
                                "STRATA.ABI.INVALID_BYTES_SINK",
                                "Preparing a Surface release packet requires a complete byte sink.");
     }
-    try {
+    return surface_call(surface, AbiCall{"Surface release-packet preparation or delivery"}, [&] {
         if (!surface->release_packet_prepared) {
             surface->core.cancel_interactions();
             const std::uint64_t last_frame = surface->core.last_frame().frame_index;
@@ -635,17 +624,10 @@ strata_result strata_surface_prepare_release_packet(strata_surface* const surfac
         const std::vector<std::uint8_t>& packet = surface->current_render_packet();
         sink->emit(sink->user_data, strata_bytes_view{packet.data(), packet.size()});
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Preparing the Surface release packet exhausted memory.");
-    } catch (...) {
-        return surface_failure(
-            *surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.CALLBACK_FAILED",
-            "Surface release-packet preparation or delivery failed inside the C ABI boundary.");
-    }
+    });
 }
 
-strata_result strata_surface_acknowledge_release_packet(strata_surface* const surface) {
+strata_result strata_surface_acknowledge_release_packet(strata_surface* const surface) noexcept {
     if (surface == nullptr || surface->owner == nullptr)
         return invalid_argument();
     if (!surface->release_packet_prepared) {
@@ -657,7 +639,7 @@ strata_result strata_surface_acknowledge_release_packet(strata_surface* const su
     return strata::core::result(STRATA_STATUS_OK);
 }
 
-strata_result strata_surface_release(strata_surface* const surface) {
+strata_result strata_surface_release(strata_surface* const surface) noexcept {
     if (surface == nullptr)
         return strata::core::result(STRATA_STATUS_OK);
     if (surface->owner == nullptr)
@@ -672,7 +654,7 @@ strata_result strata_surface_release(strata_surface* const surface) {
     return strata::core::result(STRATA_STATUS_OK);
 }
 
-strata_result strata_surface_abandon(strata_surface* const surface) {
+strata_result strata_surface_abandon(strata_surface* const surface) noexcept {
     if (surface == nullptr)
         return strata::core::result(STRATA_STATUS_OK);
     if (surface->owner == nullptr)
@@ -687,7 +669,7 @@ strata_result strata_surface_abandon(strata_surface* const surface) {
 
 strata_result strata_surface_adopt_environment(strata_surface* const surface,
                                                const strata_surface_environment* const value,
-                                               uint32_t* const out_adopted) {
+                                               uint32_t* const out_adopted) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -699,26 +681,17 @@ strata_result strata_surface_adopt_environment(strata_surface* const surface,
             *surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_SURFACE_ENVIRONMENT",
             "Environment adoption requires a complete environment and output pointer.");
     }
-    try {
+    constexpr AbiCall call{"Environment adoption", "STRATA.SURFACE.INVALID_ENVIRONMENT"};
+    return surface_call(surface, call, [&] {
         *out_adopted = surface->core.adopt_environment(environment(*value)) ? 1U : 0U;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Environment adoption exhausted memory.");
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
-                               "STRATA.SURFACE.INVALID_ENVIRONMENT", error.what());
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR,
-                               "STRATA.ABI.UNCAUGHT_EXCEPTION",
-                               "Environment adoption failed inside the C ABI exception boundary.");
-    }
+    });
 }
 
-strata_result strata_surface_enqueue_input(strata_surface* const surface,
-                                           const strata_input_event* const events,
-                                           const size_t event_count,
-                                           strata_surface_input_batch_info* const out_info) {
+strata_result
+strata_surface_enqueue_input(strata_surface* const surface, const strata_input_event* const events,
+                             const size_t event_count,
+                             strata_surface_input_batch_info* const out_info) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -734,7 +707,7 @@ strata_result strata_surface_enqueue_input(strata_surface* const surface,
         0U,
         static_cast<std::uint64_t>(surface->core.input().queued_event_count()),
     };
-    try {
+    return surface_call(surface, AbiCall{"Input batch enqueue", "STRATA.INPUT.INVALID_EVENT"}, [&] {
         std::vector<strata::ui::SurfaceInputEvent> decoded;
         decoded.reserve(event_count);
         for (std::size_t index = 0U; index < event_count; ++index) {
@@ -750,82 +723,52 @@ strata_result strata_surface_enqueue_input(strata_surface* const surface,
         return surface_failure(*surface, STRATA_STATUS_INPUT_QUEUE_FULL,
                                "STRATA.UI.INPUT_QUEUE_FULL",
                                "The atomic surface input batch exceeded the bounded input queue.");
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Input batch enqueue exhausted memory.");
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
-                               "STRATA.INPUT.INVALID_EVENT", error.what());
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR,
-                               "STRATA.ABI.UNCAUGHT_EXCEPTION",
-                               "Input batch enqueue failed inside the C ABI exception boundary.");
-    }
+    });
 }
 
-strata_result strata_surface_cancel_interactions(strata_surface* const surface) {
+strata_result strata_surface_cancel_interactions(strata_surface* const surface) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
         return terminal_surface_failure(*surface);
-    try {
+    return surface_call(surface, AbiCall{"Interaction cancellation"}, [&] {
         surface->core.cancel_interactions();
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Interaction cancellation exhausted memory.");
-    } catch (...) {
-        return surface_failure(
-            *surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Interaction cancellation failed inside the C ABI exception boundary.");
-    }
+    });
 }
 
-strata_result strata_surface_reveal(strata_surface* const surface) {
+strata_result strata_surface_reveal(strata_surface* const surface) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
         return terminal_surface_failure(*surface);
-    try {
+    return surface_call(surface, AbiCall{"Surface reveal"}, [&] {
         surface->core.reveal();
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Surface reveal exhausted memory.");
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR,
-                               "STRATA.ABI.UNCAUGHT_EXCEPTION",
-                               "Surface reveal failed inside the C ABI exception boundary.");
-    }
+    });
 }
 
 strata_result strata_surface_report_backdrop(strata_surface* const surface,
                                              const strata_backdrop_sample* const samples,
-                                             const size_t sample_count) {
+                                             const size_t sample_count) noexcept {
     if (surface == nullptr || (samples == nullptr && sample_count != 0U))
         return invalid_argument();
     if (surface->release_packet_prepared)
         return terminal_surface_failure(*surface);
-    try {
+    return surface_call(surface, AbiCall{"Surface backdrop report"}, [&] {
         std::vector<strata::ui::Surface::BackdropSample> reports;
         reports.reserve(sample_count);
         for (size_t index = 0U; index < sample_count; ++index)
             reports.push_back({samples[index].probe, samples[index].luminance});
         surface->core.report_backdrop(reports);
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Surface backdrop report exhausted memory.");
-    } catch (...) {
-        return surface_failure(
-            *surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Surface backdrop report failed inside the C ABI exception boundary.");
-    }
+    });
 }
 
-strata_result strata_surface_dispatch_action_json(strata_surface* const surface,
-                                                  const strata_action_dispatch_config* const config,
-                                                  strata_action_dispatch_info* const out_info) {
+strata_result
+strata_surface_dispatch_action_json(strata_surface* const surface,
+                                    const strata_action_dispatch_config* const config,
+                                    strata_action_dispatch_info* const out_info) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -843,7 +786,12 @@ strata_result strata_surface_dispatch_action_json(strata_surface* const surface,
         0U,
         0U,
     };
-    try {
+    constexpr AbiCall call{
+        "Surface action dispatch",
+        "STRATA.ACTION.INVALID_SURFACE_DISPATCH",
+        "STRATA.ACTION.INVALID_JSON",
+    };
+    return surface_call(surface, call, [&] {
         const std::string source = copied_string(config->source_key);
         const strata::runtime::ActionDispatchOutcome outcome = surface->core.dispatch_action(
             copied_string(config->action_id),
@@ -859,26 +807,12 @@ strata_result strata_surface_dispatch_action_json(strata_surface* const surface,
             static_cast<std::uint64_t>(outcome.handler_owners.size()),
         };
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const strata::data::JsonError&) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
-                               "STRATA.ACTION.INVALID_JSON",
-                               "Surface action payload or event value is not valid strict JSON.");
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
-                               "STRATA.ACTION.INVALID_SURFACE_DISPATCH", error.what());
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Surface action dispatch exhausted memory.");
-    } catch (...) {
-        return surface_failure(
-            *surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Surface action dispatch failed inside the C ABI exception boundary.");
-    }
+    });
 }
 
 strata_result strata_surface_frame(strata_surface* const surface,
                                    const int64_t frame_time_nanoseconds,
-                                   strata_surface_frame_info* const out_info) {
+                                   strata_surface_frame_info* const out_info) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -890,7 +824,7 @@ strata_result strata_surface_frame(strata_surface* const surface,
     }
     *out_info = {};
     out_info->struct_size = sizeof(strata_surface_frame_info);
-    try {
+    return surface_call(surface, AbiCall{"Surface framing", "STRATA.SURFACE.INVALID_FRAME"}, [&] {
         const strata::ui::SurfaceFrame frame = surface->core.frame(frame_time_nanoseconds);
         const auto packet_started = std::chrono::steady_clock::now();
         const strata::ui::TextEngine* const engine = surface->core.text_engine();
@@ -972,28 +906,11 @@ strata_result strata_surface_frame(strata_surface* const surface,
             static_cast<std::uint64_t>(surface->current_render_packet().size()),
         };
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Surface frame exhausted memory.");
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT,
-                               "STRATA.SURFACE.INVALID_FRAME", error.what());
-    } catch (const std::exception& error) {
-        const std::string message =
-            std::string("Surface framing failed inside the C ABI exception boundary: ") +
-            error.what();
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR,
-                               "STRATA.ABI.UNCAUGHT_EXCEPTION", message.c_str());
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR,
-                               "STRATA.ABI.UNCAUGHT_EXCEPTION",
-                               "Surface framing failed inside the C ABI exception boundary with a "
-                               "non-standard exception.");
-    }
+    });
 }
 
 strata_result strata_surface_read_frame_json(const strata_surface* const surface,
-                                             const strata_value_json_sink* const sink) {
+                                             const strata_value_json_sink* const sink) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) ||
@@ -1007,7 +924,7 @@ strata_result strata_surface_read_frame_json(const strata_surface* const surface
                                "STRATA.SURFACE.FRAME_UNAVAILABLE",
                                "Frame the surface before reading its canonical frame snapshot.");
     }
-    try {
+    return surface_call(surface, AbiCall{"Surface frame JSON delivery"}, [&] {
         if (surface->frame_json.empty()) {
             const auto inspection_started = std::chrono::steady_clock::now();
             // Compact: a deep tree spends most of an indented document on whitespace. Hosts that
@@ -1026,30 +943,25 @@ strata_result strata_surface_read_frame_json(const strata_surface* const surface
         sink->emit(sink->user_data,
                    strata_string_view{surface->frame_json.data(), surface->frame_json.size()});
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Surface frame JSON materialization exhausted memory.");
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.CALLBACK_FAILED",
-                               "Surface frame JSON delivery failed inside the C ABI boundary.");
-    }
+    });
 }
 
-strata_result strata_surface_read_diagnostics(const strata_surface* const surface,
-                                              const strata_diagnostics_snapshot_sink* const sink) {
+strata_result
+strata_surface_read_diagnostics(const strata_surface* const surface,
+                                const strata_diagnostics_snapshot_sink* const sink) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     return strata_runtime_read_diagnostics(surface->owner, sink);
 }
 
-strata_result strata_surface_clear_diagnostics(strata_surface* const surface) {
+strata_result strata_surface_clear_diagnostics(strata_surface* const surface) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     return strata_runtime_clear_diagnostics(surface->owner);
 }
 
 strata_result strata_surface_drain_events_json(strata_surface* const surface,
-                                               const strata_value_json_sink* const sink) {
+                                               const strata_value_json_sink* const sink) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     if (surface->release_packet_prepared)
@@ -1060,7 +972,7 @@ strata_result strata_surface_drain_events_json(strata_surface* const surface,
                                "STRATA.ABI.INVALID_VALUE_SINK",
                                "Draining surface events requires a complete JSON sink.");
     }
-    try {
+    return surface_call(surface, AbiCall{"Surface event delivery"}, [&] {
         strata::ui::SurfaceEventDrain drain = surface->core.drain_events();
         strata::data::JsonValue::Array records;
         records.reserve(drain.records.size());
@@ -1081,17 +993,11 @@ strata_result strata_surface_drain_events_json(strata_surface* const surface,
             }));
         sink->emit(sink->user_data, strata_string_view{encoded.data(), encoded.size()});
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY",
-                               "Surface event drain exhausted memory.");
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.CALLBACK_FAILED",
-                               "Surface event delivery failed inside the C ABI boundary.");
-    }
+    });
 }
 
 strata_result strata_surface_read_render_packet(const strata_surface* const surface,
-                                                const strata_bytes_sink* const sink) {
+                                                const strata_bytes_sink* const sink) noexcept {
     if (surface == nullptr)
         return invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_bytes_sink) || sink->emit == nullptr) {
@@ -1105,13 +1011,10 @@ strata_result strata_surface_read_render_packet(const strata_surface* const surf
                                "STRATA.SURFACE.FRAME_UNAVAILABLE",
                                "Frame the surface before reading its render packet.");
     }
-    try {
+    return surface_call(surface, AbiCall{"Surface render packet delivery"}, [&] {
         sink->emit(sink->user_data, strata_bytes_view{packet.data(), packet.size()});
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.CALLBACK_FAILED",
-                               "Surface render packet delivery failed inside the C ABI boundary.");
-    }
+    });
 }
 
 } // extern "C"

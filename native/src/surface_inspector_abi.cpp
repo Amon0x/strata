@@ -11,6 +11,9 @@
 #include "data/json.hpp"
 #include "ui/inspection.hpp"
 
+using strata::abi_detail::AbiCall;
+using strata::abi_detail::surface_call;
+
 namespace {
 
 [[nodiscard]] strata_result surface_failure(
@@ -30,7 +33,7 @@ strata_result strata_surface_inspector_select(
     strata_surface* const surface,
     const strata_string_view key,
     uint32_t* const out_selected
-) {
+) noexcept {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
@@ -44,16 +47,13 @@ strata_result strata_surface_inspector_select(
             "Inspector selection requires a complete keyed target and output pointer."
         );
     }
-    try {
+    constexpr AbiCall call{"Inspector selection", "STRATA.INSPECT.INVALID_TARGET"};
+    return surface_call(surface, call, [&] {
         const std::string value = strata::abi_detail::copied_string(key);
         if (!strata::core::valid_utf8(value)) throw std::invalid_argument("inspector key is not valid UTF-8");
         *out_selected = surface->core.inspect_select(value) ? 1U : 0U;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.INSPECT.INVALID_TARGET", error.what());
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.UNCAUGHT_EXCEPTION", "Inspector selection failed inside the C ABI boundary.");
-    }
+    });
 }
 
 strata_result strata_surface_inspector_pick(
@@ -61,7 +61,7 @@ strata_result strata_surface_inspector_pick(
     const double x,
     const double y,
     uint32_t* const out_selected
-) {
+) noexcept {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
@@ -70,15 +70,13 @@ strata_result strata_surface_inspector_pick(
     if (out_selected == nullptr || !std::isfinite(x) || !std::isfinite(y)) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_INSPECTOR_PICK", "Inspector picking requires finite coordinates and an output pointer.");
     }
-    try {
+    return surface_call(surface, AbiCall{"Inspector picking"}, [&] {
         *out_selected = surface->core.inspect_pick(strata::ui::Point{x, y}) ? 1U : 0U;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.UNCAUGHT_EXCEPTION", "Inspector picking failed inside the C ABI boundary.");
-    }
+    });
 }
 
-strata_result strata_surface_inspector_clear(strata_surface* const surface) {
+strata_result strata_surface_inspector_clear(strata_surface* const surface) noexcept {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
@@ -90,20 +88,18 @@ strata_result strata_surface_inspector_clear(strata_surface* const surface) {
 strata_result strata_surface_read_inspector_selection_json(
     const strata_surface* const surface,
     const strata_value_json_sink* const sink
-) {
+) noexcept {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_VALUE_SINK", "Reading inspector selection requires a complete JSON sink.");
     }
-    try {
+    return surface_call(surface, AbiCall{"Inspector selection delivery"}, [&] {
         const std::string json = strata::data::encode_canonical_json(
             strata::ui::inspect_selection(surface->core)
         );
         sink->emit(sink->user_data, strata_string_view{json.data(), json.size()});
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.CALLBACK_FAILED", "Inspector selection delivery failed inside the C ABI boundary.");
-    }
+    });
 }
 
 strata_result strata_surface_read_inspection_node_json(
@@ -111,7 +107,7 @@ strata_result strata_surface_read_inspection_node_json(
     const strata_string_view key,
     const uint32_t depth,
     const strata_value_json_sink* const sink
-) {
+) noexcept {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (sink == nullptr || sink->struct_size < sizeof(strata_value_json_sink) || sink->emit == nullptr ||
         !strata::abi_detail::valid_view(key, false)) {
@@ -120,7 +116,8 @@ strata_result strata_surface_read_inspection_node_json(
     if (!surface->frame_snapshot_available) {
         return surface_failure(*surface, STRATA_STATUS_NOT_FOUND, "STRATA.SURFACE.FRAME_UNAVAILABLE", "Frame the surface before reading an inspection node.");
     }
-    try {
+    constexpr AbiCall call{"Inspection node delivery", "STRATA.INSPECT.INVALID_TARGET"};
+    return surface_call(surface, call, [&] {
         const std::string value = strata::abi_detail::copied_string(key);
         if (!strata::core::valid_utf8(value)) throw std::invalid_argument("inspection key is not valid UTF-8");
         const std::size_t levels = depth == std::numeric_limits<uint32_t>::max()
@@ -131,11 +128,7 @@ strata_result strata_surface_read_inspection_node_json(
         );
         sink->emit(sink->user_data, strata_string_view{json.data(), json.size()});
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.INSPECT.INVALID_TARGET", error.what());
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.CALLBACK_FAILED", "Inspection node delivery failed inside the C ABI boundary.");
-    }
+    });
 }
 
 } // extern "C"

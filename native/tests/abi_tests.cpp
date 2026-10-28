@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <initializer_list>
 #include <iterator>
 #include <new>
 #include <sstream>
@@ -1408,6 +1409,225 @@ void test_allocator_ownership_and_validation() {
     check(out_of_memory.status == STRATA_STATUS_OUT_OF_MEMORY, "allocator failure lost its status");
 }
 
+/** One Runtime + Surface whose `AbiFragment` extension widget runs a test-chosen presenter. */
+struct FragmentFixture final {
+    using Presenter = void (*)(void* user_data, strata_widget_render_context* context);
+
+    using SubtargetHook = void (*)(void* user_data, strata_widget_subtargets_context* context);
+
+    FragmentFixture(const std::filesystem::path& resource_root, const Presenter presenter,
+                    void* const user_data, const SubtargetHook subtargets = nullptr)
+        : resources{resource_root, {}} {
+        strata_runtime_config runtime_config = config(clock, diagnostics);
+        runtime_config.required_capabilities |= STRATA_CAPABILITY_APPLICATION_LIFECYCLE |
+                                                STRATA_CAPABILITY_COMPILER_ACTIVATION;
+        check(strata_runtime_create(&runtime_config, &runtime).status == STRATA_STATUS_OK,
+              "fragment fixture runtime creation failed");
+        const strata_resource_adapter adapter{
+            sizeof(strata_resource_adapter),
+            &resources,
+            &load_file_resource,
+        };
+        check(strata_runtime_set_resource_adapter(runtime, &adapter).status == STRATA_STATUS_OK,
+              "fragment fixture resource adapter failed");
+        const std::string schemas = R"({
+          "widgets": {"registry": "abi-fragment.v1", "required": ["AbiFragment"], "definitions": [{
+            "name": "AbiFragment", "allowsChildren": false, "parameters": [
+              {"name":"key","type":{"kind":"key"},"required":false,"nullable":false,"aliases":[],"default":null},
+              {"name":"layout","type":{"kind":"layout"},"required":false,"nullable":false,"aliases":[],"default":null}
+            ]}]},
+          "behaviors": {"registry": "abi-fragment.v1", "required": [], "definitions": []},
+          "actions": {"registry": "abi-fragment.v1", "required": [], "definitions": []},
+          "host": []
+        })";
+        const strata_application_config application{
+            sizeof(strata_application_config), view("abi-fragment"), view(schemas), nullptr, 0U,
+        };
+        check(strata_runtime_configure_application(runtime, &application).status ==
+                  STRATA_STATUS_OK,
+              "fragment fixture application configuration failed");
+        const std::string source = R"(
+screen Main {
+  root Panel(key: "fragment.root", layout: { kind: "COLUMN" }) {
+    AbiFragment(key: "fragment.extension", layout: { width: 100, height: 40 })
+    Button(key: "fragment.sibling", label: "Sibling")
+  }
+}
+)";
+        const strata_activation_config activation{
+            sizeof(strata_activation_config),
+            1U,
+            view("fragment/main.strata"),
+            view(source),
+            nullptr,
+            nullptr,
+        };
+        strata_activation_info activation_info{};
+        activation_info.struct_size = sizeof(activation_info);
+        check(strata_runtime_compile_and_activate(runtime, &activation, &activation_info).status ==
+                  STRATA_STATUS_OK,
+              "fragment fixture source did not activate");
+        widget.struct_size = sizeof(strata_widget_extension);
+        widget.type = view("AbiFragment");
+        widget.user_data = user_data;
+        widget.present = presenter;
+        widget.subtargets = subtargets;
+        const strata_surface_extension_bundle extensions{
+            sizeof(strata_surface_extension_bundle), &widget, 1U, nullptr, 0U, nullptr, 0U,
+            nullptr,                                 0U,
+        };
+        const strata_surface_environment environment{
+            sizeof(strata_surface_environment),
+            1U,
+            320,
+            180,
+            320.0,
+            180.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            STRATA_POINT_SNAP_NEAREST,
+            STRATA_RECTANGLE_SNAP_OUTWARD,
+            STRATA_SURFACE_DENSITY_COMFORTABLE,
+            STRATA_POINTER_PRECISION_FINE,
+            STRATA_SURFACE_INPUT_POINTER | STRATA_SURFACE_INPUT_KEYBOARD,
+            0U,
+            0U,
+        };
+        const strata_surface_font_resource fonts[]{
+            {view("strata:fonts/default-medium"), view("assets/strata/fonts/medium.ttf")},
+            {view("strata:fonts/default"), view("assets/strata/fonts/default.ttf")},
+        };
+        const strata_surface_config surface_config{
+            sizeof(strata_surface_config),
+            view("fragment.surface"),
+            STRATA_SURFACE_ROOT_SCREEN,
+            0U,
+            view("Main"),
+            environment,
+            fonts,
+            std::size(fonts),
+            &extensions,
+            nullptr,
+            0U,
+        };
+        check(strata_runtime_create_surface(runtime, &surface_config, &surface).status ==
+                  STRATA_STATUS_OK,
+              "fragment fixture Surface creation failed");
+    }
+
+    ~FragmentFixture() {
+        if (surface != nullptr)
+            static_cast<void>(strata_surface_abandon(surface));
+        static_cast<void>(strata_runtime_release(runtime));
+    }
+
+    FragmentFixture(const FragmentFixture&) = delete;
+    FragmentFixture& operator=(const FragmentFixture&) = delete;
+
+    [[nodiscard]] strata_result frame(strata_surface_frame_info& info) {
+        info = {};
+        info.struct_size = sizeof(info);
+        clock.now += 16'000'000;
+        return strata_surface_frame(surface, clock.now, &info);
+    }
+
+    [[nodiscard]] strata_result pointer_move(const double x, const double y) {
+        strata_input_event event{};
+        event.struct_size = sizeof(event);
+        event.version = STRATA_INPUT_EVENT_VERSION_2;
+        event.kind = STRATA_INPUT_POINTER_MOVE;
+        event.x = x;
+        event.y = y;
+        event.key_action = STRATA_KEY_PRESS;
+        strata_surface_input_batch_info info{};
+        info.struct_size = sizeof(info);
+        return strata_surface_enqueue_input(surface, &event, 1U, &info);
+    }
+
+    Clock clock{1'000};
+    DiagnosticCapture diagnostics;
+    FileResources resources;
+    strata_widget_extension widget{};
+    strata_runtime* runtime = nullptr;
+    strata_surface* surface = nullptr;
+};
+
+void present_nothing(void*, strata_widget_render_context*) {}
+
+void present_discarded(void*, strata_widget_render_context* const context) {
+    strata_widget_render_solid_rect(context, strata_widget_render_bounds(context),
+                                    strata_color{1U, 2U, 3U, 255U});
+    strata_widget_render_discard(context);
+}
+
+/** Frames one fixture per presenter; each broken fragment must vanish without failing the frame. */
+void check_fragments_dropped(const std::filesystem::path& resource_root,
+                             const std::initializer_list<FragmentFixture::Presenter> presenters,
+                             const std::string_view code, const std::string_view message) {
+    strata_surface_frame_info baseline{};
+    {
+        FragmentFixture fixture(resource_root, &present_nothing, nullptr);
+        check(fixture.frame(baseline).status == STRATA_STATUS_OK,
+              "fragment fixture baseline frame failed");
+    }
+    std::size_t index = 0U;
+    for (const FragmentFixture::Presenter presenter : presenters) {
+        FragmentFixture fixture(resource_root, presenter, nullptr);
+        strata_surface_frame_info info{};
+        const std::string context = std::string(message) + " (case " + std::to_string(index++);
+        const strata_result framed = fixture.frame(info);
+        check(framed.status == STRATA_STATUS_OK,
+              context + ": frame status " + std::to_string(framed.status) + ", last diagnostic " +
+                  fixture.diagnostics.last_code + ")");
+        check(info.render_command_count == baseline.render_command_count,
+              context + ": " + std::to_string(info.render_command_count) + " commands, expected " +
+                  std::to_string(baseline.render_command_count) + ")");
+        check(fixture.diagnostics.last_code == code,
+              context + ": last diagnostic " + fixture.diagnostics.last_code + ")");
+    }
+}
+
+/** A failed extension draw drops that widget's fragment alone; the frame and siblings survive. */
+void test_extension_fragment_failure_isolation(const std::filesystem::path& resource_root) {
+    check_fragments_dropped(resource_root, {&present_discarded},
+                            "STRATA.EXTENSION.FRAGMENT_DROPPED",
+                            "a discarded extension fragment was not isolated");
+}
+
+struct SubtargetCapture final {
+    bool called = false;
+    strata_status reserve_status = STRATA_STATUS_OK;
+};
+
+void reserve_impossible_subtargets(void* const user_data,
+                                   strata_widget_subtargets_context* const context) {
+    auto& capture = *static_cast<SubtargetCapture*>(user_data);
+    capture.called = true;
+    // A representable but unsatisfiable request: the vector throws std::bad_alloc.
+    capture.reserve_status =
+        strata_widget_subtargets_reserve(context, std::size_t{1U} << 50U).status;
+}
+
+/** Allocation failure inside an extension call reports out-of-memory, not a bad argument. */
+void test_extension_allocation_failure_status(const std::filesystem::path& resource_root) {
+    SubtargetCapture capture;
+    FragmentFixture fixture(resource_root, &present_nothing, &capture,
+                            &reserve_impossible_subtargets);
+    strata_surface_frame_info info{};
+    check(fixture.frame(info).status == STRATA_STATUS_OK,
+          "subtarget fixture initial frame failed");
+    check(fixture.pointer_move(10.0, 10.0).status == STRATA_STATUS_OK,
+          "subtarget fixture pointer input was rejected");
+    check(fixture.frame(info).status == STRATA_STATUS_OK, "subtarget fixture pointer frame failed");
+    check(capture.called, "extension subtargets were not projected under the pointer");
+    check(capture.reserve_status == STRATA_STATUS_OUT_OF_MEMORY,
+          "allocation failure inside an extension call reported status " +
+              std::to_string(capture.reserve_status) + " instead of out-of-memory");
+}
+
 void test_invalid_contracts() {
     Clock clock{0};
     DiagnosticCapture diagnostics;
@@ -1434,8 +1654,11 @@ int strata_test_abi(const int argument_count, const char* const* const arguments
         test_negotiation();
         test_lifecycle_identity_snapshot_and_clock();
         test_lazy_host_snapshot_abi();
-        if (argument_count == 2)
+        if (argument_count == 2) {
             test_application_activation_and_action_abi(arguments[1]);
+            test_extension_fragment_failure_isolation(arguments[1]);
+            test_extension_allocation_failure_status(arguments[1]);
+        }
         test_host_service_adapters();
         test_allocator_ownership_and_validation();
         test_invalid_contracts();

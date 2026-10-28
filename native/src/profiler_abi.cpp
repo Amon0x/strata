@@ -127,66 +127,62 @@ void emit_snapshot(
 strata_result strata_runtime_read_profiler(
     const strata_runtime* const runtime,
     const strata_profiler_snapshot_sink* const sink
-) {
+) noexcept {
     if (runtime == nullptr || !valid_sink(sink) || !runtime->core.has_application()) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
-    try {
+    return strata::abi_detail::guarded([&] {
         emit_snapshot(runtime->core.application().profiler().snapshot(), *sink);
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return strata::core::result(STRATA_STATUS_OUT_OF_MEMORY);
-    } catch (...) {
-        return strata::core::result(STRATA_STATUS_INTERNAL_ERROR);
-    }
+    });
 }
 
 strata_result strata_runtime_set_profiler_capture(
     strata_runtime* const runtime,
     const uint32_t enabled
-) {
+) noexcept {
     if (runtime == nullptr || enabled > 1U || !runtime->core.has_application()) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
-    runtime->core.application().profiler().set_capture_enabled(enabled != 0U);
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::guarded([&] {
+        runtime->core.application().profiler().set_capture_enabled(enabled != 0U);
+        return strata::core::result(STRATA_STATUS_OK);
+    });
 }
 
 strata_result strata_surface_read_profiler(
     const strata_surface* const surface,
     const strata_profiler_snapshot_sink* const sink
-) {
+) noexcept {
     if (surface == nullptr || !valid_sink(sink)) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
-    try {
+    return strata::abi_detail::guarded([&] {
         emit_snapshot(surface->core.profiler().snapshot(), *sink);
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return strata::core::result(STRATA_STATUS_OUT_OF_MEMORY);
-    } catch (...) {
-        return strata::core::result(STRATA_STATUS_INTERNAL_ERROR);
-    }
+    });
 }
 
 strata_result strata_surface_set_profiler_capture(
     strata_surface* const surface,
     const uint32_t enabled
-) {
+) noexcept {
     if (surface == nullptr || enabled > 1U) {
         return strata::core::result(STRATA_STATUS_INVALID_ARGUMENT);
     }
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
-    surface->core.profiler().set_capture_enabled(enabled != 0U);
-    return strata::core::result(STRATA_STATUS_OK);
+    return strata::abi_detail::guarded([&] {
+        surface->core.profiler().set_capture_enabled(enabled != 0U);
+        return strata::core::result(STRATA_STATUS_OK);
+    });
 }
 
 strata_result strata_surface_record_host_frame(
     strata_surface* const surface,
     const strata_profiler_host_frame* const telemetry
-) {
+) noexcept {
     if (surface == nullptr || telemetry == nullptr ||
         telemetry->struct_size < sizeof(strata_profiler_host_frame) ||
         telemetry->version != STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT ||
@@ -196,7 +192,7 @@ strata_result strata_surface_record_host_frame(
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
     }
-    try {
+    return strata::abi_detail::guarded([&] {
         surface->core.profiler().record_host_frame(strata::runtime::HostFrameProfilerTelemetry{
             telemetry->draw_calls,
             telemetry->batches,
@@ -217,7 +213,5 @@ strata_result strata_surface_record_host_frame(
             telemetry->submit_nanos,
         });
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (...) {
-        return strata::core::result(STRATA_STATUS_INTERNAL_ERROR);
-    }
+    });
 }

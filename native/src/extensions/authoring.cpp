@@ -130,295 +130,355 @@ void draw_mesh(strata_widget_render_context* const context, const Rect bounds,
                                      material != nullptr ? &state : nullptr);
 }
 
-strata_extension_input_result activate_trampoline(void* const user_data,
-                                                  strata_widget_input_context* const context) {
-    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
-    Input input(context);
-    return hooks->activate(input) ? STRATA_EXTENSION_INPUT_CONSUMED
-                                  : STRATA_EXTENSION_INPUT_IGNORED;
+strata_extension_input_result
+activate_trampoline(void* const user_data, strata_widget_input_context* const context) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+        Input input(context);
+        return hooks->activate(input) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                      : STRATA_EXTENSION_INPUT_IGNORED;
+    } catch (...) {
+        return STRATA_EXTENSION_INPUT_IGNORED;
+    }
 }
 
 strata_extension_input_result key_trampoline(void* const user_data,
                                              strata_widget_input_context* const context,
-                                             const strata_widget_key_event* const event) {
-    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
-    if (event == nullptr)
+                                             const strata_widget_key_event* const event) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+        if (event == nullptr)
+            return STRATA_EXTENSION_INPUT_IGNORED;
+        const Key key{
+            std::string_view(event->key.data, event->key.size),
+            (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U,
+            (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U,
+            (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U,
+            (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U,
+        };
+        Input input(context);
+        return hooks->key(input, key) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                      : STRATA_EXTENSION_INPUT_IGNORED;
+    } catch (...) {
         return STRATA_EXTENSION_INPUT_IGNORED;
-    const Key key{
-        std::string_view(event->key.data, event->key.size),
-        (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U,
-        (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U,
-        (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U,
-        (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U,
-    };
-    Input input(context);
-    return hooks->key(input, key) ? STRATA_EXTENSION_INPUT_CONSUMED
-                                  : STRATA_EXTENSION_INPUT_IGNORED;
+    }
 }
 
 void frame_trampoline(void* const user_data, strata_widget_input_context* const context,
-                      const strata_widget_frame_info* const frame) {
-    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
-    if (frame == nullptr)
-        return;
-    Input input(context);
-    hooks->frame(input, Frame{
-                            frame->time_nanoseconds,
-                            frame->delta_nanoseconds,
-                            frame->reduced_motion != 0U,
-                        });
+                      const strata_widget_frame_info* const frame) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+        if (frame == nullptr)
+            return;
+        Input input(context);
+        hooks->frame(input, Frame{
+                                frame->time_nanoseconds,
+                                frame->delta_nanoseconds,
+                                frame->reduced_motion != 0U,
+                            });
+    } catch (...) {
+        // An authored hook failure must not unwind into the host.
+    }
 }
 strata_extension_input_result
 widget_pointer_trampoline(void* const user_data, strata_widget_input_context* const context,
-                          const strata_widget_pointer_event* const event) {
-    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
-    if (event == nullptr)
-        return STRATA_EXTENSION_INPUT_IGNORED;
-    Pointer pointer;
-    switch (event->kind) {
-    case STRATA_INPUT_POINTER_MOVE:
-        pointer.kind = Pointer::Kind::move;
-        break;
-    case STRATA_INPUT_POINTER_PRESS:
-        pointer.kind = Pointer::Kind::press;
-        break;
-    case STRATA_INPUT_POINTER_RELEASE:
-        pointer.kind = Pointer::Kind::release;
-        break;
-    default:
-        pointer.kind = Pointer::Kind::cancel;
-        break;
-    }
-    switch (event->phase) {
-    case STRATA_EXTENSION_EVENT_CAPTURE:
-        pointer.phase = Pointer::Phase::capture;
-        break;
-    case STRATA_EXTENSION_EVENT_BUBBLE:
-        pointer.phase = Pointer::Phase::bubble;
-        break;
-    default:
-        pointer.phase = Pointer::Phase::target;
-        break;
-    }
-    pointer.button = event->button;
-    pointer.pointer_id = event->pointer_id;
-    pointer.x = event->x;
-    pointer.y = event->y;
-    pointer.local_x = event->local_x;
-    pointer.local_y = event->local_y;
-    pointer.delta_x = event->delta_x;
-    pointer.delta_y = event->delta_y;
-    pointer.timestamp_nanoseconds = event->timestamp_nanoseconds;
-    pointer.on_target = event->target != 0U;
-    pointer.has_local_position = true;
-    pointer.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
-    pointer.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
-    pointer.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
-    pointer.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
-    if (event->struct_size >= sizeof(strata_widget_pointer_event)) {
-        pointer.subtarget_id =
-            std::string_view(event->subtarget_id.data != nullptr ? event->subtarget_id.data : "",
-                             event->subtarget_id.size);
-        pointer.subtarget_index = event->subtarget_index;
-    }
-    Input input(context);
-    return hooks->pointer(input, pointer) ? STRATA_EXTENSION_INPUT_CONSUMED
-                                          : STRATA_EXTENSION_INPUT_IGNORED;
-}
-strata_extension_input_result
-widget_scroll_trampoline(void* const user_data, strata_widget_input_context* const context,
-                         const strata_widget_scroll_event* const event) {
-    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
-    if (event == nullptr)
-        return STRATA_EXTENSION_INPUT_IGNORED;
-    Scroll scroll;
-    switch (event->phase) {
-    case STRATA_EXTENSION_EVENT_CAPTURE:
-        scroll.phase = Pointer::Phase::capture;
-        break;
-    case STRATA_EXTENSION_EVENT_BUBBLE:
-        scroll.phase = Pointer::Phase::bubble;
-        break;
-    default:
-        scroll.phase = Pointer::Phase::target;
-        break;
-    }
-    scroll.x = event->x;
-    scroll.y = event->y;
-    scroll.local_x = event->local_x;
-    scroll.local_y = event->local_y;
-    scroll.delta_x = event->delta_x;
-    scroll.delta_y = event->delta_y;
-    scroll.on_target = event->target != 0U;
-    scroll.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
-    scroll.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
-    scroll.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
-    scroll.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
-    Input input(context);
-    return hooks->scroll(input, scroll) ? STRATA_EXTENSION_INPUT_CONSUMED
-                                        : STRATA_EXTENSION_INPUT_IGNORED;
-}
-
-void present_trampoline(void* const user_data, strata_widget_render_context* const context) {
-    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
-    Present present(context);
-    hooks->present(present);
-}
-
-void overlay_trampoline(void* const user_data, strata_widget_render_context* const context) {
-    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
-    Present present(context);
-    hooks->overlay(present);
-}
-
-void semantics_trampoline(void* const user_data, strata_widget_semantics_context* const context) {
-    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
-    Semantics semantics(context);
-    hooks->semantics(semantics);
-}
-
-void subtargets_trampoline(void* const user_data, strata_widget_subtargets_context* const context) {
-    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
-    Subtargets subtargets(context);
-    hooks->subtargets(subtargets);
-}
-
-strata_rect hit_bounds_trampoline(void* const user_data,
-                                  strata_widget_inspection_context* const context) {
-    const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
-    Inspect inspect(context);
-    return hooks->hit_bounds(inspect);
-}
-
-strata_extension_input_result
-behavior_pointer_trampoline(void* const user_data, strata_behavior_input_context* const context,
-                            const strata_behavior_pointer_event* const event) {
-    const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
-    if (event == nullptr)
-        return STRATA_EXTENSION_INPUT_IGNORED;
-    Pointer pointer;
-    switch (event->kind) {
-    case STRATA_INPUT_POINTER_MOVE:
-        pointer.kind = Pointer::Kind::move;
-        break;
-    case STRATA_INPUT_POINTER_PRESS:
-        pointer.kind = Pointer::Kind::press;
-        break;
-    case STRATA_INPUT_POINTER_RELEASE:
-        pointer.kind = Pointer::Kind::release;
-        break;
-    default:
-        pointer.kind = Pointer::Kind::cancel;
-        break;
-    }
-    switch (event->phase) {
-    case STRATA_BEHAVIOR_EVENT_CAPTURE:
-        pointer.phase = Pointer::Phase::capture;
-        break;
-    case STRATA_BEHAVIOR_EVENT_BUBBLE:
-        pointer.phase = Pointer::Phase::bubble;
-        break;
-    default:
-        pointer.phase = Pointer::Phase::target;
-        break;
-    }
-    pointer.button = event->button;
-    pointer.pointer_id = event->pointer_id;
-    pointer.x = event->x;
-    pointer.y = event->y;
-    pointer.on_target = event->target != 0U;
-    pointer.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
-    pointer.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
-    pointer.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
-    pointer.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
-    if (event->struct_size >= sizeof(strata_behavior_pointer_event)) {
+                          const strata_widget_pointer_event* const event) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+        if (event == nullptr)
+            return STRATA_EXTENSION_INPUT_IGNORED;
+        Pointer pointer;
+        switch (event->kind) {
+        case STRATA_INPUT_POINTER_MOVE:
+            pointer.kind = Pointer::Kind::move;
+            break;
+        case STRATA_INPUT_POINTER_PRESS:
+            pointer.kind = Pointer::Kind::press;
+            break;
+        case STRATA_INPUT_POINTER_RELEASE:
+            pointer.kind = Pointer::Kind::release;
+            break;
+        default:
+            pointer.kind = Pointer::Kind::cancel;
+            break;
+        }
+        switch (event->phase) {
+        case STRATA_EXTENSION_EVENT_CAPTURE:
+            pointer.phase = Pointer::Phase::capture;
+            break;
+        case STRATA_EXTENSION_EVENT_BUBBLE:
+            pointer.phase = Pointer::Phase::bubble;
+            break;
+        default:
+            pointer.phase = Pointer::Phase::target;
+            break;
+        }
+        pointer.button = event->button;
+        pointer.pointer_id = event->pointer_id;
+        pointer.x = event->x;
+        pointer.y = event->y;
         pointer.local_x = event->local_x;
         pointer.local_y = event->local_y;
         pointer.delta_x = event->delta_x;
         pointer.delta_y = event->delta_y;
         pointer.timestamp_nanoseconds = event->timestamp_nanoseconds;
+        pointer.on_target = event->target != 0U;
         pointer.has_local_position = true;
+        pointer.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
+        pointer.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
+        pointer.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
+        pointer.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
+        if (event->struct_size >= sizeof(strata_widget_pointer_event)) {
+            pointer.subtarget_id = std::string_view(
+                event->subtarget_id.data != nullptr ? event->subtarget_id.data : "",
+                event->subtarget_id.size);
+            pointer.subtarget_index = event->subtarget_index;
+        }
+        Input input(context);
+        return hooks->pointer(input, pointer) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                              : STRATA_EXTENSION_INPUT_IGNORED;
+    } catch (...) {
+        return STRATA_EXTENSION_INPUT_IGNORED;
     }
-    BehaviorInput input(context);
-    return hooks->pointer(input, pointer) ? STRATA_EXTENSION_INPUT_CONSUMED
-                                          : STRATA_EXTENSION_INPUT_IGNORED;
+}
+strata_extension_input_result
+widget_scroll_trampoline(void* const user_data, strata_widget_input_context* const context,
+                         const strata_widget_scroll_event* const event) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+        if (event == nullptr)
+            return STRATA_EXTENSION_INPUT_IGNORED;
+        Scroll scroll;
+        switch (event->phase) {
+        case STRATA_EXTENSION_EVENT_CAPTURE:
+            scroll.phase = Pointer::Phase::capture;
+            break;
+        case STRATA_EXTENSION_EVENT_BUBBLE:
+            scroll.phase = Pointer::Phase::bubble;
+            break;
+        default:
+            scroll.phase = Pointer::Phase::target;
+            break;
+        }
+        scroll.x = event->x;
+        scroll.y = event->y;
+        scroll.local_x = event->local_x;
+        scroll.local_y = event->local_y;
+        scroll.delta_x = event->delta_x;
+        scroll.delta_y = event->delta_y;
+        scroll.on_target = event->target != 0U;
+        scroll.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
+        scroll.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
+        scroll.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
+        scroll.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
+        Input input(context);
+        return hooks->scroll(input, scroll) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                            : STRATA_EXTENSION_INPUT_IGNORED;
+    } catch (...) {
+        return STRATA_EXTENSION_INPUT_IGNORED;
+    }
+}
+
+void present_trampoline(void* const user_data,
+                        strata_widget_render_context* const context) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+        Present present(context);
+        hooks->present(present);
+    } catch (...) {
+        strata_widget_render_discard(context);
+    }
+}
+
+void overlay_trampoline(void* const user_data,
+                        strata_widget_render_context* const context) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+        Present present(context);
+        hooks->overlay(present);
+    } catch (...) {
+        strata_widget_render_discard(context);
+    }
+}
+
+void semantics_trampoline(void* const user_data,
+                          strata_widget_semantics_context* const context) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+        Semantics semantics(context);
+        hooks->semantics(semantics);
+    } catch (...) {
+        // An authored hook failure must not unwind into the host.
+    }
+}
+
+void subtargets_trampoline(void* const user_data,
+                           strata_widget_subtargets_context* const context) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+        Subtargets subtargets(context);
+        hooks->subtargets(subtargets);
+    } catch (...) {
+        // An authored hook failure must not unwind into the host.
+    }
+}
+
+strata_rect hit_bounds_trampoline(void* const user_data,
+                                  strata_widget_inspection_context* const context) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::WidgetHooks*>(user_data);
+        Inspect inspect(context);
+        return hooks->hit_bounds(inspect);
+    } catch (...) {
+        return strata_widget_inspection_layout_bounds(context);
+    }
+}
+
+strata_extension_input_result
+behavior_pointer_trampoline(void* const user_data, strata_behavior_input_context* const context,
+                            const strata_behavior_pointer_event* const event) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
+        if (event == nullptr)
+            return STRATA_EXTENSION_INPUT_IGNORED;
+        Pointer pointer;
+        switch (event->kind) {
+        case STRATA_INPUT_POINTER_MOVE:
+            pointer.kind = Pointer::Kind::move;
+            break;
+        case STRATA_INPUT_POINTER_PRESS:
+            pointer.kind = Pointer::Kind::press;
+            break;
+        case STRATA_INPUT_POINTER_RELEASE:
+            pointer.kind = Pointer::Kind::release;
+            break;
+        default:
+            pointer.kind = Pointer::Kind::cancel;
+            break;
+        }
+        switch (event->phase) {
+        case STRATA_BEHAVIOR_EVENT_CAPTURE:
+            pointer.phase = Pointer::Phase::capture;
+            break;
+        case STRATA_BEHAVIOR_EVENT_BUBBLE:
+            pointer.phase = Pointer::Phase::bubble;
+            break;
+        default:
+            pointer.phase = Pointer::Phase::target;
+            break;
+        }
+        pointer.button = event->button;
+        pointer.pointer_id = event->pointer_id;
+        pointer.x = event->x;
+        pointer.y = event->y;
+        pointer.on_target = event->target != 0U;
+        pointer.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
+        pointer.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
+        pointer.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
+        pointer.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
+        if (event->struct_size >= sizeof(strata_behavior_pointer_event)) {
+            pointer.local_x = event->local_x;
+            pointer.local_y = event->local_y;
+            pointer.delta_x = event->delta_x;
+            pointer.delta_y = event->delta_y;
+            pointer.timestamp_nanoseconds = event->timestamp_nanoseconds;
+            pointer.has_local_position = true;
+        }
+        BehaviorInput input(context);
+        return hooks->pointer(input, pointer) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                              : STRATA_EXTENSION_INPUT_IGNORED;
+    } catch (...) {
+        return STRATA_EXTENSION_INPUT_IGNORED;
+    }
 }
 strata_extension_input_result
 behavior_scroll_trampoline(void* const user_data, strata_behavior_input_context* const context,
-                           const strata_behavior_scroll_event* const event) {
-    const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
-    if (event == nullptr)
+                           const strata_behavior_scroll_event* const event) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
+        if (event == nullptr)
+            return STRATA_EXTENSION_INPUT_IGNORED;
+        Scroll scroll;
+        switch (event->phase) {
+        case STRATA_BEHAVIOR_EVENT_CAPTURE:
+            scroll.phase = Pointer::Phase::capture;
+            break;
+        case STRATA_BEHAVIOR_EVENT_BUBBLE:
+            scroll.phase = Pointer::Phase::bubble;
+            break;
+        default:
+            scroll.phase = Pointer::Phase::target;
+            break;
+        }
+        scroll.x = event->x;
+        scroll.y = event->y;
+        scroll.local_x = event->local_x;
+        scroll.local_y = event->local_y;
+        scroll.delta_x = event->delta_x;
+        scroll.delta_y = event->delta_y;
+        scroll.on_target = event->target != 0U;
+        scroll.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
+        scroll.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
+        scroll.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
+        scroll.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
+        BehaviorInput input(context);
+        return hooks->scroll(input, scroll) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                            : STRATA_EXTENSION_INPUT_IGNORED;
+    } catch (...) {
         return STRATA_EXTENSION_INPUT_IGNORED;
-    Scroll scroll;
-    switch (event->phase) {
-    case STRATA_BEHAVIOR_EVENT_CAPTURE:
-        scroll.phase = Pointer::Phase::capture;
-        break;
-    case STRATA_BEHAVIOR_EVENT_BUBBLE:
-        scroll.phase = Pointer::Phase::bubble;
-        break;
-    default:
-        scroll.phase = Pointer::Phase::target;
-        break;
     }
-    scroll.x = event->x;
-    scroll.y = event->y;
-    scroll.local_x = event->local_x;
-    scroll.local_y = event->local_y;
-    scroll.delta_x = event->delta_x;
-    scroll.delta_y = event->delta_y;
-    scroll.on_target = event->target != 0U;
-    scroll.shift = (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U;
-    scroll.control = (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U;
-    scroll.alt = (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U;
-    scroll.super = (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U;
-    BehaviorInput input(context);
-    return hooks->scroll(input, scroll) ? STRATA_EXTENSION_INPUT_CONSUMED
-                                        : STRATA_EXTENSION_INPUT_IGNORED;
 }
 
 strata_extension_input_result
 behavior_key_trampoline(void* const user_data, strata_behavior_input_context* const context,
-                        const strata_behavior_key_event* const event) {
-    const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
-    if (event == nullptr)
+                        const strata_behavior_key_event* const event) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
+        if (event == nullptr)
+            return STRATA_EXTENSION_INPUT_IGNORED;
+        const Key key{
+            std::string_view(event->key.data, event->key.size),
+            (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U,
+            (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U,
+            (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U,
+            (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U,
+        };
+        BehaviorInput input(context);
+        return hooks->key(input, key) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                      : STRATA_EXTENSION_INPUT_IGNORED;
+    } catch (...) {
         return STRATA_EXTENSION_INPUT_IGNORED;
-    const Key key{
-        std::string_view(event->key.data, event->key.size),
-        (event->modifiers & STRATA_KEY_MODIFIER_SHIFT) != 0U,
-        (event->modifiers & STRATA_KEY_MODIFIER_CONTROL) != 0U,
-        (event->modifiers & STRATA_KEY_MODIFIER_ALT) != 0U,
-        (event->modifiers & STRATA_KEY_MODIFIER_SUPER) != 0U,
-    };
-    BehaviorInput input(context);
-    return hooks->key(input, key) ? STRATA_EXTENSION_INPUT_CONSUMED
-                                  : STRATA_EXTENSION_INPUT_IGNORED;
+    }
 }
 
 strata_extension_input_result
 behavior_focus_trampoline(void* const user_data, strata_behavior_input_context* const context,
-                          const strata_behavior_focus_event* const event) {
-    const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
-    if (event == nullptr)
+                          const strata_behavior_focus_event* const event) noexcept {
+    try {
+        const auto* const hooks = static_cast<const detail::BehaviorHooks*>(user_data);
+        if (event == nullptr)
+            return STRATA_EXTENSION_INPUT_IGNORED;
+        Focus focus;
+        focus.kind =
+            event->kind == STRATA_BEHAVIOR_FOCUS_LOST ? Focus::Kind::lost : Focus::Kind::gained;
+        switch (event->phase) {
+        case STRATA_BEHAVIOR_EVENT_CAPTURE:
+            focus.phase = Pointer::Phase::capture;
+            break;
+        case STRATA_BEHAVIOR_EVENT_BUBBLE:
+            focus.phase = Pointer::Phase::bubble;
+            break;
+        default:
+            focus.phase = Pointer::Phase::target;
+            break;
+        }
+        focus.on_target = event->target != 0U;
+        BehaviorInput input(context);
+        return hooks->focus(input, focus) ? STRATA_EXTENSION_INPUT_CONSUMED
+                                          : STRATA_EXTENSION_INPUT_IGNORED;
+    } catch (...) {
         return STRATA_EXTENSION_INPUT_IGNORED;
-    Focus focus;
-    focus.kind =
-        event->kind == STRATA_BEHAVIOR_FOCUS_LOST ? Focus::Kind::lost : Focus::Kind::gained;
-    switch (event->phase) {
-    case STRATA_BEHAVIOR_EVENT_CAPTURE:
-        focus.phase = Pointer::Phase::capture;
-        break;
-    case STRATA_BEHAVIOR_EVENT_BUBBLE:
-        focus.phase = Pointer::Phase::bubble;
-        break;
-    default:
-        focus.phase = Pointer::Phase::target;
-        break;
     }
-    focus.on_target = event->target != 0U;
-    BehaviorInput input(context);
-    return hooks->focus(input, focus) ? STRATA_EXTENSION_INPUT_CONSUMED
-                                      : STRATA_EXTENSION_INPUT_IGNORED;
 }
 
 } // namespace

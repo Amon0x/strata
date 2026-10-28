@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/diagnostics.hpp"
 #include "ui/behavior/input.hpp"
 #include "ui/behavior/registry.hpp"
 #include "ui/tree.hpp"
@@ -40,6 +41,11 @@ struct strata_widget_input_context final {
 struct strata_widget_render_context final {
     strata::ui::WidgetRenderScope* scope = nullptr;
     const strata::abi_detail::ExtensionRetainedFields* fields = nullptr;
+    /**
+     * First failure of a draw call made through this context, or OK. Draw calls return nothing,
+     * so a failed one marks the callback and its whole fragment is dropped afterwards.
+     */
+    strata_status failure = STRATA_STATUS_OK;
 };
 
 struct strata_widget_inspection_context final {
@@ -70,7 +76,11 @@ struct ExtensionRegistries final {
     ui::BehaviorRegistry behaviors;
 };
 
+/**
+ * Resolves a Surface extension bundle into lifecycle registries. Presentation failures of the
+ * resulting extension widgets are reported to `diagnostics`, which must outlive the registries.
+ */
 [[nodiscard]] ExtensionRegistries
-extension_registries(const strata_surface_extension_bundle* bundle);
+extension_registries(const strata_surface_extension_bundle* bundle, core::Diagnostics& diagnostics);
 
 } // namespace strata::abi_detail

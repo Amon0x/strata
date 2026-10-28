@@ -7,7 +7,6 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | Code | Source owners |
 |---|---|
 | `STRATA.ABI.APPLICATION_REQUIRED` | `native/src/abi_services.cpp` |
-| `STRATA.ABI.CALLBACK_FAILED` | `native/src/abi_application.cpp`<br>`native/src/abi_services.cpp`<br>`native/src/surface_abi.cpp`<br>`native/src/surface_inspector_abi.cpp` |
 | `STRATA.ABI.CLOCK_CALLBACK_FAILED` | `native/src/core/runtime.cpp` |
 | `STRATA.ABI.CLOCK_REQUIRED` | `native/src/abi.cpp` |
 | `STRATA.ABI.INVALID_ACTION_DISPATCH` | `native/src/abi_application.cpp` |
@@ -15,6 +14,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.ABI.INVALID_ACTIVATION_CONFIG` | `native/src/abi_application.cpp` |
 | `STRATA.ABI.INVALID_ALLOCATOR` | `native/src/abi.cpp` |
 | `STRATA.ABI.INVALID_APPLICATION_CONFIG` | `native/src/abi_application.cpp` |
+| `STRATA.ABI.INVALID_ARGUMENT` | `native/src/abi_boundary.hpp` |
 | `STRATA.ABI.INVALID_ASYNC_HOST_ADAPTER` | `native/src/abi_services.cpp` |
 | `STRATA.ABI.INVALID_BOOLEAN` | `native/src/abi_services.cpp` |
 | `STRATA.ABI.INVALID_BYTES_SINK` | `native/src/surface_abi.cpp` |
@@ -52,7 +52,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.ABI.NULL_OUTPUT` | `native/src/abi.cpp` |
 | `STRATA.ABI.RESERVED_FIELD` | `native/src/abi.cpp` |
 | `STRATA.ABI.RESOURCE_ADAPTER_REQUIRED` | `native/src/abi_services.cpp` |
-| `STRATA.ABI.UNCAUGHT_EXCEPTION` | `native/src/abi.cpp`<br>`native/src/abi_application.cpp`<br>`native/src/state_abi.cpp`<br>`native/src/surface_abi.cpp`<br>`native/src/surface_focus_abi.cpp`<br>`native/src/surface_inspector_abi.cpp`<br>`native/src/surface_theme_abi.cpp` |
+| `STRATA.ABI.UNCAUGHT_EXCEPTION` | `native/src/abi_boundary.hpp` |
 | `STRATA.ABI.UNSUPPORTED_CAPABILITY` | `native/src/abi.cpp` |
 | `STRATA.ABI.UNSUPPORTED_VERSION` | `native/src/abi.cpp` |
 | `STRATA.ACTION.CONTRACT_NOT_FOUND` | `native/src/abi_application.cpp` |
@@ -74,7 +74,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.CLIPBOARD.WRITE_FAILED` | `native/src/abi_services.cpp` |
 | `STRATA.CORE.GENERATION_EXHAUSTED` | `native/src/core/runtime.cpp` |
 | `STRATA.CORE.IDENTITY_EXHAUSTED` | `native/src/core/runtime.cpp` |
-| `STRATA.CORE.OUT_OF_MEMORY` | `native/src/abi.cpp`<br>`native/src/abi_application.cpp`<br>`native/src/abi_services.cpp`<br>`native/src/state_abi.cpp`<br>`native/src/surface_abi.cpp`<br>`native/src/surface_theme_abi.cpp` |
+| `STRATA.CORE.OUT_OF_MEMORY` | `native/src/abi.cpp`<br>`native/src/abi_application.cpp`<br>`native/src/abi_boundary.hpp`<br>`native/src/state_abi.cpp`<br>`native/src/surface_abi.cpp` |
 | `STRATA.DSL.ACTION_HANDLER_MISSING` | `native/src/runtime/application.cpp` |
 | `STRATA.DSL.IMPORT_CYCLE` | `native/src/compiler/module.cpp` |
 | `STRATA.DSL.IMPORT_LOAD_FAILED` | `native/src/compiler/module.cpp` |
@@ -239,6 +239,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.EFFECT.EMIT_FAILED` | `native/src/abi_services.cpp` |
 | `STRATA.EFFECT.INVALID_ID` | `native/src/abi_services.cpp` |
 | `STRATA.EFFECT.INVALID_JSON` | `native/src/abi_services.cpp` |
+| `STRATA.EXTENSION.FRAGMENT_DROPPED` | `native/src/abi_extension.cpp` |
 | `STRATA.FOCUS.CONTAINMENT_TARGET_NOT_FOUND` | `native/src/surface_focus_abi.cpp` |
 | `STRATA.FOCUS.INVALID_CONTAINMENT_KEY` | `native/src/surface_focus_abi.cpp` |
 | `STRATA.FONT.REGISTRATION_FAILED` | `native/src/font/registry.cpp` |

@@ -22,20 +22,40 @@
 
 using namespace strata::abi_detail;
 
+namespace {
+
+/** Firewall for runtime creation, which reports through the configured sink without a runtime. */
+[[nodiscard]] strata_result creation_failure(
+    const strata_diagnostic_sink& sink,
+    const char* const operation
+) noexcept {
+    const CaughtException caught = classify_current_exception(AbiCall{operation});
+    return strata::core::emit_without_runtime(
+        sink,
+        caught.status,
+        caught.code,
+        caught.status == STRATA_STATUS_OUT_OF_MEMORY
+            ? "Runtime creation exhausted the configured allocator."
+            : "Runtime creation failed inside the C ABI exception boundary."
+    );
+}
+
+} // namespace
+
 extern "C" {
 
-uint32_t strata_abi_version(void) {
+uint32_t strata_abi_version(void) noexcept {
     return STRATA_ABI_VERSION_CURRENT;
 }
 
-strata_capabilities strata_capability_bits(void) {
+strata_capabilities strata_capability_bits(void) noexcept {
     return capabilities;
 }
 
 strata_result strata_get_api_info(
     const uint32_t requested_abi,
     strata_api_info* const out_info
-) {
+) noexcept {
     if (out_info == nullptr || out_info->struct_size < sizeof(strata_api_info)) {
         return invalid_argument();
     }
@@ -55,7 +75,7 @@ strata_result strata_get_api_info(
 strata_result strata_runtime_create(
     const strata_runtime_config* const config,
     strata_runtime** const out_runtime
-) {
+) noexcept {
     if (out_runtime != nullptr) {
         *out_runtime = nullptr;
     }
@@ -128,20 +148,8 @@ strata_result strata_runtime_create(
     std::optional<strata::core::HostAllocator> allocator;
     try {
         allocator.emplace(allocator_abi);
-    } catch (const std::bad_alloc&) {
-        return strata::core::emit_without_runtime(
-            sink,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Runtime allocator telemetry could not be initialized."
-        );
     } catch (...) {
-        return strata::core::emit_without_runtime(
-            sink,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Runtime allocator initialization failed inside the C ABI exception boundary."
-        );
+        return creation_failure(sink, "Runtime allocator initialization");
     }
     void* const storage = allocator->allocate(sizeof(strata_runtime), alignof(strata_runtime));
     if (storage == nullptr) {
@@ -161,26 +169,13 @@ strata_result strata_runtime_create(
             config->stable_identity_seed
         );
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        allocator->deallocate(storage, sizeof(strata_runtime), alignof(strata_runtime));
-        return strata::core::emit_without_runtime(
-            sink,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Runtime initialization exhausted the configured allocator."
-        );
     } catch (...) {
         allocator->deallocate(storage, sizeof(strata_runtime), alignof(strata_runtime));
-        return strata::core::emit_without_runtime(
-            sink,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Runtime initialization failed inside the C ABI exception boundary."
-        );
+        return creation_failure(sink, "Runtime initialization");
     }
 }
 
-strata_result strata_runtime_release(strata_runtime* const runtime) {
+strata_result strata_runtime_release(strata_runtime* const runtime) noexcept {
     if (runtime == nullptr) {
         return strata::core::result(STRATA_STATUS_OK);
     }
@@ -201,7 +196,7 @@ strata_result strata_runtime_release(strata_runtime* const runtime) {
 strata_result strata_runtime_get_memory_info(
     const strata_runtime* const runtime,
     strata_runtime_memory_info* const out_info
-) {
+) noexcept {
     if (runtime == nullptr || out_info == nullptr ||
         out_info->struct_size < sizeof(strata_runtime_memory_info)) {
         return invalid_argument();
@@ -230,7 +225,7 @@ strata_result strata_runtime_get_memory_info(
 strata_result strata_runtime_next_identity(
     strata_runtime* const runtime,
     uint64_t* const out_identity
-) {
+) noexcept {
     if (runtime == nullptr) {
         return invalid_argument();
     }
@@ -243,29 +238,15 @@ strata_result strata_runtime_next_identity(
         );
     }
     *out_identity = 0U;
-    try {
+    return runtime_call(runtime, AbiCall{"Stable identity allocation"}, [&] {
         return runtime->core.next_identity(*out_identity);
-    } catch (const std::bad_alloc&) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Stable identity allocation exhausted the configured allocator."
-        );
-    } catch (...) {
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Stable identity allocation failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_runtime_create_snapshot(
     strata_runtime* const runtime,
     strata_snapshot** const out_snapshot
-) {
+) noexcept {
     if (out_snapshot != nullptr) {
         *out_snapshot = nullptr;
     }
@@ -291,42 +272,31 @@ strata_result strata_runtime_create_snapshot(
             "The immutable snapshot handle could not be allocated."
         );
     }
-    strata::core::SnapshotData data{};
-    try {
-        const strata_result snapshot_result = runtime->core.create_snapshot(data);
-        if (snapshot_result.status != STRATA_STATUS_OK) {
+    return runtime_call(runtime, AbiCall{"Snapshot creation"}, [&] {
+        try {
+            strata::core::SnapshotData data{};
+            const strata_result snapshot_result = runtime->core.create_snapshot(data);
+            if (snapshot_result.status != STRATA_STATUS_OK) {
+                allocator.deallocate(storage, sizeof(strata_snapshot), alignof(strata_snapshot));
+                return snapshot_result;
+            }
+            *out_snapshot = std::construct_at(
+                static_cast<strata_snapshot*>(storage),
+                allocator,
+                data
+            );
+            return strata::core::result(STRATA_STATUS_OK);
+        } catch (...) {
             allocator.deallocate(storage, sizeof(strata_snapshot), alignof(strata_snapshot));
-            return snapshot_result;
+            throw;
         }
-        *out_snapshot = std::construct_at(
-            static_cast<strata_snapshot*>(storage),
-            allocator,
-            data
-        );
-        return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        allocator.deallocate(storage, sizeof(strata_snapshot), alignof(strata_snapshot));
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Snapshot creation exhausted the configured allocator."
-        );
-    } catch (...) {
-        allocator.deallocate(storage, sizeof(strata_snapshot), alignof(strata_snapshot));
-        return runtime_failure(
-            *runtime,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Snapshot creation failed inside the C ABI exception boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_snapshot_get_info(
     const strata_snapshot* const snapshot,
     strata_snapshot_info* const out_info
-) {
+) noexcept {
     if (snapshot == nullptr || out_info == nullptr ||
         out_info->struct_size < sizeof(strata_snapshot_info)) {
         return invalid_argument();
@@ -340,7 +310,7 @@ strata_result strata_snapshot_get_info(
     return strata::core::result(STRATA_STATUS_OK);
 }
 
-void strata_snapshot_release(strata_snapshot* const snapshot) {
+void strata_snapshot_release(strata_snapshot* const snapshot) noexcept {
     if (snapshot == nullptr) {
         return;
     }

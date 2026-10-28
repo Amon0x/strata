@@ -4,9 +4,12 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 
 #include <strata/strata.h>
 
+#include "abi_boundary.hpp"
 #include "abi_internal.hpp"
 #include "core/diagnostics.hpp"
 #include "data/json.hpp"
@@ -42,6 +45,34 @@ inline constexpr strata_capabilities capabilities =
                                                    const char* const code,
                                                    const char* const message) noexcept {
     return runtime.core.diagnostics().emit(status, STRATA_DIAGNOSTIC_ERROR, code, message);
+}
+
+/**
+ * Runtime-attached firewall: a null runtime is an invalid argument, and an exception escaping the
+ * body is reported as one diagnostic on the runtime instead of unwinding through the C ABI.
+ */
+template <typename Runtime, typename Body>
+[[nodiscard]] strata_result runtime_call(Runtime* const runtime, const AbiCall& call,
+                                         Body&& body) noexcept {
+    static_assert(std::is_same_v<std::remove_const_t<Runtime>, strata_runtime>);
+    if (runtime == nullptr)
+        return invalid_argument();
+    try {
+        return std::forward<Body>(body)();
+    } catch (...) {
+        return report_current_exception(
+            const_cast<strata_runtime*>(runtime)->core.diagnostics(), call);
+    }
+}
+
+/** Surface-attached firewall; failures are reported on the owning runtime. */
+template <typename Surface, typename Body>
+[[nodiscard]] strata_result surface_call(Surface* const surface, const AbiCall& call,
+                                         Body&& body) noexcept {
+    static_assert(std::is_same_v<std::remove_const_t<Surface>, strata_surface>);
+    if (surface == nullptr || surface->owner == nullptr)
+        return invalid_argument();
+    return runtime_call(surface->owner, call, std::forward<Body>(body));
 }
 
 [[nodiscard]] inline strata_result

@@ -8,6 +8,9 @@
 #include "abi_support.hpp"
 #include "core/utf8.hpp"
 
+using strata::abi_detail::AbiCall;
+using strata::abi_detail::surface_call;
+
 namespace {
 
 [[nodiscard]] strata_result surface_failure(
@@ -27,7 +30,7 @@ strata_result strata_surface_set_focus_containment(
     strata_surface* const surface,
     const strata_string_view key,
     uint32_t* const out_contained
-) {
+) noexcept {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
@@ -41,7 +44,7 @@ strata_result strata_surface_set_focus_containment(
             "Focus containment requires an optional key and output pointer."
         );
     }
-    try {
+    return surface_call(surface, AbiCall{"Focus containment"}, [&] {
         if (key.size == 0U) {
             static_cast<void>(surface->core.set_focus_containment(std::nullopt));
             return strata::core::result(STRATA_STATUS_OK);
@@ -66,14 +69,7 @@ strata_result strata_surface_set_focus_containment(
         }
         *out_contained = 1U;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (...) {
-        return surface_failure(
-            *surface,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Focus containment failed inside the C ABI boundary."
-        );
-    }
+    });
 }
 
 } // extern "C"

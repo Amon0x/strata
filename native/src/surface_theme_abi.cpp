@@ -20,6 +20,9 @@
 #include "core/utf8.hpp"
 #include "ui/theme.hpp"
 
+using strata::abi_detail::AbiCall;
+using strata::abi_detail::surface_call;
+
 namespace {
 
 [[nodiscard]] strata_result surface_failure(
@@ -733,38 +736,17 @@ template <typename Mutation>
             "Surface theme mutation requires a typed theme and output pointer."
         );
     }
-    try {
+    return surface_call(surface, AbiCall{"Surface theme mutation", "STRATA.THEME.INVALID"}, [&] {
         *out_changed = mutation(surface->core, theme(*surface, *source)) ? 1U : 0U;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(
-            *surface,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Surface theme mutation exhausted memory."
-        );
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(
-            *surface,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.THEME.INVALID",
-            error.what()
-        );
-    } catch (...) {
-        return surface_failure(
-            *surface,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Surface theme mutation failed inside the C ABI boundary."
-        );
-    }
+    });
 }
 
 } // namespace
 
 extern "C" {
 
-strata_result strata_theme_tokens_defaults(strata_theme_tokens* const out_tokens) {
+strata_result strata_theme_tokens_defaults(strata_theme_tokens* const out_tokens) noexcept {
     if (out_tokens == nullptr || out_tokens->struct_size < sizeof(strata_theme_tokens)) {
         return strata::abi_detail::invalid_argument();
     }
@@ -801,7 +783,9 @@ strata_result strata_theme_tokens_defaults(strata_theme_tokens* const out_tokens
     return strata::core::result(STRATA_STATUS_OK);
 }
 
-strata_result strata_theme_visual_style_defaults(strata_theme_visual_style* const out_style) {
+strata_result strata_theme_visual_style_defaults(
+    strata_theme_visual_style* const out_style
+) noexcept {
     if (out_style == nullptr || out_style->struct_size < sizeof(strata_theme_visual_style)) {
         return strata::abi_detail::invalid_argument();
     }
@@ -819,7 +803,7 @@ strata_result strata_theme_visual_style_defaults(strata_theme_visual_style* cons
 
 strata_result strata_theme_text_visual_style_defaults(
     strata_theme_text_visual_style* const out_style
-) {
+) noexcept {
     if (out_style == nullptr || out_style->struct_size < sizeof(strata_theme_text_visual_style)) {
         return strata::abi_detail::invalid_argument();
     }
@@ -836,7 +820,7 @@ strata_result strata_theme_text_visual_style_defaults(
 
 strata_result strata_theme_text_layout_style_defaults(
     strata_theme_text_layout_style* const out_style
-) {
+) noexcept {
     if (out_style == nullptr || out_style->struct_size < sizeof(strata_theme_text_layout_style)) {
         return strata::abi_detail::invalid_argument();
     }
@@ -856,7 +840,9 @@ strata_result strata_theme_text_layout_style_defaults(
     return strata::core::result(STRATA_STATUS_OK);
 }
 
-strata_result strata_theme_layout_style_defaults(strata_theme_layout_style* const out_style) {
+strata_result strata_theme_layout_style_defaults(
+    strata_theme_layout_style* const out_style
+) noexcept {
     if (out_style == nullptr || out_style->struct_size < sizeof(strata_theme_layout_style)) {
         return strata::abi_detail::invalid_argument();
     }
@@ -883,7 +869,9 @@ strata_result strata_theme_layout_style_defaults(strata_theme_layout_style* cons
     return strata::core::result(STRATA_STATUS_OK);
 }
 
-strata_result strata_theme_animation_set_defaults(strata_theme_animation_set* const out_set) {
+strata_result strata_theme_animation_set_defaults(
+    strata_theme_animation_set* const out_set
+) noexcept {
     if (out_set == nullptr || out_set->struct_size < sizeof(strata_theme_animation_set)) {
         return strata::abi_detail::invalid_argument();
     }
@@ -896,7 +884,7 @@ strata_result strata_surface_register_theme(
     strata_surface* const surface,
     const strata_theme* const source,
     std::uint32_t* const out_changed
-) {
+) noexcept {
     return mutate_theme(
         surface,
         source,
@@ -911,7 +899,7 @@ strata_result strata_surface_set_theme(
     strata_surface* const surface,
     const strata_theme* const source,
     std::uint32_t* const out_changed
-) {
+) noexcept {
     return mutate_theme(
         surface,
         source,
@@ -926,7 +914,7 @@ strata_result strata_surface_unregister_theme(
     strata_surface* const surface,
     const strata_string_view name,
     std::uint32_t* const out_removed
-) {
+) noexcept {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) {
         return strata::abi_detail::terminal_surface_failure(*surface);
@@ -940,32 +928,11 @@ strata_result strata_surface_unregister_theme(
             "Surface theme removal requires a non-empty name and output pointer."
         );
     }
-    try {
+    return surface_call(surface, AbiCall{"Surface theme removal", "STRATA.THEME.INVALID"}, [&] {
         const std::string value = string(name, "theme name", false);
         *out_removed = surface->core.unregister_theme(value) ? 1U : 0U;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(
-            *surface,
-            STRATA_STATUS_OUT_OF_MEMORY,
-            "STRATA.CORE.OUT_OF_MEMORY",
-            "Surface theme removal exhausted memory."
-        );
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(
-            *surface,
-            STRATA_STATUS_INVALID_ARGUMENT,
-            "STRATA.THEME.INVALID",
-            error.what()
-        );
-    } catch (...) {
-        return surface_failure(
-            *surface,
-            STRATA_STATUS_INTERNAL_ERROR,
-            "STRATA.ABI.UNCAUGHT_EXCEPTION",
-            "Surface theme removal failed inside the C ABI boundary."
-        );
-    }
+    });
 }
 
 strata_result strata_surface_set_scoped_theme(
@@ -973,7 +940,7 @@ strata_result strata_surface_set_scoped_theme(
     const strata_string_view node_key,
     const strata_theme* const source,
     std::uint32_t* const out_changed
-) {
+) noexcept {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) return strata::abi_detail::terminal_surface_failure(*surface);
     if (out_changed != nullptr) *out_changed = 0U;
@@ -986,51 +953,39 @@ strata_result strata_surface_set_scoped_theme(
             "A scoped theme requires a node key, typed theme, and output pointer."
         );
     }
-    try {
+    return surface_call(surface, AbiCall{"Scoped theme mutation", "STRATA.THEME.INVALID"}, [&] {
         std::string key = string(node_key, "theme scope node key", false);
         *out_changed = surface->core.set_scoped_theme(
             std::move(key),
             theme(*surface, *source)
         ) ? 1U : 0U;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY", "Scoped theme mutation exhausted memory.");
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.THEME.INVALID", error.what());
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.UNCAUGHT_EXCEPTION", "Scoped theme mutation failed inside the C ABI boundary.");
-    }
+    });
 }
 
 strata_result strata_surface_clear_scoped_theme(
     strata_surface* const surface,
     const strata_string_view node_key,
     std::uint32_t* const out_removed
-) {
+) noexcept {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) return strata::abi_detail::terminal_surface_failure(*surface);
     if (out_removed != nullptr) *out_removed = 0U;
     if (out_removed == nullptr || !strata::abi_detail::valid_view(node_key, false)) {
         return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.ABI.INVALID_THEME_SCOPE", "Clearing a scoped theme requires a node key and output pointer.");
     }
-    try {
+    return surface_call(surface, AbiCall{"Scoped theme removal", "STRATA.THEME.INVALID"}, [&] {
         const std::string key = string(node_key, "theme scope node key", false);
         *out_removed = surface->core.clear_scoped_theme(key) ? 1U : 0U;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY", "Scoped theme removal exhausted memory.");
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.THEME.INVALID", error.what());
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.UNCAUGHT_EXCEPTION", "Scoped theme removal failed inside the C ABI boundary.");
-    }
+    });
 }
 
 strata_result strata_surface_animate_scroll_to(
     strata_surface* const surface,
     const strata_scroll_animation_request* const source,
     std::uint32_t* const out_started
-) {
+) noexcept {
     if (surface == nullptr) return strata::abi_detail::invalid_argument();
     if (surface->release_packet_prepared) return strata::abi_detail::terminal_surface_failure(*surface);
     if (out_started != nullptr) *out_started = 0U;
@@ -1045,7 +1000,8 @@ strata_result strata_surface_animate_scroll_to(
             "Scroll animation request header is invalid."
         );
     }
-    try {
+    constexpr AbiCall call{"Scroll animation", "STRATA.SCROLL.ANIMATION_INVALID"};
+    return surface_call(surface, call, [&] {
         strata::ui::ScrollAnimationRequest request;
         request.key = string(source->key, "scroll animation key", false);
         request.timing = string(source->timing, "scroll animation timing", false);
@@ -1054,13 +1010,7 @@ strata_result strata_surface_animate_scroll_to(
         if (source->has_duration != 0U) request.duration_nanos = source->duration_nanoseconds;
         *out_started = surface->core.animate_scroll_to(std::move(request)) ? 1U : 0U;
         return strata::core::result(STRATA_STATUS_OK);
-    } catch (const std::bad_alloc&) {
-        return surface_failure(*surface, STRATA_STATUS_OUT_OF_MEMORY, "STRATA.CORE.OUT_OF_MEMORY", "Scroll animation request exhausted memory.");
-    } catch (const std::invalid_argument& error) {
-        return surface_failure(*surface, STRATA_STATUS_INVALID_ARGUMENT, "STRATA.SCROLL.ANIMATION_INVALID", error.what());
-    } catch (...) {
-        return surface_failure(*surface, STRATA_STATUS_INTERNAL_ERROR, "STRATA.ABI.UNCAUGHT_EXCEPTION", "Scroll animation failed inside the C ABI boundary.");
-    }
+    });
 }
 
 } // extern "C"
