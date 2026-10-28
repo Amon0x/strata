@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -1361,12 +1362,69 @@ void SchemaRegistry::apply_scenario_declarations(const data::JsonValue& schemas)
             }
         }
     }
+    if (const data::JsonValue* tokens = schemas.find("themeTokens"); tokens != nullptr) {
+        for (const data::JsonValue& value : array_field(*tokens, "definitions")) {
+            const std::string& name = string_field(value, "name");
+            const std::string& type = string_field(value, "type");
+            const bool identifier =
+                !name.empty() && std::isdigit(static_cast<unsigned char>(name.front())) == 0 &&
+                std::ranges::all_of(name, [](const char character) {
+                    const auto byte = static_cast<unsigned char>(character);
+                    return byte >= 0x80U || std::isalnum(byte) != 0 || character == '_';
+                });
+            if (!identifier) {
+                throw std::runtime_error("theme token name '" + name +
+                                         "' is not an identifier `theme.<name>` can read");
+            }
+            if (type != "color" && type != "number") {
+                throw std::runtime_error("theme token '" + name + "' must be a color or a number");
+            }
+            if (theme_token_kind(name) != SemanticTypeKind::unknown ||
+                !theme_tokens_
+                     .emplace(name, type == "color" ? SemanticTypeKind::color
+                                                    : SemanticTypeKind::number)
+                     .second) {
+                throw std::runtime_error("theme token '" + name + "' is declared more than once");
+            }
+        }
+    }
     if (schemas.find("host") != nullptr)
         host_roots_declared_ = true;
     for (const data::JsonValue& host : array_field(schemas, "host")) {
         host_types_.insert_or_assign(string_field(host, "path"),
                                      parse_type(required(host, "type")));
     }
+}
+
+SemanticTypeKind SchemaRegistry::theme_token_kind(const std::string_view name) const noexcept {
+    if (std::ranges::contains(theme_color_tokens, name) ||
+        std::ranges::contains(theme_palette_tokens, name)) {
+        return SemanticTypeKind::color;
+    }
+    if (std::ranges::contains(theme_number_tokens, name)) return SemanticTypeKind::number;
+    for (const auto& [declared, kind] : theme_tokens_) {
+        if (declared == name) return kind;
+    }
+    return base_ != nullptr ? base_->theme_token_kind(name) : SemanticTypeKind::unknown;
+}
+
+std::vector<std::string> SchemaRegistry::theme_token_names() const {
+    std::vector<std::string> names =
+        base_ != nullptr ? base_->theme_token_names() : std::vector<std::string>{};
+    if (base_ == nullptr) {
+        for (const auto& list : {std::span<const std::string_view>(theme_color_tokens),
+                                 std::span<const std::string_view>(theme_number_tokens),
+                                 std::span<const std::string_view>(theme_palette_tokens)}) {
+            names.insert(names.end(), list.begin(), list.end());
+        }
+    }
+    for (const auto& [name, kind] : theme_tokens_) {
+        static_cast<void>(kind);
+        names.push_back(name);
+    }
+    std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
+    return names;
 }
 
 bool SchemaRegistry::host_roots_declared() const noexcept {

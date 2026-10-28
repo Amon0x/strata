@@ -36,10 +36,8 @@ OperandClass operand_class(const SemanticType& type) {
     }
 }
 
-SemanticTypePtr theme_token_type(const std::string_view name) {
-    if (std::ranges::contains(theme_color_tokens, name)) return simple(SemanticTypeKind::color);
-    if (std::ranges::contains(theme_number_tokens, name)) return simple(SemanticTypeKind::number);
-    return simple(SemanticTypeKind::unknown);
+SemanticTypePtr theme_token_type(const SchemaRegistry& registry, const std::string_view name) {
+    return simple(registry.theme_token_kind(name));
 }
 
 namespace {
@@ -328,7 +326,7 @@ SemanticTypePtr TypeOracle::compute(const Expression& expression) {
         // `theme.<token>` lowers to a theme token read whatever else is in scope.
         if (const auto* receiver = std::get_if<IdentifierExpression>(&property->receiver->node);
             receiver != nullptr && receiver->name == "theme") {
-            return theme_token_type(property->property_name);
+            return theme_token_type(analysis_.registry, property->property_name);
         }
         const SemanticTypePtr receiver = type_of(*property->receiver);
         if (const ObjectField* field = receiver->find_field(property->property_name);

@@ -386,6 +386,8 @@ pass one JSON document to `strata_surface_register_theme_json` or `strata_surfac
 ```
 
 Standard tokens keep their types and any other name is a custom color or number token.
+`.strata` code reads a custom token as `theme.<name>` once the application schemas declare it
+under `themeTokens` (see [Styles and theme values](strata-language.md#styles-and-theme-values)).
 Colors are `"#RRGGBB"` or `"#RRGGBBAA"` strings, and an
 omitted token keeps the registered parent's value (or the default). Unknown fields and mistyped
 tokens are rejected with `STRATA_STATUS_INVALID_ARGUMENT` and a diagnostic. Widget styles and motion policies are not part of

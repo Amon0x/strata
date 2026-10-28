@@ -20,6 +20,7 @@
 #include "compiler/schema.hpp"
 #include "compiler/semantic.hpp"
 #include "compiler/source.hpp"
+#include "data/json.hpp"
 #include "resource/resource.hpp"
 
 namespace {
@@ -1061,6 +1062,81 @@ void test_catalog_declares_roles_and_names() {
           "widget roles did not come from the catalog");
 }
 
+// `theme.<name>` reads the standard tokens, the palette tokens presentation draws with, and the
+// custom tokens an application declares, each typed as the colour or number it holds. Any other
+// name is reported, since no theme is known to define it.
+void test_theme_reads_palette_and_declared_tokens() {
+    compiler::SchemaRegistry registry = compiler::SchemaRegistry::builtins();
+    registry.apply_scenario_declarations(strata::data::parse_json(R"({
+      "widgets": { "registry": "test", "required": [], "definitions": [] },
+      "actions": { "registry": "test", "required": [], "definitions": [] },
+      "host": [],
+      "themeTokens": { "definitions": [
+        { "name": "brandAccent", "type": "color" },
+        { "name": "gutter", "type": "number" }
+      ] }
+    })"));
+    const auto analyse = [](const compiler::SchemaRegistry& schemas, const std::string_view style) {
+        const compiler::ParseResult parsed = compiler::parse_source(
+            "theme.strata", "style Card { " + std::string(style) +
+                                " }\noverlay Main { root Panel(style: Card) }");
+        check(parsed.diagnostics.empty(), "the theme token fixture did not parse");
+        return compiler::validate_semantics(parsed.file, schemas).diagnostics;
+    };
+    const auto codes = [](const std::vector<compiler::Diagnostic>& diagnostics) {
+        std::string output;
+        for (const compiler::Diagnostic& diagnostic : diagnostics)
+            output += "\n  " + diagnostic.code + ": " + diagnostic.message;
+        return output;
+    };
+    const auto clean = analyse(registry, "background: theme.popupSurface; color: theme.brandAccent;"
+                                         " padding: theme.gutter; margin: theme.spacingUnit");
+    check(clean.empty(), "palette and declared theme tokens were rejected:" + codes(clean));
+    // A token is resolved by the surface's theme after evaluation, so operators never see it;
+    // the runtime would fail on these.
+    for (const std::string_view mismatched :
+         {"padding: theme.tokenFill", "background: theme.gutter", "padding: theme.brandAccent",
+          "padding: theme.spacingUnit * 2", "margin: -theme.radius",
+          "padding: (theme.gutter) + 1"}) {
+        const auto found = analyse(registry, mismatched);
+        check(found.size() == 1U && found.front().code == "STRATA.DSL.SEMANTIC_TYPE_MISMATCH",
+              "a theme token of the wrong kind was accepted: " + std::string(mismatched) +
+                  codes(found));
+    }
+    const auto misspelled = analyse(registry, "color: theme.brandAcent");
+    check(misspelled.size() == 1U &&
+              misspelled.front().code == "STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN" &&
+              misspelled.front().message.ends_with("Did you mean 'brandAccent'?"),
+          "a misspelled custom theme token was not reported with its suggestion:" +
+              codes(misspelled));
+    const auto undeclared =
+        analyse(compiler::SchemaRegistry::builtins(), "color: theme.brandAccent");
+    check(undeclared.size() == 1U &&
+              undeclared.front().code == "STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN",
+          "a custom theme token the application never declared was accepted:" +
+              codes(undeclared));
+
+    for (const std::string_view declaration : {
+             R"({ "name": "accent", "type": "color" })",
+             R"({ "name": "popupSurface", "type": "color" })",
+             R"({ "name": "brand", "type": "string" })",
+             R"({ "name": "brand-accent", "type": "color" })",
+         }) {
+        bool rejected = false;
+        try {
+            compiler::SchemaRegistry schemas = compiler::SchemaRegistry::builtins();
+            schemas.apply_scenario_declarations(strata::data::parse_json(
+                R"({ "widgets": { "registry": "t", "required": [], "definitions": [] },
+                     "actions": { "registry": "t", "required": [], "definitions": [] },
+                     "themeTokens": { "definitions": [)" +
+                std::string(declaration) + "] } }"));
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        check(rejected, "a theme token declaration was accepted: " + std::string(declaration));
+    }
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -1093,6 +1169,7 @@ int strata_test_compiler() {
         test_bind_shorthand_needs_a_retained_target();
         test_analysis_runs_despite_syntax_and_import_errors();
         test_catalog_declares_roles_and_names();
+        test_theme_reads_palette_and_declared_tokens();
         test_source_map_paths_name_ir_nodes();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;

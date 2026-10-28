@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cctype>
 #include <functional>
+#include <initializer_list>
 #include <set>
 #include <utility>
 
@@ -1348,6 +1349,30 @@ private:
                expression.span, component_path, expected_names(names));
     }
 
+    /**
+     * Reports a `theme.<name>` operand. A token stays symbolic until the surface resolves its
+     * effective theme, after evaluation, so an operator never sees its colour or number.
+     */
+    [[nodiscard]] bool theme_token_operand(const Expression& expression,
+                                           std::initializer_list<const Expression*> operands,
+                                           const std::string& symbol,
+                                           const std::string& component_path) {
+        for (const Expression* operand : operands) {
+            const auto* property = std::get_if<PropertyAccessExpression>(&ungrouped(*operand).node);
+            const auto* receiver =
+                property != nullptr ? std::get_if<IdentifierExpression>(&property->receiver->node)
+                                    : nullptr;
+            if (receiver == nullptr || receiver->name != "theme") continue;
+            report("STRATA.DSL.SEMANTIC_TYPE_MISMATCH",
+                   "Operator '" + symbol + "' cannot read theme." + property->property_name +
+                       ": a theme token is resolved by the surface's theme after evaluation, so "
+                       "use it directly as a style value.",
+                   expression.span, component_path, "a value computed without theme tokens");
+            return true;
+        }
+        return false;
+    }
+
     /** Reports an operand the runtime cannot do arithmetic with. */
     void arithmetic(const Expression& expression, const std::string& symbol,
                     const SemanticType& left, const SemanticType& right,
@@ -1386,12 +1411,28 @@ private:
             for (const MapEntry& entry : map->entries) check(*entry.value, component_path);
         } else if (const auto* unary = std::get_if<UnaryExpression>(&expression.node)) {
             const SemanticTypePtr operand = infer(*unary->operand, component_path);
-            if (unary->operation == UnaryOperator::negate)
+            if (unary->operation == UnaryOperator::negate &&
+                !theme_token_operand(expression, {unary->operand.get()}, "-", component_path)) {
                 arithmetic(expression, "-", *operand, *simple(SemanticTypeKind::number),
                            component_path);
+            }
         } else if (const auto* binary = std::get_if<BinaryExpression>(&expression.node)) {
             const SemanticTypePtr left = infer(*binary->left, component_path);
             const SemanticTypePtr right = infer(*binary->right, component_path);
+            switch (binary->operation) {
+            case BinaryOperator::equal:
+            case BinaryOperator::not_equal:
+            case BinaryOperator::logical_and:
+            case BinaryOperator::logical_or:
+            case BinaryOperator::coalesce:
+                break;
+            default:
+                if (theme_token_operand(expression, {binary->left.get(), binary->right.get()},
+                                        operator_symbol(binary->operation), component_path)) {
+                    return;
+                }
+                break;
+            }
             switch (binary->operation) {
             case BinaryOperator::less:
             case BinaryOperator::less_equal:
@@ -1442,10 +1483,9 @@ private:
                          const std::string& component_path) {
         if (const auto* receiver = std::get_if<IdentifierExpression>(&property.receiver->node);
             receiver != nullptr && receiver->name == "theme") {
-            if (theme_token_type(property.property_name)->kind != SemanticTypeKind::unknown)
+            if (registry_.theme_token_kind(property.property_name) != SemanticTypeKind::unknown)
                 return;
-            std::vector<std::string> names(theme_color_tokens.begin(), theme_color_tokens.end());
-            names.insert(names.end(), theme_number_tokens.begin(), theme_number_tokens.end());
+            const std::vector<std::string> names = registry_.theme_token_names();
             report("STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN",
                    "Theme token '" + property.property_name + "' is not defined." +
                        did_you_mean(property.property_name, names),

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -12,6 +13,30 @@
 #include "data/json.hpp"
 
 namespace strata::compiler {
+
+/**
+ * The standard tokens every theme defines, as ui::ThemeTokens holds them; a theme test keeps the
+ * lists in step.
+ */
+inline constexpr std::array<std::string_view, 7U> theme_color_tokens{
+    "surface", "surfaceRaised", "foreground", "mutedForeground", "accent", "danger", "focus",
+};
+inline constexpr std::array<std::string_view, 3U> theme_number_tokens{
+    "spacingUnit",
+    "radius",
+    "density",
+};
+/**
+ * The presentation colours every theme resolves, set or defaulted, in ui::theme_palette_tokens()
+ * order; a theme test keeps the lists in step.
+ */
+inline constexpr std::array<std::string_view, 22U> theme_palette_tokens{
+    "compositionSelection", "compositionUnderline", "disabledForeground", "insertionIndicator",
+    "link", "marqueeFill", "marqueeStroke", "matchHighlight", "paletteSurface", "popupSurface",
+    "severityError", "severityInfo", "severitySuccess", "severityWarning", "shadow",
+    "tableColumnDivider", "tablePinnedDivider", "tableRowDivider", "tokenActive",
+    "tokenActiveBorder", "tokenFill", "tooltipSurface",
+};
 
 struct BuiltinCatalog;
 struct DeclaredParameter;
@@ -220,6 +245,13 @@ public:
      * then is a name that is neither local nor a declared root certainly a mistake.
      */
     [[nodiscard]] bool host_roots_declared() const noexcept;
+    /**
+     * What `theme.<name>` reads: `color` or `number` for a standard, palette or declared custom
+     * token, and `unknown` for a name no theme is known to define.
+     */
+    [[nodiscard]] SemanticTypeKind theme_token_kind(std::string_view name) const noexcept;
+    /** Every name `theme.<name>` accepts, sorted. */
+    [[nodiscard]] std::vector<std::string> theme_token_names() const;
 
 private:
     [[nodiscard]] static SchemaRegistry from_catalog(const BuiltinCatalog& catalog);
@@ -239,6 +271,8 @@ private:
     std::vector<std::string> component_parameter_type_names_;
     std::unordered_map<std::string, SemanticTypePtr> host_types_;
     bool host_roots_declared_ = false;
+    /** Custom theme tokens the application declares, by name; see `themeTokens`. */
+    std::unordered_map<std::string, SemanticTypeKind> theme_tokens_;
     std::vector<SchemaParameter> framework_widget_parameters_;
     std::vector<SchemaParameter> layout_properties_;
     std::vector<SchemaParameter> style_properties_;

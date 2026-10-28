@@ -607,36 +607,21 @@ void apply_motion(ValueFields& fields, const ThemeNullable<ThemeAnimationSet>& v
     return property(node, name);
 }
 
-[[nodiscard]] bool mapped_color_property(const std::string_view name) noexcept {
-    return name == "background" || name == "foreground" || name == "color" ||
-           name == "hoverOverlay" || name == "activeOverlay" || name == "track" || name == "fill" ||
-           name == "thumb" || name == "selection" || name == "scrim" || name == "hintColor" ||
-           name == "selectionColor" || name == "caretColor";
-}
-
-[[nodiscard]] bool mapped_number_property(const std::string_view name) noexcept {
-    return name == "radius" || name == "indicatorSize" || name == "indicatorInset" ||
-           name == "trackWidth" || name == "trackHeight" || name == "trackRadius" ||
-           name == "trackGap" || name == "activeTrackGap" || name == "thumbSize" ||
-           name == "thumbWidth" || name == "thumbHeight" || name == "activeThumbWidth" ||
-           name == "activeThumbHeight" || name == "thumbRadius" || name == "padding" ||
-           name == "margin" || name == "gap";
-}
-
-[[nodiscard]] std::optional<runtime::Value> resolve_token(const std::string_view property_name,
-                                                          const runtime::ThemeTokenValue& token,
+/**
+ * A symbolic `theme.<name>` value read against the effective theme. Token names are unique across
+ * kinds, so the token decides whether it is a color or a number; the compiler already checked it
+ * against the property it fills. A palette token the theme leaves unset takes its light or dark
+ * default, and a custom token the theme does not define resolves to nothing, which leaves the
+ * property at its themed default.
+ */
+[[nodiscard]] std::optional<runtime::Value> resolve_token(const runtime::ThemeTokenValue& token,
                                                           const ThemeTokens& tokens) {
-    if (mapped_color_property(property_name)) {
-        if (const runtime::ColorValue* value = tokens.color(token.name); value != nullptr) {
-            return runtime::Value(*value);
-        }
-        return std::nullopt;
-    }
-    if (mapped_number_property(property_name)) {
-        if (const std::optional<double> value = tokens.number(token.name); value.has_value()) {
-            return runtime::Value(*value);
-        }
-    }
+    if (const runtime::ColorValue* value = tokens.color(token.name); value != nullptr)
+        return runtime::Value(*value);
+    if (const std::optional<double> value = tokens.number(token.name); value.has_value())
+        return runtime::Value(*value);
+    if (std::ranges::contains(theme_palette_tokens(), token.name, &ThemePaletteToken::name))
+        return runtime::Value(tokens.palette(token.name));
     return std::nullopt;
 }
 
@@ -867,7 +852,7 @@ resolve_node(const std::shared_ptr<const DescriptionNode>& source, const ThemeCa
             authored_foreground_field = authored_foreground_field || name == "foreground";
             if (const runtime::ThemeTokenValue* token = value.theme_token(); token != nullptr) {
                 const std::optional<runtime::Value> concrete =
-                    resolve_token(name, *token, effective->tokens());
+                    resolve_token(*token, effective->tokens());
                 if (!concrete.has_value())
                     continue;
                 concrete_fields.insert_or_assign(name, *concrete);

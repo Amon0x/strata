@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -6,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -16,6 +18,7 @@
 #include "base/utf8.hpp"
 #include "data/json.hpp"
 #include "runtime/application.hpp"
+#include "ui/description.hpp"
 #include "runtime/expression.hpp"
 #include "runtime/value.hpp"
 #include "ui/layout.hpp"
@@ -75,6 +78,19 @@ properties(std::optional<std::string> theme,
                        strata::runtime::ExpressionValue(strata::runtime::Value(*variant)));
     }
     return result;
+}
+
+/** The node keyed `key` in an eagerly described tree, or null. */
+[[nodiscard]] const strata::ui::DescriptionNode* keyed(const strata::ui::DescriptionNode& node,
+                                                      const std::string_view key) {
+    if (node.key == key)
+        return &node;
+    for (std::size_t index = 0U; node.children != nullptr && index < node.children->size();
+         ++index) {
+        if (const auto* found = keyed(*node.children->at(index), key); found != nullptr)
+            return found;
+    }
+    return nullptr;
 }
 
 [[nodiscard]] const strata::runtime::Value* field(const strata::ui::DescriptionNode& node,
@@ -195,7 +211,7 @@ void test_defaults_and_validation() {
           "compact control typography or theme semantics changed");
 }
 
-// The compiler types `theme.<name>` from its own token list; every name it accepts must resolve at
+// The compiler types `theme.<name>` from its own token lists; every name it accepts must resolve at
 // runtime, or an app that compiled cleanly would read nothing.
 void test_compiler_theme_tokens_match_runtime() {
     using namespace strata;
@@ -208,6 +224,88 @@ void test_compiler_theme_tokens_match_runtime() {
         check(tokens.number(name).has_value(),
               "compiler number token '" + std::string(name) + "' does not resolve at runtime");
     }
+    const std::span<const ui::ThemePaletteToken> palette = ui::theme_palette_tokens();
+    check(palette.size() == compiler::theme_palette_tokens.size() &&
+              std::ranges::equal(palette, compiler::theme_palette_tokens, {},
+                                 &ui::ThemePaletteToken::name),
+          "the compiler's palette tokens differ from the ones presentation reads");
+}
+
+// `theme.<name>` reads the standard tokens, the palette tokens and the custom tokens an application
+// declares; each resolves against the effective theme when the tree is materialized, and a palette
+// token the theme leaves unset takes its light or dark default.
+void test_compiled_theme_tokens_resolve_against_the_effective_theme() {
+    using namespace strata;
+    const data::JsonValue schemas = data::parse_json(R"({
+  "widgets": { "registry": "theme.v1", "required": [], "definitions": [] },
+  "actions": { "registry": "theme.v1", "required": [], "definitions": [] },
+  "host": [],
+  "themeTokens": { "definitions": [
+    { "name": "brandAccent", "type": "color" },
+    { "name": "gutter", "type": "number" }
+  ] }
+})");
+    runtime::ApplicationContext application("theme-tokens",
+                                            runtime::ApplicationBundle::create(&schemas));
+    constexpr std::string_view source = R"(
+style Card {
+  background: theme.popupSurface
+  color: theme.brandAccent
+  padding: theme.gutter
+  radius: theme.radius
+  margin: theme.spacingUnit
+}
+overlay Main { root Panel(key: "card", style: Card) }
+)";
+    const runtime::ActivationResult activation = application.compile_and_activate(
+        compiler::ModuleSource{"theme-tokens.strata", std::string(source)},
+        [](const std::string_view, const std::string_view path) -> compiler::ModuleSource {
+            throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+        },
+        0U);
+    std::string problems;
+    for (const auto& diagnostic : activation.diagnostics) problems += "\n  " + diagnostic.message;
+    check(activation.activated(), "palette and declared custom theme tokens did not compile:" +
+                                      problems);
+    ui::DescriptionBuilder builder(application);
+    const ui::DescriptionBuildResult description =
+        builder.build(runtime::LayerRole::overlay, "Main");
+    check(description.root != nullptr, "the theme token fixture did not describe");
+    ui::ThemeTokens tokens;
+    tokens.set("brandAccent", runtime::ColorValue{1U, 2U, 3U, 255U});
+    tokens.set("gutter", 7.0);
+    tokens.radius = 5.0;
+    ui::ThemeCatalog catalog;
+    check(catalog.set_root(ui::Theme("tokens", tokens)), "the token theme did not install");
+    const ui::ThemeMaterializationResult resolved =
+        ui::materialize_theme_tree(description.root, catalog, widget_schemas());
+    const ui::DescriptionNode* card = keyed(*resolved.root, "card");
+    check(card != nullptr, "the themed card was not materialized");
+    const auto color = [&](const std::string_view name) {
+        const runtime::Value* value = field(*card, name);
+        return value != nullptr ? value->color() : nullptr;
+    };
+    const auto number = [&](const std::string_view name) {
+        const runtime::Value* value = field(*card, name);
+        return value != nullptr && value->number() != nullptr ? *value->number() : -1.0;
+    };
+    check(color("background") != nullptr && *color("background") == tokens.palette("popupSurface"),
+          "an unset palette token did not resolve to its default");
+    check(color("color") != nullptr && *color("color") == runtime::ColorValue{1U, 2U, 3U, 255U},
+          "a custom colour token did not resolve");
+    check(number("padding") == 7.0 && number("radius") == 5.0 && number("margin") == 4.0,
+          "custom or standard number tokens did not resolve");
+
+    // A declared custom token the effective theme does not define leaves the themed default.
+    ui::ThemeCatalog plain;
+    check(plain.set_root(ui::Theme("plain", ui::ThemeTokens{})), "the plain theme did not install");
+    const ui::ThemeMaterializationResult fallback =
+        ui::materialize_theme_tree(description.root, plain, widget_schemas());
+    const ui::DescriptionNode* plain_card = keyed(*fallback.root, "card");
+    const runtime::Value* padding = plain_card != nullptr ? field(*plain_card, "padding") : nullptr;
+    check(plain_card != nullptr && (padding == nullptr || padding->theme_token() == nullptr),
+          "an undefined custom token reached the widget unresolved");
+
 }
 
 void test_scopes_styles_tokens_and_lazy_ranges() {
@@ -1182,6 +1280,7 @@ int strata_test_theme() {
     try {
         test_defaults_and_validation();
         test_compiler_theme_tokens_match_runtime();
+        test_compiled_theme_tokens_resolve_against_the_effective_theme();
         test_scopes_styles_tokens_and_lazy_ranges();
         test_catalog_and_motion_policy();
         test_exact_resolution_validation_and_local_scope();

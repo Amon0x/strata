@@ -212,8 +212,8 @@ and pressed space around the thumb; `thumbWidth`/`thumbHeight` and their `active
 resting value, so a press never changes track or thumb geometry unless the style requests it.
 
 The generated reference separates general style properties, layout properties/size forms, text
-properties, and enum values. The theme tokens are fixed, and the compiler rejects any other name
-and checks each token's kind where it is used:
+properties, and enum values. `theme.<name>` reads three kinds of token, and the compiler checks
+each token's kind where it is used:
 
 | Token | Kind |
 |---|---|
@@ -221,6 +221,35 @@ and checks each token's kind where it is used:
 | `theme.foreground`, `theme.mutedForeground` | color |
 | `theme.accent`, `theme.danger`, `theme.focus` | color |
 | `theme.spacingUnit`, `theme.radius`, `theme.density` | number |
+| Palette: `theme.popupSurface`, `theme.tooltipSurface`, `theme.paletteSurface`, `theme.link`, `theme.disabledForeground`, `theme.matchHighlight`, `theme.insertionIndicator`, `theme.shadow`, `theme.severityError`, `theme.severityWarning`, `theme.severityInfo`, `theme.severitySuccess`, `theme.tokenFill`, `theme.tokenActive`, `theme.tokenActiveBorder`, `theme.marqueeFill`, `theme.marqueeStroke`, `theme.compositionSelection`, `theme.compositionUnderline`, `theme.tableRowDivider`, `theme.tableColumnDivider`, `theme.tablePinnedDivider` | color |
+| Custom tokens the application schemas declare | as declared |
+
+Palette tokens are the colors built-in widgets draw with. Every theme resolves them: a theme that
+does not set one gets its light or dark default, chosen by the brightness of its `surface`. A theme
+may also define any other token by name (see [Themes](embedding.md#themes)); code reads one only
+after the application schemas declare it with its kind:
+
+```json
+"themeTokens": {
+  "definitions": [
+    { "name": "brandAccent", "type": "color" },
+    { "name": "gutter", "type": "number" }
+  ]
+}
+```
+
+A name that is none of these is a compile error (`STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN`, with a
+suggestion for a near miss) rather than a value that resolves to nothing at runtime. Themes are
+registered by the host at runtime, after compilation, so the compiler cannot see which custom tokens
+they will define; without a declaration, a typo such as `theme.acent` would compile and silently
+leave the property unstyled, and nothing would say whether the token is a color or a number. The
+declaration states that contract once. A declared custom token that the effective theme does not
+define leaves the property at its themed default, as an unset style property would.
+
+A token stays symbolic while the surface evaluates expressions and resolves when it applies the
+style property against the effective theme of that node, so a `ThemeScope` subtree reads its own
+values. Operators cannot compute with a token (`theme.spacingUnit * 2` is a type error); write the
+token itself as the style value.
 
 ### Layer placement and anchors
 

@@ -198,7 +198,8 @@ private:
 enum class OperandClass { number, text, other, undetermined };
 
 [[nodiscard]] OperandClass operand_class(const SemanticType& type);
-[[nodiscard]] SemanticTypePtr theme_token_type(std::string_view name);
+/** What `theme.<name>` reads; `unknown` for a name no theme is known to define. */
+[[nodiscard]] SemanticTypePtr theme_token_type(const SchemaRegistry& registry, std::string_view name);
 /** A state's type, given its declared type and its initializer's. */
 [[nodiscard]] SemanticTypePtr retained_state_type(
     const StateStatement& state,

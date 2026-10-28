@@ -51,18 +51,6 @@ struct ValidatedAnimation final {
     std::string trigger = "ANIMATE";
 };
 
-/**
- * Tokens `theme.<name>` can read, as ui::ThemeTokens resolves them; a runtime test keeps the two in
- * step.
- */
-inline constexpr std::array<std::string_view, 7U> theme_color_tokens{
-    "surface", "surfaceRaised", "foreground", "mutedForeground", "accent", "danger", "focus",
-};
-inline constexpr std::array<std::string_view, 3U> theme_number_tokens{
-    "spacingUnit",
-    "radius",
-    "density",
-};
 /** Host roots every surface supplies itself, without an application schema declaring them. */
 inline constexpr std::array<std::string_view, 1U> contextual_host_roots{"env"};
 
