@@ -2222,7 +2222,7 @@ void test_removed_focused_editor_commits(InputFixture& fixture) {
 [[nodiscard]] std::unique_ptr<ui::Surface>
 compiled_surface(runtime::ApplicationContext& application, const std::filesystem::path& resources,
                  const std::string& source, const std::string& root, const double width,
-                 const double height) {
+                 const double height, const bool reduced_motion = true) {
     const auto no_imports = [](const std::string_view,
                                const std::string_view path) -> compiler::ModuleSource {
         throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
@@ -2240,7 +2240,7 @@ compiled_surface(runtime::ApplicationContext& application, const std::filesystem
     environment.framebuffer_height = static_cast<int>(height);
     environment.logical_width = width;
     environment.logical_height = height;
-    environment.reduced_motion = true;
+    environment.reduced_motion = reduced_motion;
     return std::make_unique<ui::Surface>(
         root, application, runtime::LayerRole::overlay, root, environment,
         ui::TextEngine::load_control_font(
@@ -2442,6 +2442,63 @@ overlay StickyTable {
     check(below != table && inside_table, "a visible table row lost its hit");
 }
 
+void test_subtargets_hit_in_presented_space(const std::filesystem::path& resources) {
+    const std::string source = R"(
+animation SlideIn {
+  from { translateX: 200 }
+  to { translateX: 0 }
+  duration: 1000ms;
+  easing: "linear";
+  fillMode: "BOTH";
+}
+overlay SlidingTabs {
+  state tab = "three";
+  root Panel(key: "sliding.root", layout: { kind: "COLUMN", width: 640, height: 200 }) {
+    Panel(key: "sliding.panel", enter: SlideIn, layout: { kind: "COLUMN", width: 300, height: 40 }) {
+      Tabs(
+        key: "sliding.tabs",
+        tabs: [{ id: "one", label: "One" }, { id: "two", label: "Two" }, { id: "three", label: "Three" }],
+        bind: tab,
+        layout: { width: 300, height: 32 }
+      )
+    }
+    Text(key: "sliding.value", text: tab)
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("sliding-tabs", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "SlidingTabs", 640.0, 200.0, false);
+    static_cast<void>(surface->frame(1'000'000));
+    // Halfway through, the panel is drawn 100 to the right: one tab width.
+    static_cast<void>(surface->frame(501'000'000));
+    const ui::RetainedNode* tabs = surface->tree().find_key("sliding.tabs");
+    check(tabs != nullptr, "sliding tabs fixture lost its Tabs");
+    const std::vector<ui::WidgetSubtarget> targets = surface->input().subtargets(tabs->identity());
+    const auto first = std::ranges::find(targets, std::string("one"), &ui::WidgetSubtarget::id);
+    check(first != targets.end(), "Tabs did not project its tab subtargets");
+    // Press where the first tab is drawn, which is where the second one is laid out.
+    const ui::Point drawn{center(first->bounds).x + 100.0, center(first->bounds).y};
+    std::vector<ui::SurfaceInputEvent> events;
+    events.emplace_back(
+        ui::PointerInputEvent{ui::Point{drawn.x + 1.0, drawn.y}, ui::PointerEventType::move, 7, 0});
+    events.emplace_back(ui::PointerInputEvent{drawn, ui::PointerEventType::press, 7, 0});
+    events.emplace_back(ui::PointerInputEvent{drawn, ui::PointerEventType::release, 7, 0});
+    static_cast<void>(surface->input().enqueue(std::move(events)));
+    static_cast<void>(surface->frame(502'000'000));
+    static_cast<void>(surface->frame(503'000'000));
+    const ui::RetainedNode* value = surface->tree().find_key("sliding.value");
+    const auto text = value != nullptr ? value->description().properties.find("text")
+                                       : ui::DescriptionNode::Properties::const_iterator{};
+    const runtime::Value* selected = value != nullptr &&
+                                             text != value->description().properties.end()
+                                         ? text->second.value()
+                                         : nullptr;
+    check(selected != nullptr && selected->string() != nullptr && *selected->string() == "one",
+          "a tab inside a moving panel was hit where it is laid out instead of where it is drawn");
+}
+
 } // namespace
 
 int strata_test_interaction_residual(const int argument_count, const char* const* const arguments) {
@@ -2477,6 +2534,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_virtual_focused_row_stays_realized(resources);
         test_post_layout_reveal_reaches_layout(resources);
         test_sticky_table_header_blocks_hits(resources);
+        test_subtargets_hit_in_presented_space(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

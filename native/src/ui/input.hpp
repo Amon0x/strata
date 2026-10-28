@@ -814,6 +814,8 @@ class InputRouter final {
     mutable std::uint64_t pointer_geometry_notification_generation_ = 0U;
     mutable DirtyGenerationSnapshot pointer_geometry_dirty_generations_;
     mutable std::vector<PointerHitEntry> pointer_hit_entries_;
+    // Node identity to its entry in pointer_hit_entries_.
+    mutable std::map<std::uint64_t, std::size_t> pointer_hit_index_;
     mutable std::map<std::uint64_t, std::vector<WidgetSubtarget>> projected_subtargets_;
     mutable std::vector<WidgetSubtarget> detached_subtargets_;
     mutable bool pointer_geometry_ready_ = false;

@@ -725,6 +725,7 @@ bool InputRouter::move_static_text_selection(RetainedNode& node, const std::stri
 void InputRouter::prepare_pointer_geometry() const {
     if (tree_ == nullptr || tree_->root() == nullptr || layout_ == nullptr) {
         pointer_hit_entries_.clear();
+        pointer_hit_index_.clear();
         projected_subtargets_.clear();
         detached_subtargets_.clear();
         pointer_geometry_ready_ = false;
@@ -745,6 +746,7 @@ void InputRouter::prepare_pointer_geometry() const {
     pointer_geometry_ready_ = false;
     detached_subtargets_ready_ = false;
     pointer_hit_entries_.clear();
+    pointer_hit_index_.clear();
     projected_subtargets_.clear();
     detached_subtargets_.clear();
     pointer_hit_entries_.reserve(layout_->records.size());
@@ -818,6 +820,7 @@ void InputRouter::prepare_pointer_geometry() const {
         }
         const Rect bounds =
             hit_bounds_resolver_ ? hit_bounds_resolver_(node, *record) : record->hit_bounds;
+        pointer_hit_index_.insert_or_assign(node.identity(), pointer_hit_entries_.size());
         pointer_hit_entries_.push_back(PointerHitEntry{
             &node,
             transform_presentation_bounds(bounds, transform),
@@ -894,16 +897,12 @@ void InputRouter::prepare_detached_subtargets() const {
         for (auto target = detached.rbegin(); target != detached.rend(); ++target) {
             WidgetSubtarget presented = **target;
             if (presented.presentation_identity.has_value()) {
-                const auto entry = std::ranges::find(
-                    pointer_hit_entries_, *presented.presentation_identity,
-                    [](const PointerHitEntry& candidate) {
-                        return candidate.node != nullptr ? candidate.node->identity() : 0U;
-                    });
-                if (entry == pointer_hit_entries_.end())
+                const auto entry = pointer_hit_index_.find(*presented.presentation_identity);
+                if (entry == pointer_hit_index_.end())
                     continue;
-                presented.bounds =
-                    transform_presentation_bounds(presented.bounds, entry->transform);
-                presented.presentation_clip = entry->traversal_clip;
+                const PointerHitEntry& owner = pointer_hit_entries_[entry->second];
+                presented.bounds = transform_presentation_bounds(presented.bounds, owner.transform);
+                presented.presentation_clip = owner.traversal_clip;
             }
             detached_subtargets_.push_back(std::move(presented));
         }
@@ -978,14 +977,32 @@ InputRouter::hit_subtarget(const Point position, const RetainedNode* const ordin
         if (!node_participates(*current))
             continue;
         const std::vector<WidgetSubtarget>& projected = projected_subtargets(*current);
+        if (projected.empty())
+            continue;
+        // Subtargets are laid out with their owner, so they are hit where its presentation
+        // (a presence animation's scale or translation, say) currently draws it.
+        const auto entry = pointer_hit_index_.find(current->identity());
+        const PointerHitEntry* const owner =
+            entry != pointer_hit_index_.end() ? &pointer_hit_entries_[entry->second] : nullptr;
+        if (owner != nullptr && owner->traversal_clip.has_value() &&
+            !contains(*owner->traversal_clip, position)) {
+            continue;
+        }
         for (auto candidate = projected.rbegin(); candidate != projected.rend(); ++candidate) {
-            if (candidate->detached || !contains(candidate->bounds, position))
+            if (candidate->detached)
+                continue;
+            const Rect bounds = owner != nullptr
+                                    ? transform_presentation_bounds(candidate->bounds,
+                                                                    owner->transform)
+                                    : candidate->bounds;
+            if (!contains(bounds, position))
                 continue;
             // A modal backdrop cannot outrank a control inside that modal, regardless of zIndex.
             if (candidate->kind == WidgetSubtargetKind::scrim && ordinary_target != current)
                 continue;
             if (!best.has_value() || candidate->z_index > best->z_index) {
                 best = *candidate;
+                best->bounds = bounds;
             }
         }
     }
