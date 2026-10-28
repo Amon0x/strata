@@ -233,6 +233,11 @@ class DescriptionBuilder final {
         /** The slots `root` declares itself, for the root they were collected from. */
         std::set<std::string, std::less<>> declared_slots;
         std::shared_ptr<const DescriptionNode> declared_slots_root;
+        /**
+         * The slots the body declares within lazily generated rows, which its output does not
+         * hold until they are realized: rows take the caller's content when they are described.
+         */
+        std::set<std::string, std::less<>> generated_slots;
 
         /** The state scopes the body binds and owns itself. */
         StateBindings bindings;
@@ -280,6 +285,7 @@ class DescriptionBuilder final {
         std::unordered_map<const DescriptionNode*, std::size_t> child_index;
         StateBindings bindings;
         runtime::StateScopeSet owned_scopes;
+        std::set<std::string, std::less<>> generated_slots;
         /** A row's enclosing scope: reads of its bindings are the row's inputs. */
         const runtime::ExpressionScope* outer = nullptr;
         std::map<runtime::Symbol, runtime::ExpressionDependencyValue> outer_reads;
@@ -485,6 +491,12 @@ class DescriptionBuilder final {
     describe_row(ComponentInstance& row, const std::shared_ptr<const RowSource>& source,
                  std::size_t index);
     [[nodiscard]] runtime::StateScopeSet row_owned_scopes(const ComponentInstance& row) const;
+    /** A row's output with the content its enclosing components' callers project into it. */
+    [[nodiscard]] std::shared_ptr<const DescriptionNode>
+    project_into_row(const ComponentInstance& row,
+                     std::shared_ptr<const DescriptionNode> node) const;
+    /** Rows within the instance are described again when they are next realized. */
+    void invalidate_rows(ComponentInstance& instance);
 
     runtime::ApplicationContext& application_;
     /** This builder while it lives: generated rows describe with it, or alone once it is gone. */

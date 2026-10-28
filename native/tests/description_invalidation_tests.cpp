@@ -354,6 +354,51 @@ overlay Main {
           "the pane that read the ratio did not take its new value");
 }
 
+void test_a_slot_in_lazy_rows_takes_the_callers_content() {
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("invalidation-row-slots", bundle);
+    activate(application, "invalidation-row-slots", R"(
+component Rows() {
+  Repeater(key: "slot.rows", estimatedItemExtent: 24) {
+    for row in [{ id: "a" }, { id: "b" }] {
+      Panel(key: row.id) {
+        Text(key: format("{0}.label", row.id), text: row.id)
+        Slot(name: "content")
+      }
+    }
+  }
+}
+overlay Filled {
+  state caption = "first";
+  root Rows() {
+    Text(key: "slot.caption", text: caption)
+  }
+}
+)");
+    ui::DescriptionBuilder builder(application);
+    const ui::DescriptionBuildResult first = builder.build(runtime::LayerRole::overlay, "Filled");
+    check(first.diagnostics.empty(), "the row slot fixture produced diagnostics");
+    const std::shared_ptr<const ui::DescriptionNode> repeater = first.root->children->at(0U);
+    // Describing the layer realizes no row: the slot is found in the row body itself.
+    check(builder.telemetry().described_rows == 0U,
+          "projecting content into a component realized its lazy rows");
+    for (std::size_t index = 0U; index < repeater->children->size(); ++index) {
+        check(text(find(repeater->children->at(index), "slot.caption")) == "first",
+              "a slot inside a lazy row did not take the caller's content");
+    }
+    const std::uint64_t described = builder.telemetry().described_rows;
+
+    // New content reaches the rows already realized when they are next realized.
+    write_state(application, "overlay Filled", "caption", runtime::Value("second"));
+    const ui::DescriptionBuildResult second = builder.build(runtime::LayerRole::overlay, "Filled");
+    const std::shared_ptr<const ui::DescriptionNode> reprovided = second.root->children->at(0U);
+    check(reprovided->children != repeater->children &&
+              text(find(reprovided->children->at(0U), "slot.caption")) == "second" &&
+              text(find(reprovided->children->at(1U), "slot.caption")) == "second" &&
+              builder.telemetry().described_rows == described + 2U,
+          "rows kept the content their caller no longer passes");
+}
+
 void test_a_failed_build_changes_nothing_outside_the_builder() {
     const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("invalidation-pure", bundle);
@@ -410,6 +455,7 @@ int strata_test_description_invalidation() {
         test_a_stale_row_is_described_alone();
         test_rows_of_a_new_generation_keep_what_did_not_change();
         test_a_retained_write_beside_a_repeater_describes_only_its_reader();
+        test_a_slot_in_lazy_rows_takes_the_callers_content();
         test_a_failed_build_changes_nothing_outside_the_builder();
         std::cout << "strata_description_invalidation_tests: OK\n";
         return 0;

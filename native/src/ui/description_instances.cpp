@@ -196,6 +196,7 @@ void DescriptionBuilder::install_frame(ComponentInstance& instance, Frame& recor
     instance.outer_reads = std::move(recording.outer_reads);
     instance.bindings = std::move(recording.bindings);
     instance.owned_scopes = std::move(recording.owned_scopes);
+    instance.generated_slots = std::move(recording.generated_slots);
     touch(instance);
 }
 
@@ -304,13 +305,46 @@ void DescriptionBuilder::emit(ComponentInstance& instance) {
 const std::set<std::string, std::less<>>&
 DescriptionBuilder::declared_slots(ComponentInstance& instance) {
     if (instance.declared_slots_root != instance.root) {
-        instance.declared_slots.clear();
+        instance.declared_slots = instance.generated_slots;
         description_detail::declared_slot_names(instance.root,
                                                 program().component(instance.component_index).path,
                                                 instance.declared_slots);
         instance.declared_slots_root = instance.root;
     }
     return instance.declared_slots;
+}
+
+std::shared_ptr<const DescriptionNode>
+DescriptionBuilder::project_into_row(const ComponentInstance& row,
+                                     std::shared_ptr<const DescriptionNode> node) const {
+    // Each component the row is described within projects its caller's content into the slots
+    // it declares in the row, innermost first, as its own output would have been projected.
+    for (const ComponentInstance* enclosing = find_instance(row.parent); enclosing != nullptr;
+         enclosing = find_instance(enclosing->parent)) {
+        if (enclosing->kind == InstanceKind::component && !enclosing->generated_slots.empty() &&
+            !enclosing->call_site.projected.empty()) {
+            node = description_detail::project_slot_content(
+                node, enclosing->call_site.component_path, enclosing->call_site.projected);
+        }
+    }
+    return node;
+}
+
+void DescriptionBuilder::invalidate_rows(ComponentInstance& instance) {
+    const auto visit = [this](const auto& self, ComponentInstance& current) -> void {
+        for (const ChildRef& child : current.children) {
+            if (ComponentInstance* const called = find_instance(child.id); called != nullptr)
+                self(self, *called);
+        }
+        for (const auto& [key, id] : current.rows) {
+            static_cast<void>(key);
+            if (ComponentInstance* const row = find_instance(id); row != nullptr) {
+                mark_dirty(*row);
+                self(self, *row);
+            }
+        }
+    };
+    visit(visit, instance);
 }
 
 void DescriptionBuilder::attach(ComponentInstance& instance) {
@@ -1108,7 +1142,7 @@ DescriptionBuilder::describe_row(ComponentInstance& row,
                 throw std::logic_error("validated Repeater identity selected a row body that did "
                                        "not produce one root");
             }
-            return std::move(nodes.front());
+            return project_into_row(row, std::move(nodes.front()));
         });
         auto keyed = std::make_shared<DescriptionNode>(*described);
         keyed->key = canonical_key;

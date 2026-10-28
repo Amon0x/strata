@@ -302,6 +302,64 @@ void set_layout_field(DescriptionNode::Properties& properties, std::string name,
     return dynamic_cast<const EagerDescriptionChildren*>(node.children.get()) != nullptr;
 }
 
+/**
+ * The names of the Slots a block declares itself, read from the program rather than from what it
+ * describes: a lazily generated row is described only when realized. Content passed to another
+ * component is the block's own, except the fills naming that component's slots. A name the block
+ * computes cannot be known before it runs and is left out.
+ */
+void block_slot_names(const runtime::Program& program, const runtime::BlockId block,
+                      std::set<std::string, std::less<>>& names,
+                      const std::span<const std::size_t> skipped = {}) {
+    if (block == runtime::no_program_id)
+        return;
+    const std::span<const runtime::ProgramStatement> statements =
+        program.statements(program.block(block));
+    for (std::size_t index = 0U; index < statements.size(); ++index) {
+        if (std::ranges::binary_search(skipped, index))
+            continue;
+        const runtime::ProgramStatement& statement = statements[index];
+        switch (statement.kind) {
+        case runtime::StatementKind::node: {
+            const runtime::ProgramCall& call = program.call(statement.call);
+            if (call.component) {
+                for (const runtime::ProgramSlotFill& fill : program.slot_fills(call))
+                    block_slot_names(program, fill.children, names);
+                block_slot_names(program, call.children, names,
+                                 program.projected_statements(call));
+                break;
+            }
+            if (call.type == "Slot") {
+                for (const runtime::ProgramCallArgument& argument : program.arguments(call)) {
+                    const runtime::ProgramExpression& name = program.expression(argument.value);
+                    if (argument.name.name() == "name" &&
+                        name.kind == runtime::ExpressionKind::literal &&
+                        name.value.string() != nullptr && !name.value.string()->empty()) {
+                        names.insert(*name.value.string());
+                    }
+                }
+            }
+            block_slot_names(program, call.children, names);
+            break;
+        }
+        case runtime::StatementKind::conditional:
+            block_slot_names(program, statement.block, names);
+            block_slot_names(program, statement.otherwise, names);
+            break;
+        case runtime::StatementKind::when:
+            for (const runtime::ProgramWhenBranch& branch : program.branches(statement))
+                block_slot_names(program, branch.block, names);
+            break;
+        case runtime::StatementKind::loop:
+            block_slot_names(program, statement.block, names);
+            break;
+        case runtime::StatementKind::state:
+        case runtime::StatementKind::derived:
+            break;
+        }
+    }
+}
+
 void collect_slot_names(const std::shared_ptr<const DescriptionNode>& node,
                         const std::string_view component_path,
                         std::set<std::string, std::less<>>& names) {
@@ -1088,6 +1146,11 @@ std::shared_ptr<const DescriptionNode> DescriptionBuilder::build_call(const runt
             rows_generator = &generator(scope, call, key);
             repeater_children =
                 build_repeater_children(call.children, scope, *rows_generator, retained);
+            // A body's slots in its rows are its own; rows within rows are counted with them.
+            if (Frame* const current = frame();
+                current != nullptr && current->instance->kind != InstanceKind::row) {
+                block_slot_names(program(), statements.front().block, current->generated_slots);
+            }
         }
     }
     widgets_.apply_layout_defaults(type, properties);
@@ -1452,6 +1515,15 @@ DescriptionBuilder::build_component_call(const runtime::ProgramCall& call, const
         site.projected = std::move(projected_content);
     }
     site.behaviors = std::move(behaviors);
+    // Rows holding the body's slots take the content where they are described: new content
+    // reaches the rows already realized when they are next realized.
+    if (!called.generated_slots.empty() &&
+        !std::ranges::equal(called.call_site.projected, site.projected, [](const auto& a,
+                                                                           const auto& b) {
+            return a.first == b.first && a.second == b.second;
+        })) {
+        invalidate_rows(called);
+    }
     called.call_site = std::move(site);
     emit(called);
     hold_child(called);
