@@ -166,7 +166,14 @@ class RepeaterIndexableSequence final : public runtime::IndexableSequence {
     KeyFactory key_factory_;
 };
 
+/**
+ * The reads a Repeater generation depends on. The enclosing body is told them too: the generation
+ * is part of that body's output, so the body is stale when any of these reads change.
+ */
 struct RepeaterExpressionDependencies final : runtime::ExpressionDependencyObserver {
+    explicit RepeaterExpressionDependencies(runtime::ExpressionDependencyObserver* const enclosing)
+        : upstream(enclosing) {}
+
     void exclude(const Symbol name) {
         excluded.push_back(name);
     }
@@ -175,13 +182,18 @@ struct RepeaterExpressionDependencies final : runtime::ExpressionDependencyObser
         if (std::ranges::find(excluded, name) != excluded.end())
             return;
         lexical_values.insert_or_assign(name, runtime::capture_expression_dependency(value));
+        if (upstream != nullptr)
+            upstream->lexical(name, value);
     }
 
     void host(const runtime::ExpressionHostDependency& dependency) override {
         host_values.insert_or_assign(runtime::canonical_host_dependency_path(dependency.path),
                                      dependency);
+        if (upstream != nullptr)
+            upstream->host(dependency);
     }
 
+    runtime::ExpressionDependencyObserver* upstream = nullptr;
     std::vector<Symbol> excluded;
     std::map<Symbol, runtime::ExpressionDependencyValue> lexical_values;
     std::map<std::string, runtime::ExpressionHostDependency, std::less<>> host_values;
@@ -1048,7 +1060,7 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
         // Source reads belong to the retained generation just as filter/identity reads do. The
         // loop domain is excluded only after source evaluation so an outer binding with the same
         // name is still traced when it participates in the source expression.
-        RepeaterExpressionDependencies dependencies;
+        RepeaterExpressionDependencies dependencies(expressions_->dependency_observer());
         ExpressionDependencyObserverRestore dependency_observer(*expressions_, &dependencies);
         const ExpressionValue collection = evaluate(statement.expression, scope.expressions);
         const runtime::Value* scalar = collection.value();
@@ -1067,6 +1079,19 @@ DescriptionBuilder::RepeaterChildren DescriptionBuilder::build_repeater_children
             repeater_dependencies_current(*previous_stamp, scope.expressions, *expressions_)) {
             stamp = *previous_stamp;
             sequence = previous_sequence;
+            // The kept generation still rests on what its filter and keys read, and whoever
+            // holds this Repeater reads those values with it.
+            if (dependencies.upstream != nullptr) {
+                for (const auto& [name, value] : stamp.lexical_dependencies) {
+                    static_cast<void>(value);
+                    if (const ExpressionValue* current = scope.expressions.find(name))
+                        dependencies.upstream->lexical(name, *current);
+                }
+                for (const auto& [canonical, dependency] : stamp.host_dependencies) {
+                    static_cast<void>(canonical);
+                    dependencies.upstream->host(dependency);
+                }
+            }
         } else {
             dependencies.exclude(item_name);
             if (index_name.has_value())

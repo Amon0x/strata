@@ -7589,6 +7589,112 @@ overlay PhasedInput {
 
 } // namespace
 
+// Description-building fixtures: activate a single module and find nodes by key.
+void activate_description_fixture(strata::runtime::ApplicationContext& application,
+                                  const std::string_view name, const std::string& source) {
+    using namespace strata;
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    const runtime::ActivationResult activation = application.compile_and_activate(
+        compiler::ModuleSource{std::string(name) + ".strata", source}, no_imports, 0U);
+    std::string failure = "no diagnostic";
+    if (!activation.diagnostics.empty())
+        failure = activation.diagnostics.front().code + ": " + activation.diagnostics.front().message;
+    check(activation.activated(), std::string(name) + " fixture did not activate: " + failure);
+}
+
+[[nodiscard]] std::shared_ptr<const strata::ui::DescriptionNode>
+find_description_key(const std::shared_ptr<const strata::ui::DescriptionNode>& node,
+                     const std::string_view key) {
+    if (node == nullptr)
+        return nullptr;
+    if (node->key.has_value() && *node->key == key)
+        return node;
+    for (std::size_t index = 0U; index < node->children->size(); ++index) {
+        if (auto found = find_description_key(node->children->at(index), key); found != nullptr)
+            return found;
+    }
+    return nullptr;
+}
+
+[[nodiscard]] std::string description_text(const std::shared_ptr<const strata::ui::DescriptionNode>& node) {
+    if (node == nullptr)
+        return "<missing>";
+    const auto text = node->properties.find("text");
+    if (text == node->properties.end() || text->second.value() == nullptr ||
+        text->second.value()->string() == nullptr)
+        return "<no text>";
+    return *text->second.value()->string();
+}
+
+void test_repeater_follows_host_rows_it_reads() {
+    using namespace strata;
+    const data::JsonValue schemas = data::parse_json(R"({
+      "extensionPackages":[],
+      "widgets":{"registry":"repeater-host","required":[],"definitions":[]},
+      "actions":{"registry":"repeater-host","required":[],"definitions":[]},
+      "host":[{
+        "path":"model","nullable":false,
+        "type":{"kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[{
+          "name":"rows","required":true,"nullable":false,
+          "type":{"kind":"list","maximumItems":16,"elementNullable":false,"element":{
+            "kind":"object","allowUnknownFields":false,"valueNullable":false,"fields":[
+              {"name":"id","type":{"kind":"string"},"required":true,"nullable":false},
+              {"name":"label","type":{"kind":"string"},"required":true,"nullable":false}
+            ]}}
+        }]}
+      }]
+    })");
+    const auto bundle = runtime::ApplicationBundle::create(&schemas);
+    runtime::ApplicationContext application("repeater-host", bundle);
+    const auto publish = [&](const std::uint64_t generation, const std::string_view rows) {
+        static_cast<void>(application.host().adopt(bundle->host_snapshot(
+            "repeater-host-model", generation,
+            data::parse_json("{\"model\":{\"rows\":" + std::string(rows) + "}}"))));
+    };
+    publish(1U, R"([{"id":"a","label":"Alpha"}])");
+    activate_description_fixture(application, "repeater-host", R"(
+component Rows() {
+  Repeater(key: "host.rows", estimatedItemExtent: 24) {
+    for row in model.rows {
+      Text(key: row.id, text: row.label)
+    }
+  }
+}
+overlay Main { root Rows() }
+overlay Direct {
+  root Repeater(key: "direct.rows", estimatedItemExtent: 24) {
+    for row in model.rows {
+      Text(key: row.id, text: row.label)
+    }
+  }
+}
+)");
+    ui::DescriptionBuilder builder(application);
+    std::uint64_t generation = 1U;
+    for (const std::string_view layer : {"Main", "Direct"}) {
+        publish(++generation, R"([{"id":"a","label":"Alpha"}])");
+        const ui::DescriptionBuildResult first = builder.build(runtime::LayerRole::overlay, layer);
+        const std::shared_ptr<const ui::DescriptionNode> before =
+            first.root->children->at(0U);
+        check(first.diagnostics.empty() && before->virtual_sequence != nullptr &&
+                  before->virtual_sequence->count() == 1U,
+              "host-backed Repeater fixture did not describe its row");
+
+        // The host publishes another row: the cached body that holds the Repeater read the rows,
+        // so it is described again with the new generation.
+        publish(++generation, R"([{"id":"b","label":"Beta"},{"id":"a","label":"Alpha"}])");
+        const ui::DescriptionBuildResult second = builder.build(runtime::LayerRole::overlay, layer);
+        const std::shared_ptr<const ui::DescriptionNode> after = second.root->children->at(0U);
+        check(after->virtual_sequence != nullptr && after->virtual_sequence->count() == 2U &&
+                  after->virtual_sequence->key_at(0U) == "b" &&
+                  description_text(after->children->at(0U)) == "Beta",
+              "a cached Repeater kept rows the host replaced");
+    }
+}
+
 int strata_test_ui(const int argument_count, const char* const* const arguments) {
     try {
         if (argument_count == 3 && std::string_view(arguments[1]) == "--collections") {
@@ -7663,6 +7769,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
             test_async_collection_key_isolation_and_lazy_tree_publication(arguments[1]);
             test_native_collection_interaction_and_templates(arguments[1]);
             test_tree_rows_without_a_parent_are_reachable(arguments[1]);
+            test_repeater_follows_host_rows_it_reads();
         }
         std::cout << "strata_ui_tests: OK\n";
         return 0;
