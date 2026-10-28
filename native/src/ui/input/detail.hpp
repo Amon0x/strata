@@ -125,6 +125,11 @@ using data::JsonValue;
     });
 }
 
+inline void record_no_action(InputOperationResult& result, JsonValue event) {
+    JsonValue outcome = no_action_outcome(event);
+    result.record(std::move(event), std::move(outcome));
+}
+
 [[nodiscard]] inline const std::string* string_value(const runtime::Value* value) noexcept {
     if (value == nullptr) return nullptr;
     if (value->string() != nullptr) return value->string();

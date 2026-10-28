@@ -470,8 +470,7 @@ void WidgetInputScope::emit_event(const std::string_view event_kind, runtime::Va
         {"type", JsonValue(std::string(event_kind))},
         {"value", runtime::value_to_json(event_value)},
     });
-    result_.action_outcomes.push_back(input_detail::no_action_outcome(event));
-    result_.events.push_back(std::move(event));
+    input_detail::record_no_action(result_, std::move(event));
 }
 
 TypeaheadStep typeahead_step(WidgetInputScope& scope, const std::string_view state,

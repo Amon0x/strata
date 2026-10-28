@@ -490,8 +490,7 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
                 {"source", pending_focus_->source},
                 {"type", JsonValue("focus-changed")},
             });
-            result.action_outcomes.push_back(no_action_outcome(event));
-            result.events.push_back(std::move(event));
+            record_no_action(result, std::move(event));
             if (frame_invalidator_)
                 frame_invalidator_();
         }
@@ -886,8 +885,7 @@ void InputRouter::focus(const RetainedNode& node, const std::string_view reason,
                 {"source", source(*previous)},
                 {"type", JsonValue("focus-changed")},
             });
-            result.action_outcomes.push_back(no_action_outcome(event));
-            result.events.push_back(std::move(event));
+            record_no_action(result, std::move(event));
         }
     }
     focused_ = node.identity();
@@ -904,8 +902,7 @@ void InputRouter::focus(const RetainedNode& node, const std::string_view reason,
         {"source", source(node)},
         {"type", JsonValue("focus-changed")},
     });
-    result.action_outcomes.push_back(no_action_outcome(event));
-    result.events.push_back(std::move(event));
+    record_no_action(result, std::move(event));
 }
 
 void InputRouter::clear_focus(const std::string_view reason, InputOperationResult& result,
@@ -935,8 +932,7 @@ void InputRouter::clear_focus(const std::string_view reason, InputOperationResul
         {"source", source(*previous)},
         {"type", JsonValue("focus-changed")},
     });
-    result.action_outcomes.push_back(no_action_outcome(event));
-    result.events.push_back(std::move(event));
+    record_no_action(result, std::move(event));
 }
 
 void InputRouter::hover_route(const RetainedNode* target) {

@@ -248,6 +248,19 @@ class InputFixture final {
         });
     }
 
+    [[nodiscard]] std::shared_ptr<const runtime::ActionValue>
+    framework_action(const std::string_view id, runtime::Value payload) const {
+        const std::shared_ptr<const runtime::ActionContract> contract =
+            bundle_->action_registry().contract(id);
+        if (contract == nullptr)
+            throw std::runtime_error("framework action is unavailable");
+        return std::make_shared<const runtime::ActionValue>(runtime::ActionValue{
+            std::make_shared<const runtime::Action>(contract, std::move(payload)),
+            std::nullopt,
+            {},
+        });
+    }
+
     ui::WidgetRegistry widgets_;
     ui::BehaviorRegistry behaviors_;
     ui::StatusFeedbackService status_;
@@ -2130,6 +2143,41 @@ void test_banner_semantics(InputFixture& fixture) {
           "dismissed Banner did not settle after reconciliation");
 }
 
+void check_paired(const ui::InputOperationResult& result, const std::string_view message) {
+    check(result.events.size() == result.action_outcomes.size(), message);
+    for (std::size_t index = 0U; index < result.events.size(); ++index) {
+        const data::JsonValue* event = result.action_outcomes[index].find("event");
+        check(event != nullptr && *event == result.events[index], message);
+    }
+}
+
+void test_event_outcome_pairing(InputFixture& fixture) {
+    ui::DescriptionNode::Properties button = sized(80.0, 32.0);
+    button.emplace("onClick", runtime::ExpressionValue(fixture.framework_action(
+                                  "focus.request",
+                                  object({{"key", runtime::Value(runtime::KeyValue{"pair.field"})}}))));
+    fixture.adopt(node("Panel", "pair.root",
+                       {
+                           node("Button", "pair.button", {}, std::move(button)),
+                           node("Probe", "pair.field", {}, sized(80.0, 32.0)),
+                       },
+                       sized(300.0, 160.0, "COLUMN")));
+    const ui::Point point = center(fixture.bounds("pair.button").bounds);
+    const ui::InputOperationResult clicked = fixture.pointer({
+        ui::PointerInputEvent{point, ui::PointerEventType::press, 300, 0},
+        ui::PointerInputEvent{point, ui::PointerEventType::release, 300, 0},
+    });
+    check(fixture.focused("pair.field"), "Button focus.request did not move focus");
+    // The click's outcome is produced after the focus move records its blur/focus pair; it must
+    // still sit beside the click, not after the pairs its action recorded.
+    const bool moved = std::ranges::any_of(clicked.events, [](const data::JsonValue& event) {
+        const data::JsonValue* type = event.find("type");
+        return type != nullptr && type->string() != nullptr && *type->string() == "focus-changed";
+    });
+    check(moved, "Button focus.request recorded no focus change");
+    check_paired(clicked, "a nested focus move split an event from its action outcome");
+}
+
 } // namespace
 
 int strata_test_interaction_residual(const int argument_count, const char* const* const arguments) {
@@ -2160,6 +2208,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_release_target_activation(fixture);
         test_select_inside_modal(fixture);
         test_banner_semantics(fixture);
+        test_event_outcome_pairing(fixture);
         std::cout << "strata_interaction_residual_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

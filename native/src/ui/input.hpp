@@ -39,10 +39,19 @@ class WidgetRegistry;
 enum class WidgetFrameCost;
 
 struct InputOperationResult final {
+    // `events[i]` and `action_outcomes[i]` describe the same dispatch. Nested dispatch (an action
+    // that moves focus, say) records its own pairs while the outer one runs, so a pair is recorded
+    // as one unit, never by pushing to either vector alone.
     std::vector<data::JsonValue> events;
     std::vector<data::JsonValue> action_outcomes;
     std::size_t injected_events = 0U;
     std::size_t processed_events = 0U;
+
+    void record(data::JsonValue event, data::JsonValue outcome);
+    // Records `event` with an empty outcome and returns the pair's index, so the outcome can be
+    // filled in after the dispatch that produces it, in the event's place rather than after
+    // anything that dispatch recorded.
+    [[nodiscard]] std::size_t reserve(data::JsonValue event);
 };
 
 struct InputProfilerCounters final {

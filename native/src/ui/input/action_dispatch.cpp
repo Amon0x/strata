@@ -26,6 +26,17 @@
 namespace strata::ui {
 using namespace input_detail;
 
+void InputOperationResult::record(JsonValue event, JsonValue outcome) {
+    events.push_back(std::move(event));
+    action_outcomes.push_back(std::move(outcome));
+}
+
+std::size_t InputOperationResult::reserve(JsonValue event) {
+    const std::size_t index = events.size();
+    record(std::move(event), JsonValue{});
+    return index;
+}
+
 void InputRouter::observe_backdrop(const std::uint64_t probe, const double luminance,
                                    InputOperationResult& result) {
     RetainedNode* const node = tree_ != nullptr ? tree_->find_identity(probe) : nullptr;
@@ -92,9 +103,11 @@ runtime::ActionDispatchOutcome InputRouter::emit(
     InputOperationResult& result
 ) {
     JsonValue outcome_event = event;
-    result.events.push_back(std::move(event));
+    // The outcome is known only after the action ran, and the action can record pairs of its own
+    // (focus moves, nested dispatch): the slot is taken now so this pair keeps the event's place.
+    const std::size_t slot = result.reserve(std::move(event));
     if (action == nullptr || action->action == nullptr) {
-        result.action_outcomes.push_back(no_action_outcome(outcome_event));
+        result.action_outcomes[slot] = no_action_outcome(outcome_event);
         return runtime::ActionDispatchOutcome{
             runtime::ActionDispatchStatus::no_action, std::nullopt, {}, std::nullopt,
         };
@@ -126,13 +139,13 @@ runtime::ActionDispatchOutcome InputRouter::emit(
     report_action_outcome(*action->action, outcome, node);
     std::vector<JsonValue> owners;
     for (const std::string& owner : outcome.handler_owners) owners.emplace_back(owner);
-    result.action_outcomes.push_back(object({
+    result.action_outcomes[slot] = object({
         {"actionId", outcome.action_id.has_value() ? JsonValue(*outcome.action_id) : JsonValue{}},
         {"event", std::move(outcome_event)},
         {"handlerOwners", array(std::move(owners))},
         {"message", outcome.message.has_value() ? JsonValue(*outcome.message) : JsonValue{}},
         {"status", JsonValue(std::string(status_name(outcome.status)))},
-    }));
+    });
     return outcome;
 }
 
