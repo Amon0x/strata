@@ -221,6 +221,7 @@ The source-owner column is deliberately exact: adding, removing, or moving a dia
 | `STRATA.DSL.SEMANTIC_UNKNOWN_STYLE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_STYLE_BASE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN` | `native/src/compiler/semantic.cpp` |
+| `STRATA.DSL.SEMANTIC_UNKNOWN_TYPE` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET_DEFAULT` | `native/src/compiler/semantic.cpp` |
 | `STRATA.DSL.SEMANTIC_UNKNOWN_WIDGET_DEFAULT_PROPERTY` | `native/src/compiler/semantic.cpp` |

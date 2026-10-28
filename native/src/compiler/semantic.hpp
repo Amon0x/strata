@@ -70,6 +70,27 @@ struct SemanticResult final {
     std::map<std::string, ValidatedAnimation, std::less<>> animations;
 };
 
+/** Items an eagerly expanded loop may draw, and so the bound of a declared or retained list. */
+inline constexpr std::size_t maximum_eager_loop_items = 1'000U;
+
+/**
+ * The type an authored type reference names. Semantic analysis and lowering both resolve through
+ * here so a declaration means the same thing to each. A name the registry does not define resolves
+ * to `unknown` and is appended to `unresolved`, when given, for the caller to report.
+ */
+[[nodiscard]] SemanticTypePtr resolve_type_reference(
+    const TypeReference& reference,
+    const SchemaRegistry& registry,
+    std::vector<const TypeReference*>* unresolved = nullptr
+);
+
+/** A component parameter's type; an untyped parameter needs an explicit schema to be passed. */
+[[nodiscard]] SemanticTypePtr resolve_parameter_type(
+    const Parameter& parameter,
+    const SchemaRegistry& registry,
+    std::vector<const TypeReference*>* unresolved = nullptr
+);
+
 [[nodiscard]] SemanticResult validate_semantics(const File& file, const SchemaRegistry& registry);
 
 } // namespace strata::compiler

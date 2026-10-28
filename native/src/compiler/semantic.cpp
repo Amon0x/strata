@@ -28,7 +28,6 @@ using Scope = std::unordered_map<std::string, SemanticTypePtr>;
 using RetainedStateNames = std::set<std::string, std::less<>>;
 using LocalNames = std::set<std::string, std::less<>>;
 
-constexpr std::size_t maximum_eager_loop_items = 1'000U;
 constexpr std::size_t maximum_lazy_loop_items = 100'000U;
 
 [[nodiscard]] SemanticTypePtr simple(const SemanticTypeKind kind) {
@@ -344,10 +343,11 @@ class Validator final {
                                parameter.span, "component " + component->name,
                                "unique component parameter");
                     }
+                    std::vector<const TypeReference*> unresolved;
                     SemanticTypePtr type =
-                        parameter.type_reference.has_value()
-                            ? resolve_type(*parameter.type_reference)
-                            : simple(SemanticTypeKind::unsafe_component_parameter);
+                        resolve_parameter_type(parameter, registry_, &unresolved);
+                    report_unknown_types(unresolved, "component " + component->name + "(" +
+                                                         parameter.name + ")");
                     schema.parameters.push_back(SchemaParameter{
                         .name = parameter.name,
                         .type = std::move(type),
@@ -758,45 +758,16 @@ class Validator final {
         // popup roots and hoisted onto their synthesized portal, so they are not kind-local.
     }
 
-    [[nodiscard]] SemanticTypePtr resolve_type(const TypeReference& reference) const {
-        const std::string name = lower(reference.name);
-        if (name == "binding") {
-            auto type = std::make_shared<SemanticType>();
-            type->kind = SemanticTypeKind::state_binding;
-            type->value = reference.arguments.size() == 1U
-                              ? resolve_type(reference.arguments.front())
-                              : simple(SemanticTypeKind::unsafe_component_parameter);
-            return type;
+    /** Reports each type name a declaration used that no schema defines. */
+    void report_unknown_types(const std::vector<const TypeReference*>& unresolved,
+                              const std::string& path) {
+        for (const TypeReference* reference : unresolved) {
+            const std::vector<std::string> names = registry_.type_names();
+            report("STRATA.DSL.SEMANTIC_UNKNOWN_TYPE",
+                   "Type '" + reference->name + "' is not declared." +
+                       did_you_mean(reference->name, names),
+                   reference->span, path, expected_names(names));
         }
-        if (name == "list") {
-            auto type = std::make_shared<SemanticType>();
-            type->kind = SemanticTypeKind::list;
-            type->element = reference.arguments.size() == 1U
-                                ? resolve_type(reference.arguments.front())
-                                : simple(SemanticTypeKind::unsafe_component_parameter);
-            type->element_nullable =
-                reference.arguments.size() == 1U && reference.arguments.front().nullable;
-            type->maximum_items = maximum_eager_loop_items;
-            return type;
-        }
-        if (name == "map" || name == "record") {
-            auto type = std::make_shared<SemanticType>();
-            type->kind = SemanticTypeKind::map;
-            type->label = name;
-            type->allow_unknown_fields = true;
-            type->value = reference.arguments.empty() ? simple(SemanticTypeKind::any)
-                                                      : resolve_type(reference.arguments.front());
-            return type;
-        }
-        if (const SemanticType* declared = registry_.component_parameter_type(name);
-            declared != nullptr) {
-            return std::make_shared<SemanticType>(*declared);
-        }
-        if (const SemanticType* declared = registry_.application_type(name);
-            declared != nullptr) {
-            return std::make_shared<SemanticType>(*declared);
-        }
-        return simple(SemanticTypeKind::unsafe_component_parameter);
     }
 
     void report(std::string code, std::string message, const SourceSpan& span,
@@ -1543,10 +1514,12 @@ class Validator final {
                 persisted_owner_ = state->initializer.get();
                 SemanticTypePtr initializer =
                     infer(*state->initializer, scope, path + "/" + state->name);
-                SemanticTypePtr declared = state->type_reference.has_value()
-                                               ? resolve_type(*state->type_reference)
-                                               : initializer;
+                SemanticTypePtr declared = initializer;
                 if (state->type_reference.has_value()) {
+                    std::vector<const TypeReference*> unresolved;
+                    declared = resolve_type_reference(*state->type_reference, registry_,
+                                                      &unresolved);
+                    report_unknown_types(unresolved, path + "/" + state->name);
                     validate_expected(*state->initializer, *declared,
                                       state->type_reference->nullable, path + "/" + state->name,
                                       scope);
@@ -3646,6 +3619,62 @@ class Validator final {
 };
 
 } // namespace
+
+SemanticTypePtr resolve_type_reference(
+    const TypeReference& reference,
+    const SchemaRegistry& registry,
+    std::vector<const TypeReference*>* const unresolved
+) {
+    const std::string name = lower(reference.name);
+    const auto argument = [&](const std::size_t index) {
+        return index < reference.arguments.size()
+                   ? resolve_type_reference(reference.arguments[index], registry, unresolved)
+                   : simple(SemanticTypeKind::unsafe_component_parameter);
+    };
+    if (name == "binding") {
+        auto type = std::make_shared<SemanticType>();
+        type->kind = SemanticTypeKind::state_binding;
+        type->value = argument(0U);
+        return type;
+    }
+    if (name == "list") {
+        auto type = std::make_shared<SemanticType>();
+        type->kind = SemanticTypeKind::list;
+        type->element = argument(0U);
+        type->element_nullable =
+            !reference.arguments.empty() && reference.arguments.front().nullable;
+        type->maximum_items = maximum_eager_loop_items;
+        return type;
+    }
+    if (name == "map" || name == "record") {
+        auto type = std::make_shared<SemanticType>();
+        type->kind = SemanticTypeKind::map;
+        type->label = name;
+        type->allow_unknown_fields = true;
+        type->value = reference.arguments.empty() ? simple(SemanticTypeKind::any) : argument(0U);
+        return type;
+    }
+    if (const SemanticType* declared = registry.component_parameter_type(name);
+        declared != nullptr) {
+        return std::make_shared<SemanticType>(*declared);
+    }
+    if (const SemanticType* declared = registry.application_type(name); declared != nullptr) {
+        return std::make_shared<SemanticType>(*declared);
+    }
+    if (unresolved != nullptr)
+        unresolved->push_back(&reference);
+    return simple(SemanticTypeKind::unknown);
+}
+
+SemanticTypePtr resolve_parameter_type(
+    const Parameter& parameter,
+    const SchemaRegistry& registry,
+    std::vector<const TypeReference*>* const unresolved
+) {
+    return parameter.type_reference.has_value()
+               ? resolve_type_reference(*parameter.type_reference, registry, unresolved)
+               : simple(SemanticTypeKind::unsafe_component_parameter);
+}
 
 SemanticResult validate_semantics(const File& file, const SchemaRegistry& registry) {
     return Validator(file, registry).run();

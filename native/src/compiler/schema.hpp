@@ -204,6 +204,8 @@ public:
     [[nodiscard]] std::vector<std::string> action_names() const;
     [[nodiscard]] std::vector<std::string> material_ids() const;
     [[nodiscard]] std::vector<std::string> effect_names() const;
+    /** Names a component parameter or state type may use, as authored. */
+    [[nodiscard]] std::vector<std::string> type_names() const;
 
     void apply_scenario_declarations(const data::JsonValue& schemas);
     [[nodiscard]] const std::unordered_map<std::string, SemanticTypePtr>& host_types() const noexcept;
@@ -228,6 +230,7 @@ private:
     std::unordered_map<std::string, MaterialSchema> materials_;
     std::unordered_map<std::string, EffectSchema> effects_;
     std::unordered_map<std::string, SemanticTypePtr> component_parameter_types_;
+    std::vector<std::string> component_parameter_type_names_;
     std::unordered_map<std::string, SemanticTypePtr> host_types_;
     bool host_roots_declared_ = false;
     std::vector<SchemaParameter> framework_widget_parameters_;

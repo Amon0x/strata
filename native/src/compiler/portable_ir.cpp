@@ -356,12 +356,9 @@ public:
             if (const auto* component = std::get_if<ComponentDeclaration>(&declaration.node)) {
                 ComponentSchema schema;
                 for (const Parameter& parameter : component->parameters) {
-                    SemanticTypePtr type = parameter.type_reference.has_value()
-                                               ? resolve_type(*parameter.type_reference)
-                                               : type_of(SemanticTypeKind::unknown);
                     schema.parameters.push_back(SchemaParameter{
                         .name = parameter.name,
-                        .type = std::move(type),
+                        .type = resolve_parameter_type(parameter, registry_),
                         .required = parameter.default_value == nullptr,
                         .nullable = parameter.type_reference.has_value() &&
                             parameter.type_reference->nullable,
@@ -453,47 +450,6 @@ private:
         auto type = std::make_shared<SemanticType>();
         type->kind = kind;
         return type;
-    }
-
-    [[nodiscard]] SemanticTypePtr resolve_type(const TypeReference& reference) const {
-        std::string normalized = reference.name;
-        std::ranges::transform(normalized, normalized.begin(), [](const unsigned char character) {
-            return static_cast<char>(std::tolower(character));
-        });
-        if (normalized == "binding") {
-            auto type = std::make_shared<SemanticType>();
-            type->kind = SemanticTypeKind::state_binding;
-            type->value = reference.arguments.size() == 1U
-                              ? resolve_type(reference.arguments.front())
-                              : type_of(SemanticTypeKind::unknown);
-            return type;
-        }
-        if (normalized == "list") {
-            auto type = std::make_shared<SemanticType>();
-            type->kind = SemanticTypeKind::list;
-            type->element = reference.arguments.size() == 1U
-                                ? resolve_type(reference.arguments.front())
-                                : type_of(SemanticTypeKind::any);
-            type->maximum_items = 1000U;
-            return type;
-        }
-        if (normalized == "map" || normalized == "record") {
-            auto type = std::make_shared<SemanticType>();
-            type->kind = SemanticTypeKind::map;
-            type->label = normalized;
-            type->allow_unknown_fields = true;
-            type->value = reference.arguments.empty()
-                              ? type_of(SemanticTypeKind::any)
-                              : resolve_type(reference.arguments.front());
-            return type;
-        }
-        if (const SemanticType* type = registry_.component_parameter_type(normalized); type != nullptr) {
-            return std::make_shared<SemanticType>(*type);
-        }
-        if (const SemanticType* type = registry_.application_type(normalized); type != nullptr) {
-            return std::make_shared<SemanticType>(*type);
-        }
-        return type_of(SemanticTypeKind::unknown);
     }
 
     [[nodiscard]] JsonValue compile_screen(const ScreenDeclaration& screen, const SourceSpan& source_span) {
@@ -663,9 +619,10 @@ private:
             const Statement& statement = *block.statements[index];
             const std::string statement_path = child(path, std::to_string(index));
             if (const auto* state = std::get_if<StateStatement>(&statement.node)) {
-                SemanticTypePtr declared = state->type_reference.has_value()
-                                               ? resolve_type(*state->type_reference)
-                                               : infer_structured_type(state->initializer.get());
+                SemanticTypePtr declared =
+                    state->type_reference.has_value()
+                        ? resolve_type_reference(*state->type_reference, registry_)
+                        : infer_structured_type(state->initializer.get());
                 JsonValue declared_schema = declared != nullptr ? semantic_type(*declared) : null();
                 if (declared != nullptr && state->type_reference.has_value() &&
                     state->type_reference->nullable) {
@@ -1619,7 +1576,7 @@ private:
             type->element = list->elements.empty()
                                 ? type_of(SemanticTypeKind::any)
                                 : infer_structured_type(list->elements.front().get());
-            type->maximum_items = 1000U;
+            type->maximum_items = maximum_eager_loop_items;
             return type;
         }
         if (const auto* map = std::get_if<MapExpression>(&expression->node)) {

@@ -596,6 +596,7 @@ SchemaRegistry SchemaRegistry::from_catalog(const BuiltinCatalog& catalog) {
         if (!inserted) {
             throw std::logic_error("duplicate normalized native catalog component parameter type");
         }
+        registry.component_parameter_type_names_.push_back(value.name);
     }
     for (const DeclaredMaterial& value : catalog.materials) {
         MaterialSchema schema;
@@ -1097,6 +1098,21 @@ std::vector<std::string> SchemaRegistry::effect_names() const {
     names.reserve(names.size() + effects_.size());
     for (const auto& [name, schema] : effects_) {
         static_cast<void>(schema);
+        names.push_back(name);
+    }
+    std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
+    return names;
+}
+
+std::vector<std::string> SchemaRegistry::type_names() const {
+    std::vector<std::string> names =
+        base_ != nullptr ? base_->type_names()
+                         : std::vector<std::string>{"Binding", "List", "Map", "Record"};
+    names.insert(names.end(), component_parameter_type_names_.begin(),
+                 component_parameter_type_names_.end());
+    for (const auto& [normalized, name] : application_type_names_) {
+        static_cast<void>(normalized);
         names.push_back(name);
     }
     std::ranges::sort(names);

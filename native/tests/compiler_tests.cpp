@@ -656,6 +656,35 @@ void test_each_problem_is_reported_once() {
            "STRATA.DSL.SEMANTIC_UNKNOWN_THEME_TOKEN");
 }
 
+// A misspelled type is named as such, and lowering reads every declared type exactly as semantic
+// analysis does, nullable list elements included.
+void test_types_resolve_once_for_analysis_and_lowering() {
+    const auto misspelled = compile_source(
+        "component Card(label: strnig) { Text(text: label) }\n"
+        "screen Main { state names: List<strnig> = []; root Card(label: \"x\") }"
+    );
+    check(diagnostic_count(misspelled, "STRATA.DSL.SEMANTIC_UNKNOWN_TYPE") == 2U &&
+              misspelled.diagnostics.size() == 2U &&
+              misspelled.diagnostics.front().message.contains("Did you mean 'string'?"),
+          "misspelled types were not reported as unknown types:" + describe(misspelled));
+
+    const auto nullable = compile_source(
+        "component Names(names: List<string?>) { Text(text: \"x\") }\n"
+        "screen Main { state names: List<string?> = [null]; root Names(names: names) }"
+    );
+    check(nullable.succeeded(), "nullable list elements did not compile:" + describe(nullable));
+    const auto& unit = *nullable.unit;
+    const auto& parameter = unit.find("components")->array()->front()
+                                .find("parameters")->array()->front();
+    const auto* parameter_type = parameter.find("schema")->find("type");
+    const auto& screen_body = unit.find("screens")->array()->front().find("body");
+    const auto* state_type = screen_body->find("statements")->array()->front()
+                                 .find("declaredSchema");
+    check(*parameter_type->find("elementNullable")->boolean() &&
+              *state_type->find("elementNullable")->boolean(),
+          "lowering dropped a nullable list element type");
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -677,6 +706,7 @@ int strata_test_compiler() {
         test_when_arm_matches_a_bare_name();
         test_computed_map_keys_are_rejected();
         test_each_problem_is_reported_once();
+        test_types_resolve_once_for_analysis_and_lowering();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {
