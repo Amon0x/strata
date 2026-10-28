@@ -154,8 +154,12 @@ enum class EffectBackdropSource : std::uint32_t {
     surface = 1U,
 };
 
-/** Default visual sampling ceiling for live effects; zero explicitly means unbounded. */
-inline constexpr double default_effect_refresh_rate = 240.0;
+/**
+ * Refresh rate of an effect that requests none: zero, which means evaluated every frame. A
+ * retained sample is reused only when the display outpaces the requested rate, so a default cap
+ * would make every effect pay for the cache while rarely hitting it.
+ */
+inline constexpr double default_effect_refresh_rate = 0.0;
 
 struct EffectState final {
     std::string id;

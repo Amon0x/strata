@@ -28,7 +28,11 @@ inline constexpr std::uint32_t resource_release = 2U;
 inline constexpr std::uint32_t resource_encoded_image = 3U;
 inline constexpr std::uint32_t packet_flag_geometry_payload = 1U;
 inline constexpr std::uint32_t packet_flag_geometry_patches = 2U;
-inline constexpr double default_effect_refresh_rate = 240.0;
+/**
+ * Refresh rate of an effect that requests none: zero, evaluated every frame. Only an effect that
+ * asks for a rate retains and reuses its filtered sample between refreshes.
+ */
+inline constexpr double default_effect_refresh_rate = 0.0;
 
 /** Highest presentation group index. A vertex's z selects its group; zero is the identity. */
 inline constexpr std::uint32_t maximum_presentation_group = 511U;

@@ -525,10 +525,11 @@ incoming Surface framebuffer is the game, window, or lower UI layer already pres
 Only `BACKDROP` effects accept this argument; `CONTENT` effects always filter their isolated
 subtree.
 
-Live effects default to a maximum refresh rate of 240 Hz. The renderer continues composing every
-application frame while reusing the latest filtered sample between refreshes; animation time is
-absolute, so a sampled shader does not run in slow motion. `refreshRate` is a generic effect
-argument rather than a declared shader parameter:
+Live effects are evaluated every frame unless they set `refreshRate`. With a rate, the renderer
+continues composing every application frame while reusing the latest filtered sample between
+refreshes; animation time is absolute, so a sampled shader does not run in slow motion. A rate only
+saves work when it is below the display's refresh rate, since keeping the sample costs a copy.
+`refreshRate` is a generic effect argument rather than a declared shader parameter:
 
 ```strata
 Panel(effect: effect("demo:optic-glass", refreshRate: 120, blurRadius: 18, tint: #7DB8FF35))

@@ -562,6 +562,31 @@ void test_effect_batch_change_invalidates_retained_samples(
     );
 }
 
+/**
+ * An effect that does not ask for a refresh rate is evaluated every frame. A retained sample only
+ * pays off when the display refreshes faster than the requested rate, so a default cap would make
+ * every effect pay the cache copy and composite while almost never reusing it.
+ */
+void test_effect_refresh_defaults_to_unbounded(const std::filesystem::path& resources) {
+    using namespace strata;
+    check(host::default_effect_refresh_rate == 0.0 && host::EffectBatch{}.refresh_rate == 0.0,
+          "decoded effect batches default to a rate-limited cache");
+    ui::EffectState unspecified;
+    unspecified.id = "test:effect";
+    check(unspecified.refresh_rate == 0.0, "effect state defaults to a rate-limited cache");
+    ui::RenderCommandBuffer commands;
+    commands.append(ui::BackdropEffectRenderCommand{
+        ui::Rect{10.0, 12.0, 80.0, 44.0},
+        ui::CornerRadii::all(9.0),
+        unspecified,
+    });
+    host::RenderPacketDecoder decoder;
+    const host::RenderPacket& packet = decoder.decode(encode(commands, resources));
+    const auto* batch = std::get_if<host::EffectBatch>(&packet.batches.at(0U));
+    check(batch != nullptr && batch->refresh_rate == 0.0,
+          "an effect without a refresh rate was encoded as rate limited");
+}
+
 } // namespace
 
 int strata_test_render_packet(const int argument_count, const char* const* const arguments) {
@@ -580,6 +605,7 @@ int strata_test_render_packet(const int argument_count, const char* const* const
         test_repeated_epoch_rejects_batch_shape_changes(arguments[1]);
         test_incremental_geometry_patch_round_trip(arguments[1]);
         test_effect_batch_change_invalidates_retained_samples(arguments[1]);
+        test_effect_refresh_defaults_to_unbounded(arguments[1]);
         std::cout << "strata_render_packet_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {

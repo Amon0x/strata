@@ -160,8 +160,9 @@ Surface/backend stream. Compact packets are deltas and cannot initialize a fresh
 `reset()` only when discarding the stream, not while continuing to consume it. `RenderPacket`
 exposes ordered texture mutations, fixed-layout vertex bytes, indices, scissors,
 material/blend/texture bindings, draw batches, blur batches, backdrop/content effect batches, and
-content stack markers. Effect batches carry a maximum refresh rate; custom backends may retain the
-latest filtered sample between deadlines while continuing to composite every frame. A backdrop
+content stack markers. Effect batches carry a maximum refresh rate, zero (the default) for every
+frame; for a nonzero rate custom backends may retain the latest filtered sample between deadlines
+while continuing to composite every frame. A backdrop
 effect batch with a nonzero `probe` belongs to a node that observes its backdrop: a backend that can
 measure reports the mean luma of what that effect captured through
 `strata_surface_report_backdrop` (`Surface::report_backdrop`), in any later frame, and one that
