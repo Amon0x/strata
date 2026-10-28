@@ -753,6 +753,30 @@ void test_expression_types_follow_runtime_evaluation() {
              "arithmetic on a boolean");
 }
 
+// A list state can hold as many items as lowering declares for it, not only as many as it starts
+// with, and a state action reads its target from the arguments after the action id however the
+// id is written.
+void test_state_actions_see_the_state_lowering_declares() {
+    const auto grown = compile_source(
+        "screen Main { state items = [1, 2];\n"
+        "  root Button(label: \"Add\", onClick: action(\"state.set\", name: \"items\", "
+        "value: [1, 2, 3])) }"
+    );
+    check(grown.succeeded(), "a list state could not grow past its initializer:" + describe(grown));
+    const auto& statement = grown.unit->find("screens")->array()->front().find("body")
+                                ->find("statements")->array()->front();
+    check(*statement.find("declaredSchema")->find("maximumItems")->integer() == 1000,
+          "lowering changed the bound it declares for a list state");
+
+    const auto named_id = compile_source(
+        "screen Main { state items = [1, 2];\n"
+        "  root Button(label: \"Reset\", onClick: action(name: \"state.set\", name: \"items\", "
+        "value: [4])) }"
+    );
+    check(named_id.succeeded(),
+          "a named action id was read as the state action's target:" + describe(named_id));
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -777,6 +801,7 @@ int strata_test_compiler() {
         test_types_resolve_once_for_analysis_and_lowering();
         test_slot_names_resolve_the_same_for_analysis_and_lowering();
         test_expression_types_follow_runtime_evaluation();
+        test_state_actions_see_the_state_lowering_declares();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {

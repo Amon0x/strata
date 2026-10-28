@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <string_view>
@@ -1709,10 +1710,32 @@ class Validator final {
             deferred_derived_.erase(placeholder);
     }
 
+    /**
+     * A list a state starts from can grow to the retained-list bound at runtime, which is the
+     * bound lowering declares for it, rather than staying at the length it was written with.
+     */
+    [[nodiscard]] static SemanticTypePtr growable(const SemanticTypePtr& type) {
+        if (type == nullptr ||
+            (type->kind != SemanticTypeKind::list && type->kind != SemanticTypeKind::map)) {
+            return type;
+        }
+        auto copy = std::make_shared<SemanticType>(*type);
+        if (copy->kind == SemanticTypeKind::list) {
+            copy->minimum_items.reset();
+            copy->maximum_items = maximum_eager_loop_items;
+            copy->element = growable(copy->element);
+        }
+        for (ObjectField& field : copy->fields)
+            field.type = growable(field.type);
+        return copy;
+    }
+
     /** The type a retained state holds, given its declared type and its initializer's. */
     [[nodiscard]] static SemanticTypePtr retained_state_type(const StateStatement& state,
                                                              SemanticTypePtr declared,
                                                              const SemanticTypePtr& initializer) {
+        if (!state.type_reference.has_value())
+            declared = growable(declared);
         // A Record's fields are fixed by its initializer, so reads are checked against them;
         // their values change at runtime, so literal field types widen.
         if (declared->kind == SemanticTypeKind::map && declared->label == "record" &&
@@ -2381,9 +2404,10 @@ class Validator final {
         }
     }
 
+    /** An action's argument `name`; the first argument is always the action id. */
     [[nodiscard]] static const Expression* named_argument(const CallExpression& call,
                                                           const std::string_view name) {
-        for (const Argument& argument : call.arguments) {
+        for (const Argument& argument : call.arguments | std::views::drop(1)) {
             if (argument.name == name && argument.value != nullptr)
                 return argument.value.get();
         }
