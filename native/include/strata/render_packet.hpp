@@ -73,7 +73,10 @@ struct RoundedClip final {
     [[nodiscard]] friend bool operator==(const RoundedClip&, const RoundedClip&) = default;
 };
 
-/** Indexed geometry submission. Vertex records use the fixed 88-byte layout. */
+/** Bytes of one packet vertex record; the vertex stream is a whole number of these. */
+inline constexpr std::size_t packet_vertex_bytes = 88U;
+
+/** Indexed geometry submission. Vertex records use the fixed packet_vertex_bytes layout. */
 struct DrawBatch final {
     std::uint32_t source_order = 0U;
     Scissor scissor;

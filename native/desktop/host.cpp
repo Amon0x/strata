@@ -1709,7 +1709,7 @@ struct Host::Impl final {
             sample->packet_bytes = info.render_packet_size;
             sample->draw_calls = packet.planned_draw_count;
             sample->batches = packet.batches.size();
-            sample->vertices = packet.vertices.size() / 88U;
+            sample->vertices = packet.vertices.size() / host::packet_vertex_bytes;
             sample->blur_passes = render_telemetry.blur_passes;
         }
         strata_profiler_host_frame telemetry{};
@@ -1717,7 +1717,7 @@ struct Host::Impl final {
         telemetry.version = STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT;
         telemetry.draw_calls = packet.planned_draw_count;
         telemetry.batches = packet.batches.size();
-        telemetry.vertices = packet.vertices.size() / 88U;
+        telemetry.vertices = packet.vertices.size() / host::packet_vertex_bytes;
         telemetry.blur_passes = render_telemetry.blur_passes;
         telemetry.blur_target_width = render_telemetry.blur_target_width;
         telemetry.blur_target_height = render_telemetry.blur_target_height;

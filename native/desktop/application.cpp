@@ -503,7 +503,7 @@ struct ApplicationHost::Impl final {
         telemetry.version = STRATA_PROFILER_HOST_FRAME_VERSION_CURRENT;
         telemetry.draw_calls = packet.planned_draw_count;
         telemetry.batches = packet.batches.size();
-        telemetry.vertices = packet.vertices.size() / 88U;
+        telemetry.vertices = packet.vertices.size() / host::packet_vertex_bytes;
         telemetry.submit_nanos = 0;
         static_cast<void>(info);
         strata::require_ok(strata_surface_record_host_frame(surface->native_handle(), &telemetry),

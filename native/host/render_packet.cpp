@@ -594,7 +594,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     const std::uint32_t index_count = input.count();
     const std::uint32_t planned_draw_count = input.count();
     const std::uint32_t skipped_draw_count = input.count();
-    if (vertex_bytes % 88U != 0U || index_count > std::numeric_limits<std::uint32_t>::max() / 4U) {
+    if (vertex_bytes % packet_vertex_bytes != 0U || index_count > std::numeric_limits<std::uint32_t>::max() / 4U) {
         throw std::invalid_argument("render packet geometry counts are invalid");
     }
     std::vector<PresentationGroup> groups = presentation_groups(input);
