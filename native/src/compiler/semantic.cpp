@@ -2079,14 +2079,8 @@ class Validator final {
                            argument.value->span, call_path + ".persistenceKey",
                            "stable non-empty string literal");
                 } else {
-                    const auto [found, inserted] = persistence_keys_.try_emplace(*key, call_path);
-                    if (!inserted && found->second != call_path) {
-                        report("STRATA.DSL.SEMANTIC_DUPLICATE_PERSISTENCE_KEY",
-                               "Persistence key '" + *key + "' is already used by '" +
-                                   found->second + "'.",
-                               argument.value->span, call_path + ".persistenceKey",
-                               "unique persistence key");
-                    }
+                    claim_persistence_key(*key, *argument.value, call_path,
+                                          call_path + ".persistenceKey");
                 }
             }
             if (parameter == nullptr) {
@@ -2402,6 +2396,24 @@ class Validator final {
             if (id->starts_with("state."))
                 validate_state_action(*id, call, scope, component_path);
         }
+    }
+
+    /**
+     * Records the widget or persisted() state whose key literal is `key_expression` as the owner of
+     * `key`. Persisted values are stored by key alone, so every owner needs its own, siblings
+     * included; the same literal checked again keeps its key.
+     */
+    void claim_persistence_key(const std::string& key, const Expression& key_expression,
+                               const std::string& owner_path,
+                               const std::string& component_path) {
+        const auto [found, inserted] =
+            persistence_keys_.try_emplace(key, PersistenceOwner{&key_expression, owner_path});
+        if (inserted || found->second.key == &key_expression)
+            return;
+        report("STRATA.DSL.SEMANTIC_DUPLICATE_PERSISTENCE_KEY",
+               "Persistence key '" + key + "' is already used by '" + found->second.path +
+                   "' at line " + std::to_string(found->second.key->span.start.line) + ".",
+               key_expression.span, component_path, "unique persistence key");
     }
 
     /** An action's argument `name`; the first argument is always the action id. */
@@ -3748,14 +3760,8 @@ class Validator final {
                            key_argument != nullptr ? key_argument->value->span : expression.span,
                            component_path, "persisted(\"stable.key\", initial)");
                 } else {
-                    const auto [found, inserted] =
-                        persistence_keys_.try_emplace(*key, component_path);
-                    if (!inserted && found->second != component_path) {
-                        report("STRATA.DSL.SEMANTIC_DUPLICATE_PERSISTENCE_KEY",
-                               "Persistence key '" + *key + "' is already used by '" +
-                                   found->second + "'.",
-                               key_argument->value->span, component_path, "unique persistence key");
-                    }
+                    claim_persistence_key(*key, *key_argument->value, component_path,
+                                          component_path);
                 }
                 const Argument* initial = argument_for("initial");
                 return initial != nullptr
@@ -3832,7 +3838,12 @@ class Validator final {
     std::set<std::tuple<std::string, std::string, std::string, std::uint64_t, std::uint64_t>>
         reported_;
     std::map<std::string, ValidatedAnimation, std::less<>> validated_animations_;
-    std::map<std::string, std::string, std::less<>> persistence_keys_;
+    struct PersistenceOwner final {
+        /** The key literal, which identifies one widget or state however often it is checked. */
+        const Expression* key = nullptr;
+        std::string path;
+    };
+    std::map<std::string, PersistenceOwner, std::less<>> persistence_keys_;
     std::set<const Expression*> diagnosed_layout_properties_;
     std::vector<
         const std::map<std::string, const Expression*, std::less<>>*

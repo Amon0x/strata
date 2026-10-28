@@ -777,6 +777,25 @@ void test_state_actions_see_the_state_lowering_declares() {
           "a named action id was read as the state action's target:" + describe(named_id));
 }
 
+// Persisted values are stored by key, so two widgets written side by side cannot share one; a
+// component drawn twice is one widget and keeps its key.
+void test_sibling_widgets_need_their_own_persistence_keys() {
+    const auto siblings = compile_source(
+        "screen Main { root Panel {\n"
+        "  Scroll(persistenceKey: \"log\") { Text(text: \"a\") }\n"
+        "  Scroll(persistenceKey: \"log\") { Text(text: \"b\") }\n"
+        "} }"
+    );
+    check(diagnostic_count(siblings, "STRATA.DSL.SEMANTIC_DUPLICATE_PERSISTENCE_KEY") == 1U,
+          "sibling widgets shared a persistence key:" + describe(siblings));
+
+    const auto reused = compile_source(
+        "component Log { Scroll(persistenceKey: \"log\") { Text(text: \"a\") } }\n"
+        "screen Main { root Panel { Log Log } }"
+    );
+    check(reused.succeeded(), "a component drawn twice lost its persistence key:" + describe(reused));
+}
+
 } // namespace
 
 int strata_test_compiler() {
@@ -802,6 +821,7 @@ int strata_test_compiler() {
         test_slot_names_resolve_the_same_for_analysis_and_lowering();
         test_expression_types_follow_runtime_evaluation();
         test_state_actions_see_the_state_lowering_declares();
+        test_sibling_widgets_need_their_own_persistence_keys();
         std::cout << "strata_compiler_tests: OK\n";
         return 0;
     } catch (const std::exception& exception) {
