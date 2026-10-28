@@ -15,6 +15,7 @@
 #include "ui/text_geometry.hpp"
 #include "ui/widget/editor_geometry.hpp"
 #include "ui/widget/input.hpp"
+#include "ui/widget/presentation.hpp"
 #include "ui/widget/registry.hpp"
 
 namespace strata::ui {
@@ -780,11 +781,23 @@ void InputRouter::prepare_pointer_geometry() const {
                       inherited, local_presentation_transform(node, *motion_, record->bounds))
                 : inherited;
         std::optional<Rect> child_clip = traversal_clip;
-        if (record->clip.has_value()) {
-            const Rect transformed = transform_presentation_bounds(*record->clip, inherited);
+        const auto clip_children = [&child_clip, &inherited](const Rect clip) {
+            const Rect transformed = transform_presentation_bounds(clip, inherited);
             child_clip = child_clip.has_value()
                              ? std::optional(child_clip->clip_intersection(transformed))
                              : std::optional(transformed);
+        };
+        if (record->clip.has_value())
+            clip_children(*record->clip);
+        // Descendants are hit only where they are drawn: a widget that clips them further than
+        // its layout does (rows below a table's sticky header) clips their hits the same way.
+        if (commands_ != nullptr) {
+            if (const std::optional<Rect> descendant_clip =
+                    widget_descendant_clip(widgets_, node, *record, *layout_, *this, *commands_,
+                                           nullptr, nullptr, motion_, opacity);
+                descendant_clip.has_value()) {
+                clip_children(*descendant_clip);
+            }
         }
         std::vector<RetainedNode*> children;
         children.reserve(node.children().size());

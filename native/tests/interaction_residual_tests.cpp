@@ -2384,6 +2384,64 @@ overlay Reveal {
     check(offset("reveal.inner") == inner_before, "a reveal of a visible target scrolled");
 }
 
+void test_sticky_table_header_blocks_hits(const std::filesystem::path& resources) {
+    std::string rows;
+    for (int index = 0; index < 12; ++index) {
+        rows += std::string(index == 0 ? "" : ", ") + "{ key: \"sticky.row." +
+                std::to_string(index) + "\", cells: { name: \"Row " + std::to_string(index) +
+                "\" } }";
+    }
+    const std::string source = R"(
+overlay StickyTable {
+  root Panel(key: "sticky.root", layout: { kind: "COLUMN", width: 320, height: 240 }) {
+    Table(
+      key: "sticky.table",
+      columns: [{ id: "name", header: "Name", size: "FIXED", width: 200 }],
+      rows: [)" + rows + R"(],
+      rowHeight: 30,
+      headerHeight: 32,
+      layout: { kind: "SCROLL", width: 240, height: 150 }
+    )
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("sticky-table", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "StickyTable", 320.0, 240.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    ui::InputOperationResult scrolled;
+    check(surface->input().scroll_to("sticky.table", ui::Point{0.0, 50.0}, scrolled),
+          "sticky table did not scroll");
+    for (int frame = 0; frame < 2; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    const ui::RetainedNode* table = surface->tree().find_key("sticky.table");
+    const ui::LayoutRecord* record =
+        table != nullptr ? surface->layout().find(table->identity()) : nullptr;
+    check(record != nullptr && record->viewport.has_value(), "sticky table has no viewport");
+    const ui::Rect viewport = *record->viewport;
+    // A row scrolled beneath the header is drawn clipped away there; it must not be hit there.
+    const ui::Point under_header{viewport.x + 40.0, viewport.y + 20.0};
+    bool row_beneath = false;
+    for (const auto& row : table->children()) {
+        const ui::LayoutRecord* row_layout = surface->layout().find(row->identity());
+        row_beneath = row_beneath ||
+                      (row_layout != nullptr && row_layout->bounds.y <= under_header.y &&
+                       row_layout->bounds.bottom() >= under_header.y);
+    }
+    check(row_beneath, "sticky table fixture has no row beneath its header");
+    const ui::RetainedNode* hit = surface->input().inspection_target(under_header);
+    check(hit == table, "a row hidden beneath a sticky table header received the hit");
+    // Below the header the rows are hit as before.
+    const ui::RetainedNode* below = surface->input().inspection_target(
+        ui::Point{viewport.x + 40.0, viewport.y + 32.0 + 20.0});
+    bool inside_table = false;
+    for (const ui::RetainedNode* current = below; current != nullptr; current = current->parent())
+        inside_table = inside_table || (current != below && current == table);
+    check(below != table && inside_table, "a visible table row lost its hit");
+}
+
 } // namespace
 
 int strata_test_interaction_residual(const int argument_count, const char* const* const arguments) {
@@ -2418,6 +2476,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_removed_focused_editor_commits(fixture);
         test_virtual_focused_row_stays_realized(resources);
         test_post_layout_reveal_reaches_layout(resources);
+        test_sticky_table_header_blocks_hits(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";
         return 0;
     } catch (const std::exception& error) {
