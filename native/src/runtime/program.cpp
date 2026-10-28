@@ -342,6 +342,7 @@ class ProgramLowering final {
             if (node.material_call) {
                 std::vector<ProgramArgument> parameters;
                 for (const JsonValue parameter : array_field(source, "parameters")) {
+                    require_new_name(parameters, string_field(parameter, "name"));
                     parameters.push_back(ProgramArgument{
                         Symbol::intern(string_field(parameter, "name")),
                         true,
@@ -502,11 +503,28 @@ class ProgramLowering final {
                                        bounded_index(index));
     }
 
+    /**
+     * Named arguments become object fields (an action payload, a style, an effect, material
+     * parameters), which are unique: IR naming one twice is rejected here, with a diagnostic,
+     * instead of failing the build that evaluates it.
+     */
+    static void require_new_name(const std::vector<ProgramArgument>& previous,
+                                 const std::string_view name) {
+        if (std::ranges::any_of(previous, [name](const ProgramArgument& argument) {
+                return argument.named && argument.name.name() == name;
+            })) {
+            throw std::logic_error("portable IR names argument '" + std::string(name) +
+                                   "' twice in one call");
+        }
+    }
+
     [[nodiscard]] std::vector<ProgramArgument> arguments(const JsonValue source) {
         std::vector<ProgramArgument> result;
         for (const JsonValue argument : array_field(source, "arguments")) {
             const JsonValue name = argument.find("name");
             const std::optional<std::string_view> text = name.string();
+            if (text.has_value())
+                require_new_name(result, *text);
             result.push_back(ProgramArgument{
                 text.has_value() ? Symbol::intern(*text) : Symbol{},
                 text.has_value(),

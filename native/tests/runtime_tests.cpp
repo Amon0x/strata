@@ -2013,6 +2013,40 @@ void test_layer_stack_and_declarative_registry() {
 
 } // namespace
 
+void test_portable_ir_rejects_duplicate_named_arguments() {
+    using namespace strata::runtime;
+    const auto bundle = ApplicationBundle::create();
+    const auto loader = [](const std::string_view,
+                           const std::string_view path) -> strata::compiler::ModuleSource {
+        throw strata::compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    ApplicationContext compiled("duplicate-arguments-source", bundle);
+    check(compiled
+              .compile_and_activate(
+                  strata::compiler::ModuleSource{
+                      "app/duplicate-arguments.strata",
+                      "overlay Duplicate { state flag = false; root Button(label: \"Set\", "
+                      "onClick: action(\"state.set\", name: \"flag\", value: true)) }",
+                  },
+                  loader, 0U)
+              .activated(),
+          "duplicate-argument fixture did not compile");
+    // Named arguments become object fields (an action payload, a style, an effect): IR naming
+    // one twice is malformed, and is rejected with a diagnostic rather than failing a build.
+    std::string ir = strata::data::encode_canonical_json(compiled.active_unit()->portable_ir());
+    constexpr std::string_view value_argument = "\"name\": \"value\"";
+    const std::size_t position = ir.find(value_argument);
+    check(position != std::string::npos && ir.find(value_argument, position + 1U) == std::string::npos,
+          "duplicate-argument fixture IR did not name its payload value once");
+    ir.replace(position, value_argument.size(), "\"name\": \"name\"");
+    ApplicationContext duplicated("duplicate-arguments", bundle);
+    const ActivationResult result = duplicated.activate(strata::data::parse_json(ir), 0U);
+    check(result.status == ActivationStatus::rejected_unit && !result.diagnostics.empty() &&
+              result.diagnostics.front().code == "STRATA.RUNTIME.INVALID_PORTABLE_IR" &&
+              result.diagnostics.front().message.find("'name'") != std::string::npos,
+          "portable IR naming an argument twice was activated");
+}
+
 int strata_test_runtime(const int argument_count, const char* const* const arguments) {
     try {
         const auto run = [](const std::string_view name, auto&& operation) {
@@ -2044,6 +2078,8 @@ int strata_test_runtime(const int argument_count, const char* const* const argum
             [&] { test_authoring_mistakes_get_actionable_diagnostics(); });
         run("application isolation", [&] { test_application_bundle_and_runtime_isolation(); });
         run("portable expression runtime", [&] { test_portable_ir_expression_runtime(); });
+        run("duplicate named arguments",
+            [&] { test_portable_ir_rejects_duplicate_named_arguments(); });
         if (argument_count >= 2 && std::string_view(arguments[1]).size() != 0U) {
             run("transactional activation",
                 [&] { test_transactional_activation_and_last_good_reload(arguments[1]); });
