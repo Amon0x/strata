@@ -1468,7 +1468,7 @@
           "name": "predicate",
           "nullable": false,
           "required": false,
-          "type": "any"
+          "type": "lambda"
         }
       ],
       "returnType": "boolean"
@@ -1510,7 +1510,7 @@
           "name": "predicate",
           "nullable": false,
           "required": false,
-          "type": "any"
+          "type": "lambda"
         }
       ],
       "returnType": "boolean"
@@ -1643,7 +1643,7 @@
           "name": "predicate",
           "nullable": false,
           "required": false,
-          "type": "any"
+          "type": "lambda"
         }
       ],
       "returnType": "number"
@@ -1668,7 +1668,7 @@
           "name": "selector",
           "nullable": false,
           "required": true,
-          "type": "any"
+          "type": "lambda"
         }
       ],
       "returnType": "collection of any"
@@ -1735,7 +1735,7 @@
           "name": "predicate",
           "nullable": false,
           "required": true,
-          "type": "any"
+          "type": "lambda"
         }
       ],
       "returnType": "collection of any"
@@ -1836,7 +1836,7 @@
           "name": "selector",
           "nullable": false,
           "required": true,
-          "type": "any"
+          "type": "lambda"
         }
       ],
       "returnType": "collection of any"
@@ -1937,7 +1937,7 @@
           "name": "transform",
           "nullable": false,
           "required": true,
-          "type": "any"
+          "type": "lambda"
         }
       ],
       "returnType": "collection of any"
@@ -2237,7 +2237,7 @@
           "name": "selector",
           "nullable": false,
           "required": true,
-          "type": "any"
+          "type": "lambda"
         },
         {
           "aliases": [],
@@ -2328,7 +2328,7 @@
           "name": "predicate",
           "nullable": false,
           "required": true,
-          "type": "any"
+          "type": "lambda"
         }
       ],
       "returnType": "collection of any"

@@ -164,17 +164,13 @@ SemanticTypePtr TypeOracle::compute_symbol(const SymbolId id) {
     case SymbolKind::loop_index:
         return simple(SemanticTypeKind::number);
     case SymbolKind::lambda_parameter: {
-        // Only map's transform gives its parameter a type: the source's elements.
-        const auto found = analysis_.lambda_arguments.find(symbol.lambda->id);
-        if (found == analysis_.lambda_arguments.end()) return simple(SemanticTypeKind::unknown);
-        const Expression& call = *found->second.first;
-        const ResolvedCall* resolved = analysis_.model.call(call);
-        const ArgumentBinding& binding = resolved->arguments[found->second.second];
-        if (resolved->helper == nullptr || resolved->helper->implementation != "map" ||
-            binding.parameter == nullptr || binding.parameter->name != "transform") {
+        // The helper signature names the argument whose items the lambda is applied to.
+        const SchemaParameter* parameter = lambda_parameter_of(*symbol.lambda);
+        if (parameter == nullptr || parameter->items_from.empty())
             return simple(SemanticTypeKind::unknown);
-        }
-        const Argument* source = argument_for(call, "source");
+        const Argument* source =
+            argument_for(*analysis_.lambda_arguments.at(symbol.lambda->id).first,
+                         parameter->items_from);
         if (source == nullptr) return simple(SemanticTypeKind::unknown);
         const SemanticTypePtr source_type = type_of(*source->value);
         return source_type->element != nullptr ? source_type->element
@@ -218,6 +214,14 @@ SemanticTypePtr TypeOracle::component_template_type(
         });
     }
     return type;
+}
+
+const SchemaParameter* TypeOracle::lambda_parameter_of(const Expression& lambda) const {
+    const auto found = analysis_.lambda_arguments.find(lambda.id);
+    if (found == analysis_.lambda_arguments.end()) return nullptr;
+    const ResolvedCall* resolved = analysis_.model.call(*found->second.first);
+    if (resolved == nullptr || resolved->kind != CallKind::helper) return nullptr;
+    return resolved->arguments[found->second.second].parameter;
 }
 
 const Argument* TypeOracle::argument_for(const Expression& expression,

@@ -1062,6 +1062,75 @@ void test_catalog_declares_roles_and_names() {
           "widget roles did not come from the catalog");
 }
 
+// Every lambda a collection helper takes is type-checked like map's transform: its parameter is an
+// item of the helper's source, so a misspelled field is reported, and a predicate must decide with
+// a boolean. Lambdas nest, and one outside a helper is still checked.
+void test_lambda_bodies_are_checked_against_the_helper_signature() {
+    const auto analyse = [](const std::string_view derived) {
+        return compile_source(
+            "screen Main {\n"
+            "  state items = [{ name: \"a\", done: true, size: 2, tags: [{ label: \"x\" }] }]\n"
+            "  derived view = " + std::string(derived) + "\n"
+            "  root Text(text: \"x\")\n"
+            "}");
+    };
+    for (const std::string_view valid : {
+             "filter(items, item -> item.done)",
+             "map(items, item -> item.name)",
+             "sortBy(items, item -> item.size, descending: true)",
+             "distinctBy(items, item -> item.name)",
+             "groupBy(items, item -> item.done)",
+             "takeWhile(items, item -> item.size > 1)",
+             "count(items, item -> !item.done)",
+             "any(items, item -> any(item.tags, tag -> tag.label == \"x\"))",
+             "all(items, item -> item.done && item.size < 3)",
+             "count(items)",
+         }) {
+        const auto result = analyse(valid);
+        check(result.succeeded(),
+              "a well-typed lambda was rejected: " + std::string(valid) + describe(result));
+    }
+    const auto single = [&](const std::string_view derived, const std::string_view code) {
+        const auto result = analyse(derived);
+        check(result.diagnostics.size() == 1U && result.diagnostics.front().code == code,
+              std::string(derived) + " was not reported as one " + std::string(code) + ":" +
+                  describe(result));
+        return result.diagnostics.front().message;
+    };
+    for (const std::string_view misspelled : {
+             "filter(items, item -> item.dnoe)",
+             "sortBy(items, item -> item.szie)",
+             "distinctBy(items, item -> item.nmae)",
+             "groupBy(items, item -> item.dnoe)",
+             "takeWhile(items, item -> item.dnoe)",
+             "count(items, item -> item.dnoe)",
+             "all(items, item -> item.dnoe)",
+             "any(items, item -> any(item.tags, tag -> tag.lable == \"x\"))",
+         }) {
+        check(single(misspelled, "STRATA.DSL.SEMANTIC_UNKNOWN_FIELD").contains("Did you mean"),
+              "a misspelled lambda field had no suggestion: " + std::string(misspelled));
+    }
+    for (const std::string_view not_boolean : {
+             "filter(items, item -> item.name)",
+             "any(items, item -> item.size)",
+             "takeWhile(items, item -> item.tags)",
+             "filter(items, true)",
+         }) {
+        static_cast<void>(single(not_boolean, "STRATA.DSL.SEMANTIC_TYPE_MISMATCH"));
+    }
+    // Arithmetic inside a selector is checked as anywhere else.
+    static_cast<void>(single("sortBy(items, item -> item.name * 2)",
+                             "STRATA.DSL.SEMANTIC_TYPE_MISMATCH"));
+    // A name misspelled inside a lambda is still a near miss of the names in scope.
+    check(single("filter(items, item -> itme.done)", "STRATA.DSL.SEMANTIC_UNKNOWN_IDENTIFIER")
+              .contains("Did you mean 'item'?"),
+          "a misspelled lambda parameter was not suggested");
+    // A lambda where no helper takes one is checked, and reported without a signature to name.
+    const auto stray = compile_source("screen Main { root Text(text: item -> item.size * \"x\") }");
+    check(diagnostic_count(stray, "STRATA.DSL.SEMANTIC_TYPE_MISMATCH") == 2U,
+          "a lambda outside a helper was not checked:" + describe(stray));
+}
+
 // `theme.<name>` reads the standard tokens, the palette tokens presentation draws with, and the
 // custom tokens an application declares, each typed as the colour or number it holds. Any other
 // name is reported, since no theme is known to define it.
@@ -1169,6 +1238,7 @@ int strata_test_compiler() {
         test_bind_shorthand_needs_a_retained_target();
         test_analysis_runs_despite_syntax_and_import_errors();
         test_catalog_declares_roles_and_names();
+        test_lambda_bodies_are_checked_against_the_helper_signature();
         test_theme_reads_palette_and_declared_tokens();
         test_source_map_paths_name_ir_nodes();
         std::cout << "strata_compiler_tests: OK\n";

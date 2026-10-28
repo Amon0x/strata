@@ -30,6 +30,16 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                            .values = {"ERROR", "INFO", "SUCCESS", "WARNING"}})},
         DeclaredNamedType{.id = "any",
                           .definition = declared_type(DeclaredType{.kind = DeclaredTypeKind::any})},
+        DeclaredNamedType{.id = "itemPredicate",
+                          .definition = declared_type(
+                              DeclaredType{.kind = DeclaredTypeKind::lambda,
+                                           .parameter = declared_type_reference("any"),
+                                           .returns = declared_type_reference("boolean")})},
+        DeclaredNamedType{.id = "itemFunction",
+                          .definition = declared_type(
+                              DeclaredType{.kind = DeclaredTypeKind::lambda,
+                                           .parameter = declared_type_reference("any"),
+                                           .returns = declared_type_reference("any")})},
         DeclaredNamedType{.id = "color",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::color})},

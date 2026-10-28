@@ -179,14 +179,17 @@ using data::JsonValue;
 }
 
 [[nodiscard]] JsonValue encode_parameter(const DeclaredParameter& parameter) {
-    return object({
+    JsonValue::Object fields{
         {"aliases", strings(parameter.aliases)},
         {"default", JsonValue()},
-        {"name", JsonValue(parameter.name)},
-        {"nullable", JsonValue(parameter.nullable)},
-        {"required", JsonValue(parameter.required)},
-        {"type", encode_type(parameter.type)},
-    });
+    };
+    if (!parameter.items_from.empty())
+        fields.emplace_back("itemsFrom", JsonValue(parameter.items_from));
+    fields.emplace_back("name", JsonValue(parameter.name));
+    fields.emplace_back("nullable", JsonValue(parameter.nullable));
+    fields.emplace_back("required", JsonValue(parameter.required));
+    fields.emplace_back("type", encode_type(parameter.type));
+    return JsonValue(std::move(fields));
 }
 
 [[nodiscard]] JsonValue encode_property(const DeclaredProperty& property,
@@ -291,6 +294,13 @@ void validate_catalog(const BuiltinCatalog& catalog) {
         require_unique(helper.parameters, "helper parameter", &DeclaredParameter::name);
         for (const DeclaredParameter& parameter : helper.parameters) {
             validate_type(parameter.type, type_ids);
+            if (!parameter.items_from.empty() &&
+                (parameter.items_from == parameter.name ||
+                 !std::ranges::contains(helper.parameters, parameter.items_from,
+                                        &DeclaredParameter::name))) {
+                throw std::logic_error("built-in helper lambda takes items from an undeclared "
+                                       "parameter");
+            }
         }
         validate_type(helper.return_type, type_ids);
         if (helper.vararg_type != nullptr)

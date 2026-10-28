@@ -174,6 +174,8 @@ public:
 
     [[nodiscard]] SemanticTypePtr type_of(const Expression& expression);
     [[nodiscard]] SemanticTypePtr symbol_type(SymbolId symbol);
+    /** The helper parameter a lambda is passed for, or null when it is not a helper argument. */
+    [[nodiscard]] const SchemaParameter* lambda_parameter_of(const Expression& lambda) const;
     /** The argument of `call` that fills parameter `name`, by the recorded argument mapping. */
     [[nodiscard]] const Argument* argument_for(const Expression& call, std::string_view name) const;
     [[nodiscard]] SemanticTypePtr component_template_type(

@@ -290,8 +290,10 @@ std::string SemanticType::diagnostic_name() const {
     case SemanticTypeKind::component:
         return "component";
     case SemanticTypeKind::lambda:
-        return "pure expression (" + parameter->diagnostic_name() + ") -> " +
-               returns->diagnostic_name();
+        return "pure expression (" +
+               (parameter != nullptr ? parameter->diagnostic_name() : std::string("item")) +
+               ") -> " +
+               (returns != nullptr ? returns->diagnostic_name() : std::string("value"));
     case SemanticTypeKind::component_template:
         if (fields.empty())
             return "component template";
@@ -926,6 +928,7 @@ SchemaParameter SchemaRegistry::parse_parameter(const DeclaredParameter& value) 
     return SchemaParameter{
         value.name,     parse_type(value.type), value.required,
         value.nullable, value.aliases,          value.material_type,
+        value.items_from,
     };
 }
 

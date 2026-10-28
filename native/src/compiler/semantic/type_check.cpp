@@ -1476,7 +1476,26 @@ private:
             }
         } else if (const auto* call = std::get_if<CallExpression>(&expression.node)) {
             call_expression(expression, *call, component_path);
+        } else if (const auto* lambda = std::get_if<LambdaExpression>(&expression.node)) {
+            lambda_body(expression, *lambda, component_path);
         }
+    }
+
+    /**
+     * A lambda's body, checked like any expression and, where a helper takes the lambda, against
+     * the result its signature declares: a predicate decides with a boolean.
+     */
+    void lambda_body(const Expression& expression, const LambdaExpression& lambda,
+                     const std::string& component_path) {
+        const SchemaParameter* parameter = oracle_.lambda_parameter_of(expression);
+        const SemanticType* returns =
+            parameter != nullptr && parameter->type->kind == SemanticTypeKind::lambda
+                ? parameter->type->returns.get()
+                : nullptr;
+        if (returns != nullptr)
+            validate_expected(*lambda.body, *returns, false, component_path);
+        else
+            check(*lambda.body, component_path);
     }
 
     void property_access(const Expression& expression, const PropertyAccessExpression& property,
@@ -1555,12 +1574,6 @@ private:
             return;
         }
         helper_arguments(expression, call, *resolved.helper, component_path);
-        if (resolved.helper->implementation != "map") return;
-        const Argument* transform = oracle_.argument_for(expression, "transform");
-        const auto* lambda =
-            transform != nullptr ? std::get_if<LambdaExpression>(&ungrouped(*transform->value).node)
-                                 : nullptr;
-        if (lambda != nullptr) check(*lambda->body, component_path + ".transform");
     }
 
     Analysis& analysis_;

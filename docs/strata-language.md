@@ -665,6 +665,12 @@ Collection helpers accept bounded pure lambdas such as `item -> item.enabled`. V
 terminal helpers are `count`, `any`, and `all`. A derived view exposes `items`, `total`, `matched`,
 `rangeStart`, `rangeEnd`, `cacheHits`, and `rebuilds`.
 
+Each lambda is type-checked against the helper's signature: its parameter is an item of the
+helper's `source`, so `filter(rows, row -> row.titel)` reports the misspelled field, and the
+predicates of `filter`, `takeWhile`, `count`, `any`, and `all` must produce a boolean. The selectors
+of `sortBy`, `distinctBy`, and `groupBy` and the transform of `map` may produce any value; `map`'s
+result items take the transform's type.
+
 Catalog-declared controls accept a typed binding shorthand, for example
 `TextBox(bind: query)` or `Toggle(bind: enabled)`. The compiler lowers it to the widget's canonical
 controlled property and change callback and rejects conflicts when either is also written.

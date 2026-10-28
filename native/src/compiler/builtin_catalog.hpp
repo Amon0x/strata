@@ -55,6 +55,11 @@ struct DeclaredParameter final {
     bool nullable = false;
     std::vector<std::string> aliases;
     std::optional<std::string> material_type;
+    /**
+     * For a helper's lambda parameter: the parameter whose items the lambda is applied to, one at
+     * a time, so its own parameter takes their type.
+     */
+    std::string items_from;
 };
 
 struct DeclaredTypeField final {

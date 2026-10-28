@@ -117,6 +117,8 @@ struct SchemaParameter final {
     std::vector<std::string> aliases;
     /** GPU material packing contract; absent for ordinary DSL parameters. */
     std::optional<std::string> material_type;
+    /** For a helper's lambda parameter: the parameter whose items the lambda receives. */
+    std::string items_from;
 
     [[nodiscard]] bool accepts_name(std::string_view candidate) const noexcept;
 };
