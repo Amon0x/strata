@@ -446,9 +446,15 @@ void append_warmup_requests(const TextRunRenderCommand& text, const TextEngine& 
 text_group_scales(const RenderCommandBuffer& commands,
                   const std::span<const GroupRasterScale> group_scales) {
     std::vector<double> result(commands.size(), 1.0);
-    if (group_scales.empty())
-        return result;
     std::vector<std::uint32_t> groups;
+    // A text run under a baked (static) scale rasterizes at that scale too, so `scale: 2` text is
+    // sharp, not a magnified bitmap: the scale each transform adds, stepped to quarter octaves
+    // like a group's and left at one within a tenth of it.
+    std::vector<double> baked{1.0};
+    const auto stepped = [](const double value) {
+        const double step = std::exp2(std::round(std::log2(value) * 4.0) / 4.0);
+        return std::abs(step - 1.0) < 0.1 ? 1.0 : std::clamp(step, 0.125, 8.0);
+    };
     for (std::size_t index = 0U; index < commands.commands().size(); ++index) {
         const RenderCommand& source = commands.commands()[index];
         if (const auto* push = std::get_if<GroupPushRenderCommand>(&source); push != nullptr) {
@@ -456,11 +462,23 @@ text_group_scales(const RenderCommandBuffer& commands,
         } else if (std::holds_alternative<GroupPopRenderCommand>(source)) {
             if (!groups.empty())
                 groups.pop_back();
-        } else if (std::holds_alternative<TextRunRenderCommand>(source) && !groups.empty()) {
-            const auto found =
-                std::ranges::lower_bound(group_scales, groups.back(), {}, &GroupRasterScale::group);
-            if (found != group_scales.end() && found->group == groups.back())
-                result[index] = std::max(found->x, found->y);
+        } else if (const auto* transform = std::get_if<TransformPushRenderCommand>(&source);
+                   transform != nullptr) {
+            const double scale = std::max(std::hypot(transform->m00, transform->m10),
+                                          std::hypot(transform->m01, transform->m11));
+            baked.push_back(baked.back() * (std::isfinite(scale) && scale > 0.0 ? scale : 1.0));
+        } else if (std::holds_alternative<TransformPopRenderCommand>(source)) {
+            if (baked.size() > 1U)
+                baked.pop_back();
+        } else if (std::holds_alternative<TextRunRenderCommand>(source)) {
+            double scale = baked.back();
+            if (!groups.empty()) {
+                const auto found = std::ranges::lower_bound(group_scales, groups.back(), {},
+                                                            &GroupRasterScale::group);
+                if (found != group_scales.end() && found->group == groups.back())
+                    scale *= std::max(found->x, found->y);
+            }
+            result[index] = scale == 1.0 ? 1.0 : stepped(scale);
         }
     }
     return result;
