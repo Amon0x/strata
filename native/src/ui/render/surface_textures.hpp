@@ -16,7 +16,7 @@ struct RenderSubmission;
 
 /**
  * One texture the host creates from this packet before drawing with it: always decoded,
- * straight-alpha RGBA8 rows of the descriptor's dimensions (see resource::decode_png_rgba8).
+ * straight-alpha RGBA8 rows of the descriptor's dimensions (see resource::decode_image_rgba8).
  */
 struct TextureUpload final {
     const resource::TextureResourceDescriptor* descriptor = nullptr;
@@ -24,7 +24,7 @@ struct TextureUpload final {
 };
 
 /**
- * Every raster texture a Surface can draw: its static PNG images and the Runtime's published
+ * Every raster texture a Surface can draw: its static encoded images and the Runtime's published
  * images. Planning resolves ids against the whole table; a texture reaches the host only when a
  * planned batch samples it, again only when its image is replaced, and is released from the host
  * when its image is. A static image shadows a runtime image with the same id.
@@ -55,7 +55,7 @@ class SurfaceTextures final {
     struct Source final {
         std::span<const std::uint8_t> bytes;
         std::uint64_t revision = 0U;
-        /** The bytes are a PNG the core decodes when it uploads them, not RGBA8 rows. */
+        /** The bytes are an encoded image the core decodes when it uploads them, not RGBA8 rows. */
         bool encoded = false;
     };
     void rebuild();

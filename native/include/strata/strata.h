@@ -759,7 +759,8 @@ typedef uint32_t strata_image_sampling;
 typedef struct strata_surface_image_resource {
     /* Logical image id referenced by .strata Image/icon properties. */
     strata_string_view id;
-    /* Host resource-adapter id for an encoded PNG or static SVG document. */
+    /* Host resource-adapter id for an encoded PNG, JPEG, GIF or WebP image or static SVG
+     * document, told apart by content. An animated image shows its first frame. */
     strata_string_view resource_id;
     /* Raster sampling mode; ignored for resolution-independent SVG images. */
     strata_image_sampling sampling;
@@ -1340,7 +1341,7 @@ typedef struct strata_edges {
     double bottom;
 } strata_edges;
 
-/** Normalized image source region; {0,0,1,1} selects the whole PNG or SVG. */
+/** Normalized image source region; {0,0,1,1} selects the whole raster image or SVG. */
 typedef struct strata_texture_region {
     double u;
     double v;
@@ -1723,7 +1724,8 @@ typedef struct strata_surface_config {
     size_t font_count;
     /* Optional surface-owned lifecycle extensions. */
     const strata_surface_extension_bundle* extensions;
-    /* PNGs become surface textures; SVGs become backend-independent vector geometry. */
+    /* Raster images (PNG, JPEG, GIF, WebP) become surface textures; SVGs become
+     * backend-independent vector geometry. */
     const strata_surface_image_resource* images;
     size_t image_count;
 } strata_surface_config;

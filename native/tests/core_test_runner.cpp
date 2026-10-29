@@ -11,6 +11,7 @@ int strata_test_resource_host_residual();
 int strata_test_ui(int argument_count, const char* const* const arguments);
 int strata_test_render_packet(int argument_count, const char* const* const arguments);
 int strata_test_png_decode();
+int strata_test_image_decode(int argument_count, const char* const* const arguments);
 int strata_test_text_font_residual(int argument_count, const char* const* arguments);
 int strata_test_theme();
 int strata_test_input_editor();
@@ -52,6 +53,8 @@ int main(const int argument_count, const char* const* const arguments) {
         return strata_test_render_packet(suite_argument_count, suite_arguments);
     if (suite == "png_decode")
         return strata_test_png_decode();
+    if (suite == "image_decode")
+        return strata_test_image_decode(suite_argument_count, suite_arguments);
     if (suite == "text_font_residual")
         return strata_test_text_font_residual(suite_argument_count, suite_arguments);
     if (suite == "theme")

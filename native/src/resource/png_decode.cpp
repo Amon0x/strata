@@ -10,7 +10,10 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+#include "resource/image_codecs.hpp"
 
 namespace strata::resource {
 namespace {
@@ -439,10 +442,40 @@ struct Pass final {
     return result;
 }
 
-} // namespace
+/** One APNG frame: its fcTL and, unless it is the default image, its fdAT data. */
+struct FrameControl final {
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+    std::uint32_t x = 0U;
+    std::uint32_t y = 0U;
+    std::uint32_t delay_ms = 0U;
+    /** APNG_DISPOSE_OP_NONE, _BACKGROUND or _PREVIOUS. */
+    std::uint8_t dispose = 0U;
+    /** APNG_BLEND_OP_SOURCE or _OVER. */
+    std::uint8_t blend = 0U;
+    /** The IDAT image is this frame, rather than a fallback the animation skips. */
+    bool default_image = false;
+    std::vector<std::uint8_t> data;
+};
 
-std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> bytes,
-                                           const ImageDimensions expected) {
+struct Png final {
+    Header header;
+    std::vector<std::uint8_t> idat;
+    std::vector<std::array<std::uint8_t, 4U>> palette;
+    std::optional<std::array<std::uint16_t, 3U>> transparent;
+    /** An acTL preceded the image data, so the fcTL frames, not IDAT alone, are the image. */
+    bool animated = false;
+    std::uint32_t declared_frames = 0U;
+    std::uint32_t plays = 0U;
+    std::vector<FrameControl> frames;
+};
+
+/**
+ * Validates the chunk stream and gathers what decoding needs. APNG chunks are read only when
+ * `animation` asks for them; otherwise they are ancillary chunks like any other and ignored.
+ */
+[[nodiscard]] Png parse(const std::span<const std::uint8_t> bytes,
+                        const std::optional<ImageDimensions> expected, const bool animation) {
     constexpr std::array<std::uint8_t, 8U> signature{
         0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU,
     };
@@ -450,14 +483,15 @@ std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> b
         !std::equal(signature.begin(), signature.end(), bytes.begin())) {
         fail("bytes are not a PNG");
     }
-    Header header;
+    Png png;
+    Header& header = png.header;
     bool have_header = false;
     bool idat_finished = false;
     bool ended = false;
-    std::vector<std::uint8_t> compressed;
-    std::vector<std::array<std::uint8_t, 4U>> palette;
+    std::vector<std::uint8_t>& compressed = png.idat;
     std::vector<std::uint8_t> palette_alpha;
-    std::optional<std::array<std::uint16_t, 3U>> transparent;
+    std::uint32_t sequence = 0U;
+    bool seen_animation_control = false;
     std::size_t offset = signature.size();
     while (!ended) {
         if (bytes.size() - offset < 12U)
@@ -496,8 +530,10 @@ std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> b
                  (header.depth == 8U || header.depth == 16U));
             if (!depth_valid || data[10U] != 0U || data[11U] != 0U || data[12U] > 1U)
                 fail("IHDR describes an unsupported pixel format");
-            if (header.width != expected.width || header.height != expected.height)
+            if (expected.has_value() &&
+                (header.width != expected->width || header.height != expected->height)) {
                 fail("dimensions disagree with the resource declaration");
+            }
             validate_image_dimensions(ImageDimensions{header.width, header.height});
             if (static_cast<std::uint64_t>(header.width) * header.height >
                 maximum_png_decode_pixels) {
@@ -507,9 +543,9 @@ std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> b
         } else if (type == "PLTE") {
             if (!compressed.empty() || length % 3U != 0U || length == 0U || length > 768U)
                 fail("PLTE is misplaced or malformed");
-            palette.clear();
+            png.palette.clear();
             for (std::size_t entry = 0U; entry < length; entry += 3U)
-                palette.push_back({data[entry], data[entry + 1U], data[entry + 2U], 255U});
+                png.palette.push_back({data[entry], data[entry + 1U], data[entry + 2U], 255U});
         } else if (type == "tRNS") {
             if (!compressed.empty())
                 fail("tRNS follows image data");
@@ -517,9 +553,9 @@ std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> b
                 palette_alpha.assign(data.begin(), data.end());
             } else if (header.color == 0U && length == 2U) {
                 const auto gray = static_cast<std::uint16_t>(data[0U] << 8U | data[1U]);
-                transparent = std::array<std::uint16_t, 3U>{gray, gray, gray};
+                png.transparent = std::array<std::uint16_t, 3U>{gray, gray, gray};
             } else if (header.color == 2U && length == 6U) {
-                transparent = std::array<std::uint16_t, 3U>{
+                png.transparent = std::array<std::uint16_t, 3U>{
                     static_cast<std::uint16_t>(data[0U] << 8U | data[1U]),
                     static_cast<std::uint16_t>(data[2U] << 8U | data[3U]),
                     static_cast<std::uint16_t>(data[4U] << 8U | data[5U]),
@@ -531,6 +567,61 @@ std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> b
             compressed.insert(compressed.end(), data.begin(), data.end());
         } else if (type == "IEND") {
             ended = true;
+        } else if (animation && type == "acTL") {
+            // An acTL after the image data makes no animation; the file is a still PNG.
+            if (seen_animation_control)
+                fail("acTL is repeated");
+            seen_animation_control = true;
+            if (compressed.empty()) {
+                if (length != 8U)
+                    fail("acTL is malformed");
+                png.animated = true;
+                png.declared_frames = big_endian(data.data());
+                png.plays = big_endian(data.data() + 4U);
+                if (png.declared_frames == 0U || png.declared_frames > 0x7FFFFFFFU)
+                    fail("acTL declares an invalid frame count");
+            }
+        } else if (animation && png.animated && type == "fcTL") {
+            if (length != 26U || big_endian(data.data()) != sequence++)
+                fail("fcTL is malformed or out of sequence");
+            FrameControl frame;
+            frame.width = big_endian(data.data() + 4U);
+            frame.height = big_endian(data.data() + 8U);
+            frame.x = big_endian(data.data() + 12U);
+            frame.y = big_endian(data.data() + 16U);
+            const std::uint64_t numerator = static_cast<std::uint64_t>(data[20U]) << 8U | data[21U];
+            std::uint64_t denominator = static_cast<std::uint64_t>(data[22U]) << 8U | data[23U];
+            // A zero denominator means hundredths of a second.
+            if (denominator == 0U)
+                denominator = 100U;
+            frame.delay_ms =
+                static_cast<std::uint32_t>((numerator * 1000U + denominator / 2U) / denominator);
+            frame.dispose = data[24U];
+            frame.blend = data[25U];
+            frame.default_image = compressed.empty();
+            if (frame.width == 0U || frame.height == 0U ||
+                static_cast<std::uint64_t>(frame.x) + frame.width > header.width ||
+                static_cast<std::uint64_t>(frame.y) + frame.height > header.height ||
+                frame.dispose > 2U || frame.blend > 1U) {
+                fail("fcTL places a frame outside the image or uses an unknown operation");
+            }
+            if (frame.default_image &&
+                (!png.frames.empty() || frame.x != 0U || frame.y != 0U ||
+                 frame.width != header.width || frame.height != header.height)) {
+                fail("the default image's fcTL must cover the whole image");
+            }
+            if (!frame.default_image && !png.frames.empty() && !png.frames.back().default_image &&
+                png.frames.back().data.empty()) {
+                fail("an APNG frame has no data");
+            }
+            png.frames.push_back(std::move(frame));
+        } else if (animation && png.animated && type == "fdAT") {
+            if (length < 4U || big_endian(data.data()) != sequence++)
+                fail("fdAT is malformed or out of sequence");
+            if (png.frames.empty() || png.frames.back().default_image)
+                fail("fdAT has no frame to belong to");
+            png.frames.back().data.insert(png.frames.back().data.end(), data.begin() + 4,
+                                          data.end());
         } else if (critical) {
             fail("an unknown critical chunk is present");
         }
@@ -540,14 +631,31 @@ std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> b
     if (compressed.empty())
         fail("the image has no data");
     if (header.color == 3U) {
-        if (palette.empty())
+        if (png.palette.empty())
             fail("an indexed image has no palette");
-        for (std::size_t entry = 0U; entry < palette.size() && entry < palette_alpha.size();
+        for (std::size_t entry = 0U; entry < png.palette.size() && entry < palette_alpha.size();
              ++entry) {
-            palette[entry][3U] = palette_alpha[entry];
+            png.palette[entry][3U] = palette_alpha[entry];
         }
     }
+    if (png.animated) {
+        if (png.frames.size() != png.declared_frames)
+            fail("acTL's frame count disagrees with the frames present");
+        if (!png.frames.back().default_image && png.frames.back().data.empty())
+            fail("an APNG frame has no data");
+    }
+    return png;
+}
 
+/**
+ * Inflates and unfilters one image's scanlines into RGBA8: the whole image, or an APNG frame,
+ * whose header is the image's with the frame's dimensions.
+ */
+[[nodiscard]] std::vector<std::uint8_t>
+decode_pixels(const Png& png, const Header& header,
+              const std::span<const std::uint8_t> compressed) {
+    const auto& palette = png.palette;
+    const auto& transparent = png.transparent;
     const std::vector<Pass> layout = passes(header);
     std::size_t scanline_bytes = 0U;
     for (const Pass& pass : layout) {
@@ -651,5 +759,62 @@ std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> b
     }
     return pixels;
 }
+
+} // namespace
+
+std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> bytes,
+                                           const ImageDimensions expected) {
+    const Png png = parse(bytes, expected, false);
+    return decode_pixels(png, png.header, png.idat);
+}
+
+namespace codec {
+
+DecodedImage decode_png(const std::span<const std::uint8_t> bytes,
+                        const std::uint32_t frame_limit) {
+    const Png png = parse(bytes, std::nullopt, true);
+    const std::uint32_t width = png.header.width;
+    FrameSink sink(ImageDimensions{width, png.header.height}, frame_limit, "PNG");
+    if (!png.animated) {
+        sink.push(decode_pixels(png, png.header, png.idat), 0U);
+        return sink.finish(1U);
+    }
+    // APNG composites each frame onto a canvas that starts transparent black (APNG spec 4.3).
+    std::vector<std::uint8_t> canvas(static_cast<std::size_t>(width) * png.header.height * 4U);
+    std::vector<std::uint8_t> saved;
+    for (std::size_t index = 0U; index < png.frames.size() && sink.wants_more(); ++index) {
+        const FrameControl& frame = png.frames[index];
+        sink.reserve_next();
+        Header region = png.header;
+        region.width = frame.width;
+        region.height = frame.height;
+        const std::vector<std::uint8_t> pixels =
+            decode_pixels(png, region, frame.default_image ? png.idat : frame.data);
+        // The first frame has nothing to revert to, so PREVIOUS acts as BACKGROUND.
+        const std::uint32_t dispose = index == 0U && frame.dispose == 2U ? 1U : frame.dispose;
+        if (dispose == 2U)
+            saved = canvas;
+        for (std::uint32_t y = 0U; y < frame.height; ++y) {
+            const std::uint8_t* source =
+                pixels.data() + static_cast<std::size_t>(y) * frame.width * 4U;
+            std::uint8_t* target =
+                canvas.data() + ((static_cast<std::size_t>(frame.y) + y) * width + frame.x) * 4U;
+            if (frame.blend == 0U) {
+                std::copy_n(source, static_cast<std::size_t>(frame.width) * 4U, target);
+                continue;
+            }
+            for (std::uint32_t x = 0U; x < frame.width; ++x, source += 4U, target += 4U)
+                blend_over(target, source);
+        }
+        sink.push(canvas, frame.delay_ms);
+        if (dispose == 1U)
+            clear_rect(canvas, width, frame.x, frame.y, frame.width, frame.height);
+        else if (dispose == 2U)
+            canvas = std::move(saved);
+    }
+    return sink.finish(png.plays);
+}
+
+} // namespace codec
 
 } // namespace strata::resource

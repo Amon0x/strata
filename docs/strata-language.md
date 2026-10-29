@@ -392,8 +392,8 @@ children of its one content box, so a carousel or a picker needs no extra struct
 `CONTAIN` shows all of it at its aspect ratio; `COVER` fills the bounds at its aspect ratio and
 crops what overflows; `NONE` draws it at its natural size; `SCALE_DOWN` is `NONE` until the image is
 larger than its bounds, then `CONTAIN`. `alignX` and `alignY` (`START`, `CENTER`, `END`) place what
-does not fill and choose which part a crop keeps. The natural size comes from the SVG or PNG the
-host bound, or from a runtime image the host published.
+does not fill and choose which part a crop keeps. The natural size comes from the SVG or raster
+image (PNG, JPEG, GIF or WebP) the host bound, or from a runtime image the host published.
 
 ```strata
 Image(image: user.avatar, fit: "COVER", style: style(width: 40, height: 40, radius: 20, clip: true))

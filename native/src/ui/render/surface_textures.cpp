@@ -44,7 +44,7 @@ void SurfaceTextures::rebuild() {
     for (const resource::EncodedTextureResource& texture : static_) {
         descriptors_.push_back(texture.descriptor());
         sources_.push_back(
-            Source{texture.bytes, 0U, texture.encoding == resource::ImageEncoding::png});
+            Source{texture.bytes, 0U, texture.encoding != resource::ImageEncoding::rgba8});
     }
     for (const std::shared_ptr<const resource::RuntimeImage>& image : runtime_) {
         const bool shadowed = std::ranges::any_of(static_, [&image](const auto& texture) {
@@ -83,9 +83,10 @@ void SurfaceTextures::upload(const std::size_t index) {
         return;
     }
     // Images are decoded here, once, so every backend samples the same texels and none needs a
-    // codec. The pixels live only until the packet that carries them is retained.
+    // codec. The pixels live only until the packet that carries them is retained. An animated
+    // image shows its first frame.
     try {
-        decoded_.push_back(resource::decode_png_rgba8(source.bytes, descriptor->dimensions));
+        decoded_.push_back(resource::decode_image_rgba8(source.bytes, descriptor->dimensions));
     } catch (const std::invalid_argument& error) {
         throw std::invalid_argument("image '" + descriptor->logical_id + "': " + error.what());
     }

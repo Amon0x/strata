@@ -1,6 +1,7 @@
 # Images
 
-Strata exposes PNG and static SVG resources and host-published runtime images through one
+Strata exposes raster (PNG, JPEG, GIF, WebP) and static SVG resources and host-published runtime
+images through one
 author-facing image model. A Surface maps a logical id to resource-adapter bytes, the Runtime maps
 runtime image ids to pixels, and `.strata` uses either id with `Image`, a `Draw` image shape or any
 widget icon property:
@@ -44,14 +45,32 @@ frame samples them as straight-alpha RGBA8 the core decoded once, and are sample
 textures; no backend needs an image codec. The decoder treats every PNG as untrusted: it accepts at
 most 64 Mpx (a 256 MiB RGBA8 result, refused at Surface creation), never inflates past the image's
 scanlines or allocates them before the data supplies them, and rejects back-references beyond the
-zlib window and the incomplete Huffman codes zlib rejects. SVG documents are parsed at Surface creation into immutable
+zlib window and the incomplete Huffman codes zlib rejects.
+
+JPEG, GIF and WebP resources take the same path, told apart from PNG and SVG by their signatures
+rather than file names, and decoded by the core's own decoders (no system codec):
+
+- JPEG: baseline, extended sequential and progressive Huffman-coded DCT with 8-bit samples;
+  grayscale, YCbCr, RGB, Adobe CMYK and YCCK; any integer chroma subsampling; restart intervals;
+  EXIF orientation applied. The output matches libjpeg-turbo's default decode (islow IDCT, fancy
+  upsampling). Arithmetic coding, lossless, hierarchical and 12-bit JPEG are refused.
+- GIF: 87a and 89a, interlacing, global and local palettes, transparency, every frame composited
+  with its disposal (dispose-to-background clears to transparent, as browsers do).
+- APNG: `acTL`/`fcTL`/`fdAT` frames composited with their blend and dispose operations; a plain
+  PNG is one frame.
+- WebP: lossless (VP8L), lossy (VP8) with or without an `ALPH` plane, and animations, composited as
+  libwebp's animation decoder does.
+
+Every decoder is bounded like the PNG one: a canvas may hold at most 64 Mpx, and an animation at
+most 1024 frames and 128 Mpx across them. A Surface shows an animated image's first frame and
+decodes only that frame. SVG documents are parsed at Surface creation into immutable
 display lists. During widget presentation, Strata projects their curves, fills, strokes,
 transforms, `viewBox`, and `preserveAspectRatio` into ordinary clipped path commands. Submission
 then tessellates those paths at the current logical size and device scale.
 
 SVG is therefore resolution-independent and needs no SVG feature in D3D11, the CPU reference
 renderer, or a custom packet-v14 backend. Both desktop and headless rendering consume the same
-vertices, indices, materials, and scissors. PNG/SVG image content is immutable for a Surface
+vertices, indices, materials, and scissors. Raster and SVG image content is immutable for a Surface
 lifetime; edited assets take effect after rebuilding the owning artifact and recreating the session.
 
 `Image.tint` modulates literal SVG colors. SVG `currentColor` resolves directly to the tint, which

@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -315,9 +316,6 @@ image_resources(const ResourceLoader& resources,
     if (host_resource_namespace.empty()) {
         throw std::invalid_argument("Surface host resource namespace must not be empty");
     }
-    constexpr std::array<std::uint8_t, 8U> png_signature{
-        0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU,
-    };
     MaterializedImages result;
     result.textures.reserve(bindings.size());
     std::vector<strata::resource::SvgImageResource> vectors;
@@ -327,17 +325,17 @@ image_resources(const ResourceLoader& resources,
         const strata_string_view resource_id{binding.resource_id.data(),
                                              binding.resource_id.size()};
         strata::resource::ResourceBytes bytes = resources.load(resource_id);
-        const bool png = bytes.size() >= png_signature.size() &&
-                         std::equal(png_signature.begin(), png_signature.end(), bytes.begin());
-        if (png) {
-            const strata::resource::ImageDimensions dimensions =
-                strata::resource::inspect_png(bytes);
+        // Raster formats are told apart by their signatures, so a file's name never decides how
+        // its bytes are read; whatever no raster decoder claims must be an SVG document.
+        if (const std::optional<strata::resource::ImageFormat> format =
+                strata::resource::sniff_image_format(bytes)) {
+            const strata::resource::ImageInfo info = strata::resource::inspect_image(bytes);
             result.textures.push_back(strata::resource::EncodedTextureResource{
                 binding.id,
                 std::string(host_resource_namespace) + "/static/" + std::to_string(index),
                 image_sampling(binding.sampling),
-                strata::resource::ImageEncoding::png,
-                dimensions,
+                strata::resource::image_encoding(*format),
+                info.dimensions,
                 std::move(bytes),
             });
             continue;
@@ -345,7 +343,8 @@ image_resources(const ResourceLoader& resources,
         const std::string source(bytes.begin(), bytes.end());
         if (!strata::base::valid_utf8(source)) {
             throw std::invalid_argument("image resource '" + binding.resource_id +
-                                        "' is neither PNG nor UTF-8 SVG");
+                                        "' is neither a PNG, JPEG, GIF or WebP image nor UTF-8 "
+                                        "SVG");
         }
         try {
             strata::svg::Document document = strata::svg::parse(source);

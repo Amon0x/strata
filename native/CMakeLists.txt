@@ -1247,6 +1247,7 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         tests/ui_tests.cpp
         tests/render_packet_tests.cpp
         tests/png_decode_tests.cpp
+        tests/image_decode_tests.cpp
         tests/text_font_residual_tests.cpp
         tests/theme_tests.cpp
         tests/input_editor_tests.cpp
@@ -1309,6 +1310,10 @@ if(BUILD_TESTING AND STRATA_BUILD_TESTS)
         COMMAND strata_core_tests render_packet ${STRATA_RESOURCE_ROOT}
     )
     add_test(NAME strata.png_decode COMMAND strata_core_tests png_decode)
+    add_test(
+        NAME strata.image_decode
+        COMMAND strata_core_tests image_decode ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/images
+    )
 
     if(TARGET strata_headless_host)
         add_executable(strata_effect_refresh_tests tests/effect_refresh_tests.cpp)
@@ -1816,6 +1821,7 @@ if(STRATA_BUILD_FUZZERS)
     endfunction()
     strata_add_fuzzer(strata_opentype_fuzzer tests/fuzz/opentype_fuzzer.cpp Strata::core)
     strata_add_fuzzer(strata_png_fuzzer tests/fuzz/png_fuzzer.cpp Strata::core)
+    strata_add_fuzzer(strata_image_fuzzer tests/fuzz/image_fuzzer.cpp Strata::core)
     strata_add_fuzzer(strata_svg_fuzzer tests/fuzz/svg_fuzzer.cpp Strata::svg)
     strata_add_fuzzer(
         strata_render_packet_fuzzer tests/fuzz/render_packet_fuzzer.cpp Strata::render_host

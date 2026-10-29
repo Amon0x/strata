@@ -50,8 +50,9 @@ stateful decoder per Surface/backend stream. Reading canonical frame JSON is opt
 materialized.
 
 The resource adapter is an immutable Runtime dependency. Install it once before loading modules or
-creating Surfaces; replacement and removal are rejected. Fonts, PNG images, and SVG documents are
-materialized when a Surface is created and remain fixed for that Surface's lifetime. Source
+creating Surfaces; replacement and removal are rejected. Fonts, raster images (PNG, JPEG, GIF and
+WebP), and SVG documents are materialized when a Surface is created and remain fixed for that
+Surface's lifetime. Source
 resource paths remain private to the adapter. Packets use collision-free process/runtime/Surface
 host resource identities. Editing resource files or changing extension packages therefore requires
 rebuilding the owning artifact and recreating the application session.

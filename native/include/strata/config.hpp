@@ -149,7 +149,10 @@ struct FontResource final {
 
 enum class ImageSampling { nearest, linear };
 
-/** One PNG or static SVG exposed to authored Image/icon properties under a logical id. */
+/**
+ * One raster image (PNG, JPEG, GIF or WebP) or static SVG exposed to authored Image/icon
+ * properties under a logical id.
+ */
 struct ImageResource final {
     std::string id{};
     std::string resource_id{};
