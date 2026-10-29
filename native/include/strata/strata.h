@@ -1758,6 +1758,12 @@ typedef uint32_t strata_input_event_kind;
  * with the answer as its event once it arrives.
  */
 #define STRATA_INPUT_PLATFORM_RESULT UINT32_C(12)
+/*
+ * Something the host has to say unasked (a socket's message, a watched file's change, a tray menu
+ * choice): `text` is JSON, {"channel": name, "data": value}. Every node with a `strata.channel`
+ * behavior whose `channel` option names it receives `data` as its action's event.
+ */
+#define STRATA_INPUT_PLATFORM_EVENT UINT32_C(13)
 
 #define STRATA_INPUT_EVENT_VERSION_2 UINT32_C(2)
 

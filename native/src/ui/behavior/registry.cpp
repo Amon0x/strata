@@ -15,6 +15,8 @@ BehaviorRegistry::BehaviorRegistry() {
     // Driven by the router as the pointer moves over the node (InputRouter::track_pointer).
     register_input_phase("strata.pointer", BehaviorInputPhase{.accepts_pointer = true});
     register_input_phase("strata.fileDrop", BehaviorInputPhase{.accepts_pointer = true});
+    // Driven by host events on a channel (InputRouter::platform), not by routed input.
+    register_input_phase("strata.channel", BehaviorInputPhase{});
     register_input_phase("strata.windowDrag", BehaviorInputPhase{.accepts_pointer = true});
     register_input_phase("strata.disabled", BehaviorInputPhase{.disabled = true});
     register_input_phase(

@@ -1094,6 +1094,25 @@ std::vector<PlatformAnswer> PlatformServices::pump() {
     return impl_->pump();
 }
 
+void PlatformServices::post_event(std::string client, std::string channel, std::string data_json) {
+    const std::scoped_lock lock(impl_->mutex);
+    impl_->answered.push_back(PlatformAnswer{std::move(client), 0U, std::move(data_json),
+                                             std::nullopt, std::move(channel)});
+}
+
+std::string PlatformServices::event_json(const PlatformAnswer& event) {
+    JsonValue data;
+    try {
+        data = data::parse_json(event.json);
+    } catch (const std::exception&) {
+        data = JsonValue(event.json);
+    }
+    return data::encode_canonical_json(JsonValue(JsonValue::Object{
+        {"channel", JsonValue(event.channel.value_or(std::string{}))},
+        {"data", std::move(data)},
+    }));
+}
+
 bool PlatformServices::take_window_moved() noexcept {
     return std::exchange(impl_->window_moved, false);
 }

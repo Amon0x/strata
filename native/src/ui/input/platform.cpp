@@ -19,6 +19,7 @@ namespace {
 
 constexpr std::string_view file_drop_behavior_id = "strata.fileDrop";
 constexpr std::string_view window_drag_behavior_id = "strata.windowDrag";
+constexpr std::string_view channel_behavior_id = "strata.channel";
 /** The effect platform requests reach the host as. */
 constexpr std::string_view platform_effect_id = "strata.platform";
 
@@ -107,6 +108,38 @@ InputOperationResult InputRouter::platform(PlatformInputEvent event) {
     if (tree_ == nullptr)
         return result;
     using Fields = std::vector<std::pair<std::string, runtime::Value>>;
+    if (event.kind == PlatformInputKind::event) {
+        // Every node listening on the channel hears what was said on it, in tree order.
+        std::string channel;
+        runtime::Value data;
+        try {
+            const data::JsonValue said = data::parse_json(event.result_json);
+            const data::JsonValue* name = said.find("channel");
+            if (name == nullptr || name->string() == nullptr)
+                return result;
+            channel = *name->string();
+            if (const data::JsonValue* value = said.find("data"); value != nullptr)
+                data = runtime::value_from_json(*value);
+        } catch (const std::exception&) {
+            return result;
+        }
+        const std::vector<RetainedNode*> listeners = tree_->behavior_nodes();
+        for (RetainedNode* const node : listeners) {
+            if (tree_->find_identity(node->identity()) != node)
+                continue;
+            for (const DescriptionBehavior& behavior : node->description().behaviors) {
+                if (!behavior.enabled || behavior.id != channel_behavior_id)
+                    continue;
+                const runtime::Value* listens = behavior.options.field("channel");
+                if (listens == nullptr || listens->string() == nullptr ||
+                    *listens->string() != channel)
+                    continue;
+                BehaviorInputScope scope(*this, *node, behavior, InputEventPhase::target, result);
+                static_cast<void>(scope.emit("channel", data));
+            }
+        }
+        return result;
+    }
     if (event.kind == PlatformInputKind::result) {
         const auto pending = pending_continuations_.find(event.request);
         if (pending == pending_continuations_.end())

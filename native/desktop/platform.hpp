@@ -26,12 +26,17 @@ struct PlatformImage final {
     std::vector<std::uint8_t> rgba;
 };
 
-/** The answer to one platform request, for the session that asked. */
+/**
+ * The answer to one platform request, for the session that asked; or, with a `channel`, something
+ * said unasked on that channel (to the named session, or every session when `client` is empty),
+ * `json` being its data.
+ */
 struct PlatformAnswer final {
     std::string client;
     std::uint64_t request = 0U;
     std::string json;
     std::optional<PlatformImage> image;
+    std::optional<std::string> channel;
 };
 
 /**
@@ -62,6 +67,13 @@ class PlatformServices final {
     [[nodiscard]] strata_effect_adapter effect_adapter(std::string client);
     /** Runs the requests queued since the last call and returns their answers. */
     [[nodiscard]] std::vector<PlatformAnswer> pump();
+    /**
+     * Says `data_json` on `channel` to `client` (every session when empty), at the next pump.
+     * Callable from any thread: sockets and watchers report from their own.
+     */
+    void post_event(std::string client, std::string channel, std::string data_json);
+    /** The JSON a platform event input carries: {"channel", "data"}. */
+    [[nodiscard]] static std::string event_json(const PlatformAnswer& event);
     /** Each playing video's newest frame since the last call, for the session that plays it. */
     [[nodiscard]] std::vector<std::pair<std::string, PlatformImage>> video_frames();
     /** Whether a window drag ran since the last call: the press it began with never released. */

@@ -1652,8 +1652,25 @@ struct Host::Impl final {
      */
     void answer_platform_requests() {
         for (PlatformAnswer& answer : platform.pump()) {
+            const std::string said =
+                answer.channel.has_value() ? PlatformServices::event_json(answer) : std::string{};
             for (Layer* const layer : layers()) {
-                if (!layer->live() || layer->id != answer.client)
+                if (!layer->live())
+                    continue;
+                // Events go to the session they name, or to all of them; answers to the asker.
+                if (answer.channel.has_value()) {
+                    if (!answer.client.empty() && layer->id != answer.client)
+                        continue;
+                    strata_input_event event{};
+                    event.struct_size = sizeof(event);
+                    event.version = STRATA_INPUT_EVENT_VERSION_2;
+                    event.kind = STRATA_INPUT_PLATFORM_EVENT;
+                    event.text = strata::view(said);
+                    event.timestamp_nanoseconds = now();
+                    layer->session->enqueue(std::span<const strata_input_event>(&event, 1U));
+                    continue;
+                }
+                if (layer->id != answer.client)
                     continue;
                 if (answer.image.has_value()) {
                     layer->runtime().publish_image(answer.image->id, answer.image->width,

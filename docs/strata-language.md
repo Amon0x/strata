@@ -658,6 +658,15 @@ Button(label: "Open…", onClick: then(
   action("state.setFromEvent", name: "picked")))
 ```
 
+Some things the host says unasked: a socket's message, a watched file's change, a tray menu's
+choice. Each is said on a channel, and `strata.channel` (`options: { channel: name }`) hears it:
+its action receives what was said as its event.
+
+```strata
+Panel(behaviors: [{ id: "strata.channel", options: { channel: "chat" },
+                    action: action("state.setFromEvent", name: "lastMessage") }])
+```
+
 Two behaviors take the rest. `strata.fileDrop` hears files dragged in from the shell: its action
 receives `{ over, dropped, files }` as files arrive over the node, leave it, and are dropped on it.
 `strata.windowDrag` makes a node a title bar: a press on it (not on a control inside it) moves the

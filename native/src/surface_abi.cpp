@@ -631,6 +631,13 @@ void require_finite(const double value, const char* const message) {
         files.timestamp_nanos = value.timestamp_nanoseconds;
         return files;
     }
+    case STRATA_INPUT_PLATFORM_EVENT: {
+        strata::ui::PlatformInputEvent said;
+        said.kind = strata::ui::PlatformInputKind::event;
+        said.result_json = input_text(value.text, false);
+        said.timestamp_nanos = value.timestamp_nanoseconds;
+        return said;
+    }
     case STRATA_INPUT_PLATFORM_RESULT: {
         strata::ui::PlatformInputEvent answer;
         answer.kind = strata::ui::PlatformInputKind::result;

@@ -377,6 +377,13 @@ struct ApplicationHost::Impl final {
     /** Runs the platform requests the last frame made and hands their answers back. */
     void answer_platform_requests() {
         for (PlatformAnswer& answer : platform.pump()) {
+            if (answer.channel.has_value()) {
+                const std::string said = PlatformServices::event_json(answer);
+                strata_input_event event{};
+                event.kind = STRATA_INPUT_PLATFORM_EVENT;
+                enqueue(event, said);
+                continue;
+            }
             if (answer.image.has_value()) {
                 session->runtime().publish_image(answer.image->id, answer.image->width,
                                                  answer.image->height, answer.image->rgba);

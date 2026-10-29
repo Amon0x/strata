@@ -37,6 +37,7 @@ enum class InputKind {
     file_drop,
     file_drag_leave,
     platform_result,
+    platform_event,
 };
 
 enum class KeyAction { press, release, repeat };
@@ -120,6 +121,8 @@ struct InputEvent final {
                                           const std::vector<std::string>& paths);
     /** The host's answer to platform request `request`, as JSON. */
     [[nodiscard]] static InputEvent platform_result(std::uint64_t request, std::string json);
+    /** Something the host says on `channel` unasked, `json` being {"channel", "data"}. */
+    [[nodiscard]] static InputEvent platform_event(std::string json);
 
     [[nodiscard]] strata_input_event native() const noexcept;
 };
@@ -242,6 +245,13 @@ inline InputEvent InputEvent::platform_result(const std::uint64_t request, std::
     return result;
 }
 
+inline InputEvent InputEvent::platform_event(std::string json) {
+    InputEvent result;
+    result.kind = InputKind::platform_event;
+    result.text = std::move(json);
+    return result;
+}
+
 inline strata_input_event InputEvent::native() const noexcept {
     const auto native_kind = [this] {
         switch (kind) {
@@ -262,6 +272,8 @@ inline strata_input_event InputEvent::native() const noexcept {
             return STRATA_INPUT_FILE_DRAG_LEAVE;
         case InputKind::platform_result:
             return STRATA_INPUT_PLATFORM_RESULT;
+        case InputKind::platform_event:
+            return STRATA_INPUT_PLATFORM_EVENT;
         }
         return STRATA_INPUT_POINTER_CANCEL;
     }();

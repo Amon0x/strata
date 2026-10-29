@@ -164,8 +164,11 @@ struct NavigationInputEvent final {
     std::int64_t timestamp_nanos = 0;
 };
 
-/** What a PlatformInputEvent carries: files dragged in from the OS, or a host's answer. */
-enum class PlatformInputKind { file_drag, file_drop, file_leave, result };
+/**
+ * What a PlatformInputEvent carries: files dragged in from the OS, a host's answer, or something
+ * the host says unasked on a channel.
+ */
+enum class PlatformInputKind { file_drag, file_drop, file_leave, result, event };
 
 /**
  * Input from the platform rather than a device: files dragged over or dropped on the surface

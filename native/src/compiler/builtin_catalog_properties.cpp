@@ -413,6 +413,8 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
                          .options = declared_type_reference("strataDisabledOptions")},
         DeclaredBehavior{.id = "strata.drag-source",
                          .options = declared_type_reference("dragSourceOptions")},
+        DeclaredBehavior{.id = "strata.channel",
+                         .options = declared_type_reference("strataChannelOptions")},
         DeclaredBehavior{.id = "strata.drop-target",
                          .options = declared_type_reference("dropTargetOptions")},
         DeclaredBehavior{.id = "strata.fileDrop",

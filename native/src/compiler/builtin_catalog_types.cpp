@@ -327,6 +327,11 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
                                                          .label = "strata.hoverable options",
                                                          .value = declared_type_reference("any")})},
+        DeclaredNamedType{.id = "strataChannelOptions",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
+                                                         .label = "strata.channel options",
+                                                         .value = declared_type_reference("any")})},
         DeclaredNamedType{.id = "strataFileDropOptions",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
@@ -1010,6 +1015,7 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                               .label = "behavior attachment",
                               .options = {declared_type_reference("strataActivateBehavior"),
                                           declared_type_reference("strataBackdropBehavior"),
+                                          declared_type_reference("strataChannelBehavior"),
                                           declared_type_reference("strataDisabledBehavior"),
                                           declared_type_reference("strataDragSourceBehavior"),
                                           declared_type_reference("strataDropTargetBehavior"),
@@ -1185,6 +1191,33 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
                                                          .literal = "strata.hoverable"})},
+        DeclaredNamedType{
+            .id = "strataChannelBehavior",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "strata.channel behavior",
+                .fields =
+                    {DeclaredTypeField{.name = "action",
+                                       .type = declared_type_reference("action"),
+                                       .required = false,
+                                       .nullable = true},
+                     DeclaredTypeField{.name = "enabled",
+                                       .type = declared_type_reference("boolean"),
+                                       .required = false,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "id",
+                                       .type = declared_type_reference("literalStrataChannel"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "options",
+                                       .type = declared_type_reference("strataChannelOptions"),
+                                       .required = false,
+                                       .nullable = false}},
+                .value = declared_type_reference("any")})},
+        DeclaredNamedType{.id = "literalStrataChannel",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
+                                                         .literal = "strata.channel"})},
         DeclaredNamedType{
             .id = "strataFileDropBehavior",
             .definition = declared_type(DeclaredType{
