@@ -20,6 +20,8 @@ namespace strata::font {
 enum class GlyphRasterMode : std::uint8_t {
     coverage,
     msdf,
+    /** A colour glyph's layers (COLR) composited to straight RGBA, drawn as an image. */
+    color,
 };
 
 struct SubpixelPhase final {

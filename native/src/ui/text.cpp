@@ -1,8 +1,8 @@
 #include "ui/text.hpp"
 
 #include <algorithm>
-#include <bit>
 #include <array>
+#include <bit>
 #include <cctype>
 #include <charconv>
 #include <chrono>
@@ -12,15 +12,240 @@
 #include <new>
 #include <optional>
 #include <ranges>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "font/system_fonts.hpp"
 #include "runtime/value.hpp"
 
 namespace strata::ui {
 namespace {
+
+/**
+ * Bidirectional classes the layout tells apart (a subset of UAX #9's): strong left-to-right,
+ * right-to-left (Hebrew) and Arabic letters, European and Arabic digits, their separators and
+ * terminators, marks that take their base's class, white space, and other neutrals.
+ */
+enum class Bidi : std::uint8_t { l, r, al, en, an, es, et, cs, nsm, ws, on };
+
+[[nodiscard]] Bidi bidi_class(const std::uint32_t c) noexcept {
+    if (c == 0x20U || c == 0x09U || c == 0x0DU || c == 0x0AU || c == 0x2028U || c == 0x2029U ||
+        c == 0x3000U || (c >= 0x2000U && c <= 0x200AU))
+        return Bidi::ws;
+    if (c >= '0' && c <= '9')
+        return Bidi::en;
+    if (c == '+' || c == '-')
+        return Bidi::es;
+    if (c == '#' || c == '$' || c == '%' || (c >= 0xA2U && c <= 0xA5U) || c == 0xB0U ||
+        c == 0x2030U || c == 0x20ACU)
+        return Bidi::et;
+    if (c == ',' || c == '.' || c == '/' || c == ':' || c == 0xA0U || c == 0x060CU)
+        return Bidi::cs;
+    if ((c >= 0x0660U && c <= 0x0669U) || (c >= 0x06F0U && c <= 0x06F9U) || c == 0x066BU ||
+        c == 0x066CU)
+        return Bidi::an;
+    if ((c >= 0x0300U && c <= 0x036FU) || (c >= 0x0591U && c <= 0x05BDU) || c == 0x05BFU ||
+        c == 0x05C1U || c == 0x05C2U || c == 0x05C4U || c == 0x05C5U || c == 0x05C7U ||
+        (c >= 0x0610U && c <= 0x061AU) || (c >= 0x064BU && c <= 0x065FU) || c == 0x0670U ||
+        (c >= 0x06D6U && c <= 0x06DCU) || (c >= 0x06DFU && c <= 0x06E4U) || c == 0x06E7U ||
+        c == 0x06E8U || (c >= 0x06EAU && c <= 0x06EDU) || (c >= 0xFE00U && c <= 0xFE0FU) ||
+        c == 0x200DU)
+        return Bidi::nsm;
+    if ((c >= 0x0590U && c <= 0x05FFU) || (c >= 0x07C0U && c <= 0x085FU) ||
+        (c >= 0xFB1DU && c <= 0xFB4FU) || c == 0x200FU)
+        return Bidi::r;
+    if ((c >= 0x0600U && c <= 0x07BFU) || (c >= 0x0860U && c <= 0x08FFU) ||
+        (c >= 0xFB50U && c <= 0xFDFFU) || (c >= 0xFE70U && c <= 0xFEFFU))
+        return Bidi::al;
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= 0xC0U && c <= 0x24FU) ||
+        (c >= 0x0370U && c <= 0x058FU) || (c >= 0x0900U && c <= 0x1FFFU) ||
+        (c >= 0x2C00U && c <= 0x2DFFU) || (c >= 0x3040U && c <= 0xD7FFU) ||
+        (c >= 0xF900U && c <= 0xFAFFU) || c >= 0x10000U || c == 0x200EU)
+        return Bidi::l;
+    return Bidi::on;
+}
+
+/**
+ * Embedding levels for one paragraph (UAX #9 without explicit embeddings): the paragraph's level
+ * from its first strong character, weak types resolved (W1-W7), neutrals taking the direction
+ * around them or the paragraph's (N1-N2), then the implicit levels (I1-I2).
+ */
+[[nodiscard]] std::vector<std::uint8_t> bidi_levels(const std::vector<std::uint32_t>& text,
+                                                    std::uint8_t& paragraph) {
+    const std::size_t n = text.size();
+    std::vector<Bidi> types(n);
+    for (std::size_t i = 0U; i < n; ++i)
+        types[i] = bidi_class(text[i]);
+    paragraph = 0U;
+    for (const Bidi type : types) {
+        if (type == Bidi::l)
+            break;
+        if (type == Bidi::r || type == Bidi::al) {
+            paragraph = 1U;
+            break;
+        }
+    }
+    const Bidi sor = paragraph == 1U ? Bidi::r : Bidi::l;
+    // W1: a mark takes the class of what it marks.
+    for (std::size_t i = 0U; i < n; ++i) {
+        if (types[i] == Bidi::nsm)
+            types[i] = i == 0U ? sor : (types[i - 1U] == Bidi::ws ? Bidi::on : types[i - 1U]);
+    }
+    // W2: European digits after Arabic letters are Arabic digits. W3: Arabic letters are R.
+    Bidi last_strong = sor;
+    for (std::size_t i = 0U; i < n; ++i) {
+        if (types[i] == Bidi::l || types[i] == Bidi::r || types[i] == Bidi::al)
+            last_strong = types[i];
+        else if (types[i] == Bidi::en && last_strong == Bidi::al)
+            types[i] = Bidi::an;
+    }
+    for (Bidi& type : types) {
+        if (type == Bidi::al)
+            type = Bidi::r;
+    }
+    // W4: one separator between two digits of a kind joins them.
+    for (std::size_t i = 1U; i + 1U < n; ++i) {
+        if (types[i] == Bidi::es && types[i - 1U] == Bidi::en && types[i + 1U] == Bidi::en)
+            types[i] = Bidi::en;
+        else if (types[i] == Bidi::cs && types[i - 1U] == types[i + 1U] &&
+                 (types[i - 1U] == Bidi::en || types[i - 1U] == Bidi::an))
+            types[i] = types[i - 1U];
+    }
+    // W5: terminators next to European digits are European digits.
+    for (std::size_t i = 0U; i < n; ++i) {
+        if (types[i] != Bidi::et)
+            continue;
+        std::size_t end = i;
+        while (end < n && types[end] == Bidi::et)
+            ++end;
+        const bool digits =
+            (i > 0U && types[i - 1U] == Bidi::en) || (end < n && types[end] == Bidi::en);
+        for (std::size_t k = i; k < end; ++k)
+            types[k] = digits ? Bidi::en : Bidi::on;
+        i = end - 1U;
+    }
+    // W6: remaining separators are neutral. W7: European digits after L are L.
+    for (Bidi& type : types) {
+        if (type == Bidi::es || type == Bidi::cs || type == Bidi::et)
+            type = Bidi::on;
+    }
+    last_strong = sor;
+    for (Bidi& type : types) {
+        if (type == Bidi::l || type == Bidi::r)
+            last_strong = type;
+        else if (type == Bidi::en && last_strong == Bidi::l)
+            type = Bidi::l;
+    }
+    // N1/N2: neutrals between two of one direction take it (digits count as R); others, the
+    // paragraph's.
+    const auto direction = [](const Bidi type) {
+        return type == Bidi::l                                             ? 0
+               : (type == Bidi::r || type == Bidi::en || type == Bidi::an) ? 1
+                                                                           : -1;
+    };
+    for (std::size_t i = 0U; i < n; ++i) {
+        if (direction(types[i]) >= 0)
+            continue;
+        std::size_t end = i;
+        while (end < n && direction(types[end]) < 0)
+            ++end;
+        const int before = i == 0U ? static_cast<int>(paragraph) : direction(types[i - 1U]);
+        const int after = end == n ? static_cast<int>(paragraph) : direction(types[end]);
+        const Bidi resolved = before == after ? (before == 0 ? Bidi::l : Bidi::r)
+                                              : (paragraph == 0U ? Bidi::l : Bidi::r);
+        for (std::size_t k = i; k < end; ++k)
+            types[k] = resolved;
+        i = end - 1U;
+    }
+    // I1/I2.
+    std::vector<std::uint8_t> levels(n, paragraph);
+    for (std::size_t i = 0U; i < n; ++i) {
+        if (paragraph == 0U) {
+            if (types[i] == Bidi::r)
+                levels[i] = 1U;
+            else if (types[i] == Bidi::an || types[i] == Bidi::en)
+                levels[i] = 2U;
+        } else if (types[i] == Bidi::l || types[i] == Bidi::en || types[i] == Bidi::an) {
+            levels[i] = 2U;
+        }
+    }
+    return levels;
+}
+
+/** How an Arabic-script letter joins (Unicode's joining types): not, right only, both ways. */
+enum class Joining : std::uint8_t { none, transparent, right, dual, causing };
+
+[[nodiscard]] Joining joining_type(const std::uint32_t c) noexcept {
+    if (c == 0x0640U || c == 0x200DU)
+        return Joining::causing;
+    if ((c >= 0x0610U && c <= 0x061AU) || (c >= 0x064BU && c <= 0x065FU) || c == 0x0670U ||
+        (c >= 0x06D6U && c <= 0x06DCU) || (c >= 0x06DFU && c <= 0x06E4U) || c == 0x06E7U ||
+        c == 0x06E8U || (c >= 0x06EAU && c <= 0x06EDU))
+        return Joining::transparent;
+    switch (c) {
+    case 0x0622U:
+    case 0x0623U:
+    case 0x0624U:
+    case 0x0625U:
+    case 0x0627U:
+    case 0x0629U:
+    case 0x062FU:
+    case 0x0630U:
+    case 0x0631U:
+    case 0x0632U:
+    case 0x0648U:
+    case 0x0671U:
+    case 0x0672U:
+    case 0x0673U:
+    case 0x0675U:
+    case 0x0676U:
+    case 0x0677U:
+    case 0x06C0U:
+    case 0x06C3U:
+    case 0x06C4U:
+    case 0x06C5U:
+    case 0x06C6U:
+    case 0x06C7U:
+    case 0x06C8U:
+    case 0x06C9U:
+    case 0x06CAU:
+    case 0x06CBU:
+    case 0x06CDU:
+    case 0x06CFU:
+    case 0x06D2U:
+    case 0x06D3U:
+    case 0x06D5U:
+    case 0x06EEU:
+    case 0x06EFU:
+    case 0x0759U:
+    case 0x075AU:
+    case 0x075BU:
+    case 0x076BU:
+    case 0x076CU:
+    case 0x0771U:
+    case 0x0773U:
+    case 0x0774U:
+    case 0x0778U:
+    case 0x0779U:
+        return Joining::right;
+    case 0x0621U:
+    case 0x0674U:
+    case 0x06DDU:
+        return Joining::none;
+    default:
+        break;
+    }
+    if ((c >= 0x0688U && c <= 0x0699U))
+        return Joining::right;
+    if ((c >= 0x0620U && c <= 0x064AU) || (c >= 0x066EU && c <= 0x06D3U) ||
+        (c >= 0x06FAU && c <= 0x06FFU) || (c >= 0x0750U && c <= 0x077FU) ||
+        (c >= 0x08A0U && c <= 0x08C7U))
+        return Joining::dual;
+    return Joining::none;
+}
 
 [[nodiscard]] const runtime::Value* property(const DescriptionNode& description,
                                              const std::string_view name) noexcept {
@@ -205,6 +430,52 @@ font_rasterization_value(const runtime::Value* value,
     return fallback;
 }
 
+/**
+ * A `fontVariation` ("wght 650, wdth 80", tags quoted or not, `=` allowed) as axis settings
+ * sorted by tag; a malformed entry is skipped.
+ */
+[[nodiscard]] std::vector<std::pair<std::string, double>>
+variation_settings(const std::string_view text) {
+    std::vector<std::pair<std::string, double>> settings;
+    std::size_t start = 0U;
+    while (start <= text.size()) {
+        const std::size_t comma = std::min(text.find(',', start), text.size());
+        std::string entry(text.substr(start, comma - start));
+        start = comma + 1U;
+        std::ranges::replace_if(
+            entry, [](const char c) { return c == '\'' || c == '"' || c == '='; }, ' ');
+        std::istringstream stream(entry);
+        std::string tag;
+        double value = 0.0;
+        if (!(stream >> tag >> value) || tag.size() != 4U || !std::isfinite(value))
+            continue;
+        std::erase_if(settings, [&tag](const auto& setting) { return setting.first == tag; });
+        settings.emplace_back(std::move(tag), value);
+    }
+    std::ranges::sort(settings);
+    return settings;
+}
+
+/** Axis settings as one canonical string, part of a varied face's id. */
+[[nodiscard]] std::string
+variation_text(const std::vector<std::pair<std::string, double>>& settings) {
+    std::string result;
+    for (const auto& [tag, value] : settings) {
+        if (!result.empty())
+            result += ',';
+        std::ostringstream number;
+        number << value;
+        result += tag + "=" + number.str();
+    }
+    return result;
+}
+
+[[nodiscard]] std::string font_variation_value(const runtime::Value* value) {
+    return value != nullptr && value->string() != nullptr
+               ? variation_text(variation_settings(*value->string()))
+               : std::string();
+}
+
 [[nodiscard]] std::vector<std::string> fallback_font_values(const runtime::Value* value) {
     std::vector<std::string> result;
     if (value == nullptr || value->list() == nullptr)
@@ -271,26 +542,27 @@ bool TextLayout::shares_storage_with(const TextLayout& other) const noexcept {
 }
 
 bool text_layout_field(const std::string_view name) noexcept {
-    static constexpr std::array<std::string_view, 18U> fields{
+    static constexpr std::array<std::string_view, 19U> fields{
         "text",          "label",          "spans",
         "font",          "fallbackFonts",  "fontSize",
         "pixelSize",     "lineHeight",     "lineHeightMultiplier",
         "letterSpacing", "fontStyleFlags", "fontRasterization",
         "wrapWidth",     "wrapMode",       "overflow",
         "maxLines",      "fontWeight",     "fontStyle",
+        "fontVariation",
     };
     return std::ranges::contains(fields, name) || name == "alignment";
 }
 
 bool text_layout_projection_equal(const runtime::Value* current,
                                   const runtime::Value* next) noexcept {
-    static constexpr std::array<std::string_view, 16U> fields{
+    static constexpr std::array<std::string_view, 17U> fields{
         "font",          "fallbackFonts",  "fontSize",
         "pixelSize",     "lineHeight",     "lineHeightMultiplier",
         "letterSpacing", "fontStyleFlags", "fontRasterization",
         "wrapWidth",     "wrapMode",       "overflow",
         "maxLines",      "alignment",      "fontWeight",
-        "fontStyle",
+        "fontStyle",     "fontVariation",
     };
     for (const std::string_view field : fields) {
         const runtime::Value* left = object_field(current, field);
@@ -405,7 +677,14 @@ const font::OpenTypeFont& TextEngine::control_font() const noexcept {
 
 const font::OpenTypeFont& TextEngine::font(const std::string_view id) const noexcept {
     const auto found = fonts_.find(id);
-    return found != fonts_.end() ? found->second : fonts_.find("strata:fonts/default")->second;
+    if (found != fonts_.end())
+        return found->second;
+    {
+        const std::scoped_lock lock(system_fonts_mutex_);
+        if (const auto system = system_fonts_.find(id); system != system_fonts_.end())
+            return system->second;
+    }
+    return fonts_.find("strata:fonts/default")->second;
 }
 
 std::string TextEngine::requested_font_id(const RetainedNode& node) const {
@@ -530,6 +809,7 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
             ? *overrides->alignment
             : text_option(style, "alignment", "START"),
     };
+    result.font_variation = font_variation_value(style.field("fontVariation"));
     // Styled runs come from a description's spans, whichever widget authored them.
     const runtime::Value* spans = property(description, "spans");
     if (spans == nullptr || spans->list() == nullptr)
@@ -587,6 +867,9 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
             packed_color(run_field("color")),
             interactive,
         });
+        result.style_runs.back().font_variation =
+            run_field("fontVariation") != nullptr ? font_variation_value(run_field("fontVariation"))
+                                                  : result.font_variation;
         offset = end;
     }
     return result;
@@ -613,7 +896,7 @@ const TextLayout& TextEngine::cached_layout(CacheKey key, const bool count_reque
                                            .count());
         return restored;
     }
-    if (!fonts_.contains(key.font_id)) {
+    if (!fonts_.contains(key.font_id) && !key.font_id.starts_with("system:")) {
         record_missing_font(key.font_id);
     }
     const auto shaping_started = std::chrono::steady_clock::now();
@@ -701,14 +984,60 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         return result;
     };
 
-    const auto fallback_order = [this](const std::string& requested,
-                                       const std::vector<std::string>& authored,
-                                       const std::uint32_t requested_style_flags,
-                                       const std::uint16_t requested_weight) {
+    // A font id the application did not bind: an OS font by file name ("system:bahnschrift.ttf").
+    const auto system_named = [this](const std::string& id) -> const FontCandidate* {
+        constexpr std::string_view prefix = "system:";
+        if (!id.starts_with(prefix))
+            return nullptr;
+        {
+            const std::scoped_lock lock(system_fonts_mutex_);
+            if (const auto found = system_fonts_.find(id); found != system_fonts_.end())
+                return &*found;
+        }
+        const std::optional<font::SystemFont> system =
+            font::system_font_named(std::string_view(id).substr(prefix.size()));
+        if (!system.has_value())
+            return nullptr;
+        const std::scoped_lock lock(system_fonts_mutex_);
+        return &*system_fonts_.try_emplace(id, system->face).first;
+    };
+    // A variable face at the axes asked for, and at the weight on `wght` unless they name it.
+    const auto vary = [this](const FontCandidate* candidate, const std::string& variation,
+                             const std::uint32_t flags,
+                             const std::uint16_t weight) -> const FontCandidate* {
+        const font::OpenTypeFont& face = candidate->second;
+        if (face.axes().empty())
+            return candidate;
+        std::vector<std::pair<std::string, double>> settings = variation_settings(variation);
+        const bool weighted = std::ranges::any_of(
+            face.axes(), [](const font::FontAxis& axis) { return axis.tag == "wght"; });
+        const bool named = std::ranges::any_of(
+            settings, [](const auto& setting) { return setting.first == "wght"; });
+        if (weighted && !named && (weight != 0U || (flags & font::font_style_bold) != 0U)) {
+            settings.emplace_back("wght", weight != 0U ? static_cast<double>(weight) : 700.0);
+            std::ranges::sort(settings);
+        }
+        if (settings.empty())
+            return candidate;
+        const std::string id = candidate->first + "@" + variation_text(settings);
+        const std::scoped_lock lock(system_fonts_mutex_);
+        if (const auto found = system_fonts_.find(id); found != system_fonts_.end())
+            return &*found;
+        return &*system_fonts_.try_emplace(id, face.instance(settings)).first;
+    };
+    const auto faces_in_order = [this, &system_named](const std::string& requested,
+                                                      const std::vector<std::string>& authored,
+                                                      const std::uint32_t requested_style_flags,
+                                                      const std::uint16_t requested_weight) {
         FontOrder base;
-        const auto append = [&base, this](const std::string& id) {
+        const auto append = [&base, &system_named, this](const std::string& id) {
             const auto found = fonts_.find(id);
             if (found == fonts_.end()) {
+                if (const FontCandidate* system = system_named(id)) {
+                    if (std::ranges::find(base, system) == base.end())
+                        base.push_back(system);
+                    return;
+                }
                 record_missing_font(id);
                 return;
             }
@@ -818,15 +1147,26 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         }
         return result;
     };
+    const auto fallback_order = [&faces_in_order, &vary](const std::string& requested,
+                                                         const std::vector<std::string>& authored,
+                                                         const std::uint32_t requested_style_flags,
+                                                         const std::uint16_t requested_weight,
+                                                         const std::string& variation) {
+        FontOrder order =
+            faces_in_order(requested, authored, requested_style_flags, requested_weight);
+        for (const FontCandidate*& candidate : order)
+            candidate = vary(candidate, variation, requested_style_flags, requested_weight);
+        return order;
+    };
 
-    const FontOrder default_font_order =
-        fallback_order(key.font_id, key.fallback_fonts, key.font_style_flags, key.font_weight);
+    const FontOrder default_font_order = fallback_order(
+        key.font_id, key.fallback_fonts, key.font_style_flags, key.font_weight, key.font_variation);
     std::vector<FontOrder> style_font_orders;
     style_font_orders.reserve(key.style_runs.size());
     for (const StyleRun& style : key.style_runs) {
-        style_font_orders.push_back(
-            fallback_order(style.font_id, style.fallback_fonts, style.font_style_flags,
-                           style.font_weight));
+        style_font_orders.push_back(fallback_order(style.font_id, style.fallback_fonts,
+                                                   style.font_style_flags, style.font_weight,
+                                                   style.font_variation));
     }
 
     std::vector<Unit> units;
@@ -883,6 +1223,20 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
                 unit.glyph_id = glyph;
                 break;
             }
+            // No font the text names has it (an emoji, Arabic, Han): the system's, if any does.
+            if (unit.glyph_id == 0U && !unit.whitespace && code_point >= 0x20U) {
+                if (const std::optional<font::SystemFont> system =
+                        font::system_font_for(code_point);
+                    system.has_value()) {
+                    const std::scoped_lock lock(system_fonts_mutex_);
+                    const auto [entry, inserted] =
+                        system_fonts_.try_emplace(system->id, system->face);
+                    static_cast<void>(inserted);
+                    unit.font_id = &entry->first;
+                    unit.face = &entry->second;
+                    unit.glyph_id = entry->second.glyph_id(code_point);
+                }
+            }
         }
         if (unit.face == nullptr) {
             units.push_back(std::move(unit));
@@ -904,6 +1258,37 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                        std::chrono::steady_clock::now() - font_resolution_started)
                                        .count());
+
+    // A joining script's letters take the form their neighbours ask for (Arabic: isolated,
+    // initial, medial, final), from the font's own substitutions, before runs are shaped.
+    for (std::size_t index = 0U; index < units.size(); ++index) {
+        Unit& unit = units[index];
+        const Joining self = joining_type(unit.code_point);
+        if (unit.face == nullptr || unit.glyph_id == 0U ||
+            (self != Joining::dual && self != Joining::right))
+            continue;
+        const auto neighbour = [&units, index](const bool before) {
+            std::size_t at = index;
+            while (before ? at > 0U : at + 1U < units.size()) {
+                at = before ? at - 1U : at + 1U;
+                const Joining type = joining_type(units[at].code_point);
+                if (type != Joining::transparent)
+                    return type;
+            }
+            return Joining::none;
+        };
+        const Joining previous = neighbour(true);
+        const Joining next = neighbour(false);
+        const bool joins_before = previous == Joining::dual || previous == Joining::causing;
+        const bool joins_after =
+            self == Joining::dual &&
+            (next == Joining::dual || next == Joining::right || next == Joining::causing);
+        const font::JoiningForm form = joins_before && joins_after ? font::JoiningForm::medial
+                                       : joins_before              ? font::JoiningForm::final
+                                       : joins_after               ? font::JoiningForm::initial
+                                                                   : font::JoiningForm::isolated;
+        unit.glyph_id = unit.face->joining_form(form, unit.glyph_id);
+    }
 
     const auto opentype_started = std::chrono::steady_clock::now();
     std::vector<Unit> shaped_units;
@@ -975,6 +1360,27 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         begin = end;
     }
     units = std::move(shaped_units);
+    // Each paragraph's embedding levels, so lines can lay right-to-left runs out in visual order.
+    std::vector<std::uint8_t> levels(units.size(), 0U);
+    std::vector<std::uint8_t> paragraph_levels(units.size(), 0U);
+    bool any_right_to_left = false;
+    for (std::size_t begin = 0U; begin < units.size();) {
+        std::size_t end = begin;
+        while (end < units.size() && !units[end].newline)
+            ++end;
+        std::vector<std::uint32_t> code_points;
+        code_points.reserve(end - begin);
+        for (std::size_t index = begin; index < end; ++index)
+            code_points.push_back(units[index].code_point);
+        std::uint8_t paragraph = 0U;
+        const std::vector<std::uint8_t> resolved = bidi_levels(code_points, paragraph);
+        for (std::size_t index = begin; index < end; ++index) {
+            levels[index] = resolved[index - begin];
+            paragraph_levels[index] = paragraph;
+            any_right_to_left = any_right_to_left || resolved[index - begin] != 0U;
+        }
+        begin = end + 1U;
+    }
     operation_counters_.opentype_nanos +=
         static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                        std::chrono::steady_clock::now() - opentype_started)
@@ -1170,7 +1576,7 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
         const FontOrder marker_fonts = fallback_order(
             marker_request,
             marker.fallback_fonts != nullptr ? *marker.fallback_fonts : key.fallback_fonts,
-            marker.font_style_flags, key.font_weight);
+            marker.font_style_flags, key.font_weight, key.font_variation);
         for (const FontCandidate* candidate : marker_fonts) {
             const std::uint16_t glyph = candidate->second.glyph_id(marker.code_point);
             if (glyph == 0U)
@@ -1250,10 +1656,59 @@ TextLayout TextEngine::build_layout(const CacheKey& key) const {
             std::max(result.shaped.metrics.natural_line_height, natural_height);
         const double baseline =
             line_y + std::max(0.0, line_height - natural_height) * 0.5 + line_ascent;
+        // Where each unit stands on the line: in logical order unless it holds right-to-left
+        // text, when the line's runs reverse from its highest level down (UAX #9, L1 and L2).
+        std::vector<double> visual_x;
+        if (any_right_to_left && !draft.units.empty()) {
+            const std::size_t count = draft.units.size();
+            std::vector<std::uint8_t> line_levels(count);
+            for (std::size_t position = 0U; position < count; ++position)
+                line_levels[position] = levels[draft.units[position]];
+            // L1: white space at the line's end takes the paragraph's level.
+            for (std::size_t position = count; position > 0U; --position) {
+                if (!units[draft.units[position - 1U]].whitespace)
+                    break;
+                line_levels[position - 1U] = paragraph_levels[draft.units[position - 1U]];
+            }
+            std::vector<std::size_t> order(count);
+            for (std::size_t position = 0U; position < count; ++position)
+                order[position] = position;
+            const std::uint8_t highest = *std::ranges::max_element(line_levels);
+            std::uint8_t lowest_odd = 255U;
+            for (const std::uint8_t level : line_levels) {
+                if ((level & 1U) != 0U)
+                    lowest_odd = std::min(lowest_odd, level);
+            }
+            for (int level = highest; level >= static_cast<int>(lowest_odd) && lowest_odd != 255U;
+                 --level) {
+                for (std::size_t at = 0U; at < count;) {
+                    if (line_levels[order[at]] < level) {
+                        ++at;
+                        continue;
+                    }
+                    std::size_t end = at;
+                    while (end < count && line_levels[order[end]] >= level)
+                        ++end;
+                    std::reverse(order.begin() + static_cast<std::ptrdiff_t>(at),
+                                 order.begin() + static_cast<std::ptrdiff_t>(end));
+                    at = end;
+                }
+            }
+            visual_x.assign(count, 0.0);
+            double pen = 0.0;
+            for (std::size_t slot = 0U; slot < count; ++slot) {
+                const std::size_t position = order[slot];
+                const Unit& unit = units[draft.units[position]];
+                visual_x[position] = pen;
+                pen += (position == 0U ? 0.0 : unit.leading) + unit.advance;
+            }
+        }
         double cursor = 0.0;
         for (std::size_t position = 0U; position < draft.units.size(); ++position) {
             const Unit& unit = units[draft.units[position]];
             const double leading = position == 0U ? 0.0 : unit.leading;
+            if (!visual_x.empty())
+                cursor = visual_x[position];
             const double cluster_advance = leading + unit.advance;
             result.shaped.clusters.push_back(font::ShapedCluster{
                 unit.code_point,

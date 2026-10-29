@@ -587,6 +587,24 @@ so text that uses them rasterizes as MSDF, with a field wide enough for the larg
 Text(text: "NEON", style: style(Title, color: #E8FBFFFF, textGlow: { radius: 9, color: #22C7FFCC }))
 ```
 
+### World text and variable fonts
+
+Text in any script draws without the app bundling a font for it. A character none of the text's
+fonts has (an emoji, Arabic, Hebrew, Han, kana, Hangul, Devanagari) comes from the system's fonts:
+the ones known for its script first (Segoe UI Emoji for emoji, Microsoft YaHei for Han), then any
+installed font that covers it. Emoji draw in their own colours (COLR). Arabic letters take their
+joined forms, and right-to-left runs are laid out in their order inside left-to-right lines, with
+numbers and neutral punctuation placed as the Unicode bidirectional algorithm places them.
+
+`font` can also name an installed font by its file, `"system:bahnschrift.ttf"`. On a variable font
+`fontWeight` sets the `wght` axis instead of picking a face, and `fontVariation` sets any axis, as
+`"wght 650, wdth 80"` (tags quoted or not); each value is clamped to the axis's range.
+
+```strata
+Text(text: "Headline", style: style(Title, font: "system:bahnschrift.ttf", fontWeight: weight,
+                                    fontVariation: "wdth 80"))
+```
+
 ### Following the pointer
 
 The `strata.pointer` behavior tells a node where the pointer is over it. Its action receives an

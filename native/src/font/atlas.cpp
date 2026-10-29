@@ -134,7 +134,7 @@ class SharedGlyphRasterCache final {
 raster_config_identity(const GlyphRasterMode mode, const CoverageRasterConfig& coverage,
                        const MsdfRasterConfig& msdf) noexcept {
     std::array<std::uint64_t, 12U> result{};
-    if (mode == GlyphRasterMode::coverage) {
+    if (mode == GlyphRasterMode::coverage || mode == GlyphRasterMode::color) {
         result = {
             coverage.maximum_dimension,
             coverage.padding_pixels,
@@ -169,7 +169,7 @@ raster_cache_identity(const OpenTypeFont& font, const std::uint16_t glyph, const
             glyph,
             font_style_flags,
             std::bit_cast<std::uint64_t>(pixel_size),
-            std::bit_cast<std::uint64_t>(mode == GlyphRasterMode::coverage ? display_scale : 1.0),
+            std::bit_cast<std::uint64_t>(mode != GlyphRasterMode::msdf ? display_scale : 1.0),
             mode,
             phase,
             raster_config_identity(mode, coverage, msdf),
@@ -178,11 +178,110 @@ raster_cache_identity(const OpenTypeFont& font, const std::uint16_t glyph, const
     };
 }
 
+/**
+ * A colour glyph: each layer's coverage, at the glyph's size, composited over the layers before
+ * it in its palette colour, into one straight-RGBA bitmap over all of them.
+ */
+[[nodiscard]] std::optional<GlyphRasterBitmap>
+rasterize_color(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
+                const double display_scale, const SubpixelPhase phase,
+                const std::uint32_t font_style_flags, const CoverageRasterConfig& coverage) {
+    struct Layer final {
+        GlyphRasterBitmap bitmap;
+        std::uint32_t rgba = 0U;
+    };
+    std::vector<Layer> layers;
+    double left = std::numeric_limits<double>::infinity();
+    double top = -std::numeric_limits<double>::infinity();
+    double right = -std::numeric_limits<double>::infinity();
+    double bottom = std::numeric_limits<double>::infinity();
+    for (const ColorGlyphLayer& layer : font.color_layers(glyph)) {
+        std::optional<GlyphRasterBitmap> bitmap = rasterize_coverage(
+            font, layer.glyph, pixel_size, display_scale, phase, coverage, font_style_flags);
+        if (!bitmap.has_value())
+            continue;
+        const RasterPlaneBounds& plane = bitmap->plane_bounds_layout_pixels;
+        left = std::min(left, plane.left);
+        top = std::max(top, plane.top);
+        right = std::max(right, plane.right);
+        bottom = std::min(bottom, plane.bottom);
+        layers.push_back(Layer{std::move(*bitmap), layer.foreground ? 0xFF000000U : layer.rgba});
+    }
+    if (layers.empty())
+        return std::nullopt;
+    const double scale = display_scale > 0.0 ? display_scale : 1.0;
+    const auto width = static_cast<std::uint32_t>(std::lround((right - left) * scale));
+    const auto height = static_cast<std::uint32_t>(std::lround((top - bottom) * scale));
+    if (width == 0U || height == 0U || width > 4096U || height > 4096U)
+        return std::nullopt;
+    GlyphRasterBitmap result;
+    result.width = width;
+    result.height = height;
+    result.mode = GlyphRasterMode::color;
+    result.bytes.assign(static_cast<std::size_t>(width) * height * 4U, 0U);
+    result.plane_bounds_layout_pixels = RasterPlaneBounds{left, bottom, right, top};
+    result.plane_bounds_font_units = layers.front().bitmap.plane_bounds_font_units;
+    result.layout_pixels_per_font_unit = layers.front().bitmap.layout_pixels_per_font_unit;
+    result.atlas_pixels_per_font_unit = layers.front().bitmap.atlas_pixels_per_font_unit;
+    std::vector<float> premultiplied(static_cast<std::size_t>(width) * height * 4U, 0.0F);
+    for (const Layer& layer : layers) {
+        const RasterPlaneBounds& plane = layer.bitmap.plane_bounds_layout_pixels;
+        const auto offset_x = static_cast<long>(std::lround((plane.left - left) * scale));
+        const auto offset_y = static_cast<long>(std::lround((top - plane.top) * scale));
+        const float red = static_cast<float>(layer.rgba & 0xFFU) / 255.0F;
+        const float green = static_cast<float>((layer.rgba >> 8U) & 0xFFU) / 255.0F;
+        const float blue = static_cast<float>((layer.rgba >> 16U) & 0xFFU) / 255.0F;
+        const float alpha = static_cast<float>(layer.rgba >> 24U) / 255.0F;
+        for (std::uint32_t y = 0U; y < layer.bitmap.height; ++y) {
+            const long target_y = offset_y + static_cast<long>(y);
+            if (target_y < 0 || target_y >= static_cast<long>(height))
+                continue;
+            for (std::uint32_t x = 0U; x < layer.bitmap.width; ++x) {
+                const long target_x = offset_x + static_cast<long>(x);
+                if (target_x < 0 || target_x >= static_cast<long>(width))
+                    continue;
+                const float cover =
+                    alpha *
+                    static_cast<float>(
+                        layer.bitmap.bytes[static_cast<std::size_t>(y) * layer.bitmap.width + x]) /
+                    255.0F;
+                if (cover <= 0.0F)
+                    continue;
+                float* const out =
+                    premultiplied.data() + (static_cast<std::size_t>(target_y) * width +
+                                            static_cast<std::size_t>(target_x)) *
+                                               4U;
+                // Over: this layer above what the layers before it laid down.
+                out[0] = red * cover + out[0] * (1.0F - cover);
+                out[1] = green * cover + out[1] * (1.0F - cover);
+                out[2] = blue * cover + out[2] * (1.0F - cover);
+                out[3] = cover + out[3] * (1.0F - cover);
+            }
+        }
+    }
+    for (std::size_t texel = 0U; texel < premultiplied.size(); texel += 4U) {
+        const float a = premultiplied[texel + 3U];
+        const auto channel = [a](const float value) {
+            return static_cast<std::uint8_t>(
+                std::lround(std::clamp(a > 0.0F ? value / a : 0.0F, 0.0F, 1.0F) * 255.0F));
+        };
+        result.bytes[texel] = channel(premultiplied[texel]);
+        result.bytes[texel + 1U] = channel(premultiplied[texel + 1U]);
+        result.bytes[texel + 2U] = channel(premultiplied[texel + 2U]);
+        result.bytes[texel + 3U] =
+            static_cast<std::uint8_t>(std::lround(std::clamp(a, 0.0F, 1.0F) * 255.0F));
+    }
+    return result;
+}
+
 [[nodiscard]] std::optional<GlyphRasterBitmap>
 rasterize(const OpenTypeFont& font, const std::uint16_t glyph, const double pixel_size,
           const double display_scale, const SubpixelPhase phase, const GlyphRasterMode mode,
           const std::uint32_t font_style_flags, const CoverageRasterConfig& coverage,
           const MsdfRasterConfig& msdf) {
+    if (mode == GlyphRasterMode::color)
+        return rasterize_color(font, glyph, pixel_size, display_scale, phase, font_style_flags,
+                               coverage);
     return mode == GlyphRasterMode::coverage
                ? rasterize_coverage(font, glyph, pixel_size, display_scale, phase, coverage,
                                     font_style_flags)
@@ -298,6 +397,10 @@ GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& fon
                          const std::uint32_t font_style_flags, const double reach) {
     if (font_id.empty())
         throw std::invalid_argument("glyph atlas font id must not be empty");
+    // A colour glyph (an emoji) draws its own colours, whatever its text asked for.
+    const GlyphRasterMode requested_mode = mode;
+    const GlyphRasterMode effective_mode =
+        !font.color_layers(glyph).empty() ? GlyphRasterMode::color : requested_mode;
     // The selected face is already part of identity. Collapse known bits supplied intrinsically
     // by that face, while retaining every opaque/forward-compatible bit exactly.
     const std::uint32_t realized_style_flags = (font_style_flags & ~known_font_style_flags) |
@@ -307,15 +410,16 @@ GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& fon
         glyph,
         realized_style_flags,
         std::bit_cast<std::uint64_t>(pixel_size),
-        std::bit_cast<std::uint64_t>(mode == GlyphRasterMode::coverage ? display_scale_ : 1.0),
-        mode,
-        phase,
+        std::bit_cast<std::uint64_t>(effective_mode != GlyphRasterMode::msdf ? display_scale_
+                                                                             : 1.0),
+        effective_mode,
+        effective_mode == GlyphRasterMode::color ? SubpixelPhase{} : phase,
         generation_,
     };
     // A distance that must reach further than the configured range: the field widened to
     // cover it on both sides of the edge, with padding to hold it.
     MsdfRasterConfig msdf = config_.msdf;
-    if (mode == GlyphRasterMode::msdf && reach > 0.0 && std::isfinite(reach)) {
+    if (effective_mode == GlyphRasterMode::msdf && reach > 0.0 && std::isfinite(reach)) {
         key.reach = static_cast<std::uint32_t>(std::ceil(std::min(reach, 64.0)));
         const double oversampling = static_cast<double>(std::max(msdf.oversampling, 1U));
         msdf.pixel_range =
@@ -330,13 +434,15 @@ GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& fon
         return found->second;
     }
     RasterCacheIdentity identity =
-        raster_cache_identity(font, glyph, pixel_size, display_scale_, phase, mode,
-                              realized_style_flags, config_.coverage, msdf);
+        raster_cache_identity(font, glyph, pixel_size, display_scale_,
+                              effective_mode == GlyphRasterMode::color ? SubpixelPhase{} : phase,
+                              effective_mode, realized_style_flags, config_.coverage, msdf);
     SharedRaster bitmap = shared_raster_cache().find(identity.key);
     if (bitmap == nullptr) {
         bitmap = std::make_shared<const std::optional<GlyphRasterBitmap>>(
-            rasterize(font, glyph, pixel_size, display_scale_, phase, mode, realized_style_flags,
-                      config_.coverage, msdf));
+            rasterize(font, glyph, pixel_size, display_scale_,
+                      effective_mode == GlyphRasterMode::color ? SubpixelPhase{} : phase,
+                      effective_mode, realized_style_flags, config_.coverage, msdf));
         bitmap = shared_raster_cache().insert(std::move(identity), std::move(bitmap));
     }
     if (!bitmap->has_value())

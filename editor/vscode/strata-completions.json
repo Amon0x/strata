@@ -3344,6 +3344,11 @@
       "type": "number | \"BLACK\" | \"BOLD\" | \"LIGHT\" | \"MEDIUM\" | \"NORMAL\" | \"SEMIBOLD\" | \"THIN\""
     },
     {
+      "name": "fontVariation",
+      "nullable": false,
+      "type": "string"
+    },
+    {
       "name": "fontRasterization",
       "nullable": false,
       "type": "\"GRAYSCALE\" | \"MSDF\""

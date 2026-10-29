@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
@@ -198,6 +199,8 @@ class TextEngine final {
         FontRasterization font_rasterization = FontRasterization::grayscale;
         std::optional<std::uint32_t> color_rgba;
         bool interactive = false;
+        /** `fontVariation` axis settings, canonical ("wdth=80,wght=650"); empty for none. */
+        std::string font_variation{};
         [[nodiscard]] friend auto operator<=>(const StyleRun&, const StyleRun&) = default;
     };
 
@@ -218,6 +221,7 @@ class TextEngine final {
         std::optional<std::size_t> max_lines;
         std::string alignment;
         std::vector<StyleRun> style_runs{};
+        std::string font_variation{};
         [[nodiscard]] friend auto operator<=>(const CacheKey&, const CacheKey&) = default;
     };
 
@@ -231,6 +235,9 @@ class TextEngine final {
     void record_missing_font(std::string_view font_id) const;
 
     FontRegistry fonts_;
+    /** System fonts text fell back to (font::system_font_for), kept for as long as the engine. */
+    mutable FontRegistry system_fonts_;
+    mutable std::mutex system_fonts_mutex_;
     struct CachedLayout final {
         TextLayout layout;
         std::uint64_t last_used_frame = 0U;

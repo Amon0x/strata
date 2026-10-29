@@ -285,7 +285,7 @@ struct CommandTexture final {
         std::vector<PreparedText> shadowed;
         shadowed.reserve(groups.size() * 2U);
         for (const PreparedText& text : groups) {
-            if (text.mode != font::GlyphRasterMode::msdf)
+            if (text.mode == font::GlyphRasterMode::coverage)
                 continue;
             PreparedText shadow = text;
             shadow.origin.x += command.effects.shadow_x;
@@ -2355,6 +2355,9 @@ std::string_view default_material_id(const PreparedCommand& command) {
         } else if constexpr (std::is_same_v<Type, NinePatchRenderCommand>) {
             return "strata:nine_patch";
         } else if constexpr (std::is_same_v<Type, PreparedTextPtr>) {
+            // A colour glyph's texels are its colours: it draws as an image.
+            if (value != nullptr && value->mode == font::GlyphRasterMode::color)
+                return "strata:textured";
             return value != nullptr && value->mode == font::GlyphRasterMode::coverage
                 ? "strata:coverage_text" : "strata:msdf_text";
         } else if constexpr (std::is_same_v<Type, PathRenderCommand>) {

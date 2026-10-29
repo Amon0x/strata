@@ -203,10 +203,245 @@ struct Transform final {
 } // namespace
 
 struct TrueTypeOutlineSource::Impl final {
-    Impl(const std::span<const std::uint8_t> input, const std::uint16_t count)
+    Impl(const std::span<const std::uint8_t> input, const std::uint16_t count,
+         std::vector<double> axis_coordinates = {})
         : reader(input), glyph_count(count), cache(count) {
+        coordinates = std::move(axis_coordinates);
         parse_tables();
         parse_locations();
+    }
+
+    /** Normalized coordinates of a variable instance; empty for the default. */
+    std::vector<double> coordinates;
+    Table gvar;
+
+    /** One packed list of point numbers (gvar); empty with `all` set means every point. */
+    [[nodiscard]] std::vector<std::uint16_t> packed_points(std::size_t& cursor,
+                                                           const std::size_t end, bool& all) const {
+        all = false;
+        require_absolute(end, cursor, 1U);
+        std::size_t count = reader.u8(cursor++);
+        if (count == 0U) {
+            all = true;
+            return {};
+        }
+        if ((count & 0x80U) != 0U) {
+            require_absolute(end, cursor, 1U);
+            count = ((count & 0x7FU) << 8U) | reader.u8(cursor++);
+        }
+        std::vector<std::uint16_t> points;
+        points.reserve(count);
+        std::uint16_t point = 0U;
+        while (points.size() < count) {
+            require_absolute(end, cursor, 1U);
+            const std::uint8_t control = reader.u8(cursor++);
+            const std::size_t run = (control & 0x7FU) + 1U;
+            const bool words = (control & 0x80U) != 0U;
+            for (std::size_t index = 0U; index < run && points.size() < count; ++index) {
+                require_absolute(end, cursor, words ? 2U : 1U);
+                point = static_cast<std::uint16_t>(
+                    point + (words ? reader.u16(cursor) : reader.u8(cursor)));
+                cursor += words ? 2U : 1U;
+                points.push_back(point);
+            }
+        }
+        return points;
+    }
+
+    /** `count` packed deltas (gvar). */
+    [[nodiscard]] std::vector<double> packed_deltas(std::size_t& cursor, const std::size_t end,
+                                                    const std::size_t count) const {
+        std::vector<double> deltas;
+        deltas.reserve(count);
+        while (deltas.size() < count) {
+            require_absolute(end, cursor, 1U);
+            const std::uint8_t control = reader.u8(cursor++);
+            const std::size_t run = (control & 0x3FU) + 1U;
+            for (std::size_t index = 0U; index < run && deltas.size() < count; ++index) {
+                if ((control & 0x80U) != 0U) {
+                    deltas.push_back(0.0);
+                } else if ((control & 0x40U) != 0U) {
+                    require_absolute(end, cursor, 2U);
+                    deltas.push_back(static_cast<double>(reader.i16(cursor)));
+                    cursor += 2U;
+                } else {
+                    require_absolute(end, cursor, 1U);
+                    deltas.push_back(static_cast<double>(reader.i8(cursor)));
+                    cursor += 1U;
+                }
+            }
+        }
+        return deltas;
+    }
+
+    /**
+     * The glyph's gvar deltas at the instance's coordinates, for its `point_count` points and
+     * four phantom points after them: each tuple scaled by how far the coordinates reach into
+     * its region, points a tuple leaves out interpolated from their contour's (IUP).
+     */
+    [[nodiscard]] std::pair<std::vector<double>, std::vector<double>>
+    variation_deltas(const std::uint16_t glyph, const std::vector<std::uint16_t>& contour_ends,
+                     const std::vector<double>& xs, const std::vector<double>& ys) const {
+        const std::size_t total = xs.size() + 4U;
+        std::vector<double> dx(total, 0.0);
+        std::vector<double> dy(total, 0.0);
+        if (coordinates.empty() || gvar.length == 0U)
+            return {dx, dy};
+        const std::size_t table = gvar.offset;
+        reader.require(table, 20U);
+        const std::uint16_t axes = reader.u16(table + 4U);
+        const std::uint16_t shared_count = reader.u16(table + 6U);
+        const std::size_t shared_tuples = table + reader.u32(table + 8U);
+        const std::uint16_t glyphs = reader.u16(table + 12U);
+        const bool long_offsets = (reader.u16(table + 14U) & 1U) != 0U;
+        const std::size_t data_array = table + reader.u32(table + 16U);
+        if (glyph >= glyphs || axes != coordinates.size())
+            return {dx, dy};
+        const auto offset_of = [&](const std::size_t index) -> std::size_t {
+            return long_offsets
+                       ? reader.u32(table + 20U + index * 4U)
+                       : static_cast<std::size_t>(reader.u16(table + 20U + index * 2U)) * 2U;
+        };
+        const std::size_t start = data_array + offset_of(glyph);
+        const std::size_t end = data_array + offset_of(static_cast<std::size_t>(glyph) + 1U);
+        if (end <= start)
+            return {dx, dy};
+        reader.require(start, end - start);
+        const std::uint16_t header = reader.u16(start);
+        const std::size_t tuple_count = header & 0x0FFFU;
+        std::size_t data = start + reader.u16(start + 2U);
+        std::size_t cursor = start + 4U;
+        bool shared_all = false;
+        std::vector<std::uint16_t> shared_points;
+        if ((header & 0x8000U) != 0U)
+            shared_points = packed_points(data, end, shared_all);
+        for (std::size_t tuple = 0U; tuple < tuple_count; ++tuple) {
+            require_absolute(end, cursor, 4U);
+            const std::uint16_t size = reader.u16(cursor);
+            const std::uint16_t index = reader.u16(cursor + 2U);
+            cursor += 4U;
+            std::vector<double> peak(axes, 0.0);
+            if ((index & 0x8000U) != 0U) {
+                require_absolute(end, cursor, static_cast<std::size_t>(axes) * 2U);
+                for (std::size_t axis = 0U; axis < axes; ++axis)
+                    peak[axis] = reader.f2dot14(cursor + axis * 2U);
+                cursor += static_cast<std::size_t>(axes) * 2U;
+            } else {
+                const std::size_t shared = index & 0x0FFFU;
+                if (shared >= shared_count)
+                    throw FontError("gvar names a missing shared tuple");
+                reader.require(shared_tuples + shared * axes * 2U,
+                               static_cast<std::size_t>(axes) * 2U);
+                for (std::size_t axis = 0U; axis < axes; ++axis)
+                    peak[axis] = reader.f2dot14(shared_tuples + (shared * axes + axis) * 2U);
+            }
+            std::vector<double> low(axes, 0.0);
+            std::vector<double> high(axes, 0.0);
+            const bool intermediate = (index & 0x4000U) != 0U;
+            if (intermediate) {
+                require_absolute(end, cursor, static_cast<std::size_t>(axes) * 4U);
+                for (std::size_t axis = 0U; axis < axes; ++axis) {
+                    low[axis] = reader.f2dot14(cursor + axis * 2U);
+                    high[axis] = reader.f2dot14(cursor + (axes + axis) * 2U);
+                }
+                cursor += static_cast<std::size_t>(axes) * 4U;
+            }
+            // How far the coordinates reach into this tuple's region.
+            double scalar = 1.0;
+            for (std::size_t axis = 0U; axis < axes && scalar != 0.0; ++axis) {
+                const double p = peak[axis];
+                const double v = coordinates[axis];
+                if (p == 0.0)
+                    continue;
+                if (v == 0.0 || (v < 0.0) != (p < 0.0)) {
+                    scalar = 0.0;
+                } else if (intermediate) {
+                    if (v < low[axis] || v > high[axis])
+                        scalar = 0.0;
+                    else if (v < p)
+                        scalar *= (v - low[axis]) / (p - low[axis]);
+                    else if (v > p)
+                        scalar *= (high[axis] - v) / (high[axis] - p);
+                } else if (std::abs(v) < std::abs(p)) {
+                    scalar *= v / p;
+                }
+            }
+            const std::size_t tuple_data = data;
+            data += size;
+            if (scalar == 0.0)
+                continue;
+            std::size_t at = tuple_data;
+            const std::size_t tuple_end = std::min(end, tuple_data + size);
+            bool all = shared_all;
+            std::vector<std::uint16_t> points = shared_points;
+            if ((index & 0x2000U) != 0U)
+                points = packed_points(at, tuple_end, all);
+            const std::size_t count = all ? total : points.size();
+            const std::vector<double> xd = packed_deltas(at, tuple_end, count);
+            const std::vector<double> yd = packed_deltas(at, tuple_end, count);
+            std::vector<double> tx(total, 0.0);
+            std::vector<double> ty(total, 0.0);
+            if (all) {
+                tx = xd;
+                ty = yd;
+            } else {
+                std::vector<bool> touched(total, false);
+                for (std::size_t k = 0U; k < points.size(); ++k) {
+                    if (points[k] >= total)
+                        continue;
+                    tx[points[k]] = xd[k];
+                    ty[points[k]] = yd[k];
+                    touched[points[k]] = true;
+                }
+                // IUP: each contour's untouched points between two touched ones, interpolated
+                // along each axis from where they stand between those two (or shifted with the
+                // nearer when outside them).
+                std::size_t first = 0U;
+                for (const std::uint16_t last_point : contour_ends) {
+                    const std::size_t last = last_point;
+                    std::vector<std::size_t> marks;
+                    for (std::size_t p = first; p <= last && p < xs.size(); ++p) {
+                        if (touched[p])
+                            marks.push_back(p);
+                    }
+                    if (!marks.empty()) {
+                        const auto infer = [&](const std::vector<double>& position,
+                                               std::vector<double>& delta, const std::size_t p,
+                                               const std::size_t a, const std::size_t b) {
+                            const double pa = position[a], pb = position[b];
+                            const double lo = std::min(pa, pb), hi = std::max(pa, pb);
+                            const double da = pa <= pb ? delta[a] : delta[b];
+                            const double db = pa <= pb ? delta[b] : delta[a];
+                            const double v = position[p];
+                            if (v <= lo)
+                                delta[p] = da;
+                            else if (v >= hi)
+                                delta[p] = db;
+                            else
+                                delta[p] = da + (db - da) * (v - lo) / (hi - lo);
+                        };
+                        const std::size_t span = last - first + 1U;
+                        for (std::size_t m = 0U; m < marks.size(); ++m) {
+                            const std::size_t a = marks[m];
+                            const std::size_t b = marks[(m + 1U) % marks.size()];
+                            for (std::size_t step = 1U; step < span; ++step) {
+                                const std::size_t p = first + (a - first + step) % span;
+                                if (p == b)
+                                    break;
+                                infer(xs, tx, p, a, b);
+                                infer(ys, ty, p, a, b);
+                            }
+                        }
+                    }
+                    first = last + 1U;
+                }
+            }
+            for (std::size_t p = 0U; p < total; ++p) {
+                dx[p] += tx[p] * scalar;
+                dy[p] += ty[p] * scalar;
+            }
+        }
+        return {dx, dy};
     }
 
     Reader reader;
@@ -218,11 +453,18 @@ struct TrueTypeOutlineSource::Impl final {
 
     void parse_tables() {
         reader.require(0U, 12U);
-        const std::uint16_t count = reader.u16(4U);
-        reader.require(12U, static_cast<std::size_t>(count) * 16U);
+        // A collection's first face, as OpenTypeFont reads it.
+        std::size_t directory = 0U;
+        if (reader.u32(0U) == 0x74746366U) {
+            reader.require(0U, 16U);
+            directory = reader.u32(12U);
+            reader.require(directory, 12U);
+        }
+        const std::uint16_t count = reader.u16(directory + 4U);
+        reader.require(directory + 12U, static_cast<std::size_t>(count) * 16U);
         std::map<std::string, Table, std::less<>> tables;
         for (std::size_t index = 0U; index < count; ++index) {
-            const std::size_t record = 12U + index * 16U;
+            const std::size_t record = directory + 12U + index * 16U;
             const Table table{
                 static_cast<std::size_t>(reader.u32(record + 8U)),
                 static_cast<std::size_t>(reader.u32(record + 12U)),
@@ -247,6 +489,10 @@ struct TrueTypeOutlineSource::Impl final {
         }
         loca_table = loca->second;
         glyf = glyph_data->second;
+        if (const auto variations = tables.find("gvar"); variations != tables.end()) {
+            reader.require(variations->second.offset, variations->second.length);
+            gvar = variations->second;
+        }
     }
 
     void parse_locations() {
@@ -318,16 +564,14 @@ struct TrueTypeOutlineSource::Impl final {
             static_cast<double>(reader.i16(start + 8U)),
         };
         return contour_count >= 0
-            ? parse_simple(start, end, static_cast<std::uint16_t>(contour_count), header_bounds)
-            : parse_compound(start, end, header_bounds, stack, depth);
+                   ? parse_simple(glyph, start, end, static_cast<std::uint16_t>(contour_count),
+                                  header_bounds)
+                   : parse_compound(start, end, header_bounds, stack, depth);
     }
 
-    [[nodiscard]] std::shared_ptr<const GlyphOutline> parse_simple(
-        const std::size_t start,
-        const std::size_t end,
-        const std::uint16_t contour_count,
-        const GlyphBounds bounds
-    ) const {
+    [[nodiscard]] std::shared_ptr<const GlyphOutline>
+    parse_simple(const std::uint16_t glyph, const std::size_t start, const std::size_t end,
+                 const std::uint16_t contour_count, const GlyphBounds bounds) const {
         const std::size_t contour_bytes = static_cast<std::size_t>(contour_count) * 2U;
         require_glyph_range(start, end, glyph_header_size, contour_bytes + 2U);
         std::vector<std::uint16_t> contour_ends;
@@ -398,9 +642,21 @@ struct TrueTypeOutlineSource::Impl final {
             }
             ys[index] = static_cast<double>(y);
         }
+        // A variable instance moves every point by its glyph's deltas at the coordinates.
+        GlyphBounds varied_bounds = bounds;
+        if (!coordinates.empty()) {
+            const auto [dx, dy] = variation_deltas(glyph, contour_ends, xs, ys);
+            for (std::size_t index = 0U; index < point_count; ++index) {
+                xs[index] += dx[index];
+                ys[index] += dy[index];
+            }
+            const auto [x_low, x_high] = std::minmax_element(xs.begin(), xs.end());
+            const auto [y_low, y_high] = std::minmax_element(ys.begin(), ys.end());
+            varied_bounds = GlyphBounds{*x_low, *y_low, *x_high, *y_high};
+        }
 
         GlyphOutline result;
-        result.bounds = bounds;
+        result.bounds = varied_bounds;
         result.contours.reserve(contour_count);
         std::size_t contour_start = 0U;
         for (const std::uint16_t contour_end : contour_ends) {
@@ -554,6 +810,39 @@ TrueTypeOutlineSource::TrueTypeOutlineSource(
     const std::span<const std::uint8_t> bytes,
     const std::uint16_t glyph_count
 ) : implementation_(std::make_unique<Impl>(bytes, glyph_count)) {}
+
+TrueTypeOutlineSource::TrueTypeOutlineSource(const std::span<const std::uint8_t> bytes,
+                                             const std::uint16_t glyph_count,
+                                             std::vector<double> coordinates)
+    : implementation_(std::make_unique<Impl>(bytes, glyph_count, std::move(coordinates))) {}
+
+double TrueTypeOutlineSource::advance_delta(const std::uint16_t glyph) const {
+    Impl& impl = *implementation_;
+    if (impl.coordinates.empty() || impl.gvar.length == 0U || glyph >= impl.glyph_count)
+        return 0.0;
+    // The phantom points follow the glyph's own: their gvar deltas move its advance.
+    std::size_t points = 0U;
+    std::vector<std::uint16_t> ends;
+    const std::size_t relative_start = impl.locations[glyph];
+    const std::size_t relative_end = impl.locations[static_cast<std::size_t>(glyph) + 1U];
+    if (relative_end - relative_start >= glyph_header_size) {
+        const std::size_t start = impl.glyf.offset + relative_start;
+        const std::int16_t contours = impl.reader.i16(start);
+        if (contours > 0) {
+            for (std::size_t index = 0U; index < static_cast<std::size_t>(contours); ++index)
+                ends.push_back(impl.reader.u16(start + glyph_header_size + index * 2U));
+            points = static_cast<std::size_t>(ends.back()) + 1U;
+        } else if (contours < 0) {
+            return 0.0;
+        }
+    }
+    const std::vector<double> xs(points, 0.0);
+    const std::vector<double> ys(points, 0.0);
+    std::scoped_lock lock(impl.mutex);
+    const auto [dx, dy] = impl.variation_deltas(glyph, ends, xs, ys);
+    static_cast<void>(dy);
+    return dx[points + 1U] - dx[points];
+}
 
 TrueTypeOutlineSource::~TrueTypeOutlineSource() = default;
 TrueTypeOutlineSource::TrueTypeOutlineSource(TrueTypeOutlineSource&&) noexcept = default;

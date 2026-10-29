@@ -4,7 +4,9 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -1883,6 +1885,60 @@ void test_layout_cache_drops_unused_text(const std::filesystem::path& resources)
           "trimming the text layout cache dropped a layout every frame still uses");
 }
 
+/** A variable font's instance moves its outlines and advances (when the system has Bahnschrift). */
+void test_variable_font_instance(const std::filesystem::path& resources) {
+    using namespace strata;
+    const std::filesystem::path path("C:/Windows/Fonts/bahnschrift.ttf");
+    if (!std::filesystem::exists(path))
+        return;
+    std::ifstream input(path, std::ios::binary);
+    Bytes bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    const font::OpenTypeFont regular = font::OpenTypeFont::parse(std::move(bytes));
+    for (const std::string& note : regular.optional_diagnostics())
+        std::cerr << "bahnschrift: " << note << '\n';
+    check(regular.axes().size() == 2U && regular.axes()[0].tag == "wght",
+          "Bahnschrift's fvar axes were not read: " + std::to_string(regular.axes().size()));
+    const std::array<std::pair<std::string, double>, 1U> bold{{{"wght", 700.0}}};
+    const font::OpenTypeFont heavy = regular.instance(bold);
+    for (const std::string& note : heavy.optional_diagnostics())
+        std::cerr << "bahnschrift 700: " << note << '\n';
+    const std::uint16_t glyph = regular.glyph_id('S');
+    const auto light_outline = regular.glyph_outline(glyph);
+    const auto heavy_outline = heavy.glyph_outline(glyph);
+    check(light_outline->bounds.has_value() && heavy_outline->bounds.has_value(),
+          "S has no bounds");
+    const double light_width = light_outline->bounds->right - light_outline->bounds->left;
+    const double heavy_width = heavy_outline->bounds->right - heavy_outline->bounds->left;
+    check(heavy_width > light_width + 10.0,
+          "wght 700 did not widen S: " + std::to_string(light_width) + " to " +
+              std::to_string(heavy_width));
+    check(heavy.metadata().weight_class == 700U, "the instance does not report its weight");
+    // Bahnschrift keeps its advances across weights; its width axis moves them.
+    const std::array<std::pair<std::string, double>, 1U> narrow{{{"wdth", 75.0}}};
+    check(regular.instance(narrow).horizontal_advance(glyph) < regular.horizontal_advance(glyph),
+          "wdth 75 did not narrow S's advance");
+
+    // Text names the system font by file and asks for a weight and a width.
+    const font::OpenTypeFont fallback = font::OpenTypeFont::parse(resource::load_binary_resource(
+        resources, resource::ResourceId::parse("assets/strata/fonts/default.ttf")));
+    ui::TextEngine engine(ui::TextEngine::FontRegistry{
+        {"strata:fonts/default", fallback},
+        {"strata:fonts/default-medium", fallback},
+    });
+    ui::RetainedTree tree;
+    const ui::RetainedNode& node =
+        *retain(tree, text_node("Text", object({{"pixelSize", runtime::Value(20.0)},
+                                                {"font", runtime::Value("system:bahnschrift.ttf")},
+                                                {"fontWeight", runtime::Value(650.0)},
+                                                {"fontVariation", runtime::Value("'wdth' 80")}})));
+    const ui::TextLayout layout = engine.layout(node, "Strata");
+    check(!layout.glyph_font_ids.empty() &&
+              layout.glyph_font_ids.front() == "system:bahnschrift.ttf@wdth=80,wght=650",
+          "text did not use the varied system face: " + (layout.glyph_font_ids.empty()
+                                                             ? std::string("none")
+                                                             : layout.glyph_font_ids.front()));
+}
+
 int strata_test_text_font_residual(const int argument_count, const char* const* arguments) {
     try {
         if (argument_count != 2) throw std::runtime_error("expected resource root");
@@ -1892,6 +1948,7 @@ int strata_test_text_font_residual(const int argument_count, const char* const* 
         test_layout_tables_bound_expansion(resources);
         test_layout_runs_fallback_and_soft_wrap(resources);
         test_layout_cache_drops_unused_text(resources);
+        test_variable_font_instance(resources);
         std::cout << "text/font residual tests passed\n";
         return 0;
     } catch (const std::exception& error) {

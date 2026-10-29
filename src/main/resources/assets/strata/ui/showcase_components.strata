@@ -1605,8 +1605,53 @@ component ShapeTile(shape: string, sides: number = 6) {
   }
 }
 
+style WorldText {
+  font: "strata:fonts/default";
+  pixelSize: 26;
+  color: #F4F7FBFF;
+}
+
+style WeightText {
+  font: "system:bahnschrift.ttf";
+  pixelSize: 34;
+  color: #F4F7FBFF;
+}
+
+component WeightSample(weight: number) {
+  Panel(style: style(PageColumn, gap: 2, width: "content")) {
+    Text(text: "Strata", style: style(WeightText, fontWeight: weight))
+    Text(text: format("wght {0}", weight), style: CardNote)
+  }
+}
+
 component TypePage() {
+  state weight = 400;
+  state width = 100;
   Panel(style: PageColumn) {
+    Card(title: "WORLD TEXT: EMOJI, RIGHT-TO-LEFT AND HAN FROM THE SYSTEM'S FONTS") {
+      Text(text: "Colour emoji 🎨 🚀 ✨ 🔥 🌈 🐙 🍕 🎧 💜 😎", style: WorldText)
+      Text(text: "مرحبا بالعالم", style: style(WorldText, pixelSize: 34))
+      Text(text: "Strata says مرحبا بالعالم to the world in 2026", style: WorldText)
+      Text(text: "Hebrew: שלום עולם, 123 ABC", style: WorldText)
+      Text(text: "你好世界 · こんにちは · 안녕하세요 · नमस्ते", style: WorldText)
+      Text(text: "Nothing here is bundled: each script finds its font on the machine, and Arabic and Hebrew run right to left inside left-to-right lines.", style: CardNote, wrapMode: "WORD")
+    }
+    Card(title: "VARIABLE FONTS: ONE FILE, EVERY WEIGHT AND WIDTH") {
+      Panel(style: style(ActionRow, gap: 22)) {
+        WeightSample(weight: 300)
+        WeightSample(weight: 400)
+        WeightSample(weight: 500)
+        WeightSample(weight: 600)
+        WeightSample(weight: 700)
+      }
+      Text(text: "Drag the weight", style: style(WeightText, pixelSize: 64, fontWeight: weight, fontVariation: format("wdth {0}", width)))
+      Text(text: format("Bahnschrift  wght {0}  wdth {1}", weight, width), style: CardNote)
+      Slider(key: "type.variable.weight", min: 300, max: 700, step: 25, bind: weight, layout: { width: 460 })
+      Slider(key: "type.variable.width", min: 75, max: 100, step: 5, bind: width, layout: { width: 460 })
+      Text(text: "Condensed, from the same file", style: style(WeightText, fontVariation: "wdth 75, wght 600"))
+      Text(text: "Segoe UI Variable, heavy", style: style(WorldText, font: "system:seguivar.ttf", pixelSize: 30, fontVariation: "wght 800"))
+    }
+
     Card(title: "CLIP SHAPES: CONTENT CUT TO ANY SHAPE") {
       Panel(style: style(ActionRow, gap: 18)) {
         ShapeTile(shape: "circle")
@@ -2313,7 +2358,7 @@ component ExpectedText(selectedPage: string) {
   } else if selectedPage == "DATA" {
     Text(text: "Tree expansion never reconciles collapsed descendants; keyboard/range/typeahead and drag positions emit stable keys. Table sort is a host request, widths/order persist, and sticky/pinned regions align. Grid marquee, 2D arrows, stationary edge scroll, and sticky push-off stay current.", wrapMode: "WORD")
   } else if selectedPage == "TYPE" {
-    Text(text: "Shapes clip their content to circles, hexagons, stars, diamonds, ellipses and polygons (clipShape), the star turning as it goes. The list fades out at its top and bottom as it scrolls (fadeEdges). The headings are drawn with a gradient, an outline, a neon glow and a soft shadow (textGradient, textOutline, textGlow, textShadow).", wrapMode: "WORD")
+    Text(text: "Emoji, Arabic, Hebrew, Han, kana, Hangul and Devanagari draw from the system's own fonts, Arabic joined and right-to-left runs ordered inside left-to-right lines. Bahnschrift and Segoe UI Variable change weight and width from one file (fontWeight, fontVariation); drag the sliders. Shapes clip their content to circles, hexagons, stars, diamonds, ellipses and polygons (clipShape), the star turning as it goes. The list fades out at its top and bottom as it scrolls (fadeEdges). The headings are drawn with a gradient, an outline, a neon glow and a soft shadow (textGradient, textOutline, textGlow, textShadow).", wrapMode: "WORD")
   } else if selectedPage == "INTERACT" {
     Text(text: "Spotlight cards light up under the pointer, and their rims glow from across the grid: the material reads the pointer on the GPU (materialPointer). Tilt cards turn in 3D toward it (strata.pointer drives rotateX and rotateY, perspective is real). The carousel springs between cards, the race compares easings from linear to bouncy springs, and the heart beats on a five-keyframe animation.", wrapMode: "WORD")
   } else if selectedPage == "MENU" {

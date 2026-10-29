@@ -200,6 +200,26 @@ struct GlyphOutline final {
     [[nodiscard]] bool empty() const noexcept { return contours.empty(); }
 };
 
+/** One layer of a colour glyph (COLR): a glyph drawn in a colour, under the layers after it. */
+struct ColorGlyphLayer final {
+    std::uint16_t glyph = 0U;
+    /** Straight RGBA, from the font's first palette (CPAL). */
+    std::uint32_t rgba = 0xFF000000U;
+    /** Whether the layer takes the text's own colour instead (palette index 0xFFFF). */
+    bool foreground = false;
+};
+
+/** A variable font's axis (fvar): its tag and its range, in its own user units. */
+struct FontAxis final {
+    std::string tag;
+    double minimum = 0.0;
+    double fallback = 0.0;
+    double maximum = 0.0;
+};
+
+/** Which joining form a letter of a joining script takes: alone, or joined after, both, before. */
+enum class JoiningForm : std::uint8_t { isolated, initial, medial, final };
+
 /** Bounds-checked, allocation-owned OpenType metrics and horizontal positioning model. */
 class OpenTypeFont final {
 public:
@@ -221,6 +241,26 @@ public:
     /** Optional-table failures retained without rejecting the mandatory usable face. */
     [[nodiscard]] const std::vector<std::string>& optional_diagnostics() const noexcept;
     [[nodiscard]] std::uint16_t glyph_id(std::uint32_t code_point) const noexcept;
+    /** The code point ranges its character map covers, ascending (a font's coverage summary). */
+    [[nodiscard]] std::vector<std::pair<std::uint32_t, std::uint32_t>> coverage_ranges() const;
+    /** A colour glyph's layers, bottom first (COLR version 0 with CPAL); empty for a plain one. */
+    [[nodiscard]] std::vector<ColorGlyphLayer> color_layers(std::uint16_t glyph) const;
+    /**
+     * The glyph a joining script's letter takes in `form`, from the font's isol/init/medi/fina
+     * single substitutions; the glyph itself when the font has none for it.
+     */
+    [[nodiscard]] std::uint16_t joining_form(JoiningForm form, std::uint16_t glyph) const noexcept;
+    /** A variable font's axes (fvar); empty for a static one. */
+    [[nodiscard]] const std::vector<FontAxis>& axes() const noexcept;
+    /** An instance's value on each axis, in the axis's own units; empty for the default face. */
+    [[nodiscard]] const std::vector<double>& variation() const noexcept;
+    /**
+     * This variable font at `settings` (axis tag and user value, `wght` 650 say; axes not named
+     * stay at their defaults): its outlines and advances from gvar. The font itself when it has
+     * no axes or the settings change nothing.
+     */
+    [[nodiscard]] OpenTypeFont
+    instance(std::span<const std::pair<std::string, double>> settings) const;
     [[nodiscard]] std::uint16_t horizontal_advance(std::uint16_t glyph) const noexcept;
     [[nodiscard]] std::shared_ptr<const GlyphOutline> glyph_outline(std::uint16_t glyph) const;
     [[nodiscard]] std::int16_t pair_advance_adjustment(

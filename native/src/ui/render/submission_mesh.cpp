@@ -448,7 +448,11 @@ void text_geometry(
             glyph.bounds.width,
             glyph.bounds.height,
         };
-        if (right > left) {
+        if (text.mode == font::GlyphRasterMode::color) {
+            // An emoji keeps its own colours; the run lends it only its opacity.
+            quad(output, draw, bounds, RenderColor{255U, 255U, 255U, text.color.alpha}, glyph.uv,
+                 data, batch_base_vertex);
+        } else if (right > left) {
             quad_colors(output, draw, bounds, gradient_at(glyph.bounds.x),
                         gradient_at(glyph.bounds.right()), glyph.uv, data, batch_base_vertex);
         } else {

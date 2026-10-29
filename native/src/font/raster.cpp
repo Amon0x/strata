@@ -14,10 +14,12 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_OUTLINE_H
+#include FT_MULTIPLE_MASTERS_H
 
 namespace strata::font {
 namespace {
@@ -62,7 +64,8 @@ class FreeTypeLibrary final {
 
 class FreeTypeFace final {
   public:
-    FreeTypeFace(std::shared_ptr<const void> owner, const std::span<const std::uint8_t> bytes)
+    FreeTypeFace(std::shared_ptr<const void> owner, const std::span<const std::uint8_t> bytes,
+                 const std::vector<double>& variation = {})
         : owner_(std::move(owner)) {
         if (bytes.empty() ||
             bytes.size() > static_cast<std::size_t>(std::numeric_limits<FT_Long>::max())) {
@@ -75,6 +78,20 @@ class FreeTypeFace final {
                                static_cast<FT_Long>(bytes.size()), 0, &face_);
         if (error != FT_Err_Ok)
             freetype_error("memory-face creation", error);
+        // A variable font's instance: FreeType applies the same gvar deltas, and its hinting.
+        if (!variation.empty()) {
+            std::vector<FT_Fixed> coordinates;
+            coordinates.reserve(variation.size());
+            for (const double value : variation)
+                coordinates.push_back(static_cast<FT_Fixed>(std::lround(value * 65'536.0)));
+            const FT_Error varied = FT_Set_Var_Design_Coordinates(
+                face_, static_cast<FT_UInt>(coordinates.size()), coordinates.data());
+            if (varied != FT_Err_Ok) {
+                static_cast<void>(FT_Done_Face(face_));
+                face_ = nullptr;
+                freetype_error("variable-font instance", varied);
+            }
+        }
     }
 
     ~FreeTypeFace() {
@@ -144,7 +161,8 @@ class FreeTypeFaceCache final {
             }
         }
         return Lease(*this, key,
-                     std::make_shared<FreeTypeFace>(std::move(owner), font.source_bytes()));
+                     std::make_shared<FreeTypeFace>(std::move(owner), font.source_bytes(),
+                                                    font.variation()));
     }
 
   private:

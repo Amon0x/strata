@@ -2954,6 +2954,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `fontStyle` | "ITALIC" \| "NORMAL" |
 | `fontStyleFlags` | number |
 | `fontWeight` | number \| "BLACK" \| "BOLD" \| "LIGHT" \| "MEDIUM" \| "NORMAL" \| "SEMIBOLD" \| "THIN" |
+| `fontVariation` | string |
 | `fontRasterization` | "GRAYSCALE" \| "MSDF" |
 | `foreground` | color |
 | `gap` | number \| { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number } |

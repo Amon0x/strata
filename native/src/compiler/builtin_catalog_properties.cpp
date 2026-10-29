@@ -129,6 +129,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "fontStyle", .type = declared_type_reference("fontStyleName")},
         DeclaredProperty{.name = "fontStyleFlags", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "fontWeight", .type = declared_type_reference("fontWeightUnion")},
+        DeclaredProperty{.name = "fontVariation", .type = declared_type_reference("string")},
         DeclaredProperty{.name = "fontRasterization",
                          .type = declared_type_reference("fontRasterization")},
         DeclaredProperty{.name = "foreground", .type = declared_type_reference("color")},

@@ -1,6 +1,7 @@
 #include "font/opentype.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstddef>
@@ -33,6 +34,15 @@ public:
         if (offset > bytes_.size() || count > bytes_.size() - offset) {
             throw FontError("OpenType table range exceeds the font bytes");
         }
+    }
+
+    [[nodiscard]] std::uint8_t u8(const std::size_t offset) const {
+        require(offset, 1U);
+        return bytes_[offset];
+    }
+
+    [[nodiscard]] double f2dot14(const std::size_t offset) const {
+        return static_cast<double>(std::bit_cast<std::int16_t>(u16(offset))) / 16384.0;
     }
 
     [[nodiscard]] std::uint16_t u16(const std::size_t offset) const {
@@ -504,8 +514,9 @@ void append_utf8(std::string& output, const std::uint32_t code_point) {
 } // namespace
 
 struct OpenTypeFont::Impl final {
-    explicit Impl(resource::ResourceBytes input)
+    explicit Impl(resource::ResourceBytes input, std::vector<double> variation = {})
         : font_bytes(std::move(input)), font_reader(font_bytes) {
+        coordinates = std::move(variation);
         parse_directory();
         parse_metrics();
         parse_cmap();
@@ -555,14 +566,155 @@ struct OpenTypeFont::Impl final {
                 std::string(error.what())
             );
         }
+        try {
+            parse_colr();
+        } catch (const std::exception& error) {
+            optional_diagnostics.push_back("COLR colour glyphs ignored: " +
+                                           std::string(error.what()));
+            color_bases.clear();
+        }
+        try {
+            parse_axes();
+        } catch (const std::exception& error) {
+            optional_diagnostics.push_back("fvar axes ignored: " + std::string(error.what()));
+            axes.clear();
+        }
+        if (coordinates.size() != axes.size())
+            coordinates.clear();
         if (tables.contains("glyf") || tables.contains("loca")) {
-            outlines = std::make_unique<TrueTypeOutlineSource>(font_bytes, glyphs);
+            outlines =
+                coordinates.empty()
+                    ? std::make_unique<TrueTypeOutlineSource>(font_bytes, glyphs)
+                    : std::make_unique<TrueTypeOutlineSource>(font_bytes, glyphs, coordinates);
+            // An instance's advances move with its phantom points.
+            if (!coordinates.empty()) {
+                try {
+                    for (std::size_t glyph = 0U; glyph < advances.size(); ++glyph) {
+                        const double moved =
+                            static_cast<double>(advances[glyph]) +
+                            outlines->advance_delta(static_cast<std::uint16_t>(glyph));
+                        advances[glyph] =
+                            static_cast<std::uint16_t>(std::clamp(std::round(moved), 0.0, 65535.0));
+                    }
+                } catch (const std::exception& error) {
+                    optional_diagnostics.push_back("gvar advances ignored: " +
+                                                   std::string(error.what()));
+                }
+            }
+        }
+    }
+
+    /** fvar axes and avar maps. */
+    void parse_axes() {
+        const std::optional<Reader> fvar = optional_table_reader("fvar");
+        if (!fvar.has_value())
+            return;
+        fvar->require(0U, 16U);
+        const std::size_t first = fvar->u16(4U);
+        const std::uint16_t count = fvar->u16(8U);
+        const std::uint16_t size = fvar->u16(10U);
+        if (size < 20U)
+            throw FontError("fvar axis records are too small");
+        fvar->require(first, static_cast<std::size_t>(count) * size);
+        for (std::size_t index = 0U; index < count; ++index) {
+            const std::size_t record = first + index * size;
+            const auto fixed = [&fvar](const std::size_t at) {
+                return static_cast<double>(static_cast<std::int32_t>(fvar->u32(at))) / 65536.0;
+            };
+            axes.push_back(FontAxis{fvar->tag(record), fixed(record + 4U), fixed(record + 8U),
+                                    fixed(record + 12U)});
+        }
+        if (const std::optional<Reader> avar = optional_table_reader("avar"); avar.has_value()) {
+            avar->require(0U, 8U);
+            const std::uint16_t axis_count = avar->u16(6U);
+            std::size_t cursor = 8U;
+            for (std::size_t axis = 0U; axis < axis_count && axis < axes.size(); ++axis) {
+                avar->require(cursor, 2U);
+                const std::uint16_t pairs = avar->u16(cursor);
+                cursor += 2U;
+                avar->require(cursor, static_cast<std::size_t>(pairs) * 4U);
+                std::vector<std::pair<double, double>> segment;
+                for (std::size_t pair = 0U; pair < pairs; ++pair) {
+                    segment.emplace_back(avar->f2dot14(cursor), avar->f2dot14(cursor + 2U));
+                    cursor += 4U;
+                }
+                axis_maps.push_back(std::move(segment));
+            }
+        }
+    }
+
+    std::vector<FontAxis> axes;
+    std::vector<std::vector<std::pair<double, double>>> axis_maps;
+    /** A variable instance's normalized coordinates; empty for the default. */
+    std::vector<double> coordinates;
+    /** The same instance in each axis's own units, for raster backends that vary fonts. */
+    std::vector<double> design;
+
+    /** COLR version 0 (and the version 0 records of version 1) with CPAL's first palette. */
+    void parse_colr() {
+        const std::optional<Reader> colr = optional_table_reader("COLR");
+        const std::optional<Reader> cpal = optional_table_reader("CPAL");
+        if (!colr.has_value() || !cpal.has_value())
+            return;
+        colr->require(0U, 14U);
+        const std::uint16_t bases = colr->u16(2U);
+        const std::uint32_t bases_offset = colr->u32(4U);
+        const std::uint32_t layers_offset = colr->u32(8U);
+        const std::uint16_t layers = colr->u16(12U);
+        colr->require(bases_offset, static_cast<std::size_t>(bases) * 6U);
+        colr->require(layers_offset, static_cast<std::size_t>(layers) * 4U);
+        color_bases.reserve(bases);
+        for (std::size_t index = 0U; index < bases; ++index) {
+            const std::size_t record = bases_offset + index * 6U;
+            const std::uint16_t first = colr->u16(record + 2U);
+            const std::uint16_t count = colr->u16(record + 4U);
+            if (static_cast<std::size_t>(first) + count > layers)
+                throw FontError("COLR base glyph names missing layers");
+            color_bases.push_back({colr->u16(record), first, count});
+        }
+        std::ranges::sort(color_bases, {}, [](const auto& base) { return base[0]; });
+        color_layer_records.reserve(layers);
+        for (std::size_t index = 0U; index < layers; ++index) {
+            const std::size_t record = layers_offset + index * 4U;
+            color_layer_records.emplace_back(colr->u16(record), colr->u16(record + 2U));
+        }
+        cpal->require(0U, 12U);
+        const std::uint16_t entries = cpal->u16(2U);
+        const std::uint16_t palettes = cpal->u16(4U);
+        const std::uint16_t colors = cpal->u16(6U);
+        const std::uint32_t colors_offset = cpal->u32(8U);
+        if (palettes == 0U)
+            throw FontError("CPAL has no palettes");
+        cpal->require(12U, 2U);
+        const std::uint16_t first = cpal->u16(12U);
+        if (static_cast<std::size_t>(first) + entries > colors)
+            throw FontError("CPAL palette runs past its colours");
+        cpal->require(colors_offset + static_cast<std::size_t>(first) * 4U,
+                      static_cast<std::size_t>(entries) * 4U);
+        palette.reserve(entries);
+        for (std::size_t index = 0U; index < entries; ++index) {
+            const std::size_t record =
+                colors_offset + (static_cast<std::size_t>(first) + index) * 4U;
+            // Records are blue, green, red, alpha.
+            const std::uint32_t blue = cpal->u8(record);
+            const std::uint32_t green = cpal->u8(record + 1U);
+            const std::uint32_t red = cpal->u8(record + 2U);
+            const std::uint32_t alpha = cpal->u8(record + 3U);
+            palette.push_back(red | (green << 8U) | (blue << 16U) | (alpha << 24U));
         }
     }
 
     resource::ResourceBytes font_bytes;
     Reader font_reader;
+    /** Where the face's table directory starts: 0, or its place in a collection. */
+    std::size_t directory = 0U;
     std::map<std::string, Table, std::less<>> tables;
+    /** COLR version 0 base glyphs (glyph, first layer, layer count) and layers, CPAL palette 0. */
+    std::vector<std::array<std::uint16_t, 3U>> color_bases;
+    std::vector<std::pair<std::uint16_t, std::uint16_t>> color_layer_records;
+    std::vector<std::uint32_t> palette;
+    /** isol, init, medi and fina single substitutions, by JoiningForm. */
+    std::array<std::map<std::uint16_t, std::uint16_t>, 4U> joining_forms;
     std::uint16_t units = 0U;
     std::int16_t ascent = 0;
     std::int16_t descent = 0;
@@ -610,14 +762,23 @@ struct OpenTypeFont::Impl final {
 
     void parse_directory() {
         font_reader.require(0U, 12U);
-        const std::uint32_t version = font_reader.u32(0U);
+        // A collection (.ttc) lists its faces' directories; its first face is the font. Table
+        // offsets are from the start of the file either way.
+        if (font_reader.u32(0U) == 0x74746366U) {
+            font_reader.require(0U, 16U);
+            if (font_reader.u32(8U) == 0U)
+                throw FontError("font collection has no faces");
+            directory = font_reader.u32(12U);
+            font_reader.require(directory, 12U);
+        }
+        const std::uint32_t version = font_reader.u32(directory);
         if (version != 0x00010000U && version != 0x4F54544FU) {
             throw FontError("unsupported sfnt scaler type");
         }
-        const std::uint16_t count = font_reader.u16(4U);
-        font_reader.require(12U, static_cast<std::size_t>(count) * 16U);
+        const std::uint16_t count = font_reader.u16(directory + 4U);
+        font_reader.require(directory + 12U, static_cast<std::size_t>(count) * 16U);
         for (std::size_t index = 0U; index < count; ++index) {
-            const std::size_t record = 12U + index * 16U;
+            const std::size_t record = directory + 12U + index * 16U;
             const std::string name = font_reader.tag(record);
             const std::size_t offset = static_cast<std::size_t>(font_reader.u32(record + 8U));
             const std::size_t length = static_cast<std::size_t>(font_reader.u32(record + 12U));
@@ -1257,6 +1418,45 @@ struct OpenTypeFont::Impl final {
         return result;
     }
 
+    /** A lookup's single substitutions (type 1, or wrapped in an extension), into `forms`. */
+    void parse_single_substitutions(const Reader& reader, const std::size_t lookup,
+                                    std::map<std::uint16_t, std::uint16_t>& forms) {
+        reader.require(lookup, 6U);
+        const std::uint16_t type = reader.u16(lookup);
+        const std::uint16_t count = reader.u16(lookup + 4U);
+        reader.require(lookup + 6U, static_cast<std::size_t>(count) * 2U);
+        layout_budget.charge(1U + static_cast<std::size_t>(count));
+        for (std::size_t index = 0U; index < count; ++index) {
+            std::uint16_t resolved_type = type;
+            std::size_t subtable = lookup + reader.u16(lookup + 6U + index * 2U);
+            if (type == 7U) {
+                reader.require(subtable, 8U);
+                if (reader.u16(subtable) != 1U)
+                    throw FontError("unsupported GSUB extension format");
+                resolved_type = reader.u16(subtable + 2U);
+                subtable = checked_add(subtable, reader.u32(subtable + 4U), reader);
+            }
+            if (resolved_type != 1U)
+                continue;
+            reader.require(subtable, 6U);
+            const std::uint16_t format = reader.u16(subtable);
+            const std::vector<std::uint16_t> covered = expand_coverage(
+                parse_coverage(reader, subtable + reader.u16(subtable + 2U)), 65'536U);
+            layout_budget.charge(covered.size());
+            if (format == 1U) {
+                const auto delta = static_cast<std::int16_t>(reader.u16(subtable + 4U));
+                for (const std::uint16_t glyph : covered) {
+                    forms.try_emplace(glyph, static_cast<std::uint16_t>((glyph + delta) & 0xFFFFU));
+                }
+            } else if (format == 2U) {
+                const std::uint16_t glyph_count = reader.u16(subtable + 4U);
+                reader.require(subtable + 6U, static_cast<std::size_t>(glyph_count) * 2U);
+                for (std::size_t at = 0U; at < covered.size() && at < glyph_count; ++at)
+                    forms.try_emplace(covered[at], reader.u16(subtable + 6U + at * 2U));
+            }
+        }
+    }
+
     [[nodiscard]] std::optional<LigatureSubstitutionLookup> parse_gsub_lookup(
         const Reader& reader,
         const std::size_t lookup,
@@ -1362,6 +1562,36 @@ struct OpenTypeFont::Impl final {
 
         const std::uint16_t lookup_count = reader.u16(lookups);
         reader.require(lookups + 2U, static_cast<std::size_t>(lookup_count) * 2U);
+        // A joining script's letter forms (Arabic, Syriac, ...): single substitutions under
+        // isol, init, medi and fina, applied by the shaper as each letter's neighbours ask.
+        for (std::size_t feature_index = 0U; feature_index < feature_records.size();
+             ++feature_index) {
+            if (!selected_features[feature_index])
+                continue;
+            const Feature& feature = feature_records[feature_index];
+            const int form = feature.tag == "isol"   ? 0
+                             : feature.tag == "init" ? 1
+                             : feature.tag == "medi" ? 2
+                             : feature.tag == "fina" ? 3
+                                                     : -1;
+            if (form < 0)
+                continue;
+            for (const std::uint16_t lookup_index : feature.lookups) {
+                if (lookup_index >= lookup_count)
+                    continue;
+                try {
+                    parse_single_substitutions(
+                        reader, lookups + reader.u16(lookups + 2U + lookup_index * 2U),
+                        joining_forms[static_cast<std::size_t>(form)]);
+                } catch (const std::exception& error) {
+                    if (layout_budget.exhausted())
+                        throw;
+                    optional_diagnostics.push_back("GSUB joining lookup " +
+                                                   std::to_string(lookup_index) +
+                                                   " ignored: " + error.what());
+                }
+            }
+        }
         std::vector<bool> active_lookups(lookup_count, false);
         for (std::size_t feature_index = 0U; feature_index < feature_records.size();
              ++feature_index) {
@@ -2196,8 +2426,116 @@ const std::vector<std::string>& OpenTypeFont::optional_diagnostics() const noexc
     return implementation_->optional_diagnostics;
 }
 
+std::vector<std::pair<std::uint32_t, std::uint32_t>> OpenTypeFont::coverage_ranges() const {
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> ranges;
+    for (const Cmap12Group& group : implementation_->cmap12)
+        ranges.emplace_back(group.first, group.last);
+    if (ranges.empty() && implementation_->cmap4.has_value()) {
+        const Cmap4& cmap = *implementation_->cmap4;
+        for (std::size_t index = 0U; index < cmap.ends.size(); ++index) {
+            if (cmap.starts[index] <= cmap.ends[index] && cmap.starts[index] != 0xFFFFU)
+                ranges.emplace_back(cmap.starts[index], cmap.ends[index]);
+        }
+    }
+    std::ranges::sort(ranges);
+    return ranges;
+}
+
+std::vector<ColorGlyphLayer> OpenTypeFont::color_layers(const std::uint16_t glyph) const {
+    const Impl& font = *implementation_;
+    const auto found = std::ranges::lower_bound(font.color_bases, glyph, {},
+                                                [](const auto& base) { return base[0]; });
+    if (found == font.color_bases.end() || (*found)[0] != glyph)
+        return {};
+    std::vector<ColorGlyphLayer> layers;
+    layers.reserve((*found)[2]);
+    for (std::size_t index = (*found)[1];
+         index < static_cast<std::size_t>((*found)[1]) + (*found)[2]; ++index) {
+        const auto [layer_glyph, palette_index] = font.color_layer_records[index];
+        ColorGlyphLayer layer;
+        layer.glyph = layer_glyph;
+        layer.foreground = palette_index == 0xFFFFU;
+        if (!layer.foreground)
+            layer.rgba =
+                palette_index < font.palette.size() ? font.palette[palette_index] : 0xFF000000U;
+        layers.push_back(layer);
+    }
+    return layers;
+}
+
+std::uint16_t OpenTypeFont::joining_form(const JoiningForm form,
+                                         const std::uint16_t glyph) const noexcept {
+    const auto& forms = implementation_->joining_forms[static_cast<std::size_t>(form)];
+    const auto found = forms.find(glyph);
+    return found != forms.end() ? found->second : glyph;
+}
+
 std::uint16_t OpenTypeFont::glyph_id(const std::uint32_t code_point) const noexcept {
     return implementation_->glyph_id(code_point);
+}
+
+const std::vector<FontAxis>& OpenTypeFont::axes() const noexcept {
+    return implementation_->axes;
+}
+
+const std::vector<double>& OpenTypeFont::variation() const noexcept {
+    return implementation_->design;
+}
+
+OpenTypeFont
+OpenTypeFont::instance(const std::span<const std::pair<std::string, double>> settings) const {
+    const Impl& font = *implementation_;
+    if (font.axes.empty() || settings.empty())
+        return *this;
+    // Each axis's user value normalized to -1..1 about its default, then through avar.
+    std::vector<double> coordinates(font.axes.size(), 0.0);
+    std::vector<double> design(font.axes.size(), 0.0);
+    bool changed = false;
+    for (std::size_t axis = 0U; axis < font.axes.size(); ++axis) {
+        const FontAxis& range = font.axes[axis];
+        design[axis] = range.fallback;
+        const auto found =
+            std::ranges::find(settings, range.tag, &std::pair<std::string, double>::first);
+        if (found == settings.end())
+            continue;
+        const double value = std::clamp(found->second, range.minimum, range.maximum);
+        design[axis] = value;
+        double normalized = 0.0;
+        if (value < range.fallback && range.fallback > range.minimum)
+            normalized = (value - range.fallback) / (range.fallback - range.minimum);
+        else if (value > range.fallback && range.maximum > range.fallback)
+            normalized = (value - range.fallback) / (range.maximum - range.fallback);
+        if (axis < font.axis_maps.size() && font.axis_maps[axis].size() >= 2U) {
+            const auto& map = font.axis_maps[axis];
+            for (std::size_t k = 1U; k < map.size(); ++k) {
+                if (normalized <= map[k].first) {
+                    const auto [from_a, to_a] = map[k - 1U];
+                    const auto [from_b, to_b] = map[k];
+                    normalized = from_b > from_a ? to_a + (to_b - to_a) * (normalized - from_a) /
+                                                              (from_b - from_a)
+                                                 : to_b;
+                    break;
+                }
+            }
+        }
+        coordinates[axis] = std::round(normalized * 16384.0) / 16384.0;
+        changed = changed || coordinates[axis] != 0.0;
+    }
+    if (!changed)
+        return *this;
+    auto varied = std::make_shared<Impl>(font.font_bytes, std::move(coordinates));
+    varied->design = std::move(design);
+    // The instance stands for the weight it was made at, so nothing emboldens it again.
+    const auto weight =
+        std::ranges::find(settings, std::string("wght"), &std::pair<std::string, double>::first);
+    if (weight != settings.end()) {
+        varied->metadata.weight_class =
+            static_cast<std::uint16_t>(std::clamp(std::round(weight->second), 1.0, 1000.0));
+        varied->metadata.style_flags = weight->second >= 600.0
+                                           ? varied->metadata.style_flags | font_style_bold
+                                           : varied->metadata.style_flags & ~font_style_bold;
+    }
+    return OpenTypeFont(std::shared_ptr<const Impl>(std::move(varied)));
 }
 
 std::uint16_t OpenTypeFont::horizontal_advance(const std::uint16_t glyph) const noexcept {
