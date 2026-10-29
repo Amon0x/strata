@@ -5,15 +5,19 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
+#include <numbers>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include "font/raster.hpp"
+#include "ui/render/path_geometry.hpp"
 #include "ui/text.hpp"
 
 namespace strata::ui::submission_detail {
@@ -85,6 +89,8 @@ constexpr std::size_t maximum_content_effect_depth = 4U;
                 bottom = std::max(bottom, value->origin.y + glyph.bounds.bottom());
             }
             return Rect{left, top, right - left, bottom - top};
+        } else if constexpr (std::is_same_v<Type, PreparedMaskPtr>) {
+            return value != nullptr ? value->bounds : Rect{};
         } else if constexpr (std::is_same_v<Type, ShadowRenderCommand>) {
             const double outset =
                 std::max(0.0, value.radius + std::max(value.spread, 0.0));
@@ -132,7 +138,8 @@ struct CommandTexture final {
             // released) draws nothing rather than sampling a texture the host lacks.
             if (declared == context.textures.end()) return CommandTexture{std::nullopt, true};
             return CommandTexture{declared->host_id, false};
-        } else if constexpr (std::is_same_v<Type, PreparedTextPtr>) {
+        } else if constexpr (std::is_same_v<Type, PreparedTextPtr> ||
+                             std::is_same_v<Type, PreparedMaskPtr>) {
             return CommandTexture{
                 value != nullptr ? std::optional<std::string>(value->texture) : std::nullopt,
                 false,
@@ -491,6 +498,470 @@ void append_draw(
     });
 }
 
+/** FNV-1a over raw bytes: mask identities hash everything their pixels depend on. */
+class MaskHash final {
+  public:
+    template <typename Value>
+    void add(const Value& value) noexcept {
+        static_assert(std::is_trivially_copyable_v<Value>);
+        const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
+        for (std::size_t index = 0U; index < sizeof(Value); ++index) {
+            state_ ^= bytes[index];
+            state_ *= 1099511628211ULL;
+        }
+    }
+    [[nodiscard]] std::uint64_t value() const noexcept { return state_; }
+
+  private:
+    std::uint64_t state_ = 1469598103934665603ULL;
+};
+
+/**
+ * A gradient as bands over a mask: the affine map from the draw's local space to the gradient
+ * position, and one band per interval between stops, the outer ones open-ended so they hold the
+ * end colours past the stops.
+ */
+[[nodiscard]] MaskGradient mask_gradient(const Gradient& gradient, const Rect bounds) {
+    MaskGradient result;
+    result.paint = static_cast<float>(1U + static_cast<std::uint32_t>(gradient.kind) +
+                                      2U * static_cast<std::uint32_t>(gradient.extend));
+    const double width = std::max(bounds.width, 1.0e-9);
+    const double height = std::max(bounds.height, 1.0e-9);
+    // Normalized position: n = ((x - bounds.x) / width, (y - bounds.y) / height).
+    if (gradient.kind == GradientKind::linear) {
+        const auto [start, end] = gradient.axis(Size{bounds.width, bounds.height});
+        const Point direction{end.x - start.x, end.y - start.y};
+        const double length_squared = direction.x * direction.x + direction.y * direction.y;
+        if (length_squared > 0.0) {
+            const double ax = direction.x / length_squared;
+            const double ay = direction.y / length_squared;
+            result.position = {
+                ax / width, ay / height,
+                (-bounds.x / width - start.x) * ax + (-bounds.y / height - start.y) * ay,
+                0.0, 0.0, 0.0,
+            };
+        }
+    } else {
+        const double radius_x = std::max(gradient.radius_x, 1.0e-9);
+        const double radius_y = std::max(gradient.radius_y, 1.0e-9);
+        result.position = {
+            1.0 / (width * radius_x), 0.0, (-bounds.x / width - gradient.center.x) / radius_x,
+            0.0, 1.0 / (height * radius_y), (-bounds.y / height - gradient.center.y) / radius_y,
+        };
+    }
+    const std::vector<GradientStop>& stops = gradient.stops;
+    if (stops.empty())
+        return result;
+    for (std::size_t index = 1U; index < stops.size(); ++index) {
+        if (stops[index].offset > stops[index - 1U].offset) {
+            result.bands.push_back(MaskGradientBand{
+                static_cast<float>(stops[index - 1U].offset),
+                static_cast<float>(stops[index].offset), 0.0F, stops[index - 1U].color,
+                stops[index].color});
+        }
+    }
+    if (result.bands.empty()) {
+        // Every stop at one offset: a hard step from the first colour to the last.
+        const auto offset = static_cast<float>(stops.front().offset);
+        result.bands.push_back(
+            MaskGradientBand{offset, offset, 0.0F, stops.front().color, stops.back().color});
+    }
+    result.bands.front().open += 1.0F;
+    result.bands.back().open += 2.0F;
+    return result;
+}
+
+/** The largest mask edge, in device pixels, kept below an atlas page with its gutter. */
+constexpr double maximum_mask_extent = 1000.0;
+/**
+ * Larger shapes rasterize in tiles of this many device pixels a side, each with a one-pixel apron
+ * of real coverage so sampling across a seam reads its neighbour's pixels. Empty tiles take
+ * nothing and full ones a single shared texel, so only the outline's own tiles use atlas space.
+ */
+constexpr std::uint32_t mask_tile = 256U;
+/** Past this many tiles (or this extent), a shape draws as geometry instead. */
+constexpr double maximum_mask_tiles = 1024.0;
+constexpr double maximum_tiled_extent = 16384.0;
+/** Tile classes kept before the record starts over. */
+constexpr std::size_t maximum_tile_classes = 16384U;
+
+/**
+ * Draws a path's fill and stroke from exact coverage masks in the shape atlas, as text draws its
+ * glyphs: the outline is flattened and (for a stroke) expanded at device resolution, rasterized
+ * by area into a mask placed on the device pixel grid at the shape's own sub-pixel position, and
+ * drawn with the paint: its colour, or its gradient evaluated per pixel. A shape larger than a
+ * page is drawn in tiles. Returns false, drawing nothing, when the shape draws analytically or as
+ * geometry instead: no shape atlas, full pages, or a shape too large even for tiles.
+ */
+[[nodiscard]] bool append_shape_masks(
+    std::vector<PlannedItem>& output,
+    const PathRenderCommand& command,
+    const std::uint32_t source_order,
+    const Transform& transform,
+    const Rect clip,
+    const std::vector<SubmissionRoundedClip>& rounded_clips,
+    const double opacity,
+    const std::uint32_t group,
+    const SubmissionContext& context,
+    std::size_t& skipped_draws,
+    font::GlyphAtlas* const atlas,
+    std::unordered_map<std::uint64_t, std::uint8_t>& tile_classes
+) {
+    const PathShape& shape = command.shape;
+    const Rect bounds = command.bounds;
+    if (atlas == nullptr || bounds.width <= 0.0 || bounds.height <= 0.0 ||
+        analytic_shape(shape, Size{bounds.width, bounds.height})) {
+        return false;
+    }
+    // Device pixels per local pixel. An axis-aligned draw is rasterized on the device grid itself;
+    // a rotated or skewed one in its own axes at device density, its quad turned with it.
+    const bool aligned = transform.axis_aligned();
+    const double device_x = aligned ? transform.m00 * context.scale
+                                    : std::hypot(transform.m00, transform.m10) * context.scale;
+    const double device_y = aligned ? transform.m11 * context.scale
+                                    : std::hypot(transform.m01, transform.m11) * context.scale;
+    if (!(std::abs(device_x) > 1.0e-6) || !(std::abs(device_y) > 1.0e-6))
+        return false;
+    const Point origin = aligned ? Point{(bounds.x * transform.m00 + transform.m02) * context.scale,
+                                         (bounds.y * transform.m11 + transform.m12) * context.scale}
+                                 : Point{0.0, 0.0};
+    // Sub-pixel position in sixteenths, so a moving shape reuses a handful of masks.
+    const Point whole{std::floor(origin.x), std::floor(origin.y)};
+    const Point phase{std::round((origin.x - whole.x) * 16.0) / 16.0,
+                      std::round((origin.y - whole.y) * 16.0) / 16.0};
+    const StrokeStyle style = shape.stroke_style.value_or(StrokeStyle{});
+    const double tolerance =
+        0.15 / std::max(std::min(std::abs(device_x), std::abs(device_y)), 1.0e-3);
+
+    std::optional<std::vector<PathContour>> centrelines;
+    const auto local_contours = [&]() -> const std::vector<PathContour>& {
+        if (!centrelines.has_value()) {
+            std::vector<PathContour> flattened = flatten_path(
+                shape.path, Size{bounds.width, bounds.height}, tolerance);
+            for (PathContour& contour : flattened) {
+                for (Point& point : contour.points) {
+                    point.x *= bounds.width;
+                    point.y *= bounds.height;
+                }
+            }
+            centrelines = std::move(flattened);
+        }
+        return *centrelines;
+    };
+
+    // The path's control points bound it, so they give each part's device box without flattening.
+    double control_left = std::numeric_limits<double>::infinity();
+    double control_top = std::numeric_limits<double>::infinity();
+    double control_right = -std::numeric_limits<double>::infinity();
+    double control_bottom = -std::numeric_limits<double>::infinity();
+    const auto include = [&](const Point point) {
+        control_left = std::min(control_left, point.x);
+        control_top = std::min(control_top, point.y);
+        control_right = std::max(control_right, point.x);
+        control_bottom = std::max(control_bottom, point.y);
+    };
+    for (const PathSegment& segment : shape.path.segments()) {
+        if (segment.verb == PathVerb::close)
+            continue;
+        include(segment.to);
+        if (segment.verb == PathVerb::quadratic || segment.verb == PathVerb::cubic)
+            include(segment.control_a);
+        if (segment.verb == PathVerb::cubic)
+            include(segment.control_b);
+    }
+    if (!std::isfinite(control_left))
+        return true;
+
+    struct Part final {
+        bool stroke = false;
+        const Paint* paint = nullptr;
+    };
+    /** One quad to draw: its device box relative to the whole-pixel origin and its texels. */
+    struct Piece final {
+        const Part* part = nullptr;
+        font::RasterPlaneBounds box;
+        TextureRegion uv;
+        std::string texture;
+    };
+    std::vector<Part> parts;
+    if (shape.fill.has_value() && !shape.fill->transparent())
+        parts.push_back(Part{false, &*shape.fill});
+    if (shape.stroke.has_value() && !shape.stroke->transparent() && style.width > 0.0)
+        parts.push_back(Part{true, &*shape.stroke});
+    std::vector<Piece> pieces;
+    for (const Part& part : parts) {
+        MaskHash hash;
+        for (const PathSegment& segment : shape.path.segments())
+            hash.add(segment);
+        hash.add(part.stroke);
+        hash.add(shape.fill_rule);
+        if (part.stroke) {
+            hash.add(style.width);
+            hash.add(style.cap);
+            hash.add(style.join);
+            hash.add(style.miter_limit);
+            hash.add(style.dash_offset);
+            for (const double dash : style.dash)
+                hash.add(dash);
+        }
+        hash.add(bounds.width);
+        hash.add(bounds.height);
+        hash.add(device_x);
+        hash.add(device_y);
+        hash.add(phase);
+
+        // The part's outline in device pixels relative to the whole-pixel origin, made once.
+        std::optional<std::vector<std::vector<font::CoveragePoint>>> device_outline;
+        const auto outline_polygons = [&]() -> const std::vector<std::vector<font::CoveragePoint>>& {
+            if (!device_outline.has_value()) {
+                const std::vector<PathContour>& contours = local_contours();
+                std::vector<PathContour> outline;
+                if (part.stroke) {
+                    outline = stroke_outline(contours, style, tolerance);
+                } else {
+                    for (const PathContour& contour : contours) {
+                        if (contour.points.size() >= 3U)
+                            outline.push_back(PathContour{contour.points, true});
+                    }
+                }
+                std::vector<std::vector<font::CoveragePoint>> polygons;
+                polygons.reserve(outline.size());
+                for (const PathContour& contour : outline) {
+                    std::vector<font::CoveragePoint> polygon;
+                    polygon.reserve(contour.points.size());
+                    for (const Point point : contour.points)
+                        polygon.push_back(font::CoveragePoint{phase.x + point.x * device_x,
+                                                              phase.y + point.y * device_y});
+                    polygons.push_back(std::move(polygon));
+                }
+                device_outline = std::move(polygons);
+            }
+            return *device_outline;
+        };
+        const bool even_odd = !part.stroke && shape.fill_rule == PathFillRule::evenodd;
+
+        // A conservative device box: the control points, a stroke's reach past them, a pixel.
+        double reach = 0.0;
+        if (part.stroke) {
+            double factor = 1.0;
+            if (style.join == PathJoin::miter)
+                factor = std::max(factor, style.miter_limit);
+            if (style.cap == PathCap::square)
+                factor = std::max(factor, std::numbers::sqrt2);
+            reach = style.width * 0.5 * factor;
+        }
+        const double x_a = phase.x + (control_left * bounds.width - reach) * device_x;
+        const double x_b = phase.x + (control_right * bounds.width + reach) * device_x;
+        const double y_a = phase.y + (control_top * bounds.height - reach) * device_y;
+        const double y_b = phase.y + (control_bottom * bounds.height + reach) * device_y;
+        const double left = std::min(x_a, x_b) - 1.0;
+        const double right = std::max(x_a, x_b) + 1.0;
+        const double top = std::min(y_a, y_b) - 1.0;
+        const double bottom = std::max(y_a, y_b) + 1.0;
+
+        if (right - left <= maximum_mask_extent && bottom - top <= maximum_mask_extent) {
+            char key[40];
+            std::snprintf(key, sizeof(key), "%016llx",
+                          static_cast<unsigned long long>(hash.value()));
+            const std::optional<font::GlyphAtlasEntry> entry = atlas->request_mask(
+                key, [&]() -> std::optional<font::GlyphRasterBitmap> {
+                    const auto& polygons = outline_polygons();
+                    double outline_left = std::numeric_limits<double>::infinity();
+                    double outline_top = std::numeric_limits<double>::infinity();
+                    double outline_right = -std::numeric_limits<double>::infinity();
+                    double outline_bottom = -std::numeric_limits<double>::infinity();
+                    for (const std::vector<font::CoveragePoint>& polygon : polygons) {
+                        for (const font::CoveragePoint point : polygon) {
+                            outline_left = std::min(outline_left, point.x);
+                            outline_top = std::min(outline_top, point.y);
+                            outline_right = std::max(outline_right, point.x);
+                            outline_bottom = std::max(outline_bottom, point.y);
+                        }
+                    }
+                    if (!std::isfinite(outline_left) ||
+                        outline_right - outline_left > maximum_mask_extent ||
+                        outline_bottom - outline_top > maximum_mask_extent) {
+                        return std::nullopt;
+                    }
+                    // One clear pixel around the outline, so linear sampling never reaches a
+                    // neighbour in the atlas.
+                    const double x0 = std::floor(outline_left) - 1.0;
+                    const double y0 = std::floor(outline_top) - 1.0;
+                    const auto width =
+                        static_cast<std::uint32_t>(std::ceil(outline_right) + 1.0 - x0);
+                    const auto height =
+                        static_cast<std::uint32_t>(std::ceil(outline_bottom) + 1.0 - y0);
+                    std::optional<std::vector<std::uint8_t>> coverage = font::rasterize_polygons(
+                        polygons, width, height, even_odd, font::CoveragePoint{x0, y0});
+                    if (!coverage.has_value())
+                        return std::nullopt;
+                    font::GlyphRasterBitmap bitmap;
+                    bitmap.width = width;
+                    bitmap.height = height;
+                    bitmap.bytes = std::move(*coverage);
+                    // The mask's device-pixel box relative to the whole-pixel origin.
+                    bitmap.plane_bounds_layout_pixels =
+                        font::RasterPlaneBounds{x0, y0 + height, x0 + width, y0};
+                    return bitmap;
+                });
+            if (!entry.has_value())
+                return false;
+            pieces.push_back(Piece{&part, entry->plane_bounds_layout_pixels,
+                                   TextureRegion{entry->u, entry->v, entry->uv_width,
+                                                 entry->uv_height},
+                                   entry->texture});
+            continue;
+        }
+
+        // Tiles over the device box.
+        const double tile = static_cast<double>(mask_tile);
+        const auto first_x = static_cast<std::int64_t>(std::floor(left / tile));
+        const auto last_x = static_cast<std::int64_t>(std::floor(right / tile));
+        const auto first_y = static_cast<std::int64_t>(std::floor(top / tile));
+        const auto last_y = static_cast<std::int64_t>(std::floor(bottom / tile));
+        if (right - left > maximum_tiled_extent || bottom - top > maximum_tiled_extent ||
+            static_cast<double>(last_x - first_x + 1) * static_cast<double>(last_y - first_y + 1) >
+                maximum_mask_tiles) {
+            return false;
+        }
+        if (tile_classes.size() > maximum_tile_classes)
+            tile_classes.clear();
+        std::optional<font::GlyphAtlasEntry> solid;
+        for (std::int64_t tile_y = first_y; tile_y <= last_y; ++tile_y) {
+            for (std::int64_t tile_x = first_x; tile_x <= last_x; ++tile_x) {
+                MaskHash tile_hash = hash;
+                tile_hash.add(tile_x);
+                tile_hash.add(tile_y);
+                const std::uint64_t identity = tile_hash.value();
+                const font::RasterPlaneBounds core{
+                    static_cast<double>(tile_x) * tile, static_cast<double>(tile_y + 1) * tile,
+                    static_cast<double>(tile_x + 1) * tile, static_cast<double>(tile_y) * tile};
+                std::uint8_t tile_class = 2U;
+                if (const auto known = tile_classes.find(identity); known != tile_classes.end())
+                    tile_class = known->second;
+                if (tile_class == 0U)
+                    continue;
+                if (tile_class == 2U) {
+                    char key[48];
+                    std::snprintf(key, sizeof(key), "%016llx",
+                                  static_cast<unsigned long long>(identity));
+                    std::optional<std::uint8_t> found_class;
+                    const std::optional<font::GlyphAtlasEntry> entry = atlas->request_mask(
+                        key, [&]() -> std::optional<font::GlyphRasterBitmap> {
+                            constexpr std::uint32_t side = mask_tile + 2U;
+                            std::optional<std::vector<std::uint8_t>> coverage =
+                                font::rasterize_polygons(
+                                    outline_polygons(), side, side, even_odd,
+                                    font::CoveragePoint{core.left - 1.0, core.top - 1.0});
+                            if (!coverage.has_value())
+                                return std::nullopt;
+                            if (std::ranges::all_of(*coverage,
+                                                    [](const std::uint8_t value) { return value == 0U; })) {
+                                found_class = std::uint8_t{0U};
+                                return std::nullopt;
+                            }
+                            if (std::ranges::all_of(*coverage, [](const std::uint8_t value) {
+                                    return value == 255U;
+                                })) {
+                                found_class = std::uint8_t{1U};
+                                return std::nullopt;
+                            }
+                            font::GlyphRasterBitmap bitmap;
+                            bitmap.width = side;
+                            bitmap.height = side;
+                            bitmap.bytes = std::move(*coverage);
+                            bitmap.plane_bounds_layout_pixels = font::RasterPlaneBounds{
+                                core.left - 1.0, core.bottom + 1.0, core.right + 1.0,
+                                core.top - 1.0};
+                            return bitmap;
+                        });
+                    if (found_class.has_value()) {
+                        tile_classes[identity] = *found_class;
+                        tile_class = *found_class;
+                        if (tile_class == 0U)
+                            continue;
+                    } else if (!entry.has_value()) {
+                        return false;
+                    } else {
+                        // The core's texels: the apron stays outside the quad.
+                        const double inset_u = entry->uv_width / static_cast<double>(mask_tile + 2U);
+                        const double inset_v = entry->uv_height / static_cast<double>(mask_tile + 2U);
+                        pieces.push_back(Piece{
+                            &part, core,
+                            TextureRegion{entry->u + inset_u, entry->v + inset_v,
+                                          entry->uv_width - 2.0 * inset_u,
+                                          entry->uv_height - 2.0 * inset_v},
+                            entry->texture});
+                        continue;
+                    }
+                }
+                // A full tile samples one solid texel.
+                if (!solid.has_value()) {
+                    solid = atlas->request_mask("solid", []() -> std::optional<font::GlyphRasterBitmap> {
+                        font::GlyphRasterBitmap bitmap;
+                        bitmap.width = 4U;
+                        bitmap.height = 4U;
+                        bitmap.bytes.assign(16U, 255U);
+                        bitmap.plane_bounds_layout_pixels = font::RasterPlaneBounds{0.0, 4.0, 4.0, 0.0};
+                        return bitmap;
+                    });
+                    if (!solid.has_value())
+                        return false;
+                }
+                pieces.push_back(Piece{
+                    &part, core,
+                    TextureRegion{solid->u + solid->uv_width * 0.5, solid->v + solid->uv_height * 0.5,
+                                  0.0, 0.0},
+                    solid->texture});
+            }
+        }
+    }
+    std::optional<MaskGradient> gradients[2];
+    for (const Piece& piece : pieces) {
+        const Part& part = *piece.part;
+        const font::RasterPlaneBounds& box = piece.box;
+        // The device box back in the draw's local space: through the transform's own axes when it
+        // is axis-aligned, and in the shape's axes otherwise.
+        Rect quad;
+        if (aligned) {
+            const double left = ((whole.x + box.left) / context.scale - transform.m02) /
+                                transform.m00;
+            const double right = ((whole.x + box.right) / context.scale - transform.m02) /
+                                 transform.m00;
+            const double top = ((whole.y + box.top) / context.scale - transform.m12) /
+                               transform.m11;
+            const double bottom = ((whole.y + box.bottom) / context.scale - transform.m12) /
+                                  transform.m11;
+            quad = Rect{std::min(left, right), std::min(top, bottom), std::abs(right - left),
+                        std::abs(bottom - top)};
+        } else {
+            quad = Rect{bounds.x + box.left / device_x, bounds.y + box.top / device_y,
+                        (box.right - box.left) / device_x, (box.bottom - box.top) / device_y};
+        }
+        std::optional<MaskGradient>& gradient = gradients[part.stroke ? 1 : 0];
+        if (const Gradient* paint_gradient = part.paint->gradient();
+            paint_gradient != nullptr && !gradient.has_value()) {
+            gradient = mask_gradient(*paint_gradient, bounds);
+        }
+        TextureRegion uv = piece.uv;
+        if (aligned && transform.m00 < 0.0) {
+            uv.u += uv.width;
+            uv.width = -uv.width;
+        }
+        if (aligned && transform.m11 < 0.0) {
+            uv.v += uv.height;
+            uv.height = -uv.height;
+        }
+        append_draw(output,
+                    PreparedCommand{std::make_shared<const PreparedMask>(
+                        PreparedMask{quad, uv, part.paint->representative(), piece.texture,
+                                     gradient})},
+                    source_order, transform, clip, rounded_clips, std::nullopt, opacity, group,
+                    context, skipped_draws);
+    }
+    return true;
+}
+
 /**
  * The planner's state machine over a command stream: clip, transform, material, opacity, group
  * and content effect scopes, and the items each command makes. It starts from a recorded state
@@ -766,6 +1237,14 @@ class Planner final {
                     );
                 }
             } else {
+                if constexpr (std::is_same_v<Type, PathRenderCommand>) {
+                    if (append_shape_masks(output_, value, source_order, transform_, clip_,
+                                           batch_rounded_clips(), opacity_, group_, context_,
+                                           skipped_draws_, cache_.shape_atlas,
+                                           cache_.shape_tile_classes)) {
+                        return;
+                    }
+                }
                 append_draw(
                     output_, PreparedCommand{value}, source_order, transform_, clip_,
                     batch_rounded_clips(), material_override_, opacity_, group_, context_,
@@ -908,6 +1387,8 @@ std::string_view default_material_id(const PreparedCommand& command) {
         } else if constexpr (std::is_same_v<Type, CustomMeshRenderCommand>) {
             return value.material.has_value() ? std::string_view(value.material->id)
                                               : std::string_view("strata:custom_mesh");
+        } else if constexpr (std::is_same_v<Type, PreparedMaskPtr>) {
+            return "strata:coverage_mask";
         } else {
             static_assert(std::is_same_v<Type, ShadowRenderCommand>);
             return "strata:shadow";
@@ -928,7 +1409,8 @@ bool unified_material(const std::string_view material) noexcept {
     return material == "strata:solid" || material == "strata:textured" ||
            material == "strata:rounded_rect" || material == "strata:border" ||
            material == "strata:coverage_text" || material == "strata:msdf_text" ||
-           material == "strata:custom_mesh" || material == "strata:shadow";
+           material == "strata:custom_mesh" || material == "strata:shadow" ||
+           material == "strata:coverage_mask";
 }
 
 float unified_draw_mode(const std::string_view material) noexcept {
@@ -938,13 +1420,14 @@ float unified_draw_mode(const std::string_view material) noexcept {
     if (material == "strata:coverage_text") return 4.0F;
     if (material == "strata:msdf_text") return 5.0F;
     if (material == "strata:shadow") return 6.0F;
+    if (material == "strata:coverage_mask") return 10.0F;
     return 0.0F;
 }
 
 bool samples_texture(const std::string_view material) noexcept {
     return material == "strata:textured" || material == "strata:nine_patch" ||
            material == "strata:coverage_text" || material == "strata:msdf_text" ||
-           material == "strata:custom_mesh";
+           material == "strata:custom_mesh" || material == "strata:coverage_mask";
 }
 
 std::vector<PlannedItem> plan(

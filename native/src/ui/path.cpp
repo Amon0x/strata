@@ -203,10 +203,17 @@ std::optional<PathShape> path_shape_from_value(const runtime::Value* const value
         if (!width.has_value() || !height.has_value()) {
             throw std::invalid_argument("a rect shape requires 'width' and 'height'");
         }
-        shape.path = Path::rectangle(
-            Rect{x.value_or(0.0), y.value_or(0.0), *width, *height},
-            number_field(*value, "radius").value_or(0.0)
-        );
+        const Rect area{x.value_or(0.0), y.value_or(0.0), *width, *height};
+        const double radius = number_field(*value, "radius").value_or(0.0);
+        shape.path = Path::rectangle(area, radius);
+        if (area.width > 0.0 && area.height > 0.0) {
+            ShapePrimitive primitive{ShapePrimitiveKind::rect,
+                                     Point{area.x + area.width * 0.5, area.y + area.height * 0.5},
+                                     area.width * 0.5, area.height * 0.5};
+            primitive.corner =
+                std::clamp(radius, 0.0, std::min(area.width, area.height) * 0.5);
+            shape.primitive = primitive;
+        }
     } else if (kind == "circle" || kind == "ellipse") {
         const Point center = point_field(*value, "center").value_or(Point{0.5, 0.5});
         const std::optional<double> radius = number_field(*value, "radius");

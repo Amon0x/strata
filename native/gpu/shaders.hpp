@@ -78,12 +78,13 @@ PixelInput main(VertexInput input) {
     // Tone belongs to ink: fills, borders, shapes and text. An image (mode 1) keeps its own colours
     // and a shadow (mode 6) stays a shadow. A rounded rect (mode 2) carries its border colour in
     // drawData2, which is toned with it.
+    // A banded gradient (mode 10 with a paint) carries its band's end colour there too.
     int mode = (int)floor(input.drawData3.z + 0.5);
     float tone = (mode == 1 || mode == 6) ? 0.0 : group.opacity.y;
     output.color = float4(strataTone(input.color.rgb, tone), input.color.a);
     output.drawData0 = input.drawData0;
     output.drawData1 = input.drawData1;
-    output.drawData2 = mode == 2
+    output.drawData2 = (mode == 2 || (mode == 10 && input.drawData1.z > 0.5))
         ? float4(strataTone(input.drawData2.rgb, tone), input.drawData2.a)
         : input.drawData2;
     output.drawData3 = float4(input.drawData3.xyz, input.drawData3.w * group.opacity.x);
@@ -265,6 +266,28 @@ StrataShape strataSegmentDistance(float2 p, float2 end, float halfWidth, int cap
     return shape;
 }
 
+/** host::gradient_band_parameter and host::gradient_band_factor. */
+float strataGradientBand(PixelInput input) {
+    int packed = (int)floor(input.drawData1.z + 0.5) - 1;
+    float2 position = input.drawData3.xy;
+    float t = (packed & 1) != 0 ? length(position) : position.x;
+    int extend = packed >> 1;
+    if (extend == 1) {
+        t -= floor(t);
+    } else if (extend == 2) {
+        float period = abs(fmod(t, 2.0));
+        t = period > 1.0 ? 2.0 - period : period;
+    }
+    int open = (int)floor(input.drawData1.w + 0.5);
+    if (((open & 1) == 0 && !(t >= input.drawData1.x)) ||
+        ((open & 2) == 0 && !(t < input.drawData1.y)))
+        return -1.0;
+    float span = input.drawData1.y - input.drawData1.x;
+    if (!(span > 0.0))
+        return t >= input.drawData1.y ? 1.0 : 0.0;
+    return saturate((t - input.drawData1.x) / span);
+}
+
 /** Box-filtered coverage of an analytic shape: host::analytic_shape_coverage. */
 float strataAnalyticCoverage(int mode, PixelInput input) {
     float2 p = input.uv * input.drawData0.xy - input.drawData0.zw;
@@ -369,6 +392,17 @@ float4 strataShade(PixelInput input) {
         color.a *= outside * falloff;
     } else if (mode >= 7 && mode <= 9) {
         color.a *= strataAnalyticCoverage(mode, input);
+    } else if (mode == 10) {
+        // A shape's coverage mask: exact area coverage, applied as it is, times its paint: a
+        // gradient band lerps from the vertex colour to its end colour and leaves other bands'
+        // pixels to them (host::gradient_band_factor).
+        float coverage = Texture0.Sample(Sampler0, input.uv).r;
+        if (input.drawData1.z > 0.5) {
+            float band = strataGradientBand(input);
+            coverage = band < 0.0 ? 0.0 : coverage;
+            color = lerp(color, input.drawData2, saturate(band));
+        }
+        color.a *= coverage;
     }
     color.a *= input.drawData3.w;
     return color;

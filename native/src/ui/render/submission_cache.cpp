@@ -43,7 +43,11 @@ const RenderSubmission& RenderSubmissionCache::resolve(
         ? text_engine_ == nullptr
         : !glyph_atlas.reclamation_pending() && glyph_atlas_ == &glyph_atlas &&
           glyph_atlas_generation_ == glyph_atlas.generation() && text_engine_ == text_engine;
-    if (submission_.has_value() && text_resources_match &&
+    font::GlyphAtlas* const shape_atlas = preparation_cache_->shape_atlas;
+    const bool shape_resources_match =
+        shape_atlas == nullptr || (!shape_atlas->reclamation_pending() &&
+                                   shape_atlas_generation_ == shape_atlas->generation());
+    if (submission_.has_value() && text_resources_match && shape_resources_match &&
         environment_ == environment &&
         (commands_.shares_storage(commands) || commands_.commands() == commands.commands()) &&
         std::ranges::equal(texture_descriptors_, textures)) {
@@ -71,6 +75,7 @@ const RenderSubmission& RenderSubmissionCache::resolve(
     glyph_atlas_ = text_engine != nullptr ? &glyph_atlas : nullptr;
     glyph_atlas_generation_ = text_engine != nullptr ? glyph_atlas.generation() : 0U;
     text_engine_ = text_engine;
+    shape_atlas_generation_ = shape_atlas != nullptr ? shape_atlas->generation() : 0U;
     ++misses_;
     return *submission_;
 }
@@ -85,6 +90,13 @@ const RenderSubmission& RenderSubmissionCache::resolve(
     return resolve(commands, glyph_atlas, &text_engine, environment, textures);
 }
 
+void RenderSubmissionCache::set_shape_atlas(font::GlyphAtlas* const atlas) noexcept {
+    if (preparation_cache_->shape_atlas == atlas)
+        return;
+    preparation_cache_->shape_atlas = atlas;
+    submission_.reset();
+}
+
 void RenderSubmissionCache::clear() noexcept {
     commands_.clear();
     environment_.reset();
@@ -93,7 +105,9 @@ void RenderSubmissionCache::clear() noexcept {
     glyph_atlas_generation_ = 0U;
     text_engine_ = nullptr;
     submission_.reset();
+    font::GlyphAtlas* const shape_atlas = preparation_cache_->shape_atlas;
     preparation_cache_->clear();
+    preparation_cache_->shape_atlas = shape_atlas;
 }
 
 std::size_t RenderSubmissionCache::hit_count() const noexcept { return hits_; }

@@ -320,6 +320,41 @@ GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& fon
     return insert_bitmap(key, bitmap->value());
 }
 
+std::optional<GlyphAtlasEntry>
+GlyphAtlas::request_mask(const std::string_view key,
+                         const std::function<std::optional<GlyphRasterBitmap>()>& rasterize) {
+    if (key.empty())
+        throw std::invalid_argument("a mask atlas key must not be empty");
+    // A leading '$' keeps mask keys apart from every font id.
+    Key cache_key{
+        "$mask:" + std::string(key),
+        0U,
+        0U,
+        0U,
+        std::bit_cast<std::uint64_t>(display_scale_),
+        GlyphRasterMode::coverage,
+        SubpixelPhase{},
+        generation_,
+    };
+    if (const auto found = cache_.find(cache_key); found != cache_.end()) {
+        if (!frame_preparation_active_)
+            flush_pending_uploads();
+        return found->second;
+    }
+    std::optional<GlyphRasterBitmap> bitmap = rasterize();
+    if (!bitmap.has_value() || bitmap->width == 0U || bitmap->height == 0U ||
+        bitmap->width > config_.page_size || bitmap->height > config_.page_size) {
+        return std::nullopt;
+    }
+    bitmap->mode = GlyphRasterMode::coverage;
+    try {
+        return insert_bitmap(cache_key, *bitmap);
+    } catch (const FontError&) {
+        // Full pages: the shape draws another way until reclamation runs on a safe frame.
+        return std::nullopt;
+    }
+}
+
 bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
     if (!frame_preparation_active_) {
         throw std::logic_error("glyph atlas warmup requires an active frame preparation");

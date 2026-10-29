@@ -223,12 +223,16 @@ void validate_svg_image_geometry(const svg::Document& document) {
     for (const RenderCommand& command : commands) {
         const auto* path_command = std::get_if<PathRenderCommand>(&command);
         if (path_command == nullptr) continue;
+        // Paths draw from coverage masks, which take any outline, so only the geometry's range is
+        // checked: every flattened point must stay finite at the drawn size.
+        const Size size{path_command->bounds.width, path_command->bounds.height};
+        for (const PathContour& contour : flatten_path(path_command->shape.path, size)) {
+            for (const Point point : contour.points) {
+                if (!std::isfinite(point.x * size.width) || !std::isfinite(point.y * size.height))
+                    throw std::invalid_argument("SVG viewport or geometry exceeds the finite UI range");
+            }
+        }
         ++validated_paths;
-        static_cast<void>(tessellate_shape(
-            path_command->shape,
-            Size{path_command->bounds.width, path_command->bounds.height},
-            100.0
-        ));
     }
     if (validated_paths != expected_paths) {
         throw std::invalid_argument("SVG viewport or geometry exceeds the finite UI range");

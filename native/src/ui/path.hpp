@@ -39,12 +39,13 @@ struct StrokeStyle final {
     [[nodiscard]] friend bool operator==(const StrokeStyle&, const StrokeStyle&) = default;
 };
 
-enum class ShapePrimitiveKind : std::uint8_t { ellipse, sector, arc, segment };
+enum class ShapePrimitiveKind : std::uint8_t { ellipse, sector, arc, segment, rect };
 
 /**
  * What a shape is when it is one the pixel stage draws analytically, in the shape's normalized
  * space like its path: an ellipse, a ring sector (a pie slice when the inner radius is zero), an
- * open arc, or a line segment. The path stays the shape's exact outline for everything else.
+ * open arc, a line segment, or a rectangle (centre and half extents in the radii, its corner
+ * radius in `corner`). The path stays the shape's exact outline for everything else.
  */
 struct ShapePrimitive final {
     ShapePrimitiveKind kind = ShapePrimitiveKind::ellipse;
@@ -59,6 +60,8 @@ struct ShapePrimitive final {
     /** A segment's ends. */
     Point from;
     Point to;
+    /** A rectangle's corner radius, normalized like its path's. */
+    double corner = 0.0;
     [[nodiscard]] friend bool operator==(const ShapePrimitive&, const ShapePrimitive&) = default;
 };
 

@@ -12,7 +12,10 @@ namespace strata::ui {
 
 SurfacePackets::SurfacePackets(std::string resource_namespace,
                                std::vector<resource::EncodedTextureResource> static_textures)
-    : glyph_atlas_(resource_namespace), textures_(resource_namespace, std::move(static_textures)) {}
+    : glyph_atlas_(resource_namespace), shape_atlas_(resource_namespace + ".shapes"),
+      textures_(resource_namespace, std::move(static_textures)) {
+    cache_.set_shape_atlas(&shape_atlas_);
+}
 
 const std::vector<std::uint8_t>& SurfacePackets::encode(Surface& surface, const SurfaceFrame& frame,
                                                         const resource::RuntimeImageStore& images) {

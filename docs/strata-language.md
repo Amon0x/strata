@@ -682,11 +682,17 @@ runtime. `strokeStyle` carries `width`, `cap` (`butt`/`round`/`square`), `join`
 (`miter`/`round`/`bevel`), `miterLimit`, `dash` and `dashOffset`. A `points` list may come straight
 from host data.
 
-Circles and ellipses (filled or stroked), sectors and rings, arcs stroked with butt or round caps,
-and lines, all in a solid color without dashes, are drawn analytically by the pixel stage: their
-edges land exactly on the geometry, their antialiasing is the true share of each pixel they cover
-at any scale, rotation or animation, and a stroke thinner than a pixel draws proportionally lighter
-rather than a pixel wide. Other outlines are tessellated.
+Every outline is drawn with exact coverage: each pixel gets the true share of it the shape covers,
+so edges land on the geometry at any scale or rotation. Circles and ellipses (filled or stroked),
+sectors and rings, arcs stroked with butt or round caps, lines, and rects whose corners are
+circular on screen, all in a solid color without dashes, are evaluated analytically by the pixel
+stage, so they stay exact while they animate and a stroke thinner than a pixel draws
+proportionally lighter rather than a pixel wide. Every other outline (polygons, polylines, paths,
+dashed or gradient-painted shapes, and imported SVG icons) is rasterized once into a coverage
+mask the way text glyphs are, at the shape's device size and sub-pixel position, and cached. Fills
+follow their fill rule, strokes are a union, so a translucent stroke stays one even alpha where it
+crosses itself, and shapes larger than an atlas page are drawn in seamless tiles. Gradient paints
+are evaluated per pixel over the mask: every stop, `extend` mode and radial distance is exact.
 
 An `image` shape maps an image's `source` region (normalized, as for `Image.source`) onto the
 parallelogram whose top-left, top-right and bottom-left corners are its three `points`, multiplied

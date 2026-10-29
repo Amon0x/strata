@@ -84,6 +84,11 @@ namespace {
                                    glyph_atlas.generation() != cache.planned_atlas_generation)) {
         return false;
     }
+    if (cache.shape_atlas != nullptr &&
+        (cache.shape_atlas->reclamation_pending() ||
+         cache.shape_atlas->generation() != cache.planned_shape_generation)) {
+        return false;
+    }
     // A changed draw is planned again alone; a changed scope (a moved subtree's transform, a
     // resized clip) with everything up to its end. Either way only the changed draws are encoded.
     std::vector<CommandRange> ranges;
@@ -152,6 +157,8 @@ namespace {
     output.previous_full_geometry_bytes = previous_full_geometry_bytes;
     cache.planned_commands = commands;
     cache.planned_atlas_generation = glyph_atlas.generation();
+    if (cache.shape_atlas != nullptr)
+        cache.planned_shape_generation = cache.shape_atlas->generation();
     ++cache.changed_draw_update_count;
     return true;
 }
@@ -210,12 +217,22 @@ void update_cached(
     }
     struct PreparationGuard final {
         font::GlyphAtlas* atlas = nullptr;
-        ~PreparationGuard() { if (atlas != nullptr) atlas->end_frame_preparation(); }
+        font::GlyphAtlas* shapes = nullptr;
+        ~PreparationGuard() {
+            if (atlas != nullptr) atlas->end_frame_preparation();
+            if (shapes != nullptr) shapes->end_frame_preparation();
+        }
     };
     PreparationGuard preparation;
     if (text_engine != nullptr) {
         static_cast<void>(glyph_atlas.begin_frame_preparation());
         preparation.atlas = &glyph_atlas;
+    }
+    if (cache.shape_atlas != nullptr) {
+        cache.shape_atlas->adopt_display_scale(display_scale);
+        if (cache.shape_atlas->begin_frame_preparation())
+            cache.plan_current = false;
+        preparation.shapes = cache.shape_atlas;
     }
     if (update_changed_draws(commands, glyph_atlas, text_engine, context, cache, output)) return;
     output.planned_draws = 0U;
@@ -256,6 +273,8 @@ void update_cached(
     cache.planned_commands = commands;
     cache.planned_items = std::move(items);
     cache.planned_atlas_generation = glyph_atlas.generation();
+    if (cache.shape_atlas != nullptr)
+        cache.planned_shape_generation = cache.shape_atlas->generation();
     cache.plan_current = true;
 }
 

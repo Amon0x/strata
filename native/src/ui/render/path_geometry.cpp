@@ -846,10 +846,16 @@ void append_stroke_region(std::vector<PathContour>& regions, std::vector<Point> 
 }
 
 void append_round_region(std::vector<PathContour>& regions, const Point center, const Vector from,
-                         const double sweep, const double radius, const Size size) {
+                         const double sweep, const double radius, const Size size,
+                         const double tolerance = 0.0) {
+    // With a tolerance, as many segments as keep every chord within it of the true arc.
+    const double arc_step =
+        tolerance > 0.0 && radius > tolerance
+            ? std::max(2.0 * std::acos(std::clamp(1.0 - tolerance / radius, -1.0, 1.0)), 0.02)
+            : std::numbers::pi / 8.0;
     const auto segments = static_cast<std::size_t>(std::clamp(
-        std::ceil(std::abs(sweep) / (std::numbers::pi / 8.0)), 1.0,
-        static_cast<double>(maximum_round_segments)));
+        std::ceil(std::abs(sweep) / arc_step), 1.0,
+        tolerance > 0.0 ? 4096.0 : static_cast<double>(maximum_round_segments)));
     std::vector<Point> points;
     points.reserve(segments + 2U);
     points.push_back(center);
@@ -869,7 +875,7 @@ void append_round_region(std::vector<PathContour>& regions, const Point center, 
 
 void append_stroke_cap(std::vector<PathContour>& regions, const Point point,
                        const Vector direction, const double half_width, const PathCap cap,
-                       const Size size) {
+                       const Size size, const double tolerance = 0.0) {
     const Vector side = perpendicular(direction);
     switch (cap) {
     case PathCap::butt:
@@ -885,14 +891,14 @@ void append_stroke_cap(std::vector<PathContour>& regions, const Point point,
         return;
     }
     case PathCap::round:
-        append_round_region(regions, point, side, -std::numbers::pi, half_width, size);
+        append_round_region(regions, point, side, -std::numbers::pi, half_width, size, tolerance);
         return;
     }
 }
 
 void append_stroke_join(std::vector<PathContour>& regions, const Point point,
                         const Vector incoming, const Vector outgoing, const double half_width,
-                        const StrokeStyle& style, const Size size) {
+                        const StrokeStyle& style, const Size size, const double tolerance = 0.0) {
     const double turn = cross(incoming, outgoing);
     if (std::abs(turn) <= geometry_epsilon) return;
     const double side_sign = turn > 0.0 ? -1.0 : 1.0;
@@ -904,7 +910,7 @@ void append_stroke_join(std::vector<PathContour>& regions, const Point point,
         const std::optional<Vector> from = normalized(incoming_side);
         if (!from.has_value()) return;
         const double sweep = std::atan2(cross(*from, outgoing_side), dot(*from, outgoing_side));
-        append_round_region(regions, point, *from, sweep, half_width, size);
+        append_round_region(regions, point, *from, sweep, half_width, size, tolerance);
         return;
     }
     const std::optional<Vector> bisector = normalized(Vector{
@@ -926,7 +932,8 @@ void append_stroke_join(std::vector<PathContour>& regions, const Point point,
 }
 
 void append_stroke_polyline(std::vector<PathContour>& regions, const std::vector<Point>& points,
-                            const StrokeStyle& style, const double feather, const Size size) {
+                            const StrokeStyle& style, const double feather, const Size size,
+                            const double tolerance = 0.0) {
     if (points.size() < 2U) return;
     const double half_width = std::max(style.width, feather) * 0.5;
     std::vector<Vector> directions;
@@ -946,20 +953,44 @@ void append_stroke_polyline(std::vector<PathContour>& regions, const std::vector
     for (std::size_t index = 1U; index < directions.size(); ++index) {
         append_stroke_join(
             regions, points[index], directions[index - 1U], directions[index], half_width, style,
-            size);
+            size, tolerance);
     }
     if (closed) {
         append_stroke_join(
             regions, points.front(), directions.back(), directions.front(), half_width, style,
-            size);
+            size, tolerance);
         return;
     }
     append_stroke_cap(
-        regions, points.front(), directions.front() * -1.0, half_width, style.cap, size);
-    append_stroke_cap(regions, points.back(), directions.back(), half_width, style.cap, size);
+        regions, points.front(), directions.front() * -1.0, half_width, style.cap, size,
+        tolerance);
+    append_stroke_cap(regions, points.back(), directions.back(), half_width, style.cap, size,
+                      tolerance);
 }
 
 } // namespace
+
+std::vector<PathContour> stroke_outline(const std::vector<PathContour>& centrelines,
+                                        const StrokeStyle& style, const double tolerance) {
+    std::vector<PathContour> regions;
+    for (const PathContour& contour : centrelines) {
+        for (const std::vector<Point>& polyline : dashed(contour.points, contour.closed, style))
+            append_stroke_polyline(regions, polyline, style, 0.0, Size{1.0, 1.0}, tolerance);
+    }
+    // Every piece wound the same way: under the nonzero rule their overlaps are a union.
+    for (PathContour& region : regions) {
+        double area = 0.0;
+        const std::vector<Point>& points = region.points;
+        for (std::size_t index = 0U; index < points.size(); ++index) {
+            const Point& a = points[index];
+            const Point& b = points[(index + 1U) % points.size()];
+            area += a.x * b.y - b.x * a.y;
+        }
+        if (area < 0.0)
+            std::ranges::reverse(region.points);
+    }
+    return regions;
+}
 
 PaintMesh tessellate_shape(const PathShape& shape, const Size shape_size,
                            const double pixel_scale) {

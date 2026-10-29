@@ -8,6 +8,7 @@
 #include <span>
 #include <string_view>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -56,6 +57,47 @@ struct PreparedText final {
 
 using PreparedTextPtr = std::shared_ptr<const PreparedText>;
 
+/**
+ * One interval between a gradient's stops, from `start` at `from` to `end` at `to`; `open` says
+ * whether it also takes the parameters before (bit 0) and after (bit 1) it.
+ */
+struct MaskGradientBand final {
+    float from = 0.0F;
+    float to = 0.0F;
+    float open = 0.0F;
+    RenderColor start;
+    RenderColor end;
+    [[nodiscard]] friend bool operator==(const MaskGradientBand&, const MaskGradientBand&) = default;
+};
+
+/**
+ * A gradient painted per pixel over a mask (include/strata/render_shapes.hpp): `paint` is the
+ * draw-data paint code, `position` the affine map from the draw's local space to the gradient
+ * position (x = p[0] x + p[1] y + p[2], y = p[3] x + p[4] y + p[5]), and each band draws once.
+ */
+struct MaskGradient final {
+    float paint = 0.0F;
+    std::array<double, 6> position{};
+    std::vector<MaskGradientBand> bands;
+    [[nodiscard]] friend bool operator==(const MaskGradient&, const MaskGradient&) = default;
+};
+
+/**
+ * A path's fill or stroke drawn from an exact coverage mask: `bounds` is the mask's quad in the
+ * draw's local space, `uv` its atlas region, and `color` the paint the coverage multiplies, or
+ * `gradient` when the paint is one.
+ */
+struct PreparedMask final {
+    Rect bounds;
+    TextureRegion uv;
+    RenderColor color;
+    std::string texture;
+    std::optional<MaskGradient> gradient;
+    [[nodiscard]] friend bool operator==(const PreparedMask&, const PreparedMask&) = default;
+};
+
+using PreparedMaskPtr = std::shared_ptr<const PreparedMask>;
+
 using PreparedCommand = std::variant<
     SolidRectRenderCommand,
     RoundedRectRenderCommand,
@@ -65,7 +107,8 @@ using PreparedCommand = std::variant<
     PreparedTextPtr,
     CustomMeshRenderCommand,
     PathRenderCommand,
-    ShadowRenderCommand
+    ShadowRenderCommand,
+    PreparedMaskPtr
 >;
 
 struct PreparedDraw final {
@@ -169,6 +212,14 @@ struct PreparationCache final {
     std::vector<PlannedItem> planned_items;
     std::vector<CommandPlan> command_plans;
     std::uint64_t planned_atlas_generation = 0U;
+    /** Where shape coverage masks pack, when the owner provides one, and its planned generation. */
+    font::GlyphAtlas* shape_atlas = nullptr;
+    /**
+     * Tiles of large shapes found empty (0) or fully covered (1), which take no atlas space: a
+     * full tile draws from one solid texel. A memo, so planning from a const cache may fill it.
+     */
+    mutable std::unordered_map<std::uint64_t, std::uint8_t> shape_tile_classes;
+    std::uint64_t planned_shape_generation = 0U;
     bool plan_current = false;
     /** Tests compare the fast path against a full plan of the same stream. */
     bool changed_draw_updates = true;
@@ -185,6 +236,8 @@ struct PreparationCache final {
         planned_items.clear();
         command_plans.clear();
         planned_atlas_generation = 0U;
+        planned_shape_generation = 0U;
+        shape_tile_classes.clear();
         plan_current = false;
     }
 };
@@ -278,5 +331,12 @@ struct CommandRange final {
 [[nodiscard]] bool unified_material(std::string_view material) noexcept;
 [[nodiscard]] float unified_draw_mode(std::string_view material) noexcept;
 [[nodiscard]] bool samples_texture(std::string_view material) noexcept;
+
+/**
+ * Whether the encoder draws `shape`, at `size` logical pixels under the built-in material, from its
+ * analytic form: solid paints, no dashes, and a kind and paint combination the pixel stage has a
+ * mode for (include/strata/render_shapes.hpp).
+ */
+[[nodiscard]] bool analytic_shape(const PathShape& shape, Size size) noexcept;
 
 } // namespace strata::ui::submission_detail

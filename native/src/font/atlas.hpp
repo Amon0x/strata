@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <span>
@@ -113,6 +114,15 @@ class GlyphAtlas final {
             double pixel_size, SubpixelPhase coverage_phase, std::uint32_t font_style_flags = 0U,
             GlyphRasterMode mode = GlyphRasterMode::coverage);
 
+    /**
+     * A coverage mask that is not a glyph (a shape's fill or stroke), cached under `key`, which must
+     * name everything the mask's pixels depend on. A miss calls `rasterize` for an 8-bit coverage
+     * bitmap and packs it like a glyph. Returns nothing when `rasterize` does, or when the pages are
+     * full until the next safe frame reclaims them.
+     */
+    [[nodiscard]] std::optional<GlyphAtlasEntry>
+    request_mask(std::string_view key,
+                 const std::function<std::optional<GlyphRasterBitmap>()>& rasterize);
     /**
      * Rasterizes and packs a unique request set before draw planning. Expensive cache misses run
      * concurrently, while deterministic page allocation and host-operation construction remain

@@ -123,7 +123,7 @@ struct PixelRect final {
     if (group.tone > 0.0 && mode != 1 && mode != 6) {
         const float tone = static_cast<float>(group.tone);
         host::tone_color(result.color.red, result.color.green, result.color.blue, tone);
-        if (mode == 2)
+        if (mode == 2 || (mode == host::draw_mode_coverage_mask && result.data[6U] > 0.5F))
             host::tone_color(result.data[8U], result.data[9U], result.data[10U], tone);
     }
     // The rasterizer sees positions on the 1/256 subpixel grid D3D11 hardware snaps to, so a
@@ -695,6 +695,19 @@ void SoftwareRenderer::draw(const host::DrawBatch& batch, const host::RenderPack
                     const float range =
                         std::max(0.5F * (unit_x * screen_u + unit_y * screen_v), 1.0F);
                     source.alpha *= saturate(signed_distance * range + 0.5F);
+                } else if (mode == host::draw_mode_coverage_mask) {
+                    float coverage = texture_sample(u, v).red;
+                    if (data[6U] > 0.5F) {
+                        const float band = host::gradient_band_factor(data.data());
+                        if (band < 0.0F)
+                            coverage = 0.0F;
+                        const float factor = std::max(band, 0.0F);
+                        source.red += (data[8U] - source.red) * factor;
+                        source.green += (data[9U] - source.green) * factor;
+                        source.blue += (data[10U] - source.blue) * factor;
+                        source.alpha += (data[11U] - source.alpha) * factor;
+                    }
+                    source.alpha *= coverage;
                 } else if (mode >= host::draw_mode_ellipse && mode <= host::draw_mode_segment) {
                     source.alpha *= host::analytic_shape_coverage(
                         mode, u, v, du_dx, dv_dx, du_dy, dv_dy, data.data());

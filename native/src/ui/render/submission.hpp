@@ -173,6 +173,8 @@ public:
         const RenderSubmissionEnvironment& environment,
         std::span<const resource::TextureResourceDescriptor> textures = {}
     );
+    /** Packs shape coverage masks into `atlas`; without one, every shape draws as geometry. */
+    void set_shape_atlas(font::GlyphAtlas* atlas) noexcept;
     void clear() noexcept;
     [[nodiscard]] std::size_t hit_count() const noexcept;
     [[nodiscard]] std::size_t miss_count() const noexcept;
@@ -183,6 +185,7 @@ private:
     std::vector<resource::TextureResourceDescriptor> texture_descriptors_;
     const font::GlyphAtlas* glyph_atlas_ = nullptr;
     std::uint64_t glyph_atlas_generation_ = 0U;
+    std::uint64_t shape_atlas_generation_ = 0U;
     const TextEngine* text_engine_ = nullptr;
     std::optional<RenderSubmission> submission_;
     std::unique_ptr<submission_detail::PreparationCache> preparation_cache_;

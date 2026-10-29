@@ -477,7 +477,16 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
                                                          : std::chrono::steady_clock::time_point{};
     // Submission planning has finished mutating the atlas. Keep a stable view of its pending
     // operations until every packet that references them has been encoded and retained.
-    const std::span<const font::AtlasOperation> atlas_operations = glyph_atlas.pending_operations();
+    std::span<const font::AtlasOperation> atlas_operations = glyph_atlas.pending_operations();
+    std::vector<font::AtlasOperation> combined_atlas_operations;
+    if (shape_atlas_ != nullptr && !shape_atlas_->pending_operations().empty()) {
+        const std::span<const font::AtlasOperation> shapes = shape_atlas_->pending_operations();
+        combined_atlas_operations.reserve(atlas_operations.size() + shapes.size());
+        combined_atlas_operations.assign(atlas_operations.begin(), atlas_operations.end());
+        combined_atlas_operations.insert(combined_atlas_operations.end(), shapes.begin(),
+                                         shapes.end());
+        atlas_operations = combined_atlas_operations;
+    }
     const bool submission_reused = submission_cache_.hit_count() != prior_hits;
     if (textures != nullptr)
         textures->plan(submission, !submission_reused || retrying_incomplete_frame);
@@ -598,6 +607,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     // This is the final state transition. All retained packet/cache operations above are complete
     // and the noexcept commit merely consumes operations now owned by the host packet.
     glyph_atlas.commit_operations();
+    if (shape_atlas_ != nullptr)
+        shape_atlas_->commit_operations();
     planned_draws_ = submission.planned_draws;
     skipped_draws_ = submission.skipped_draws;
     geometry_epoch_ = encoded_geometry_epoch;
@@ -642,6 +653,11 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
     // Snapshotting and encoding are deliberately non-mutating. An allocation failure therefore
     // leaves live pages and pending releases retryable.
     std::vector<font::AtlasOperation> operations = glyph_atlas.plan_terminal_release();
+    if (shape_atlas_ != nullptr) {
+        std::vector<font::AtlasOperation> shapes = shape_atlas_->plan_terminal_release();
+        operations.insert(operations.end(), std::make_move_iterator(shapes.begin()),
+                          std::make_move_iterator(shapes.end()));
+    }
     for (const std::string& host_id : textures)
         append_terminal_release(operations, host_id);
     const RenderSubmission empty_submission;
@@ -668,7 +684,14 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::prepare_resource_release
     skipped_draws_ = 0U;
     frame_encoding_incomplete_ = false;
     glyph_atlas.commit_terminal_release();
+    if (shape_atlas_ != nullptr)
+        shape_atlas_->commit_terminal_release();
     return resource_packet_;
+}
+
+void HostRenderPacketCache::set_shape_atlas(font::GlyphAtlas* const atlas) noexcept {
+    shape_atlas_ = atlas;
+    submission_cache_.set_shape_atlas(atlas);
 }
 
 void HostRenderPacketCache::clear() noexcept {

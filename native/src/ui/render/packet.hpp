@@ -116,12 +116,15 @@ class HostRenderPacketCache final {
     [[nodiscard]] const std::vector<std::uint8_t>&
     prepare_resource_release(std::uint64_t frame_index, font::GlyphAtlas& glyph_atlas,
                              std::span<const std::string> textures);
+    /** The atlas shape coverage masks pack into, beside the glyph atlas; it must outlive this. */
+    void set_shape_atlas(font::GlyphAtlas* atlas) noexcept;
     void clear() noexcept;
     [[nodiscard]] const std::vector<std::uint8_t>& packet() const noexcept;
     [[nodiscard]] const HostRenderPacketTelemetry& telemetry() const noexcept;
 
   private:
     RenderSubmissionCache submission_cache_;
+    font::GlyphAtlas* shape_atlas_ = nullptr;
     std::vector<std::uint8_t> geometry_packet_;
     std::vector<std::uint8_t> reuse_packet_;
     std::vector<std::uint8_t> resource_packet_;

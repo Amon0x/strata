@@ -412,4 +412,67 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
     };
 }
 
+std::optional<std::vector<std::uint8_t>>
+rasterize_polygons(const std::span<const std::vector<CoveragePoint>> contours,
+                   const std::uint32_t width, const std::uint32_t height, const bool even_odd,
+                   const CoveragePoint origin) {
+    std::vector<std::uint8_t> coverage(static_cast<std::size_t>(width) * height, 0U);
+    if (width == 0U || height == 0U)
+        return coverage;
+    std::size_t point_count = 0U;
+    std::size_t contour_count = 0U;
+    for (const std::vector<CoveragePoint>& contour : contours) {
+        if (contour.size() < 3U)
+            continue;
+        point_count += contour.size();
+        ++contour_count;
+    }
+    if (contour_count == 0U)
+        return coverage;
+    if (point_count > 65'535U || contour_count > 32'767U)
+        return std::nullopt;
+    std::vector<FT_Vector> points;
+    std::vector<unsigned char> tags;
+    std::vector<unsigned short> ends;
+    points.reserve(point_count);
+    tags.reserve(point_count);
+    ends.reserve(contour_count);
+    // FreeType's outline space has y up from the bitmap's bottom edge, in 26.6 fixed point.
+    const auto fixed = [](const double value) {
+        return static_cast<FT_Pos>(std::lround(std::clamp(value, -1.0e6, 1.0e6) * 64.0));
+    };
+    for (const std::vector<CoveragePoint>& contour : contours) {
+        if (contour.size() < 3U)
+            continue;
+        for (const CoveragePoint& point : contour) {
+            points.push_back(FT_Vector{fixed(point.x - origin.x),
+                                       fixed(static_cast<double>(height) - (point.y - origin.y))});
+            tags.push_back(FT_CURVE_TAG_ON);
+        }
+        ends.push_back(static_cast<unsigned short>(points.size() - 1U));
+    }
+    FT_Outline outline{};
+    outline.n_points = static_cast<decltype(outline.n_points)>(points.size());
+    outline.n_contours = static_cast<decltype(outline.n_contours)>(ends.size());
+    outline.points = points.data();
+    outline.tags = tags.data();
+    outline.contours = reinterpret_cast<decltype(outline.contours)>(ends.data());
+    outline.flags = even_odd ? FT_OUTLINE_EVEN_ODD_FILL : FT_OUTLINE_NONE;
+    FT_Bitmap bitmap{};
+    bitmap.rows = height;
+    bitmap.width = width;
+    bitmap.pitch = static_cast<int>(width);
+    bitmap.buffer = coverage.data();
+    bitmap.num_grays = 256;
+    bitmap.pixel_mode = FT_PIXEL_MODE_GRAY;
+    FT_Raster_Params params{};
+    params.target = &bitmap;
+    params.source = &outline;
+    params.flags = FT_RASTER_FLAG_AA;
+    const FT_Error error = FT_Outline_Render(freetype_library().get(), &outline, &params);
+    if (error != FT_Err_Ok)
+        freetype_error("polygon rendering", error);
+    return coverage;
+}
+
 } // namespace strata::font

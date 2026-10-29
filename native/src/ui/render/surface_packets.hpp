@@ -53,6 +53,8 @@ class SurfacePackets final {
 
   private:
     font::GlyphAtlas glyph_atlas_;
+    /** Shape coverage masks, on pages of their own so shapes never evict glyphs. */
+    font::GlyphAtlas shape_atlas_;
     SurfaceTextures textures_;
     HostRenderPacketCache cache_;
     bool release_prepared_ = false;

@@ -41,7 +41,8 @@ Ground rules:
       description next to their path (`ellipse_shape`, `sector_shape`, `arc_shape` and
       `segment_shape` build them in code), and the encoder draws them analytically whenever their
       paint and stroke allow.
-- [ ] `Draw`'s `rect` shapes draw as rounded rects analytically.
+- [x] `Draw`'s `rect` shapes draw as rounded rects analytically (circular corners on screen; a
+      centred stroke is the rounded-rect border over the stroke's outer edge).
 - [x] `Draw` gains `sector` (a ring or pie slice with an inner radius) and `ring`.
 - [x] Coverage tests (`strata.render.drawing`): every analytic shape, rounded rect and border
       covers its true area within 0.04% (a diagonal half-pixel hairline within 0.32%), at scales
@@ -50,16 +51,23 @@ Ground rules:
 
 ## Phase 2: coverage masks for arbitrary paths
 
-- [ ] A path rasterizer with exact area coverage for fills (nonzero and even-odd), strokes (caps,
-      joins, miter limit, dashes) and their combination, through FreeType's smooth rasterizer and
-      stroker, which are already linked.
-- [ ] A shape mask atlas sharing the glyph atlas's pages, eviction and uploads, keyed by geometry,
-      device size and subpixel phase; very large shapes are tiled.
-- [ ] Paint per pixel: mask × paint, where paint is a colour or a gradient evaluated in the shader
-      from a stop ramp, so multi-stop linear and radial gradients with repeat and mirror are exact on
-      every shape, analytic or masked.
-- [ ] Translucent strokes, self-overlapping paths and SVG icons render with uniform alpha and no
-      seams; the O(E²) union sweep and its throwing limits are gone.
+- [x] A path rasterizer with exact area coverage for fills (nonzero and even-odd), strokes (caps,
+      joins, miter limit, dashes) and their combination: strokes expand to a uniformly wound
+      outline at device resolution and FreeType's smooth rasterizer takes the nonzero union
+      (`font::rasterize_polygons`).
+- [x] A shape mask atlas with the glyph atlas's packing, eviction and uploads (its own pages, so
+      shapes never evict glyphs), keyed by geometry, device size and subpixel phase. Shapes larger
+      than a page draw in 256-pixel tiles with a one-pixel apron, so seams sample their neighbours;
+      empty tiles take nothing and full ones one shared texel.
+- [x] Paint per pixel: mask × paint, where paint is a colour or a gradient evaluated in the shader
+      band by band (one quad per interval between stops, each lerping across its interval), so
+      multi-stop linear and radial gradients with repeat and mirror are exact on every outline. A
+      gradient-painted analytic shape takes the mask path; rect fills keep their stop-split
+      tessellation, which is exact for linear gradients.
+- [x] Translucent strokes, self-overlapping paths and SVG icons render with uniform alpha and no
+      seams. SVG import no longer tessellates to validate, so its sweep limits no longer reject
+      icons; the sweep remains only as the fallback for a shape no mask can take (past 1,024
+      tiles or 65,535 outline points), which is left out rather than failing the frame.
 - [ ] Adjacent shapes that share an edge (pie slices, tiles) meet without a halo or a gap.
 
 ## Phase 3: change and animation cost

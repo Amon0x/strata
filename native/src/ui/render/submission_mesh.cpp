@@ -295,6 +295,57 @@ void quad(
     });
 }
 
+/**
+ * A gradient-painted mask: one quad per band, each vertex carrying the gradient position at its
+ * corner so the pixel stage evaluates the gradient exactly.
+ */
+void gradient_mask_geometry(
+    RenderSubmission& output,
+    const PreparedDraw& draw,
+    const PreparedMask& mask,
+    const std::array<float, draw_data_float_count>& data,
+    const std::uint32_t batch_base_vertex
+) {
+    const MaskGradient& gradient = *mask.gradient;
+    const Rect bounds = mask.bounds;
+    const TextureRegion uv = mask.uv;
+    const double z = group_depth(draw);
+    const std::array<double, 6>& map = gradient.position;
+    std::array<float, draw_data_float_count> values = data;
+    values[6] = gradient.paint;
+    const auto corner = [&](std::uint8_t* destination, const double x, const double y,
+                            const RenderColor color, const double u, const double v) {
+        values[12] = static_cast<float>(map[0] * x + map[1] * y + map[2]);
+        values[13] = static_cast<float>(map[3] * x + map[4] * y + map[5]);
+        vertex_at(destination, draw.transform, x, y, z, color, u, v, values);
+    };
+    for (const MaskGradientBand& band : gradient.bands) {
+        const std::size_t offset = output.vertex_bytes.size();
+        const std::size_t global_base_size = offset / vertex_bytes;
+        if (global_base_size > std::numeric_limits<std::uint32_t>::max())
+            throw std::length_error("render submission vertex count exceeds uint32");
+        const std::uint32_t local_base =
+            static_cast<std::uint32_t>(global_base_size) - batch_base_vertex;
+        values[4] = band.from;
+        values[5] = band.to;
+        values[7] = band.open;
+        color_data(values, 8U, band.end);
+        output.vertex_bytes.resize(offset + 4U * vertex_bytes);
+        std::uint8_t* destination = output.vertex_bytes.data() + offset;
+        corner(destination, bounds.x, bounds.y, band.start, uv.u, uv.v);
+        corner(destination + vertex_bytes, bounds.x, bounds.bottom(), band.start, uv.u,
+               uv.v + uv.height);
+        corner(destination + 2U * vertex_bytes, bounds.right(), bounds.bottom(), band.start,
+               uv.u + uv.width, uv.v + uv.height);
+        corner(destination + 3U * vertex_bytes, bounds.right(), bounds.y, band.start,
+               uv.u + uv.width, uv.v);
+        output.indices.insert(output.indices.end(), {
+            local_base, local_base + 1U, local_base + 2U,
+            local_base + 2U, local_base + 3U, local_base,
+        });
+    }
+}
+
 void text_geometry(
     RenderSubmission& output,
     const PreparedDraw& draw,
@@ -546,6 +597,62 @@ constexpr int analytic_segment_mode = 9;
  * when the shape needs its path: gradients, dashes, authored materials, a stroked sector, a
  * filled open arc, square-capped arcs, or a sector that is not circular on screen.
  */
+} // namespace
+
+bool analytic_shape(const PathShape& shape, const Size size) noexcept {
+    if (!shape.primitive.has_value())
+        return false;
+    const auto solid = [](const std::optional<Paint>& paint) {
+        return !paint.has_value() || paint->gradient() == nullptr;
+    };
+    if (!solid(shape.fill) || !solid(shape.stroke))
+        return false;
+    const StrokeStyle style = shape.stroke_style.value_or(StrokeStyle{});
+    if (shape.stroke.has_value() && !style.dash.empty())
+        return false;
+    const ShapePrimitive& primitive = *shape.primitive;
+    const double radius_x = primitive.radius_x * size.width;
+    const double radius_y = primitive.radius_y * size.height;
+    const bool circular =
+        std::abs(radius_x - radius_y) <= 1.0e-6 * std::max({radius_x, radius_y, 1.0});
+    switch (primitive.kind) {
+    case ShapePrimitiveKind::ellipse:
+    case ShapePrimitiveKind::segment:
+        return true;
+    case ShapePrimitiveKind::sector:
+        return circular && !shape.stroke.has_value();
+    case ShapePrimitiveKind::arc:
+        return circular && !shape.fill.has_value() && style.cap != PathCap::square;
+    case ShapePrimitiveKind::rect: {
+        // The rounded-rect mode: circular corners on screen, a stroke whose outline is a rounded
+        // rect too (any join around a rounded corner; a mitre or round join around a square one),
+        // and opaque paints where a stroke meets a fill, since the mode mixes rather than layers.
+        const bool stroked = shape.stroke.has_value() && style.width > 0.0;
+        const double corner_x = primitive.corner * size.width;
+        const double corner_y = primitive.corner * size.height;
+        if (primitive.corner > 0.0 &&
+            std::abs(corner_x - corner_y) > 1.0e-6 * std::max({corner_x, corner_y, 1.0})) {
+            return false;
+        }
+        const double reach = stroked ? style.width : 0.0;
+        if (radius_x * 2.0 + reach < 1.0 || radius_y * 2.0 + reach < 1.0)
+            return false;
+        if (stroked && primitive.corner <= 0.0 &&
+            (style.join == PathJoin::bevel ||
+             (style.join == PathJoin::miter && style.miter_limit < std::numbers::sqrt2))) {
+            return false;
+        }
+        const auto opaque = [](const std::optional<Paint>& paint) {
+            return paint.has_value() && paint->color() != nullptr && paint->color()->alpha == 255U;
+        };
+        return !stroked || !shape.fill.has_value() || (opaque(shape.fill) && opaque(shape.stroke));
+    }
+    }
+    return false;
+}
+
+namespace {
+
 [[nodiscard]] bool analytic_shape_geometry(
     RenderSubmission& output,
     const PreparedDraw& draw,
@@ -555,16 +662,11 @@ constexpr int analytic_segment_mode = 9;
     const SubmissionContext& context
 ) {
     const PathShape& shape = command.shape;
-    if (!shape.primitive.has_value() || draw.material.id != "strata:solid" ||
-        !draw.material.parameters.empty()) {
+    if (draw.material.id != "strata:solid" || !draw.material.parameters.empty() ||
+        !analytic_shape(shape, Size{command.bounds.width, command.bounds.height})) {
         return false;
     }
-    const auto solid = [](const std::optional<Paint>& paint) {
-        return !paint.has_value() || paint->gradient() == nullptr;
-    };
-    if (!solid(shape.fill) || !solid(shape.stroke)) return false;
     const StrokeStyle style = shape.stroke_style.value_or(StrokeStyle{});
-    if (shape.stroke.has_value() && !style.dash.empty()) return false;
     const ShapePrimitive& primitive = *shape.primitive;
     const Rect bounds = command.bounds;
     const double transform_scale = std::max(
@@ -653,6 +755,42 @@ constexpr int analytic_segment_mode = 9;
               static_cast<float>(half_width), caps, 0.0F, 0.0F, 0.0F});
         return true;
     }
+    case ShapePrimitiveKind::rect: {
+        // The rounded-rect mode (2) over the stroke's outer edge: the fill is the vertex colour and
+        // the stroke a border as wide as the stroke, half of it inside the rectangle.
+        const bool stroked = shape.stroke.has_value() && half_width > 0.0;
+        if (!shape.fill.has_value() && !stroked)
+            return true;
+        const double reach = stroked ? half_width : 0.0;
+        const double corner = std::min(primitive.corner * bounds.width,
+                                       std::min(radius_x, radius_y));
+        const double outer_corner =
+            corner > 0.0 || style.join == PathJoin::round ? corner + reach : 0.0;
+        const double width = (radius_x + reach) * 2.0;
+        const double height = (radius_y + reach) * 2.0;
+        std::array<float, draw_data_float_count> values = data;
+        values[0] = static_cast<float>(width);
+        values[1] = static_cast<float>(height);
+        values[2] = 1.0F;
+        values[3] = stroked ? static_cast<float>(half_width * 2.0) : 0.0F;
+        for (std::size_t index = 4U; index < 8U; ++index)
+            values[index] = static_cast<float>(outer_corner);
+        RenderColor fill;
+        if (stroked) {
+            const RenderColor stroke = shape.stroke->representative();
+            color_data(values, 8U, stroke);
+            fill = RenderColor{stroke.red, stroke.green, stroke.blue, 0U};
+        }
+        if (shape.fill.has_value())
+            fill = shape.fill->representative();
+        values[14] = 2.0F;
+        quad(output, draw, around(center, radius_x + reach + margin, radius_y + reach + margin),
+             fill,
+             TextureRegion{-margin / width, -margin / height, 1.0 + margin * 2.0 / width,
+                           1.0 + margin * 2.0 / height},
+             values, batch_base_vertex);
+        return true;
+    }
     }
     return false;
 }
@@ -704,22 +842,29 @@ void geometry(
                 std::hypot(draw.transform.m00, draw.transform.m10),
                 std::hypot(draw.transform.m01, draw.transform.m11)
             );
-            paint_mesh_geometry(
-                output,
-                draw,
-                command.bounds,
-                tessellate_shape(
-                    command.shape,
-                    Size{command.bounds.width, command.bounds.height},
-                    context.scale * std::max(transform_scale, 0.1)
-                ),
-                data,
-                batch_base_vertex
-            );
+            // The geometry fallback, for shapes no mask could take. Its sweep has work limits; a
+            // shape past them is left out rather than failing the frame it is in.
+            PaintMesh mesh;
+            try {
+                mesh = tessellate_shape(command.shape,
+                                        Size{command.bounds.width, command.bounds.height},
+                                        context.scale * std::max(transform_scale, 0.1));
+            } catch (const std::invalid_argument&) {
+                return;
+            }
+            paint_mesh_geometry(output, draw, command.bounds, mesh, data, batch_base_vertex);
         } else if constexpr (std::is_same_v<Type, CustomMeshRenderCommand>) {
             custom_mesh_geometry(output, draw, command, data, batch_base_vertex);
         } else if constexpr (std::is_same_v<Type, ShadowRenderCommand>) {
             quad(output, draw, draw.local_bounds, command.color, full_uv, data, batch_base_vertex);
+        } else if constexpr (std::is_same_v<Type, PreparedMaskPtr>) {
+            if (command == nullptr) {
+            } else if (command->gradient.has_value()) {
+                gradient_mask_geometry(output, draw, *command, data, batch_base_vertex);
+            } else {
+                quad(output, draw, command->bounds, command->color, command->uv, data,
+                     batch_base_vertex);
+            }
         }
     }, draw.command);
 }

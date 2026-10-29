@@ -294,4 +294,48 @@ inline float analytic_shape_coverage(const int mode, const float u, const float 
                                                       px_dy, py_dy));
 }
 
+/**
+ * Coverage masks (draw mode 10) paint gradients per pixel in bands: a gradient becomes one masked
+ * quad per interval between its stops, each carrying in its draw data the interval's stop offsets
+ * (4 and 5), the paint (6: zero for a solid colour, otherwise 1 + kind + 2 * extend, kind 0 linear
+ * and 1 radial, extend 0 clamp, 1 repeat, 2 mirror), whether the band also takes everything before
+ * its start (7, bit 0: the first band) or after its end (bit 1: the last), the interval's end
+ * colour (8-11, its start colour being the vertex colour) and the gradient position (12-13,
+ * interpolated across the quad: the linear parameter, or the radial offset whose length is the
+ * parameter). A pixel belongs to exactly the band its wrapped parameter falls in and lerps across
+ * it, held at the end colours outside the stops, so the bands together draw each pixel once with
+ * the exact gradient colour.
+ */
+constexpr int draw_mode_coverage_mask = 10;
+
+/** The gradient parameter of a banded draw at one pixel, wrapped by its extend mode. */
+[[nodiscard]] inline float gradient_band_parameter(const float paint, const float x,
+                                                   const float y) noexcept {
+    const int packed = static_cast<int>(std::floor(paint + 0.5F)) - 1;
+    float t = (packed & 1) != 0 ? std::sqrt(x * x + y * y) : x;
+    const int extend = packed >> 1;
+    if (extend == 1) {
+        t -= std::floor(t);
+    } else if (extend == 2) {
+        const float period = std::abs(std::fmod(t, 2.0F));
+        t = period > 1.0F ? 2.0F - period : period;
+    }
+    return t;
+}
+
+/**
+ * How far across its band a pixel's gradient parameter lies, in [0, 1], or a negative value when
+ * the pixel belongs to another band.
+ */
+[[nodiscard]] inline float gradient_band_factor(const float* data) noexcept {
+    const float t = gradient_band_parameter(data[6], data[12], data[13]);
+    const int open = static_cast<int>(std::floor(data[7] + 0.5F));
+    if (((open & 1) == 0 && !(t >= data[4])) || ((open & 2) == 0 && !(t < data[5])))
+        return -1.0F;
+    const float span = data[5] - data[4];
+    if (!(span > 0.0F))
+        return t >= data[5] ? 1.0F : 0.0F;
+    return std::clamp((t - data[4]) / span, 0.0F, 1.0F);
+}
+
 } // namespace strata::host

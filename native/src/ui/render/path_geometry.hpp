@@ -20,4 +20,13 @@ namespace strata::ui {
     double pixel_scale
 );
 
+/**
+ * The region a stroke covers, as closed polygons in the same space as `centrelines` (already
+ * flattened): each segment's band, its joins and its caps, after dashing, with round geometry
+ * within `tolerance` of true arcs. Every polygon winds the same way, so the nonzero rule unions
+ * their overlaps into exactly the stroke.
+ */
+[[nodiscard]] std::vector<PathContour> stroke_outline(const std::vector<PathContour>& centrelines,
+                                                      const StrokeStyle& style, double tolerance);
+
 } // namespace strata::ui
