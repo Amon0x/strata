@@ -97,8 +97,14 @@ Ground rules:
 
 ## Phase 4: one painter
 
-- [ ] A painter on `WidgetRenderScope` and the extension API: fill and stroke paths, circles,
-      ellipses, arcs, sectors, lines, polylines and rounded rectangles with paints, transforms and
-      clips, choosing analytic or masked drawing itself.
-- [ ] Chart, icons, the calendar and every built-in presenter draw through it.
-- [ ] `docs/native-widgets.md` and `docs/strata-language.md` document drawing end to end.
+- [x] A painter on `WidgetRenderScope` (`circle`, `ellipse`, `sector`, `arc`, `line`, `polyline`,
+      `polygon`, `path`, with `rounded_rect`, clips and transforms beside them) in logical pixels,
+      with colour and gradient paints, each shape choosing analytic or masked drawing itself; and
+      the same shapes for extensions through `Present`, carried by the widget table's
+      `render_shape` (`STRATA_WIDGET_API_VERSION_2`, colours only).
+- [x] Every built-in draws through the one shape path: `Chart` through the painter, icons
+      (checkmarks, chevrons, the calendar glyph) and SVG images as `PathShape`s through
+      `WidgetRenderScope::shape`, which the painter itself feeds; the calendar's cells are rounded
+      rects, which the same coverage model draws.
+- [x] `docs/native-widgets.md` (Vector drawing) and `docs/strata-language.md` (Vector drawing,
+      Charts) document drawing end to end.

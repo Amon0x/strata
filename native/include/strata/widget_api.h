@@ -21,7 +21,67 @@ extern "C" {
  */
 
 #define STRATA_WIDGET_API_VERSION_1 UINT32_C(1)
-#define STRATA_WIDGET_API_VERSION_CURRENT STRATA_WIDGET_API_VERSION_1
+/* Version 2 appends render_shape: vector shapes in logical pixels. */
+#define STRATA_WIDGET_API_VERSION_2 UINT32_C(2)
+#define STRATA_WIDGET_API_VERSION_CURRENT STRATA_WIDGET_API_VERSION_2
+
+/*
+ * One vector shape a widget draws in its logical pixels (render_shape). `kind` picks the outline
+ * and which fields it reads: an ellipse (center, radius_x, radius_y), a ring sector (center,
+ * radius_x as its radius, inner_radius, start and sweep: a pie slice when inner_radius is zero), an
+ * open arc (center, radius_x, start, sweep), a line (points[0] to points[1]), a polyline or a
+ * polygon (points). Angles are degrees clockwise from +x. `flags` says which paints apply: a fill,
+ * a stroke `stroke_width` wide, and for a polygon whether the fill is even-odd. Every shape draws
+ * with exact coverage: circles, ellipses, sectors, arcs and lines analytically, other outlines from
+ * cached coverage masks. A shape with a non-finite value, or a field its kind needs missing, is
+ * dropped.
+ */
+#define STRATA_WIDGET_SHAPE_ELLIPSE UINT32_C(1)
+#define STRATA_WIDGET_SHAPE_SECTOR UINT32_C(2)
+#define STRATA_WIDGET_SHAPE_ARC UINT32_C(3)
+#define STRATA_WIDGET_SHAPE_LINE UINT32_C(4)
+#define STRATA_WIDGET_SHAPE_POLYLINE UINT32_C(5)
+#define STRATA_WIDGET_SHAPE_POLYGON UINT32_C(6)
+
+#define STRATA_WIDGET_SHAPE_FILL UINT32_C(1)
+#define STRATA_WIDGET_SHAPE_STROKE UINT32_C(2)
+#define STRATA_WIDGET_SHAPE_EVEN_ODD UINT32_C(4)
+
+#define STRATA_WIDGET_STROKE_CAP_BUTT UINT32_C(0)
+#define STRATA_WIDGET_STROKE_CAP_ROUND UINT32_C(1)
+#define STRATA_WIDGET_STROKE_CAP_SQUARE UINT32_C(2)
+#define STRATA_WIDGET_STROKE_JOIN_MITER UINT32_C(0)
+#define STRATA_WIDGET_STROKE_JOIN_ROUND UINT32_C(1)
+#define STRATA_WIDGET_STROKE_JOIN_BEVEL UINT32_C(2)
+
+typedef struct strata_widget_point {
+    double x;
+    double y;
+} strata_widget_point;
+
+typedef struct strata_widget_shape {
+    size_t struct_size;
+    uint32_t kind;
+    uint32_t flags;
+    strata_color fill;
+    strata_color stroke;
+    double stroke_width;
+    uint32_t cap;
+    uint32_t join;
+    double miter_limit;
+    strata_widget_point center;
+    double radius_x;
+    double radius_y;
+    double inner_radius;
+    double start_degrees;
+    double sweep_degrees;
+    const strata_widget_point* points;
+    size_t point_count;
+    /* Dash lengths alternating on and off, or null for a solid stroke. */
+    const double* dash;
+    size_t dash_count;
+    double dash_offset;
+} strata_widget_shape;
 
 typedef uint32_t strata_widget_context_kind;
 
@@ -132,6 +192,9 @@ typedef struct strata_widget_api {
     strata_rect (*subtargets_bounds)(const strata_widget_subtargets_context* context);
     strata_result (*subtargets_reserve)(strata_widget_subtargets_context* context, size_t capacity);
     strata_result (*subtargets_add)(strata_widget_subtargets_context* context, const strata_widget_subtarget* subtarget);
+
+    /* STRATA_WIDGET_API_VERSION_2 */
+    void (*render_shape)(strata_widget_render_context* context, const strata_widget_shape* shape);
 } strata_widget_api;
 
 /*

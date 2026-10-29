@@ -1,6 +1,7 @@
 #include <strata/extension.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <atomic>
 #include <cstdint>
 #include <format>
@@ -740,6 +741,106 @@ void Present::nine_patch(const Rect bounds, const std::string_view texture,
                          const Color tint, const TextureRegion source) {
     detail::widget_api().render_nine_patch(context_, bounds, view(texture), source_insets,
                                     destination_insets, source, tint);
+}
+
+namespace {
+
+/** A render_shape call when the bound table has one. */
+void draw_shape(strata_widget_render_context* const context, strata_widget_shape& shape,
+                const std::optional<Color> fill, const std::optional<Color> outline,
+                const Stroke& style, const std::span<const Point> points = {}) {
+    const strata_widget_api& api = detail::widget_api();
+    if (api.struct_size < offsetof(strata_widget_api, render_shape) + sizeof(api.render_shape) ||
+        api.render_shape == nullptr) {
+        return;
+    }
+    shape.struct_size = sizeof(strata_widget_shape);
+    if (fill.has_value()) {
+        shape.flags |= STRATA_WIDGET_SHAPE_FILL;
+        shape.fill = *fill;
+    }
+    if (outline.has_value()) {
+        shape.flags |= STRATA_WIDGET_SHAPE_STROKE;
+        shape.stroke = *outline;
+    }
+    shape.stroke_width = style.width;
+    shape.cap = static_cast<std::uint32_t>(style.cap);
+    shape.join = static_cast<std::uint32_t>(style.join);
+    shape.miter_limit = style.miter_limit;
+    shape.dash = style.dash.empty() ? nullptr : style.dash.data();
+    shape.dash_count = style.dash.size();
+    shape.dash_offset = style.dash_offset;
+    std::vector<strata_widget_point> converted;
+    converted.reserve(points.size());
+    for (const Point point : points)
+        converted.push_back(strata_widget_point{point.x, point.y});
+    shape.points = converted.empty() ? nullptr : converted.data();
+    shape.point_count = converted.size();
+    api.render_shape(context, &shape);
+}
+
+} // namespace
+
+void Present::circle(const Point center, const double radius, const std::optional<Color> fill,
+                     const std::optional<Color> outline, const Stroke& style) {
+    ellipse(center, radius, radius, fill, outline, style);
+}
+
+void Present::ellipse(const Point center, const double radius_x, const double radius_y,
+                      const std::optional<Color> fill, const std::optional<Color> outline,
+                      const Stroke& style) {
+    strata_widget_shape shape{};
+    shape.kind = STRATA_WIDGET_SHAPE_ELLIPSE;
+    shape.center = strata_widget_point{center.x, center.y};
+    shape.radius_x = radius_x;
+    shape.radius_y = radius_y;
+    draw_shape(context_, shape, fill, outline, style);
+}
+
+void Present::sector(const Point center, const double radius, const double inner_radius,
+                     const double start_degrees, const double sweep_degrees, const Color fill) {
+    strata_widget_shape shape{};
+    shape.kind = STRATA_WIDGET_SHAPE_SECTOR;
+    shape.center = strata_widget_point{center.x, center.y};
+    shape.radius_x = radius;
+    shape.inner_radius = inner_radius;
+    shape.start_degrees = start_degrees;
+    shape.sweep_degrees = sweep_degrees;
+    draw_shape(context_, shape, fill, std::nullopt, Stroke{});
+}
+
+void Present::arc(const Point center, const double radius, const double start_degrees,
+                  const double sweep_degrees, const Color color, const Stroke& style) {
+    strata_widget_shape shape{};
+    shape.kind = STRATA_WIDGET_SHAPE_ARC;
+    shape.center = strata_widget_point{center.x, center.y};
+    shape.radius_x = radius;
+    shape.start_degrees = start_degrees;
+    shape.sweep_degrees = sweep_degrees;
+    draw_shape(context_, shape, std::nullopt, color, style);
+}
+
+void Present::line(const Point from, const Point to, const Color color, const Stroke& style) {
+    strata_widget_shape shape{};
+    shape.kind = STRATA_WIDGET_SHAPE_LINE;
+    const std::array<Point, 2> ends{from, to};
+    draw_shape(context_, shape, std::nullopt, color, style, ends);
+}
+
+void Present::polyline(const std::span<const Point> points, const Color color,
+                       const Stroke& style) {
+    strata_widget_shape shape{};
+    shape.kind = STRATA_WIDGET_SHAPE_POLYLINE;
+    draw_shape(context_, shape, std::nullopt, color, style, points);
+}
+
+void Present::polygon(const std::span<const Point> points, const std::optional<Color> fill,
+                      const std::optional<Color> outline, const Stroke& style,
+                      const bool even_odd) {
+    strata_widget_shape shape{};
+    shape.kind = STRATA_WIDGET_SHAPE_POLYGON;
+    shape.flags = even_odd ? STRATA_WIDGET_SHAPE_EVEN_ODD : 0U;
+    draw_shape(context_, shape, fill, outline, style, points);
 }
 
 void Present::mesh(const Rect bounds, const std::string_view id, const Mesh& geometry) {

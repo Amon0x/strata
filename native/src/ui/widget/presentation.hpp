@@ -1,10 +1,12 @@
 #pragma once
 
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "ui/path.hpp"
 #include "ui/render.hpp"
 #include "ui/widget/registry.hpp"
 
@@ -135,6 +137,32 @@ class WidgetRenderScope final {
                     RenderColor tint = RenderColor{255U, 255U, 255U, 255U});
     /** Draws one authored vector shape inside `bounds`, in that rectangle's normalized space. */
     void shape(Rect bounds, PathShape shape);
+
+    /*
+     * The painter: vector drawing in the widget's logical pixels. Each shape picks its own way to
+     * draw, both exact (include/strata/render_shapes.hpp): circles, ellipses, ring sectors, arcs,
+     * lines and rounded rects are evaluated analytically by the pixel stage, and every other
+     * outline is rasterized once into a cached coverage mask. Angles are degrees clockwise from
+     * +x. A gradient paint is laid out across the shape's own bounding box.
+     */
+    void ellipse(Point center, double radius_x, double radius_y, std::optional<Paint> fill,
+                 std::optional<Paint> stroke = std::nullopt, StrokeStyle style = {});
+    void circle(Point center, double radius, std::optional<Paint> fill,
+                std::optional<Paint> stroke = std::nullopt, StrokeStyle style = {});
+    /** A ring sector between `inner_radius` and `radius`: a pie slice when the inner radius is 0. */
+    void sector(Point center, double radius, double inner_radius, double start_degrees,
+                double sweep_degrees, Paint fill);
+    void arc(Point center, double radius, double start_degrees, double sweep_degrees, Paint stroke,
+             StrokeStyle style);
+    void line(Point from, Point to, Paint stroke, StrokeStyle style);
+    void polyline(std::span<const Point> points, Paint stroke, StrokeStyle style);
+    void polygon(std::span<const Point> points, std::optional<Paint> fill,
+                 std::optional<Paint> stroke = std::nullopt, StrokeStyle style = {},
+                 PathFillRule rule = PathFillRule::nonzero);
+    /** Any outline, its points in logical pixels. */
+    void path(const Path& outline, std::optional<Paint> fill,
+              std::optional<Paint> stroke = std::nullopt, StrokeStyle style = {},
+              PathFillRule rule = PathFillRule::nonzero);
     void custom_mesh(Rect bounds, std::string mesh, MeshGeometry geometry,
                      std::optional<std::string> texture = std::nullopt,
                      std::optional<MaterialState> material = std::nullopt);

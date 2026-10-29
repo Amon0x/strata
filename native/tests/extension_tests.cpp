@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -418,6 +419,21 @@ void harness_present(Present& present) {
         };
         present.mesh(bounds, "harness.mesh", Mesh{harness_vertices, harness_indices}, {}, material);
         present.mesh(bounds, "harness.invalid", Mesh{invalid_vertices, harness_indices});
+        // Vector shapes through the painter: each reaches the frame as a path.
+        const Point middle{bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.5};
+        Stroke ring;
+        ring.width = 3.25;
+        ring.cap = Cap::round;
+        present.circle(middle, 6.0, rgba(72U, 198U, 177U), rgba(240U, 240U, 240U), ring);
+        present.sector(middle, 8.0, 4.0, -90.0, 120.0, rgba(255U, 160U, 60U));
+        present.arc(middle, 10.0, 0.0, 200.0, rgba(120U, 190U, 255U), ring);
+        const std::array<Point, 3> zigzag{Point{bounds.x + 2.0, bounds.y + 2.0},
+                                          Point{middle.x, bounds.y + bounds.height - 2.0},
+                                          Point{bounds.x + bounds.width - 2.0, bounds.y + 2.0}};
+        present.polyline(zigzag, rgba(255U, 255U, 255U, 128U), ring);
+        present.polygon(zigzag, rgba(40U, 80U, 160U));
+        // A shape with a non-finite field is dropped, not drawn and not fatal.
+        present.circle(middle, std::numeric_limits<double>::infinity(), rgba(255U, 0U, 0U));
     }
     counters.pointer_focus_hidden =
         counters.pointer_focus_hidden || (present.focused() && !present.focus_visible());
@@ -880,6 +896,14 @@ screen Main {
         check(frame_json.find(primitive) != std::string::npos,
               "an extension render primitive did not reach the published frame");
     }
+    std::size_t paths = 0U;
+    for (std::size_t at = frame_json.find("\"kind\":\"path\""); at != std::string::npos;
+         at = frame_json.find("\"kind\":\"path\"", at + 1U)) {
+        ++paths;
+    }
+    check(paths >= 5U && frame_json.find("3.25") != std::string::npos,
+          "the extension painter's circle, sector, arc, polyline and polygon did not reach the "
+          "published frame");
     check(counters.typed_color_visible && frame_json.find("Compound thumb") != std::string::npos,
           "typed color access or compound semantic child projection was unavailable");
     check(counters.semantics != 0U, "the semantics hook did not run");

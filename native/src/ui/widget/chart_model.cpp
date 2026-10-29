@@ -639,50 +639,26 @@ void themed_colors(const WidgetRenderScope& scope, ChartState& state, const Reta
     return result;
 }
 
-/** Maps a point into `frame`'s normalized space, where shapes are authored. */
-[[nodiscard]] Point normalized(const Point point, const Rect frame) noexcept {
-    return Point{frame.width > 0.0 ? (point.x - frame.x) / frame.width : 0.0,
-                 frame.height > 0.0 ? (point.y - frame.y) / frame.height : 0.0};
-}
-
-void stroke_polyline(WidgetRenderScope& scope, const Rect frame, const std::vector<Point>& points,
+void stroke_polyline(WidgetRenderScope& scope, const std::vector<Point>& points,
                      const RenderColor color, const double width) {
-    if (points.size() < 2U)
-        return;
-    std::vector<Point> local;
-    local.reserve(points.size());
-    for (const Point point : points)
-        local.push_back(normalized(point, frame));
     StrokeStyle style;
     style.width = width;
     style.cap = PathCap::round;
     style.join = PathJoin::round;
-    scope.shape(frame, PathShape{Path::polyline(local, false), std::nullopt, Paint(color), style});
+    scope.polyline(points, Paint(color), style);
 }
 
-void fill_polygon(WidgetRenderScope& scope, const Rect frame, const std::vector<Point>& points,
+void fill_polygon(WidgetRenderScope& scope, const std::vector<Point>& points,
                   const RenderColor color) {
-    if (points.size() < 3U)
-        return;
-    std::vector<Point> local;
-    local.reserve(points.size());
-    for (const Point point : points)
-        local.push_back(normalized(point, frame));
-    scope.shape(frame, PathShape{Path::polyline(local, true), Paint(color)});
+    scope.polygon(points, Paint(color));
 }
 
 void dot(WidgetRenderScope& scope, const Point center, const double radius,
          const RenderColor fill, const std::optional<RenderColor> ring = std::nullopt) {
-    const Rect frame{center.x - radius, center.y - radius, radius * 2.0, radius * 2.0};
-    std::optional<StrokeStyle> style;
-    if (ring.has_value()) {
-        style = StrokeStyle{};
-        style->width = 2.0;
-    }
-    scope.shape(frame, ellipse_shape(Point{0.5, 0.5}, 0.5, 0.5, Paint(fill),
-                                     ring.has_value() ? std::optional<Paint>(Paint(*ring))
-                                                      : std::nullopt,
-                                     style));
+    StrokeStyle style;
+    style.width = 2.0;
+    scope.circle(center, radius, Paint(fill),
+                 ring.has_value() ? std::optional<Paint>(Paint(*ring)) : std::nullopt, style);
 }
 
 [[nodiscard]] double text_height(const WidgetRenderScope& scope) {
@@ -751,8 +727,6 @@ void circular_content(WidgetRenderScope& scope, ChartState& state, ChartProjecti
             ? 1.5 / std::max(1.0, (projection.radius + inner) * 0.5) * 180.0 / std::numbers::pi
             : 0.0;
     const double outer = projection.radius;
-    const Rect frame{projection.center.x - outer, projection.center.y - outer, outer * 2.0,
-                     outer * 2.0};
     for (ChartSlice& slice : projection.slices) {
         slice.color = slice_color(scope, slice.index);
         const double pad = std::min(gap_degrees, slice.sweep * 0.25);
@@ -761,8 +735,8 @@ void circular_content(WidgetRenderScope& scope, ChartState& state, ChartProjecti
             continue;
         const RenderColor paint =
             focus.has_value() && *focus != slice.index ? with_alpha(slice.color, 0.4) : slice.color;
-        scope.shape(frame, sector_shape(Point{0.5, 0.5}, 0.5, 0.5, inner / outer,
-                                        slice.start + pad * 0.5 - 90.0, sweep, Paint(paint)));
+        scope.sector(projection.center, outer, inner, slice.start + pad * 0.5 - 90.0, sweep,
+                     Paint(paint));
     }
     if (projection.inner_radius > 0.0) {
         // The ring's middle names the inspected slice, or the total.
@@ -893,10 +867,10 @@ void cartesian_content(WidgetRenderScope& scope, ChartState& state, ChartProject
                         }
                         outline.push_back(Point{point->x, base});
                     }
-                    fill_polygon(scope, plot, outline, with_alpha(series.color, 0.22));
+                    fill_polygon(scope, outline, with_alpha(series.color, 0.22));
                 }
                 if (state.kind != ChartKind::scatter)
-                    stroke_polyline(scope, plot, run, series.color, 2.0);
+                    stroke_polyline(scope, run, series.color, 2.0);
                 if (state.kind == ChartKind::scatter || state.points || run.size() == 1U) {
                     for (const Point point : run)
                         dot(scope, point, state.kind == ChartKind::scatter ? 4.0 : 3.0,

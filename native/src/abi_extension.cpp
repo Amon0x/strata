@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <map>
 #include <optional>
 #include <span>
@@ -12,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <strata/widget_api.h>
 
@@ -2146,9 +2148,97 @@ strata_result generic_retained_bytes(const strata_widget_context_kind kind,
     }
 }
 
-constexpr strata_widget_api widget_api_v1{
+/** render_shape: one painter call (WidgetRenderScope's), its fields checked first. */
+void render_widget_shape(strata_widget_render_context* const context,
+                         const strata_widget_shape* const shape) noexcept {
+    if (context == nullptr || context->scope == nullptr || shape == nullptr ||
+        shape->struct_size < sizeof(strata_widget_shape)) {
+        return;
+    }
+    const auto finite = [](const std::initializer_list<double> values) {
+        return std::ranges::all_of(values, [](const double value) { return std::isfinite(value); });
+    };
+    if (!finite({shape->stroke_width, shape->miter_limit, shape->center.x, shape->center.y,
+                 shape->radius_x, shape->radius_y, shape->inner_radius, shape->start_degrees,
+                 shape->sweep_degrees, shape->dash_offset}) ||
+        (shape->point_count > 0U && shape->points == nullptr) ||
+        (shape->dash_count > 0U && shape->dash == nullptr) || shape->dash_count > 16U) {
+        return;
+    }
+    std::vector<strata::ui::Point> points;
+    points.reserve(shape->point_count);
+    for (std::size_t index = 0U; index < shape->point_count; ++index) {
+        const strata_widget_point point = shape->points[index];
+        if (!finite({point.x, point.y}))
+            return;
+        points.push_back(strata::ui::Point{point.x, point.y});
+    }
+    std::optional<strata::ui::Paint> fill;
+    if ((shape->flags & STRATA_WIDGET_SHAPE_FILL) != 0U)
+        fill = strata::ui::Paint(color(shape->fill));
+    std::optional<strata::ui::Paint> stroke;
+    strata::ui::StrokeStyle style;
+    if ((shape->flags & STRATA_WIDGET_SHAPE_STROKE) != 0U && shape->stroke_width > 0.0) {
+        stroke = strata::ui::Paint(color(shape->stroke));
+        style.width = shape->stroke_width;
+        style.cap = shape->cap == STRATA_WIDGET_STROKE_CAP_ROUND    ? strata::ui::PathCap::round
+                    : shape->cap == STRATA_WIDGET_STROKE_CAP_SQUARE ? strata::ui::PathCap::square
+                                                                    : strata::ui::PathCap::butt;
+        style.join = shape->join == STRATA_WIDGET_STROKE_JOIN_ROUND   ? strata::ui::PathJoin::round
+                     : shape->join == STRATA_WIDGET_STROKE_JOIN_BEVEL ? strata::ui::PathJoin::bevel
+                                                                      : strata::ui::PathJoin::miter;
+        style.miter_limit = std::max(shape->miter_limit, 1.0);
+        style.dash_offset = shape->dash_offset;
+        for (std::size_t index = 0U; index < shape->dash_count; ++index) {
+            if (!std::isfinite(shape->dash[index]) || shape->dash[index] < 0.0)
+                return;
+            style.dash.push_back(shape->dash[index]);
+        }
+        try {
+            style.validate();
+        } catch (const std::exception&) {
+            return;
+        }
+    }
+    const strata::ui::Point center{shape->center.x, shape->center.y};
+    render_call(context, [&] {
+        strata::ui::WidgetRenderScope& scope = *context->scope;
+        switch (shape->kind) {
+        case STRATA_WIDGET_SHAPE_ELLIPSE:
+            scope.ellipse(center, shape->radius_x, shape->radius_y, fill, stroke, style);
+            break;
+        case STRATA_WIDGET_SHAPE_SECTOR:
+            if (fill.has_value())
+                scope.sector(center, shape->radius_x, shape->inner_radius, shape->start_degrees,
+                             shape->sweep_degrees, *fill);
+            break;
+        case STRATA_WIDGET_SHAPE_ARC:
+            if (stroke.has_value())
+                scope.arc(center, shape->radius_x, shape->start_degrees, shape->sweep_degrees,
+                          *stroke, style);
+            break;
+        case STRATA_WIDGET_SHAPE_LINE:
+            if (stroke.has_value() && points.size() == 2U)
+                scope.line(points[0], points[1], *stroke, style);
+            break;
+        case STRATA_WIDGET_SHAPE_POLYLINE:
+            if (stroke.has_value())
+                scope.polyline(points, *stroke, style);
+            break;
+        case STRATA_WIDGET_SHAPE_POLYGON:
+            scope.polygon(points, fill, stroke, style,
+                          (shape->flags & STRATA_WIDGET_SHAPE_EVEN_ODD) != 0U
+                              ? strata::ui::PathFillRule::evenodd
+                              : strata::ui::PathFillRule::nonzero);
+            break;
+        default: break;
+        }
+    });
+}
+
+constexpr strata_widget_api widget_api_table{
     sizeof(strata_widget_api),
-    STRATA_WIDGET_API_VERSION_1,
+    STRATA_WIDGET_API_VERSION_CURRENT,
     0U,
     &generic_has_property,
     &generic_property_value,
@@ -2223,6 +2313,7 @@ constexpr strata_widget_api widget_api_v1{
     &strata_widget_subtargets_bounds,
     &strata_widget_subtargets_reserve,
     &strata_widget_subtargets_add,
+    &render_widget_shape,
 };
 
 } // namespace
@@ -2236,7 +2327,7 @@ strata_result strata_widget_api_query(const uint32_t requested_version,
     *out_api = nullptr;
     if (requested_version == 0U || requested_version > STRATA_WIDGET_API_VERSION_CURRENT)
         return strata::abi_detail::result(STRATA_STATUS_UNSUPPORTED_ABI);
-    *out_api = &widget_api_v1;
+    *out_api = &widget_api_table;
     return strata::abi_detail::result(STRATA_STATUS_OK);
 }
 

@@ -632,6 +632,162 @@ void WidgetRenderScope::shape(const Rect bounds, PathShape value) {
     output_.emplace_back(PathRenderCommand{bounds, std::move(value)});
 }
 
+namespace {
+
+/**
+ * The frame a painter shape is drawn in: `area`, at least a pixel each way so a straight line's
+ * normalized space stays finite.
+ */
+[[nodiscard]] Rect painter_frame(Rect area) noexcept {
+    if (area.width < 1.0) {
+        area.x -= (1.0 - area.width) * 0.5;
+        area.width = 1.0;
+    }
+    if (area.height < 1.0) {
+        area.y -= (1.0 - area.height) * 0.5;
+        area.height = 1.0;
+    }
+    return area;
+}
+
+[[nodiscard]] Point normalized_in(const Point point, const Rect frame) noexcept {
+    return Point{(point.x - frame.x) / frame.width, (point.y - frame.y) / frame.height};
+}
+
+/** The box around points, and a stroke's reach past them when it has one. */
+[[nodiscard]] Rect painter_bounds(std::span<const Point> points) noexcept {
+    if (points.empty())
+        return Rect{};
+    double left = points.front().x;
+    double top = points.front().y;
+    double right = left;
+    double bottom = top;
+    for (const Point point : points) {
+        left = std::min(left, point.x);
+        top = std::min(top, point.y);
+        right = std::max(right, point.x);
+        bottom = std::max(bottom, point.y);
+    }
+    return Rect{left, top, right - left, bottom - top};
+}
+
+} // namespace
+
+void WidgetRenderScope::ellipse(const Point center, const double radius_x, const double radius_y,
+                                std::optional<Paint> fill, std::optional<Paint> stroke,
+                                const StrokeStyle style) {
+    if (!(radius_x > 0.0) || !(radius_y > 0.0) || (!fill.has_value() && !stroke.has_value()))
+        return;
+    const Rect frame{center.x - radius_x, center.y - radius_y, radius_x * 2.0, radius_y * 2.0};
+    shape(frame, ellipse_shape(Point{0.5, 0.5}, 0.5, 0.5, std::move(fill), std::move(stroke),
+                               style));
+}
+
+void WidgetRenderScope::circle(const Point center, const double radius, std::optional<Paint> fill,
+                               std::optional<Paint> stroke, const StrokeStyle style) {
+    ellipse(center, radius, radius, std::move(fill), std::move(stroke), style);
+}
+
+void WidgetRenderScope::sector(const Point center, const double radius, const double inner_radius,
+                               const double start_degrees, const double sweep_degrees,
+                               Paint fill) {
+    if (!(radius > 0.0) || sweep_degrees == 0.0)
+        return;
+    const Rect frame{center.x - radius, center.y - radius, radius * 2.0, radius * 2.0};
+    shape(frame, sector_shape(Point{0.5, 0.5}, 0.5, 0.5,
+                              std::clamp(inner_radius / radius, 0.0, 0.999), start_degrees,
+                              sweep_degrees, std::move(fill)));
+}
+
+void WidgetRenderScope::arc(const Point center, const double radius, const double start_degrees,
+                            const double sweep_degrees, Paint stroke, const StrokeStyle style) {
+    if (!(radius > 0.0) || sweep_degrees == 0.0 || !(style.width > 0.0))
+        return;
+    const Rect frame{center.x - radius, center.y - radius, radius * 2.0, radius * 2.0};
+    shape(frame, arc_shape(Point{0.5, 0.5}, 0.5, 0.5, start_degrees, sweep_degrees,
+                           std::move(stroke), style));
+}
+
+void WidgetRenderScope::line(const Point from, const Point to, Paint stroke,
+                             const StrokeStyle style) {
+    if (!(style.width > 0.0))
+        return;
+    const std::array<Point, 2> ends{from, to};
+    const Rect frame = painter_frame(painter_bounds(ends));
+    shape(frame, segment_shape(normalized_in(from, frame), normalized_in(to, frame),
+                               std::move(stroke), style));
+}
+
+void WidgetRenderScope::polyline(const std::span<const Point> points, Paint stroke,
+                                 const StrokeStyle style) {
+    if (points.size() < 2U || !(style.width > 0.0))
+        return;
+    const Rect frame = painter_frame(painter_bounds(points));
+    std::vector<Point> local;
+    local.reserve(points.size());
+    for (const Point point : points)
+        local.push_back(normalized_in(point, frame));
+    shape(frame, PathShape{Path::polyline(local, false), std::nullopt, std::move(stroke), style});
+}
+
+void WidgetRenderScope::polygon(const std::span<const Point> points, std::optional<Paint> fill,
+                                std::optional<Paint> stroke, const StrokeStyle style,
+                                const PathFillRule rule) {
+    if (points.size() < 3U || (!fill.has_value() && !stroke.has_value()))
+        return;
+    const Rect frame = painter_frame(painter_bounds(points));
+    std::vector<Point> local;
+    local.reserve(points.size());
+    for (const Point point : points)
+        local.push_back(normalized_in(point, frame));
+    PathShape value{Path::polyline(local, true), std::move(fill), std::move(stroke)};
+    if (value.stroke.has_value())
+        value.stroke_style = style;
+    value.fill_rule = rule;
+    shape(frame, std::move(value));
+}
+
+void WidgetRenderScope::path(const Path& outline, std::optional<Paint> fill,
+                             std::optional<Paint> stroke, const StrokeStyle style,
+                             const PathFillRule rule) {
+    if (outline.segments().empty() || (!fill.has_value() && !stroke.has_value()))
+        return;
+    // Control points bound the outline, so they frame it.
+    std::vector<Point> points;
+    for (const PathSegment& segment : outline.segments()) {
+        if (segment.verb == PathVerb::close)
+            continue;
+        points.push_back(segment.to);
+        if (segment.verb == PathVerb::quadratic || segment.verb == PathVerb::cubic)
+            points.push_back(segment.control_a);
+        if (segment.verb == PathVerb::cubic)
+            points.push_back(segment.control_b);
+    }
+    const Rect frame = painter_frame(painter_bounds(points));
+    Path local;
+    for (const PathSegment& segment : outline.segments()) {
+        switch (segment.verb) {
+        case PathVerb::move: local.move_to(normalized_in(segment.to, frame)); break;
+        case PathVerb::line: local.line_to(normalized_in(segment.to, frame)); break;
+        case PathVerb::quadratic:
+            local.quadratic_to(normalized_in(segment.control_a, frame),
+                               normalized_in(segment.to, frame));
+            break;
+        case PathVerb::cubic:
+            local.cubic_to(normalized_in(segment.control_a, frame),
+                           normalized_in(segment.control_b, frame),
+                           normalized_in(segment.to, frame));
+            break;
+        case PathVerb::close: local.close(); break;
+        }
+    }
+    PathShape value{std::move(local), std::move(fill), std::move(stroke)};
+    if (value.stroke.has_value())
+        value.stroke_style = style;
+    value.fill_rule = rule;
+    shape(frame, std::move(value));
+}
+
 std::optional<Size> WidgetRenderScope::image_size(const std::string_view image) const {
     if (svg_images_ == nullptr)
         return std::nullopt;

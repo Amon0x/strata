@@ -69,6 +69,20 @@ using Border = strata_border;
     return Border{width, color};
 }
 
+enum class Cap : std::uint32_t { butt = 0U, round = 1U, square = 2U };
+enum class Join : std::uint32_t { miter = 0U, round = 1U, bevel = 2U };
+
+/** How a vector shape's outline is stroked, in logical pixels. */
+struct Stroke final {
+    double width = 1.0;
+    Cap cap = Cap::butt;
+    Join join = Join::miter;
+    double miter_limit = 4.0;
+    /** Dash lengths alternating on and off; empty for a solid stroke. At most sixteen. */
+    std::vector<double> dash;
+    double dash_offset = 0.0;
+};
+
 using CornerRadii = strata_corner_radii;
 using Edges = strata_edges;
 using TextureRegion = strata_texture_region;
@@ -718,6 +732,27 @@ class Present final {
     void shadow(Rect bounds, CornerRadii radii, Color color, double radius, double spread = 0.0);
     /** Clips every command emitted while the returned guard is alive. */
     [[nodiscard]] ClipScope clip(Rect bounds);
+
+    /*
+     * Vector shapes in logical pixels, each drawn with exact coverage (analytically for circles,
+     * ellipses, sectors, arcs and lines; from cached coverage masks otherwise). Angles are degrees
+     * clockwise from +x. They need a widget API table of version 2; against an older one they draw
+     * nothing.
+     */
+    void circle(Point center, double radius, std::optional<Color> fill,
+                std::optional<Color> outline = std::nullopt, const Stroke& style = {});
+    void ellipse(Point center, double radius_x, double radius_y, std::optional<Color> fill,
+                 std::optional<Color> outline = std::nullopt, const Stroke& style = {});
+    /** A ring sector between `inner_radius` and `radius`: a pie slice when the inner radius is 0. */
+    void sector(Point center, double radius, double inner_radius, double start_degrees,
+                double sweep_degrees, Color fill);
+    void arc(Point center, double radius, double start_degrees, double sweep_degrees, Color color,
+             const Stroke& style);
+    void line(Point from, Point to, Color color, const Stroke& style);
+    void polyline(std::span<const Point> points, Color color, const Stroke& style);
+    void polygon(std::span<const Point> points, std::optional<Color> fill,
+                 std::optional<Color> outline = std::nullopt, const Stroke& style = {},
+                 bool even_odd = false);
 
   private:
     strata_widget_render_context* context_;

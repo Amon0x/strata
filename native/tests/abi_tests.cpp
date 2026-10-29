@@ -1968,9 +1968,11 @@ void test_widget_api_table() {
     check(strata_widget_api_query(STRATA_WIDGET_API_VERSION_1, nullptr).status ==
               STRATA_STATUS_INVALID_ARGUMENT,
           "a widget API query without an output was accepted");
+    // An older version is served by the current table: versions only append members.
     check(strata_widget_api_query(STRATA_WIDGET_API_VERSION_1, &api).status == STRATA_STATUS_OK &&
               api != nullptr && api->struct_size == sizeof(strata_widget_api) &&
-              api->api_version == STRATA_WIDGET_API_VERSION_1 && api->reserved == 0U,
+              api->api_version == STRATA_WIDGET_API_VERSION_CURRENT && api->reserved == 0U &&
+              api->render_shape != nullptr,
           "the widget API table header is wrong");
     const auto* const first = reinterpret_cast<const unsigned char*>(&api->has_property);
     const auto* const end = reinterpret_cast<const unsigned char*>(api) + sizeof(strata_widget_api);

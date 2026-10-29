@@ -301,6 +301,34 @@ void advance(Input& input, const Frame& frame) {
 }
 ```
 
+## Vector drawing
+
+`Present` draws vector shapes in the widget's logical pixels: `circle`, `ellipse`, `sector` (a ring
+slice between an inner radius and a radius; a pie slice when the inner radius is 0), `arc`, `line`,
+`polyline` and `polygon` (nonzero or even-odd), each with a fill colour, an outline colour and a
+`Stroke` (`width`, `cap`, `join`, `miter_limit`, `dash`, `dash_offset`). Angles are degrees
+clockwise from +x. These are the same shapes `Draw` and the built-in widgets use, drawn the same
+way: circles, ellipses, sectors, arcs and lines are evaluated analytically by the pixel stage, and
+every other outline is rasterized once into a cached coverage mask, the way text glyphs are. Edges
+cover exactly the area the geometry does at any scale, a stroke thinner than a pixel draws
+proportionally lighter, and a translucent stroke is one even alpha where it crosses itself, so a
+gauge, a chart or an icon needs no hand-built mesh and no antialiasing of its own.
+
+```cpp
+const Point centre{bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.5};
+Stroke track{.width = 6.0, .cap = Cap::round};
+present.arc(centre, 28.0, 135.0, 270.0, rgba(40U, 48U, 62U), track);
+present.arc(centre, 28.0, 135.0, 270.0 * level, rgba(86U, 225U, 198U), track);
+present.polygon(needle, rgba(240U, 240U, 240U));
+```
+
+The shapes arrive through the widget table's `render_shape` member, added in
+`STRATA_WIDGET_API_VERSION_2` with the plain-C `strata_widget_shape` description; against an older
+table they draw nothing. Native widgets inside the engine have the same painter on
+`WidgetRenderScope` (`circle`, `ellipse`, `sector`, `arc`, `line`, `polyline`, `polygon` and
+`path`), which also takes gradient paints; `Chart` draws through it. A custom mesh remains the tool
+for geometry that is not an outline: textured or per-vertex-coloured triangles, and materials.
+
 ## Canvas transforms and virtual geometry
 
 `CanvasTransform` maps world coordinates into a widget-owned surface viewport. Its `project`,
