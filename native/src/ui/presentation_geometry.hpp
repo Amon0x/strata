@@ -11,6 +11,25 @@ namespace strata::ui {
 class MotionRuntime;
 class RetainedNode;
 
+/** The presentation inputs a node's description sets, as its style or as direct properties. */
+struct PresentationStatics final {
+    std::optional<double> scale;
+    std::optional<double> scale_x;
+    std::optional<double> scale_y;
+    std::optional<double> translate_x;
+    std::optional<double> translate_y;
+    std::optional<double> rotate;
+    std::optional<double> opacity;
+    std::optional<double> tone;
+    double origin_x = 0.5;
+    double origin_y = 0.5;
+    /** Content-size motion that clips the node's descendants to its animated bounds. */
+    bool content_motion_clip = false;
+};
+
+/** The node's presentation inputs, read from its description once and kept with it. */
+[[nodiscard]] const PresentationStatics& presentation_statics(const RetainedNode& node) noexcept;
+
 /**
  * Affine presentation geometry shared by rendering, hit testing, and inspection.
  *

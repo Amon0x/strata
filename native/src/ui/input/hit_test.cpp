@@ -24,10 +24,12 @@ namespace {
 [[nodiscard]] bool
 pointer_geometry_generations_match(const DirtyGenerationSnapshot& left,
                                    const DirtyGenerationSnapshot& right) noexcept {
+    // The input lane only records hover and press changes, which move no hit region; the
+    // subtargets widgets project from that state are refreshed on their own.
     return left.structure == right.structure && left.properties == right.properties &&
            left.layout == right.layout && left.text == right.text && left.style == right.style &&
-           left.input == right.input && left.scale == right.scale &&
-           left.animation == right.animation && left.editor == right.editor;
+           left.scale == right.scale && left.animation == right.animation &&
+           left.editor == right.editor;
 }
 
 [[nodiscard]] bool contains(const Rect& bounds, const Point point) noexcept {
@@ -753,6 +755,14 @@ void InputRouter::prepare_pointer_geometry() const {
         pointer_geometry_layout_generation_ == layout_->generation &&
         pointer_geometry_notification_generation_ == notifications &&
         pointer_geometry_generations_match(pointer_geometry_dirty_generations_, dirty)) {
+        if (pointer_geometry_dirty_generations_.input != dirty.input) {
+            // Hover and press move no hit region, but widgets project subtargets from their
+            // interaction state (a hovered Tooltip's bubble): only those are projected again.
+            projected_subtargets_.clear();
+            detached_subtargets_.clear();
+            detached_subtargets_ready_ = false;
+            pointer_geometry_dirty_generations_.input = dirty.input;
+        }
         return;
     }
 
@@ -1100,6 +1110,14 @@ void InputRouter::refresh_hover() {
         scrollbar_drag_.has_value()) {
         return;
     }
+    // Hover is a function of the pointer and the hit geometry; when neither moved since the
+    // last refresh, it is already right.
+    const HoverRefreshKey key{*hover_position_, tree_->generation(), layout_->generation,
+                              notifications_.generation(), tree_->dirty_generations(),
+                              modal_identity()};
+    if (last_hover_refresh_ == key)
+        return;
+    last_hover_refresh_ = key;
     std::optional<WidgetSubtarget> subtarget;
     RetainedNode* hover_target = subtarget_hover_target(
         *hover_position_, widget_native_input_owner(hit_test(*hover_position_)), subtarget);
@@ -1112,6 +1130,11 @@ void InputRouter::refresh_hover() {
     }
     set_hovered_subtarget(subtarget);
     hover_route(hover_target);
+}
+
+std::uint64_t InputRouter::modal_identity() const noexcept {
+    const RetainedNode* modal = active_modal();
+    return modal != nullptr ? modal->identity() : 0U;
 }
 
 RetainedNode* InputRouter::interactive_ancestor(RetainedNode* node) const noexcept {

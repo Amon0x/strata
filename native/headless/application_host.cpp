@@ -527,6 +527,14 @@ std::string ApplicationHost::inspect() const {
     return impl_->session->surface().frame_json();
 }
 
+void ApplicationHost::set_capture_frames(const bool capture) noexcept {
+    impl_->options.capture_frames = capture;
+}
+
+strata::ProfilerSnapshot ApplicationHost::surface_profiler() const {
+    return impl_->session->surface().profiler();
+}
+
 void ApplicationHost::frame(const std::int64_t time_nanoseconds) {
     impl_->frame(time_nanoseconds);
 }

@@ -157,7 +157,6 @@ private:
     [[nodiscard]] static std::string_view close_lexeme(TokenType type) noexcept;
 
     std::string source_id_;
-    std::vector<SourceSpan> trivia_;
     std::vector<Token> tokens_;
     std::vector<Diagnostic> diagnostics_;
     std::vector<std::string> unparsed_names_;

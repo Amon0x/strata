@@ -269,6 +269,8 @@ class Profiler final {
         std::string path;
         RollingWindow timings;
         std::uint64_t last_sample_frame_index = 0U;
+        /** Every sample of the section within its latest frame, summed. */
+        std::int64_t frame_total_nanos = 0;
     };
 
     struct SectionKey final {

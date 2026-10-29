@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -66,6 +67,21 @@ class JsonValue final {
   private:
     Storage storage_;
 };
+
+/**
+ * One entry of an object written as a braced list. An initializer list hands out only const
+ * elements, so a plain pair would be deep-copied into the object; mutable members are the parts a
+ * const element may still give up, and `json_object` moves them out.
+ */
+struct JsonEntry final {
+    mutable std::string key;
+    mutable JsonValue value;
+};
+
+/** The object of `entries`, in order, taking each entry's key and value. */
+[[nodiscard]] JsonValue json_object(std::initializer_list<JsonEntry> entries);
+/** Takes each of `entries` onto the end of `object`. */
+void append_json_entries(JsonValue::Object& object, std::initializer_list<JsonEntry> entries);
 
 [[nodiscard]] JsonValue parse_json(std::string_view source,
                                    const JsonLimits& limits = JsonLimits{});

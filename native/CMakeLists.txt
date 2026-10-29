@@ -798,6 +798,11 @@ if(STRATA_BUILD_TOOLS)
     add_executable(strata_headless headless/main.cpp)
     target_link_libraries(strata_headless PRIVATE strata_headless_host)
     strata_target_defaults(strata_headless)
+
+    # Core frame benchmark: the showcase workload through the C ABI with a null renderer.
+    add_executable(strata_core_benchmark benchmarks/core_frames.cpp)
+    target_link_libraries(strata_core_benchmark PRIVATE strata_headless_host)
+    strata_target_defaults(strata_core_benchmark)
 endif()
 
 if(STRATA_BUILD_PREVIEW)

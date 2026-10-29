@@ -20,8 +20,8 @@ namespace strata::ui::input_detail {
 
 using data::JsonValue;
 
-[[nodiscard]] inline JsonValue object(std::initializer_list<JsonValue::ObjectEntry> entries) {
-    return JsonValue(JsonValue::Object(entries));
+[[nodiscard]] inline JsonValue object(const std::initializer_list<data::JsonEntry> entries) {
+    return data::json_object(entries);
 }
 
 [[nodiscard]] inline JsonValue array(std::vector<JsonValue> values = {}) {

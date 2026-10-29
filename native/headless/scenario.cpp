@@ -398,7 +398,8 @@ Scenario load_scenario(const std::filesystem::path& path) {
     if (result.root_role != "screen" && result.root_role != "overlay") {
         throw std::invalid_argument("surface.role must be 'screen' or 'overlay'");
     }
-    if (result.render_backend != "d3d11" && result.render_backend != "reference" && result.render_backend != "vulkan") {
+    if (result.render_backend != "d3d11" && result.render_backend != "reference" &&
+        result.render_backend != "vulkan" && result.render_backend != "none") {
         throw std::invalid_argument("surface.backend must be 'd3d11', 'vulkan', or 'reference'");
     }
     const auto validate_dimensions = [](const double width, const double height,

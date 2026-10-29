@@ -673,6 +673,18 @@ const JsonValue* JsonValue::find(const std::string_view key) const noexcept {
     return found == entries->end() ? nullptr : &found->second;
 }
 
+JsonValue json_object(const std::initializer_list<JsonEntry> entries) {
+    JsonValue::Object object;
+    append_json_entries(object, entries);
+    return JsonValue(std::move(object));
+}
+
+void append_json_entries(JsonValue::Object& object, const std::initializer_list<JsonEntry> entries) {
+    object.reserve(object.size() + entries.size());
+    for (const JsonEntry& entry : entries)
+        object.emplace_back(std::move(entry.key), std::move(entry.value));
+}
+
 JsonValue parse_json(const std::string_view source, const JsonLimits& limits) {
     return JsonReader(source, limits).parse();
 }

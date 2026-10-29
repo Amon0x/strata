@@ -226,6 +226,8 @@ struct WidgetVisualProfile final {
     bool transparent_chrome = false;
     bool raised_chrome = false;
     bool text_variant_foreground = false;
+    [[nodiscard]] friend bool operator==(const WidgetVisualProfile&,
+                                         const WidgetVisualProfile&) = default;
 };
 
 struct WidgetPresentPhase final {

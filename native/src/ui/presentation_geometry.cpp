@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <optional>
 
@@ -38,6 +39,35 @@ std::optional<double> visual_number(
                : std::nullopt;
 }
 
+const PresentationStatics& presentation_statics(const RetainedNode& node) noexcept {
+    std::shared_ptr<const PresentationStatics>& cached = node.presentation_statics_cache();
+    if (cached != nullptr)
+        return *cached;
+    PresentationStatics statics;
+    statics.scale = visual_number(node, "scale");
+    statics.scale_x = visual_number(node, "scaleX");
+    statics.scale_y = visual_number(node, "scaleY");
+    statics.translate_x = visual_number(node, "translateX");
+    statics.translate_y = visual_number(node, "translateY");
+    statics.rotate = visual_number(node, "rotate");
+    statics.opacity = visual_number(node, "opacity");
+    statics.tone = visual_number(node, "tone");
+    const runtime::Value* origin = visual_value(node, "transformOrigin");
+    const auto origin_fraction = [origin](const std::string_view axis) {
+        const runtime::Value* value = origin != nullptr ? origin->field(axis) : nullptr;
+        return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
+                   ? *value->number()
+                   : 0.5;
+    };
+    statics.origin_x = origin_fraction("x");
+    statics.origin_y = origin_fraction("y");
+    const std::optional<ContentSizeMotionSpec> content_motion =
+        content_size_motion(node.description());
+    statics.content_motion_clip = content_motion.has_value() && content_motion->clip;
+    cached = std::make_shared<const PresentationStatics>(statics);
+    return *cached;
+}
+
 bool motion_presentation_group(const RetainedNode& node, const MotionRuntime& motion) noexcept {
     const MotionComputedValues* computed = motion.computed_values(node.identity());
     // Only while the motion runs: a settled node bakes its final presentation back into its
@@ -60,7 +90,7 @@ std::optional<double> local_presentation_tone(const RetainedNode& node,
     std::optional<double> tone =
         computed != nullptr ? computed->number(MotionProperty::tone) : std::nullopt;
     if (!tone.has_value())
-        tone = visual_number(node, "tone");
+        tone = presentation_statics(node).tone;
     return tone.has_value() ? std::optional<double>(std::clamp(*tone, 0.0, 1.0)) : std::nullopt;
 }
 
@@ -70,47 +100,33 @@ MotionTransform local_presentation_transform(
     const Rect& bounds
 ) noexcept {
     const MotionComputedValues* computed = motion.computed_values(node.identity());
+    const PresentationStatics& statics = presentation_statics(node);
     const auto animated = [computed](const MotionProperty property) -> std::optional<double> {
         return computed != nullptr ? computed->number(property) : std::nullopt;
     };
-    const double uniform = animated(MotionProperty::scale)
-                               .value_or(visual_number(node, "scale").value_or(1.0));
-    const auto axis_scale = [&](const MotionProperty property, const std::string_view name) {
+    const double uniform = animated(MotionProperty::scale).value_or(statics.scale.value_or(1.0));
+    const auto axis_scale = [&](const MotionProperty property, const std::optional<double> base) {
         if (const std::optional<double> value = animated(property); value.has_value()) return *value;
-        if (const std::optional<double> base = visual_number(node, name); base.has_value()) {
-            return *base * uniform;
-        }
-        return uniform;
+        return base.has_value() ? *base * uniform : uniform;
     };
     const runtime::Value* movement = node.retained_value("strata.movement.offset");
-    const double movement_x = movement != nullptr && movement->field("x") != nullptr &&
-        movement->field("x")->number() != nullptr
-        ? *movement->field("x")->number()
-        : 0.0;
-    const double movement_y = movement != nullptr && movement->field("y") != nullptr &&
-        movement->field("y")->number() != nullptr
-        ? *movement->field("y")->number()
-        : 0.0;
-    const double scale_x = axis_scale(MotionProperty::scale_x, "scaleX");
-    const double scale_y = axis_scale(MotionProperty::scale_y, "scaleY");
+    const auto movement_axis = [movement](const std::string_view axis) {
+        const runtime::Value* value = movement != nullptr ? movement->field(axis) : nullptr;
+        return value != nullptr && value->number() != nullptr ? *value->number() : 0.0;
+    };
+    const double scale_x = axis_scale(MotionProperty::scale_x, statics.scale_x);
+    const double scale_y = axis_scale(MotionProperty::scale_y, statics.scale_y);
     const double translation_x = animated(MotionProperty::x)
         .value_or(animated(MotionProperty::translate_x)
-                      .value_or(visual_number(node, "translateX").value_or(0.0))) + movement_x;
+                      .value_or(statics.translate_x.value_or(0.0))) + movement_axis("x");
     const double translation_y = animated(MotionProperty::y)
         .value_or(animated(MotionProperty::translate_y)
-                      .value_or(visual_number(node, "translateY").value_or(0.0))) + movement_y;
-    const double degrees = animated(MotionProperty::rotate)
-                               .value_or(visual_number(node, "rotate").value_or(0.0));
-    const runtime::Value* origin = visual_value(node, "transformOrigin");
-    const auto origin_fraction = [origin](const std::string_view axis) {
-        const runtime::Value* value = origin != nullptr ? origin->field(axis) : nullptr;
-        return value != nullptr && value->number() != nullptr && std::isfinite(*value->number())
-                   ? *value->number()
-                   : 0.5;
-    };
+                      .value_or(statics.translate_y.value_or(0.0))) + movement_axis("y");
+    const double degrees =
+        animated(MotionProperty::rotate).value_or(statics.rotate.value_or(0.0));
     const Point center{
-        bounds.x + bounds.width * origin_fraction("x"),
-        bounds.y + bounds.height * origin_fraction("y"),
+        bounds.x + bounds.width * statics.origin_x,
+        bounds.y + bounds.height * statics.origin_y,
     };
     if (!std::isfinite(degrees) || std::fmod(degrees, 360.0) == 0.0) {
         return MotionTransform{
@@ -144,12 +160,10 @@ double local_presentation_opacity(
 ) noexcept {
     const MotionComputedValues* computed =
         motion != nullptr ? motion->computed_values(node.identity()) : nullptr;
+    const std::optional<double> base = presentation_statics(node).opacity;
     return std::clamp(
-        computed != nullptr
-            ? computed->number(MotionProperty::opacity).value_or(
-                  visual_number(node, "opacity").value_or(1.0)
-              )
-            : visual_number(node, "opacity").value_or(1.0),
+        computed != nullptr ? computed->number(MotionProperty::opacity).value_or(base.value_or(1.0))
+                            : base.value_or(1.0),
         0.0,
         1.0
     );

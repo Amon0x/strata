@@ -64,10 +64,16 @@ struct BatchKey final {
 }
 
 void write_u32(std::uint8_t*& output, const std::uint32_t value) noexcept {
-    *output++ = static_cast<std::uint8_t>(value);
-    *output++ = static_cast<std::uint8_t>(value >> 8U);
-    *output++ = static_cast<std::uint8_t>(value >> 16U);
-    *output++ = static_cast<std::uint8_t>(value >> 24U);
+    // Packets are little-endian; on a little-endian host that is the value's own bytes.
+    if constexpr (std::endian::native == std::endian::little) {
+        std::memcpy(output, &value, sizeof(value));
+        output += sizeof(value);
+    } else {
+        *output++ = static_cast<std::uint8_t>(value);
+        *output++ = static_cast<std::uint8_t>(value >> 8U);
+        *output++ = static_cast<std::uint8_t>(value >> 16U);
+        *output++ = static_cast<std::uint8_t>(value >> 24U);
+    }
 }
 
 void write_float(std::uint8_t*& output, const float value) noexcept {
@@ -210,6 +216,36 @@ void parameter_data(
     return static_cast<double>(draw.group);
 }
 
+/** Encodes one vertex at `destination`, which must hold `vertex_bytes`. */
+void vertex_at(
+    std::uint8_t* destination,
+    const Transform& transform,
+    const double x,
+    const double y,
+    const double z,
+    const RenderColor color,
+    const double u,
+    const double v,
+    const std::array<float, draw_data_float_count>& data
+) noexcept {
+    const Point point = transform.apply(Point{x, y});
+    write_float(destination, static_cast<float>(point.x));
+    write_float(destination, static_cast<float>(point.y));
+    write_float(destination, static_cast<float>(z));
+    write_float(destination, static_cast<float>(u));
+    write_float(destination, static_cast<float>(v));
+    *destination++ = color.red;
+    *destination++ = color.green;
+    *destination++ = color.blue;
+    *destination++ = color.alpha;
+    // The draw data is the same little-endian floats on every vertex: one block copy.
+    if constexpr (std::endian::native == std::endian::little) {
+        std::memcpy(destination, data.data(), sizeof(data));
+    } else {
+        for (const float value : data) write_float(destination, value);
+    }
+}
+
 void vertex(
     RenderSubmission& output,
     const Transform& transform,
@@ -221,24 +257,9 @@ void vertex(
     const double v,
     const std::array<float, draw_data_float_count>& data
 ) {
-    const Point point = transform.apply(Point{x, y});
-    std::array<std::uint8_t, vertex_bytes> encoded;
-    std::uint8_t* destination = encoded.data();
-    write_float(destination, static_cast<float>(point.x));
-    write_float(destination, static_cast<float>(point.y));
-    write_float(destination, static_cast<float>(z));
-    write_float(destination, static_cast<float>(u));
-    write_float(destination, static_cast<float>(v));
-    *destination++ = color.red;
-    *destination++ = color.green;
-    *destination++ = color.blue;
-    *destination++ = color.alpha;
-    for (const float value : data) write_float(destination, value);
-    output.vertex_bytes.insert(
-        output.vertex_bytes.end(),
-        encoded.begin(),
-        encoded.end()
-    );
+    const std::size_t offset = output.vertex_bytes.size();
+    output.vertex_bytes.resize(offset + vertex_bytes);
+    vertex_at(output.vertex_bytes.data() + offset, transform, x, y, z, color, u, v, data);
 }
 
 void quad(
@@ -250,16 +271,23 @@ void quad(
     const std::array<float, draw_data_float_count>& data,
     const std::uint32_t batch_base_vertex
 ) {
-    const std::size_t global_base_size = output.vertex_bytes.size() / vertex_bytes;
+    const std::size_t offset = output.vertex_bytes.size();
+    const std::size_t global_base_size = offset / vertex_bytes;
     if (global_base_size > std::numeric_limits<std::uint32_t>::max()) {
         throw std::length_error("render submission vertex count exceeds uint32");
     }
     const std::uint32_t global_base = static_cast<std::uint32_t>(global_base_size);
     const std::uint32_t local_base = global_base - batch_base_vertex;
-    vertex(output, draw.transform, bounds.x, bounds.y, group_depth(draw), color, uv.u, uv.v, data);
-    vertex(output, draw.transform, bounds.x, bounds.bottom(), group_depth(draw), color, uv.u, uv.v + uv.height, data);
-    vertex(output, draw.transform, bounds.right(), bounds.bottom(), group_depth(draw), color, uv.u + uv.width, uv.v + uv.height, data);
-    vertex(output, draw.transform, bounds.right(), bounds.y, group_depth(draw), color, uv.u + uv.width, uv.v, data);
+    const double z = group_depth(draw);
+    output.vertex_bytes.resize(offset + 4U * vertex_bytes);
+    std::uint8_t* destination = output.vertex_bytes.data() + offset;
+    vertex_at(destination, draw.transform, bounds.x, bounds.y, z, color, uv.u, uv.v, data);
+    vertex_at(destination + vertex_bytes, draw.transform, bounds.x, bounds.bottom(), z, color,
+              uv.u, uv.v + uv.height, data);
+    vertex_at(destination + 2U * vertex_bytes, draw.transform, bounds.right(), bounds.bottom(), z,
+              color, uv.u + uv.width, uv.v + uv.height, data);
+    vertex_at(destination + 3U * vertex_bytes, draw.transform, bounds.right(), bounds.y, z, color,
+              uv.u + uv.width, uv.v, data);
     output.indices.insert(output.indices.end(), {
         local_base, local_base + 1U, local_base + 2U,
         local_base + 2U, local_base + 3U, local_base,

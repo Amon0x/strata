@@ -120,9 +120,11 @@ Lexer::Lexer(
     std::string source_id,
     std::string source,
     const std::size_t max_tokens,
-    std::pmr::memory_resource* const scratch
+    std::pmr::memory_resource* const scratch,
+    const bool keep_trivia
 )
-    : buffer_(std::move(source_id), std::move(source), scratch), max_tokens_(max_tokens) {
+    : buffer_(std::move(source_id), std::move(source), scratch), max_tokens_(max_tokens),
+      keep_trivia_(keep_trivia) {
     if (max_tokens_ == 0U) {
         throw std::invalid_argument("lexer token limit must be positive");
     }
@@ -130,7 +132,7 @@ Lexer::Lexer(
 
 LexResult Lexer::lex() {
     while (!at_end()) {
-        if (tokens_.size() >= max_tokens_) {
+        if (token_count_ >= max_tokens_) {
             report(
                 "STRATA.DSL.LIMIT_TOKENS",
                 "Source exceeds the compiler token limit.",
@@ -363,6 +365,9 @@ void Lexer::unexpected_character() {
 }
 
 void Lexer::add_token(const TokenType type) {
+    ++token_count_;
+    if (type == TokenType::trivia && !keep_trivia_)
+        return;
     tokens_.push_back(Token{
         type,
         std::string(buffer_.slice(start_, current_)),

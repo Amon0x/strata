@@ -62,6 +62,14 @@ struct WidgetVisualStyle final {
     std::optional<double> indicator_position;
 };
 
+/** A node's chrome as its description alone resolves it, before motion; kept on the node. */
+struct NodeVisualCache final {
+    WidgetVisualProfile profile;
+    WidgetVisualStyle style;
+    /** `appearance: BARE`, which strips chrome after motion has been applied. */
+    bool bare = false;
+};
+
 /** Typed, per-node presentation capability passed only to a widget lifecycle hook. */
 class WidgetRenderScope final {
   public:

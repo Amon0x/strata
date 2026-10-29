@@ -22,8 +22,8 @@ namespace {
 
 using data::JsonValue;
 
-[[nodiscard]] JsonValue object(std::initializer_list<JsonValue::ObjectEntry> entries) {
-    return JsonValue(JsonValue::Object(entries));
+[[nodiscard]] JsonValue object(const std::initializer_list<data::JsonEntry> entries) {
+    return data::json_object(entries);
 }
 
 [[nodiscard]] JsonValue array(std::vector<JsonValue> values) {
@@ -183,11 +183,11 @@ using data::JsonValue;
 
 [[nodiscard]] JsonValue type_base(
     std::string kind,
-    std::initializer_list<JsonValue::ObjectEntry> fields = {}
+    const std::initializer_list<data::JsonEntry> fields = {}
 ) {
     JsonValue::Object entries;
     entries.emplace_back("kind", JsonValue(std::move(kind)));
-    entries.insert(entries.end(), fields.begin(), fields.end());
+    data::append_json_entries(entries, fields);
     return JsonValue(std::move(entries));
 }
 
@@ -687,7 +687,7 @@ private:
     [[nodiscard]] JsonValue compile_expression(const Expression& expression) {
         const Placement placement = placed(expression.id);
         const ExpressionFacts& facts = model_.facts(expression);
-        const auto literal = [&](std::initializer_list<JsonValue::ObjectEntry> value) {
+        const auto literal = [&](const std::initializer_list<data::JsonEntry> value) {
             return expression_base(placement.path, expression.span, {
                 {"kind", JsonValue("literal")},
                 {"value", object(value)},
@@ -957,12 +957,12 @@ private:
     [[nodiscard]] static JsonValue expression_base(
         const std::string& path,
         const SourceSpan& source_span,
-        std::initializer_list<JsonValue::ObjectEntry> fields
+        const std::initializer_list<data::JsonEntry> fields
     ) {
         JsonValue::Object entries;
         entries.emplace_back("path", JsonValue(path));
         entries.emplace_back("span", span(source_span));
-        entries.insert(entries.end(), fields.begin(), fields.end());
+        data::append_json_entries(entries, fields);
         return JsonValue(std::move(entries));
     }
 

@@ -12,7 +12,6 @@
 #include <ranges>
 #include <span>
 #include <string>
-#include <thread>
 #include <utility>
 
 #include <ft2build.h>
@@ -91,9 +90,6 @@ class FreeTypeFace final {
     [[nodiscard]] FT_Face get() const noexcept {
         return face_;
     }
-    [[nodiscard]] std::mutex& mutex() noexcept {
-        return mutex_;
-    }
 
     void select_size(const FT_F26Dot6 size) {
         if (selected_size_ == size) return;
@@ -106,49 +102,81 @@ class FreeTypeFace final {
     std::shared_ptr<const void> owner_;
     FT_Face face_ = nullptr;
     FT_F26Dot6 selected_size_ = 0;
-    std::mutex mutex_;
 };
 
 class FreeTypeFaceCache final {
   public:
-    [[nodiscard]] std::shared_ptr<FreeTypeFace> get(const OpenTypeFont& font) {
-        std::shared_ptr<const void> owner = font.cache_identity();
-        const Key key{
-            reinterpret_cast<std::uintptr_t>(owner.get()),
-            std::this_thread::get_id(),
-        };
-        const std::scoped_lock lock(mutex_);
-        if (const auto found = faces_.find(key); found != faces_.end()) {
-            found->second.last_use = ++clock_;
-            return found->second.face;
+    /** A face held for one caller's exclusive use; it returns to the pool when the lease ends. */
+    class Lease final {
+      public:
+        Lease(FreeTypeFaceCache& cache, const std::uintptr_t key,
+              std::shared_ptr<FreeTypeFace> face) noexcept
+            : cache_(cache), key_(key), face_(std::move(face)) {}
+        ~Lease() {
+            cache_.release(key_, std::move(face_));
         }
-        auto face = std::make_shared<FreeTypeFace>(std::move(owner), font.source_bytes());
-        faces_.emplace(key, Entry{face, ++clock_});
-        trim();
-        return face;
+        Lease(const Lease&) = delete;
+        Lease& operator=(const Lease&) = delete;
+
+        [[nodiscard]] FreeTypeFace* operator->() const noexcept {
+            return face_.get();
+        }
+
+      private:
+        FreeTypeFaceCache& cache_;
+        std::uintptr_t key_;
+        std::shared_ptr<FreeTypeFace> face_;
+    };
+
+    [[nodiscard]] Lease acquire(const OpenTypeFont& font) {
+        std::shared_ptr<const void> owner = font.cache_identity();
+        // An idle face keeps its font's bytes (and so this address) alive.
+        const auto key = reinterpret_cast<std::uintptr_t>(owner.get());
+        {
+            const std::scoped_lock lock(mutex_);
+            if (const auto found = faces_.find(key);
+                found != faces_.end() && !found->second.idle.empty()) {
+                std::shared_ptr<FreeTypeFace> face = std::move(found->second.idle.back());
+                found->second.idle.pop_back();
+                found->second.last_use = ++clock_;
+                return Lease(*this, key, std::move(face));
+            }
+        }
+        return Lease(*this, key,
+                     std::make_shared<FreeTypeFace>(std::move(owner), font.source_bytes()));
     }
 
   private:
-    using Key = std::pair<std::uintptr_t, std::thread::id>;
-
     struct Entry final {
-        std::shared_ptr<FreeTypeFace> face;
+        std::vector<std::shared_ptr<FreeTypeFace>> idle;
         std::uint64_t last_use = 0U;
     };
 
-    void trim() {
-        constexpr std::size_t maximum_faces = 128U;
-        while (faces_.size() > maximum_faces) {
-            const auto oldest = std::ranges::min_element(
-                faces_, {}, [](const auto& entry) { return entry.second.last_use; });
-            faces_.erase(oldest);
+    void release(const std::uintptr_t key, std::shared_ptr<FreeTypeFace> face) noexcept {
+        // A face outlives the lane that used it: the next raster batch, on whatever threads it
+        // runs, reuses its parsed tables and selected size instead of building them again.
+        constexpr std::size_t maximum_idle_per_font = 8U;
+        constexpr std::size_t maximum_fonts = 32U;
+        try {
+            const std::scoped_lock lock(mutex_);
+            Entry& entry = faces_[key];
+            entry.last_use = ++clock_;
+            if (entry.idle.size() < maximum_idle_per_font)
+                entry.idle.push_back(std::move(face));
+            while (faces_.size() > maximum_fonts) {
+                const auto oldest = std::ranges::min_element(
+                    faces_, {}, [](const auto& value) { return value.second.last_use; });
+                faces_.erase(oldest);
+            }
+        } catch (...) {
+            // A face that cannot be pooled is simply dropped.
         }
     }
 
     std::mutex mutex_;
-    // FT_Face carries mutable size, transform, and glyph-slot state. Caching one face per calling
-    // thread lets a bounded raster batch run concurrently without sharing that mutable state.
-    std::map<Key, Entry> faces_;
+    // FT_Face carries mutable size, transform, and glyph-slot state, so each face is leased to one
+    // lane at a time; concurrent raster lanes take distinct faces of the same font.
+    std::map<std::uintptr_t, Entry> faces_;
     std::uint64_t clock_ = 0U;
 };
 
@@ -276,8 +304,7 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
         throw FontError("coverage raster physical size cannot be represented by FreeType");
     }
 
-    const std::shared_ptr<FreeTypeFace> cached_face = freetype_faces().get(font);
-    const std::scoped_lock face_lock(cached_face->mutex());
+    const FreeTypeFaceCache::Lease cached_face = freetype_faces().acquire(font);
     FT_Face face = cached_face->get();
     cached_face->select_size(static_cast<FT_F26Dot6>(size_26_6_value));
 

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <strata/strata.h>
+#include <strata/strata.hpp>
 
 #include "data/json.hpp"
 #include "packet_stream.hpp"
@@ -86,6 +87,10 @@ class ApplicationHost final {
     void close();
     void cancel_interactions();
     void clear_observations();
+    /** Turns per-frame trace capture (frame JSON and the frame list) on or off. */
+    void set_capture_frames(bool capture) noexcept;
+    /** The Surface's own profiler: sections, counters and spikes. */
+    [[nodiscard]] strata::ProfilerSnapshot surface_profiler() const;
     /** Materialize inspection on demand when capture_frames is disabled. */
     [[nodiscard]] std::string inspect() const;
 

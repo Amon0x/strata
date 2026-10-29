@@ -317,6 +317,9 @@ class RetainedDescriptionSnapshot final {
     std::map<std::string, std::vector<const Node*>, std::less<>> source_index_;
 };
 
+struct PresentationStatics;
+struct NodeVisualCache;
+
 class RetainedNode final {
   public:
     using Cleanup = std::function<void()>;
@@ -369,6 +372,13 @@ class RetainedNode final {
     [[nodiscard]] std::span<const std::byte> retained_bytes(std::string_view name) const noexcept;
     [[nodiscard]] bool set_retained_bytes(std::string name, std::span<const std::byte> value);
     void add_cleanup(Cleanup cleanup);
+    /**
+     * What render and input read from the description alone (its presentation transform inputs,
+     * its resolved widget chrome), built on first use and dropped whenever the description is.
+     */
+    [[nodiscard]] std::shared_ptr<const PresentationStatics>&
+    presentation_statics_cache() const noexcept;
+    [[nodiscard]] std::shared_ptr<const NodeVisualCache>& visual_cache() const noexcept;
 
   private:
     friend class RetainedTree;
@@ -383,6 +393,8 @@ class RetainedNode final {
     /** What layout parsed from the description, kept while reconcile finds everything layout
      * reads from it (properties and virtual metadata) unchanged. */
     mutable std::shared_ptr<const ParsedLayout> parsed_layout_;
+    mutable std::shared_ptr<const PresentationStatics> presentation_statics_;
+    mutable std::shared_ptr<const NodeVisualCache> visual_cache_;
     RetainedNode* parent_;
     std::vector<std::unique_ptr<RetainedNode>> children_;
     std::size_t source_index_;

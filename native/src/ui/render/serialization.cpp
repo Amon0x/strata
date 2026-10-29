@@ -16,8 +16,8 @@ namespace {
 
 using data::JsonValue;
 
-[[nodiscard]] JsonValue object(std::initializer_list<JsonValue::ObjectEntry> entries) {
-    return JsonValue(JsonValue::Object(entries));
+[[nodiscard]] JsonValue object(const std::initializer_list<data::JsonEntry> entries) {
+    return data::json_object(entries);
 }
 
 [[nodiscard]] JsonValue array(std::vector<JsonValue> values = {}) {
@@ -194,11 +194,11 @@ using data::JsonValue;
 }
 
 [[nodiscard]] JsonValue draw(const std::string& kind,
-                             std::initializer_list<JsonValue::ObjectEntry> fields) {
+                             const std::initializer_list<data::JsonEntry> fields) {
     JsonValue::Object result;
     result.reserve(fields.size() + 2U);
     result.emplace_back("kind", JsonValue(kind));
-    result.insert(result.end(), fields.begin(), fields.end());
+    data::append_json_entries(result, fields);
     result.emplace_back("hitTest", JsonValue{});
     return JsonValue(std::move(result));
 }

@@ -363,7 +363,6 @@ struct File final {
     std::string source_id;
     std::vector<Import> imports;
     std::vector<Declaration> declarations;
-    std::vector<SourceSpan> trivia;
     SourceSpan span;
     /** One past the highest node id the file's nodes use; side tables size themselves by it. */
     NodeId node_id_limit = 0U;

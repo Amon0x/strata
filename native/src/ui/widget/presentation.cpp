@@ -5,6 +5,7 @@
 #include <charconv>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <ranges>
 #include <utility>
 
@@ -12,6 +13,7 @@
 #include "ui/command.hpp"
 #include "ui/input.hpp"
 #include "ui/motion.hpp"
+#include "ui/presentation_geometry.hpp"
 #include "ui/svg_image.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
@@ -171,8 +173,9 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
     };
 }
 
-[[nodiscard]] WidgetVisualStyle resolve_visual(const WidgetRenderScope& scope,
-                                               const WidgetVisualProfile profile) {
+/** The chrome a node's description and profile resolve to, before motion. */
+[[nodiscard]] NodeVisualCache resolve_static_visual(const WidgetRenderScope& scope,
+                                                    const WidgetVisualProfile profile) {
     const std::string variant = scope.string("variant", "default");
     const ThemeTokens& tokens = fallback_tokens();
     const RenderColor accent =
@@ -251,6 +254,18 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
     result.active_thumb_width = optional_dimension("activeThumbWidth");
     result.active_thumb_height = optional_dimension("activeThumbHeight");
     result.thumb_radius = optional_dimension("thumbRadius");
+    return NodeVisualCache{profile, std::move(result),
+                           scope.string("appearance", "DEFAULT") == "BARE"};
+}
+
+[[nodiscard]] WidgetVisualStyle resolve_visual(const WidgetRenderScope& scope,
+                                               const WidgetVisualProfile profile) {
+    // Every widget the frame presents resolves its chrome; what its description fixes is
+    // resolved once per description, and only motion is applied each time.
+    std::shared_ptr<const NodeVisualCache>& cached = scope.node().visual_cache();
+    if (cached == nullptr || cached->profile != profile)
+        cached = std::make_shared<const NodeVisualCache>(resolve_static_visual(scope, profile));
+    WidgetVisualStyle result = cached->style;
     if (const MotionComputedValues* motion = scope.motion_values(); motion != nullptr) {
         const auto animated_color =
             [motion](const MotionProperty property) -> std::optional<RenderColor> {
@@ -297,7 +312,7 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
             result.opacity = std::clamp(*value, 0.0, 1.0);
         }
     }
-    if (scope.string("appearance", "DEFAULT") == "BARE") {
+    if (cached->bare) {
         result.background.reset();
         result.border.reset();
         result.focus_ring.reset();
@@ -1026,11 +1041,8 @@ widget_descendant_clip(const WidgetRegistry& registry, const RetainedNode& node,
     const WidgetLifecycle* lifecycle = registry.find(node.description().type);
     if (lifecycle == nullptr || !participates(*lifecycle, node))
         return std::nullopt;
-    if (const std::optional<ContentSizeMotionSpec> content_motion =
-            content_size_motion(node.description());
-        content_motion.has_value() && content_motion->clip) {
+    if (presentation_statics(node).content_motion_clip)
         return layout.bounds;
-    }
     if (lifecycle->present.descendant_clip == nullptr) {
         return std::nullopt;
     }

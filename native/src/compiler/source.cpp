@@ -59,7 +59,8 @@ SourceBuffer::SourceBuffer(
 )
     : source_id_(std::move(source_id)),
       text_(std::move(text)),
-      boundaries_(scratch != nullptr ? scratch : std::pmr::get_default_resource()) {
+      boundaries_(scratch != nullptr ? scratch : std::pmr::get_default_resource()),
+      boundary_index_(scratch != nullptr ? scratch : std::pmr::get_default_resource()) {
     if (source_id_.empty()) {
         throw std::invalid_argument("source identity must not be empty");
     }
@@ -71,8 +72,12 @@ SourceBuffer::SourceBuffer(
     std::uint64_t utf16_offset = 0U;
     std::uint32_t line = 1U;
     std::uint32_t column = 1U;
+    if (text_.size() >= no_boundary)
+        throw std::length_error("source text is too large to index");
     boundaries_.reserve(text_.size() + 1U);
+    boundary_index_.assign(text_.size() + 1U, no_boundary);
     while (byte_offset < text_.size()) {
+        boundary_index_[byte_offset] = static_cast<std::uint32_t>(boundaries_.size());
         boundaries_.push_back(Boundary{byte_offset, SourcePosition{line, column, utf16_offset}});
         const std::size_t length = sequence_length(static_cast<unsigned char>(text_[byte_offset]));
         const std::uint32_t code_point = decode(text_, byte_offset, length);
@@ -86,6 +91,7 @@ SourceBuffer::SourceBuffer(
             column += utf16_units;
         }
     }
+    boundary_index_[byte_offset] = static_cast<std::uint32_t>(boundaries_.size());
     boundaries_.push_back(Boundary{byte_offset, SourcePosition{line, column, utf16_offset}});
 }
 
@@ -120,7 +126,8 @@ bool SourceBuffer::starts_with(
     const std::size_t byte_offset,
     const std::string_view value
 ) const noexcept {
-    return byte_offset <= text_.size() && text_.substr(byte_offset).starts_with(value);
+    return byte_offset <= text_.size() &&
+           std::string_view(text_).substr(byte_offset).starts_with(value);
 }
 
 std::string_view SourceBuffer::slice(const std::size_t start, const std::size_t end) const {
@@ -146,11 +153,10 @@ SourceSpan SourceBuffer::span(const std::size_t start, const std::size_t end) co
 }
 
 const SourceBuffer::Boundary& SourceBuffer::boundary(const std::size_t byte_offset) const {
-    const auto found = std::ranges::lower_bound(boundaries_, byte_offset, {}, &Boundary::byte_offset);
-    if (found == boundaries_.end() || found->byte_offset != byte_offset) {
+    if (byte_offset >= boundary_index_.size() || boundary_index_[byte_offset] == no_boundary) {
         throw std::out_of_range("source offset is not a UTF-8 code-point boundary");
     }
-    return *found;
+    return boundaries_[boundary_index_[byte_offset]];
 }
 
 SourceSpan covering(const SourceSpan& left, const SourceSpan& right) {

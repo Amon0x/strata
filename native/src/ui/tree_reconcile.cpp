@@ -339,6 +339,8 @@ std::unique_ptr<RetainedNode> RetainedTree::reconcile_node(
                  next_persistence != description->properties.end() &&
                  !expression_value_equal(previous_persistence->second, next_persistence->second));
             existing->description_ = description;
+            existing->presentation_statics_.reset();
+            existing->visual_cache_.reset();
             if (persistence_changed && persistence_fields_) {
                 reconcile_indexes_changed_ = true;
                 for (const std::string& field : persistence_fields_(description->type)) {

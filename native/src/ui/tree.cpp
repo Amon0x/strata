@@ -392,6 +392,13 @@ const DescriptionNode& RetainedNode::description() const noexcept {
 const std::shared_ptr<const DescriptionNode>& RetainedNode::shared_description() const noexcept {
     return description_;
 }
+std::shared_ptr<const PresentationStatics>&
+RetainedNode::presentation_statics_cache() const noexcept {
+    return presentation_statics_;
+}
+std::shared_ptr<const NodeVisualCache>& RetainedNode::visual_cache() const noexcept {
+    return visual_cache_;
+}
 RetainedNode* RetainedNode::parent() const noexcept {
     return parent_;
 }

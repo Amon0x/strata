@@ -819,6 +819,19 @@ class InputRouter final {
     std::optional<std::uint64_t> focus_before_containment_;
     std::set<std::uint64_t> hovered_;
     std::optional<Point> hover_position_;
+    /** What the last post-layout hover refresh saw; a refresh with the same key is skipped. */
+    struct HoverRefreshKey final {
+        Point position;
+        std::uint64_t tree_generation = 0U;
+        std::uint64_t layout_generation = 0U;
+        std::uint64_t notification_generation = 0U;
+        DirtyGenerationSnapshot dirty;
+        std::uint64_t modal = 0U;
+        [[nodiscard]] friend bool operator==(const HoverRefreshKey&,
+                                             const HoverRefreshKey&) = default;
+    };
+    std::optional<HoverRefreshKey> last_hover_refresh_;
+    [[nodiscard]] std::uint64_t modal_identity() const noexcept;
     // Whether the pointer is over the surface at hover_position_ (it has not left or cancelled).
     bool hover_present_ = false;
     std::map<std::uint64_t, std::int64_t> hover_started_nanos_;

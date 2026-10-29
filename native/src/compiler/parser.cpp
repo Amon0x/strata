@@ -55,14 +55,8 @@ Parser::Parser(
     truncated_ = std::ranges::any_of(diagnostics_, [](const Diagnostic& diagnostic) {
         return diagnostic.code.starts_with("STRATA.DSL.LIMIT_");
     });
-    tokens_.reserve(tokens.size());
-    for (Token& token : tokens) {
-        if (token.type == TokenType::trivia) {
-            trivia_.push_back(std::move(token.span));
-        } else {
-            tokens_.push_back(std::move(token));
-        }
-    }
+    tokens_ = std::move(tokens);
+    std::erase_if(tokens_, [](const Token& token) { return token.type == TokenType::trivia; });
     if (tokens_.empty() || tokens_.back().type != TokenType::end_of_file) {
         throw std::invalid_argument("parser token stream must end with EOF");
     }
@@ -122,7 +116,6 @@ ParseResult Parser::parse() {
         source_id_,
         std::move(imports),
         std::move(declarations),
-        std::move(trivia_),
         file_span,
         next_node_id_,
         std::move(unparsed_names_),
@@ -1397,7 +1390,6 @@ ParseResult parse_source(
             source_id,
             {},
             {},
-            {},
             SourceSpan{source_id, start, start, 0U},
             first_node_id,
             {},
@@ -1414,7 +1406,7 @@ ParseResult parse_source(
         });
         return ParseResult{std::move(file), std::move(diagnostics)};
     }
-    LexResult lexed = Lexer(source_id, source, limits.max_tokens, scratch).lex();
+    LexResult lexed = Lexer(source_id, source, limits.max_tokens, scratch, false).lex();
     return Parser(
         std::move(source_id),
         std::move(lexed.tokens),

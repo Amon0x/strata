@@ -91,7 +91,8 @@ public:
         std::string source_id,
         std::string source,
         std::size_t max_tokens = default_max_tokens,
-        std::pmr::memory_resource* scratch = std::pmr::get_default_resource()
+        std::pmr::memory_resource* scratch = std::pmr::get_default_resource(),
+        bool keep_trivia = true
     );
 
     [[nodiscard]] LexResult lex();
@@ -122,6 +123,10 @@ private:
     std::vector<Token> tokens_;
     std::vector<Diagnostic> diagnostics_;
     std::size_t max_tokens_;
+    /** Tokens scanned, trivia included whether or not it is kept: what the limit counts. */
+    std::size_t token_count_ = 0U;
+    /** Whether whitespace and comments become tokens; the parser has no use for them. */
+    bool keep_trivia_ = true;
     std::size_t start_ = 0U;
     std::size_t current_ = 0U;
 };

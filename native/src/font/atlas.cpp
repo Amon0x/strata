@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -388,29 +389,42 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
         missing.size() < parallel_raster_threshold
             ? 1U
             : std::min({maximum_raster_lanes, available_lanes, missing.size()});
+    // Each lane leases a FreeType face per font and selects a size on it; grouping the misses by
+    // font and size and handing lanes contiguous runs keeps a lane on one face and one size, so a
+    // cold batch builds a few faces and runs each size's hinting program once, not per lane.
+    std::ranges::sort(missing, {}, [&pending](const std::size_t index) {
+        const Key& key = pending[index].key;
+        return std::tie(key.font_id, key.pixel_size, key.mode, key.font_style_flags, key.phase,
+                        key.glyph);
+    });
+    const std::size_t run = std::max<std::size_t>(1U, missing.size() / (raster_lanes * 4U));
     std::atomic_size_t cursor{0U};
     std::atomic_bool failed{false};
     std::mutex failure_mutex;
     std::exception_ptr failure;
     const auto raster_lane = [&] {
         while (!failed.load(std::memory_order_acquire)) {
-            const std::size_t position = cursor.fetch_add(1U, std::memory_order_relaxed);
-            if (position >= missing.size())
+            const std::size_t first = cursor.fetch_add(run, std::memory_order_relaxed);
+            if (first >= missing.size())
                 return;
-            Pending& item = pending[missing[position]];
-            try {
-                item.raster = std::make_shared<const std::optional<GlyphRasterBitmap>>(rasterize(
-                    *item.font, item.key.glyph, std::bit_cast<double>(item.key.pixel_size),
-                    display_scale_, item.key.phase, item.key.mode, item.key.font_style_flags,
-                    config_.coverage, config_.msdf));
-            } catch (...) {
-                {
-                    const std::scoped_lock lock(failure_mutex);
-                    if (failure == nullptr)
-                        failure = std::current_exception();
+            const std::size_t last = std::min(missing.size(), first + run);
+            for (std::size_t position = first; position < last; ++position) {
+                Pending& item = pending[missing[position]];
+                try {
+                    item.raster = std::make_shared<const std::optional<GlyphRasterBitmap>>(
+                        rasterize(*item.font, item.key.glyph,
+                                  std::bit_cast<double>(item.key.pixel_size), display_scale_,
+                                  item.key.phase, item.key.mode, item.key.font_style_flags,
+                                  config_.coverage, config_.msdf));
+                } catch (...) {
+                    {
+                        const std::scoped_lock lock(failure_mutex);
+                        if (failure == nullptr)
+                            failure = std::current_exception();
+                    }
+                    failed.store(true, std::memory_order_release);
+                    return;
                 }
-                failed.store(true, std::memory_order_release);
-                return;
             }
         }
     };

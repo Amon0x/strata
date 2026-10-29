@@ -211,6 +211,7 @@ typedef struct strata_profiler_section {
     strata_string_view path;
     uint64_t sample_count;
     uint64_t last_sample_frame_index;
+    /* Time in the section during the latest frame, summed over every time it ran in that frame. */
     int64_t last_nanos;
     int64_t average_nanos;
     int64_t p50_nanos;

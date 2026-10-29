@@ -13,8 +13,8 @@ namespace {
 
 using data::JsonValue;
 
-[[nodiscard]] JsonValue object(std::initializer_list<JsonValue::ObjectEntry> entries) {
-    return JsonValue(JsonValue::Object(entries));
+[[nodiscard]] JsonValue object(const std::initializer_list<data::JsonEntry> entries) {
+    return data::json_object(entries);
 }
 
 [[nodiscard]] JsonValue array(std::vector<JsonValue> values = {}) {

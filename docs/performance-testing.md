@@ -76,6 +76,24 @@ A single run can still contain ordinary system noise. For consequential decision
 valid runs under the same power/thermal conditions and compare their distributions rather than
 selecting the most favorable result.
 
+## Core-only profiling
+
+The desktop harness is authoritative for what users see. To work on Strata's own costs (compile,
+describe, layout, render planning, packet encoding and decoding) without a GPU, swap chain or
+rasterizer in the loop, use `strata_core_benchmark`. It drives a headless scenario with a renderer
+that draws nothing, so its numbers are comparable across machines and stable enough to profile:
+
+```bat
+cmake --build --preset windows-x64 --target strata_core_benchmark
+build\cmake\windows-x64\native\RelWithDebInfo\strata_core_benchmark.exe src\main\resources native\tests\fixtures\headless\showcase.json 3
+```
+
+It reports the cold start (host, compile and surface creation, then the first frame), idle frames,
+the tab-switch click frame and the frames that settle it, scrolling, and a moving hover sweep. Each
+phase prints its frame-time distribution and its heaviest profiler sections in milliseconds per
+frame. The optional last argument scales the iteration counts; `cold` measures only the cold start,
+which is the mode to repeat under a CPU sampler when working on startup.
+
 ## Scenario format
 
 Desktop performance scenarios are JSON documents independent of headless scenarios:

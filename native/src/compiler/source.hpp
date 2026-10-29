@@ -50,6 +50,9 @@ private:
     std::string source_id_;
     std::string text_;
     std::pmr::vector<Boundary> boundaries_;
+    /** Byte offset -> index into `boundaries_`, or `no_boundary` inside a multi-byte character. */
+    std::pmr::vector<std::uint32_t> boundary_index_;
+    static constexpr std::uint32_t no_boundary = 0xFFFF'FFFFU;
 };
 
 [[nodiscard]] SourceSpan covering(const SourceSpan& left, const SourceSpan& right);

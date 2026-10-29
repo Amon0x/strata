@@ -468,7 +468,7 @@ ProfilerSnapshot Profiler::snapshot_locked() const {
             section.timings.samples.size(),
             section.last_sample_frame_index,
             section.last_sample_frame_index == frame_index_ && !section.timings.samples.empty()
-                ? section.timings.samples.back()
+                ? section.frame_total_nanos
                 : 0,
             section.timings.average(),
             section.timings.percentile(0.50),
@@ -517,7 +517,7 @@ void Profiler::publish_completed_snapshot_locked() const {
             published.last_sample_frame_index = section.last_sample_frame_index;
             published.last_nanos =
                 section.last_sample_frame_index == frame_index_ && !section.timings.samples.empty()
-                    ? section.timings.samples.back()
+                    ? section.frame_total_nanos
                     : 0;
             published.average_nanos = section.timings.average();
             published.p50_nanos = section.timings.percentile(0.50);
@@ -686,6 +686,10 @@ void Profiler::record_timing_locked(const std::uint64_t section_id,
                            static_cast<long double>(baseline) * config_.spike_baseline_multiplier;
     if (section->timings.add(duration_nanos))
         increment_saturated(dropped_timing_samples_);
+    // A section opened several times in one frame (input, prepare) reports its whole frame cost.
+    section->frame_total_nanos = section->last_sample_frame_index == frame_index_
+                                     ? section->frame_total_nanos + duration_nanos
+                                     : duration_nanos;
     section->last_sample_frame_index = frame_index_;
     if (spike)
         record_spike_locked(*section, duration_nanos, baseline);
