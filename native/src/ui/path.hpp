@@ -104,6 +104,21 @@ struct PathShape final {
 [[nodiscard]] std::optional<PathShape> path_shape_from_value(const runtime::Value* value);
 
 /**
+ * The numbers authored shapes carry (coordinates, radii, angles, widths, dash lengths and colour
+ * channels) in a fixed traversal order, led by a signature of everything else: kinds and other
+ * strings, booleans, list lengths and field names. Two shape lists with the same structure give
+ * lists of the same length and signature, so they interpolate number by number.
+ */
+[[nodiscard]] std::vector<double> shape_numbers(const runtime::Value& shapes);
+
+/**
+ * `shapes` with its numbers replaced by `numbers`, in shape_numbers' order; nothing when `numbers`
+ * came from shapes of another structure.
+ */
+[[nodiscard]] std::optional<runtime::Value> with_shape_numbers(const runtime::Value& shapes,
+                                                              std::span<const double> numbers);
+
+/**
  * Reads an `image` shape's `points`: the top-left, top-right and bottom-left corners of the
  * parallelogram its image region is mapped onto. Throws std::invalid_argument unless there are
  * exactly three finite points.

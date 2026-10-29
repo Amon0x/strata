@@ -1,6 +1,7 @@
 #include "ui/render/packet.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <bit>
 #include <chrono>
 #include <cstddef>
@@ -458,6 +459,34 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
     const bool profile_cold_encode = geometry_packet_.empty();
     const auto cold_encode_started = profile_cold_encode ? std::chrono::steady_clock::now()
                                                          : std::chrono::steady_clock::time_point{};
+    // Masks in a scaled group rasterize at the group's density, so a zoomed group's shapes stay
+    // sharp rather than magnified. A new group, or one whose scale held since the last frame, is
+    // exact; one whose scale is moving takes the nearest quarter octave, so a zoom replans only a
+    // few times on its way. Scales within a tenth of one are left at one.
+    {
+        std::vector<RenderGroup> composed;
+        static_cast<void>(compose_groups(commands.groups(), composed));
+        std::vector<GroupRasterScale> scales;
+        const auto stepped = [](const double value) {
+            return std::exp2(std::round(std::log2(value) * 4.0) / 4.0);
+        };
+        for (const RenderGroup& group : composed) {
+            if (group.shear_x != 0.0 || group.shear_y != 0.0 || !(group.scale_x > 0.0) ||
+                !(group.scale_y > 0.0)) {
+                continue;
+            }
+            const auto previous =
+                std::ranges::lower_bound(groups_, group.index, {}, &RenderGroup::index);
+            const bool moving = previous != groups_.end() && previous->index == group.index &&
+                                (previous->scale_x != group.scale_x ||
+                                 previous->scale_y != group.scale_y);
+            const double x = moving ? stepped(group.scale_x) : group.scale_x;
+            const double y = moving ? stepped(group.scale_y) : group.scale_y;
+            if (std::abs(x - 1.0) > 0.1 || std::abs(y - 1.0) > 0.1)
+                scales.push_back(GroupRasterScale{group.index, x, y});
+        }
+        submission_cache_.set_group_raster_scales(std::move(scales));
+    }
     const std::size_t prior_hits = submission_cache_.hit_count();
     const auto submission_started = std::chrono::steady_clock::now();
     const RenderSubmission& submission =

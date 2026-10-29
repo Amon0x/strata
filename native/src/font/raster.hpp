@@ -130,8 +130,8 @@ struct CoveragePoint final {
  * The exact area each pixel of a `width` x `height` bitmap shares with closed polygons, as 8-bit
  * coverage: what text glyphs get, for any outline. Overlapping polygons combine by the nonzero
  * rule (a union, when they wind the same way) or by even-odd. The bitmap's top-left corner sits at
- * `origin` in the polygons' space, so one outline rasterizes tile by tile. Returns nothing when the
- * outline is larger than one pass can take (65,535 points or 32,767 contours).
+ * `origin` in the polygons' space, so one outline rasterizes tile by tile; edges outside the bitmap
+ * cost only their crossing of its rows. Any number of points is taken.
  */
 [[nodiscard]] std::optional<std::vector<std::uint8_t>>
 rasterize_polygons(std::span<const std::vector<CoveragePoint>> contours, std::uint32_t width,

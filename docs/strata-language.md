@@ -477,6 +477,13 @@ each series' value; hovering a slice lifts it out, and a donut names it in its m
 Enter after the arrow keys, selects a category or slice: `onSelect` carries
 `{ index, label, value, values }`.
 
+A chart animates its data with the theme's standard motion policy: when its values change, bars
+grow and shrink, lines morph and slices sweep to their new shares, and a series or slice hidden
+from the legend fades out (or sweeps closed) rather than vanishing. A change of structure (another
+number of categories or series, or a gap appearing) draws the new data at once, as does reduced
+motion. An authored `animateChanges` replaces the default; one without `"data"` in its
+`properties` turns the animation off.
+
 ```strata
 Chart(kind: "BAR", labels: ["Q1", "Q2", "Q3", "Q4"], stacked: true,
       series: [{ name: "Online", values: [42, 55, 61, 70] },
@@ -693,6 +700,24 @@ mask the way text glyphs are, at the shape's device size and sub-pixel position,
 follow their fill rule, strokes are a union, so a translucent stroke stays one even alpha where it
 crosses itself, and shapes larger than an atlas page are drawn in seamless tiles. Gradient paints
 are evaluated per pixel over the mask: every stop, `extend` mode and radial distance is exact.
+Inside a presentation group held at another scale (a node that sets a `tone`, or one whose scale
+stays put while other motion runs), masks rasterize at the group's density, so a zoomed shape is
+as sharp as one drawn at that size. A `Draw` takes up to 16,384 shapes and a path up to 262,144
+segments, so a live series of tens of thousands of points is one `polyline`.
+
+`animateChanges: { properties: ["shapes"] }` animates a `Draw`'s shapes: when they change and keep
+their structure (the same kinds, list lengths and fields, with only numbers and colours differing),
+every coordinate, radius, angle, stroke width, dash and colour interpolates with the motion
+policy, so a gauge sweeps, a sparkline morphs and a circle grows. A change of structure draws the
+new shapes at once.
+
+```strata
+Draw(animateChanges: { properties: ["shapes"], policy: "standard" },
+     layout: { width: 64, height: 64 }, shapes: [
+  { kind: "arc", center: { x: 0.5, y: 0.5 }, radius: 0.4, start: -90, sweep: progress * 360,
+    stroke: theme.accent, strokeStyle: { width: 6, cap: "round" } }
+])
+```
 
 An `image` shape maps an image's `source` region (normalized, as for `Image.source`) onto the
 parallelogram whose top-left, top-right and bottom-left corners are its three `points`, multiplied

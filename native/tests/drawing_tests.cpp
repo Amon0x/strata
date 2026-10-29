@@ -3,12 +3,14 @@
 // shape's summed coverage is its area: any edge drawn outside (or inside) the geometry shows up as
 // area, a thousandth of it at a time.
 
+#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <span>
 #include <numbers>
 #include <stdexcept>
 #include <string>
@@ -272,6 +274,151 @@ void measure(const std::filesystem::path& root, const std::string& backend, cons
     check(failures.empty(), "shapes drew the wrong area:" + failures);
 }
 
+/** A region of the surface in logical pixels. */
+struct Area final {
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+};
+
+/** Summed coverage of a framebuffer region, in logical square pixels. */
+[[nodiscard]] double covered_area(const headless::ApplicationHost& host, const Area area,
+                                  const double scale) {
+    const std::span<const std::uint8_t> pixels = host.pixels();
+    const std::uint32_t width = host.framebuffer_width();
+    double covered = 0.0;
+    for (auto y = static_cast<std::uint32_t>(area.y * scale);
+         y < static_cast<std::uint32_t>((area.y + area.height) * scale); ++y) {
+        for (auto x = static_cast<std::uint32_t>(area.x * scale);
+             x < static_cast<std::uint32_t>((area.x + area.width) * scale); ++x)
+            covered += pixels[(static_cast<std::size_t>(y) * width + x) * 4U] / 255.0;
+    }
+    return covered / (scale * scale);
+}
+
+/**
+ * `animateChanges: { properties: ["shapes"] }`: when host data grows a circle's radius, the Draw
+ * passes through intermediate circles (an exact circle each frame, so its area lies strictly
+ * between) and settles exactly on the new one; a structural change snaps.
+ */
+void measure_animation(const std::filesystem::path& root, const std::string& backend) {
+    std::filesystem::create_directories(root / "assets" / "drawing");
+    {
+        std::ofstream module(root / "assets" / "drawing" / "animated.strata", std::ios::binary);
+        module << "screen Shapes {\n  root Panel(style: { background: null, border: null }, "
+                  "layout: { kind: \"PANEL\", width: 300, height: 140 }) {\n"
+                  "    Draw(animateChanges: { properties: [\"shapes\"], policy: \"standard\" }, "
+                  "layout: { width: 120, height: 120, placement: { x: 10, y: 10 } }, shapes: [\n"
+                  "      { kind: \"circle\", center: { x: 0.5, y: 0.5 }, radius: shape.big ? 0.4 : "
+                  "0.2, fill: #FFFFFF }\n    ])\n"
+                  "    Draw(animateChanges: { properties: [\"shapes\"], policy: \"standard\" }, "
+                  "layout: { width: 120, height: 120, placement: { x: 160, y: 10 } }, "
+                  "shapes: shape.big ? [{ kind: \"rect\", x: 0.1, y: 0.1, width: 0.8, height: 0.8, "
+                  "fill: #FFFFFF }] : [{ kind: \"circle\", center: { x: 0.5, y: 0.5 }, radius: 0.2, "
+                  "fill: #FFFFFF }])\n"
+                  "  }\n}\n";
+    }
+    const auto values = [](const bool big) {
+        return data::JsonValue(data::JsonValue::Object{
+            {"shape", data::JsonValue(data::JsonValue::Object{{"big", data::JsonValue(big)}})}});
+    };
+    headless::Scenario scenario;
+    scenario.application_id = "drawing.tests";
+    scenario.surface_id = "drawing.tests";
+    scenario.module = "assets/drawing/animated.strata";
+    scenario.root = "Shapes";
+    scenario.root_role = "screen";
+    scenario.render_backend = backend;
+    scenario.width = 300.0;
+    scenario.height = 140.0;
+    scenario.scale = 1.0;
+    scenario.reduced_motion = false;
+    scenario.clear_color = {0U, 0U, 0U, 255U};
+    scenario.snapshots.push_back(headless::SnapshotConfig{"drawing.shape", values(false)});
+    headless::ApplicationHost host(scenario, root);
+    constexpr std::int64_t frame = 16'666'667;
+    std::int64_t now = 0;
+    host.frame(now);
+    const Area circle{0.0, 0.0, 140.0, 140.0};
+    const Area morph{150.0, 0.0, 140.0, 140.0};
+    const double small = std::numbers::pi * 24.0 * 24.0;
+    const double large = std::numbers::pi * 48.0 * 48.0;
+    const double before = covered_area(host, circle, 1.0);
+    host.publish(headless::SnapshotConfig{"drawing.shape", values(true)});
+    for (int index = 0; index < 4; ++index)
+        host.frame(now += frame);
+    const double during = covered_area(host, circle, 1.0);
+    const double snapped = covered_area(host, morph, 1.0);
+    for (int index = 0; index < 120; ++index)
+        host.frame(now += frame);
+    const double after = covered_area(host, circle, 1.0);
+    std::cout << "  " << backend << " animated circle: " << before << " -> " << during << " -> "
+              << after << ", structural change " << snapped << "\n";
+    check(std::abs(before - small) / small < 0.004, backend + ": the circle did not start small");
+    check(during > before * 1.05 && during < after * 0.95,
+          backend + ": the circle did not pass through intermediate sizes");
+    check(std::abs(after - large) / large < 0.004, backend + ": the circle did not settle large");
+    check(std::abs(snapped - 96.0 * 96.0) / (96.0 * 96.0) < 0.004,
+          backend + ": a structural change did not snap to its new shapes");
+}
+
+/**
+ * A shape inside a presentation group held at 2x (a node that sets a tone stays a group, its scale
+ * applied as the group's transform) draws as sharp as the same shape drawn at twice the size once
+ * the scale holds: its masks rasterize at the group's density instead of being magnified. Blur
+ * would keep the area, so the two are compared pixel by pixel.
+ */
+void measure_group_scale(const std::filesystem::path& root, const std::string& backend) {
+    std::filesystem::create_directories(root / "assets" / "drawing");
+    const std::string star = "{ kind: \"polygon\", points: [{ x: 0.5, y: 0.1 }, { x: 0.74687, y: "
+                             "0.859787 }, { x: 0.100556, y: 0.390213 }, { x: 0.899444, y: 0.390213 "
+                             "}, { x: 0.25313, y: 0.859787 }], fill: #FFFFFF }";
+    {
+        std::ofstream module(root / "assets" / "drawing" / "scaled.strata", std::ios::binary);
+        module << "screen Shapes {\n  root Panel(style: { background: null, border: null }, "
+                  "layout: { kind: \"PANEL\", width: 300, height: 140 }) {\n"
+                  "    Draw(layout: { width: 120, height: 120, placement: { x: 10, y: 10 } }, "
+                  "shapes: [" << star << "])\n"
+                  "    Panel(style: { background: null, border: null, tone: 0, scale: 2, "
+                  "transformOrigin: { x: 0, y: 0 } }, layout: { kind: \"PANEL\", "
+                  "width: 60, height: 60, placement: { x: 160, y: 10 } }) {\n"
+                  "      Draw(layout: { width: 60, height: 60 }, shapes: [" << star << "])\n"
+                  "    }\n  }\n}\n";
+    }
+    headless::Scenario scenario;
+    scenario.application_id = "drawing.tests";
+    scenario.surface_id = "drawing.tests";
+    scenario.module = "assets/drawing/scaled.strata";
+    scenario.root = "Shapes";
+    scenario.root_role = "screen";
+    scenario.render_backend = backend;
+    scenario.width = 300.0;
+    scenario.height = 140.0;
+    scenario.scale = 1.0;
+    scenario.reduced_motion = true;
+    scenario.clear_color = {0U, 0U, 0U, 255U};
+    headless::ApplicationHost host(scenario, root);
+    host.frame(0);
+    host.frame(16'666'667);
+    const std::span<const std::uint8_t> pixels = host.pixels();
+    const std::uint32_t width = host.framebuffer_width();
+    double difference = 0.0;
+    int largest = 0;
+    for (std::uint32_t y = 10U; y < 130U; ++y) {
+        for (std::uint32_t x = 0U; x < 120U; ++x) {
+            const int direct = pixels[(static_cast<std::size_t>(y) * width + 10U + x) * 4U];
+            const int scaled = pixels[(static_cast<std::size_t>(y) * width + 160U + x) * 4U];
+            difference += std::abs(direct - scaled) / 255.0;
+            largest = std::max(largest, std::abs(direct - scaled));
+        }
+    }
+    std::cout << "  " << backend << " star in a 2x group: summed difference " << difference
+              << " pixels, largest " << largest << "/255\n";
+    check(difference < 4.0 && largest <= 24,
+          backend + ": a shape in a scaled group is not as sharp as the shape drawn at that size");
+}
+
 } // namespace
 
 int main(const int argument_count, const char* const* const arguments) {
@@ -294,6 +441,8 @@ int main(const int argument_count, const char* const* const arguments) {
                 std::numbers::pi * 416.0 * 416.0 / 3.0),
         };
         for (const std::string& backend : available_backends()) {
+            measure_animation(root, backend);
+            measure_group_scale(root, backend);
             for (const double scale : {1.0, 1.25, 2.0}) {
                 for (const Scene& scene : scenes)
                     measure(root, backend, scale, scene);

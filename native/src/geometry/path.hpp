@@ -22,8 +22,11 @@ struct PathSegment final {
     [[nodiscard]] friend bool operator==(const PathSegment&, const PathSegment&) = default;
 };
 
-/** The largest authored or generated segment count. Bounded so tessellation cost is predictable. */
-inline constexpr std::size_t maximum_path_segments = 4096U;
+/**
+ * The largest authored or generated segment count: a live series of tens of thousands of points
+ * draws as one path. Bounded so a runaway generator stays a diagnostic rather than an allocation.
+ */
+inline constexpr std::size_t maximum_path_segments = 1U << 18U;
 
 /**
  * A resolution-independent outline authored in the normalized space of the shape it is drawn into:

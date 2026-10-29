@@ -412,67 +412,168 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
     };
 }
 
+namespace {
+
+/**
+ * Exact-area polygon coverage by accumulation: every edge adds, to each pixel of each row it
+ * crosses, the signed share of that pixel lying to the right of it within the row, so a running
+ * sum along the row is the winding-weighted area covering each pixel. Rows are independent, so
+ * edges above or below the bitmap are skipped and edges left of it count in its first column.
+ */
+class CoverageAccumulator final {
+  public:
+    CoverageAccumulator(const std::uint32_t width, const std::uint32_t height)
+        : width_(width), height_(height), stride_(static_cast<std::size_t>(width) + 2U),
+          cells_(stride_ * height, 0.0F) {}
+
+    /** One edge in bitmap pixels, split where it crosses the bitmap's left and right sides. */
+    void edge(double x0, double y0, double x1, double y1) {
+        if (y0 == y1 || !std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) ||
+            !std::isfinite(y1)) {
+            return;
+        }
+        const double right = static_cast<double>(width_);
+        // Cut at x = 0 and x = width; each piece then lies within one side or inside.
+        double cuts[2];
+        std::size_t cut_count = 0U;
+        for (const double boundary : {0.0, right}) {
+            if ((x0 < boundary && x1 > boundary) || (x0 > boundary && x1 < boundary)) {
+                const double t = (boundary - x0) / (x1 - x0);
+                cuts[cut_count++] = t;
+            }
+        }
+        if (cut_count == 2U && cuts[0] > cuts[1])
+            std::swap(cuts[0], cuts[1]);
+        double from_x = x0;
+        double from_y = y0;
+        for (std::size_t index = 0U; index <= cut_count; ++index) {
+            double to_x = x1;
+            double to_y = y1;
+            if (index < cut_count) {
+                to_x = x0 + (x1 - x0) * cuts[index];
+                to_y = y0 + (y1 - y0) * cuts[index];
+            }
+            // Outside pieces become vertical at the side they lie past.
+            line(std::clamp(from_x, 0.0, right), from_y, std::clamp(to_x, 0.0, right), to_y);
+            from_x = to_x;
+            from_y = to_y;
+        }
+    }
+
+    [[nodiscard]] std::vector<std::uint8_t> coverage(const bool even_odd) const {
+        std::vector<std::uint8_t> result(static_cast<std::size_t>(width_) * height_, 0U);
+        for (std::uint32_t row = 0U; row < height_; ++row) {
+            const float* cells = cells_.data() + static_cast<std::size_t>(row) * stride_;
+            std::uint8_t* output = result.data() + static_cast<std::size_t>(row) * width_;
+            float sum = 0.0F;
+            for (std::uint32_t column = 0U; column < width_; ++column) {
+                sum += cells[column];
+                float value = std::abs(sum);
+                if (even_odd) {
+                    value = std::fmod(value, 2.0F);
+                    if (value > 1.0F)
+                        value = 2.0F - value;
+                } else {
+                    value = std::min(value, 1.0F);
+                }
+                output[column] = static_cast<std::uint8_t>(value * 255.0F + 0.5F);
+            }
+        }
+        return result;
+    }
+
+  private:
+    /** A piece within [0, width] horizontally, accumulated row by row. */
+    void line(double x0, double y0, double x1, double y1) {
+        if (y0 == y1)
+            return;
+        float direction = 1.0F;
+        if (y0 > y1) {
+            std::swap(x0, x1);
+            std::swap(y0, y1);
+            direction = -1.0F;
+        }
+        const double slope = (x1 - x0) / (y1 - y0);
+        const double top = std::max(y0, 0.0);
+        const double bottom = std::min(y1, static_cast<double>(height_));
+        if (top >= bottom)
+            return;
+        double x = x0 + (top - y0) * slope;
+        const auto first_row = static_cast<std::int64_t>(std::floor(top));
+        const auto last_row = static_cast<std::int64_t>(std::ceil(bottom)) - 1;
+        for (std::int64_t row = first_row; row <= last_row; ++row) {
+            const double row_top = std::max(static_cast<double>(row), top);
+            const double row_bottom = std::min(static_cast<double>(row + 1), bottom);
+            const double dy = row_bottom - row_top;
+            const double next_x = x + dy * slope;
+            const float signed_height = static_cast<float>(dy) * direction;
+            float* cells = cells_.data() + static_cast<std::size_t>(row) * stride_;
+            // Clamped: stepping x row by row may drift a rounding error past either side.
+            const double limit = static_cast<double>(width_);
+            const double left = std::clamp(std::min(x, next_x), 0.0, limit);
+            const double right = std::clamp(std::max(x, next_x), 0.0, limit);
+            const double left_floor = std::floor(left);
+            const auto left_index = static_cast<std::size_t>(left_floor);
+            const double right_ceiling = std::ceil(right);
+            const auto right_index = static_cast<std::size_t>(right_ceiling);
+            if (right_index <= left_index + 1U) {
+                // Within one pixel: the share right of the edge's midpoint stays in it.
+                const float middle = static_cast<float>(0.5 * (left + right) - left_floor);
+                cells[left_index] += signed_height * (1.0F - middle);
+                cells[left_index + 1U] += signed_height * middle;
+            } else {
+                // Across pixels: a trapezoid ramp from the first pixel to the last.
+                const double inverse = 1.0 / (right - left);
+                const double first_fraction = left - left_floor;
+                const double first_area = 0.5 * inverse * (1.0 - first_fraction) * (1.0 - first_fraction);
+                const double last_fraction = right - right_ceiling + 1.0;
+                const double last_area = 0.5 * inverse * last_fraction * last_fraction;
+                cells[left_index] += signed_height * static_cast<float>(first_area);
+                if (right_index == left_index + 2U) {
+                    cells[left_index + 1U] +=
+                        signed_height * static_cast<float>(1.0 - first_area - last_area);
+                } else {
+                    const double second = inverse * (1.5 - first_fraction);
+                    cells[left_index + 1U] += signed_height * static_cast<float>(second - first_area);
+                    for (std::size_t index = left_index + 2U; index + 1U < right_index; ++index)
+                        cells[index] += signed_height * static_cast<float>(inverse);
+                    const double before_last =
+                        second + static_cast<double>(right_index - left_index - 3U) * inverse;
+                    cells[right_index - 1U] +=
+                        signed_height * static_cast<float>(1.0 - before_last - last_area);
+                }
+                cells[right_index] += signed_height * static_cast<float>(last_area);
+            }
+            x = next_x;
+        }
+    }
+
+    std::uint32_t width_;
+    std::uint32_t height_;
+    std::size_t stride_;
+    std::vector<float> cells_;
+};
+
+} // namespace
+
 std::optional<std::vector<std::uint8_t>>
 rasterize_polygons(const std::span<const std::vector<CoveragePoint>> contours,
                    const std::uint32_t width, const std::uint32_t height, const bool even_odd,
                    const CoveragePoint origin) {
-    std::vector<std::uint8_t> coverage(static_cast<std::size_t>(width) * height, 0U);
     if (width == 0U || height == 0U)
-        return coverage;
-    std::size_t point_count = 0U;
-    std::size_t contour_count = 0U;
+        return std::vector<std::uint8_t>{};
+    CoverageAccumulator accumulator(width, height);
     for (const std::vector<CoveragePoint>& contour : contours) {
         if (contour.size() < 3U)
             continue;
-        point_count += contour.size();
-        ++contour_count;
-    }
-    if (contour_count == 0U)
-        return coverage;
-    if (point_count > 65'535U || contour_count > 32'767U)
-        return std::nullopt;
-    std::vector<FT_Vector> points;
-    std::vector<unsigned char> tags;
-    std::vector<unsigned short> ends;
-    points.reserve(point_count);
-    tags.reserve(point_count);
-    ends.reserve(contour_count);
-    // FreeType's outline space has y up from the bitmap's bottom edge, in 26.6 fixed point.
-    const auto fixed = [](const double value) {
-        return static_cast<FT_Pos>(std::lround(std::clamp(value, -1.0e6, 1.0e6) * 64.0));
-    };
-    for (const std::vector<CoveragePoint>& contour : contours) {
-        if (contour.size() < 3U)
-            continue;
-        for (const CoveragePoint& point : contour) {
-            points.push_back(FT_Vector{fixed(point.x - origin.x),
-                                       fixed(static_cast<double>(height) - (point.y - origin.y))});
-            tags.push_back(FT_CURVE_TAG_ON);
+        CoveragePoint previous = contour.back();
+        for (const CoveragePoint point : contour) {
+            accumulator.edge(previous.x - origin.x, previous.y - origin.y, point.x - origin.x,
+                             point.y - origin.y);
+            previous = point;
         }
-        ends.push_back(static_cast<unsigned short>(points.size() - 1U));
     }
-    FT_Outline outline{};
-    outline.n_points = static_cast<decltype(outline.n_points)>(points.size());
-    outline.n_contours = static_cast<decltype(outline.n_contours)>(ends.size());
-    outline.points = points.data();
-    outline.tags = tags.data();
-    outline.contours = reinterpret_cast<decltype(outline.contours)>(ends.data());
-    outline.flags = even_odd ? FT_OUTLINE_EVEN_ODD_FILL : FT_OUTLINE_NONE;
-    FT_Bitmap bitmap{};
-    bitmap.rows = height;
-    bitmap.width = width;
-    bitmap.pitch = static_cast<int>(width);
-    bitmap.buffer = coverage.data();
-    bitmap.num_grays = 256;
-    bitmap.pixel_mode = FT_PIXEL_MODE_GRAY;
-    FT_Raster_Params params{};
-    params.target = &bitmap;
-    params.source = &outline;
-    params.flags = FT_RASTER_FLAG_AA;
-    const FT_Error error = FT_Outline_Render(freetype_library().get(), &outline, &params);
-    if (error != FT_Err_Ok)
-        freetype_error("polygon rendering", error);
-    return coverage;
+    return accumulator.coverage(even_odd);
 }
 
 } // namespace strata::font

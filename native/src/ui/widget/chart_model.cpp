@@ -5,9 +5,11 @@
 #include <cstdio>
 #include <limits>
 #include <numbers>
+#include <span>
 #include <utility>
 
 #include "ui/input.hpp"
+#include "ui/motion/model.hpp"
 #include "ui/path.hpp"
 #include "ui/text.hpp"
 #include "ui/tree.hpp"
@@ -179,6 +181,105 @@ constexpr RenderColor fallback_series[] = {
     return static_cast<double>(text.size()) * 7.0;
 }
 
+/**
+ * The numbers a chart animates, led by a signature of their structure: for a pie, each slice's
+ * weight (1 shown, 0 hidden) then the first series' values; otherwise each series' weight followed
+ * by its values. Gaps are structure, not numbers, so a series gaining or losing a gap snaps.
+ */
+[[nodiscard]] std::vector<double> chart_motion_numbers(const runtime::Value* kind,
+                                                       const runtime::Value* series,
+                                                       const runtime::Value* values,
+                                                       const runtime::Value* hidden) {
+    std::vector<std::vector<std::optional<double>>> rows;
+    if (series != nullptr && series->list() != nullptr) {
+        for (const runtime::Value& entry : series->list()->values) {
+            if (entry.object() != nullptr)
+                rows.push_back(values_of(entry.field("values")));
+        }
+    } else if (values != nullptr) {
+        rows.push_back(values_of(values));
+    }
+    std::vector<bool> hidden_flags;
+    if (hidden != nullptr && hidden->list() != nullptr) {
+        for (const runtime::Value& entry : hidden->list()->values) {
+            if (const std::optional<double> index = finite(&entry);
+                index.has_value() && *index >= 0.0 && *index < 1.0e6) {
+                const auto at = static_cast<std::size_t>(*index);
+                if (hidden_flags.size() <= at)
+                    hidden_flags.resize(at + 1U, false);
+                hidden_flags[at] = true;
+            }
+        }
+    }
+    const auto shown = [&hidden_flags](const std::size_t index) {
+        return index < hidden_flags.size() && hidden_flags[index] ? 0.0 : 1.0;
+    };
+    const ChartKind chart_kind = kind_of(kind);
+    const bool circular = chart_kind == ChartKind::pie || chart_kind == ChartKind::donut;
+    std::uint64_t signature = 1469598103934665603ULL;
+    const auto mix = [&signature](const std::uint64_t value) {
+        for (int shift = 0; shift < 64; shift += 8) {
+            signature ^= (value >> shift) & 0xFFU;
+            signature *= 1099511628211ULL;
+        }
+    };
+    std::vector<double> numbers{0.0};
+    mix(circular ? 1U : 0U);
+    mix(rows.size());
+    const auto row_numbers = [&](const std::vector<std::optional<double>>& row) {
+        mix(row.size());
+        for (const std::optional<double>& value : row) {
+            mix(value.has_value() ? 1U : 0U);
+            if (value.has_value())
+                numbers.push_back(*value);
+        }
+    };
+    if (circular) {
+        if (!rows.empty()) {
+            for (std::size_t index = 0U; index < rows.front().size(); ++index)
+                numbers.push_back(shown(index));
+            row_numbers(rows.front());
+        }
+    } else {
+        for (std::size_t index = 0U; index < rows.size(); ++index) {
+            numbers.push_back(shown(index));
+            row_numbers(rows[index]);
+        }
+    }
+    numbers.front() = static_cast<double>(signature >> 12U);
+    return numbers;
+}
+
+/** Puts animated numbers (chart_motion_numbers' layout, for this state's structure) in `state`. */
+void apply_chart_motion(ChartState& state, const std::span<const double> numbers) {
+    std::size_t next = 1U;
+    const auto take = [&]() { return next < numbers.size() ? numbers[next++] : 0.0; };
+    const auto row = [&](ChartSeries& series) {
+        for (std::optional<double>& value : series.values) {
+            if (value.has_value())
+                *value = take();
+        }
+    };
+    if (state.circular()) {
+        if (state.series.empty())
+            return;
+        const std::size_t count = state.series.front().values.size();
+        state.slice_weights.assign(count, 1.0);
+        state.hidden_slices.resize(std::max(state.hidden_slices.size(), count), false);
+        for (std::size_t index = 0U; index < count; ++index) {
+            state.slice_weights[index] = std::clamp(take(), 0.0, 1.0);
+            state.hidden_slices[index] = state.slice_weights[index] <= 0.0;
+        }
+        row(state.series.front());
+        return;
+    }
+    for (ChartSeries& series : state.series) {
+        series.weight = std::clamp(take(), 0.0, 1.0);
+        series.hidden = series.weight <= 0.0;
+        row(series);
+    }
+}
+
 } // namespace
 
 bool ChartState::circular() const noexcept {
@@ -194,7 +295,9 @@ std::optional<double> ChartState::slice_value(const std::size_t index) const {
         return std::nullopt;
     if (index < hidden_slices.size() && hidden_slices[index])
         return std::nullopt;
-    const std::optional<double> value = series.front().values[index];
+    std::optional<double> value = series.front().values[index];
+    if (value.has_value() && index < slice_weights.size())
+        *value *= slice_weights[index];
     return value.has_value() && *value > 0.0 ? value : std::nullopt;
 }
 
@@ -702,6 +805,10 @@ void cartesian_content(WidgetRenderScope& scope, ChartState& state, ChartProject
     themed_colors(scope, state, scope.node());
     for (ChartLegendEntry& entry : projection.legend)
         entry.color = state.series[entry.index].color;
+    for (ChartSeries& series : state.series) {
+        if (series.weight < 1.0)
+            series.color = with_alpha(series.color, series.weight);
+    }
     const Rect plot = projection.plot;
     const RenderColor ink = scope.visual().foreground;
     const RenderColor muted = with_alpha(ink, 0.55);
@@ -828,6 +935,18 @@ void cartesian_content(WidgetRenderScope& scope, ChartState& state, ChartProject
 
 void chart_content(WidgetRenderScope& scope) {
     ChartState state = chart_state(scope.node());
+    // Animated data: values morph, and series and slices fade or sweep as the legend toggles them.
+    if (const MotionComputedValues* computed = scope.motion_values(); computed != nullptr) {
+        if (const MotionNumbers* animated = computed->numbers(MotionProperty::data);
+            animated != nullptr && animated->values != nullptr) {
+            const RetainedNode& node = scope.node();
+            const std::vector<double> own =
+                chart_motion_numbers(property(node, "kind"), property(node, "series"),
+                                     property(node, "values"), node.retained_value("$hidden"));
+            if (own.size() == animated->values->size() && own.front() == animated->values->front())
+                apply_chart_motion(state, *animated->values);
+        }
+    }
     const ChartTextWidth measure = [&scope](const std::string_view text) {
         return scope.text_engine() != nullptr
                    ? scope.text_engine()->shape(scope.node(), text).metrics.width
@@ -843,6 +962,30 @@ void chart_content(WidgetRenderScope& scope) {
     else
         cartesian_content(scope, state, projection, measure);
     scope.focus(scope.layout().bounds);
+}
+
+/**
+ * A chart animates its data by default: its numbers go out as `$motionData`, which
+ * `animateChanges` follows (the theme's standard policy; reduced motion snaps).
+ */
+void chart_expand(WidgetDescriptionScope& scope) {
+    const std::vector<double> numbers =
+        chart_motion_numbers(scope.property("kind"), scope.property("series"),
+                             scope.property("values"), scope.retained("$hidden"));
+    std::vector<runtime::Value> values;
+    values.reserve(numbers.size());
+    for (const double number : numbers)
+        values.emplace_back(number);
+    scope.description().properties.insert_or_assign(
+        "$motionData", runtime::ExpressionValue(runtime::Value(std::move(values))));
+    if (scope.property("animateChanges") == nullptr) {
+        scope.description().properties.insert_or_assign(
+            "animateChanges",
+            runtime::ExpressionValue(widget_object({
+                {"policy", runtime::Value("standard")},
+                {"properties", runtime::Value(std::vector<runtime::Value>{runtime::Value("data")})},
+            })));
+    }
 }
 
 void chart_defaults(WidgetLayoutDefaultsScope& scope) {
@@ -898,7 +1041,8 @@ void chart_toggle(WidgetInputScope& scope, const std::size_t index) {
     }
     if (!removed)
         hidden.emplace_back(static_cast<double>(index));
-    scope.set_retained("$hidden", runtime::Value(std::move(hidden)), DirtyReason::paint);
+    // Properties, not paint: the description publishes the shown series for them to fade.
+    scope.set_retained("$hidden", runtime::Value(std::move(hidden)), DirtyReason::properties);
 }
 
 bool chart_click(WidgetInputScope& scope) {
@@ -1039,7 +1183,7 @@ std::vector<WidgetSubtarget> chart_subtargets(const WidgetSubtargetContext& cont
 } // namespace
 
 void register_chart_widget(WidgetRegistry& registry) {
-    WidgetDescribePhase describe{&chart_defaults, nullptr, {}, "Chart", true};
+    WidgetDescribePhase describe{&chart_defaults, &chart_expand, {}, "Chart", true};
     registry.register_describe_phase("Chart", std::move(describe));
     WidgetInputPhase input;
     input.click = &chart_click;

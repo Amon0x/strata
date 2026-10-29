@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -605,7 +606,8 @@ constexpr std::size_t maximum_tile_classes = 16384U;
     const SubmissionContext& context,
     std::size_t& skipped_draws,
     font::GlyphAtlas* const atlas,
-    std::unordered_map<std::uint64_t, std::uint8_t>& tile_classes
+    std::unordered_map<std::uint64_t, std::uint8_t>& tile_classes,
+    const std::span<const GroupRasterScale> group_scales
 ) {
     const PathShape& shape = command.shape;
     const Rect bounds = command.bounds;
@@ -614,16 +616,27 @@ constexpr std::size_t maximum_tile_classes = 16384U;
         return false;
     }
     // Device pixels per local pixel. An axis-aligned draw is rasterized on the device grid itself;
-    // a rotated or skewed one in its own axes at device density, its quad turned with it.
+    // a rotated or skewed one in its own axes at device density, its quad turned with it. A group
+    // settled at another scale (whose translation lands on whole device pixels) is rasterized at
+    // its density too.
+    double group_x = 1.0;
+    double group_y = 1.0;
+    if (const auto found = std::ranges::lower_bound(group_scales, group, {}, &GroupRasterScale::group);
+        found != group_scales.end() && found->group == group) {
+        group_x = found->x;
+        group_y = found->y;
+    }
+    const double scale_x = context.scale * group_x;
+    const double scale_y = context.scale * group_y;
     const bool aligned = transform.axis_aligned();
-    const double device_x = aligned ? transform.m00 * context.scale
-                                    : std::hypot(transform.m00, transform.m10) * context.scale;
-    const double device_y = aligned ? transform.m11 * context.scale
-                                    : std::hypot(transform.m01, transform.m11) * context.scale;
+    const double device_x = aligned ? transform.m00 * scale_x
+                                    : std::hypot(transform.m00, transform.m10) * scale_x;
+    const double device_y = aligned ? transform.m11 * scale_y
+                                    : std::hypot(transform.m01, transform.m11) * scale_y;
     if (!(std::abs(device_x) > 1.0e-6) || !(std::abs(device_y) > 1.0e-6))
         return false;
-    const Point origin = aligned ? Point{(bounds.x * transform.m00 + transform.m02) * context.scale,
-                                         (bounds.y * transform.m11 + transform.m12) * context.scale}
+    const Point origin = aligned ? Point{(bounds.x * transform.m00 + transform.m02) * scale_x,
+                                         (bounds.y * transform.m11 + transform.m12) * scale_y}
                                  : Point{0.0, 0.0};
     // Sub-pixel position in sixteenths, so a moving shape reuses a handful of masks.
     const Point whole{std::floor(origin.x), std::floor(origin.y)};
@@ -827,7 +840,22 @@ constexpr std::size_t maximum_tile_classes = 16384U;
         if (tile_classes.size() > maximum_tile_classes)
             tile_classes.clear();
         std::optional<font::GlyphAtlasEntry> solid;
+        constexpr std::uint32_t side = mask_tile + 2U;
+        const auto band_width =
+            static_cast<std::uint32_t>(last_x - first_x + 1) * mask_tile + 2U;
         for (std::int64_t tile_y = first_y; tile_y <= last_y; ++tile_y) {
+            // The row of tiles rasterizes once, aprons included, when any of its tiles is missing;
+            // each tile is then cut from it.
+            std::optional<std::vector<std::uint8_t>> band;
+            const auto band_coverage = [&]() -> const std::vector<std::uint8_t>& {
+                if (!band.has_value()) {
+                    band = font::rasterize_polygons(
+                        outline_polygons(), band_width, side, even_odd,
+                        font::CoveragePoint{static_cast<double>(first_x) * tile - 1.0,
+                                            static_cast<double>(tile_y) * tile - 1.0});
+                }
+                return *band;
+            };
             for (std::int64_t tile_x = first_x; tile_x <= last_x; ++tile_x) {
                 MaskHash tile_hash = hash;
                 tile_hash.add(tile_x);
@@ -848,13 +876,17 @@ constexpr std::size_t maximum_tile_classes = 16384U;
                     std::optional<std::uint8_t> found_class;
                     const std::optional<font::GlyphAtlasEntry> entry = atlas->request_mask(
                         key, [&]() -> std::optional<font::GlyphRasterBitmap> {
-                            constexpr std::uint32_t side = mask_tile + 2U;
-                            std::optional<std::vector<std::uint8_t>> coverage =
-                                font::rasterize_polygons(
-                                    outline_polygons(), side, side, even_odd,
-                                    font::CoveragePoint{core.left - 1.0, core.top - 1.0});
-                            if (!coverage.has_value())
-                                return std::nullopt;
+                            const std::vector<std::uint8_t>& rows = band_coverage();
+                            const std::size_t offset =
+                                static_cast<std::size_t>(tile_x - first_x) * mask_tile;
+                            std::optional<std::vector<std::uint8_t>> coverage(
+                                std::in_place, static_cast<std::size_t>(side) * side);
+                            for (std::uint32_t row = 0U; row < side; ++row) {
+                                std::memcpy(coverage->data() + static_cast<std::size_t>(row) * side,
+                                            rows.data() + static_cast<std::size_t>(row) * band_width +
+                                                offset,
+                                            side);
+                            }
                             if (std::ranges::all_of(*coverage,
                                                     [](const std::uint8_t value) { return value == 0U; })) {
                                 found_class = std::uint8_t{0U};
@@ -924,13 +956,13 @@ constexpr std::size_t maximum_tile_classes = 16384U;
         // is axis-aligned, and in the shape's axes otherwise.
         Rect quad;
         if (aligned) {
-            const double left = ((whole.x + box.left) / context.scale - transform.m02) /
+            const double left = ((whole.x + box.left) / scale_x - transform.m02) /
                                 transform.m00;
-            const double right = ((whole.x + box.right) / context.scale - transform.m02) /
+            const double right = ((whole.x + box.right) / scale_x - transform.m02) /
                                  transform.m00;
-            const double top = ((whole.y + box.top) / context.scale - transform.m12) /
+            const double top = ((whole.y + box.top) / scale_y - transform.m12) /
                                transform.m11;
-            const double bottom = ((whole.y + box.bottom) / context.scale - transform.m12) /
+            const double bottom = ((whole.y + box.bottom) / scale_y - transform.m12) /
                                   transform.m11;
             quad = Rect{std::min(left, right), std::min(top, bottom), std::abs(right - left),
                         std::abs(bottom - top)};
@@ -1241,7 +1273,8 @@ class Planner final {
                     if (append_shape_masks(output_, value, source_order, transform_, clip_,
                                            batch_rounded_clips(), opacity_, group_, context_,
                                            skipped_draws_, cache_.shape_atlas,
-                                           cache_.shape_tile_classes)) {
+                                           cache_.shape_tile_classes,
+                                           cache_.group_raster_scales)) {
                         return;
                     }
                 }

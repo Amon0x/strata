@@ -54,6 +54,8 @@ constexpr std::array property_names{
     PropertyName{MotionProperty::scale_y, "scaleY"},
     PropertyName{MotionProperty::tone, "tone"},
     PropertyName{MotionProperty::rotate, "rotate"},
+    PropertyName{MotionProperty::shapes, "shapes"},
+    PropertyName{MotionProperty::data, "data"},
 };
 
 [[nodiscard]] std::string normalized(const std::string_view value) {
@@ -145,6 +147,11 @@ std::optional<bool> MotionComputedValues::boolean(const MotionProperty property)
     return boolean != nullptr ? std::optional<bool>(*boolean) : std::nullopt;
 }
 
+const MotionNumbers* MotionComputedValues::numbers(const MotionProperty property) const noexcept {
+    const MotionValue* value = find(property);
+    return value != nullptr ? std::get_if<MotionNumbers>(value) : nullptr;
+}
+
 bool MotionComputedValues::affects_layout() const noexcept {
     return std::ranges::any_of(values, [](const auto& value) {
         return motion_property_affects_layout(value.first);
@@ -191,6 +198,8 @@ bool motion_property_accepts(
                                 property == MotionProperty::thumb;
     if (color_property) return std::holds_alternative<runtime::ColorValue>(value);
     if (property == MotionProperty::clip) return std::holds_alternative<bool>(value);
+    if (property == MotionProperty::shapes || property == MotionProperty::data)
+        return std::holds_alternative<MotionNumbers>(value);
     if (std::holds_alternative<MotionLayoutValue>(value)) {
         return motion_property_affects_layout(property);
     }
@@ -273,6 +282,22 @@ MotionValue interpolate_motion_value(
             start->unit,
             start->value + (end.value - start->value) * t,
         };
+    }
+    if (const auto* start = std::get_if<MotionNumbers>(&from)) {
+        // The same structure (size and leading signature) interpolates; another one snaps.
+        const MotionNumbers& end = *std::get_if<MotionNumbers>(&to);
+        if (t >= 1.0 || start->values == nullptr || end.values == nullptr ||
+            start->values->size() != end.values->size() || start->values->empty() ||
+            start->values->front() != end.values->front()) {
+            return t < 1.0 ? from : to;
+        }
+        std::vector<double> values(end.values->size());
+        values.front() = end.values->front();
+        for (std::size_t index = 1U; index < values.size(); ++index) {
+            const double first = (*start->values)[index];
+            values[index] = first + ((*end.values)[index] - first) * t;
+        }
+        return MotionNumbers{std::make_shared<const std::vector<double>>(std::move(values))};
     }
     return t < 1.0 ? from : to;
 }

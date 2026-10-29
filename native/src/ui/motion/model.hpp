@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -52,6 +53,10 @@ enum class MotionProperty {
     tone,
     /** Degrees clockwise about the transform origin. */
     rotate,
+    /** A Draw's shapes, as their numbers (shape_numbers in ui/path.hpp). */
+    shapes,
+    /** The numbers a widget publishes as `$motionData` for its own data to animate (a Chart's). */
+    data,
 };
 
 enum class MotionTrigger {
@@ -103,7 +108,22 @@ struct MotionLayoutValue final {
         default;
 };
 
-using MotionValue = std::variant<double, runtime::ColorValue, bool, MotionLayoutValue>;
+/**
+ * A list of numbers that animates number by number while its first number, a signature of the
+ * structure the rest come from, stays the same; it snaps otherwise. Shared, so copying a motion
+ * value never copies the numbers.
+ */
+struct MotionNumbers final {
+    std::shared_ptr<const std::vector<double>> values;
+    [[nodiscard]] friend bool operator==(const MotionNumbers& left,
+                                         const MotionNumbers& right) noexcept {
+        return left.values == right.values ||
+               (left.values != nullptr && right.values != nullptr && *left.values == *right.values);
+    }
+};
+
+using MotionValue =
+    std::variant<double, runtime::ColorValue, bool, MotionLayoutValue, MotionNumbers>;
 
 struct MotionKeyframe final {
     double offset = 0.0;
@@ -154,6 +174,7 @@ struct MotionComputedValues final {
     [[nodiscard]] const MotionLayoutValue* layout(MotionProperty property) const noexcept;
     [[nodiscard]] const runtime::ColorValue* color(MotionProperty property) const noexcept;
     [[nodiscard]] std::optional<bool> boolean(MotionProperty property) const noexcept;
+    [[nodiscard]] const MotionNumbers* numbers(MotionProperty property) const noexcept;
     [[nodiscard]] bool affects_layout() const noexcept;
     [[nodiscard]] friend bool operator==(const MotionComputedValues&, const MotionComputedValues&) = default;
 };

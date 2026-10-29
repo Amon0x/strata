@@ -6,6 +6,8 @@
 #include <map>
 #include <string_view>
 
+#include "ui/path.hpp"
+
 namespace strata::ui::motion_detail {
 namespace {
 
@@ -216,6 +218,22 @@ std::optional<MotionValue> resolved_motion_value(
             return edge_motion_value(edges, "bottom", false);
         default: break;
         }
+    }
+    if (property == MotionProperty::shapes) {
+        const runtime::Value* shapes = node_style(node, "shapes");
+        if (shapes == nullptr || shapes->list() == nullptr) return std::nullopt;
+        return MotionNumbers{std::make_shared<const std::vector<double>>(shape_numbers(*shapes))};
+    }
+    if (property == MotionProperty::data) {
+        const runtime::Value* data = node_property(node, "$motionData");
+        if (data == nullptr || data->list() == nullptr) return std::nullopt;
+        std::vector<double> numbers;
+        numbers.reserve(data->list()->values.size());
+        for (const runtime::Value& entry : data->list()->values) {
+            if (entry.number() == nullptr) return std::nullopt;
+            numbers.push_back(*entry.number());
+        }
+        return MotionNumbers{std::make_shared<const std::vector<double>>(std::move(numbers))};
     }
     if (property == MotionProperty::placement_x ||
         property == MotionProperty::placement_y) {

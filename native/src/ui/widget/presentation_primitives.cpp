@@ -270,6 +270,18 @@ void draw_content(WidgetRenderScope& scope) {
     const runtime::ValueList* shapes = scope.list("shapes");
     if (shapes == nullptr)
         return;
+    // `animateChanges: { properties: ["shapes"] }`: the shapes as their numbers stand mid-motion.
+    std::optional<runtime::Value> animated;
+    if (const MotionComputedValues* computed = scope.motion_values(); computed != nullptr) {
+        if (const MotionNumbers* numbers = computed->numbers(MotionProperty::shapes);
+            numbers != nullptr && numbers->values != nullptr) {
+            if (const runtime::Value* authored = scope.property("shapes"); authored != nullptr) {
+                animated = with_shape_numbers(*authored, *numbers->values);
+                if (animated.has_value() && animated->list() != nullptr)
+                    shapes = animated->list();
+            }
+        }
+    }
     if (scope.visual().background.has_value()) {
         scope.rounded_rect(scope.layout().bounds, *scope.visual().background);
     }

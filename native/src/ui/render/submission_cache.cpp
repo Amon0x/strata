@@ -97,6 +97,14 @@ void RenderSubmissionCache::set_shape_atlas(font::GlyphAtlas* const atlas) noexc
     submission_.reset();
 }
 
+void RenderSubmissionCache::set_group_raster_scales(std::vector<GroupRasterScale> scales) {
+    if (preparation_cache_->group_raster_scales == scales)
+        return;
+    preparation_cache_->group_raster_scales = std::move(scales);
+    preparation_cache_->plan_current = false;
+    submission_.reset();
+}
+
 void RenderSubmissionCache::clear() noexcept {
     commands_.clear();
     environment_.reset();
@@ -106,8 +114,11 @@ void RenderSubmissionCache::clear() noexcept {
     text_engine_ = nullptr;
     submission_.reset();
     font::GlyphAtlas* const shape_atlas = preparation_cache_->shape_atlas;
+    std::vector<GroupRasterScale> group_raster_scales =
+        std::move(preparation_cache_->group_raster_scales);
     preparation_cache_->clear();
     preparation_cache_->shape_atlas = shape_atlas;
+    preparation_cache_->group_raster_scales = std::move(group_raster_scales);
 }
 
 std::size_t RenderSubmissionCache::hit_count() const noexcept { return hits_; }

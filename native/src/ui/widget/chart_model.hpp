@@ -24,6 +24,8 @@ struct ChartSeries final {
     RenderColor color;
     /** Hidden from its legend entry: not drawn and not scaled. */
     bool hidden = false;
+    /** How shown it is while it fades in or out: 1 shown, 0 hidden. */
+    double weight = 1.0;
 };
 
 /** What a Chart node plots, read from its properties and retained state. */
@@ -46,6 +48,8 @@ struct ChartState final {
     std::optional<std::size_t> cursor;
     /** A pie's slices hidden from the legend (a cartesian chart hides whole series instead). */
     std::vector<bool> hidden_slices;
+    /** How shown each slice is while it sweeps open or closed: 1 shown, 0 hidden. */
+    std::vector<double> slice_weights;
 
     [[nodiscard]] bool circular() const noexcept;
     /** The category's label, or its 1-based position when it has none. */

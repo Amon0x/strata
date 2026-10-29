@@ -3403,8 +3403,9 @@ overlay Sales {
 )";
     const auto bundle = runtime::ApplicationBundle::create();
     runtime::ApplicationContext application("charts", bundle);
+    // Motion on: hiding a series fades it out.
     std::unique_ptr<ui::Surface> surface =
-        compiled_surface(application, resources, source, "Sales", 480.0, 600.0);
+        compiled_surface(application, resources, source, "Sales", 480.0, 600.0, false);
     std::int64_t now = 1'000'000;
     static_cast<void>(surface->frame(now));
     const ui::RetainedNode* line = surface->tree().find_key("sales.line");
@@ -3449,9 +3450,36 @@ overlay Sales {
     static_cast<void>(surface->frame(now += 16'000'000));
     check(picked() == "Apr", "Right then Enter did not select the next category");
 
+    // Each series' line is one opaque colour; hiding one fades that colour out before it goes.
+    const auto strokes = [&](const bool opaque) {
+        std::vector<std::uint32_t> colors;
+        for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+            const auto* path = std::get_if<ui::PathRenderCommand>(&command);
+            if (path == nullptr || !path->shape.stroke.has_value())
+                continue;
+            const runtime::ColorValue* color = path->shape.stroke->color();
+            if (color == nullptr || color->alpha == 0U || (color->alpha == 255U) != opaque)
+                continue;
+            colors.push_back((std::uint32_t{color->red} << 16U) |
+                             (std::uint32_t{color->green} << 8U) | color->blue);
+        }
+        return colors;
+    };
+    const std::vector<std::uint32_t> lines = strokes(true);
+    const auto fading = [&] {
+        return std::ranges::any_of(strokes(false), [&](const std::uint32_t color) {
+            return std::ranges::find(lines, color) != lines.end();
+        });
+    };
+    check(!fading(), "a line Chart drew a series line part way faded before any change");
     press(center(target(*line, "legend:1").bounds));
     check(target(*line, "legend:1").label == "Show Costs",
           "clicking a legend entry did not hide its series");
+    check(fading(), "hiding a series did not fade its line out");
+    for (int frame = 0; frame < 60; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    check(!fading() && strokes(true).size() < lines.size(),
+          "a hidden series' line did not finish fading out");
     press(center(target(*line, "legend:1").bounds));
     check(target(*line, "legend:1").label == "Hide Costs",
           "clicking a hidden series' legend entry did not show it again");

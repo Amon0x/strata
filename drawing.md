@@ -72,18 +72,28 @@ Ground rules:
 
 ## Phase 3: change and animation cost
 
-- [ ] Colour, opacity and gradient changes rewrite draw data only; geometry is cached by shape,
-      size and scale, so a window resize or an unrelated change re-rasterizes nothing.
-- [ ] Analytic primitives under any presentation transform, and masks once a scale settles, stay
-      exact; nothing blurs when a presentation group scales up.
-- [ ] Shape vertices stop repeating draw data: shared vertices and a per-draw record instead of 64
-      bytes of draw data on every vertex.
-- [ ] `Draw` shapes animate: when shapes change with the same structure, their numbers, points,
+- [x] Colour, opacity and gradient changes re-plan only the changed draw and reuse its geometry:
+      masks are keyed by outline, size, density and sub-pixel phase, never by paint, and an
+      unrelated change re-plans nothing else. (A `Draw` that changes size rasterizes anew, since
+      its shapes are normalized to its bounds.)
+- [x] Analytic primitives stay exact under any presentation transform (their coverage comes from
+      the pixel's own derivatives). Settled motion is baked back into commands, so masks are exact
+      at rest; a group that stays a group (a toned node, or a scale held while other motion runs)
+      rasterizes its masks at its own density, and a moving zoom at the nearest quarter octave.
+- [~] Dropped for now, by measurement: shared vertices and a per-draw record. Mesh encoding is
+      0.23 ms of a 1.5 ms frame for 500 animated arcs and 0.01 ms of the 10,000-point line's
+      9.4 ms; the cost is in describe, parse and rasterize, not in the 88-byte vertex.
+- [x] `Draw` shapes animate: when shapes change with the same structure, their numbers, points,
       angles, stroke widths, dash offsets and colours interpolate with a motion policy
-      (`animateChanges: { properties: ["shapes"] }`).
-- [ ] Charts animate their data: bars grow, lines morph, slices sweep, series fade on legend toggle.
-- [ ] `strata_core_benchmark` measures drawing: a 10,000-point line, a 200-slice pie, 500 animated
-      arcs, a complex SVG; each has a budget.
+      (`animateChanges: { properties: ["shapes"] }`); a structural change snaps.
+- [x] Charts animate their data by default: bars grow, lines morph, slices sweep, and series fade
+      (slices sweep closed) on legend toggle. Entry growth from zero is not done.
+- [x] `strata_drawing_benchmark` measures drawing through the full pipeline with budgets: a live
+      10,000-point line (9.4 ms of 12), a 200-slice pie recoloured (0.7 of 2), 500 arcs animating
+      (1.5 of 3) and a 2,000-segment outline moving (0.5 of 1). Getting there replaced FreeType's
+      65,535-point polygon rasterizer with an exact-area accumulator that has no point limit,
+      rasterizes a tile row once, and raised the path (262,144 segments), flattening and `Draw`
+      shape-count (16,384) limits.
 
 ## Phase 4: one painter
 

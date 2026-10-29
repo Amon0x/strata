@@ -366,6 +366,10 @@ std::string motion_value_text(const MotionValue& value) {
     if (const bool* boolean = std::get_if<bool>(&value)) {
         return *boolean ? "BooleanValue(value=true)" : "BooleanValue(value=false)";
     }
+    if (const auto* numbers = std::get_if<MotionNumbers>(&value)) {
+        return "Numbers(count=" +
+               std::to_string(numbers->values != nullptr ? numbers->values->size() : 0U) + ")";
+    }
     const MotionLayoutValue& layout = std::get<MotionLayoutValue>(value);
     const std::string_view unit = layout.unit == MotionLayoutUnit::percent
         ? "percent"

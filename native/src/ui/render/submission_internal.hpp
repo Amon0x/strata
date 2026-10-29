@@ -219,6 +219,8 @@ struct PreparationCache final {
      * full tile draws from one solid texel. A memo, so planning from a const cache may fill it.
      */
     mutable std::unordered_map<std::uint64_t, std::uint8_t> shape_tile_classes;
+    /** Groups whose masks rasterize denser than the display, ordered by group. */
+    std::vector<GroupRasterScale> group_raster_scales;
     std::uint64_t planned_shape_generation = 0U;
     bool plan_current = false;
     /** Tests compare the fast path against a full plan of the same stream. */

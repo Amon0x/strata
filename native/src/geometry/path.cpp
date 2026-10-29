@@ -12,7 +12,7 @@
 namespace strata::geometry {
 namespace {
 
-constexpr std::size_t maximum_flattened_points = 8192U;
+constexpr std::size_t maximum_flattened_points = 1U << 20U;
 constexpr std::size_t maximum_curve_subdivisions = 256U;
 /** A closed contour whose ends are nearer than this is treated as already closed. */
 constexpr double contour_epsilon = 1e-9;

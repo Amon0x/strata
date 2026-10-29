@@ -303,4 +303,109 @@ std::optional<PathShape> path_shape_from_value(const runtime::Value* const value
     return shape;
 }
 
+namespace {
+
+/** FNV-1a over the structure of a value: everything shape_numbers does not list. */
+class ShapeSignature final {
+  public:
+    void add(const std::string_view text) noexcept {
+        for (const char byte : text)
+            mix(static_cast<unsigned char>(byte));
+        mix(0xFFU);
+    }
+    void add(const std::uint64_t value) noexcept {
+        for (int shift = 0; shift < 64; shift += 8)
+            mix(static_cast<unsigned char>(value >> shift));
+    }
+    /** Exact as a double: 52 bits. */
+    [[nodiscard]] double value() const noexcept {
+        return static_cast<double>(state_ >> 12U);
+    }
+
+  private:
+    void mix(const unsigned char byte) noexcept {
+        state_ ^= byte;
+        state_ *= 1099511628211ULL;
+    }
+    std::uint64_t state_ = 1469598103934665603ULL;
+};
+
+void collect_shape_numbers(const runtime::Value& value, std::vector<double>& numbers,
+                           ShapeSignature& signature) {
+    signature.add(static_cast<std::uint64_t>(value.kind()));
+    if (const double* number = value.number(); number != nullptr) {
+        numbers.push_back(*number);
+    } else if (const runtime::ColorValue* color = value.color(); color != nullptr) {
+        numbers.push_back(color->red);
+        numbers.push_back(color->green);
+        numbers.push_back(color->blue);
+        numbers.push_back(color->alpha);
+    } else if (const std::string* text = value.string(); text != nullptr) {
+        signature.add(*text);
+    } else if (const bool* boolean = value.boolean(); boolean != nullptr) {
+        signature.add(static_cast<std::uint64_t>(*boolean));
+    } else if (const runtime::ValueList* list = value.list(); list != nullptr) {
+        signature.add(static_cast<std::uint64_t>(list->values.size()));
+        for (const runtime::Value& entry : list->values)
+            collect_shape_numbers(entry, numbers, signature);
+    } else if (const runtime::ValueObject* object = value.object(); object != nullptr) {
+        signature.add(static_cast<std::uint64_t>(object->fields.size()));
+        for (const auto& [name, entry] : object->fields) {
+            signature.add(name);
+            collect_shape_numbers(entry, numbers, signature);
+        }
+    }
+}
+
+[[nodiscard]] runtime::Value replace_shape_numbers(const runtime::Value& value,
+                                                   std::span<const double> numbers,
+                                                   std::size_t& next) {
+    if (value.number() != nullptr)
+        return runtime::Value(numbers[next++]);
+    if (value.color() != nullptr) {
+        const auto channel = [&]() {
+            return static_cast<std::uint8_t>(std::clamp(std::round(numbers[next++]), 0.0, 255.0));
+        };
+        const std::uint8_t red = channel();
+        const std::uint8_t green = channel();
+        const std::uint8_t blue = channel();
+        const std::uint8_t alpha = channel();
+        return runtime::Value(runtime::ColorValue{red, green, blue, alpha});
+    }
+    if (const runtime::ValueList* list = value.list(); list != nullptr) {
+        std::vector<runtime::Value> values;
+        values.reserve(list->values.size());
+        for (const runtime::Value& entry : list->values)
+            values.push_back(replace_shape_numbers(entry, numbers, next));
+        return runtime::Value(std::move(values));
+    }
+    if (const runtime::ValueObject* object = value.object(); object != nullptr) {
+        std::vector<std::pair<std::string, runtime::Value>> fields;
+        fields.reserve(object->fields.size());
+        for (const auto& [name, entry] : object->fields)
+            fields.emplace_back(name, replace_shape_numbers(entry, numbers, next));
+        return runtime::Value(std::move(fields));
+    }
+    return value;
+}
+
+} // namespace
+
+std::vector<double> shape_numbers(const runtime::Value& shapes) {
+    std::vector<double> numbers{0.0};
+    ShapeSignature signature;
+    collect_shape_numbers(shapes, numbers, signature);
+    numbers.front() = signature.value();
+    return numbers;
+}
+
+std::optional<runtime::Value> with_shape_numbers(const runtime::Value& shapes,
+                                                 const std::span<const double> numbers) {
+    const std::vector<double> own = shape_numbers(shapes);
+    if (numbers.size() != own.size() || numbers.empty() || numbers.front() != own.front())
+        return std::nullopt;
+    std::size_t next = 1U;
+    return replace_shape_numbers(shapes, numbers, next);
+}
+
 } // namespace strata::ui

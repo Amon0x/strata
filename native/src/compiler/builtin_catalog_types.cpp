@@ -1729,7 +1729,7 @@ void add_builtin_types(BuiltinCatalog& catalog) {
             .definition = declared_type(DeclaredType{.kind = DeclaredTypeKind::list,
                                                      .element = declared_type_reference("shape"),
                                                      .minimum_items = std::size_t{1U},
-                                                     .maximum_items = std::size_t{64U}})},
+                                                     .maximum_items = std::size_t{16384U}})},
         DeclaredNamedType{.id = "path",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::path})},

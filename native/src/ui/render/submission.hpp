@@ -147,6 +147,17 @@ struct RenderSubmissionEnvironment final {
     ) = default;
 };
 
+/**
+ * The density a presentation group's coverage masks rasterize at, beyond the display scale: its
+ * settled scale, so a group zoomed in draws its shapes sharp rather than magnified.
+ */
+struct GroupRasterScale final {
+    std::uint32_t group = 0U;
+    double x = 1.0;
+    double y = 1.0;
+    [[nodiscard]] friend bool operator==(const GroupRasterScale&, const GroupRasterScale&) = default;
+};
+
 /** Surface-owned geometry cache. Cache hits perform no planning, glyph request, or mesh encoding. */
 class RenderSubmissionCache final {
 public:
@@ -175,6 +186,8 @@ public:
     );
     /** Packs shape coverage masks into `atlas`; without one, every shape draws as geometry. */
     void set_shape_atlas(font::GlyphAtlas* atlas) noexcept;
+    /** Groups whose masks rasterize denser than the display (ordered by group); a change replans. */
+    void set_group_raster_scales(std::vector<GroupRasterScale> scales);
     void clear() noexcept;
     [[nodiscard]] std::size_t hit_count() const noexcept;
     [[nodiscard]] std::size_t miss_count() const noexcept;

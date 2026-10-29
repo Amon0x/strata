@@ -8,6 +8,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <map>
@@ -656,34 +657,29 @@ GlyphAtlasEntry GlyphAtlas::insert(const Key& key, const GlyphRasterBitmap& bitm
     if (upload_pixels > std::numeric_limits<std::size_t>::max() / channels) {
         throw FontError("glyph atlas upload byte count overflows the host size");
     }
-    std::vector<std::uint8_t> upload(upload_pixels * channels, 0U);
-    for (std::uint32_t row = 0U; row < allocation.upload.height; ++row) {
-        const std::uint32_t source_y = static_cast<std::uint32_t>(std::clamp(
-            static_cast<std::int64_t>(row) - static_cast<std::int64_t>(config_.gutter_pixels),
-            std::int64_t{0}, static_cast<std::int64_t>(bitmap.height - 1U)));
-        for (std::uint32_t column = 0U; column < allocation.upload.width; ++column) {
-            const std::uint32_t source_x = static_cast<std::uint32_t>(
-                std::clamp(static_cast<std::int64_t>(column) -
-                               static_cast<std::int64_t>(config_.gutter_pixels),
-                           std::int64_t{0}, static_cast<std::int64_t>(bitmap.width - 1U)));
-            const std::size_t source =
-                (static_cast<std::size_t>(source_y) * bitmap.width + source_x) * channels;
-            const std::size_t destination =
-                (static_cast<std::size_t>(row) * allocation.upload.width + column) * channels;
-            std::copy_n(bitmap.bytes.begin() + static_cast<std::ptrdiff_t>(source), channels,
-                        upload.begin() + static_cast<std::ptrdiff_t>(destination));
-        }
-    }
+    // Row by row straight into the page: the bitmap's row, its edge pixels repeated across the
+    // gutter on either side, and the first and last rows repeated above and below.
     const std::size_t atlas_row_bytes = static_cast<std::size_t>(config_.page_size) * channels;
-    const std::size_t upload_row_bytes =
-        static_cast<std::size_t>(allocation.upload.width) * channels;
+    const std::size_t bitmap_row_bytes = static_cast<std::size_t>(bitmap.width) * channels;
+    const std::uint32_t gutter = config_.gutter_pixels;
     for (std::uint32_t row = 0U; row < allocation.upload.height; ++row) {
-        const std::size_t source = static_cast<std::size_t>(row) * upload_row_bytes;
-        const std::size_t destination =
-            static_cast<std::size_t>(allocation.upload.y + row) * atlas_row_bytes +
+        const auto source_y = static_cast<std::uint32_t>(std::clamp(
+            static_cast<std::int64_t>(row) - static_cast<std::int64_t>(gutter), std::int64_t{0},
+            static_cast<std::int64_t>(bitmap.height - 1U)));
+        const std::uint8_t* source = bitmap.bytes.data() + source_y * bitmap_row_bytes;
+        std::uint8_t* destination =
+            page.pixels.data() + static_cast<std::size_t>(allocation.upload.y + row) * atlas_row_bytes +
             static_cast<std::size_t>(allocation.upload.x) * channels;
-        std::copy_n(upload.begin() + static_cast<std::ptrdiff_t>(source), upload_row_bytes,
-                    page.pixels.begin() + static_cast<std::ptrdiff_t>(destination));
+        const std::uint32_t left_gutter = std::min(gutter, allocation.upload.width);
+        for (std::uint32_t column = 0U; column < left_gutter; ++column)
+            std::memcpy(destination + static_cast<std::size_t>(column) * channels, source, channels);
+        const std::uint32_t inner =
+            std::min(bitmap.width, allocation.upload.width - left_gutter);
+        std::memcpy(destination + static_cast<std::size_t>(left_gutter) * channels, source,
+                    static_cast<std::size_t>(inner) * channels);
+        const std::uint8_t* last = source + static_cast<std::size_t>(bitmap.width - 1U) * channels;
+        for (std::uint32_t column = left_gutter + inner; column < allocation.upload.width; ++column)
+            std::memcpy(destination + static_cast<std::size_t>(column) * channels, last, channels);
     }
     if (page.dirty.has_value()) {
         const std::uint32_t left = std::min(page.dirty->x, allocation.upload.x);
