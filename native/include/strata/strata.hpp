@@ -1710,6 +1710,13 @@ class Surface final {
         return detail::dispatch_info(info);
     }
 
+    /** One of the `STRATA_POINTER_CURSOR_*` shapes for where the pointer last rested. */
+    [[nodiscard]] std::uint32_t pointer_cursor() const {
+        std::uint32_t cursor = STRATA_POINTER_CURSOR_DEFAULT;
+        require(strata_surface_pointer_cursor(value_, &cursor), "surface pointer cursor");
+        return cursor;
+    }
+
     [[nodiscard]] bool set_focus_containment(const std::optional<std::string_view> key) {
         std::uint32_t contained = 0U;
         const std::string_view value = key.value_or(std::string_view{});

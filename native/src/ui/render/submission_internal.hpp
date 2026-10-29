@@ -32,6 +32,8 @@ struct Transform final {
     [[nodiscard]] Transform concatenate(const Transform& next) const noexcept;
     [[nodiscard]] std::optional<Transform> inverse() const noexcept;
     [[nodiscard]] bool axis_aligned_translation() const noexcept;
+    /** Keeps rectangles axis-aligned: no rotation or skew, whatever its scale. */
+    [[nodiscard]] bool axis_aligned() const noexcept;
     [[nodiscard]] friend bool operator==(const Transform&, const Transform&) = default;
 };
 

@@ -191,6 +191,16 @@ composition applies named styles first and named overrides last. Unknown bases a
 compile errors. `theme.*` values remain symbolic until the surface resolves its effective theme.
 When `clip: true` is set, descendants are clipped to the same authored `radius` as the container;
 the rounded clip follows presentation transforms rather than degrading to its axis-aligned bounds.
+`radius` is a number for every corner or a map naming corners (`topLeft`, `topRight`,
+`bottomRight`, `bottomLeft`) or sides (`top`, `bottom`, `left`, `right`), most specific first:
+`radius: { top: 12, bottomRight: 4 }` rounds a tab's top corners and one bottom corner. Fills,
+borders, shadows and clips all follow the per-corner shape.
+
+Text takes `fontWeight` (a number from 100 to 900, or `THIN`, `LIGHT`, `NORMAL`, `MEDIUM`,
+`SEMIBOLD`, `BOLD` or `BLACK`; 600 and above draws bold) and `fontStyle` (`NORMAL` or `ITALIC`), on
+the node or on a rich text span's style. `textDecoration` draws `UNDERLINE`, `LINE_THROUGH` or both
+(`UNDERLINE_LINE_THROUGH`) under each line the text covers, in the text's colour unless
+`textDecorationColor` sets one; a span's `textDecoration: "NONE"` turns its node's decoration off.
 
 ```strata
 style Transparent { background: null; border: null; }
@@ -303,6 +313,69 @@ Panel(layout: {
 ```
 
 Missing targets and cyclic chains produce layout diagnostics instead of order-dependent geometry.
+
+### Absolute and sticky positioning
+
+`position: "ABSOLUTE"` takes a child out of its parent's flow in any container: a `ROW`, `COLUMN`,
+`GRID` or `SCROLL` lays out its other children as if it were not there. `inset` places it against
+the parent's padding box: a number insets every edge, and a map names the edges it sets (`left`,
+`top`, `right`, `bottom`, or `horizontal`, `vertical` and `all`). An absolute child with both insets
+on an axis and an automatic size stretches between them; one inset pins that edge; none places it
+at the start. `placement` still applies on top, and a `{ fraction }` size is a fraction of the
+padding box. Inside a `SCROLL`, an absolute child stays put over the scrolling content.
+
+```strata
+Panel(layout: { kind: "ROW", gap: 8 }) {
+  Button(label: "Inbox")
+  // A badge on the corner, outside the row's flow.
+  Panel(style: style(position: "ABSOLUTE", inset: { top: -4, right: -4 },
+                     width: 16, height: 16, radius: 8, background: theme.danger))
+}
+```
+
+`position: "STICKY"` keeps a child in flow until scrolling would carry one of its inset edges past
+the nearest scroll viewport; it then holds at that inset, but never leaves the box its parent lays
+it out in, so a section's sticky header leaves with its section and the next one takes over.
+
+```strata
+Scroll(layout: { kind: "SCROLL", height: { weight: 1 } }) {
+  for group in groups {
+    Panel(key: group.id, layout: { kind: "COLUMN" }) {
+      Text(text: group.title, layout: { position: "STICKY", inset: { top: 0 } })
+      for row in group.rows { Row(key: row.id, row: row) }
+    }
+  }
+}
+```
+
+Absolute and sticky children paint and are hit above in-flow siblings with the same `zIndex`.
+
+A `SCROLL` layout's `scrollSnap` (`START`, `CENTER` or `END`) settles it on a child once the user
+stops scrolling: about 120 ms after the last wheel step or drag, and not while a press is held, it
+eases to the nearest child's start, centre or end. Its snap points are its children, or the
+children of its one content box, so a carousel or a picker needs no extra structure.
+
+### Pointer cursor
+
+`cursor` sets the pointer shape over a node and its descendants: `DEFAULT`, `POINTER`, `TEXT`,
+`GRAB`, `GRABBING`, `MOVE`, `NOT_ALLOWED`, `RESIZE_EW`, `RESIZE_NS`, `RESIZE_NESW`, `RESIZE_NWSE`,
+`CROSSHAIR`, `WAIT`, `PROGRESS`, `HELP` or `NONE`. Without one, editable and selectable text shows
+`TEXT`, links `POINTER`, drag sources `GRAB` (`GRABBING` while dragging), movable boxes `MOVE`, and a
+`SplitPane` divider the resize shape along its axis. Hosts read the shape with
+`strata_surface_pointer_cursor`; the Win32 adapter and the desktop hosts apply it.
+
+### Rotation
+
+`rotate` turns a node clockwise by degrees about its `transformOrigin` (`{ x, y }` as fractions of
+its bounds, the centre by default), after `scale` and before `translateX`/`translateY`. Like the
+other presentation properties it moves nothing in layout, and `animateChanges`, `motions` and
+keyframes can drive it. A rotated node's clip turns with it, and it is hit within its turned shape.
+
+```strata
+animation Spin { from { rotate: 0 } to { rotate: 360 } duration: 900ms; repeat: "forever"; }
+Panel(style: style(width: 24, height: 24, radius: 12, border: { width: 3, color: theme.accent }),
+      enter: Spin)
+```
 
 ### Anchored portals
 
@@ -598,7 +671,7 @@ the window's.
 The D3D11 desktop and headless hosts execute the full pass program. The reference software backend
 executes declared blur passes, ignores authored shader stages, and then applies the same rounded
 mask, opacity, and backdrop/content composition. This approximation is intentionally deterministic
-rather than a claim of shader fidelity. Packet v14 carries ordered backdrop/content batches,
+rather than a claim of shader fidelity. Packet v15 carries ordered backdrop/content batches,
 current/surface backdrop selection, active rounded-clip geometry, effect refresh-rate policy, a
 backdrop probe token, and a bounded sixteen-float parameter block; presentation groups carry tone
 beside their transform and opacity.
@@ -672,6 +745,15 @@ Common pure helpers cover formatting, case conversion, trimming, number clamp/ro
 list size/join, numeric/color operations, actions, effects, materials, and animations. Helper
 capability and argument errors are source-ranged compiler diagnostics.
 
+Text helpers include `split(value, separator)` (an empty separator splits into characters),
+`replace(value, search, replacement)` (every occurrence), `indexOf(value, needle)` (-1 when absent;
+also finds an item of a list), `padStart` and `padEnd(value, length, fill?)`, and
+`slice(value, start, end?)`, which takes text or a list and counts negative bounds from the end.
+List helpers `first`, `last`, `reverse`, `find(source, predicate)` and `sum(source, selector?)`
+take a list or derived view; `first`, `last` and `find` give one item typed as the source's items,
+or null. `range(start, end, step?)` lists the numbers from `start` up to but not including `end`,
+at most 10000 of them. `sqrt` and `pow(base, exponent)` complete the numeric helpers.
+
 Collection helpers accept bounded pure lambdas such as `item -> item.enabled`. View helpers are
 `filter`, `map`, `sortBy`, `distinctBy`, `groupBy`, `flatten`, `takeWhile`, `window`, and `page`;
 terminal helpers are `count`, `any`, and `all`. A derived view exposes `items`, `total`, `matched`,
@@ -703,6 +785,20 @@ UI-local actions compose without a host callback: `sequence(first, ...)`, `paral
 and `chooseAction(condition, whenTrue, whenFalse)`. `state.setFromEvent` adapts the canonical event
 value into local state. `reveal.request` is resolved after layout, so a sequence can change a filter
 and then reveal/focus a newly materialized stable key. Domain effects remain typed host actions.
+
+`delay(after, action)` runs its action once `after` (a duration) has passed, from the node that
+scheduled it; if that node has left the tree by then, the step is dropped with it. A status that
+clears itself is a sequence with a delay:
+
+```strata
+Button(label: "Save", onClick: sequence(
+  action("state.set", name: "saved", value: true),
+  delay(2s, action("state.set", name: "saved", value: false))
+))
+```
+
+`clipboard.copy(text:)` writes text to the host clipboard (or the surface's local clipboard when the
+host installs none), where a paste reads it.
 
 ## Animations and timelines
 

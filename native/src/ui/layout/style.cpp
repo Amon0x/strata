@@ -103,6 +103,40 @@ class SnapshotKeyedSequence final : public runtime::KeyedSequence {
     std::vector<std::string> keys_;
 };
 
+[[nodiscard]] std::optional<double> inset_edge(const runtime::Value* value) noexcept {
+    if (value == nullptr || value->number() == nullptr || !std::isfinite(*value->number()))
+        return std::nullopt;
+    return *value->number();
+}
+
+/**
+ * A number insets every edge; an edges map insets only the edges it names, most specific first
+ * (`left` over `horizontal` over `all`), so an unnamed edge stays unconstrained.
+ */
+[[nodiscard]] LayoutInset layout_inset(const runtime::Value* value) noexcept {
+    LayoutInset inset;
+    if (value == nullptr)
+        return inset;
+    if (const std::optional<double> all = inset_edge(value); all.has_value()) {
+        inset.left = inset.top = inset.right = inset.bottom = all;
+        return inset;
+    }
+    if (value->object() == nullptr)
+        return inset;
+    const auto edge = [value](const std::string_view side, const std::string_view axis) {
+        if (std::optional<double> resolved = inset_edge(value->field(side)); resolved.has_value())
+            return resolved;
+        if (std::optional<double> resolved = inset_edge(value->field(axis)); resolved.has_value())
+            return resolved;
+        return inset_edge(value->field("all"));
+    };
+    inset.left = edge("left", "horizontal");
+    inset.right = edge("right", "horizontal");
+    inset.top = edge("top", "vertical");
+    inset.bottom = edge("bottom", "vertical");
+    return inset;
+}
+
 } // namespace
 
 std::size_t VirtualListSpec::item_count() const noexcept {
@@ -164,6 +198,12 @@ LayoutStyle layout_style(const DescriptionNode& description) {
         placement.offset_y = number(value->field("offsetY"));
         style.placement = std::move(placement);
     }
+    const std::string_view position = text(field(layout, "position"));
+    if (position == "ABSOLUTE")
+        style.position = LayoutPosition::absolute;
+    else if (position == "STICKY")
+        style.position = LayoutPosition::sticky;
+    style.inset = layout_inset(field(layout, "inset"));
     style.wrap = boolean(field(layout, "wrap"));
     style.clip = boolean(field(layout, "clip"));
     const runtime::Value* columns = field(layout, "columns");
@@ -206,6 +246,11 @@ LayoutStyle layout_style(const DescriptionNode& description) {
         }
         style.scroll_content_padding = edges(field(layout, "contentPadding"));
         style.scrollbar_gutter = non_negative_number(field(layout, "scrollbarGutter"));
+        const std::string_view snap = text(field(layout, "scrollSnap"));
+        style.scroll_snap = snap == "START"    ? ScrollSnap::start
+                            : snap == "CENTER" ? ScrollSnap::center
+                            : snap == "END"    ? ScrollSnap::end
+                                               : ScrollSnap::none;
     }
     const runtime::Value* scroll = field(layout, "scrollOffset");
     if (scroll == nullptr)

@@ -79,7 +79,11 @@ struct ExpressionHostDependency final {
 
 [[nodiscard]] std::string canonical_host_dependency_path(std::span<const HostPathSegment> path);
 
-enum class ActionCompositionMode { sequence, parallel };
+/**
+ * How a composed action runs its steps: in order, together, or (`delay`) its one step once a
+ * duration has passed.
+ */
+enum class ActionCompositionMode { sequence, parallel, delay };
 
 struct ActionValue final {
     ActionValue() = default;
@@ -94,6 +98,8 @@ struct ActionValue final {
     std::optional<ActionCompositionMode> composition;
     std::vector<std::shared_ptr<const ActionValue>> children;
     std::optional<LexicalStateBinding> lexical_state_binding;
+    /** How long a `delay` composition waits before its step runs. */
+    std::int64_t delay_nanoseconds = 0;
 };
 
 struct ExpressionListValue;

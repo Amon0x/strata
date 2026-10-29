@@ -61,6 +61,31 @@ namespace {
            (node.description().key.has_value() ? "#" + *node.description().key : std::string{});
 }
 
+/**
+ * An absolute child is measured against the parent's padding box less the insets it sets. With both
+ * insets on an axis and an automatic size it fills the space between them, as a stretched child does.
+ */
+[[nodiscard]] Constraints absolute_constraints(const LayoutStyle& style,
+                                               const Constraints& content,
+                                               const Edges& padding) noexcept {
+    Constraints result = content;
+    const auto axis = [](const double available, const std::optional<double> start,
+                         const std::optional<double> end, const LayoutSize& size, double& minimum,
+                         double& maximum) {
+        if (!std::isfinite(available))
+            return;
+        const double room = std::max(0.0, available - start.value_or(0.0) - end.value_or(0.0));
+        maximum = room;
+        const bool automatic = size.kind == LayoutSize::Kind::automatic;
+        minimum = start.has_value() && end.has_value() && automatic ? room : 0.0;
+    };
+    axis(content.max_width + padding.horizontal(), style.inset.left, style.inset.right,
+         style.width, result.min_width, result.max_width);
+    axis(content.max_height + padding.vertical(), style.inset.top, style.inset.bottom,
+         style.height, result.min_height, result.max_height);
+    return result;
+}
+
 } // namespace
 
 bool LayoutEngine::measured_model_equal(const LayoutEngine::MeasuredNode& left,
@@ -74,6 +99,7 @@ bool LayoutEngine::measured_model_equal(const LayoutEngine::MeasuredNode& left,
                right.content_motion_snapped_by_reduced_motion &&
            left.subtree_pins_horizontal == right.subtree_pins_horizontal &&
            left.subtree_pins_vertical == right.subtree_pins_vertical &&
+           left.subtree_sticky == right.subtree_sticky &&
            left.subtree_portals == right.subtree_portals &&
            left.content_motion_target_size == right.content_motion_target_size &&
            left.children == right.children && left.flow_child_count == right.flow_child_count &&
@@ -129,25 +155,28 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
     content_constraints.max_height = available_content_height;
     std::vector<const RetainedNode*> retained_children;
     std::vector<const RetainedNode*> anchor_children;
+    std::vector<const RetainedNode*> absolute_children;
     std::vector<const RetainedNode*> portal_children;
     retained_children.reserve(node.children().size());
     anchor_children.reserve(node.children().size());
     portal_children.reserve(node.children().size());
     for (const auto& child : node.children()) {
-        // Participation, portals and anchors are never adjusted at runtime.
+        // Participation, positions, portals and anchors are never adjusted at runtime.
         const LayoutStyle& child_style = parsed_layout(*child).style;
         if (child_style.participates && child->lifecycle() != RetainedLifecycle::exiting) {
             if (child_style.kind == LayoutKind::portal) {
                 portal_children.push_back(child.get());
             } else if (!child_style.anchor_target.empty()) {
                 anchor_children.push_back(child.get());
+            } else if (child_style.position == LayoutPosition::absolute) {
+                absolute_children.push_back(child.get());
             } else {
                 retained_children.push_back(child.get());
             }
         }
     }
     measured.children.reserve(retained_children.size() + anchor_children.size() +
-                              portal_children.size());
+                              absolute_children.size() + portal_children.size());
 
     if (measured.style.kind == LayoutKind::row || measured.style.kind == LayoutKind::column) {
         const bool horizontal = measured.style.kind == LayoutKind::row;
@@ -364,6 +393,13 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         measured.children.push_back(
             measure(*anchored, content_constraints, environment, operations));
     }
+    for (const RetainedNode* positioned : absolute_children) {
+        measured.children.push_back(measure(
+            *positioned,
+            absolute_constraints(parsed_layout(*positioned).style, content_constraints,
+                                 measured.style.padding),
+            environment, operations));
+    }
     for (const RetainedNode* portal : portal_children) {
         measured.children.push_back(measure(*portal,
                                             Constraints{
@@ -384,6 +420,10 @@ LayoutEngine::MeasuredNodePtr LayoutEngine::measure(const RetainedNode& node,
         std::ranges::any_of(measured.children, [](const MeasuredNodePtr& child) {
             return child->subtree_pins_vertical;
         });
+    measured.subtree_sticky =
+        measured.style.position == LayoutPosition::sticky ||
+        std::ranges::any_of(measured.children,
+                            [](const MeasuredNodePtr& child) { return child->subtree_sticky; });
     measured.subtree_portals =
         measured.style.kind == LayoutKind::portal || !measured.style.anchor_target.empty() ||
         std::ranges::any_of(measured.children,

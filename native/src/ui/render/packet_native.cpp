@@ -291,10 +291,15 @@ bool compose_groups(const std::span<const RenderGroup> relative, std::vector<Ren
             const RenderGroup& parent =
                 self(self, static_cast<std::size_t>(found - next.begin()));
             RenderGroup& group = next[at];
-            group.translate_x = parent.scale_x * group.translate_x + parent.translate_x;
-            group.translate_y = parent.scale_y * group.translate_y + parent.translate_y;
-            group.scale_x *= parent.scale_x;
-            group.scale_y *= parent.scale_y;
+            const RenderGroup local = group;
+            group.translate_x = parent.scale_x * local.translate_x +
+                                parent.shear_x * local.translate_y + parent.translate_x;
+            group.translate_y = parent.shear_y * local.translate_x +
+                                parent.scale_y * local.translate_y + parent.translate_y;
+            group.scale_x = parent.scale_x * local.scale_x + parent.shear_x * local.shear_y;
+            group.scale_y = parent.shear_y * local.shear_x + parent.scale_y * local.scale_y;
+            group.shear_x = parent.scale_x * local.shear_x + parent.shear_x * local.scale_y;
+            group.shear_y = parent.shear_y * local.scale_x + parent.scale_y * local.shear_y;
             group.opacity *= parent.opacity;
             // Tone replaces rather than multiplies: the nearest group that sets one owns it.
             if (group.tone < 0.0)
@@ -388,6 +393,8 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
         output.number(group.translate_y);
         output.number(group.opacity);
         output.number(group.tone);
+        output.number(group.shear_x);
+        output.number(group.shear_y);
     }
     // Resource operations preserve atlas order, and every release precedes the texture creations
     // that may reuse a Surface-scoped host id.

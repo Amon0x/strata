@@ -380,7 +380,33 @@ SemanticTypePtr TypeOracle::compute_call(const Expression& expression, const Cal
         const Argument* initial = argument_for(expression, "initial");
         return initial != nullptr ? type_of(*initial->value) : helper.return_type;
     }
+    if (implementation == "element") {
+        // first, last and find give one item of their source.
+        const Argument* source_argument = argument_for(expression, "source");
+        const SemanticTypePtr source =
+            source_argument != nullptr ? type_of(*source_argument->value) : nullptr;
+        return source != nullptr && source->element != nullptr ? source->element
+                                                               : helper.return_type;
+    }
+    if (implementation == "slice") {
+        // A slice of text is text; a slice of a list keeps the list's element type.
+        const Argument* value_argument = argument_for(expression, "value");
+        const SemanticTypePtr value =
+            value_argument != nullptr ? type_of(*value_argument->value) : nullptr;
+        if (value == nullptr) return helper.return_type;
+        if (value->kind == SemanticTypeKind::string ||
+            value->kind == SemanticTypeKind::string_literal) {
+            return simple(SemanticTypeKind::string);
+        }
+        if (value->element == nullptr) return helper.return_type;
+        auto projected = std::make_shared<SemanticType>();
+        projected->kind = SemanticTypeKind::collection;
+        projected->element = value->element;
+        projected->maximum_items = value->maximum_items;
+        return projected;
+    }
     const bool preserves_source = implementation == "filter" || implementation == "sort_by" ||
+                                  implementation == "reverse" ||
                                   implementation == "distinct_by" ||
                                   implementation == "take_while" || implementation == "window" ||
                                   implementation == "page";

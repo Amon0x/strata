@@ -105,6 +105,69 @@ namespace {
     return bounds;
 }
 
+/**
+ * One axis of an absolute child: pinned to whichever insets it sets, stretched between both when its
+ * size is automatic, and otherwise placed at the container's start.
+ */
+[[nodiscard]] std::pair<double, double> absolute_axis(const double container_start,
+                                                      const double container_extent,
+                                                      const std::optional<double> start,
+                                                      const std::optional<double> end,
+                                                      const LayoutSize& size,
+                                                      const double measured) noexcept {
+    double extent = measured;
+    if (start.has_value() && end.has_value() && size.kind == LayoutSize::Kind::automatic)
+        extent = std::max(0.0, container_extent - *start - *end);
+    else if (size.kind == LayoutSize::Kind::percent)
+        extent = std::max(0.0, container_extent * size.value);
+    if (start.has_value())
+        return {container_start + *start, extent};
+    if (end.has_value())
+        return {container_start + container_extent - *end - extent, extent};
+    return {container_start, extent};
+}
+
+[[nodiscard]] Rect absolute_bounds(const LayoutStyle& style, const Size measured,
+                                   const Rect containing) noexcept {
+    const auto [x, width] = absolute_axis(containing.x, containing.width, style.inset.left,
+                                          style.inset.right, style.width, measured.width);
+    const auto [y, height] = absolute_axis(containing.y, containing.height, style.inset.top,
+                                           style.inset.bottom, style.height, measured.height);
+    return Rect{x, y, width, height};
+}
+
+/**
+ * A sticky box keeps its flow position until scrolling would carry an inset edge past the viewport,
+ * then follows the viewport, but never leaves the container its parent laid it out in.
+ */
+[[nodiscard]] double sticky_shift(const double start, const double extent,
+                                  const double viewport_start, const double viewport_end,
+                                  const double container_start, const double container_end,
+                                  const std::optional<double> leading,
+                                  const std::optional<double> trailing) noexcept {
+    double shift = 0.0;
+    if (leading.has_value()) {
+        const double minimum = viewport_start + *leading;
+        if (start < minimum)
+            shift = std::min(minimum - start, std::max(0.0, container_end - (start + extent)));
+    }
+    if (trailing.has_value() && shift == 0.0) {
+        const double maximum = viewport_end - *trailing;
+        if (start + extent > maximum)
+            shift = -std::min(start + extent - maximum, std::max(0.0, start - container_start));
+    }
+    return shift;
+}
+
+[[nodiscard]] Rect sticky_bounds(Rect bounds, const LayoutInset& inset, const Rect viewport,
+                                 const Rect container) noexcept {
+    bounds.x += sticky_shift(bounds.x, bounds.width, viewport.x, viewport.x + viewport.width,
+                             container.x, container.x + container.width, inset.left, inset.right);
+    bounds.y += sticky_shift(bounds.y, bounds.height, viewport.y, viewport.y + viewport.height,
+                             container.y, container.y + container.height, inset.top, inset.bottom);
+    return bounds;
+}
+
 void translate_record(
     LayoutRecord& record,
     const Point delta,
@@ -133,8 +196,12 @@ void LayoutEngine::arrange(
     const Rect arrangement_bounds = bounds;
     const std::uint64_t identity = measured.node->identity();
     const PinContext cache_pin_context{
-        measured.subtree_pins_horizontal ? pin_context.horizontal_offset : std::nullopt,
-        measured.subtree_pins_vertical ? pin_context.vertical_offset : std::nullopt,
+        measured.subtree_pins_horizontal || measured.subtree_sticky ? pin_context.horizontal_offset
+                                                                    : std::nullopt,
+        measured.subtree_pins_vertical || measured.subtree_sticky ? pin_context.vertical_offset
+                                                                  : std::nullopt,
+        measured.subtree_sticky ? pin_context.sticky_viewport : std::nullopt,
+        measured.subtree_sticky ? pin_context.sticky_container : std::nullopt,
     };
     const auto cached = arrangement_cache_.find(identity);
     const std::shared_ptr<const MeasuredNode> cached_measured =
@@ -218,6 +285,11 @@ void LayoutEngine::arrange(
     );
     if (style.pin_horizontal && pin_context.horizontal_offset.has_value()) bounds.x += *pin_context.horizontal_offset;
     if (style.pin_vertical && pin_context.vertical_offset.has_value()) bounds.y += *pin_context.vertical_offset;
+    if (style.position == LayoutPosition::sticky && pin_context.sticky_viewport.has_value() &&
+        pin_context.sticky_container.has_value()) {
+        bounds = sticky_bounds(bounds, style.inset, *pin_context.sticky_viewport,
+                               *pin_context.sticky_container);
+    }
     const Rect border_bounds = bounds.deflate(style.margin);
     const Rect base_content_bounds = border_bounds.deflate(style.padding);
     const Rect scroll_viewport = style.kind == LayoutKind::scroll
@@ -252,6 +324,7 @@ void LayoutEngine::arrange(
     record.pin_horizontal = style.pin_horizontal;
     record.pin_vertical = style.pin_vertical;
     record.z_index = style.z_index;
+    record.positioned = style.position != LayoutPosition::flow;
     record.portal_target = style.kind == LayoutKind::portal ? style.portal_target : std::string{};
     record.detached_from_parent_clip = style.kind == LayoutKind::portal && style.detach_from_parent_clip;
     record.content_motion_progress = measured.content_motion_progress;
@@ -270,6 +343,8 @@ void LayoutEngine::arrange(
         measured.children.data(),
         measured.flow_child_count,
     };
+    // Sticky children are held inside the box their parent lays them out in.
+    pin_context.sticky_container = content_bounds;
 
     if ((style.kind == LayoutKind::row || style.kind == LayoutKind::column) && style.wrap) {
         const bool horizontal = style.kind == LayoutKind::row;
@@ -533,6 +608,13 @@ void LayoutEngine::arrange(
         PinContext child_pin_context = pin_context;
         if (style.scroll_horizontal) child_pin_context.horizontal_offset = record.scroll_offset.x;
         if (style.scroll_vertical) child_pin_context.vertical_offset = record.scroll_offset.y;
+        child_pin_context.sticky_viewport = scroll_viewport;
+        child_pin_context.sticky_container = Rect{
+            content_bounds.x - record.scroll_offset.x,
+            content_bounds.y - record.scroll_offset.y,
+            std::max(content_bounds.width, scroll_content.width),
+            std::max(content_bounds.height, scroll_content.height),
+        };
         double cursor = content_bounds.y - record.scroll_offset.y;
         std::size_t first_visible = std::numeric_limits<std::size_t>::max();
         std::size_t last_visible = 0U;
@@ -674,6 +756,17 @@ void LayoutEngine::arrange(
                 child_clip,
                 pin_context,
             });
+            continue;
+        }
+        if (child->style.position == LayoutPosition::absolute &&
+            child->style.anchor_target.empty()) {
+            // Absolute children are placed against the padding box and stay put while a scroll
+            // container's content moves beneath them.
+            const Rect containing = style.kind == LayoutKind::scroll ? scroll_viewport : border_bounds;
+            arrange(child,
+                    apply_placement(absolute_bounds(child->style, child->measured_size, containing),
+                                    containing, child->style.placement),
+                    child_clip, pin_context, environment, result);
             continue;
         }
         const LayoutAlign horizontal =

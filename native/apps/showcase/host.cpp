@@ -1851,6 +1851,18 @@ void Host::resize(
     impl_->resize(framebuffer_width, framebuffer_height, scale);
 }
 
+std::optional<std::uint32_t> Host::pointer_cursor() noexcept {
+    Impl::Layer* const layer = impl_->interactive_layer();
+    if (layer == nullptr || !layer->live())
+        return std::nullopt;
+    std::uint32_t cursor = STRATA_POINTER_CURSOR_DEFAULT;
+    if (strata_surface_pointer_cursor(layer->surface().native_handle(), &cursor).status !=
+        STRATA_STATUS_OK) {
+        return std::nullopt;
+    }
+    return cursor;
+}
+
 void Host::pointer(
     const std::uint32_t kind,
     const std::int32_t button,

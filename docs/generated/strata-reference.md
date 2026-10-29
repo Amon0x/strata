@@ -2149,6 +2149,13 @@ Execute independent UI-local actions as one activation Payload: `strata.action-p
 | Name | Type | Required | Nullable | Aliases |
 |---|---|---:|---:|---|
 
+### `action.delay`
+
+Execute one UI-local action after a delay Payload: `strata.action-payload/action.delay@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+
 ### `action.sequence`
 
 Execute UI-local actions in order Payload: `strata.action-payload/action.sequence@1`. Dispatch: `framework`.
@@ -2188,6 +2195,14 @@ Start a debounced latest-wins asynchronous host query Payload: `strata.action-pa
 | `payload` | any | false | true | — |
 | `debounceMillis` | number | false | false | — |
 | `fromEvent` | boolean | false | false | — |
+
+### `clipboard.copy`
+
+Copy text to the host clipboard Payload: `strata.action-payload/clipboard.copy@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `text` | string | true | false | — |
 
 ### `command.execute`
 
@@ -2542,6 +2557,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `clip` | boolean |
 | `color` | color |
 | `contentEffect` | effect |
+| `cursor` | "CROSSHAIR" \| "DEFAULT" \| "GRAB" \| "GRABBING" \| "HELP" \| "MOVE" \| "NONE" \| "NOT_ALLOWED" \| "POINTER" \| "PROGRESS" \| "RESIZE_EW" \| "RESIZE_NESW" \| "RESIZE_NS" \| "RESIZE_NWSE" \| "TEXT" \| "WAIT" |
 | `columnSpan` | number |
 | `detachFromParentClip` | boolean |
 | `disabledOpacity` | number |
@@ -2551,13 +2567,16 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `fill` | color \| { angle?: number, center?: { x: number, y: number }, extend?: "clamp" \| "mirror" \| "repeat", from?: { x: number, y: number }, kind: "linear" \| "radial", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } } |
 | `focusRing` | { color: color, inside?: boolean, width: number } |
 | `font` | string |
+| `fontStyle` | "ITALIC" \| "NORMAL" |
 | `fontStyleFlags` | number |
+| `fontWeight` | number \| "BLACK" \| "BOLD" \| "LIGHT" \| "MEDIUM" \| "NORMAL" \| "SEMIBOLD" \| "THIN" |
 | `fontRasterization` | "GRAYSCALE" \| "MSDF" |
 | `foreground` | color |
 | `gap` | number \| { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number } |
 | `gridColumn` | number |
 | `gridRow` | number |
 | `height` | number \| "auto" \| "content" \| { weight: number } \| { fraction: number } \| { max?: layout size atom, min?: layout size atom, preferred?: layout size atom } |
+| `inset` | number \| { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number } |
 | `hintColor` | color |
 | `hoverOverlay` | color |
 | `indicatorInset` | number |
@@ -2583,8 +2602,10 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `pixelSize` | number |
 | `placement` | { anchorX?: number, anchorY?: number, offsetX?: number, offsetY?: number, x?: position, y?: position } |
 | `portalTarget` | string |
-| `radius` | number |
+| `position` | "ABSOLUTE" \| "FLOW" \| "STICKY" |
+| `radius` | number \| { all?: number, bottom?: number, bottomLeft?: number, bottomRight?: number, left?: number, right?: number, top?: number, topLeft?: number, topRight?: number } |
 | `rowSpan` | number |
+| `rotate` | number |
 | `scale` | number |
 | `scaleX` | number |
 | `scaleY` | number |
@@ -2597,7 +2618,10 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `thumbRadius` | number |
 | `thumbSize` | number |
 | `thumbWidth` | number |
+| `textDecoration` | "LINE_THROUGH" \| "NONE" \| "UNDERLINE" \| "UNDERLINE_LINE_THROUGH" |
+| `textDecorationColor` | color |
 | `tone` | number |
+| `transformOrigin` | { x: number, y: number } |
 | `track` | color \| { angle?: number, center?: { x: number, y: number }, extend?: "clamp" \| "mirror" \| "repeat", from?: { x: number, y: number }, kind: "linear" \| "radial", radius?: number, radiusX?: number, radiusY?: number, stops: list of { color: color, offset?: number }, to?: { x: number, y: number } } |
 | `trackGap` | number |
 | `trackHeight` | number |
@@ -2634,6 +2658,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `gridColumn` | number |
 | `gridRow` | number |
 | `height` | number \| "auto" \| "content" \| { weight: number } \| { fraction: number } \| { max?: layout size atom, min?: layout size atom, preferred?: layout size atom } |
+| `inset` | number \| { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number } |
 | `justifyContent` | "CENTER" \| "END" \| "SPACE_AROUND" \| "SPACE_BETWEEN" \| "SPACE_EVENLY" \| "START" |
 | `justifySelf` | "CENTER" \| "END" \| "START" \| "STRETCH" |
 | `kind` | "COLUMN" \| "GRID" \| "OVERLAY" \| "PANEL" \| "PORTAL" \| "ROW" \| "SCROLL" \| "SPACER" \| "STACK" |
@@ -2646,7 +2671,9 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `padding` | number \| { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number } |
 | `placement` | { anchorX?: number, anchorY?: number, offsetX?: number, offsetY?: number, x?: position, y?: position } |
 | `portalTarget` | string |
+| `position` | "ABSOLUTE" \| "FLOW" \| "STICKY" |
 | `rowSpan` | number |
+| `scrollSnap` | "CENTER" \| "END" \| "NONE" \| "START" |
 | `width` | number \| "auto" \| "content" \| { weight: number } \| { fraction: number } \| { max?: layout size atom, min?: layout size atom, preferred?: layout size atom } |
 | `wrap` | boolean |
 | `zIndex` | number |
@@ -2696,6 +2723,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `thumb` | color |
 | `thumbRadius` | number |
 | `thumbSize` | number |
+| `rotate` | number |
 | `tone` | number |
 | `track` | color |
 | `trackRadius` | number |
@@ -2719,6 +2747,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `clamp` | number | NUMERIC |
 | `contains` | boolean | COLLECTION |
 | `count` | number | COLLECTION |
+| `delay` | action | ACTION |
 | `distinctBy` | collection of any | COLLECTION |
 | `effect` | effect | EFFECT |
 | `endsWith` | boolean | TEXT |
@@ -2752,6 +2781,20 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `title` | string | TEXT |
 | `trim` | string | TEXT |
 | `upper` | string | TEXT |
+| `split` | list of string | TEXT |
+| `replace` | string | TEXT |
+| `slice` | any | COLLECTION |
+| `indexOf` | number | COLLECTION |
+| `padStart` | string | TEXT |
+| `padEnd` | string | TEXT |
+| `first` | any | COLLECTION |
+| `last` | any | COLLECTION |
+| `reverse` | list of any | COLLECTION |
+| `sum` | number | COLLECTION |
+| `range` | list of number | COLLECTION |
+| `find` | any | COLLECTION |
+| `sqrt` | number | NUMERIC |
+| `pow` | number | NUMERIC |
 | `window` | collection of any | COLLECTION |
 
 ## Materials

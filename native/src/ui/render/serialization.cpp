@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <optional>
+#include <string_view>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -204,6 +207,41 @@ using data::JsonValue;
 
 CornerRadii CornerRadii::all(const double value) noexcept {
     return CornerRadii{value, value, value, value};
+}
+
+double CornerRadii::largest() const noexcept {
+    return std::max({top_left, top_right, bottom_right, bottom_left});
+}
+
+std::optional<CornerRadii> corner_radii_value(const runtime::Value* value) noexcept {
+    const auto length = [](const runtime::Value* candidate) -> std::optional<double> {
+        if (candidate == nullptr || candidate->number() == nullptr)
+            return std::nullopt;
+        const double number = *candidate->number();
+        return std::isfinite(number) ? std::max(0.0, number) : 0.0;
+    };
+    if (value == nullptr)
+        return std::nullopt;
+    if (const std::optional<double> all = length(value); all.has_value())
+        return CornerRadii::all(*all);
+    if (value->object() == nullptr)
+        return std::nullopt;
+    const auto corner = [&](const std::string_view name, const std::string_view vertical,
+                            const std::string_view horizontal) {
+        for (const std::string_view field : {name, vertical, horizontal, std::string_view("all")}) {
+            if (const std::optional<double> resolved = length(value->field(field));
+                resolved.has_value()) {
+                return *resolved;
+            }
+        }
+        return 0.0;
+    };
+    return CornerRadii{
+        corner("topLeft", "top", "left"),
+        corner("topRight", "top", "right"),
+        corner("bottomRight", "bottom", "right"),
+        corner("bottomLeft", "bottom", "left"),
+    };
 }
 
 void RenderCommandBuffer::make_unique_storage() {

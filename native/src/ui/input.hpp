@@ -78,6 +78,33 @@ struct KeyModifiers final {
 };
 
 enum class PointerEventType { move, press, release, cancel };
+
+/**
+ * The pointer shape a host shows over the surface. The values match the public
+ * `STRATA_POINTER_CURSOR_*` constants.
+ */
+enum class PointerCursor : std::uint8_t {
+    standard,
+    pointer,
+    text,
+    grab,
+    grabbing,
+    move,
+    not_allowed,
+    resize_ew,
+    resize_ns,
+    resize_nesw,
+    resize_nwse,
+    crosshair,
+    wait,
+    progress,
+    help,
+    none,
+};
+
+/** The authored `cursor` style value for a shape, and back. */
+[[nodiscard]] std::string_view pointer_cursor_name(PointerCursor cursor) noexcept;
+[[nodiscard]] std::optional<PointerCursor> pointer_cursor_from_name(std::string_view name) noexcept;
 enum class KeyEventType { press, release, repeat };
 
 struct PointerInputEvent final {
@@ -390,6 +417,17 @@ class InputRouter final {
     /** True only for the focused node while keyboard/spatial focus indication is active. */
     [[nodiscard]] bool focus_visible(std::uint64_t identity) const noexcept;
     [[nodiscard]] bool hovered(std::uint64_t identity) const noexcept;
+    /**
+     * The pointer shape for where the pointer rests: grabbing during a drag; else the nearest
+     * authored `cursor` on the hovered node or an ancestor; else a text beam over an editor, a hand
+     * over a link, and the grab or move shape over drag sources and movable boxes.
+     */
+    [[nodiscard]] PointerCursor cursor() const;
+    /** A press, drag or scrollbar drag is in progress: the user still holds what they move. */
+    [[nodiscard]] bool pointer_held() const noexcept {
+        return !pressed_pointer_targets_.empty() || !drag_sessions_.empty() ||
+               scrollbar_drag_.has_value();
+    }
     /** True after a stationary command-bound hover crosses its one-shot disclosure deadline. */
     [[nodiscard]] bool command_tooltip_ready(std::uint64_t identity) const noexcept;
     [[nodiscard]] bool active(std::uint64_t identity) const noexcept;
@@ -567,6 +605,8 @@ class InputRouter final {
         Rect bounds;
         std::optional<Rect> traversal_clip;
         MotionTransform transform;
+        /** The hit bounds before `transform`, for exact tests against a rotated node. */
+        Rect local_bounds;
     };
     void prepare_pointer_geometry() const;
     void prepare_detached_subtargets() const;
@@ -796,7 +836,19 @@ class InputRouter final {
     AuthoredPresentationInputs authored_presentation_inputs_;
     std::optional<std::uint64_t> active_;
     std::optional<WidgetSubtarget> routed_subtarget_;
+    /** A delayed action waiting for its time, run from the node that scheduled it. */
+    struct PendingDelay final {
+        std::int64_t due_nanos = 0;
+        std::uint64_t node_identity = 0U;
+        runtime::ActionEvent event;
+        std::shared_ptr<const runtime::ActionValue> action;
+    };
+    std::vector<PendingDelay> pending_delays_;
+    void run_due_delays(InputOperationResult& result);
     std::optional<std::pair<std::uint64_t, std::string>> hovered_subtarget_;
+    std::optional<WidgetSubtargetKind> hovered_subtarget_kind_;
+    /** The deepest node of the current hover route. */
+    std::optional<std::uint64_t> hover_target_;
     std::optional<std::uint64_t> hovered_notification_id_;
     std::optional<std::pair<std::uint64_t, std::string>> active_subtarget_;
     std::map<std::int32_t, PointerPress> pressed_pointer_targets_;

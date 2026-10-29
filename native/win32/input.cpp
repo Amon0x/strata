@@ -114,6 +114,31 @@ namespace {
     }
 }
 
+/** The system cursor for one of the `STRATA_POINTER_CURSOR_*` shapes; NONE hides the pointer. */
+[[nodiscard]] HCURSOR system_cursor(const std::uint32_t cursor) noexcept {
+    LPTSTR name = IDC_ARROW;
+    switch (cursor) {
+    case STRATA_POINTER_CURSOR_POINTER: name = IDC_HAND; break;
+    case STRATA_POINTER_CURSOR_TEXT: name = IDC_IBEAM; break;
+    // Windows has no open or closed hand; the size-all arrows are its closest move shape.
+    case STRATA_POINTER_CURSOR_GRAB:
+    case STRATA_POINTER_CURSOR_GRABBING:
+    case STRATA_POINTER_CURSOR_MOVE: name = IDC_SIZEALL; break;
+    case STRATA_POINTER_CURSOR_NOT_ALLOWED: name = IDC_NO; break;
+    case STRATA_POINTER_CURSOR_RESIZE_EW: name = IDC_SIZEWE; break;
+    case STRATA_POINTER_CURSOR_RESIZE_NS: name = IDC_SIZENS; break;
+    case STRATA_POINTER_CURSOR_RESIZE_NESW: name = IDC_SIZENESW; break;
+    case STRATA_POINTER_CURSOR_RESIZE_NWSE: name = IDC_SIZENWSE; break;
+    case STRATA_POINTER_CURSOR_CROSSHAIR: name = IDC_CROSS; break;
+    case STRATA_POINTER_CURSOR_WAIT: name = IDC_WAIT; break;
+    case STRATA_POINTER_CURSOR_PROGRESS: name = IDC_APPSTARTING; break;
+    case STRATA_POINTER_CURSOR_HELP: name = IDC_HELP; break;
+    case STRATA_POINTER_CURSOR_NONE: return nullptr;
+    default: break;
+    }
+    return LoadCursor(nullptr, name);
+}
+
 void enqueue(strata_surface* const surface, const InputEvent& event) {
     const strata_input_event native = event.native();
     strata_surface_input_batch_info info{};
@@ -343,6 +368,15 @@ std::optional<std::intptr_t> InputAdapter::handle(
     const WPARAM word_parameter = static_cast<WPARAM>(raw_word_parameter);
     const LPARAM long_parameter = static_cast<LPARAM>(raw_long_parameter);
     switch (message) {
+    case WM_SETCURSOR: {
+        // Only the client area shows the surface's shape; borders and captions keep theirs.
+        if (LOWORD(long_parameter) != HTCLIENT) return std::nullopt;
+        std::uint32_t cursor = STRATA_POINTER_CURSOR_DEFAULT;
+        if (strata_surface_pointer_cursor(surface, &cursor).status != STRATA_STATUS_OK)
+            return std::nullopt;
+        SetCursor(system_cursor(cursor));
+        return TRUE;
+    }
     case WM_MOUSEMOVE: {
         if (!impl_->tracking_mouse_leave && window != nullptr) {
             TRACKMOUSEEVENT tracking{sizeof(TRACKMOUSEEVENT), TME_LEAVE, window, HOVER_DEFAULT};

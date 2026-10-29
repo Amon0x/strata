@@ -46,6 +46,100 @@ namespace {
     };
 }
 
+/** Which lines a `textDecoration` draws through a run. */
+struct TextDecoration final {
+    bool underline = false;
+    bool line_through = false;
+    std::optional<RenderColor> color;
+    [[nodiscard]] bool any() const noexcept { return underline || line_through; }
+};
+
+[[nodiscard]] TextDecoration text_decoration(const runtime::Value* value,
+                                             const runtime::Value* color) noexcept {
+    TextDecoration result;
+    if (value != nullptr && value->string() != nullptr) {
+        const std::string_view name = *value->string();
+        result.underline = name == "UNDERLINE" || name == "UNDERLINE_LINE_THROUGH";
+        result.line_through = name == "LINE_THROUGH" || name == "UNDERLINE_LINE_THROUGH";
+    }
+    result.color = optional_color(color);
+    return result;
+}
+
+/**
+ * The decoration a rich text span asks for: its own style or field, else the node's. A span
+ * that sets `textDecoration: "NONE"` turns the node's decoration off for itself.
+ */
+[[nodiscard]] TextDecoration span_decoration(const DescriptionNode& description,
+                                             const std::optional<std::size_t> span_index) {
+    const runtime::Value* decoration = text_style_field(description, "textDecoration");
+    const runtime::Value* color = text_style_field(description, "textDecorationColor");
+    const runtime::Value* spans = nullptr;
+    if (const auto found = description.properties.find("spans");
+        found != description.properties.end()) {
+        spans = found->second.value();
+    }
+    if (span_index.has_value() && spans != nullptr && spans->list() != nullptr &&
+        *span_index < spans->list()->values.size()) {
+        const runtime::Value& span = spans->list()->values[*span_index];
+        const runtime::Value* style = span.field("style");
+        const auto span_field = [&span, style](const std::string_view name) {
+            const runtime::Value* styled =
+                style != nullptr && style->object() != nullptr ? style->field(name) : nullptr;
+            return styled != nullptr ? styled : span.field(name);
+        };
+        if (const runtime::Value* own = span_field("textDecoration"); own != nullptr)
+            decoration = own;
+        if (const runtime::Value* own = span_field("textDecorationColor"); own != nullptr)
+            color = own;
+    }
+    return text_decoration(decoration, color);
+}
+
+/**
+ * The underline and line-through rectangles for one run, one per line the run crosses. They sit
+ * a tenth of the pixel size below the baseline and three tenths above it.
+ */
+[[nodiscard]] std::vector<Rect> decoration_lines(const font::ShapedText& shaped,
+                                                 const TextResolvedRun& run, const Point origin,
+                                                 const double x_offset,
+                                                 const TextDecoration& decoration) {
+    std::vector<Rect> result;
+    const double thickness = std::max(1.0, std::round(run.pixel_size / 14.0));
+    std::optional<double> baseline;
+    double start = 0.0;
+    double end = 0.0;
+    const auto flush = [&] {
+        if (!baseline.has_value() || end <= start)
+            return;
+        if (decoration.underline) {
+            result.push_back(Rect{origin.x + start, origin.y + *baseline + run.pixel_size * 0.1,
+                                  end - start, thickness});
+        }
+        if (decoration.line_through) {
+            result.push_back(Rect{origin.x + start,
+                                  origin.y + *baseline - run.pixel_size * 0.3 - thickness * 0.5,
+                                  end - start, thickness});
+        }
+    };
+    for (std::size_t index = run.glyph_start_index; index < run.glyph_end_index; ++index) {
+        const font::ShapedGlyph& glyph = shaped.glyphs[index];
+        const double left = glyph.x + x_offset;
+        const double right = left + glyph.advance;
+        if (!baseline.has_value() || glyph.baseline != *baseline) {
+            flush();
+            baseline = glyph.baseline;
+            start = left;
+            end = right;
+            continue;
+        }
+        start = std::min(start, left);
+        end = std::max(end, right);
+    }
+    flush();
+    return result;
+}
+
 [[nodiscard]] constexpr RenderColor token_color(const runtime::ColorValue& value,
                                            const std::optional<std::uint8_t> alpha = std::nullopt) {
     return RenderColor{value.red, value.green, value.blue, alpha.value_or(value.alpha)};
@@ -114,7 +208,12 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
     result.foreground = widget_color(scope.style("foreground"),
                                      widget_color(scope.style("color"), result.foreground));
     result.border = resolved_border(scope.style("border"), result.border);
-    result.radius = std::max(0.0, value_number(scope.style("radius"), result.radius));
+    if (const std::optional<CornerRadii> corners = corner_radii_value(scope.style("radius"));
+        corners.has_value()) {
+        result.radius = corners->largest();
+        if (*corners != CornerRadii::all(result.radius))
+            result.corner_radii = corners;
+    }
     if (const runtime::Value* value = scope.style("hoverOverlay"); value != nullptr) {
         result.hover_overlay = optional_color(value);
     }
@@ -176,6 +275,7 @@ resolved_border(const runtime::Value* value, const std::optional<RenderBorder>& 
         }
         if (const auto value = motion->number(MotionProperty::radius); value.has_value()) {
             result.radius = *value;
+            result.corner_radii.reset();
         }
         if (const auto value = animated_color(MotionProperty::track); value.has_value())
             result.track = Paint(*value);
@@ -473,6 +573,12 @@ std::optional<std::string_view> WidgetRenderScope::node_text() const noexcept {
     return text != nullptr ? std::optional<std::string_view>(*text) : std::nullopt;
 }
 
+CornerRadii WidgetRenderScope::corners(const std::optional<double> radius) const noexcept {
+    if (visual_.corner_radii.has_value() && (!radius.has_value() || *radius == visual_.radius))
+        return *visual_.corner_radii;
+    return CornerRadii::all(radius.value_or(visual_.radius));
+}
+
 void WidgetRenderScope::rounded_rect(const Rect bounds, Paint fill,
                                      std::optional<RenderBorder> border_value,
                                      const std::optional<double> radius) {
@@ -481,7 +587,7 @@ void WidgetRenderScope::rounded_rect(const Rect bounds, Paint fill,
         border_value->color = widget_opacity(border_value->color, alpha());
     output_.emplace_back(RoundedRectRenderCommand{
         bounds,
-        CornerRadii::all(radius.value_or(visual_.radius)),
+        corners(radius),
         fill,
         border_value,
         1.0,
@@ -494,7 +600,7 @@ void WidgetRenderScope::border(const Rect bounds, RenderBorder border_value,
     output_.emplace_back(BorderRenderCommand{
         bounds,
         border_value,
-        CornerRadii::all(radius.value_or(visual_.radius)),
+        corners(radius),
     });
 }
 
@@ -685,6 +791,16 @@ void WidgetRenderScope::draw_text_layout(const TextLayout& layout_value, const P
                 text_cull_bounds,
             });
         }
+        if (const TextDecoration decoration =
+                span_decoration(node_.description(), resolved_run.authored_span_index);
+            decoration.any()) {
+            const RenderColor line_color =
+                decoration.color.has_value() ? widget_opacity(*decoration.color, alpha()) : color;
+            for (const Rect line :
+                 decoration_lines(shaped, resolved_run, text_origin, x_offset, decoration)) {
+                output_.emplace_back(SolidRectRenderCommand{line, line_color});
+            }
+        }
     }
     if (clipped)
         pop_clip();
@@ -756,6 +872,14 @@ void WidgetRenderScope::rich_text(const Point origin, const RenderColor fallback
                 resolved_run.font_rasterization,
                 text_cull_bounds,
             });
+        }
+        if (const TextDecoration decoration =
+                span_decoration(node_.description(), resolved_run.authored_span_index);
+            decoration.any()) {
+            const RenderColor line_color =
+                decoration.color.has_value() ? widget_opacity(*decoration.color, alpha()) : color;
+            for (const Rect line : decoration_lines(shaped, resolved_run, origin, 0.0, decoration))
+                output_.emplace_back(SolidRectRenderCommand{line, line_color});
         }
     }
 }

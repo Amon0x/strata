@@ -30,6 +30,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{
             .name = "gridRow", .type = declared_type_reference("number"), .nullable = true},
         DeclaredProperty{.name = "height", .type = declared_type_reference("layoutSizeUnion")},
+        DeclaredProperty{.name = "inset", .type = declared_type_reference("spacingUnion")},
         DeclaredProperty{.name = "justifyContent",
                          .type = declared_type_reference("alignContentEnum")},
         DeclaredProperty{.name = "justifySelf",
@@ -53,7 +54,9 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "padding", .type = declared_type_reference("spacingUnion")},
         DeclaredProperty{.name = "placement", .type = declared_type_reference("layerPlacement")},
         DeclaredProperty{.name = "portalTarget", .type = declared_type_reference("string")},
+        DeclaredProperty{.name = "position", .type = declared_type_reference("layoutPosition")},
         DeclaredProperty{.name = "rowSpan", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "scrollSnap", .type = declared_type_reference("scrollSnap")},
         DeclaredProperty{.name = "width", .type = declared_type_reference("layoutSizeUnion")},
         DeclaredProperty{.name = "wrap", .type = declared_type_reference("boolean")},
         DeclaredProperty{.name = "zIndex", .type = declared_type_reference("number")},
@@ -103,6 +106,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "color", .type = declared_type_reference("color")},
         DeclaredProperty{
             .name = "contentEffect", .type = declared_type_reference("effect"), .nullable = true},
+        DeclaredProperty{.name = "cursor", .type = declared_type_reference("pointerCursor")},
         DeclaredProperty{.name = "columnSpan", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "detachFromParentClip",
                          .type = declared_type_reference("boolean")},
@@ -119,7 +123,9 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{
             .name = "focusRing", .type = declared_type_reference("borderStroke"), .nullable = true},
         DeclaredProperty{.name = "font", .type = declared_type_reference("string")},
+        DeclaredProperty{.name = "fontStyle", .type = declared_type_reference("fontStyleName")},
         DeclaredProperty{.name = "fontStyleFlags", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "fontWeight", .type = declared_type_reference("fontWeightUnion")},
         DeclaredProperty{.name = "fontRasterization",
                          .type = declared_type_reference("fontRasterization")},
         DeclaredProperty{.name = "foreground", .type = declared_type_reference("color")},
@@ -129,6 +135,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{
             .name = "gridRow", .type = declared_type_reference("number"), .nullable = true},
         DeclaredProperty{.name = "height", .type = declared_type_reference("layoutSizeUnion")},
+        DeclaredProperty{.name = "inset", .type = declared_type_reference("spacingUnion")},
         DeclaredProperty{.name = "hintColor", .type = declared_type_reference("color")},
         DeclaredProperty{
             .name = "hoverOverlay", .type = declared_type_reference("color"), .nullable = true},
@@ -173,8 +180,10 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "pixelSize", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "placement", .type = declared_type_reference("layerPlacement")},
         DeclaredProperty{.name = "portalTarget", .type = declared_type_reference("string")},
-        DeclaredProperty{.name = "radius", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "position", .type = declared_type_reference("layoutPosition")},
+        DeclaredProperty{.name = "radius", .type = declared_type_reference("radiusUnion")},
         DeclaredProperty{.name = "rowSpan", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "rotate", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "scale", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "scaleX", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "scaleY", .type = declared_type_reference("number")},
@@ -195,7 +204,14 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
             .name = "thumbSize", .type = declared_type_reference("number"), .nullable = true},
         DeclaredProperty{
             .name = "thumbWidth", .type = declared_type_reference("number"), .nullable = true},
+        DeclaredProperty{.name = "textDecoration",
+                         .type = declared_type_reference("textDecoration")},
+        DeclaredProperty{.name = "textDecorationColor",
+                         .type = declared_type_reference("color"),
+                         .nullable = true},
         DeclaredProperty{.name = "tone", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "transformOrigin",
+                         .type = declared_type_reference("normalizedPoint")},
         DeclaredProperty{
             .name = "track", .type = declared_type_reference("paintUnion"), .nullable = true},
         DeclaredProperty{
@@ -245,6 +261,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "thumb", .type = declared_type_reference("color")},
         DeclaredProperty{.name = "thumbRadius", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "thumbSize", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "rotate", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "tone", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "track", .type = declared_type_reference("color")},
         DeclaredProperty{.name = "trackRadius", .type = declared_type_reference("number")},

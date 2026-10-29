@@ -1159,7 +1159,7 @@ void validate_compiled_motion(const CompiledMotion& motion, const bool require_n
         throw std::invalid_argument("theme animation requires tracks");
     std::set<MotionProperty> properties;
     for (const MotionTrack& track : motion.tracks) {
-        if (track.property > MotionProperty::tone) {
+        if (track.property > MotionProperty::rotate) {
             throw std::invalid_argument("theme animation property is invalid");
         }
         if (!properties.insert(track.property).second || track.keyframes.empty()) {
@@ -1475,7 +1475,7 @@ void ThemeAnimationSet::validate() const {
         }
     }
     for (const ThemeMotionValueChannel& channel : value_channels) {
-        if (channel.property > MotionProperty::tone) {
+        if (channel.property > MotionProperty::rotate) {
             throw std::invalid_argument("theme motion value channel property is invalid");
         }
         validate_motion_reference(channel.id, "theme motion value channel id");
@@ -1500,7 +1500,7 @@ void ThemeAnimationSet::validate() const {
         }
         std::set<MotionProperty> properties;
         for (const MotionProperty property : resolved_properties->properties) {
-            if (property > MotionProperty::tone) {
+            if (property > MotionProperty::rotate) {
                 throw std::invalid_argument("theme resolved-property motion property is invalid");
             }
             if (!properties.insert(property).second) {

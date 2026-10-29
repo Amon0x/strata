@@ -44,8 +44,16 @@ struct CornerRadii final {
     double bottom_right = 0.0;
     double bottom_left = 0.0;
     [[nodiscard]] static CornerRadii all(double value) noexcept;
+    [[nodiscard]] double largest() const noexcept;
     [[nodiscard]] friend bool operator==(const CornerRadii&, const CornerRadii&) = default;
 };
+
+/**
+ * An authored `radius`: a number rounds every corner; a map names corners (`topLeft`, `topRight`,
+ * `bottomRight`, `bottomLeft`), sides (`top`, `bottom`, `left`, `right`) or `all`, most specific
+ * first. Negative and non-finite values are zero; anything else is not a radius.
+ */
+[[nodiscard]] std::optional<CornerRadii> corner_radii_value(const runtime::Value* value) noexcept;
 
 struct RenderBorder final {
     double width = 0.0;
@@ -370,7 +378,7 @@ struct GroupPopRenderCommand final {
 };
 /** Stable 1-based group indices; zero means "no group" (identity). */
 inline constexpr std::uint32_t maximum_render_groups = 511U;
-/** A group's axis-aligned transform and opacity relative to its parent group. */
+/** A group's affine transform and opacity relative to its parent group. */
 struct RenderGroup final {
     std::uint32_t index = 0U;
     std::uint32_t parent = 0U;
@@ -381,6 +389,9 @@ struct RenderGroup final {
     double opacity = 1.0;
     /** The group's tone in [0, 1]; negative inherits the parent group's tone. */
     double tone = -1.0;
+    /** The off-diagonal terms of a rotated group: x' += shear_x * y and y' += shear_y * x. */
+    double shear_x = 0.0;
+    double shear_y = 0.0;
     [[nodiscard]] friend bool operator==(const RenderGroup&, const RenderGroup&) = default;
 };
 

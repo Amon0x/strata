@@ -25,9 +25,34 @@ struct WindowInputState final {
     wchar_t high_surrogate = 0;
 };
 
+/** The system cursor for one of the `STRATA_POINTER_CURSOR_*` shapes; NONE hides the pointer. */
+[[nodiscard]] inline HCURSOR system_cursor(const std::uint32_t cursor) noexcept {
+    LPTSTR name = IDC_ARROW;
+    switch (cursor) {
+    case STRATA_POINTER_CURSOR_POINTER: name = IDC_HAND; break;
+    case STRATA_POINTER_CURSOR_TEXT: name = IDC_IBEAM; break;
+    // Windows has no open or closed hand; the size-all arrows are its closest move shape.
+    case STRATA_POINTER_CURSOR_GRAB:
+    case STRATA_POINTER_CURSOR_GRABBING:
+    case STRATA_POINTER_CURSOR_MOVE: name = IDC_SIZEALL; break;
+    case STRATA_POINTER_CURSOR_NOT_ALLOWED: name = IDC_NO; break;
+    case STRATA_POINTER_CURSOR_RESIZE_EW: name = IDC_SIZEWE; break;
+    case STRATA_POINTER_CURSOR_RESIZE_NS: name = IDC_SIZENS; break;
+    case STRATA_POINTER_CURSOR_RESIZE_NESW: name = IDC_SIZENESW; break;
+    case STRATA_POINTER_CURSOR_RESIZE_NWSE: name = IDC_SIZENWSE; break;
+    case STRATA_POINTER_CURSOR_CROSSHAIR: name = IDC_CROSS; break;
+    case STRATA_POINTER_CURSOR_WAIT: name = IDC_WAIT; break;
+    case STRATA_POINTER_CURSOR_PROGRESS: name = IDC_APPSTARTING; break;
+    case STRATA_POINTER_CURSOR_HELP: name = IDC_HELP; break;
+    case STRATA_POINTER_CURSOR_NONE: return nullptr;
+    default: break;
+    }
+    return LoadCursor(nullptr, name);
+}
+
 /**
  * Translates one window message into Strata input on `sink`, which offers pointer, scroll, key,
- * text, ime_preedit and cancel_interactions. Returns the message result when the message is
+ * text, ime_preedit, cancel_interactions and pointer_cursor (nullopt when no surface shows). Returns the message result when the message is
  * input; nullopt when it is not, or when the system must still see it (a system key other than
  * F10), so the caller passes it on to DefWindowProc. Window management (size, DPI, close) stays
  * with the caller.
@@ -51,6 +76,16 @@ template <typename Sink>
             ReleaseCapture();
     };
     switch (message) {
+    case WM_SETCURSOR: {
+        // Only the client area shows the surface's shape; borders and captions keep their own.
+        if (LOWORD(long_value) != HTCLIENT)
+            return std::nullopt;
+        const std::optional<std::uint32_t> cursor = sink.pointer_cursor();
+        if (!cursor.has_value())
+            return std::nullopt;
+        SetCursor(system_cursor(*cursor));
+        return TRUE;
+    }
     case WM_MOUSEMOVE:
         if (!state.tracking_mouse_leave) {
             TRACKMOUSEEVENT tracking{sizeof(TRACKMOUSEEVENT), TME_LEAVE, window, HOVER_DEFAULT};

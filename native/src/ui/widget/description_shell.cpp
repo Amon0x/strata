@@ -283,6 +283,7 @@ void split_pane_expand(WidgetDescriptionScope& scope) {
             "$layout",
             runtime::ExpressionValue(widget_object({
                 {cross_dimension, widget_object({{"weight", runtime::Value(1.0)}})},
+                {"cursor", runtime::Value(vertical ? "RESIZE_NS" : "RESIZE_EW")},
                 {main_dimension, runtime::Value(divider_size)},
             }))
         },

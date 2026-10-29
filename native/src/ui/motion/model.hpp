@@ -50,6 +50,8 @@ enum class MotionProperty {
     scale_x,
     scale_y,
     tone,
+    /** Degrees clockwise about the transform origin. */
+    rotate,
 };
 
 enum class MotionTrigger {
@@ -156,12 +158,20 @@ struct MotionComputedValues final {
     [[nodiscard]] friend bool operator==(const MotionComputedValues&, const MotionComputedValues&) = default;
 };
 
+/**
+ * A 2D affine presentation transform: x' = scale_x * x + shear_x * y + translate_x and
+ * y' = shear_y * x + scale_y * y + translate_y. The shears are zero unless something rotates.
+ */
 struct MotionTransform final {
     double translate_x = 0.0;
     double translate_y = 0.0;
     double scale_x = 1.0;
     double scale_y = 1.0;
+    double shear_x = 0.0;
+    double shear_y = 0.0;
     [[nodiscard]] bool identity() const noexcept;
+    /** Whether it keeps rectangles axis-aligned: no rotation or skew. */
+    [[nodiscard]] bool axis_aligned() const noexcept { return shear_x == 0.0 && shear_y == 0.0; }
     [[nodiscard]] friend bool operator==(const MotionTransform&, const MotionTransform&) = default;
 };
 

@@ -67,6 +67,37 @@ namespace {
         std::floor(resolved), static_cast<double>(std::numeric_limits<std::uint32_t>::max())));
 }
 
+/**
+ * Applies a named `fontWeight` and `fontStyle` over numeric style flags: a weight of 600 or more
+ * (or SEMIBOLD, BOLD, BLACK) is bold, any lighter weight is not; ITALIC and NORMAL set and clear
+ * italic. Either property left out keeps the flags it is given.
+ */
+[[nodiscard]] std::uint32_t with_named_font_style(std::uint32_t flags,
+                                                  const runtime::Value* weight,
+                                                  const runtime::Value* style) noexcept {
+    std::optional<double> numeric;
+    if (weight != nullptr && weight->number() != nullptr && std::isfinite(*weight->number())) {
+        numeric = *weight->number();
+    } else if (weight != nullptr && weight->string() != nullptr) {
+        const std::string_view name = *weight->string();
+        numeric = name == "THIN"       ? 100.0
+                  : name == "LIGHT"    ? 300.0
+                  : name == "MEDIUM"   ? 500.0
+                  : name == "SEMIBOLD" ? 600.0
+                  : name == "BOLD"     ? 700.0
+                  : name == "BLACK"    ? 900.0
+                                       : 400.0;
+    }
+    if (numeric.has_value()) {
+        flags = *numeric >= 600.0 ? flags | font::font_style_bold : flags & ~font::font_style_bold;
+    }
+    if (style != nullptr && style->string() != nullptr) {
+        flags = *style->string() == "ITALIC" ? flags | font::font_style_italic
+                                             : flags & ~font::font_style_italic;
+    }
+    return flags;
+}
+
 [[nodiscard]] std::string text_option(const DescriptionNode& description,
                                       const std::string_view name, std::string fallback) {
     const runtime::Value* value = style_field(description, name);
@@ -188,25 +219,26 @@ bool TextLayout::shares_storage_with(const TextLayout& other) const noexcept {
 }
 
 bool text_layout_field(const std::string_view name) noexcept {
-    static constexpr std::array<std::string_view, 16U> fields{
+    static constexpr std::array<std::string_view, 18U> fields{
         "text",          "label",          "spans",
         "font",          "fallbackFonts",  "fontSize",
         "pixelSize",     "lineHeight",     "lineHeightMultiplier",
         "letterSpacing", "fontStyleFlags", "fontRasterization",
         "wrapWidth",     "wrapMode",       "overflow",
-        "maxLines",
+        "maxLines",      "fontWeight",     "fontStyle",
     };
     return std::ranges::contains(fields, name) || name == "alignment";
 }
 
 bool text_layout_projection_equal(const runtime::Value* current,
                                   const runtime::Value* next) noexcept {
-    static constexpr std::array<std::string_view, 14U> fields{
+    static constexpr std::array<std::string_view, 16U> fields{
         "font",          "fallbackFonts",  "fontSize",
         "pixelSize",     "lineHeight",     "lineHeightMultiplier",
         "letterSpacing", "fontStyleFlags", "fontRasterization",
         "wrapWidth",     "wrapMode",       "overflow",
-        "maxLines",      "alignment",
+        "maxLines",      "alignment",      "fontWeight",
+        "fontStyle",
     };
     for (const std::string_view field : fields) {
         const runtime::Value* left = object_field(current, field);
@@ -346,7 +378,14 @@ double TextEngine::pixel_size(const RetainedNode& node) const noexcept {
 }
 
 std::uint32_t TextEngine::font_style_flags(const RetainedNode& node) const noexcept {
-    return unsigned_flags(style_field(node.description(), "fontStyleFlags"));
+    return with_named_font_style(unsigned_flags(style_field(node.description(), "fontStyleFlags")),
+                                 style_field(node.description(), "fontWeight"),
+                                 style_field(node.description(), "fontStyle"));
+}
+
+const runtime::Value* text_style_field(const DescriptionNode& description,
+                                       const std::string_view name) noexcept {
+    return style_field(description, name);
 }
 
 FontRasterization TextEngine::font_rasterization(const RetainedNode& node) const noexcept {
@@ -487,7 +526,9 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
             std::max(0.001,
                      number(run_field("lineHeightMultiplier"), result.line_height_multiplier)),
             number(run_field("letterSpacing"), result.letter_spacing),
-            unsigned_flags(run_field("fontStyleFlags"), result.font_style_flags),
+            with_named_font_style(
+                unsigned_flags(run_field("fontStyleFlags"), result.font_style_flags),
+                run_field("fontWeight"), run_field("fontStyle")),
             font_rasterization_value(run_field("fontRasterization"), result.font_rasterization),
             packed_color(run_field("color")),
             interactive,

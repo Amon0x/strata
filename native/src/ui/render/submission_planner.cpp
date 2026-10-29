@@ -559,7 +559,10 @@ class Planner final {
                     std::max(0.0, value.radii.bottom_right),
                     std::max(0.0, value.radii.bottom_left),
                 };
-                const bool has_rounded_geometry = rounded(safe_radii) && !clip_.empty();
+                // A rotated rectangle is not its scissor box: it clips through the same
+                // per-pixel mask a rounded corner does, with square corners.
+                const bool has_rounded_geometry =
+                    (rounded(safe_radii) || !transform_.axis_aligned()) && !clip_.empty();
                 rounded_clip_stack_.push_back(has_rounded_geometry);
                 if (has_rounded_geometry) {
                     if (active_rounded_clips_.size() == maximum_rounded_clip_depth) {
@@ -869,6 +872,10 @@ std::optional<Transform> Transform::inverse() const noexcept {
     result.m02 = -(result.m00 * m02 + result.m01 * m12);
     result.m12 = -(result.m10 * m02 + result.m11 * m12);
     return result;
+}
+
+bool Transform::axis_aligned() const noexcept {
+    return std::abs(m01) <= transform_epsilon && std::abs(m10) <= transform_epsilon;
 }
 
 bool Transform::axis_aligned_translation() const noexcept {

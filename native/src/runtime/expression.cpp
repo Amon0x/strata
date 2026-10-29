@@ -59,6 +59,31 @@ constexpr std::size_t maximum_derived_items = 100'000U;
     return units;
 }
 
+/** The byte where a UTF-16 unit offset falls, clamped to the string; never inside a sequence. */
+[[nodiscard]] std::size_t utf8_offset(const std::string_view value, const std::size_t units) noexcept {
+    std::size_t counted = 0U;
+    std::size_t index = 0U;
+    while (index < value.size() && counted < units) {
+        const auto lead = static_cast<unsigned char>(value[index]);
+        const std::size_t width = lead < 0x80U                ? 1U
+                                  : (lead & 0xE0U) == 0xC0U ? 2U
+                                  : (lead & 0xF0U) == 0xE0U ? 3U
+                                                            : 4U;
+        index = std::min(value.size(), index + width);
+        counted += width == 4U ? 2U : 1U;
+    }
+    return index;
+}
+
+/** A `slice` bound: a negative value counts back from `size`; the result is clamped to it. */
+[[nodiscard]] std::size_t slice_bound(const double bound, const std::size_t size) noexcept {
+    if (!std::isfinite(bound))
+        return bound > 0.0 ? size : 0U;
+    const double resolved =
+        bound < 0.0 ? static_cast<double>(size) + std::trunc(bound) : std::trunc(bound);
+    return static_cast<std::size_t>(std::clamp(resolved, 0.0, static_cast<double>(size)));
+}
+
 [[nodiscard]] std::uint8_t color_channel(const Value& value) noexcept {
     const double numeric = value.number() != nullptr ? *value.number() : 0.0;
     const double scaled = numeric <= 1.0 ? numeric * 255.0 : numeric;
@@ -129,6 +154,16 @@ struct Names final {
     Symbol precision = Symbol::intern("precision");
     Symbol separator = Symbol::intern("separator");
     Symbol needle = Symbol::intern("needle");
+    Symbol search = Symbol::intern("search");
+    Symbol replacement = Symbol::intern("replacement");
+    Symbol start = Symbol::intern("start");
+    Symbol end = Symbol::intern("end");
+    Symbol step = Symbol::intern("step");
+    Symbol fill = Symbol::intern("fill");
+    Symbol base = Symbol::intern("base");
+    Symbol exponent = Symbol::intern("exponent");
+    Symbol after = Symbol::intern("after");
+    Symbol action = Symbol::intern("action");
     Symbol prefix = Symbol::intern("prefix");
     Symbol suffix = Symbol::intern("suffix");
     Symbol red = Symbol::intern("red");
@@ -1505,6 +1540,234 @@ ExpressionValue ExpressionRuntime::evaluate_helper(const Program& program,
         }
         properties.emplace_back("$bases", Value(std::move(bases)));
         return ExpressionValue(Value(std::move(properties)));
+    }
+    case HelperKind::split: {
+        const std::string value =
+            display_string(argument_value(program, node, scope, known.value, 0U, reads));
+        const std::string separator =
+            display_string(argument_value(program, node, scope, known.separator, 1U, reads));
+        std::vector<Value> parts;
+        if (separator.empty()) {
+            // An empty separator splits into characters, as most string libraries do.
+            for (std::size_t index = 0U; index < value.size();) {
+                const std::size_t width =
+                    std::max<std::size_t>(utf8_offset(std::string_view(value).substr(index), 1U), 1U);
+                parts.emplace_back(value.substr(index, width));
+                index += width;
+            }
+            return ExpressionValue(Value(std::move(parts)));
+        }
+        std::size_t begin = 0U;
+        for (std::size_t found = value.find(separator); found != std::string::npos;
+             found = value.find(separator, begin)) {
+            parts.emplace_back(value.substr(begin, found - begin));
+            begin = found + separator.size();
+        }
+        parts.emplace_back(value.substr(begin));
+        return ExpressionValue(Value(std::move(parts)));
+    }
+    case HelperKind::replace: {
+        std::string value =
+            display_string(argument_value(program, node, scope, known.value, 0U, reads));
+        const std::string search =
+            display_string(argument_value(program, node, scope, known.search, 1U, reads));
+        const std::string replacement =
+            display_string(argument_value(program, node, scope, known.replacement, 2U, reads));
+        if (search.empty())
+            return ExpressionValue(Value(std::move(value)));
+        std::string result;
+        std::size_t begin = 0U;
+        for (std::size_t found = value.find(search); found != std::string::npos;
+             found = value.find(search, begin)) {
+            result.append(value, begin, found - begin);
+            result += replacement;
+            begin = found + search.size();
+        }
+        result.append(value, begin);
+        return ExpressionValue(Value(std::move(result)));
+    }
+    case HelperKind::slice: {
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
+        const Value start_value = argument_value(program, node, scope, known.start, 1U, reads);
+        const Value end_value = argument_value(program, node, scope, known.end, 2U, reads);
+        const double start = start_value.number() != nullptr ? *start_value.number() : 0.0;
+        if (const ValueList* list = value.list(); list != nullptr) {
+            const std::size_t size = list->values.size();
+            const std::size_t from = slice_bound(start, size);
+            const std::size_t to =
+                end_value.number() != nullptr ? slice_bound(*end_value.number(), size) : size;
+            return ExpressionValue(Value(std::vector<Value>(
+                list->values.begin() + static_cast<std::ptrdiff_t>(from),
+                list->values.begin() + static_cast<std::ptrdiff_t>(std::max(from, to)))));
+        }
+        const std::string text = display_string(value);
+        const std::size_t size = utf16_length(text);
+        const std::size_t from = slice_bound(start, size);
+        const std::size_t to =
+            end_value.number() != nullptr ? slice_bound(*end_value.number(), size) : size;
+        const std::size_t byte_from = utf8_offset(text, from);
+        const std::size_t byte_to = utf8_offset(text, std::max(from, to));
+        return ExpressionValue(Value(text.substr(byte_from, byte_to - byte_from)));
+    }
+    case HelperKind::index_of: {
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
+        const Value needle = argument_value(program, node, scope, known.needle, 1U, reads);
+        if (const ValueList* list = value.list(); list != nullptr) {
+            const auto found = std::ranges::find(list->values, needle);
+            return ExpressionValue(Value(found == list->values.end()
+                                             ? -1.0
+                                             : static_cast<double>(found - list->values.begin())));
+        }
+        const std::string text = display_string(value);
+        const std::size_t found = text.find(display_string(needle));
+        return ExpressionValue(Value(
+            found == std::string::npos
+                ? -1.0
+                : static_cast<double>(utf16_length(std::string_view(text).substr(0U, found)))));
+    }
+    case HelperKind::pad_start:
+    case HelperKind::pad_end: {
+        std::string value =
+            display_string(argument_value(program, node, scope, known.value, 0U, reads));
+        const Value length_value = argument_value(program, node, scope, known.length, 1U, reads);
+        const Value fill_value = argument_value(program, node, scope, known.fill, 2U, reads);
+        const std::string fill =
+            fill_value.kind() == ValueKind::null_value ? " " : display_string(fill_value);
+        const double target = length_value.number() != nullptr ? *length_value.number() : 0.0;
+        // A bounded pad: a runaway target would otherwise allocate without limit.
+        const std::size_t width = static_cast<std::size_t>(
+            std::clamp(std::isfinite(target) ? target : 0.0, 0.0, 4096.0));
+        std::size_t current = utf16_length(value);
+        const std::size_t fill_units = utf16_length(fill);
+        if (fill_units == 0U || current >= width)
+            return ExpressionValue(Value(std::move(value)));
+        std::string padding;
+        while (current + fill_units <= width) {
+            padding += fill;
+            current += fill_units;
+        }
+        if (current < width)
+            padding += fill.substr(0U, utf8_offset(fill, width - current));
+        return ExpressionValue(
+            Value(node.helper == HelperKind::pad_start ? padding + value : value + padding));
+    }
+    case HelperKind::first:
+    case HelperKind::last:
+    case HelperKind::reverse:
+    case HelperKind::sum:
+    case HelperKind::find: {
+        const ProgramArgument* source_argument = argument(program, node, known.source, 0U);
+        const ExpressionValue source =
+            source_argument != nullptr
+                ? evaluate_node(program, source_argument->value, scope, reads)
+                : ExpressionValue{};
+        const ValueList* items = collection_items(source);
+        if (items == nullptr) {
+            report(node, scope, "STRATA.DSL.RUNTIME_COLLECTION_SOURCE",
+                   "This helper requires a list or derived view.");
+            if (node.helper == HelperKind::sum)
+                return ExpressionValue(Value(0.0));
+            if (node.helper == HelperKind::reverse)
+                return ExpressionValue(Value(std::vector<Value>{}));
+            return ExpressionValue(Value{});
+        }
+        if (node.helper == HelperKind::first || node.helper == HelperKind::last) {
+            if (items->values.empty())
+                return ExpressionValue(Value{});
+            return ExpressionValue(node.helper == HelperKind::first ? items->values.front()
+                                                                    : items->values.back());
+        }
+        if (node.helper == HelperKind::reverse) {
+            return ExpressionValue(
+                Value(std::vector<Value>(items->values.rbegin(), items->values.rend())));
+        }
+        const Symbol function_name =
+            node.helper == HelperKind::sum ? known.selector : known.predicate;
+        const ProgramArgument* function_argument = argument(program, node, function_name, 1U);
+        const ExpressionValue function_value =
+            function_argument != nullptr
+                ? evaluate_node(program, function_argument->value, scope, reads)
+                : ExpressionValue{};
+        const auto* function = function_value.lambda();
+        if (node.helper == HelperKind::find) {
+            for (const Value& item : items->values) {
+                if (function != nullptr && truthy(evaluate_lambda(**function, item, reads)))
+                    return ExpressionValue(item);
+            }
+            return ExpressionValue(Value{});
+        }
+        double total = 0.0;
+        for (const Value& item : items->values) {
+            const Value selected =
+                function != nullptr ? evaluate_lambda(**function, item, reads) : item;
+            if (selected.number() != nullptr && std::isfinite(*selected.number()))
+                total += *selected.number();
+        }
+        return ExpressionValue(Value(total));
+    }
+    case HelperKind::range: {
+        const Value start_value = argument_value(program, node, scope, known.start, 0U, reads);
+        const Value end_value = argument_value(program, node, scope, known.end, 1U, reads);
+        const Value step_value = argument_value(program, node, scope, known.step, 2U, reads);
+        const double start = start_value.number() != nullptr ? *start_value.number() : 0.0;
+        const double end = end_value.number() != nullptr ? *end_value.number() : 0.0;
+        const double step = step_value.number() != nullptr ? *step_value.number()
+                            : end >= start                 ? 1.0
+                                                           : -1.0;
+        std::vector<Value> values;
+        if (step == 0.0) {
+            report(node, scope, "STRATA.DSL.RUNTIME_INVALID_RANGE", "range step is zero.");
+            return ExpressionValue(Value(std::move(values)));
+        }
+        if (!std::isfinite(start) || !std::isfinite(end) || !std::isfinite(step) ||
+            (step > 0.0) != (end >= start)) {
+            return ExpressionValue(Value(std::move(values)));
+        }
+        // Ranges are bounded like every eager loop, so a typo cannot allocate without limit.
+        constexpr std::size_t maximum = 10'000U;
+        for (std::size_t index = 0U;; ++index) {
+            const double current = start + step * static_cast<double>(index);
+            if (step > 0.0 ? current >= end : current <= end)
+                break;
+            if (values.size() == maximum) {
+                report(node, scope, "STRATA.DSL.RUNTIME_INVALID_RANGE",
+                       "range produced more than 10000 values.");
+                break;
+            }
+            values.emplace_back(current);
+        }
+        return ExpressionValue(Value(std::move(values)));
+    }
+    case HelperKind::sqrt: {
+        const Value value = argument_value(program, node, scope, known.value, 0U, reads);
+        const double number = value.number() != nullptr ? *value.number() : 0.0;
+        return ExpressionValue(Value(number >= 0.0 ? std::sqrt(number) : 0.0));
+    }
+    case HelperKind::pow: {
+        const Value base = argument_value(program, node, scope, known.base, 0U, reads);
+        const Value exponent = argument_value(program, node, scope, known.exponent, 1U, reads);
+        const double result = std::pow(base.number() != nullptr ? *base.number() : 0.0,
+                                       exponent.number() != nullptr ? *exponent.number() : 1.0);
+        return ExpressionValue(Value(std::isfinite(result) ? result : 0.0));
+    }
+    case HelperKind::delay: {
+        const Value after = argument_value(program, node, scope, known.after, 0U, reads);
+        const ProgramArgument* step_argument = argument(program, node, known.action, 1U);
+        const ExpressionValue step =
+            step_argument != nullptr ? evaluate_node(program, step_argument->value, scope, reads)
+                                     : ExpressionValue{};
+        const auto contract = actions_.contract("action.delay");
+        if (step.action() == nullptr || after.duration() == nullptr || contract == nullptr) {
+            report(node, scope, "STRATA.DSL.RUNTIME_ACTION_COMPOSITION",
+                   "delay requires a duration and a typed action.");
+            return ExpressionValue(std::make_shared<const ActionValue>(ActionValue{}));
+        }
+        auto action = std::make_shared<const Action>(
+            contract, Value(std::vector<std::pair<std::string, Value>>{}),
+            action_origin(program, node, scope));
+        ActionValue delayed{std::move(action), ActionCompositionMode::delay, {*step.action()}};
+        delayed.delay_nanoseconds = std::max<std::int64_t>(0, after.duration()->nanoseconds);
+        return ExpressionValue(std::make_shared<const ActionValue>(std::move(delayed)));
     }
     case HelperKind::when_style: {
         const Value condition = argument_value(program, node, scope, known.condition, 0U, reads);

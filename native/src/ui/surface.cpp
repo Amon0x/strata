@@ -524,6 +524,7 @@ Surface::Surface(std::string id, runtime::ApplicationContext& application,
                   const auto animation = scroll_animations_.find(key);
                   if (animation != scroll_animations_.end())
                       scroll_animations_.erase(animation);
+                  pending_scroll_snaps_.insert_or_assign(std::string(key), frame_started_nanos_);
               }
           },
           [this] { invalidate_frame(); }),
@@ -751,6 +752,68 @@ void Surface::advance_scroll_animations(const std::int64_t frame_time_nanos) {
             ++animation;
     }
     append_input(pending_lifecycle_input_, std::move(result));
+}
+
+void Surface::settle_scroll_snaps(const std::int64_t frame_time_nanos) {
+    // Wheels and trackpads deliver a burst of small steps; snapping waits until they stop.
+    constexpr std::int64_t quiet_nanos = 120'000'000;
+    for (auto pending = pending_scroll_snaps_.begin(); pending != pending_scroll_snaps_.end();) {
+        const RetainedNode* node = tree_.find_key(pending->first);
+        const LayoutRecord* record =
+            node != nullptr ? layout_engine_.result().find(node->identity()) : nullptr;
+        const ScrollSnap snap =
+            node != nullptr ? layout_style(node->description()).scroll_snap : ScrollSnap::none;
+        if (record == nullptr || snap == ScrollSnap::none) {
+            pending = pending_scroll_snaps_.erase(pending);
+            continue;
+        }
+        if (frame_time_nanos - pending->second < quiet_nanos || input_.pointer_held()) {
+            ++pending;
+            continue;
+        }
+        // Snap points are the scroll's children, or the children of its one content box.
+        const RetainedNode* content = node;
+        if (node->children().size() == 1U)
+            content = node->children().front().get();
+        const Point offset = record->scroll_offset;
+        const Rect viewport = record->content_bounds;
+        std::optional<Point> best;
+        double best_distance = std::numeric_limits<double>::infinity();
+        for (const auto& child : content->children()) {
+            const LayoutRecord* child_record = layout_engine_.result().find(child->identity());
+            if (child_record == nullptr || child->lifecycle() != RetainedLifecycle::attached)
+                continue;
+            // The child's place in the scrolled content, independent of the current offset.
+            const double x = child_record->bounds.x - viewport.x + offset.x;
+            const double y = child_record->bounds.y - viewport.y + offset.y;
+            const auto aligned = [snap](const double start, const double extent,
+                                        const double view) {
+                return snap == ScrollSnap::start    ? start
+                       : snap == ScrollSnap::center ? start + extent * 0.5 - view * 0.5
+                                                    : start + extent - view;
+            };
+            const Point candidate{
+                record->scroll_horizontal
+                    ? aligned(x, child_record->bounds.width, viewport.width)
+                    : offset.x,
+                record->scroll_vertical
+                    ? aligned(y, child_record->bounds.height, viewport.height)
+                    : offset.y,
+            };
+            const double distance =
+                std::hypot(candidate.x - offset.x, candidate.y - offset.y);
+            if (distance < best_distance) {
+                best_distance = distance;
+                best = candidate;
+            }
+        }
+        const std::string key = pending->first;
+        pending = pending_scroll_snaps_.erase(pending);
+        if (best.has_value() && best_distance > 0.5) {
+            static_cast<void>(animate_scroll_to(ScrollAnimationRequest{
+                key, best->x, best->y, std::string(default_motion_timing_name), 220'000'000}));
+        }
+    }
 }
 
 void Surface::retain_scroll_animations() {
@@ -1443,7 +1506,8 @@ FrameDirtyModel Surface::observe_dirty(const std::int64_t frame_time_nanos, cons
         .layout =
             layout_engine_.requires_layout(tree_, environment_.layout_environment(frame_time_nanos)),
         .motion = motion_.active_count() != 0U,
-        .animation = !scroll_animations_.empty() || layout_engine_.active_transition_count() != 0U,
+        .animation = !scroll_animations_.empty() || !pending_scroll_snaps_.empty() ||
+                     layout_engine_.active_transition_count() != 0U,
         .input = input_.requires_frame_advance(),
         .lifecycle_input = pending_lifecycle,
         .services = application_.services().has_pending_frame_work(),
@@ -1620,6 +1684,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
         throw std::overflow_error("surface frame index exhausted");
     }
     pending_lazy_materializations_.clear();
+    frame_started_nanos_ = frame_time_nanos;
     auto profiler_frame = profiler_.frame(last_frame_.frame_index + 1U);
     status_feedback_.advance_frame(frame_time_nanos);
     notifications_.advance_frame(frame_time_nanos);
@@ -1733,6 +1798,7 @@ SurfaceFrame Surface::frame(const std::int64_t frame_time_nanos) {
 
     // Build: re-describe when the description is stale, then bring input onto the tree.
     advance_scroll_animations(frame_time_nanos);
+    settle_scroll_snaps(frame_time_nanos);
     motion_.bind(application_.active_unit());
     {
         frame_phases_.push_back(FramePhase::build);

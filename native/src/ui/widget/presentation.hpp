@@ -27,6 +27,8 @@ struct WidgetVisualStyle final {
     RenderColor foreground{232U, 235U, 239U, 255U};
     std::optional<RenderBorder> border;
     double radius = 0.0;
+    /** Per-corner radii when `radius` names corners; `radius` is then their largest. */
+    std::optional<CornerRadii> corner_radii;
     std::optional<RenderColor> hover_overlay{RenderColor{255U, 255U, 255U, 18U}};
     std::optional<RenderColor> active_overlay{RenderColor{0U, 0U, 0U, 32U}};
     std::optional<RenderBorder> focus_ring{RenderBorder{
@@ -78,6 +80,11 @@ class WidgetRenderScope final {
     [[nodiscard]] const TextEngine* text_engine() const noexcept;
     [[nodiscard]] const MotionComputedValues* motion_values() const noexcept;
     [[nodiscard]] const WidgetVisualStyle& visual() const noexcept;
+    /**
+     * The corners a drawing of the widget's own shape rounds: its authored per-corner radii when
+     * asked for its own radius (no radius, or exactly `visual().radius`), else `radius` everywhere.
+     */
+    [[nodiscard]] CornerRadii corners(std::optional<double> radius = std::nullopt) const noexcept;
     /**
      * A named presentation color from the node's effective theme (see theme_palette_tokens);
      * an unthemed node gets the default theme's. `alpha` replaces the token's own alpha.

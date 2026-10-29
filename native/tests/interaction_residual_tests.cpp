@@ -24,6 +24,7 @@
 #include "ui/notification.hpp"
 #include "ui/semantics.hpp"
 #include "ui/status.hpp"
+#include "font/opentype.hpp"
 #include "ui/surface.hpp"
 #include "ui/text.hpp"
 #include "ui/text_geometry.hpp"
@@ -2820,6 +2821,315 @@ overlay HoverScroll {
           "a popup opened under a still pointer did not take its hover");
 }
 
+void test_pointer_cursor_follows_what_is_hovered(const std::filesystem::path& resources) {
+    const std::string source = R"(
+style Crosshair { cursor: "CROSSHAIR"; }
+overlay Cursors {
+  root Panel(key: "cursor.root", layout: { kind: "COLUMN", width: 300, height: 300 }) {
+    TextBox(key: "cursor.edit", text: "hello", layout: { width: 200, height: 30 })
+    Panel(key: "cursor.custom", style: Crosshair, layout: { kind: "COLUMN", width: 200, height: 60 }) {
+      Panel(key: "cursor.inner", layout: { width: 200, height: 30 })
+    }
+    Panel(key: "cursor.plain", layout: { width: 200, height: 30 })
+    SplitPane(key: "cursor.split", layout: { width: 200, height: 60 }) {
+      Panel(key: "cursor.split.a")
+      Panel(key: "cursor.split.b")
+    }
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("pointer-cursors", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Cursors", 300.0, 300.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const auto cursor_over = [&](const std::string_view key) {
+        const ui::RetainedNode* node = surface->tree().find_key(key);
+        check(node != nullptr, "pointer cursor fixture is missing a node");
+        std::vector<ui::SurfaceInputEvent> events;
+        events.emplace_back(ui::PointerInputEvent{
+            center(surface->layout().find(node->identity())->bounds), ui::PointerEventType::move,
+            4, 0});
+        static_cast<void>(surface->input().enqueue(std::move(events)));
+        static_cast<void>(surface->frame(now += 16'000'000));
+        return surface->input().cursor();
+    };
+    check(cursor_over("cursor.edit") == ui::PointerCursor::text,
+          "an editable text box did not show the text cursor");
+    check(cursor_over("cursor.inner") == ui::PointerCursor::crosshair,
+          "a child did not inherit its ancestor's authored cursor");
+    check(cursor_over("cursor.plain") == ui::PointerCursor::standard,
+          "a plain panel did not show the default cursor");
+    check(cursor_over("cursor.split.divider") == ui::PointerCursor::resize_ew,
+          "a horizontal split divider did not show the east-west resize cursor");
+    check(ui::pointer_cursor_from_name(ui::pointer_cursor_name(ui::PointerCursor::resize_nwse)) ==
+              ui::PointerCursor::resize_nwse,
+          "pointer cursor names do not round-trip");
+}
+
+void test_text_decoration_and_named_weight(const std::filesystem::path& resources) {
+    const std::string source = R"(
+style Strong { fontWeight: "BOLD"; fontStyle: "ITALIC"; textDecoration: "UNDERLINE"; textDecorationColor: #FF0000FF; }
+overlay Decorated {
+  root Panel(key: "decor.root", layout: { kind: "COLUMN", width: 300, height: 120 }) {
+    Text(key: "decor.strong", text: "Strong words", style: Strong)
+    Text(key: "decor.plain", text: "Plain words")
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("text-decoration", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Decorated", 300.0, 120.0);
+    static_cast<void>(surface->frame(1'000'000));
+    std::size_t red_lines = 0U;
+    std::uint32_t strong_flags = 0U;
+    for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+        if (const auto* rect = std::get_if<ui::SolidRectRenderCommand>(&command)) {
+            const runtime::ColorValue* color = rect->fill.color();
+            if (color != nullptr && color->red == 255U && color->green == 0U &&
+                color->blue == 0U && rect->bounds.width > 20.0 && rect->bounds.height <= 2.0) {
+                ++red_lines;
+            }
+        }
+        if (const auto* run = std::get_if<ui::TextRunRenderCommand>(&command);
+            run != nullptr && !run->glyphs.empty() && strong_flags == 0U) {
+            strong_flags = run->glyphs.front().font_style_flags;
+        }
+    }
+    check(red_lines == 1U, "an underlined text did not draw exactly one underline in its color");
+    check(strong_flags == (font::font_style_bold | font::font_style_italic),
+          "named BOLD weight and ITALIC style did not resolve to bold italic glyphs");
+}
+
+void test_per_corner_radius_rounds_each_corner(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Corners {
+  root Panel(key: "corners.root", layout: { kind: "COLUMN", width: 300, height: 120 }) {
+    Panel(key: "corners.tab", style: style(radius: { top: 12, bottomRight: 4 }, background: #336699FF, clip: true), layout: { width: 120, height: 40 }) {
+      Panel(key: "corners.inner", style: style(background: #FFFFFFFF), layout: { width: 120, height: 40 })
+    }
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("per-corner-radius", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Corners", 300.0, 120.0);
+    static_cast<void>(surface->frame(1'000'000));
+    const ui::CornerRadii expected{12.0, 12.0, 4.0, 0.0};
+    bool background = false;
+    bool clip = false;
+    for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+        if (const auto* rect = std::get_if<ui::RoundedRectRenderCommand>(&command);
+            rect != nullptr && rect->fill.color() != nullptr && rect->fill.color()->blue == 0x99U) {
+            background = rect->radii == expected;
+        }
+        if (const auto* pushed = std::get_if<ui::ClipPushRenderCommand>(&command);
+            pushed != nullptr && pushed->radii == expected) {
+            clip = true;
+        }
+    }
+    check(background, "a per-corner radius did not round the background's corners separately");
+    check(clip, "a clipping panel did not clip its children to its per-corner radius");
+}
+
+void test_text_list_and_math_helpers(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Helpers {
+  state names = ["ada", "grace", "linus"];
+  root Panel(key: "helpers.root", layout: { kind: "COLUMN", width: 300, height: 300 }) {
+    Text(key: "helpers.split", text: join(split("a,b,,c", ","), "|"))
+    Text(key: "helpers.replace", text: replace("one two two", "two", "2"))
+    Text(key: "helpers.slice", text: slice("hello world", -5))
+    Text(key: "helpers.index", text: formatNumber(indexOf("hello", "ll"), 0))
+    Text(key: "helpers.pad", text: padStart("7", 3, "0") + padEnd("x", 3, "-"))
+    Text(key: "helpers.first", text: first(names) + ":" + last(names))
+    Text(key: "helpers.reverse", text: join(reverse(names), " "))
+    Text(key: "helpers.sum", text: formatNumber(sum(range(1, 5)), 0) + "/" + formatNumber(sum(names, n -> length(n)), 0))
+    Text(key: "helpers.find", text: find(names, n -> startsWith(n, "g")))
+    Text(key: "helpers.math", text: formatNumber(sqrt(16) + pow(2, 10), 0))
+    Text(key: "helpers.list", text: join(slice(range(0, 10, 3), 1, 3), ","))
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("expression-helpers", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Helpers", 300.0, 300.0);
+    static_cast<void>(surface->frame(1'000'000));
+    const auto text = [&](const std::string_view key) {
+        const ui::RetainedNode* node = surface->tree().find_key(key);
+        check(node != nullptr, "helper fixture is missing a text node");
+        const auto found = node->description().properties.find("text");
+        const runtime::Value* value =
+            found != node->description().properties.end() ? found->second.value() : nullptr;
+        return value != nullptr && value->string() != nullptr ? *value->string() : std::string{};
+    };
+    check(text("helpers.split") == "a|b||c", "split did not keep empty fields between separators");
+    check(text("helpers.replace") == "one 2 2", "replace did not replace every occurrence");
+    check(text("helpers.slice") == "world", "slice did not count a negative start from the end");
+    check(text("helpers.index") == "2", "indexOf did not find a substring");
+    check(text("helpers.pad") == "007x--", "padStart or padEnd did not pad to the width");
+    check(text("helpers.first") == "ada:linus", "first or last did not return an end of a list");
+    check(text("helpers.reverse") == "linus grace ada", "reverse did not reverse a list");
+    check(text("helpers.sum") == "10/13", "sum did not add numbers or selected values");
+    check(text("helpers.find") == "grace", "find did not return the first matching item");
+    check(text("helpers.math") == "1028", "sqrt or pow computed the wrong value");
+    check(text("helpers.list") == "3,6", "range with a step or list slice was wrong");
+}
+
+void test_rotation_draws_and_hits_the_turned_shape(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Rotated {
+  root Panel(key: "rotated.root", layout: { kind: "PANEL", width: 200, height: 200 }) {
+    Panel(key: "rotated.card", style: style(rotate: 45, background: #FF8800FF, clip: true), layout: { width: 100, height: 100, placement: { x: 50, y: 50 } }) {
+      Panel(key: "rotated.inner", style: style(background: #FFFFFFFF), layout: { width: 100, height: 100 })
+    }
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("rotation", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Rotated", 200.0, 200.0);
+    static_cast<void>(surface->frame(1'000'000));
+    bool turned = false;
+    bool clipped_with_turn = false;
+    bool in_transform = false;
+    for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+        if (const auto* push = std::get_if<ui::TransformPushRenderCommand>(&command)) {
+            const double half_root = std::sqrt(0.5);
+            turned = std::abs(push->m00 - half_root) < 1e-9 &&
+                     std::abs(push->m01 + half_root) < 1e-9 &&
+                     std::abs(push->m10 - half_root) < 1e-9;
+            in_transform = true;
+        }
+        if (const auto* clip = std::get_if<ui::ClipPushRenderCommand>(&command);
+            clip != nullptr && in_transform && clip->rect == ui::Rect{50.0, 50.0, 100.0, 100.0}) {
+            // The clip stays in the card's own space so it turns with what it clips.
+            clipped_with_turn = true;
+        }
+    }
+    check(turned, "a 45 degree rotation did not emit a rotating transform");
+    check(clipped_with_turn, "a rotated clip did not stay in the rotated content's space");
+    // The card's corner (52, 52) lies outside the turned square, though inside its box.
+    const ui::RetainedNode* corner = surface->input().inspection_target(ui::Point{52.0, 52.0});
+    check(corner != nullptr && corner->description().key == std::optional<std::string>("rotated.root"),
+          "a point outside a rotated shape but inside its box hit the shape");
+    const ui::RetainedNode* middle = surface->input().inspection_target(ui::Point{100.0, 100.0});
+    check(middle != nullptr &&
+              middle->description().key == std::optional<std::string>("rotated.inner"),
+          "the centre of a rotated shape did not hit it");
+    const ui::RetainedNode* tip = surface->input().inspection_target(ui::Point{100.0, 35.0});
+    check(tip != nullptr && tip->description().key == std::optional<std::string>("rotated.inner"),
+          "a turned corner beyond the layout box did not hit the rotated shape");
+}
+
+void test_delayed_and_clipboard_actions(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Timers {
+  state saved = false;
+  state copied = "";
+  root Panel(key: "timers.root", layout: { kind: "COLUMN", width: 300, height: 120 }) {
+    Button(key: "timers.save", label: "Save",
+      onClick: sequence(action("state.set", name: "saved", value: true),
+                        delay(200ms, action("state.set", name: "saved", value: false)),
+                        action("clipboard.copy", text: "saved at noon")))
+    Text(key: "timers.status", text: saved ? "Saved" : "Idle")
+    TextBox(key: "timers.paste", bind: copied)
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("delayed-actions", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Timers", 300.0, 120.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    const auto status = [&] {
+        const ui::RetainedNode* node = surface->tree().find_key("timers.status");
+        const auto found = node->description().properties.find("text");
+        const runtime::Value* value = found->second.value();
+        return value != nullptr && value->string() != nullptr ? *value->string() : std::string{};
+    };
+    const ui::Point button = center(
+        surface->layout().find(surface->tree().find_key("timers.save")->identity())->bounds);
+    std::vector<ui::SurfaceInputEvent> events;
+    events.emplace_back(ui::PointerInputEvent{button, ui::PointerEventType::press, 4, 0});
+    events.emplace_back(ui::PointerInputEvent{button, ui::PointerEventType::release, 4, 0});
+    static_cast<void>(surface->input().enqueue(std::move(events)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(status() == "Saved", "the immediate step of a sequence with a delay did not run");
+    check(surface->input().requires_frame_advance(),
+          "a pending delayed action did not keep frames advancing");
+    static_cast<void>(surface->frame(now += 100'000'000));
+    check(status() == "Saved", "a delayed action ran before its time");
+    static_cast<void>(surface->frame(now += 120'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(status() == "Idle", "a delayed action did not run once its time passed");
+
+    // The copied text reaches the clipboard a paste reads.
+    const ui::Point field = center(
+        surface->layout().find(surface->tree().find_key("timers.paste")->identity())->bounds);
+    std::vector<ui::SurfaceInputEvent> paste;
+    paste.emplace_back(ui::PointerInputEvent{field, ui::PointerEventType::press, 4, 0});
+    paste.emplace_back(ui::PointerInputEvent{field, ui::PointerEventType::release, 4, 0});
+    paste.emplace_back(ui::KeyInputEvent{"v", ui::KeyModifiers{false, true, false, false}});
+    static_cast<void>(surface->input().enqueue(std::move(paste)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    const ui::RetainedNode* pasted = surface->tree().find_key("timers.paste");
+    const auto pasted_property = pasted->description().properties.find("text");
+    const runtime::Value* pasted_text = pasted_property != pasted->description().properties.end()
+                                            ? pasted_property->second.value()
+                                            : nullptr;
+    check(pasted_text != nullptr && pasted_text->string() != nullptr &&
+              *pasted_text->string() == "saved at noon",
+          "clipboard.copy did not put its text where a paste reads it");
+}
+
+void test_scroll_snaps_to_the_nearest_child(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Snapping {
+  root Panel(key: "snap.root", layout: { kind: "COLUMN", width: 200, height: 200 }) {
+    Scroll(key: "snap.scroll", vertical: true, horizontal: false,
+           layout: { width: 200, height: 100, scrollSnap: "START" }) {
+      Panel(key: "snap.content", layout: { kind: "COLUMN", width: 200 }) {
+        Panel(key: "snap.row.0", layout: { width: 200, height: 40 })
+        Panel(key: "snap.row.1", layout: { width: 200, height: 40 })
+        Panel(key: "snap.row.2", layout: { width: 200, height: 40 })
+        Panel(key: "snap.row.3", layout: { width: 200, height: 40 })
+        Panel(key: "snap.row.4", layout: { width: 200, height: 40 })
+      }
+    }
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("scroll-snap", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Snapping", 200.0, 200.0);
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    ui::InputOperationResult scrolled;
+    check(surface->input().scroll_to("snap.scroll", ui::Point{0.0, 52.0}, scrolled),
+          "snap fixture did not scroll");
+    static_cast<void>(surface->frame(now += 16'000'000));
+    check(surface->input().scroll_offset("snap.scroll")->y == 52.0,
+          "a scroll container snapped while the user was still scrolling");
+    for (int frame = 0; frame < 40; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    check(surface->input().scroll_offset("snap.scroll")->y == 40.0,
+          "a START scroll snap did not settle on the nearest row's top");
+    for (int frame = 0; frame < 4; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    check(surface->active_scroll_animation_count() == 0U,
+          "a settled scroll snap kept animating");
+}
+
 void test_palette_projection_is_cached_across_frames(const std::filesystem::path& resources) {
     std::string commands;
     for (int index = 0; index < 40; ++index) {
@@ -2961,6 +3271,13 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_frame_input_prepares_are_explained(resources);
         test_queued_batch_sees_rebuilt_tree(resources);
         test_hover_follows_content_under_still_pointer(resources);
+        test_pointer_cursor_follows_what_is_hovered(resources);
+        test_text_decoration_and_named_weight(resources);
+        test_per_corner_radius_rounds_each_corner(resources);
+        test_text_list_and_math_helpers(resources);
+        test_rotation_draws_and_hits_the_turned_shape(resources);
+        test_delayed_and_clipboard_actions(resources);
+        test_scroll_snaps_to_the_nearest_child(resources);
         test_palette_projection_is_cached_across_frames(resources);
         test_environment_set_rebuilds_once(resources);
         std::cout << "strata_interaction_residual_tests: OK\n";

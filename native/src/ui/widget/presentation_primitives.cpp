@@ -239,7 +239,7 @@ void menu_overlay(WidgetRenderScope& scope) {
     const Paint background = scope.visual().background.value_or(scope.palette("popupSurface"));
     if (!authored_popup) {
         for (const MenuPanelModel& panel : projection.panels) {
-            scope.shadow(panel.bounds, CornerRadii::all(scope.visual().radius),
+            scope.shadow(panel.bounds, scope.corners(),
                          scope.palette("shadow", std::uint8_t{105U}), 8.0, 1.0);
             scope.rounded_rect(panel.bounds, background, scope.visual().border);
         }

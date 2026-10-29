@@ -47,6 +47,12 @@ class RetainedNode;
     const MotionRuntime* motion
 ) noexcept;
 
+/** A point under a presentation transform. */
+[[nodiscard]] Point transform_presentation_point(Point point,
+                                                 const MotionTransform& transform) noexcept;
+/** The transform that undoes `transform`, or nothing when it collapses an axis. */
+[[nodiscard]] std::optional<MotionTransform>
+inverse_presentation_transform(const MotionTransform& transform) noexcept;
 [[nodiscard]] MotionTransform concatenate_presentation_transform(
     const MotionTransform& parent,
     const MotionTransform& local

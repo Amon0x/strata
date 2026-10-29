@@ -14,8 +14,9 @@ cbuffer FrameData : register(b0) {
 
 /**
  * Presentation groups: `transform` is scale.xy then translate.xy over logical layout space,
- * `opacity.x` multiplies material opacity and `opacity.y` is the group's tone. Entry zero (and
- * every unused entry) is the identity.
+ * `opacity.x` multiplies material opacity, `opacity.y` is the group's tone and `opacity.zw` are
+ * the shears a rotated group adds (x += shear.x * y, y += shear.y * x). Entry zero (and every
+ * unused entry) is the identity.
  */
 struct PresentationGroup {
     float4 transform;
@@ -65,7 +66,8 @@ PixelInput main(VertexInput input) {
     // Whole device pixels keep pixel-snapped glyphs and hairlines crisp while a group moves.
     float2 devicePixels = framebufferSize / max(logicalSize, 1.0);
     float2 translation = round(group.transform.zw * devicePixels) / devicePixels;
-    float2 position = input.position.xy * group.transform.xy + translation;
+    float2 position = input.position.xy * group.transform.xy +
+                      input.position.yx * group.opacity.zw + translation;
     output.position = float4(
         position.x * 2.0 / logicalSize.x - 1.0,
         1.0 - position.y * 2.0 / logicalSize.y,

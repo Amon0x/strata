@@ -552,6 +552,17 @@ void ApplicationHost::cancel_interactions() noexcept {
     }
 }
 
+std::optional<std::uint32_t> ApplicationHost::pointer_cursor() const noexcept {
+    if (!impl_->session.has_value() || !impl_->session->has_surface())
+        return std::nullopt;
+    std::uint32_t cursor = STRATA_POINTER_CURSOR_DEFAULT;
+    if (strata_surface_pointer_cursor(impl_->session->surface().native_handle(), &cursor).status !=
+        STRATA_STATUS_OK) {
+        return std::nullopt;
+    }
+    return cursor;
+}
+
 void ApplicationHost::frame() {
     impl_->frame();
 }

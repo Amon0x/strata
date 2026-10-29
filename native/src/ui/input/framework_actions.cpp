@@ -58,6 +58,17 @@ std::optional<runtime::ActionDispatchOutcome> InputRouter::execute_surface_actio
         focus(*target, "programmatic", result);
         return surface_outcome(runtime::ActionDispatchStatus::handled);
     }
+    if (id == "clipboard.copy") {
+        const std::string* text = string_value(action.payload.field("text"));
+        if (text == nullptr) {
+            return surface_outcome(runtime::ActionDispatchStatus::failed,
+                                   "clipboard.copy requires text.");
+        }
+        return surface_outcome(host_services_->write_clipboard(*text)
+                                   ? runtime::ActionDispatchStatus::handled
+                                   : runtime::ActionDispatchStatus::failed,
+                               std::nullopt);
+    }
     if (id == "focus.clear") {
         if (!focused_.has_value()) return surface_outcome(runtime::ActionDispatchStatus::ignored);
         clear_focus("programmatic", result);

@@ -460,6 +460,10 @@ class Surface final {
         std::optional<std::int64_t> started_nanos;
     };
     std::map<std::string, ScrollAnimation, std::less<>> scroll_animations_;
+    /** Scroll containers the user moved, and when; each snaps once it has been still a while. */
+    std::map<std::string, std::int64_t, std::less<>> pending_scroll_snaps_;
+    std::int64_t frame_started_nanos_ = 0;
+    void settle_scroll_snaps(std::int64_t frame_time_nanos);
     std::optional<std::uint64_t> inspected_identity_;
     std::uint64_t scale_context_generation_ = 0U;
     /** Surface frame index whose temporal motion clocks were sampled; discovery is separate. */

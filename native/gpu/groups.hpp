@@ -12,7 +12,7 @@ static_assert(host::maximum_presentation_group == 511U);
 
 /**
  * The vertex stage's PresentationGroups constant buffer (register b2): per group index, float4
- * scale.xy/translate.xy then float4 opacity/tone/padding. Default-constructed, every entry is the
+ * scale.xy/translate.xy then float4 opacity/tone/shear.xy. Default-constructed, every entry is the
  * identity.
  */
 struct PresentationGroupConstants final {
@@ -32,6 +32,8 @@ struct PresentationGroupConstants final {
             entry[3] = static_cast<float>(group.translate_y);
             entry[4] = static_cast<float>(group.opacity);
             entry[5] = static_cast<float>(group.tone);
+            entry[6] = static_cast<float>(group.shear_x);
+            entry[7] = static_cast<float>(group.shear_y);
         }
         used_ = groups.size();
     }

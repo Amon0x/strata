@@ -67,6 +67,23 @@ enum class LayoutJustify { start, center, end, space_between, space_around, spac
 enum class LayoutAxis { horizontal, vertical };
 enum class LayoutAnchorSide { bottom, top, right, left };
 enum class LayoutAnchorAlign { start, center, end };
+/**
+ * How a child takes its place: in its parent's flow, out of flow against the parent's padding box
+ * (`absolute`), or in flow but held inside the nearest scroll viewport by its insets (`sticky`).
+ */
+enum class LayoutPosition { flow, absolute, sticky };
+/** Where a scroll container settles after the user scrolls: aligned to a child's edge or centre. */
+enum class ScrollSnap { none, start, center, end };
+
+/** Authored distances from the containing box's edges; an absent edge is unconstrained. */
+struct LayoutInset final {
+    std::optional<double> left;
+    std::optional<double> top;
+    std::optional<double> right;
+    std::optional<double> bottom;
+
+    [[nodiscard]] friend bool operator==(const LayoutInset&, const LayoutInset&) = default;
+};
 
 struct LayoutSize final {
     enum class Kind { automatic, content, fixed, percent, fill, clamp };
@@ -131,6 +148,8 @@ struct LayoutStyle final {
     std::optional<LayoutAlign> align_self;
     std::optional<LayoutAlign> justify_self;
     std::optional<LayoutPlacement> placement;
+    LayoutPosition position = LayoutPosition::flow;
+    LayoutInset inset;
     bool wrap = false;
     bool clip = false;
     int z_index = 0;
@@ -142,6 +161,7 @@ struct LayoutStyle final {
     std::size_t row_span = 1U;
     bool scroll_horizontal = false;
     bool scroll_vertical = true;
+    ScrollSnap scroll_snap = ScrollSnap::none;
     Edges scroll_viewport_insets;
     bool scroll_viewport_insets_from_inside_border = false;
     Edges scroll_content_padding;
@@ -274,6 +294,8 @@ struct LayoutRecord final {
     bool pin_horizontal = false;
     bool pin_vertical = false;
     int z_index = 0;
+    /** Absolute and sticky boxes paint and hit above in-flow siblings with the same zIndex. */
+    bool positioned = false;
     std::vector<std::uint64_t> arranged_child_order;
     std::vector<std::size_t> materialized_child_indices;
     std::string portal_target;
@@ -386,10 +408,14 @@ class LayoutEngine final {
         bool content_motion_snapped_by_reduced_motion = false;
         bool subtree_pins_horizontal = false;
         bool subtree_pins_vertical = false;
+        bool subtree_sticky = false;
         bool subtree_portals = false;
         Size content_motion_target_size;
         std::vector<MeasuredNodePtr> children;
-        /** Prefix of children participating in parent flow; portals follow this prefix. */
+        /**
+         * Prefix of children participating in parent flow; anchored, absolute and portal children
+         * follow this prefix.
+         */
         std::size_t flow_child_count = 0U;
         std::optional<LinearLayoutResolution> linear;
         std::optional<GridLayoutResolution> grid;
@@ -408,6 +434,10 @@ class LayoutEngine final {
     struct PinContext final {
         std::optional<double> horizontal_offset;
         std::optional<double> vertical_offset;
+        /** The nearest scroll viewport, which sticky descendants are held inside. */
+        std::optional<Rect> sticky_viewport;
+        /** The arranging parent's content box, which a sticky child never leaves. */
+        std::optional<Rect> sticky_container;
         [[nodiscard]] friend bool operator==(const PinContext&, const PinContext&) = default;
     };
 

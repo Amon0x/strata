@@ -125,9 +125,10 @@ struct DrawBatch final {
 
 /**
  * A presentation group's complete transform, opacity and tone over logical layout space for the
- * current frame. Vertices in the group are placed at position * scale + translate, with the
- * translation rounded to whole framebuffer pixels, and their material opacity is multiplied by
- * `opacity`. `tone` in [0, 1] mirrors the lightness of the group's light, unsaturated vertex
+ * current frame. A vertex at (x, y) in the group is placed at
+ * (scale_x * x + shear_x * y + translate_x, shear_y * x + scale_y * y + translate_y), with the
+ * translation rounded to whole framebuffer pixels; the shears are zero unless the group rotates.
+ * Its material opacity is multiplied by `opacity`. `tone` in [0, 1] mirrors the lightness of the group's light, unsaturated vertex
  * colours toward dark ink (see tone_color); images and shadows are not toned.
  */
 struct PresentationGroup final {
@@ -137,6 +138,16 @@ struct PresentationGroup final {
     double translate_y = 0.0;
     double opacity = 1.0;
     double tone = 0.0;
+    double shear_x = 0.0;
+    double shear_y = 0.0;
+
+    /** Where the group places a point of its content. */
+    [[nodiscard]] constexpr double place_x(const double x, const double y) const noexcept {
+        return scale_x * x + shear_x * y + translate_x;
+    }
+    [[nodiscard]] constexpr double place_y(const double x, const double y) const noexcept {
+        return shear_y * x + scale_y * y + translate_y;
+    }
     [[nodiscard]] friend bool operator==(const PresentationGroup&,
                                          const PresentationGroup&) = default;
 };

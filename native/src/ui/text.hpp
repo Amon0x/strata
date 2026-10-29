@@ -26,6 +26,9 @@ namespace strata::ui {
 /** Compares only text-layout-affecting fields of two style/object values. */
 [[nodiscard]] bool text_layout_projection_equal(const runtime::Value* current,
                                                 const runtime::Value* next) noexcept;
+/** A text property as a node authors it: text style, then style, then the property itself. */
+[[nodiscard]] const runtime::Value* text_style_field(const DescriptionNode& description,
+                                                    std::string_view name) noexcept;
 
 struct TextOperationCounters final {
     std::size_t requests = 0U;

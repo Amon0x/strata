@@ -399,7 +399,7 @@ void command_palette_overlay(WidgetRenderScope& scope) {
         query != nullptr ? std::string_view(*query) : std::string_view{}
     );
     scope.solid_rect(scope.root_bounds(), scope.visual().scrim);
-    scope.shadow(projection.bounds, CornerRadii::all(scope.visual().radius),
+    scope.shadow(projection.bounds, scope.corners(),
                  scope.palette("shadow", std::uint8_t{135U}), 14.0, 2.0);
     scope.rounded_rect(projection.bounds,
                        scope.visual().background.value_or(scope.palette("paletteSurface")),
@@ -534,7 +534,7 @@ void toast_region_overlay(WidgetRenderScope& scope) {
     );
     for (const ToastCardModel& card : projection.cards) {
         const RenderColor accent = scope.palette(toast_accent(card.notification.request.severity));
-        scope.shadow(card.bounds, CornerRadii::all(scope.visual().radius),
+        scope.shadow(card.bounds, scope.corners(),
                      scope.palette("shadow", std::uint8_t{105U}), 9.0, 1.0);
         scope.rounded_rect(card.bounds, scope.visual().background.value_or(scope.visual().track),
                            scope.visual().border, scope.visual().radius);

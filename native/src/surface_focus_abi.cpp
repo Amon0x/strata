@@ -7,6 +7,7 @@
 #include "abi_internal.hpp"
 #include "abi_support.hpp"
 #include "base/utf8.hpp"
+#include "ui/input.hpp"
 
 using strata::abi_detail::AbiCall;
 using strata::abi_detail::EntryGuard;
@@ -14,6 +15,13 @@ using strata::abi_detail::Reentry;
 using strata::abi_detail::surface_call;
 
 namespace {
+
+static_assert(static_cast<uint32_t>(strata::ui::PointerCursor::standard) ==
+              STRATA_POINTER_CURSOR_DEFAULT);
+static_assert(static_cast<uint32_t>(strata::ui::PointerCursor::text) == STRATA_POINTER_CURSOR_TEXT);
+static_assert(static_cast<uint32_t>(strata::ui::PointerCursor::resize_nwse) ==
+              STRATA_POINTER_CURSOR_RESIZE_NWSE);
+static_assert(static_cast<uint32_t>(strata::ui::PointerCursor::none) == STRATA_POINTER_CURSOR_NONE);
 
 [[nodiscard]] strata_result surface_failure(
     const strata_surface& surface,
@@ -73,6 +81,21 @@ strata_result strata_surface_set_focus_containment(
             );
         }
         *out_contained = 1U;
+        return strata::abi_detail::result(STRATA_STATUS_OK);
+    });
+}
+
+strata_result strata_surface_pointer_cursor(
+    strata_surface* const surface,
+    uint32_t* const out_cursor
+) noexcept {
+    const EntryGuard entry(surface, Reentry::allowed);
+    if (entry.refused())
+        return entry.refusal();
+    if (surface == nullptr || out_cursor == nullptr) return strata::abi_detail::invalid_argument();
+    *out_cursor = STRATA_POINTER_CURSOR_DEFAULT;
+    return surface_call(surface, AbiCall{"Pointer cursor"}, [&] {
+        *out_cursor = static_cast<uint32_t>(surface->core.input().cursor());
         return strata::abi_detail::result(STRATA_STATUS_OK);
     });
 }

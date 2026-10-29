@@ -273,12 +273,58 @@ runtime::ActionDispatchOutcome InputRouter::execute_action(
     );
 }
 
+void InputRouter::run_due_delays(InputOperationResult& result) {
+    if (pending_delays_.empty())
+        return;
+    // Steps may schedule further delays, so take the due ones out before running any.
+    std::vector<PendingDelay> due;
+    std::erase_if(pending_delays_, [this, &due](PendingDelay& pending) {
+        if (pending.due_nanos > frame_time_nanos_)
+            return false;
+        due.push_back(std::move(pending));
+        return true;
+    });
+    std::ranges::stable_sort(due, {}, &PendingDelay::due_nanos);
+    for (const PendingDelay& pending : due) {
+        // A step whose node left the tree goes with it, as its activation would have.
+        const RetainedNode* node =
+            tree_ != nullptr ? tree_->find_identity(pending.node_identity) : nullptr;
+        if (node == nullptr)
+            continue;
+        static_cast<void>(execute_action(pending.event, *pending.action, *node, result));
+    }
+}
+
 runtime::ActionDispatchOutcome InputRouter::execute_composition(
     const runtime::ActionEvent& event,
     const runtime::ActionValue& composition,
     const RetainedNode& node,
     InputOperationResult& result
 ) {
+    if (*composition.composition == runtime::ActionCompositionMode::delay) {
+        if (composition.children.size() != 1U || composition.children.front() == nullptr) {
+            return runtime::ActionDispatchOutcome{
+                runtime::ActionDispatchStatus::failed,
+                composition.action->id(),
+                {"strata.surface.declarative"},
+                "A delayed action needs exactly one step.",
+            };
+        }
+        pending_delays_.push_back(PendingDelay{
+            frame_time_nanos_ + composition.delay_nanoseconds,
+            node.identity(),
+            event,
+            composition.children.front(),
+        });
+        if (frame_invalidator_)
+            frame_invalidator_();
+        return runtime::ActionDispatchOutcome{
+            runtime::ActionDispatchStatus::handled,
+            composition.action->id(),
+            {"strata.surface.declarative"},
+            std::nullopt,
+        };
+    }
     application_.undo().begin_group(public_surface_id_);
     std::vector<runtime::ActionDispatchOutcome> outcomes;
     outcomes.reserve(composition.children.size());

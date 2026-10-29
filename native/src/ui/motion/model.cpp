@@ -53,6 +53,7 @@ constexpr std::array property_names{
     PropertyName{MotionProperty::scale_x, "scaleX"},
     PropertyName{MotionProperty::scale_y, "scaleY"},
     PropertyName{MotionProperty::tone, "tone"},
+    PropertyName{MotionProperty::rotate, "rotate"},
 };
 
 [[nodiscard]] std::string normalized(const std::string_view value) {
@@ -151,7 +152,8 @@ bool MotionComputedValues::affects_layout() const noexcept {
 }
 
 bool MotionTransform::identity() const noexcept {
-    return translate_x == 0.0 && translate_y == 0.0 && scale_x == 1.0 && scale_y == 1.0;
+    return translate_x == 0.0 && translate_y == 0.0 && scale_x == 1.0 && scale_y == 1.0 &&
+           shear_x == 0.0 && shear_y == 0.0;
 }
 
 std::optional<MotionProperty> motion_property(const std::string_view name) noexcept {

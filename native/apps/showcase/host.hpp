@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <strata/strata.h>
@@ -77,6 +78,8 @@ public:
     void text(std::string utf8);
     void ime_preedit(std::string utf8, std::size_t selection_start, std::size_t selection_end);
     void cancel_interactions() noexcept;
+    /** The pointer shape the interactive layer asks for; nullopt when no layer is live. */
+    [[nodiscard]] std::optional<std::uint32_t> pointer_cursor() noexcept;
     void frame();
 
     [[nodiscard]] double scale() const noexcept;

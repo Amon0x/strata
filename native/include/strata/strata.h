@@ -1152,6 +1152,7 @@ typedef uint32_t strata_theme_motion_property;
 #define STRATA_THEME_MOTION_PROPERTY_SCALE_X UINT32_C(34)
 #define STRATA_THEME_MOTION_PROPERTY_SCALE_Y UINT32_C(35)
 #define STRATA_THEME_MOTION_PROPERTY_TONE UINT32_C(36)
+#define STRATA_THEME_MOTION_PROPERTY_ROTATE UINT32_C(37)
 
 typedef uint32_t strata_theme_motion_value_kind;
 #define STRATA_THEME_MOTION_VALUE_NUMBER UINT32_C(0)
@@ -1868,7 +1869,9 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_12 UINT32_C(12)
 #define STRATA_RENDER_PACKET_VERSION_13 UINT32_C(13)
 #define STRATA_RENDER_PACKET_VERSION_14 UINT32_C(14)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_14
+/* Version 15 adds each presentation group's two shear terms, so groups can rotate. */
+#define STRATA_RENDER_PACKET_VERSION_15 UINT32_C(15)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_15
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)
@@ -2244,6 +2247,28 @@ STRATA_API strata_result strata_surface_report_backdrop(strata_surface* surface,
 STRATA_API strata_result strata_surface_dispatch_action_json(
     strata_surface* surface, const strata_action_dispatch_config* config,
     strata_action_dispatch_info* out_info) STRATA_NOEXCEPT;
+/* The pointer shape a host shows over the surface where the pointer last rested. It follows the
+ * nearest authored `cursor` style, then editable or selectable text (TEXT), links (POINTER), drag
+ * sources (GRAB) and movable boxes (MOVE); an active drag is GRABBING. Hosts read it after routing
+ * pointer input or framing; a read is allowed from inside callbacks. */
+#define STRATA_POINTER_CURSOR_DEFAULT 0u
+#define STRATA_POINTER_CURSOR_POINTER 1u
+#define STRATA_POINTER_CURSOR_TEXT 2u
+#define STRATA_POINTER_CURSOR_GRAB 3u
+#define STRATA_POINTER_CURSOR_GRABBING 4u
+#define STRATA_POINTER_CURSOR_MOVE 5u
+#define STRATA_POINTER_CURSOR_NOT_ALLOWED 6u
+#define STRATA_POINTER_CURSOR_RESIZE_EW 7u
+#define STRATA_POINTER_CURSOR_RESIZE_NS 8u
+#define STRATA_POINTER_CURSOR_RESIZE_NESW 9u
+#define STRATA_POINTER_CURSOR_RESIZE_NWSE 10u
+#define STRATA_POINTER_CURSOR_CROSSHAIR 11u
+#define STRATA_POINTER_CURSOR_WAIT 12u
+#define STRATA_POINTER_CURSOR_PROGRESS 13u
+#define STRATA_POINTER_CURSOR_HELP 14u
+#define STRATA_POINTER_CURSOR_NONE 15u
+STRATA_API strata_result strata_surface_pointer_cursor(strata_surface* surface,
+                                                       uint32_t* out_cursor) STRATA_NOEXCEPT;
 /* Empty key clears the active focus containment scope. */
 STRATA_API strata_result strata_surface_set_focus_containment(
     strata_surface* surface, strata_string_view key, uint32_t* out_contained) STRATA_NOEXCEPT;

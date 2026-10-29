@@ -43,6 +43,7 @@ InputOperationResult InputRouter::cancel_interactions() {
         hover_route(nullptr);
     } else {
         hovered_.clear();
+        hover_target_.reset();
         hover_started_nanos_.clear();
         matured_command_tooltips_.clear();
     }
@@ -57,6 +58,7 @@ InputOperationResult InputRouter::cancel_interactions() {
         hovered_notification_id_.reset();
     }
     hovered_subtarget_.reset();
+    hovered_subtarget_kind_.reset();
     active_subtarget_.reset();
     synchronized_modal_.reset();
     focus_before_modal_.reset();

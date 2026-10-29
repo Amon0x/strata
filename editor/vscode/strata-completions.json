@@ -107,6 +107,13 @@
     },
     {
       "dispatchPolicy": "framework",
+      "id": "action.delay",
+      "parameters": [],
+      "payloadContract": "strata.action-payload/action.delay@1",
+      "summary": "Execute one UI-local action after a delay"
+    },
+    {
+      "dispatchPolicy": "framework",
       "id": "action.sequence",
       "parameters": [],
       "payloadContract": "strata.action-payload/action.sequence@1",
@@ -181,6 +188,22 @@
       ],
       "payloadContract": "strata.action-payload/async.query@1",
       "summary": "Start a debounced latest-wins asynchronous host query"
+    },
+    {
+      "dispatchPolicy": "framework",
+      "id": "clipboard.copy",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "text",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "payloadContract": "strata.action-payload/clipboard.copy@1",
+      "summary": "Copy text to the host clipboard"
     },
     {
       "dispatchPolicy": "framework",
@@ -1285,6 +1308,11 @@
       "type": "number"
     },
     {
+      "name": "rotate",
+      "nullable": false,
+      "type": "number"
+    },
+    {
       "name": "tone",
       "nullable": false,
       "type": "number"
@@ -1647,6 +1675,31 @@
         }
       ],
       "returnType": "number"
+    },
+    {
+      "capabilities": [
+        "ACTION"
+      ],
+      "name": "delay",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "after",
+          "nullable": false,
+          "required": true,
+          "type": "duration"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "action",
+          "nullable": false,
+          "required": true,
+          "type": "action"
+        }
+      ],
+      "returnType": "action"
     },
     {
       "capabilities": [
@@ -2386,6 +2439,364 @@
     },
     {
       "capabilities": [
+        "TEXT"
+      ],
+      "name": "split",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "separator",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "returnType": "list of string"
+    },
+    {
+      "capabilities": [
+        "TEXT"
+      ],
+      "name": "replace",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "search",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "replacement",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "returnType": "string"
+    },
+    {
+      "capabilities": [
+        "COLLECTION"
+      ],
+      "name": "slice",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "start",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "end",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "returnType": "any"
+    },
+    {
+      "capabilities": [
+        "COLLECTION"
+      ],
+      "name": "indexOf",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "needle",
+          "nullable": false,
+          "required": true,
+          "type": "any"
+        }
+      ],
+      "returnType": "number"
+    },
+    {
+      "capabilities": [
+        "TEXT"
+      ],
+      "name": "padStart",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "length",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "fill",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "returnType": "string"
+    },
+    {
+      "capabilities": [
+        "TEXT"
+      ],
+      "name": "padEnd",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "length",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "fill",
+          "nullable": false,
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "returnType": "string"
+    },
+    {
+      "capabilities": [
+        "COLLECTION"
+      ],
+      "name": "first",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "source",
+          "nullable": false,
+          "required": true,
+          "type": "any"
+        }
+      ],
+      "returnType": "any"
+    },
+    {
+      "capabilities": [
+        "COLLECTION"
+      ],
+      "name": "last",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "source",
+          "nullable": false,
+          "required": true,
+          "type": "any"
+        }
+      ],
+      "returnType": "any"
+    },
+    {
+      "capabilities": [
+        "COLLECTION"
+      ],
+      "name": "reverse",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "source",
+          "nullable": false,
+          "required": true,
+          "type": "any"
+        }
+      ],
+      "returnType": "list of any"
+    },
+    {
+      "capabilities": [
+        "COLLECTION"
+      ],
+      "name": "sum",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "source",
+          "nullable": false,
+          "required": true,
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "selector",
+          "nullable": false,
+          "required": false,
+          "type": "lambda"
+        }
+      ],
+      "returnType": "number"
+    },
+    {
+      "capabilities": [
+        "COLLECTION"
+      ],
+      "name": "range",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "start",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "end",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "step",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "returnType": "list of number"
+    },
+    {
+      "capabilities": [
+        "COLLECTION"
+      ],
+      "name": "find",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "source",
+          "nullable": false,
+          "required": true,
+          "type": "any"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "predicate",
+          "nullable": false,
+          "required": true,
+          "type": "lambda"
+        }
+      ],
+      "returnType": "any"
+    },
+    {
+      "capabilities": [
+        "NUMERIC"
+      ],
+      "name": "sqrt",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "value",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        }
+      ],
+      "returnType": "number"
+    },
+    {
+      "capabilities": [
+        "NUMERIC"
+      ],
+      "name": "pow",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "base",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "exponent",
+          "nullable": false,
+          "required": true,
+          "type": "number"
+        }
+      ],
+      "returnType": "number"
+    },
+    {
+      "capabilities": [
         "COLLECTION"
       ],
       "name": "window",
@@ -2515,6 +2926,11 @@
       "type": "number | \"auto\" | \"content\" | { weight: number } | { fraction: number } | { max?: layout size atom, min?: layout size atom, preferred?: layout size atom }"
     },
     {
+      "name": "inset",
+      "nullable": false,
+      "type": "number | { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number }"
+    },
+    {
       "name": "justifyContent",
       "nullable": false,
       "type": "\"CENTER\" | \"END\" | \"SPACE_AROUND\" | \"SPACE_BETWEEN\" | \"SPACE_EVENLY\" | \"START\""
@@ -2575,9 +2991,19 @@
       "type": "string"
     },
     {
+      "name": "position",
+      "nullable": false,
+      "type": "\"ABSOLUTE\" | \"FLOW\" | \"STICKY\""
+    },
+    {
       "name": "rowSpan",
       "nullable": false,
       "type": "number"
+    },
+    {
+      "name": "scrollSnap",
+      "nullable": false,
+      "type": "\"CENTER\" | \"END\" | \"NONE\" | \"START\""
     },
     {
       "name": "width",
@@ -2728,6 +3154,11 @@
       "type": "effect"
     },
     {
+      "name": "cursor",
+      "nullable": false,
+      "type": "\"CROSSHAIR\" | \"DEFAULT\" | \"GRAB\" | \"GRABBING\" | \"HELP\" | \"MOVE\" | \"NONE\" | \"NOT_ALLOWED\" | \"POINTER\" | \"PROGRESS\" | \"RESIZE_EW\" | \"RESIZE_NESW\" | \"RESIZE_NS\" | \"RESIZE_NWSE\" | \"TEXT\" | \"WAIT\""
+    },
+    {
       "name": "columnSpan",
       "nullable": false,
       "type": "number"
@@ -2773,9 +3204,19 @@
       "type": "string"
     },
     {
+      "name": "fontStyle",
+      "nullable": false,
+      "type": "\"ITALIC\" | \"NORMAL\""
+    },
+    {
       "name": "fontStyleFlags",
       "nullable": false,
       "type": "number"
+    },
+    {
+      "name": "fontWeight",
+      "nullable": false,
+      "type": "number | \"BLACK\" | \"BOLD\" | \"LIGHT\" | \"MEDIUM\" | \"NORMAL\" | \"SEMIBOLD\" | \"THIN\""
     },
     {
       "name": "fontRasterization",
@@ -2806,6 +3247,11 @@
       "name": "height",
       "nullable": false,
       "type": "number | \"auto\" | \"content\" | { weight: number } | { fraction: number } | { max?: layout size atom, min?: layout size atom, preferred?: layout size atom }"
+    },
+    {
+      "name": "inset",
+      "nullable": false,
+      "type": "number | { all?: number, bottom?: number, horizontal?: number, left?: number, right?: number, top?: number, vertical?: number }"
     },
     {
       "name": "hintColor",
@@ -2933,12 +3379,22 @@
       "type": "string"
     },
     {
+      "name": "position",
+      "nullable": false,
+      "type": "\"ABSOLUTE\" | \"FLOW\" | \"STICKY\""
+    },
+    {
       "name": "radius",
+      "nullable": false,
+      "type": "number | { all?: number, bottom?: number, bottomLeft?: number, bottomRight?: number, left?: number, right?: number, top?: number, topLeft?: number, topRight?: number }"
+    },
+    {
+      "name": "rowSpan",
       "nullable": false,
       "type": "number"
     },
     {
-      "name": "rowSpan",
+      "name": "rotate",
       "nullable": false,
       "type": "number"
     },
@@ -3003,9 +3459,24 @@
       "type": "number"
     },
     {
+      "name": "textDecoration",
+      "nullable": false,
+      "type": "\"LINE_THROUGH\" | \"NONE\" | \"UNDERLINE\" | \"UNDERLINE_LINE_THROUGH\""
+    },
+    {
+      "name": "textDecorationColor",
+      "nullable": true,
+      "type": "color"
+    },
+    {
       "name": "tone",
       "nullable": false,
       "type": "number"
+    },
+    {
+      "name": "transformOrigin",
+      "nullable": false,
+      "type": "{ x: number, y: number }"
     },
     {
       "name": "track",

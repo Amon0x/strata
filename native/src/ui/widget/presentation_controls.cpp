@@ -542,7 +542,7 @@ void select_overlay(WidgetRenderScope& scope) {
         popup = Rect{left, top, right - left, bottom - top};
     }
     if (!authored_popup) {
-        scope.shadow(popup, CornerRadii::all(scope.visual().radius), scope.palette("shadow", std::uint8_t{90U}),
+        scope.shadow(popup, scope.corners(), scope.palette("shadow", std::uint8_t{90U}),
                      12.0, 1.0);
         scope.rounded_rect(popup,
                            scope.visual().background.value_or(scope.palette("popupSurface")),

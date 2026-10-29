@@ -132,6 +132,14 @@ struct WindowApplication final {
         }
     }
 
+    [[nodiscard]] std::optional<std::uint32_t> pointer_cursor() noexcept {
+        if (host != nullptr)
+            return host->pointer_cursor();
+        if (application_host != nullptr)
+            return application_host->pointer_cursor();
+        return std::nullopt;
+    }
+
     void cancel_interactions() noexcept {
         if (host != nullptr)
             host->cancel_interactions();

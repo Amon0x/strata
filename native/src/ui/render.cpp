@@ -24,6 +24,15 @@
 namespace strata::ui {
 namespace {
 
+/**
+ * A layout-space clip in the space the planner is in. Under scale and translation the clip stays
+ * where layout put it, so the transform is cancelled; once something rotates, the clip turns with
+ * the content it clips and becomes an exact clip mask in the planner.
+ */
+[[nodiscard]] Rect layout_clip(const Rect clip, const MotionTransform& transform) noexcept {
+    return transform.axis_aligned() ? inverse_presentation_bounds(clip, transform) : clip;
+}
+
 [[nodiscard]] std::optional<MaterialState> material_state(const runtime::Value* value) {
     if (value == nullptr || value->object() == nullptr)
         return std::nullopt;
@@ -459,7 +468,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             // beneath a non-unit inherited scale.
             const bool clip_translation_context_safe =
                 !retained.subtree_contains_clip ||
-                (inherited_transform.scale_x == 1.0 && inherited_transform.scale_y == 1.0);
+                (inherited_transform.scale_x == 1.0 && inherited_transform.scale_y == 1.0 &&
+                 inherited_transform.axis_aligned());
             const bool translation_candidate =
                 retained.subtree_commands.has_value() && record->translated_subtree.has_value() &&
                 record->kind != LayoutKind::scroll && record->kind != LayoutKind::portal &&
@@ -599,7 +609,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 RenderGroup{group, inherited_group, effective_transform.scale_x,
                             effective_transform.scale_y, effective_transform.translate_x,
                             effective_transform.translate_y, descendant_opacity,
-                            tone.value_or(-1.0)});
+                            tone.value_or(-1.0), effective_transform.shear_x,
+                            effective_transform.shear_y});
             effective_transform = MotionTransform{};
             descendant_opacity = 1.0;
         }
@@ -688,23 +699,24 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             // Clips stay in layout space: cancel the transforms the planner applies at this
             // point, which inside a group start from the group's own (identity) space.
             output.append(ClipPushRenderCommand{
-                inverse_presentation_bounds(*scope_clip_rect,
-                                            group != 0U ? MotionTransform{} : inherited_transform),
+                layout_clip(*scope_clip_rect,
+                            group != 0U ? MotionTransform{} : inherited_transform),
             });
             ++counters.commands_emitted;
         }
         if (group == 0U && !transform.identity()) {
             output.append(TransformPushRenderCommand{
                 transform.scale_x,
-                0.0,
+                transform.shear_x,
                 transform.translate_x,
-                0.0,
+                transform.shear_y,
                 transform.scale_y,
                 transform.translate_y,
             });
             ++counters.commands_emitted;
         }
-        const double radius = std::max(0.0, visual_number(node, "radius").value_or(0.0));
+        const CornerRadii corners =
+            corner_radii_value(visual_value(node, "radius")).value_or(CornerRadii{});
         for (const StyleShadow& shadow : style_shadows(style_value("shadows"),
                                                        descendant_opacity)) {
             output.append(ShadowRenderCommand{
@@ -714,7 +726,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                     record->bounds.width,
                     record->bounds.height,
                 },
-                CornerRadii::all(radius),
+                corners,
                 shadow.color,
                 shadow.radius,
                 shadow.spread,
@@ -735,7 +747,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                                           std::lround(105.0 * rendered_effect->opacity))};
                 output.append(ShadowRenderCommand{
                     record->bounds,
-                    CornerRadii::all(radius),
+                    corners,
                     color,
                     blur_value != nullptr && blur_value->number() != nullptr
                         ? std::max(0.0, *blur_value->number())
@@ -748,14 +760,14 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
             } else if (rendered_effect->input == EffectInput::backdrop) {
                 output.append(BackdropEffectRenderCommand{
                     record->bounds,
-                    CornerRadii::all(radius),
+                    corners,
                     *rendered_effect,
                 });
                 ++counters.commands_emitted;
             } else if (rendered_effect->input == EffectInput::content) {
                 output.append(ContentEffectPushRenderCommand{
                     record->bounds,
-                    CornerRadii::all(radius),
+                    corners,
                     *rendered_effect,
                 });
                 ++counters.commands_emitted;
@@ -764,7 +776,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         if (isolates_descendants) {
             output.append(ContentEffectPushRenderCommand{
                 record->bounds,
-                CornerRadii::all(radius),
+                corners,
                 *rendered_content_effect,
             });
             ++counters.commands_emitted;
@@ -809,22 +821,24 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         // empty/offscreen clip after scrolling and blank newly visible content.
         if (lifecycle_clip.has_value()) {
             output.append(ClipPushRenderCommand{
-                inverse_presentation_bounds(*lifecycle_clip, effective_transform),
+                layout_clip(*lifecycle_clip, effective_transform),
                 {},
             });
             ++counters.commands_emitted;
         }
         if (record->local_clip.has_value()) {
             output.append(ClipPushRenderCommand{
-                inverse_presentation_bounds(*record->local_clip, effective_transform),
-                CornerRadii::all(radius),
+                layout_clip(*record->local_clip, effective_transform),
+                corners,
             });
             ++counters.commands_emitted;
         }
         const std::size_t composition_prefix_end = output.size();
         const auto child_z_index = [&layout](const RetainedNode& child) {
             const LayoutRecord* child_layout = layout.find(child.identity());
-            return child_layout != nullptr ? child_layout->z_index : 0;
+            return child_layout != nullptr
+                       ? std::pair{child_layout->z_index, child_layout->positioned}
+                       : std::pair{0, false};
         };
         const auto& retained_children = node.children();
         bool children_already_ordered = true;

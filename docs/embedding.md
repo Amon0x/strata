@@ -126,7 +126,7 @@ with the existing HLSL materials and effects. See [Vulkan hosting](vulkan-hostin
 image ownership, synchronous submission, and Surface release ordering.
 
 Custom renderers can instead link `Strata::render_host` and include `<strata/render_packet.hpp>`
-to consume packet-v14 without duplicating parsing:
+to consume packet-v15 without duplicating parsing:
 
 ```cpp
 strata::host::RenderPacketDecoder decoder;
@@ -184,11 +184,13 @@ patch; it does not force a complete Surface payload merely because planned-item 
 Backends should apply those ranges directly to retained buffers. Capacity growth or a patch larger
 than replacement remains an explicit full-epoch boundary.
 
-Running presentation motion (opacity, translation, scale) does not touch geometry. Each animating
+Running presentation motion (opacity, translation, scale, rotation) does not touch geometry. Each animating
 node is a presentation group: its content is encoded in layout space, every vertex carries its
-group index in position z, and `RenderPacket::groups` holds each group's current scale, translation
-and opacity. A backend's vertex stage places each vertex at `position * scale + translate` (the
-translation rounded to whole framebuffer pixels) and multiplies material opacity (draw-data float
+group index in position z, and `RenderPacket::groups` holds each group's current scale, shear,
+translation and opacity. A backend's vertex stage places each vertex at
+`(scale_x * x + shear_x * y, shear_y * x + scale_y * y) + translate` (the translation rounded to
+whole framebuffer pixels; `PresentationGroup::place_x`/`place_y` compute it, and the shears are zero
+unless the group rotates) and multiplies material opacity (draw-data float
 15) by the group opacity; the shared `native/gpu` vertex shader already does. The decoder presents
 grouped blur/effect bounds itself, and a changed table adds dirty regions covering the moved
 content. Settled nodes leave their group and bake their final presentation back into geometry.
@@ -349,7 +351,7 @@ runners and remote protocols whose schema is selected only at runtime.
 
 Adopt a complete Surface environment generation atomically: framebuffer and logical sizes, scale,
 safe insets, snapping, density, reduced-motion preference, and input capabilities. Enqueue input in
-ordered batches, call `strata_surface_frame`, then read packet v14 through a bytes sink.
+ordered batches, call `strata_surface_frame`, then read packet v15 through a bytes sink.
 
 The packet bytes are borrowed only during the sink callback. Copy them if the backend submits later;
 consume them directly if submission is synchronous. Packet-v10 full packets contain native geometry,

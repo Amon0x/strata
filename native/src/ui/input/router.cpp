@@ -526,7 +526,10 @@ InputOperationResult InputRouter::prepare(RetainedTree& tree,
             hovered_notification_id_.reset();
         }
         hovered_subtarget_.reset();
+        hovered_subtarget_kind_.reset();
     }
+    if (hover_target_.has_value() && tree.find_identity(*hover_target_) == nullptr)
+        hover_target_.reset();
     if (active_subtarget_.has_value() && tree.find_identity(active_subtarget_->first) == nullptr) {
         active_subtarget_.reset();
     }
@@ -954,6 +957,7 @@ void InputRouter::blur(RetainedNode& previous, const std::string_view reason,
 }
 
 void InputRouter::hover_route(const RetainedNode* target) {
+    hover_target_ = target != nullptr ? std::optional(target->identity()) : std::nullopt;
     std::size_t route_size = 0U;
     bool unchanged = true;
     for (const RetainedNode* current = target; current != nullptr; current = current->parent()) {

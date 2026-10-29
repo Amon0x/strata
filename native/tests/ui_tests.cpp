@@ -3015,6 +3015,123 @@ void test_exiting_child_retains_placement_without_affecting_flow() {
                "replacement fill child did not receive the vacated flow allocation");
 }
 
+void test_absolute_children_leave_flow_in_any_container() {
+    using namespace strata;
+    using namespace strata::ui;
+    const auto box = [](const std::string& key, runtime::Value layout) {
+        return node("Panel", key, {}, layout_properties(std::move(layout)));
+    };
+    const auto row = node(
+        "Panel", "absolute.row",
+        {
+            box("absolute.first", object({{"height", runtime::Value(20.0)},
+                                          {"width", runtime::Value(30.0)}})),
+            box("absolute.badge", object({{"height", runtime::Value(10.0)},
+                                          {"inset", object({{"right", runtime::Value(4.0)},
+                                                            {"top", runtime::Value(-5.0)}})},
+                                          {"position", runtime::Value("ABSOLUTE")},
+                                          {"width", runtime::Value(10.0)}})),
+            box("absolute.scrim", object({{"inset", runtime::Value(0.0)},
+                                          {"position", runtime::Value("ABSOLUTE")}})),
+            box("absolute.second", object({{"height", runtime::Value(20.0)},
+                                           {"width", runtime::Value(30.0)}})),
+        },
+        layout_properties(object({
+            {"gap", runtime::Value(10.0)},
+            {"height", runtime::Value(40.0)},
+            {"kind", runtime::Value("ROW")},
+            {"padding", runtime::Value(5.0)},
+            {"width", runtime::Value(200.0)},
+        })));
+    RetainedTree tree;
+    static_cast<void>(tree.reconcile(node("Panel", "absolute.root", {row},
+                                          layout_properties(object({
+                                              {"kind", runtime::Value("PANEL")},
+                                          })))));
+    LayoutEngine layout;
+    const LayoutEnvironment environment{
+        0U,    Rect{0.0, 0.0, 200.0, 100.0}, 1.0,
+        {},    PointSnapPolicy::nearest,     RectangleSnapPolicy::outward,
+        false,
+    };
+    const LayoutResult& result = layout.layout(tree, environment);
+    const auto bounds = [&](const std::string& key) {
+        const LayoutRecord* record = result.find(tree.find_key(key)->identity());
+        check(record != nullptr, "positioned layout record is missing: " + key);
+        return record->bounds;
+    };
+    check(bounds("absolute.second").x == 45.0,
+          "absolute children took space in their row's flow");
+    const Rect badge = bounds("absolute.badge");
+    check(badge.x == 186.0 && badge.y == -5.0 && badge.width == 10.0,
+          "absolute child did not resolve its right and top insets against the padding box");
+    const Rect scrim = bounds("absolute.scrim");
+    check(scrim == Rect{0.0, 0.0, 200.0, 40.0},
+          "absolute child with every inset did not stretch over the padding box");
+    const LayoutRecord* badge_record = result.find(tree.find_key("absolute.badge")->identity());
+    check(badge_record->positioned, "absolute child was not marked as positioned");
+}
+
+void test_sticky_child_holds_inside_scroll_viewport_and_parent() {
+    using namespace strata;
+    using namespace strata::ui;
+    const auto sticky_layout = [] {
+        return layout_properties(object({
+            {"height", runtime::Value(20.0)},
+            {"inset", object({{"top", runtime::Value(0.0)}})},
+            {"position", runtime::Value("STICKY")},
+            {"width", object({{"weight", runtime::Value(1.0)}})},
+        }));
+    };
+    const auto section = [&](const std::string& key) {
+        return node("Panel", key,
+                    {
+                        node("Panel", key + ".header", {}, sticky_layout()),
+                        node("Panel", key + ".body", {},
+                             layout_properties(object({{"height", runtime::Value(180.0)},
+                                                       {"width", runtime::Value(50.0)}}))),
+                    },
+                    layout_properties(object({
+                        {"kind", runtime::Value("COLUMN")},
+                        {"width", object({{"weight", runtime::Value(1.0)}})},
+                    })));
+    };
+    const auto scrolled = [&](const double offset) {
+        DescriptionNode::Properties scroll = layout_properties(object({
+            {"height", runtime::Value(100.0)},
+            {"kind", runtime::Value("SCROLL")},
+            {"width", runtime::Value(100.0)},
+        }));
+        scroll.emplace("scrollOffset", runtime::ExpressionValue(object({
+                                           {"x", runtime::Value(0.0)},
+                                           {"y", runtime::Value(offset)},
+                                       })));
+        return node("Scroll", "sticky.root", {section("sticky.a"), section("sticky.b")},
+                    std::move(scroll));
+    };
+    RetainedTree tree;
+    LayoutEngine layout;
+    const LayoutEnvironment environment{
+        0U,    Rect{0.0, 0.0, 100.0, 100.0}, 1.0,
+        {},    PointSnapPolicy::nearest,     RectangleSnapPolicy::outward,
+        false,
+    };
+    const auto header_y = [&](const double offset, const std::string& key) {
+        static_cast<void>(tree.reconcile(scrolled(offset)));
+        const LayoutResult& result = layout.layout(tree, environment);
+        const LayoutRecord* record = result.find(tree.find_key(key)->identity());
+        check(record != nullptr, "sticky header layout record is missing");
+        return record->bounds.y;
+    };
+    check_near(header_y(0.0, "sticky.a.header"), 0.0, "sticky header moved before scrolling");
+    check_near(header_y(50.0, "sticky.a.header"), 0.0,
+               "sticky header did not hold at the top of the scroll viewport");
+    check_near(header_y(190.0, "sticky.a.header"), -10.0,
+               "sticky header did not leave with the end of its section");
+    check_near(header_y(250.0, "sticky.b.header"), 0.0,
+               "the next section's sticky header did not take over the viewport top");
+}
+
 void test_nested_scroll_pin_uses_nearest_scroll_offset() {
     using namespace strata;
     using namespace strata::ui;
@@ -5763,6 +5880,67 @@ overlay Grouped {
     check(encode(3U).groups.empty(), "a settled surface still published presentation groups");
 }
 
+void test_rotating_presentation_group() {
+    using namespace strata;
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("rotating-groups", bundle);
+    const std::string source = R"(
+animation Spin {
+  from { rotate: 0 }
+  to { rotate: 90 }
+  duration: 100ms;
+  easing: "linear";
+  fillMode: "BOTH";
+}
+overlay Spinning {
+  root Panel(key: "spin.root", layout: { kind: "PANEL", width: 200, height: 200 }) {
+    Panel(key: "spin.card", style: style(background: #3050A0FF), enter: Spin,
+      layout: { width: 100, height: 40, placement: { x: 50, y: 80 } })
+  }
+}
+)";
+    const auto no_imports = [](const std::string_view,
+                               const std::string_view path) -> compiler::ModuleSource {
+        throw compiler::ModuleLoadError("unexpected import '" + std::string(path) + "'");
+    };
+    check(application
+              .compile_and_activate(compiler::ModuleSource{"spin.strata", source}, no_imports, 0U)
+              .activated(),
+          "rotating group fixture did not activate");
+    ui::SurfaceEnvironment environment;
+    environment.framebuffer_width = 200;
+    environment.framebuffer_height = 200;
+    environment.logical_width = 200.0;
+    environment.logical_height = 200.0;
+    ui::Surface surface("rotating-groups", application, runtime::LayerRole::overlay, "Spinning",
+                        environment);
+    font::GlyphAtlas atlas("rotating-groups");
+    ui::HostRenderPacketCache packet_cache;
+    host::RenderPacketDecoder decoder;
+    static_cast<void>(surface.frame(1'000'000));
+    static_cast<void>(surface.frame(51'000'000));
+    const ui::RenderCommandBuffer& half = surface.render_commands();
+    check(half.groups().size() == 1U, "a spinning node did not render as a presentation group");
+    const ui::RenderGroup& group = half.groups().front();
+    // Half way through, the card has turned 45 degrees about its centre (100, 100).
+    const double half_root = std::sqrt(0.5);
+    check(std::abs(group.scale_x - half_root) < 1e-6 && std::abs(group.shear_x + half_root) < 1e-6 &&
+              std::abs(group.shear_y - half_root) < 1e-6 &&
+              std::abs(group.scale_y - half_root) < 1e-6,
+          "the group entry did not carry the animated rotation");
+    const host::RenderPacket& packet =
+        decoder.decode(packet_cache.encode(half, 1U, {}, atlas,
+                                           static_cast<const ui::TextEngine*>(nullptr), 1.0, 200,
+                                           200, 200.0, 200.0));
+    check(group.index < packet.groups.size(), "the packet did not carry the rotating group");
+    const host::PresentationGroup& decoded = packet.groups[group.index];
+    check(std::abs(decoded.place_x(100.0, 100.0) - 100.0) < 1e-6 &&
+              std::abs(decoded.place_y(100.0, 100.0) - 100.0) < 1e-6 &&
+              std::abs(decoded.place_x(150.0, 100.0) - (100.0 + 50.0 * half_root)) < 1e-6 &&
+              std::abs(decoded.place_y(150.0, 100.0) - (100.0 + 50.0 * half_root)) < 1e-6,
+          "the decoded group did not turn its content about the card's centre");
+}
+
 void test_cached_tone_during_pointer_hold() {
     using namespace strata;
     const auto bundle = runtime::ApplicationBundle::create();
@@ -8208,6 +8386,8 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_grid_track_change_invalidates_layout();
         test_layered_layout_uses_independent_axes();
         test_layer_placement_and_sibling_anchors();
+        test_absolute_children_leave_flow_in_any_container();
+        test_sticky_child_holds_inside_scroll_viewport_and_parent();
         test_zero_fill_weight_collapses_without_stealing_space();
         test_layout_motion_preserves_relative_units();
         test_anchored_portal_is_out_of_flow_and_flips();
@@ -8231,6 +8411,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_svg_image_projection_and_compound_fill();
         test_render_submission_opacity_scope_reuse();
         test_presentation_group_animation();
+        test_rotating_presentation_group();
         test_cached_tone_during_pointer_hold();
         test_surface_environment_scale_matches_framebuffer();
         if (argument_count >= 3 && std::string_view(arguments[2]).size() != 0U) {

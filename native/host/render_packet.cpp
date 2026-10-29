@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <array>
 #include <limits>
 #include <map>
 #include <ranges>
@@ -274,6 +275,29 @@ void validate_geometry(const RenderPacket& packet) {
     return result;
 }
 
+/** Left, top, right and bottom of the box around a rectangle the group places. */
+[[nodiscard]] std::array<double, 4U> placed_box(const PresentationGroup& group, const double x,
+                                                const double y, const double width,
+                                                const double height) noexcept {
+    std::array<double, 4U> result{
+        std::numeric_limits<double>::infinity(),
+        std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity(),
+    };
+    for (const auto [corner_x, corner_y] : {std::pair{x, y}, std::pair{x + width, y},
+                                            std::pair{x, y + height},
+                                            std::pair{x + width, y + height}}) {
+        const double placed_x = group.place_x(corner_x, corner_y);
+        const double placed_y = group.place_y(corner_x, corner_y);
+        result[0U] = std::min(result[0U], placed_x);
+        result[1U] = std::min(result[1U], placed_y);
+        result[2U] = std::max(result[2U], placed_x);
+        result[3U] = std::max(result[3U], placed_y);
+    }
+    return result;
+}
+
 [[nodiscard]] PresentationGroup group_of(const std::vector<PresentationGroup>& groups,
                                          const std::uint32_t index) noexcept {
     return index < groups.size() ? groups[index] : PresentationGroup{};
@@ -330,16 +354,14 @@ void append_group_regions(const std::vector<PresentationGroup>& previous,
         if (before == after || !(extent[0U] <= extent[2U] && extent[1U] <= extent[3U]))
             continue;
         for (const PresentationGroup& group : {before, after}) {
-            const double left = group.translate_x + group.scale_x * extent[0U];
-            const double right = group.translate_x + group.scale_x * extent[2U];
-            const double top = group.translate_y + group.scale_y * extent[1U];
-            const double bottom = group.translate_y + group.scale_y * extent[3U];
+            const std::array<double, 4U> placed = placed_box(
+                group, extent[0U], extent[1U], extent[2U] - extent[0U], extent[3U] - extent[1U]);
             // One logical pixel of slack covers the backends' device-pixel translation snap.
             output.push_back(GeometryDirtyRegion{
-                std::min(left, right) - 1.0,
-                std::min(top, bottom) - 1.0,
-                std::abs(right - left) + 2.0,
-                std::abs(bottom - top) + 2.0,
+                placed[0U] - 1.0,
+                placed[1U] - 1.0,
+                placed[2U] - placed[0U] + 2.0,
+                placed[3U] - placed[1U] + 2.0,
             });
         }
     }
@@ -366,8 +388,8 @@ void append_group_regions(const std::vector<PresentationGroup>& previous,
             throw std::invalid_argument("render vertex patch contains a non-finite position");
         }
         const PresentationGroup group = group_of(table, vertex_group(bytes));
-        const double presented_x = group.translate_x + group.scale_x * x;
-        const double presented_y = group.translate_y + group.scale_y * y;
+        const double presented_x = group.place_x(x, y);
+        const double presented_y = group.place_y(x, y);
         minimum_x = std::min(minimum_x, presented_x);
         minimum_y = std::min(minimum_y, presented_y);
         maximum_x = std::max(maximum_x, presented_x);
@@ -534,7 +556,10 @@ void append_texture_regions(const RenderPacket& packet,
         group.translate_y = input.number();
         group.opacity = input.number();
         group.tone = input.number();
+        group.shear_x = input.number();
+        group.shear_y = input.number();
         if (!std::isfinite(group.scale_x) || !std::isfinite(group.scale_y) ||
+            !std::isfinite(group.shear_x) || !std::isfinite(group.shear_y) ||
             !std::isfinite(group.translate_x) || !std::isfinite(group.translate_y) ||
             !std::isfinite(group.opacity) || group.opacity < 0.0 || group.opacity > 1.0 ||
             !std::isfinite(group.tone) || group.tone < 0.0 || group.tone > 1.0) {
@@ -575,16 +600,14 @@ void append_texture_regions(const RenderPacket& packet,
 /** Writes the presented bounds of a group-local blur/effect batch into `target` (same kind). */
 void present(const SubmissionBatch& local, const std::vector<PresentationGroup>& groups,
              SubmissionBatch& target) noexcept {
+    // A rotated group's effects are sampled over the box around their turned rectangle.
     const auto place = [](const PresentationGroup& group, const double x, const double y,
                           const double width, const double height, auto& output) {
-        const double left = group.translate_x + group.scale_x * x;
-        const double right = group.translate_x + group.scale_x * (x + width);
-        const double top = group.translate_y + group.scale_y * y;
-        const double bottom = group.translate_y + group.scale_y * (y + height);
-        output.x = std::min(left, right);
-        output.y = std::min(top, bottom);
-        output.width = std::abs(right - left);
-        output.height = std::abs(bottom - top);
+        const std::array<double, 4U> placed = placed_box(group, x, y, width, height);
+        output.x = placed[0U];
+        output.y = placed[1U];
+        output.width = placed[2U] - placed[0U];
+        output.height = placed[3U] - placed[1U];
     };
     if (const auto* blur = std::get_if<BlurBatch>(&local); blur != nullptr) {
         place(group_of(groups, blur->group), blur->x, blur->y, blur->width, blur->height,
@@ -593,7 +616,11 @@ void present(const SubmissionBatch& local, const std::vector<PresentationGroup>&
         const PresentationGroup group = group_of(groups, effect->group);
         EffectBatch& output = std::get<EffectBatch>(target);
         place(group, effect->x, effect->y, effect->width, effect->height, output);
-        const double radius_scale = std::min(std::abs(group.scale_x), std::abs(group.scale_y));
+        // A rotated group keeps lengths; its corners scale by the square root of its area scale.
+        const double radius_scale =
+            group.shear_x == 0.0 && group.shear_y == 0.0
+                ? std::min(std::abs(group.scale_x), std::abs(group.scale_y))
+                : std::sqrt(std::abs(group.scale_x * group.scale_y - group.shear_x * group.shear_y));
         for (std::size_t corner = 0U; corner < output.radii.size(); ++corner)
             output.radii[corner] = effect->radii[corner] * radius_scale;
         output.opacity = effect->opacity * group.opacity;

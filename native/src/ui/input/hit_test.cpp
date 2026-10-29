@@ -812,8 +812,16 @@ void InputRouter::prepare_pointer_geometry() const {
                              ? std::optional(child_clip->clip_intersection(transformed))
                              : std::optional(transformed);
         };
-        if (record->clip.has_value())
+        if (!transform.axis_aligned() && record->local_clip.has_value()) {
+            // A rotated node's clip turns with it, as it is drawn; descendants are hit within the
+            // box around the turned clip, and exactly within their own turned shapes.
+            const Rect turned = transform_presentation_bounds(*record->local_clip, transform);
+            child_clip = child_clip.has_value()
+                             ? std::optional(child_clip->clip_intersection(turned))
+                             : std::optional(turned);
+        } else if (record->clip.has_value()) {
             clip_children(*record->clip);
+        }
         // Descendants are hit only where they are drawn: a widget that clips them further than
         // its layout does (rows below a table's sticky header) clips their hits the same way.
         if (commands_ != nullptr) {
@@ -831,8 +839,11 @@ void InputRouter::prepare_pointer_geometry() const {
         const auto z_order = [this](const RetainedNode* left, const RetainedNode* right) {
             const LayoutRecord* left_layout = layout_->find(left->identity());
             const LayoutRecord* right_layout = layout_->find(right->identity());
-            return (left_layout != nullptr ? left_layout->z_index : 0) <
-                   (right_layout != nullptr ? right_layout->z_index : 0);
+            const auto key = [](const LayoutRecord* record) {
+                return record != nullptr ? std::pair{record->z_index, record->positioned}
+                                         : std::pair{0, false};
+            };
+            return key(left_layout) < key(right_layout);
         };
         // Children are almost always already in z-order; a stable sort would leave them as they
         // are, so skip it and its temporary buffer.
@@ -849,6 +860,7 @@ void InputRouter::prepare_pointer_geometry() const {
             transform_presentation_bounds(bounds, transform),
             traversal_clip,
             transform,
+            bounds,
         });
     };
     // Detached portal roots occupy the final render plane. Visit them first in reverse paint
@@ -943,7 +955,11 @@ RetainedNode* InputRouter::hit_test(const Point position) const noexcept {
     prepare_pointer_geometry();
     for (const PointerHitEntry& entry : pointer_hit_entries_) {
         if ((!entry.traversal_clip.has_value() || contains(*entry.traversal_clip, position)) &&
-            contains(entry.bounds, position)) {
+            contains(entry.bounds, position) &&
+            // A rotated node is hit inside its turned shape, not the box around it.
+            (entry.transform.axis_aligned() ||
+             contains(entry.local_bounds,
+                      inverse_presentation_point(position, entry.transform)))) {
             return entry.node;
         }
     }
@@ -1054,6 +1070,8 @@ void InputRouter::set_hovered_subtarget(const std::optional<WidgetSubtarget>& ta
         static_cast<void>(tree_->mark(hovered_subtarget_->first, DirtyReason::paint));
     }
     hovered_subtarget_ = next;
+    hovered_subtarget_kind_ =
+        target.has_value() ? std::optional(target->kind) : std::nullopt;
     if (tree_ != nullptr && hovered_subtarget_.has_value()) {
         static_cast<void>(tree_->mark(hovered_subtarget_->first, DirtyReason::paint));
     }

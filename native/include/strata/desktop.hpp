@@ -116,6 +116,8 @@ class ApplicationHost final {
     void text(std::string utf8);
     void ime_preedit(std::string utf8, std::size_t selection_start, std::size_t selection_end);
     void cancel_interactions() noexcept;
+    /** The `STRATA_POINTER_CURSOR_*` shape the surface asks for; nullopt without a surface. */
+    [[nodiscard]] std::optional<std::uint32_t> pointer_cursor() const noexcept;
 
     /**
      * Handles resize, DPI, pointer capture/leave, wheel, keyboard, Unicode, focus cancellation,

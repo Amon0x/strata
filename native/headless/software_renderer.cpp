@@ -98,9 +98,11 @@ struct PixelRect final {
         group_index < groups.size() ? groups[group_index] : host::PresentationGroup{};
     // Group translation lands on whole device pixels, as in the vertex stage.
     Vertex result;
-    result.x = static_cast<float>(read_float(bytes, base) * group.scale_x * scale_x +
+    const double x = read_float(bytes, base);
+    const double y = read_float(bytes, base + 4U);
+    result.x = static_cast<float>((group.scale_x * x + group.shear_x * y) * scale_x +
                                   std::round(group.translate_x * scale_x));
-    result.y = static_cast<float>(read_float(bytes, base + 4U) * group.scale_y * scale_y +
+    result.y = static_cast<float>((group.shear_y * x + group.scale_y * y) * scale_y +
                                   std::round(group.translate_y * scale_y));
     result.u = read_float(bytes, base + 12U);
     result.v = read_float(bytes, base + 16U);
