@@ -143,6 +143,14 @@ class WidgetRenderScope final {
      * is behind them; others draw one by one.
      */
     void shapes(Rect bounds, std::vector<PathShape> shapes);
+    /**
+     * Art (see ArtOutline): an outline the GPU generates in `bounds` from `outline`'s program,
+     * filled by `rule` and stroked as `style` says. Opt in only for decoration: nothing reads its
+     * geometry on the CPU, and the software renderer leaves it out.
+     */
+    void art(Rect bounds, ArtOutline outline, std::optional<Paint> fill,
+             std::optional<Paint> stroke, StrokeStyle style = {},
+             PathFillRule rule = PathFillRule::nonzero);
 
     /*
      * The painter: vector drawing in the widget's logical pixels. Each shape picks its own way to

@@ -843,6 +843,39 @@ void Present::polygon(const std::span<const Point> points, const std::optional<C
     draw_shape(context_, shape, fill, outline, style, points);
 }
 
+void Present::art(const Rect bounds, const std::string_view hlsl, const std::uint32_t count,
+                  const std::span<const float> parameters, const std::optional<Color> fill,
+                  const std::optional<Color> outline, const Stroke& style, const bool closed,
+                  const bool even_odd) {
+    const strata_widget_api& api = detail::widget_api();
+    if (api.struct_size < offsetof(strata_widget_api, render_art) + sizeof(api.render_art) ||
+        api.render_art == nullptr) {
+        return;
+    }
+    strata_widget_art art{};
+    art.struct_size = sizeof(art);
+    art.bounds = strata_rect{bounds.x, bounds.y, bounds.width, bounds.height};
+    art.source = strata_string_view{hlsl.data(), hlsl.size()};
+    art.point_count = count;
+    art.flags = (closed ? STRATA_WIDGET_ART_CLOSED : 0U) |
+                (even_odd ? STRATA_WIDGET_SHAPE_EVEN_ODD : 0U);
+    if (fill.has_value()) {
+        art.flags |= STRATA_WIDGET_SHAPE_FILL;
+        art.fill = *fill;
+    }
+    if (outline.has_value()) {
+        art.flags |= STRATA_WIDGET_SHAPE_STROKE;
+        art.stroke = *outline;
+        art.stroke_width = style.width;
+        art.cap = static_cast<std::uint32_t>(style.cap);
+        art.join = static_cast<std::uint32_t>(style.join);
+        art.miter_limit = style.miter_limit;
+    }
+    art.parameters = parameters.data();
+    art.parameter_count = std::min<std::size_t>(parameters.size(), 16U);
+    api.render_art(context_, &art);
+}
+
 void Present::mesh(const Rect bounds, const std::string_view id, const Mesh& geometry) {
     draw_mesh(context_, bounds, id, geometry, {}, nullptr);
 }

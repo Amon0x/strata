@@ -16,7 +16,9 @@ namespace strata::d3d11 {
 /**
  * Rasterizes raster jobs (strata/raster_job.hpp) with compute shaders straight into an atlas:
  * each segment's exact area accumulates into cells by atomics, each row resolves its cells to
- * coverage, and a colour job composites its layers before writing straight RGBA.
+ * coverage, and a colour job composites its layers before writing straight RGBA. An art layer's
+ * program compiles on a background thread the first time it is seen; until it is ready (or if it
+ * fails to compile) the layer draws nothing.
  */
 class RasterPass final {
   public:
@@ -37,7 +39,8 @@ class RasterPass final {
      * against: R8 coverage, or RGBA8 when `rgba`.
      */
     void run(const host::RasterJob& job, bool rgba, ID3D11UnorderedAccessView* target,
-             std::uint32_t x, std::uint32_t y, std::uint32_t width, std::uint32_t height);
+             std::uint32_t x, std::uint32_t y, std::uint32_t width, std::uint32_t height,
+             double seconds = 0.0);
 
   private:
     struct Impl;

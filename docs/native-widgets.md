@@ -332,6 +332,36 @@ table they draw nothing. Native widgets inside the engine have the same painter 
 those that share an edge so they meet without a seam; `Chart` draws through it. A custom mesh remains the tool
 for geometry that is not an outline: textured or per-vertex-coloured triangles, and materials.
 
+### Art: outlines the GPU generates
+
+For decoration that moves every frame, `present.art` hands the outline itself to the GPU. The
+widget passes a small HLSL program defining `float2 artPoint(uint index, uint count)`, which
+returns each point in the bounds' 0-1 space and may call `artTime()` (seconds), `artParameter(i)`
+(up to sixteen values the widget passes) and `artSize()` (the canvas in device pixels). The
+backend fills or strokes the outline with the same exact coverage as any shape and draws it again
+every frame, so the figure moves while the widget neither repaints nor plans anything:
+
+```cpp
+constexpr std::string_view rose = R"hlsl(
+float2 artPoint(uint index, uint count) {
+    float t = 6.28318531 * index / count;
+    float r = 0.3 + 0.12 * cos(5.0 * t + artTime() * artParameter(0));
+    return float2(0.5 + r * cos(t), 0.5 + r * sin(t));
+}
+)hlsl";
+const std::array<float, 1> speed{1.5F};
+present.art(bounds, rose, 720U, speed, rgba(244U, 114U, 182U));
+```
+
+Art is opt-in and decorative, with three consequences to accept. Nothing on the CPU sees its
+geometry: hit testing and the inspector see only its bounds. It is GPU-only: the software
+renderer, and so pixel tests against it, leave it out. And the program compiles in the background
+the first time it is drawn, so it may appear a few frames late; one that fails to compile draws
+nothing and reports why once on stderr. A stroke under a scale that differs by axis is left out,
+since the GPU's pen is round. Art arrives through the widget table's `render_art` member, added in
+`STRATA_WIDGET_API_VERSION_3` with the plain-C `strata_widget_art` description; engine widgets
+have the same call as `WidgetRenderScope::art`.
+
 ## Canvas transforms and virtual geometry
 
 `CanvasTransform` maps world coordinates into a widget-owned surface viewport. Its `project`,

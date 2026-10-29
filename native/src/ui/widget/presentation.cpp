@@ -807,6 +807,29 @@ void WidgetRenderScope::shapes(const Rect bounds, std::vector<PathShape> values)
     output_.emplace_back(PathRenderCommand{bounds, std::move(first), std::move(values)});
 }
 
+void WidgetRenderScope::art(const Rect bounds, ArtOutline outline, std::optional<Paint> fill,
+                            std::optional<Paint> stroke, const StrokeStyle style,
+                            const PathFillRule rule) {
+    if (outline.source.empty() || outline.count < 2U || bounds.width <= 0.0 ||
+        bounds.height <= 0.0) {
+        return;
+    }
+    PathShape shape;
+    shape.fill_rule = rule;
+    if (fill.has_value()) {
+        fill->multiply_alpha(alpha());
+        shape.fill = std::move(fill);
+    }
+    if (stroke.has_value() && style.width > 0.0) {
+        stroke->multiply_alpha(alpha());
+        shape.stroke = std::move(stroke);
+        shape.stroke_style = style;
+    }
+    if (!shape.fill.has_value() && !shape.stroke.has_value())
+        return;
+    output_.emplace_back(PathRenderCommand{bounds, std::move(shape), {}, std::move(outline)});
+}
+
 std::optional<Size> WidgetRenderScope::image_size(const std::string_view image) const {
     if (svg_images_ == nullptr)
         return std::nullopt;

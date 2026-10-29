@@ -1415,11 +1415,11 @@ component DrawPage() {
   ) {
     Card(title: "LIVE VECTOR ART: NATIVE PAINTER, EVERY FRAME") {
       Panel(style: ActionRow) {
-        DemoCanvas(key: "draw.canvas.spirograph", kind: "spirograph", animation: CanvasClock, layout: { width: { weight: 1 }, height: 230 })
+        DemoCanvas(key: "draw.canvas.spirograph", kind: "spirograph", layout: { width: { weight: 1 }, height: 230 })
         DemoCanvas(key: "draw.canvas.orbits", kind: "orbits", animation: CanvasClock, layout: { width: { weight: 1 }, height: 230 })
         DemoCanvas(key: "draw.canvas.waves", kind: "waves", animation: CanvasClock, layout: { width: { weight: 1 }, height: 230 })
       }
-      Text(text: "A native extension draws these through Present: a 1,400-point spirograph that changes shape every frame, sweeping gauges, orbiting dots and a spinning pie, and translucent swells. Arcs, circles and slices are exact analytic shapes; the curves are rasterized to exact coverage masks each frame.", wrapMode: "WORD")
+      Text(text: "A native extension draws these through Present: a 1,400-point spirograph the GPU generates itself every frame as art (Present.art: no CPU work at all), sweeping gauges, orbiting dots and a spinning pie, and translucent swells. Arcs, circles and slices are exact analytic shapes; the swells are rasterized to exact coverage masks each frame.", wrapMode: "WORD")
     }
     Card(title: "DATA THAT MORPHS: animateChanges") {
       Panel(style: ActionRow) {

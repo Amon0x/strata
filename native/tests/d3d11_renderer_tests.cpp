@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -435,10 +436,131 @@ void test_raster_jobs_match_the_reference(const D3D_DRIVER_TYPE driver, const st
     }
 }
 
+/**
+ * Art: a GPU program generates an outline's points, which the kernels fill or stroke as they
+ * would the same points sent from the CPU. Compiled in the background, it draws nothing until
+ * ready; then its coverage matches the CPU rasterizing the same points, but for float rounding.
+ */
+void test_art_matches_the_same_points(const D3D_DRIVER_TYPE driver, const std::string_view name) {
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    if (FAILED(D3D11CreateDevice(nullptr, driver, nullptr, 0U, nullptr, 0U, D3D11_SDK_VERSION,
+                                 &device, nullptr, &context))) {
+        std::cout << "  " << name << " device unavailable; art skipped\n";
+        return;
+    }
+    constexpr std::uint32_t size = 120U;
+    constexpr std::uint32_t region = size + 2U;
+    constexpr std::uint32_t count = 360U;
+    // A rose: r = 0.3 + 0.12 cos(5 t), about the centre, in canvas space.
+    const std::string program =
+        "float2 artPoint(uint index, uint count) {\n"
+        "    float t = 6.28318530718 * index / count;\n"
+        "    float r = artParameter(0) + artParameter(1) * cos(5.0 * t);\n"
+        "    return float2(0.5 + r * cos(t), 0.5 + r * sin(t));\n"
+        "}\n";
+    std::vector<host::RasterPoint> points;
+    for (std::uint32_t index = 0U; index < count; ++index) {
+        const double angle = 6.28318530718 * index / count;
+        const double r = 0.3 + 0.12 * std::cos(5.0 * angle);
+        points.push_back({(0.5 + r * std::cos(angle)) * size, (0.5 + r * std::sin(angle)) * size});
+    }
+    D3D11_TEXTURE2D_DESC descriptor{};
+    descriptor.Width = region;
+    descriptor.Height = region;
+    descriptor.MipLevels = 1U;
+    descriptor.ArraySize = 1U;
+    descriptor.Format = DXGI_FORMAT_R8_UNORM;
+    descriptor.SampleDesc.Count = 1U;
+    descriptor.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11UnorderedAccessView> writer;
+    check(SUCCEEDED(device->CreateTexture2D(&descriptor, nullptr, &texture)) &&
+              SUCCEEDED(device->CreateUnorderedAccessView(texture.Get(), nullptr, &writer)),
+          "could not create the art atlas");
+    descriptor.Usage = D3D11_USAGE_STAGING;
+    descriptor.BindFlags = 0U;
+    descriptor.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> staging;
+    check(SUCCEEDED(device->CreateTexture2D(&descriptor, nullptr, &staging)),
+          "could not create the art readback texture");
+    const auto read = [&] {
+        context->CopyResource(staging.Get(), texture.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        check(SUCCEEDED(context->Map(staging.Get(), 0U, D3D11_MAP_READ, 0U, &mapped)),
+              "could not read the art atlas back");
+        std::vector<std::uint8_t> result(static_cast<std::size_t>(region) * region);
+        for (std::uint32_t row = 0U; row < region; ++row)
+            std::memcpy(result.data() + row * region,
+                        static_cast<const std::uint8_t*>(mapped.pData) + row * mapped.RowPitch,
+                        region);
+        context->Unmap(staging.Get(), 0U);
+        return result;
+    };
+    d3d11::RasterPass pass(device.Get(), context.Get());
+    host::RasterStroke stroke{2.5F, host::RasterJoin::round, host::RasterCap::round, 4.0F, 0.03F};
+    for (const bool stroked : {false, true}) {
+        host::RasterArt art;
+        art.source = program;
+        art.count = count;
+        art.closed = true;
+        art.stroked = stroked;
+        art.width = static_cast<float>(size);
+        art.height = static_cast<float>(size);
+        art.parameters[0] = 0.3F;
+        art.parameters[1] = 0.12F;
+        host::RasterJobBuilder art_builder(size, size);
+        art_builder.add_art_layer(host::RasterFill::nonzero, host::RasterLayer{}, stroke, art);
+        const host::RasterJob job = host::decode_raster_job(art_builder.encode(1U, 1U), region,
+                                                            region, host::texture_format_r8_filtered);
+        // The program compiles in the background: until then the region is left empty.
+        std::vector<std::uint8_t> gpu;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        for (;;) {
+            pass.run(job, false, writer.Get(), 0U, 0U, region, region, 1.0);
+            gpu = read();
+            if (std::ranges::any_of(gpu, [](const std::uint8_t value) { return value != 0U; }) ||
+                std::chrono::steady_clock::now() > deadline) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        host::RasterJobBuilder builder(size, size);
+        if (stroked) {
+            const std::vector<host::RasterStrokeRun> runs{{points, true}};
+            builder.add_stroke_layer(host::RasterLayer{}, stroke, runs, {});
+        } else {
+            const std::vector<std::vector<host::RasterPoint>> polygons{points};
+            builder.add_layer(host::RasterFill::nonzero, host::RasterLayer{}, polygons, {});
+        }
+        const host::RasterJob reference_job = host::decode_raster_job(
+            builder.encode(1U, 1U), region, region, host::texture_format_r8_filtered);
+        std::vector<std::uint8_t> reference(static_cast<std::size_t>(region) * region);
+        host::rasterize_job(reference_job, host::texture_format_r8_filtered, region, region,
+                            reference, region);
+        int largest = 0;
+        std::size_t off = 0U;
+        std::size_t covered = 0U;
+        for (std::size_t index = 0U; index < gpu.size(); ++index) {
+            const int difference = std::abs(int{gpu[index]} - int{reference[index]});
+            largest = std::max(largest, difference);
+            off += difference > 4 ? 1U : 0U;
+            covered += reference[index] != 0U ? 1U : 0U;
+        }
+        std::cout << "  " << name << (stroked ? " stroked" : " filled") << " art: " << off
+                  << " of " << covered << " covered texels off by more than 4, largest "
+                  << largest << "\n";
+        check(covered > 0U && off * 100U <= covered && largest <= 32,
+              std::string(name) + " art differs from the same points drawn from the CPU");
+    }
+}
+
 } // namespace
 
 int main() {
     try {
+        test_art_matches_the_same_points(D3D_DRIVER_TYPE_HARDWARE, "hardware");
+        test_art_matches_the_same_points(D3D_DRIVER_TYPE_WARP, "WARP");
         test_raster_jobs_match_the_reference(D3D_DRIVER_TYPE_WARP, "WARP");
         test_raster_jobs_match_the_reference(D3D_DRIVER_TYPE_HARDWARE, "hardware");
         test_geometry_after_a_failed_frame();

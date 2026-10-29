@@ -273,6 +273,22 @@ struct CustomMeshRenderCommand final {
                                          const CustomMeshRenderCommand&) = default;
 };
 /** One authored vector shape: an outline plus how it is filled, stroked, or both. */
+/**
+ * An outline a GPU program generates (WidgetRenderScope::art): HLSL defining
+ * `float2 artPoint(uint index, uint count)` in the shape's own 0-1 space, how many points it has,
+ * whether the last joins the first, and the sixteen parameters `artParameter(index)` reads. The
+ * backend draws it again each frame with `artTime()`, so a picture that moves costs no CPU work.
+ * It is decorative and GPU-only: hit testing sees only its bounds, and the software renderer
+ * leaves it out.
+ */
+struct ArtOutline final {
+    std::string source;
+    std::uint32_t count = 0U;
+    bool closed = false;
+    std::array<float, 16U> parameters{};
+    [[nodiscard]] friend bool operator==(const ArtOutline&, const ArtOutline&) = default;
+};
+
 struct PathRenderCommand final {
     Rect bounds;
     PathShape shape;
@@ -282,6 +298,8 @@ struct PathRenderCommand final {
      * seam (WidgetRenderScope::shapes joins shapes that share an edge).
      */
     std::vector<PathShape> joined;
+    /** Art: the outline comes from this program rather than `shape`'s path. */
+    std::optional<ArtOutline> art;
     [[nodiscard]] friend bool operator==(const PathRenderCommand&,
                                          const PathRenderCommand&) = default;
 };

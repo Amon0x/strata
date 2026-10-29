@@ -3,7 +3,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace strata::host {
@@ -31,6 +33,12 @@ struct RasterPoint final {
  * piece and the caps of a run's ends, each a convex polygon wound one way, so under the nonzero
  * rule their union is the stroke. Expansion is floating point, so a GPU's stroke may differ from
  * the reference's by a level along an edge.
+ *
+ * A layer may instead be art: an opt-in GPU program (HLSL) whose `artPoint(index, count)` gives
+ * each point of an outline in the canvas's 0-1 space, which the backend strokes or fills itself,
+ * so a picture that moves every frame costs the CPU nothing. Art is decorative and GPU-only: the
+ * reference rasterizer leaves an art layer empty, and backends keep art jobs live, running them
+ * again each frame they render with the time, `artTime()`, in seconds.
  *
  * A job for an R8 atlas has one coverage layer. A job for an RGBA8 atlas has painted layers,
  * front first, composited by area: a layer takes what the layers in front leave uncovered at its
@@ -94,6 +102,26 @@ struct RasterStroke final {
     float tolerance = 0.03F;
 };
 
+/** An art layer's program and its canvas (see the job description above). */
+struct RasterArt final {
+    /** HLSL defining `float2 artPoint(uint index, uint count)`. */
+    std::string source;
+    std::uint32_t count = 0U;
+    /** Whether the last point joins the first. */
+    bool closed = false;
+    /** Stroked with the layer's stroke, or filled by the layer's fill rule. */
+    bool stroked = false;
+    /** The canvas in content pixels: a point (u, v) lies at (x + u width, y + v height). */
+    float x = 0.0F;
+    float y = 0.0F;
+    float width = 0.0F;
+    float height = 0.0F;
+    /** Read by `artParameter(index)`. */
+    std::array<float, 16U> parameters{};
+};
+inline constexpr std::uint32_t maximum_art_points = 1U << 20U;
+inline constexpr std::size_t maximum_art_source = 64U * 1024U;
+
 /** A run of a stroke's centreline: its points, and whether its last joins its first. */
 struct RasterStrokeRun final {
     std::vector<RasterPoint> points;
@@ -117,6 +145,8 @@ struct RasterLayer final {
     RasterStroke stroke;
     std::uint32_t first_piece = 0U;
     std::uint32_t piece_count = 0U;
+    /** An art layer's program, instead of segments or pieces. */
+    std::optional<RasterArt> art;
     /** raster_lut_size packed colours for a gradient, empty otherwise. */
     std::vector<std::uint32_t> lut;
 };
@@ -150,6 +180,12 @@ class RasterJobBuilder final {
      */
     void add_stroke_layer(const RasterLayer& paint, const RasterStroke& stroke,
                           std::span<const RasterStrokeRun> runs, RasterPoint origin);
+    /**
+     * Adds an art layer behind the ones added before it: `art` strokes with `stroke` when it is
+     * stroked, and fills by `fill` otherwise.
+     */
+    void add_art_layer(RasterFill fill, const RasterLayer& paint, const RasterStroke& stroke,
+                       RasterArt art);
     /** The job's content size. */
     [[nodiscard]] std::uint32_t width() const noexcept { return width_; }
     [[nodiscard]] std::uint32_t height() const noexcept { return height_; }
@@ -166,6 +202,9 @@ class RasterJobBuilder final {
     std::vector<RasterSegment> segments_;
     std::vector<RasterStrokePiece> pieces_;
 };
+
+/** Whether a job draws art, which a backend keeps live and runs again each frame. */
+[[nodiscard]] bool raster_job_has_art(const RasterJob& job) noexcept;
 
 /** How far a stroke reaches from its centreline: its half width, a mitre's or a square's more. */
 [[nodiscard]] double raster_stroke_reach(const RasterStroke& stroke) noexcept;

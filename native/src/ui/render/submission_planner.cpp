@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <numbers>
@@ -1336,6 +1337,139 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
 }
 
 /**
+ * Draws art (PathRenderCommand::art): each part (fill, stroke) is a coverage mask over the
+ * canvas whose raster job carries the art's program instead of edges, drawn with the part's paint
+ * as a shape's mask is. The mask is cached by everything it depends on but the time, so the CPU
+ * plans it once while the backend draws it again every frame. A stroke under a scale that differs
+ * by axis is left out (the backend's pen is round). Returns false when there is no shape atlas or
+ * the canvas exceeds a page.
+ */
+[[nodiscard]] bool append_art_masks(
+    std::vector<PlannedItem>& output,
+    const PathRenderCommand& command,
+    const std::uint32_t source_order,
+    const Transform& transform,
+    const Rect clip,
+    const std::vector<SubmissionRoundedClip>& rounded_clips,
+    const double opacity,
+    const std::uint32_t group,
+    const SubmissionContext& context,
+    std::size_t& skipped_draws,
+    font::GlyphAtlas* const atlas,
+    const std::span<const GroupRasterScale> group_scales
+) {
+    const ArtOutline& outline = *command.art;
+    const PathShape& shape = command.shape;
+    const Rect bounds = command.bounds;
+    if (atlas == nullptr || bounds.width <= 0.0 || bounds.height <= 0.0)
+        return false;
+    const std::optional<MaskGrid> grid = mask_grid(transform, bounds, context, group, group_scales);
+    if (!grid.has_value())
+        return false;
+    const StrokeStyle style = shape.stroke_style.value_or(StrokeStyle{});
+    struct Part final {
+        bool stroke = false;
+        const Paint* paint = nullptr;
+        std::optional<host::RasterStroke> pen;
+    };
+    std::vector<Part> parts;
+    if (shape.fill.has_value() && !shape.fill->transparent())
+        parts.push_back(Part{false, &*shape.fill, std::nullopt});
+    if (shape.stroke.has_value() && !shape.stroke->transparent() && style.width > 0.0) {
+        if (const std::optional<host::RasterStroke> pen = device_stroke(style, *grid))
+            parts.push_back(Part{true, &*shape.stroke, pen});
+    }
+    // The canvas on the device grid, from the shape's whole pixel.
+    const double canvas_x = grid->phase.x;
+    const double canvas_y = grid->phase.y;
+    const double canvas_width = bounds.width * grid->device_x;
+    const double canvas_height = bounds.height * grid->device_y;
+    MaskHash program;
+    program.add(std::uint32_t{0x41525421U});
+    program.add(std::hash<std::string>{}(outline.source));
+    program.add(outline.source.size());
+    program.add(outline.count);
+    program.add(outline.closed);
+    program.add(outline.parameters);
+    program.add(shape.fill_rule);
+    program.add(bounds.width);
+    program.add(bounds.height);
+    program.add(grid->device_x);
+    program.add(grid->device_y);
+    program.add(grid->phase);
+    struct Piece final {
+        const Part* part = nullptr;
+        font::GlyphAtlasEntry entry;
+    };
+    std::vector<Piece> pieces;
+    for (const Part& part : parts) {
+        const double reach = part.pen.has_value() ? host::raster_stroke_reach(*part.pen) : 0.0;
+        const double left = std::min(canvas_x, canvas_x + canvas_width) - reach - 1.0;
+        const double right = std::max(canvas_x, canvas_x + canvas_width) + reach + 1.0;
+        const double top = std::min(canvas_y, canvas_y + canvas_height) - reach - 1.0;
+        const double bottom = std::max(canvas_y, canvas_y + canvas_height) + reach + 1.0;
+        if (right - left > maximum_mask_extent || bottom - top > maximum_mask_extent)
+            return false;
+        MaskHash hash = program;
+        hash.add(part.stroke);
+        if (part.stroke) {
+            hash.add(style.width);
+            hash.add(style.cap);
+            hash.add(style.join);
+            hash.add(style.miter_limit);
+        }
+        char key[40];
+        std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(hash.value()));
+        const std::optional<font::GlyphAtlasEntry> entry = atlas->request_raster(
+            key, font::GlyphRasterMode::coverage,
+            [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
+                const double x0 = std::floor(left);
+                const double y0 = std::floor(top);
+                const auto width = static_cast<std::uint32_t>(std::ceil(right) - x0);
+                const auto height = static_cast<std::uint32_t>(std::ceil(bottom) - y0);
+                host::RasterArt art;
+                art.source = outline.source;
+                art.count = outline.count;
+                art.closed = outline.closed;
+                art.stroked = part.stroke;
+                art.x = static_cast<float>(canvas_x - x0);
+                art.y = static_cast<float>(canvas_y - y0);
+                art.width = static_cast<float>(canvas_width);
+                art.height = static_cast<float>(canvas_height);
+                art.parameters = outline.parameters;
+                host::RasterJobBuilder builder(width, height);
+                builder.add_art_layer(shape.fill_rule == PathFillRule::evenodd
+                                          ? host::RasterFill::even_odd
+                                          : host::RasterFill::nonzero,
+                                      host::RasterLayer{}, part.pen.value_or(host::RasterStroke{}),
+                                      std::move(art));
+                return font::RasterRequest{builder.encode(gutter, gutter), width, height,
+                                           font::RasterPlaneBounds{x0, y0 + height, x0 + width, y0}};
+            });
+        if (!entry.has_value())
+            return false;
+        pieces.push_back(Piece{&part, *entry});
+    }
+    for (const Piece& piece : pieces) {
+        const Part& part = *piece.part;
+        std::optional<MaskGradient> gradient;
+        if (const Gradient* paint_gradient = part.paint->gradient(); paint_gradient != nullptr)
+            gradient = mask_gradient(*paint_gradient, bounds);
+        const auto [quad, uv] =
+            mask_quad(*grid, transform, bounds, piece.entry.plane_bounds_layout_pixels,
+                      TextureRegion{piece.entry.u, piece.entry.v, piece.entry.uv_width,
+                                    piece.entry.uv_height});
+        append_draw(output,
+                    PreparedCommand{std::make_shared<const PreparedMask>(
+                        PreparedMask{quad, uv, part.paint->representative(), piece.entry.texture,
+                                     gradient})},
+                    source_order, transform, clip, rounded_clips, std::nullopt, opacity, group,
+                    context, skipped_draws);
+    }
+    return true;
+}
+
+/**
  * Draws a path's fill and stroke from exact coverage masks in the shape atlas, as text draws its
  * glyphs: the outline is flattened and (for a stroke) expanded at device resolution, and the
  * backend rasterizes it by area (a raster job) into a mask placed on the device pixel grid at the
@@ -1360,6 +1494,10 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
     const std::span<const GroupRasterScale> group_scales,
     PreparationCache::VolatileShape* const animated
 ) {
+    if (command.art.has_value()) {
+        return append_art_masks(output, command, source_order, transform, clip, rounded_clips,
+                                opacity, group, context, skipped_draws, atlas, group_scales);
+    }
     if (!command.joined.empty()) {
         return append_joined_masks(output, command, source_order, transform, clip, rounded_clips,
                                    opacity, group, context, skipped_draws, atlas, tile_classes,

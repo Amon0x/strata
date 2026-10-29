@@ -10,6 +10,7 @@
 #include "shader.hpp"
 #include <algorithm>
 #include <cmath>
+#include <future>
 #include <map>
 #include <optional>
 #include <span>
@@ -198,6 +199,19 @@ struct Renderer::Impl {
     std::array<VkPipeline, 5U> raster_pipelines{};
     /** GPU-only work buffers the kernels leave zeroed, and the region they write. */
     std::unique_ptr<Buffer> raster_cells, raster_sums, raster_output;
+    /** Art programs by source hash: SPIR-V compiling in the background, then their pipelines. */
+    struct ArtProgram {
+        std::shared_future<std::array<std::vector<std::uint32_t>, 2U>> code;
+        VkPipeline stroke = VK_NULL_HANDLE, fill = VK_NULL_HANDLE;
+        bool failed = false;
+    };
+    std::map<std::size_t, ArtProgram> art_programs;
+    /** Art jobs, run again each frame; `seconds` is the frame time each last ran at. */
+    struct LiveArt {
+        host::ResourceOperation operation;
+        double seconds = 0.0;
+    };
+    std::vector<LiveArt> live_art;
     bool poisoned = false;
     double logical_width{}, logical_height{}, seconds{};
     RenderLayerTelemetry telemetry;
@@ -230,7 +244,13 @@ struct Renderer::Impl {
     Image& capture(Target& source, host::Scissor region);
     void resources(const host::RenderPacket& packet);
     /** Rasterizes a raster operation's job into its region of `image` (vulkan/raster.cpp). */
-    void rasterize(const host::ResourceOperation& operation, Image& image);
+    void rasterize(const host::ResourceOperation& operation, Image& image, double time = 0.0);
+    /** An art layer's pipelines when they are ready, or null while compiling or when it failed. */
+    ArtProgram* art_program(const std::string& source);
+    /** Runs every live art job at this frame's time. */
+    void run_live_art();
+    /** Drops the live art jobs a write over (part of) a texture replaces. */
+    void forget_live_art(const host::ResourceOperation& operation, bool whole);
     void create_raster_kernels();
     /** Starts compiling the raster kernels in the background, so no frame waits on them. */
     void prepare_raster_kernels();

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace strata::gpu::raster_shaders {
@@ -38,7 +39,8 @@ struct Constants final {
     float half_width = 0.0F;
     float miter_limit = 4.0F;
     float tolerance = 0.03F;
-    float stroke_reserved = 0.0F;
+    /** Where an art layer's values begin in the art buffer. */
+    std::uint32_t art_base = 0U;
 };
 /** The most push constant bytes every Vulkan device offers. */
 static_assert(sizeof(Constants) == 128U);
@@ -57,9 +59,9 @@ inline constexpr std::array<const char*, 5U> entries{"accumulate", "stroke", "re
  *   accumulate         one thread a segment: its exact area into the cells it crosses (atomics)
  *   stroke             one thread a stroke piece: its band, join and caps as convex polygons,
  *                      clipped and quantized in float, then accumulated like segments
- *   resolve_coverage   one thread a region row: cells to coverage, written to the R8 atlas
- *   resolve_composite  one thread a content row: cells to coverage, composited into the sums
- *   finish             one thread a region row: the sums to straight RGBA, written to the atlas
+ *   resolve_coverage   one group a region row, in 64 chunks: cells to coverage, to the R8 atlas
+ *   resolve_composite  one group a content row, in 64 chunks: coverage composited into the sums
+ *   finish             one thread a texel: the sums to straight RGBA, written to the atlas
  *
  * Each resolve clears the cells it reads and finish the sums, so the next job starts from zero.
  * STRATA_VULKAN selects push constants, explicit bindings and a buffer output.
@@ -97,7 +99,7 @@ struct RasterData {
     float half_width;
     float miter_limit;
     float tolerance;
-    float stroke_reserved;
+    uint art_base;
 };
 
 struct StrokePiece {
@@ -402,11 +404,8 @@ Polygon cap_of(float2 position, float2 outward) {
     return fan_of(position, across, sweep);
 }
 
-[numthreads(64, 1, 1)]
-void stroke(uint3 id : SV_DispatchThreadID) {
-    if (id.x >= raster.piece_count)
-        return;
-    StrokePiece piece = pieces[raster.first_piece + id.x];
+/** One stroke piece's band, join and caps, accumulated into the cells. */
+void stroke_piece(StrokePiece piece) {
     float radius = raster.half_width;
     // A piece's polygons are closed and lie within its reach: one that misses the content adds
     // nothing to it.
@@ -493,6 +492,13 @@ void stroke(uint3 id : SV_DispatchThreadID) {
     }
 }
 
+[numthreads(64, 1, 1)]
+void stroke(uint3 id : SV_DispatchThreadID) {
+    if (id.x >= raster.piece_count)
+        return;
+    stroke_piece(pieces[raster.first_piece + id.x]);
+}
+
 int resolved(int cover, int area) {
     int value = abs(cover * (2 * one) - area);
     if (raster.fill == 1) {
@@ -516,17 +522,48 @@ int2 take_cell(uint column, uint row) {
     return cell;
 }
 
+groupshared int lane_cover[64];
+
+/**
+ * A row's cover left of this lane's chunk: each lane sums the cover of its chunk of the content
+ * row, then counts the chunks before its own. Rows are a group each, so a wide row resolves in
+ * 64 chunks at once rather than one column after another.
+ */
+int cover_before(uint row, uint begin, uint end, uint lane) {
+    int sum = 0;
+    [loop] for (uint column = begin; column < end; ++column)
+        sum += cells[(row * raster.content_width + column) * 2];
+    lane_cover[lane] = sum;
+    GroupMemoryBarrierWithGroupSync();
+    int before = 0;
+    [loop] for (uint index = 0; index < lane; ++index)
+        before += lane_cover[index];
+    return before;
+}
+
+/** This lane's chunk of `width` columns: sixty-four chunks, each a multiple of four wide. */
+uint2 lane_chunk(uint width, uint lane) {
+    uint chunk = (((width + 63) / 64) + 3) & ~3u;
+    uint begin = min(lane * chunk, width);
+    return uint2(begin, min(begin + chunk, width));
+}
+
 [numthreads(64, 1, 1)]
-void resolve_coverage(uint3 id : SV_DispatchThreadID) {
-    uint row = id.x;
-    if (row >= raster.region_height)
-        return;
+void resolve_coverage(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
+    uint row = group.x;
+    uint lane = thread.x;
+    uint2 chunk = lane_chunk(raster.region_width, lane);
     bool content_row = row >= raster.content_y && row < raster.content_y + raster.content_height;
-    int running = 0;
+    // The content columns of this lane's chunk of the region row.
+    uint content_begin = clamp(chunk.x, raster.content_x, raster.content_x + raster.content_width);
+    uint content_end = clamp(chunk.y, raster.content_x, raster.content_x + raster.content_width);
+    int running = cover_before(content_row ? row - raster.content_y : 0,
+                               content_row ? content_begin - raster.content_x : 0,
+                               content_row ? content_end - raster.content_x : 0, lane);
 #ifdef STRATA_VULKAN
     uint packed = 0;
 #endif
-    [loop] for (uint column = 0; column < raster.region_width; ++column) {
+    [loop] for (uint column = chunk.x; column < chunk.y; ++column) {
         uint value = 0;
         if (content_row && column >= raster.content_x &&
             column < raster.content_x + raster.content_width) {
@@ -567,12 +604,11 @@ uint layer_color(uint column, uint row) {
 }
 
 [numthreads(64, 1, 1)]
-void resolve_composite(uint3 id : SV_DispatchThreadID) {
-    uint row = id.x;
-    if (row >= raster.content_height)
-        return;
-    int running = 0;
-    [loop] for (uint column = 0; column < raster.content_width; ++column) {
+void resolve_composite(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
+    uint row = group.x;
+    uint2 chunk = lane_chunk(raster.content_width, thread.x);
+    int running = cover_before(row, chunk.x, chunk.y, thread.x);
+    [loop] for (uint column = chunk.x; column < chunk.y; ++column) {
         int2 cell = take_cell(column, row);
         running += cell.x;
         int covered = resolved(running, cell.y);
@@ -605,37 +641,112 @@ uint straight_channel(uint premultiplied, uint alpha) {
 
 [numthreads(64, 1, 1)]
 void finish(uint3 id : SV_DispatchThreadID) {
-    uint row = id.x;
-    if (row >= raster.region_height)
+    if (id.x >= raster.region_width * raster.region_height)
         return;
-    bool content_row = row >= raster.content_y && row < raster.content_y + raster.content_height;
-    [loop] for (uint column = 0; column < raster.region_width; ++column) {
-        uint texel = 0;
-        if (content_row && column >= raster.content_x &&
-            column < raster.content_x + raster.content_width) {
-            uint at = ((row - raster.content_y) * raster.content_width +
-                       (column - raster.content_x)) * 5;
-            uint alpha = sums[at + 3];
-            if (alpha > 0) {
-                texel = straight_channel(sums[at], alpha) |
-                        (straight_channel(sums[at + 1], alpha) << 8) |
-                        (straight_channel(sums[at + 2], alpha) << 16) |
-                        (((alpha * 255 + composite_one / 2) / composite_one) << 24);
-            }
-            sums[at] = 0;
-            sums[at + 1] = 0;
-            sums[at + 2] = 0;
-            sums[at + 3] = 0;
-            sums[at + 4] = 0;
+    uint row = id.x / raster.region_width;
+    uint column = id.x - row * raster.region_width;
+    uint texel = 0;
+    if (row >= raster.content_y && row < raster.content_y + raster.content_height &&
+        column >= raster.content_x && column < raster.content_x + raster.content_width) {
+        uint at = ((row - raster.content_y) * raster.content_width +
+                   (column - raster.content_x)) * 5;
+        uint alpha = sums[at + 3];
+        if (alpha > 0) {
+            texel = straight_channel(sums[at], alpha) |
+                    (straight_channel(sums[at + 1], alpha) << 8) |
+                    (straight_channel(sums[at + 2], alpha) << 16) |
+                    (((alpha * 255 + composite_one / 2) / composite_one) << 24);
         }
-#ifdef STRATA_VULKAN
-        output[row * raster.output_stride + column] = texel;
-#else
-        output[uint2(raster.region_x + column, raster.region_y + row)] =
-            float4(texel & 0xFF, (texel >> 8) & 0xFF, (texel >> 16) & 0xFF, texel >> 24) / 255.0;
-#endif
+        sums[at] = 0;
+        sums[at + 1] = 0;
+        sums[at + 2] = 0;
+        sums[at + 3] = 0;
+        sums[at + 4] = 0;
     }
+#ifdef STRATA_VULKAN
+    output[row * raster.output_stride + column] = texel;
+#else
+    output[uint2(raster.region_x + column, raster.region_y + row)] =
+        float4(texel & 0xFF, (texel >> 8) & 0xFF, (texel >> 16) & 0xFF, texel >> 24) / 255.0;
+#endif
 }
 )hlsl";
+
+/** The art kernels, compiled once per program. */
+inline constexpr std::array<const char*, 2U> art_entries{"art_stroke", "art_fill"};
+
+/**
+ * Values an art kernel reads besides the job's constants, as floats: the time in seconds, the
+ * point count, whether the outline closes, the canvas (x, y, width, height) in content pixels,
+ * one unused, then sixteen parameters.
+ */
+inline constexpr std::size_t art_value_count = 24U;
+
+/** What an art program may call, ahead of its source. */
+constexpr std::string_view art_prelude = R"hlsl(
+BIND(6) StructuredBuffer<float> art_values : register(t3);
+
+/** Seconds since the renderer began presenting. */
+float artTime() { return art_values[raster.art_base + 0]; }
+/** One of the sixteen parameters the canvas was drawn with. */
+float artParameter(uint index) { return index < 16 ? art_values[raster.art_base + 8 + index] : 0.0; }
+/** The canvas's size in device pixels. */
+float2 artSize() { return float2(art_values[raster.art_base + 5], art_values[raster.art_base + 6]); }
+)hlsl";
+
+/** The art entry points, after the program, which defines artPoint(index, count). */
+constexpr std::string_view art_kernels = R"hlsl(
+float2 art_position(uint index, uint count) {
+    float2 position = artPoint(index, count);
+    return float2(art_values[raster.art_base + 3], art_values[raster.art_base + 4]) + position * float2(art_values[raster.art_base + 5], art_values[raster.art_base + 6]);
+}
+
+bool art_finite(float2 value) {
+    return all(abs(value) <= 1.0e6);
+}
+
+[numthreads(64, 1, 1)]
+void art_stroke(uint3 id : SV_DispatchThreadID) {
+    uint count = uint(art_values[raster.art_base + 1]);
+    bool closed = art_values[raster.art_base + 2] > 0.5;
+    uint segments = closed ? count : count - 1;
+    if (id.x >= segments)
+        return;
+    bool joined = closed || id.x + 2 < count;
+    StrokePiece piece;
+    piece.p0 = art_position(id.x, count);
+    piece.p1 = art_position((id.x + 1) % count, count);
+    piece.p2 = joined ? art_position((id.x + 2) % count, count) : piece.p1;
+    piece.flags = (joined ? 1 : 0) | (!closed && id.x == 0 ? 2 : 0) |
+                  (!closed && id.x + 1 == segments ? 4 : 0);
+    piece.reserved = 0;
+    if (!art_finite(piece.p0) || !art_finite(piece.p1) || !art_finite(piece.p2))
+        return;
+    stroke_piece(piece);
+}
+
+[numthreads(64, 1, 1)]
+void art_fill(uint3 id : SV_DispatchThreadID) {
+    uint count = uint(art_values[raster.art_base + 1]);
+    if (id.x >= count)
+        return;
+    float2 a = art_position(id.x, count);
+    float2 b = art_position((id.x + 1) % count, count);
+    if (art_finite(a) && art_finite(b))
+        edge(a, b, 1);
+}
+)hlsl";
+
+/** The source an art program compiles from: the raster kernels, the prelude, it, the entries. */
+inline std::string art_source(const std::string_view program) {
+    std::string result;
+    result.reserve(source.size() + art_prelude.size() + program.size() + art_kernels.size() + 2U);
+    result += source;
+    result += art_prelude;
+    result += program;
+    result += "\n";
+    result += art_kernels;
+    return result;
+}
 
 } // namespace strata::gpu::raster_shaders

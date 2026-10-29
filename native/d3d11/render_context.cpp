@@ -605,6 +605,7 @@ struct RenderContext::Impl final {
     [[nodiscard]] RenderLayerTelemetry render_layer(const std::string_view id,
                                                     const RenderPacket& packet) {
         consume_resources(packet);
+        textures->run_live(current_frame_seconds);
         if (target == nullptr)
             throw std::logic_error("D3D11 render target is not configured");
         RenderLayerTelemetry telemetry;

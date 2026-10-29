@@ -31,6 +31,7 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
     begin();
     try {
         resources(packet);
+        run_live_art();
         // The packet names materials and effects by index; resolve each table once.
         layer_materials.clear();
         layer_materials.reserve(packet.materials.size());

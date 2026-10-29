@@ -118,7 +118,40 @@ struct TextureStore::Impl final {
         return result;
     }
 
+    /** Drops the live jobs a new write over (part of) a texture replaces. */
+    void forget_live(const ResourceOperation& operation, const bool whole) {
+        std::erase_if(live, [&](const LiveJob& job) {
+            if (job.operation.texture != operation.texture)
+                return false;
+            if (whole)
+                return true;
+            const ResourceOperation& other = job.operation;
+            return operation.x < other.x + other.width && other.x < operation.x + operation.width &&
+                   operation.y < other.y + other.height && other.y < operation.y + operation.height;
+        });
+    }
+
+    void run_live(const double seconds) {
+        for (LiveJob& job : live) {
+            if (job.seconds == seconds)
+                continue;
+            const auto found = textures.find(job.operation.texture);
+            if (found == textures.end() || found->second.writer == nullptr)
+                continue;
+            if (raster == nullptr)
+                raster = std::make_unique<RasterPass>(device.Get(), context.Get());
+            raster->run(job.operation.raster, job.operation.format == 1U,
+                        found->second.writer.Get(), job.operation.x, job.operation.y,
+                        job.operation.width, job.operation.height, seconds);
+            job.seconds = seconds;
+        }
+    }
+
     void apply(const ResourceOperation& operation) {
+        if (operation.kind == 2U || operation.kind == 0U || operation.kind == host::resource_image)
+            forget_live(operation, true);
+        else
+            forget_live(operation, false);
         if (operation.kind == 2U) {
             textures.erase(operation.texture);
             return;
@@ -152,6 +185,11 @@ struct TextureStore::Impl final {
         if (operation.kind == host::resource_raster) {
             if (destination.writer == nullptr)
                 throw std::invalid_argument("raster job targets an atlas compute cannot write");
+            // Art draws every frame, with the frame's time: it runs when the frame renders.
+            if (host::raster_job_has_art(operation.raster)) {
+                live.push_back(LiveJob{operation, std::numeric_limits<double>::quiet_NaN()});
+                return;
+            }
             if (raster == nullptr)
                 raster = std::make_unique<RasterPass>(device.Get(), context.Get());
             raster->run(operation.raster, operation.format == 1U, destination.writer.Get(),
@@ -185,6 +223,12 @@ struct TextureStore::Impl final {
     Texture white;
     /** Made on the first raster job, so a stream without shapes compiles no compute shaders. */
     std::unique_ptr<RasterPass> raster;
+    /** Art jobs, run again each frame; `seconds` is the frame time each last ran at. */
+    struct LiveJob final {
+        ResourceOperation operation;
+        double seconds = 0.0;
+    };
+    std::vector<LiveJob> live;
 };
 
 TextureStore::TextureStore(ID3D11Device* const device, ID3D11DeviceContext* const context)
@@ -193,6 +237,9 @@ TextureStore::~TextureStore() = default;
 
 void TextureStore::apply(const ResourceOperation& operation) {
     impl_->apply(operation);
+}
+void TextureStore::run_live(const double seconds) {
+    impl_->run_live(seconds);
 }
 void TextureStore::bind(const DrawBatch& batch) const {
     impl_->bind(batch);

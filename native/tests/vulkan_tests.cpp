@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <thread>
+#include <chrono>
 #include <cstring>
 #include <iostream>
 #include <optional>
@@ -173,6 +175,62 @@ void test_raster_jobs_match_the_reference(vulkan::detail::Offscreen& context) {
         std::cout << "  Vulkan " << label << ": " << covered << " covered texels, largest difference "
                   << largest << "\n";
         require(covered > 0 && largest <= 4, "Vulkan compute stroke differs from the reference");
+    }
+    // Art: the same rose generated on the GPU, which compiles in the background (frames drawn
+    // before it is ready leave the canvas empty), then matches the CPU's points closely.
+    {
+        constexpr std::uint32_t count = 360;
+        const std::string program =
+            "float2 artPoint(uint index, uint count) {\n"
+            "    float t = 6.28318530718 * index / count;\n"
+            "    float r = artParameter(0) + artParameter(1) * cos(5.0 * t);\n"
+            "    return float2(0.5 + r * cos(t), 0.5 + r * sin(t));\n"
+            "}\n";
+        std::vector<host::RasterPoint> rose;
+        for (std::uint32_t index = 0; index < count; ++index) {
+            const double angle = 6.28318530718 * index / count;
+            const double r = 0.3 + 0.12 * std::cos(5.0 * angle);
+            rose.push_back({(0.5 + r * std::cos(angle)) * width, (0.5 + r * std::sin(angle)) * height});
+        }
+        host::RasterArt art;
+        art.source = program;
+        art.count = count;
+        art.closed = true;
+        art.width = static_cast<float>(width);
+        art.height = static_cast<float>(height);
+        art.parameters[0] = 0.3F;
+        art.parameters[1] = 0.12F;
+        host::RasterJobBuilder builder(width, height);
+        builder.add_art_layer(host::RasterFill::nonzero, host::RasterLayer{}, host::RasterStroke{},
+                              art);
+        std::vector<std::uint8_t> pixels;
+        std::vector<std::uint8_t> reference;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        for (;;) {
+            std::tie(pixels, reference) = draw(builder, false);
+            bool drawn = false;
+            for (std::size_t index = 0; index < reference.size() && !drawn; ++index)
+                drawn = pixels[index * 4] != 0;
+            if (drawn || std::chrono::steady_clock::now() > deadline)
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        host::RasterJobBuilder expected(width, height);
+        const std::vector<std::vector<host::RasterPoint>> polygons{rose};
+        expected.add_layer(host::RasterFill::nonzero, host::RasterLayer{}, polygons, {});
+        const host::RasterJob expected_job = host::decode_raster_job(
+            expected.encode(1U, 1U), region_width, region_height, host::texture_format_r8);
+        host::rasterize_job(expected_job, host::texture_format_r8, region_width, region_height,
+                            reference, region_width);
+        int largest = 0;
+        std::size_t covered = 0;
+        for (std::size_t index = 0; index < reference.size(); ++index) {
+            largest = std::max(largest, std::abs(int{pixels[index * 4]} - int{reference[index]}));
+            covered += reference[index] != 0 ? 1U : 0U;
+        }
+        std::cout << "  Vulkan filled art: " << covered << " covered texels, largest difference "
+                  << largest << "\n";
+        require(covered > 0 && largest <= 4, "Vulkan art differs from the same points");
     }
     host::RasterLayer opaque;
     opaque.paint = host::RasterPaint::solid;

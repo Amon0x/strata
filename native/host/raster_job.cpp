@@ -20,9 +20,11 @@ static_assert(std::endian::native == std::endian::little, "raster jobs are littl
 constexpr std::size_t header_words = 7U;
 /**
  * Layer words before its colour table: fill, paint, colour, extend, six parameters, segment range,
- * stroke half width, join, cap, mitre limit and tolerance, piece range.
+ * stroke half width, join, cap, mitre limit and tolerance, piece range, and whether art follows.
  */
-constexpr std::size_t layer_words = 19U;
+constexpr std::size_t layer_words = 20U;
+/** Art words before its source: count, flags, canvas x, y, width, height, 16 parameters, length. */
+constexpr std::size_t art_words = 23U;
 /** One pixel's full coverage as resolved area: 2 x raster_one x raster_one. */
 constexpr std::int32_t full_area = 2 * raster_one * raster_one;
 /** Composite fractions are fifteen-bit fixed point. */
@@ -550,6 +552,30 @@ void RasterJobBuilder::add_stroke_layer(const RasterLayer& paint, const RasterSt
     layers_.push_back(std::move(layer));
 }
 
+void RasterJobBuilder::add_art_layer(const RasterFill fill, const RasterLayer& paint,
+                                     const RasterStroke& stroke, RasterArt art) {
+    if (layers_.size() >= maximum_raster_layers)
+        throw std::length_error("raster job has too many layers");
+    if (art.count < 2U || art.count > maximum_art_points || art.source.empty() ||
+        art.source.size() > maximum_art_source) {
+        throw std::invalid_argument("raster art needs 2 to 2^20 points and a program");
+    }
+    RasterLayer layer = paint;
+    layer.fill = art.stroked ? RasterFill::nonzero : fill;
+    layer.stroke = stroke;
+    layer.first_segment = static_cast<std::uint32_t>(segments_.size());
+    layer.segment_count = 0U;
+    layer.first_piece = static_cast<std::uint32_t>(pieces_.size());
+    layer.piece_count = 0U;
+    layer.art = std::move(art);
+    layers_.push_back(std::move(layer));
+}
+
+bool raster_job_has_art(const RasterJob& job) noexcept {
+    return std::ranges::any_of(job.layers,
+                               [](const RasterLayer& layer) { return layer.art.has_value(); });
+}
+
 double raster_stroke_reach(const RasterStroke& stroke) noexcept {
     double factor = 1.0;
     if (stroke.join == RasterJoin::miter)
@@ -563,8 +589,11 @@ std::vector<std::uint8_t> RasterJobBuilder::encode(const std::uint32_t x,
                                                    const std::uint32_t y) const {
     std::size_t size = header_words * 4U + segments_.size() * sizeof(RasterSegment) +
                        pieces_.size() * sizeof(RasterStrokePiece);
-    for (const RasterLayer& layer : layers_)
+    for (const RasterLayer& layer : layers_) {
         size += layer_words * 4U + (gradient(layer.paint) ? raster_lut_size * 4U : 0U);
+        if (layer.art.has_value())
+            size += art_words * 4U + (layer.art->source.size() + 3U) / 4U * 4U;
+    }
     Writer output(size);
     output.u32(x);
     output.u32(y);
@@ -589,6 +618,20 @@ std::vector<std::uint8_t> RasterJobBuilder::encode(const std::uint32_t x,
         output.f32(layer.stroke.tolerance);
         output.u32(layer.first_piece);
         output.u32(layer.piece_count);
+        output.u32(layer.art.has_value() ? 1U : 0U);
+        if (layer.art.has_value()) {
+            const RasterArt& art = *layer.art;
+            output.u32(art.count);
+            output.u32((art.closed ? 1U : 0U) | (art.stroked ? 2U : 0U));
+            for (const float value : {art.x, art.y, art.width, art.height})
+                output.f32(value);
+            for (const float parameter : art.parameters)
+                output.f32(parameter);
+            output.u32(static_cast<std::uint32_t>(art.source.size()));
+            output.append(art.source.data(), art.source.size());
+            const std::uint32_t zero = 0U;
+            output.append(&zero, (4U - art.source.size() % 4U) % 4U);
+        }
         if (gradient(layer.paint)) {
             if (layer.lut.size() != raster_lut_size)
                 throw std::invalid_argument("raster gradient layer needs a full colour table");
@@ -661,6 +704,43 @@ RasterJob decode_raster_job(const std::span<const std::uint8_t> bytes,
         layer.stroke.cap = static_cast<RasterCap>(cap);
         if (static_cast<std::uint64_t>(layer.first_piece) + layer.piece_count > piece_count)
             throw std::invalid_argument("raster job layer names missing stroke pieces");
+        if (input.u32() != 0U) {
+            RasterArt art;
+            art.count = input.u32();
+            const std::uint32_t flags = input.u32();
+            art.closed = (flags & 1U) != 0U;
+            art.stroked = (flags & 2U) != 0U;
+            art.x = input.f32();
+            art.y = input.f32();
+            art.width = input.f32();
+            art.height = input.f32();
+            for (float& parameter : art.parameters)
+                parameter = input.f32();
+            const std::uint32_t length = input.u32();
+            if (art.count < 2U || art.count > maximum_art_points || flags > 3U || length == 0U ||
+                length > maximum_art_source) {
+                throw std::invalid_argument("raster art is outside the supported domain");
+            }
+            for (const float value : {art.x, art.y, art.width, art.height}) {
+                if (!(std::abs(value) <= 1.0e6F))
+                    throw std::invalid_argument("raster art canvas is out of range");
+            }
+            for (const float parameter : art.parameters) {
+                if (!std::isfinite(parameter))
+                    throw std::invalid_argument("raster art parameter is not finite");
+            }
+            art.source.resize(length);
+            input.copy(art.source.data(), length);
+            std::array<std::uint8_t, 4U> padding{};
+            input.copy(padding.data(), (4U - length % 4U) % 4U);
+            if (art.stroked && (layer.fill != RasterFill::nonzero ||
+                                !(layer.stroke.half_width > 0.0F) ||
+                                !(layer.stroke.miter_limit >= 1.0F) ||
+                                !(layer.stroke.tolerance >= 1.0e-3F))) {
+                throw std::invalid_argument("raster art stroke is invalid");
+            }
+            layer.art = std::move(art);
+        }
         if (layer.piece_count > 0U &&
             (layer.fill != RasterFill::nonzero || !(layer.stroke.half_width > 0.0F) ||
              !(layer.stroke.half_width <= 1.0e5F) || !(layer.stroke.miter_limit >= 1.0F) ||

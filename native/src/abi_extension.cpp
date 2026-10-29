@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include <strata/raster_job.hpp>
 #include <strata/widget_api.h>
 
 #include "abi_boundary.hpp"
@@ -2148,6 +2149,54 @@ strata_result generic_retained_bytes(const strata_widget_context_kind kind,
     }
 }
 
+/** render_art: WidgetRenderScope::art, its fields checked first. */
+void render_widget_art(strata_widget_render_context* const context,
+                       const strata_widget_art* const art) noexcept {
+    if (context == nullptr || context->scope == nullptr || art == nullptr ||
+        art->struct_size < sizeof(strata_widget_art) || art->source.data == nullptr ||
+        art->source.size == 0U || art->source.size > strata::host::maximum_art_source ||
+        art->point_count < 2U || art->point_count > strata::host::maximum_art_points ||
+        art->parameter_count > 16U || (art->parameter_count > 0U && art->parameters == nullptr) ||
+        !std::isfinite(art->stroke_width) || !std::isfinite(art->miter_limit) ||
+        !std::isfinite(art->bounds.x) || !std::isfinite(art->bounds.y) ||
+        !std::isfinite(art->bounds.width) || !std::isfinite(art->bounds.height)) {
+        return;
+    }
+    strata::ui::ArtOutline outline;
+    outline.source.assign(art->source.data, art->source.size);
+    outline.count = art->point_count;
+    outline.closed = (art->flags & STRATA_WIDGET_ART_CLOSED) != 0U;
+    for (std::size_t index = 0U; index < art->parameter_count; ++index) {
+        if (!std::isfinite(art->parameters[index]))
+            return;
+        outline.parameters[index] = art->parameters[index];
+    }
+    std::optional<strata::ui::Paint> fill;
+    if ((art->flags & STRATA_WIDGET_SHAPE_FILL) != 0U)
+        fill = strata::ui::Paint(color(art->fill));
+    std::optional<strata::ui::Paint> stroke;
+    strata::ui::StrokeStyle style;
+    if ((art->flags & STRATA_WIDGET_SHAPE_STROKE) != 0U && art->stroke_width > 0.0) {
+        stroke = strata::ui::Paint(color(art->stroke));
+        style.width = art->stroke_width;
+        style.cap = art->cap == STRATA_WIDGET_STROKE_CAP_ROUND    ? strata::ui::PathCap::round
+                    : art->cap == STRATA_WIDGET_STROKE_CAP_SQUARE ? strata::ui::PathCap::square
+                                                                  : strata::ui::PathCap::butt;
+        style.join = art->join == STRATA_WIDGET_STROKE_JOIN_ROUND   ? strata::ui::PathJoin::round
+                     : art->join == STRATA_WIDGET_STROKE_JOIN_BEVEL ? strata::ui::PathJoin::bevel
+                                                                    : strata::ui::PathJoin::miter;
+        style.miter_limit = std::max(art->miter_limit, 1.0);
+    }
+    const strata::ui::Rect bounds{art->bounds.x, art->bounds.y, art->bounds.width,
+                                  art->bounds.height};
+    render_call(context, [&] {
+        context->scope->art(bounds, std::move(outline), fill, stroke, style,
+                            (art->flags & STRATA_WIDGET_SHAPE_EVEN_ODD) != 0U
+                                ? strata::ui::PathFillRule::evenodd
+                                : strata::ui::PathFillRule::nonzero);
+    });
+}
+
 /** render_shape: one painter call (WidgetRenderScope's), its fields checked first. */
 void render_widget_shape(strata_widget_render_context* const context,
                          const strata_widget_shape* const shape) noexcept {
@@ -2314,6 +2363,7 @@ constexpr strata_widget_api widget_api_table{
     &strata_widget_subtargets_reserve,
     &strata_widget_subtargets_add,
     &render_widget_shape,
+    &render_widget_art,
 };
 
 } // namespace

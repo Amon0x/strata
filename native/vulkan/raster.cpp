@@ -1,6 +1,8 @@
 #include "gpu/raster_shaders.hpp"
 #include "renderer_internal.hpp"
 
+#include <cstdio>
+#include <functional>
 #include <future>
 #include <mutex>
 
@@ -11,7 +13,7 @@ namespace {
 
 namespace shaders = gpu::raster_shaders;
 
-constexpr std::uint32_t raster_bindings = 6U;
+constexpr std::uint32_t raster_bindings = 7U;
 constexpr const auto& raster_entries = shaders::entries;
 
 /** Orders everything the queue did before (kernels, copies) ahead of the next kernel. */
@@ -114,7 +116,83 @@ void Renderer::Impl::reserve_raster_buffer(std::unique_ptr<Buffer>& buffer,
         vkCmdFillBuffer(command, buffer->buffer, 0, VK_WHOLE_SIZE, 0U);
 }
 
-void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& image) {
+Renderer::Impl::ArtProgram* Renderer::Impl::art_program(const std::string& source) {
+    const std::size_t key = std::hash<std::string>{}(source);
+    auto found = art_programs.find(key);
+    if (found == art_programs.end()) {
+        ArtProgram program;
+        program.code = std::async(std::launch::async, [text = shaders::art_source(source)] {
+                           std::array<std::vector<std::uint32_t>, 2U> code;
+                           for (std::size_t index = 0U; index < code.size(); ++index) {
+                               code[index] = compile_hlsl_compute(
+                                   text, shaders::art_entries[index], "strata.art");
+                           }
+                           return code;
+                       }).share();
+        found = art_programs.emplace(key, std::move(program)).first;
+    }
+    ArtProgram& program = found->second;
+    if (program.failed)
+        return nullptr;
+    if (program.stroke == VK_NULL_HANDLE) {
+        if (program.code.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return nullptr;
+        try {
+            const auto& code = program.code.get();
+            std::array<VkPipeline*, 2U> targets{&program.stroke, &program.fill};
+            for (std::size_t index = 0U; index < code.size(); ++index) {
+                VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+                mi.codeSize = code[index].size() * sizeof(std::uint32_t);
+                mi.pCode = code[index].data();
+                VkShaderModule module{};
+                check(vkCreateShaderModule(device.device, &mi, nullptr, &module),
+                      "create art shader module");
+                VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+                ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+                ci.stage.module = module;
+                ci.stage.pName = shaders::art_entries[index];
+                ci.layout = raster_layout;
+                const VkResult result = vkCreateComputePipelines(device.device, pipeline_cache, 1,
+                                                                 &ci, nullptr, targets[index]);
+                vkDestroyShaderModule(device.device, module, nullptr);
+                check(result, "create art pipeline");
+            }
+        } catch (const std::exception& error) {
+            // A program that does not compile draws nothing, rather than failing frames; the
+            // author sees why once.
+            std::fprintf(stderr, "strata: an art program failed to compile: %s\n", error.what());
+            program.failed = true;
+            return nullptr;
+        }
+    }
+    return &program;
+}
+
+void Renderer::Impl::forget_live_art(const host::ResourceOperation& operation, const bool whole) {
+    std::erase_if(live_art, [&](const LiveArt& live) {
+        const host::ResourceOperation& other = live.operation;
+        if (other.texture != operation.texture)
+            return false;
+        return whole || (operation.x < other.x + other.width && other.x < operation.x + operation.width &&
+                         operation.y < other.y + other.height && other.y < operation.y + operation.height);
+    });
+}
+
+void Renderer::Impl::run_live_art() {
+    for (LiveArt& live : live_art) {
+        if (live.seconds == seconds)
+            continue;
+        const auto found = textures.find(live.operation.texture);
+        if (found == textures.end())
+            continue;
+        rasterize(live.operation, *found->second, seconds);
+        live.seconds = seconds;
+    }
+}
+
+void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& image,
+                               const double time) {
     const host::RasterJob& job = operation.raster;
     const bool rgba = operation.format == host::texture_format_rgba8;
     if ((image.format == VK_FORMAT_R8G8B8A8_UNORM) != rgba || operation.x > image.width ||
@@ -138,6 +216,23 @@ void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& 
     const Slice tables = arena->upload(luts.data(), luts.size() * sizeof(std::uint32_t));
     const Slice strokes =
         arena->upload(job.pieces.data(), job.pieces.size() * sizeof(host::RasterStrokePiece));
+    // Every art layer's values end to end; each layer finds its own at its base.
+    std::vector<float> art_values;
+    std::vector<std::uint32_t> art_bases(job.layers.size(), 0U);
+    for (std::size_t index = 0U; index < job.layers.size(); ++index) {
+        const std::optional<host::RasterArt>& art = job.layers[index].art;
+        if (!art.has_value())
+            continue;
+        art_bases[index] = static_cast<std::uint32_t>(art_values.size());
+        const std::array<float, 8U> head{static_cast<float>(time), static_cast<float>(art->count),
+                                         art->closed ? 1.0F : 0.0F, art->x, art->y, art->width,
+                                         art->height, 0.0F};
+        art_values.insert(art_values.end(), head.begin(), head.end());
+        art_values.insert(art_values.end(), art->parameters.begin(), art->parameters.end());
+    }
+    if (art_values.empty())
+        art_values.resize(shaders::art_value_count, 0.0F);
+    const Slice arts = arena->upload(art_values.data(), art_values.size() * sizeof(float));
     const std::size_t pixels = static_cast<std::size_t>(job.width) * job.height;
     // R8 rows are packed four texels a uint; RGBA rows one texel a uint.
     const std::uint32_t stride = rgba ? operation.width : (operation.width + 3U) / 4U;
@@ -181,6 +276,7 @@ void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& 
         {raster_sums->buffer, 0, VK_WHOLE_SIZE},
         {raster_output->buffer, 0, VK_WHOLE_SIZE},
         {strokes.buffer, strokes.offset, strokes.size},
+        {arts.buffer, arts.offset, arts.size},
     }};
     std::array<VkWriteDescriptorSet, raster_bindings> writes{};
     for (std::uint32_t index = 0U; index < raster_bindings; ++index) {
@@ -196,14 +292,17 @@ void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& 
                             nullptr);
 
     shaders::Constants values;
-    const auto dispatch = [&](const std::size_t kernel, const std::uint32_t threads) {
+    const auto dispatch_with = [&](const VkPipeline pipeline, const std::uint32_t threads) {
         if (threads == 0U)
             return;
         compute_barrier(command);
-        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, raster_pipelines[kernel]);
+        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
         vkCmdPushConstants(command, raster_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                            sizeof(values), &values);
         vkCmdDispatch(command, group_count(threads), 1, 1);
+    };
+    const auto dispatch = [&](const std::size_t kernel, const std::uint32_t threads) {
+        dispatch_with(raster_pipelines[kernel], threads);
     };
     for (std::size_t index = 0U; index < job.layers.size(); ++index) {
         const host::RasterLayer& layer = job.layers[index];
@@ -232,10 +331,21 @@ void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& 
         values.tolerance = layer.stroke.tolerance;
         dispatch(0U, layer.segment_count);
         dispatch(1U, layer.piece_count);
-        dispatch(rgba ? 3U : 2U, rgba ? job.height : operation.height);
+        if (layer.art.has_value()) {
+            if (ArtProgram* program = art_program(layer.art->source); program != nullptr) {
+                values.art_base = art_bases[index];
+                const std::uint32_t count = layer.art->count;
+                if (layer.art->stroked)
+                    dispatch_with(program->stroke, layer.art->closed ? count : count - 1U);
+                else
+                    dispatch_with(program->fill, count);
+            }
+        }
+        // A group of threads a row.
+        dispatch(rgba ? 3U : 2U, (rgba ? job.height : operation.height) * shaders::group_size);
     }
     if (rgba)
-        dispatch(4U, operation.height);
+        dispatch(4U, operation.width * operation.height);
 
     // The region's texels into the atlas.
     VkMemoryBarrier written{VK_STRUCTURE_TYPE_MEMORY_BARRIER};

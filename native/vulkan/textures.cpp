@@ -56,6 +56,8 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
     end_pass();
     for (const auto& operation : packet.resources) {
         const auto& id = operation.texture;
+        forget_live_art(operation, operation.kind != host::resource_upload &&
+                                       operation.kind != host::resource_raster);
         if (operation.kind == host::resource_release) {
             if (auto it = textures.find(id); it != textures.end()) {
                 retire(std::move(it->second));
@@ -89,6 +91,11 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
             auto it = textures.find(id);
             if (it == textures.end())
                 throw std::invalid_argument("raster job references missing texture: " + id);
+            // Art draws every frame, with the frame's time: it runs when the frame renders.
+            if (host::raster_job_has_art(operation.raster)) {
+                live_art.push_back(LiveArt{operation, std::numeric_limits<double>::quiet_NaN()});
+                continue;
+            }
             rasterize(operation, *it->second);
             continue;
         }

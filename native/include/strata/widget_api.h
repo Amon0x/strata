@@ -23,7 +23,9 @@ extern "C" {
 #define STRATA_WIDGET_API_VERSION_1 UINT32_C(1)
 /* Version 2 appends render_shape: vector shapes in logical pixels. */
 #define STRATA_WIDGET_API_VERSION_2 UINT32_C(2)
-#define STRATA_WIDGET_API_VERSION_CURRENT STRATA_WIDGET_API_VERSION_2
+/* Version 3 appends render_art: outlines a GPU program generates. */
+#define STRATA_WIDGET_API_VERSION_3 UINT32_C(3)
+#define STRATA_WIDGET_API_VERSION_CURRENT STRATA_WIDGET_API_VERSION_3
 
 /*
  * One vector shape a widget draws in its logical pixels (render_shape). `kind` picks the outline
@@ -82,6 +84,35 @@ typedef struct strata_widget_shape {
     size_t dash_count;
     double dash_offset;
 } strata_widget_shape;
+
+/*
+ * Art (render_art): an outline a GPU program generates, for decoration that moves every frame at
+ * no CPU cost. `source` is HLSL defining `float2 artPoint(uint index, uint count)`, which returns
+ * each of `point_count` points in `bounds`' 0-1 space; it may call artTime() (seconds),
+ * artParameter(index) (one of `parameters`, at most 16) and artSize() (the canvas in device
+ * pixels). The backend fills (STRATA_WIDGET_SHAPE_FILL, by STRATA_WIDGET_SHAPE_EVEN_ODD) and
+ * strokes (STRATA_WIDGET_SHAPE_STROKE) the outline with exact coverage, closing it when flags has
+ * STRATA_WIDGET_ART_CLOSED, and draws it again every frame. Art is opt-in and GPU-only: nothing
+ * on the CPU sees its geometry (hit testing sees `bounds`), the software renderer leaves it out,
+ * and a program that fails to compile draws nothing and is reported once on stderr.
+ */
+#define STRATA_WIDGET_ART_CLOSED UINT32_C(8)
+
+typedef struct strata_widget_art {
+    size_t struct_size;
+    strata_rect bounds;
+    strata_string_view source;
+    uint32_t point_count;
+    uint32_t flags;
+    strata_color fill;
+    strata_color stroke;
+    double stroke_width;
+    uint32_t cap;
+    uint32_t join;
+    double miter_limit;
+    const float* parameters;
+    size_t parameter_count;
+} strata_widget_art;
 
 typedef uint32_t strata_widget_context_kind;
 
@@ -195,6 +226,9 @@ typedef struct strata_widget_api {
 
     /* STRATA_WIDGET_API_VERSION_2 */
     void (*render_shape)(strata_widget_render_context* context, const strata_widget_shape* shape);
+
+    /* STRATA_WIDGET_API_VERSION_3 */
+    void (*render_art)(strata_widget_render_context* context, const strata_widget_art* art);
 } strata_widget_api;
 
 /*

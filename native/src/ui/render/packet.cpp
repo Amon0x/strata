@@ -245,6 +245,14 @@ void command_payload(Bytes& output, const RenderCommand& command) {
                 integer(output, static_cast<std::uint32_t>(style.dash.size()));
                 for (const double entry : style.dash) number(output, entry);
             }
+            boolean(output, value.art.has_value());
+            if (value.art.has_value()) {
+                text(output, value.art->source);
+                integer(output, value.art->count);
+                boolean(output, value.art->closed);
+                for (const float parameter : value.art->parameters)
+                    number(output, static_cast<double>(parameter));
+            }
         } else if constexpr (std::is_same_v<Command, BlurRegionRenderCommand>) {
             rect(output, value.bounds);
             number(output, value.radius);

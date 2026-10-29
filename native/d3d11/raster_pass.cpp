@@ -2,12 +2,16 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <future>
+#include <functional>
 #include <mutex>
 #include <stdexcept>
+#include <unordered_map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,12 +42,13 @@ void require_hresult(const HRESULT result, const std::string_view operation) {
 using shaders::entries;
 using Bytecode = std::array<ComPtr<ID3DBlob>, entries.size()>;
 
-[[nodiscard]] ComPtr<ID3DBlob> compile(const char* const entry, const bool rgba) {
+[[nodiscard]] ComPtr<ID3DBlob> compile(const char* const entry, const bool rgba,
+                                      const std::string_view text = shaders::source) {
     const D3D_SHADER_MACRO rgba_macros[]{{"STRATA_RASTER_RGBA", "1"}, {nullptr, nullptr}};
     ComPtr<ID3DBlob> code;
     ComPtr<ID3DBlob> diagnostics;
     const HRESULT status =
-        D3DCompile(shaders::source.data(), shaders::source.size(), "strata.d3d11.raster.hlsl",
+        D3DCompile(text.data(), text.size(), "strata.d3d11.raster.hlsl",
                    rgba ? rgba_macros : nullptr, nullptr, entry, "cs_5_0",
                    D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3, 0U, &code,
                    &diagnostics);
@@ -151,6 +156,14 @@ struct WorkBuffer final {
 
 } // namespace
 
+/** An art program: its kernels, compiling in the background until they are ready. */
+struct ArtProgram final {
+    std::shared_future<std::array<ComPtr<ID3DBlob>, shaders::art_entries.size()>> code;
+    ComPtr<ID3D11ComputeShader> stroke;
+    ComPtr<ID3D11ComputeShader> fill;
+    bool failed = false;
+};
+
 struct RasterPass::Impl final {
     Impl(ID3D11Device* const device, ID3D11DeviceContext* const context)
         : device(device), context(context) {
@@ -190,9 +203,45 @@ struct RasterPass::Impl final {
         context->Dispatch(groups(threads), 1U, 1U);
     }
 
+    /** An art layer's kernels when they are ready: compiled, made, and not failed. */
+    [[nodiscard]] ArtProgram* art_program(const std::string& source) {
+        const std::size_t key = std::hash<std::string>{}(source);
+        auto found = art_programs.find(key);
+        if (found == art_programs.end()) {
+            ArtProgram program;
+            program.code = std::async(std::launch::async, [text = shaders::art_source(source)] {
+                               std::array<ComPtr<ID3DBlob>, shaders::art_entries.size()> code;
+                               for (std::size_t index = 0U; index < code.size(); ++index)
+                                   code[index] = compile(shaders::art_entries[index], false, text);
+                               return code;
+                           }).share();
+            found = art_programs.emplace(key, std::move(program)).first;
+        }
+        ArtProgram& program = found->second;
+        if (program.failed)
+            return nullptr;
+        if (program.stroke == nullptr) {
+            if (program.code.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                return nullptr;
+            try {
+                const auto& code = program.code.get();
+                program.stroke = create(device.Get(), code[0]);
+                program.fill = create(device.Get(), code[1]);
+            } catch (const std::exception& error) {
+                // A program that does not compile draws nothing, rather than failing frames; the
+                // author sees why once.
+                std::fprintf(stderr, "strata: an art program failed to compile: %s\n",
+                             error.what());
+                program.failed = true;
+                return nullptr;
+            }
+        }
+        return &program;
+    }
+
     void run(const host::RasterJob& job, const bool rgba, ID3D11UnorderedAccessView* const target,
              const std::uint32_t x, const std::uint32_t y, const std::uint32_t width,
-             const std::uint32_t height) {
+             const std::uint32_t height, const double seconds) {
         // Every gradient layer's colour table, end to end.
         lut_data.clear();
         std::vector<std::uint32_t> lut_offsets;
@@ -207,6 +256,25 @@ struct RasterPass::Impl final {
                        sizeof(host::RasterSegment));
         pieces.write(device.Get(), context.Get(), job.pieces.data(), job.pieces.size(),
                      sizeof(host::RasterStrokePiece));
+        // Art values for every art layer, end to end.
+        art_data.clear();
+        std::vector<std::uint32_t> art_offsets(job.layers.size(), 0U);
+        for (std::size_t index = 0U; index < job.layers.size(); ++index) {
+            const std::optional<host::RasterArt>& art = job.layers[index].art;
+            if (!art.has_value())
+                continue;
+            art_offsets[index] = static_cast<std::uint32_t>(art_data.size());
+            const std::array<float, 8U> head{static_cast<float>(seconds),
+                                             static_cast<float>(art->count),
+                                             art->closed ? 1.0F : 0.0F,
+                                             art->x,
+                                             art->y,
+                                             art->width,
+                                             art->height,
+                                             0.0F};
+            art_data.insert(art_data.end(), head.begin(), head.end());
+            art_data.insert(art_data.end(), art->parameters.begin(), art->parameters.end());
+        }
         luts.write(device.Get(), context.Get(), lut_data.data(), lut_data.size(), 4U);
         const std::size_t pixels = static_cast<std::size_t>(job.width) * job.height;
         cells.reserve(device.Get(), context.Get(), pixels * 2U);
@@ -218,8 +286,12 @@ struct RasterPass::Impl final {
         // The atlas may still be bound for sampling from the frame before.
         ID3D11ShaderResourceView* const no_view = nullptr;
         context->PSSetShaderResources(0U, 1U, &no_view);
-        const std::array<ID3D11ShaderResourceView*, 3U> views{
-            segments.view.Get(), luts.view.Get(), pieces.view.Get()};
+        static_assert(shaders::art_value_count == 24U);
+        if (art_data.empty())
+            art_data.resize(shaders::art_value_count, 0.0F);
+        arts.write(device.Get(), context.Get(), art_data.data(), art_data.size(), 4U);
+        const std::array<ID3D11ShaderResourceView*, 4U> views{
+            segments.view.Get(), luts.view.Get(), pieces.view.Get(), arts.view.Get()};
         context->CSSetShaderResources(0U, static_cast<UINT>(views.size()), views.data());
         const std::array<ID3D11UnorderedAccessView*, 3U> outputs{cells.view.Get(),
                                                                  sums.view.Get(), target};
@@ -256,19 +328,31 @@ struct RasterPass::Impl final {
             values.tolerance = layer.stroke.tolerance;
             dispatch(accumulate.Get(), values, layer.segment_count);
             dispatch(stroke.Get(), values, layer.piece_count);
+            if (layer.art.has_value()) {
+                if (ArtProgram* program = art_program(layer.art->source); program != nullptr) {
+                    values.art_base = art_offsets[index];
+                    const std::uint32_t count = layer.art->count;
+                    if (layer.art->stroked)
+                        dispatch(program->stroke.Get(), values,
+                                 layer.art->closed ? count : count - 1U);
+                    else
+                        dispatch(program->fill.Get(), values, count);
+                }
+            }
+            // A group of threads a row.
             if (rgba)
-                dispatch(resolve_composite.Get(), values, job.height);
+                dispatch(resolve_composite.Get(), values, job.height * shaders::group_size);
             else
-                dispatch(resolve_coverage.Get(), values, height);
+                dispatch(resolve_coverage.Get(), values, height * shaders::group_size);
             last = values;
         }
         if (rgba)
-            dispatch(finish.Get(), last, height);
+            dispatch(finish.Get(), last, width * height);
 
         const std::array<ID3D11UnorderedAccessView*, 3U> no_outputs{};
         context->CSSetUnorderedAccessViews(0U, static_cast<UINT>(no_outputs.size()),
                                            no_outputs.data(), nullptr);
-        const std::array<ID3D11ShaderResourceView*, 3U> no_views{};
+        const std::array<ID3D11ShaderResourceView*, 4U> no_views{};
         context->CSSetShaderResources(0U, static_cast<UINT>(no_views.size()), no_views.data());
         context->CSSetShader(nullptr, nullptr, 0U);
     }
@@ -284,6 +368,9 @@ struct RasterPass::Impl final {
     UploadBuffer segments;
     UploadBuffer luts;
     UploadBuffer pieces;
+    UploadBuffer arts;
+    std::vector<float> art_data;
+    std::unordered_map<std::size_t, ArtProgram> art_programs;
     WorkBuffer cells;
     WorkBuffer sums;
     std::vector<std::uint32_t> lut_data;
@@ -301,8 +388,8 @@ RasterPass::~RasterPass() = default;
 void RasterPass::run(const host::RasterJob& job, const bool rgba,
                      ID3D11UnorderedAccessView* const target, const std::uint32_t x,
                      const std::uint32_t y, const std::uint32_t width,
-                     const std::uint32_t height) {
-    impl_->run(job, rgba, target, x, y, width, height);
+                     const std::uint32_t height, const double seconds) {
+    impl_->run(job, rgba, target, x, y, width, height, seconds);
 }
 
 } // namespace strata::d3d11

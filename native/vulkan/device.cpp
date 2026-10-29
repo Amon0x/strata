@@ -21,6 +21,13 @@ Renderer::Impl::~Impl() {
         if (pipeline)
             vkDestroyPipeline(device.device, pipeline, nullptr);
     }
+    for (auto& [key, program] : art_programs) {
+        (void)key;
+        for (VkPipeline pipeline : {program.stroke, program.fill}) {
+            if (pipeline)
+                vkDestroyPipeline(device.device, pipeline, nullptr);
+        }
+    }
     if (raster_layout)
         vkDestroyPipelineLayout(device.device, raster_layout, nullptr);
     if (raster_descriptors)
