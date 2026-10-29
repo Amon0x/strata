@@ -187,20 +187,32 @@ bool inspect_pointer(BehaviorInput& input, const Pointer& pointer) {
 
 /**
  * A hypotrochoid whose inner wheel slowly changes size: a different figure every frame, drawn as
- * art. The GPU generates its 1,400 points from the time (one figure per nine seconds), so the
+ * art. The GPU generates its 1,400 points from the time (one cycle per nine seconds), so the
  * figure moves without the widget repainting: a soft wide stroke under a thin bright one.
+ *
+ * A wheel of any size leaves the figure open, its pen stopping short of where it started. So the
+ * pen runs 13 turns of the ring and the wheel a whole number of its own, `turns`, and the figure
+ * between two wheel sizes is the blend of their two, which closes because both do.
  */
 constexpr std::string_view spirograph_art = R"hlsl(
+float2 hypotrochoid(float t, float turns, float pen) {
+    float ratio = 13.0 / (13.0 + turns);
+    float wheel = turns / 13.0 * t;
+    return float2((1.0 - ratio) * cos(t) + pen * ratio * cos(wheel),
+                  (1.0 - ratio) * sin(t) - pen * ratio * sin(wheel));
+}
+
 float2 artPoint(uint index, uint count) {
     float phase = artTime() * artParameter(0);
-    float ratio = 0.62 + 0.18 * sin(phase * 6.28318531);
+    float turns = 8.0 + 3.5 * sin(phase * 6.28318531);
     float pen = 0.55 + 0.25 * cos(phase * 12.5663706);
-    float t = float(index) / float(count - 1) * 6.28318531 * 13.0;
-    float x = (1.0 - ratio) * cos(t) + pen * ratio * cos((1.0 - ratio) / ratio * t);
-    float y = (1.0 - ratio) * sin(t) - pen * ratio * sin((1.0 - ratio) / ratio * t);
+    float t = float(index) / float(count) * 6.28318531 * 13.0;
+    float below = floor(turns);
+    float2 curve = lerp(hypotrochoid(t, below, pen), hypotrochoid(t, below + 1.0, pen),
+                        smoothstep(0.0, 1.0, turns - below));
     float2 size = artSize();
     float scale = min(size.x, size.y) * 0.46;
-    return float2(0.5 + x * scale / size.x, 0.5 + y * scale / size.y);
+    return float2(0.5 + curve.x * scale / size.x, 0.5 + curve.y * scale / size.y);
 }
 )hlsl";
 
@@ -208,15 +220,13 @@ void spirograph(Present& present, const Rect area) {
     const std::array<float, 1U> turns_per_second{1.0F / 9.0F};
     Stroke glow;
     glow.width = 6.0;
-    glow.cap = Cap::round;
     glow.join = Join::round;
     present.art(area, spirograph_art, 1400U, turns_per_second, std::nullopt,
-                hue(0.83, 1.0, 46U), glow, false);
+                hue(0.83, 1.0, 46U), glow);
     Stroke line;
     line.width = 1.25;
     line.join = Join::round;
-    present.art(area, spirograph_art, 1400U, turns_per_second, std::nullopt, hue(0.91), line,
-                false);
+    present.art(area, spirograph_art, 1400U, turns_per_second, std::nullopt, hue(0.91), line);
 }
 
 /** Gauges sweeping on concentric tracks, planets orbiting them and a spinning pie at the hub. */
