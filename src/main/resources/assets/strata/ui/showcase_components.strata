@@ -495,6 +495,34 @@ style ContentSlot extends Transparent {
   gap: 8;
 }
 
+style MenuField extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  alignItems: "CENTER";
+  justifyContent: "CENTER";
+  gap: 14;
+}
+
+style MenuButtons extends Transparent {
+  kind: "COLUMN";
+  width: 260;
+  height: "content";
+  gap: 9;
+  padding: { top: 18 };
+}
+
+style MenuTitle {
+  font: "strata:fonts/default-medium";
+  pixelSize: 64;
+  color: #F4F7FBFF;
+}
+
+style MenuSubtitle {
+  pixelSize: 15;
+  color: #8FA6BAFF;
+}
+
 style ActionRow extends Transparent {
   kind: "ROW";
   width: { weight: 1 };
@@ -1135,6 +1163,8 @@ component PageViewport(selectedPage: string) {
       Scroll(key: "targets.page.scroll.inspect", persistenceKey: "showcase.page.scroll.inspect", vertical: true, horizontal: false, style: PageScroll) { InspectPage() }
     } else if selectedPage == "DATA" {
       Scroll(key: "targets.page.scroll.data", persistenceKey: "showcase.page.scroll.data", vertical: true, horizontal: false, style: PageScroll) { DataPage() }
+    } else if selectedPage == "MENU" {
+      MenuPage()
     } else if selectedPage == "DRAW" {
       Scroll(key: "targets.page.scroll.draw", persistenceKey: "showcase.page.scroll.draw", vertical: true, horizontal: false, style: PageScroll) { DrawPage() }
     } else if selectedPage == "SHELL" {
@@ -1154,6 +1184,7 @@ component ShowcaseHeader(selectedPage: Binding<string>) {
     Tabs(
       key: "targets.navigation",
       tabs: [
+        { id: "MENU", label: "MENU" },
         { id: "EXTEND", label: "EXTEND" },
         { id: "DRAW", label: "DRAW" },
         { id: "STATE", label: "STATE" },
@@ -1400,6 +1431,23 @@ component DataPage() {
         Panel(variant: "secondary", layout: { gridColumn: 1, gridRow: 1, padding: 8 }) { Text(text: "Content") }
         Panel(variant: "secondary", layout: { gridColumn: 2, gridRow: 1, padding: 8 }) { Text(text: "Fixed 120") }
       }
+    }
+  }
+}
+
+component MenuPage() {
+  state picked = "nothing yet";
+  DemoParticles(key: "menu.particles", particles: 110, layout: { width: { weight: 1 }, height: { weight: 1 } }) {
+    Panel(style: MenuField) {
+      Text(text: "STRATA", style: MenuTitle)
+      Text(text: "a particle field the GPU draws itself, reaching for your pointer", style: MenuSubtitle)
+      Panel(style: MenuButtons) {
+        Button(key: "menu.play", label: "PLAY", layout: { width: { weight: 1 } }, onClick: action("state.set", name: "picked", value: "PLAY"))
+        Button(key: "menu.settings", label: "SETTINGS", layout: { width: { weight: 1 } }, onClick: action("state.set", name: "picked", value: "SETTINGS"))
+        Button(key: "menu.credits", label: "CREDITS", layout: { width: { weight: 1 } }, onClick: action("state.set", name: "picked", value: "CREDITS"))
+        Button(key: "menu.quit", label: "QUIT", layout: { width: { weight: 1 } }, onClick: action("state.set", name: "picked", value: "QUIT"))
+      }
+      Text(text: format("picked: {0}", picked), style: MenuSubtitle)
     }
   }
 }
@@ -1978,6 +2026,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "Selection and pick update outlines/metadata without activating the underlying target. Coalesce shows PASS with +23. The no-GPU probe reports two frames, one activation, and one node. Dynamic probe reports UNHANDLED with a source-aware diagnostic.", wrapMode: "WORD")
   } else if selectedPage == "DATA" {
     Text(text: "Tree expansion never reconciles collapsed descendants; keyboard/range/typeahead and drag positions emit stable keys. Table sort is a host request, widths/order persist, and sticky/pinned regions align. Grid marquee, 2D arrows, stationary edge scroll, and sticky push-off stay current.", wrapMode: "WORD")
+  } else if selectedPage == "MENU" {
+    Text(text: "Particles drift and bounce behind the menu, joined by lines that fade as they part. Move the pointer over it: nearby particles reach for it and lean toward it, under the buttons too. The GPU draws all of it every frame; the CPU only reports where the pointer is.", wrapMode: "WORD")
   } else if selectedPage == "DRAW" {
     Text(text: "The three canvases move every frame. A timer advances the data every 2.2 s while Auto is on, and Shuffle data steps it at once; either morphs the charts, gauge, sunburst and blob over the standard motion policy; the sunburst's slices meet with no seam. The loops turn and breathe without blurring an edge. Reduced motion snaps the data and stops the loops.", wrapMode: "WORD")
   } else if selectedPage == "SHELL" {

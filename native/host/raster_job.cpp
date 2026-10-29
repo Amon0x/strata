@@ -622,7 +622,7 @@ std::vector<std::uint8_t> RasterJobBuilder::encode(const std::uint32_t x,
         if (layer.art.has_value()) {
             const RasterArt& art = *layer.art;
             output.u32(art.count);
-            output.u32((art.closed ? 1U : 0U) | (art.stroked ? 2U : 0U));
+            output.u32((art.closed ? 1U : 0U) | (art.stroked ? 2U : 0U) | (art.segments ? 4U : 0U));
             for (const float value : {art.x, art.y, art.width, art.height})
                 output.f32(value);
             for (const float parameter : art.parameters)
@@ -710,6 +710,7 @@ RasterJob decode_raster_job(const std::span<const std::uint8_t> bytes,
             const std::uint32_t flags = input.u32();
             art.closed = (flags & 1U) != 0U;
             art.stroked = (flags & 2U) != 0U;
+            art.segments = (flags & 4U) != 0U;
             art.x = input.f32();
             art.y = input.f32();
             art.width = input.f32();
@@ -717,7 +718,8 @@ RasterJob decode_raster_job(const std::span<const std::uint8_t> bytes,
             for (float& parameter : art.parameters)
                 parameter = input.f32();
             const std::uint32_t length = input.u32();
-            if (art.count < 2U || art.count > maximum_art_points || flags > 3U || length == 0U ||
+            if (art.count < 2U || art.count > maximum_art_points || flags > 7U ||
+                (art.segments && (art.closed || !art.stroked)) || length == 0U ||
                 length > maximum_art_source) {
                 throw std::invalid_argument("raster art is outside the supported domain");
             }

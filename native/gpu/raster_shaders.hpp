@@ -179,7 +179,7 @@ BIND(2) RWStructuredBuffer<int> cells : register(u0);
 BIND(3) RWStructuredBuffer<uint> sums : register(u1);
 BIND(5) StructuredBuffer<StrokePiece> pieces : register(t2);
 BIND(6) StructuredBuffer<float> art_values : register(t3);
-BIND(7) RWStructuredBuffer<float2> art_positions : register(u3);
+BIND(7) RWStructuredBuffer<float4> art_positions : register(u3);
 BIND(8) StructuredBuffer<RasterData> table : register(t4);
 BIND(9) StructuredBuffer<uint4> batch : register(t5);
 
@@ -218,6 +218,11 @@ RWTexture2D<unorm float> output : register(u2);
 
 static const int one = 256;
 static const int full_area = 2 * 256 * 256;
+/**
+ * Cells hold contributions times weight_one, so an art piece can add a fraction of its coverage
+ * (artSetWeight); resolved() divides it back out. Every other edge adds exactly weight_one.
+ */
+static const int weight_one = 32;
 static const uint composite_one = 32768;
 
 int floor_divide(int numerator, int divisor) {
@@ -302,7 +307,7 @@ void accumulate(uint3 id : SV_DispatchThreadID) {
     if (!enter(id.x, local) || local >= raster.segment_count)
         return;
     int4 segment = segments[raster.first_segment + local];
-    walk(segment.x, segment.y, segment.z, segment.w, 1);
+    walk(segment.x, segment.y, segment.z, segment.w, weight_one);
 }
 
 /** A fixed-point edge in pieces no longer than 16 pixels, so every product fits 32 bits. */
@@ -498,13 +503,17 @@ static const uint stroke_parts = 16;
  * of about 16 pixels, the first with the start cap and the last with the join and end cap. The
  * slices tile the band, and the edge two share is walked once each way, so it cancels.
  */
-void stroke_piece(StrokePiece piece, uint part) {
+void stroke_piece(StrokePiece piece, uint part, int weight) {
     float radius = raster.half_width;
     float2 d = piece.p1 - piece.p0;
     float length_value = length(d);
-    if (!(length_value > 1.0e-6) || !(radius > 0.0))
+    if (!(radius > 0.0) || weight <= 0)
         return;
-    uint parts = clamp(uint(ceil(length_value / 16.0)), 1u, stroke_parts);
+    // A piece that does not move and is capped is a dot, as SVG draws one: just its caps.
+    bool still = !(length_value > 1.0e-6);
+    if (still && ((piece.flags & 6) == 0 || raster.cap == 0))
+        return;
+    uint parts = still ? 1u : clamp(uint(ceil(length_value / 16.0)), 1u, stroke_parts);
     if (part >= parts)
         return;
     bool first = part == 0;
@@ -520,13 +529,15 @@ void stroke_piece(StrokePiece piece, uint part) {
     if (any(high < 0.0) || low.x > float(raster.content_width) ||
         low.y > float(raster.content_height))
         return;
-    float2 along = d / length_value;
+    float2 along = still ? float2(1.0, 0.0) : d / length_value;
     float2 side = float2(-along.y, along.x) * radius;
     // The band; the join with the next piece, on the side the path turns away from (the bands
     // overlap on the other); the caps of a run's ends.
-    Polygon band = corners(from + side, to + side, to - side, from - side, 4);
+    Polygon band = no_polygon();
+    if (!still)
+        band = corners(from + side, to + side, to - side, from - side, 4);
     Polygon join = no_polygon();
-    if (last && (piece.flags & 1) != 0) {
+    if (!still && last && (piece.flags & 1) != 0) {
         float2 e = piece.p2 - piece.p1;
         float next_length = length(e);
         if (next_length > 1.0e-6) {
@@ -587,7 +598,7 @@ void stroke_piece(StrokePiece piece, uint part) {
             float2 a;
             float2 b;
             edge_of(polygon, index, a, b);
-            edge(a, b, orientation);
+            edge(a, b, orientation * weight);
         }
     }
 }
@@ -597,7 +608,8 @@ void stroke(uint3 id : SV_DispatchThreadID) {
     uint local;
     if (!enter(id.x, local) || local / stroke_parts >= raster.piece_count)
         return;
-    stroke_piece(pieces[raster.first_piece + local / stroke_parts], local % stroke_parts);
+    stroke_piece(pieces[raster.first_piece + local / stroke_parts], local % stroke_parts,
+                 weight_one);
 }
 
 bool art_finite(float2 value) {
@@ -606,7 +618,8 @@ bool art_finite(float2 value) {
 
 /**
  * An art layer's outline stroked from the points its program wrote to art_positions: each
- * segment stroke_parts threads.
+ * segment stroke_parts threads, weighted by its first point. In segments mode points pair off,
+ * each pair a line capped at both ends.
  */
 [numthreads(64, 1, 1)]
 void art_stroke_points(uint3 id : SV_DispatchThreadID) {
@@ -615,22 +628,30 @@ void art_stroke_points(uint3 id : SV_DispatchThreadID) {
         return;
     uint count = uint(art_values[raster.art_base + 1]);
     bool closed = art_values[raster.art_base + 2] > 0.5;
-    uint segments = closed ? count : count - 1;
+    bool pairs = art_values[raster.art_base + 7] > 0.5;
+    uint segments = pairs ? count / 2 : (closed ? count : count - 1);
     uint segment = local / stroke_parts;
     if (segment >= segments)
         return;
-    bool joined = closed || segment + 2 < count;
     uint base = raster.points_base;
+    float4 start = art_positions[base + (pairs ? segment * 2 : segment)];
+    float4 end = art_positions[base + (pairs ? segment * 2 + 1 : (segment + 1) % count)];
+    float2 offset = float2(art_values[raster.art_base + 3], art_values[raster.art_base + 4]);
+    int weight = int(round(saturate(start.z) * float(weight_one)));
+    if (weight <= 0)
+        return;
+    bool joined = !pairs && (closed || segment + 2 < count);
     StrokePiece piece;
-    piece.p0 = art_positions[base + segment];
-    piece.p1 = art_positions[base + (segment + 1) % count];
-    piece.p2 = joined ? art_positions[base + (segment + 2) % count] : piece.p1;
-    piece.flags = (joined ? 1 : 0) | (!closed && segment == 0 ? 2 : 0) |
-                  (!closed && segment + 1 == segments ? 4 : 0);
+    piece.p0 = offset + start.xy;
+    piece.p1 = offset + end.xy;
+    piece.p2 = joined ? offset + art_positions[base + (segment + 2) % count].xy : piece.p1;
+    piece.flags = pairs ? 6
+                        : (joined ? 1 : 0) | (!closed && segment == 0 ? 2 : 0) |
+                              (!closed && segment + 1 == segments ? 4 : 0);
     piece.reserved = 0;
     if (!art_finite(piece.p0) || !art_finite(piece.p1) || !art_finite(piece.p2))
         return;
-    stroke_piece(piece, local % stroke_parts);
+    stroke_piece(piece, local % stroke_parts, weight);
 }
 
 /** An art layer's outline filled from its points: one thread an edge, closed. */
@@ -642,14 +663,15 @@ void art_fill_points(uint3 id : SV_DispatchThreadID) {
     uint count = uint(art_values[raster.art_base + 1]);
     if (local >= count)
         return;
-    float2 a = art_positions[raster.points_base + local];
-    float2 b = art_positions[raster.points_base + (local + 1) % count];
+    float2 offset = float2(art_values[raster.art_base + 3], art_values[raster.art_base + 4]);
+    float2 a = offset + art_positions[raster.points_base + local].xy;
+    float2 b = offset + art_positions[raster.points_base + (local + 1) % count].xy;
     if (art_finite(a) && art_finite(b))
-        edge(a, b, 1);
+        edge(a, b, weight_one);
 }
 
 int resolved(int cover, int area) {
-    int value = abs(cover * (2 * one) - area);
+    int value = (abs(cover * (2 * one) - area) + weight_one / 2) / weight_one;
     if (raster.fill == 1) {
         value = value & (2 * full_area - 1);
         if (value > full_area)
@@ -856,7 +878,7 @@ void finish(uint3 id : SV_DispatchThreadID) {
 )hlsl";
 
 /**
- * An art program's one kernel, compiled once per program: its points, in content pixels, to
+ * An art program's one kernel, compiled once per program: its points, in canvas pixels, to
  * art_positions, which art_stroke_points or art_fill_points then outline.
  */
 inline constexpr const char* art_entry = "art_points";
@@ -864,7 +886,7 @@ inline constexpr const char* art_entry = "art_points";
 /**
  * Values an art kernel reads besides the job's constants, as floats: the time in seconds, the
  * point count, whether the outline closes, the canvas (x, y, width, height) in content pixels,
- * one unused, then sixteen parameters.
+ * whether points pair off into segments, then sixteen parameters.
  */
 inline constexpr std::size_t art_value_count = 24U;
 
@@ -876,6 +898,12 @@ float artTime() { return art_values[raster.art_base + 0]; }
 float artParameter(uint index) { return index < 16 ? art_values[raster.art_base + 8 + index] : 0.0; }
 /** The canvas's size in device pixels. */
 float2 artSize() { return float2(art_values[raster.art_base + 5], art_values[raster.art_base + 6]); }
+static float art_weight;
+/**
+ * From artPoint: how much of its coverage the stroke piece this point starts adds, 0 to 1 (1
+ * unless set); a piece of weight 0 is skipped. Lines that fade one by one, say.
+ */
+void artSetWeight(float weight) { art_weight = saturate(weight); }
 /**
  * `unit`, a point of a figure drawn round the origin with -1 to 1 spanning `reach` of the canvas's
  * shorter side, in the canvas's 0-1 space: centred, and round whatever the canvas's shape.
@@ -888,9 +916,10 @@ float2 artCentred(float2 unit, float reach) {
 
 /** The art entry point, after the program, which defines artPoint(index, count). */
 constexpr std::string_view art_kernels = R"hlsl(
+// A point in canvas pixels; the outline kernels add where the canvas lies in the job, so every
+// tile of one art reads the same points.
 float2 art_position(uint index, uint count) {
-    float2 position = artPoint(index, count);
-    return float2(art_values[raster.art_base + 3], art_values[raster.art_base + 4]) + position * float2(art_values[raster.art_base + 5], art_values[raster.art_base + 6]);
+    return artPoint(index, count) * float2(art_values[raster.art_base + 5], art_values[raster.art_base + 6]);
 }
 
 [numthreads(64, 1, 1)]
@@ -899,8 +928,11 @@ void art_points(uint3 id : SV_DispatchThreadID) {
     if (!enter(id.x, local))
         return;
     uint count = uint(art_values[raster.art_base + 1]);
-    if (local < count)
-        art_positions[raster.points_base + local] = art_position(local, count);
+    if (local < count) {
+        art_weight = 1.0;
+        float2 position = art_position(local, count);
+        art_positions[raster.points_base + local] = float4(position, art_weight, 0.0);
+    }
 }
 )hlsl";
 

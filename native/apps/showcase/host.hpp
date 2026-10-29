@@ -9,6 +9,8 @@
 
 #include <strata/strata.h>
 
+#include "renderer.hpp"
+
 struct HWND__;
 using HWND = HWND__*;
 
@@ -85,6 +87,9 @@ public:
     [[nodiscard]] double scale() const noexcept;
     [[nodiscard]] const DesktopFrameSample& last_frame_sample() const noexcept;
     [[nodiscard]] DesktopHostInfo performance_info() const;
+    /** The next frame's pixels, read from the swap chain (Renderer::capture_next_frame). */
+    void capture_next_frame() noexcept;
+    [[nodiscard]] std::optional<FrameCapture> take_capture();
     /** Canonical active showcase frame used only to resolve scripted interaction targets. */
     [[nodiscard]] std::string performance_frame_json();
     [[nodiscard]] bool smoke_ready() const noexcept;

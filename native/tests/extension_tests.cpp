@@ -657,7 +657,7 @@ void test_external_package_and_schema_projection() {
     strata::host::SelectedExtensions selected = strata::host::select_extensions({"strata.demo.v1"}, {}, strata::widget_api());
     check(selected.packages.size() == 1U && selected.packages.front().id() == "strata.demo.v1",
           "the external demo package was not loaded");
-    check(selected.widgets.size() == 3U && selected.behaviors.size() == 1U,
+    check(selected.widgets.size() == 4U && selected.behaviors.size() == 1U,
           "the external demo package did not project its runtime descriptors");
     const std::string unknown = rejection(
         [] { static_cast<void>(strata::host::select_extensions({"strata.missing.v1"}, {}, strata::widget_api())); });
@@ -675,6 +675,7 @@ void test_external_package_and_schema_projection() {
              std::string_view(R"("name":"DemoPulse")"),
              std::string_view(R"("name":"DemoDisclosure")"),
              std::string_view(R"("name":"DemoCanvas")"),
+             std::string_view(R"("name":"DemoParticles")"),
              std::string_view(R"("allowsChildren":true)"),
              std::string_view(R"("id":"demo.custom.pulse")"),
              std::string_view(R"("payloadContract":"DemoPulseActivation")"),

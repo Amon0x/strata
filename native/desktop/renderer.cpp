@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
@@ -176,6 +177,10 @@ struct Renderer::Impl final {
     }
 
     [[nodiscard]] bool end_frame() {
+        if (capture_requested) {
+            capture_requested = false;
+            capture = read_back_buffer();
+        }
         const HRESULT result = swap_chain->Present(vsync ? 1U : 0U, 0U);
         if (result == DXGI_STATUS_OCCLUDED)
             return false;
@@ -183,6 +188,38 @@ struct Renderer::Impl final {
         return true;
     }
 
+    /** The back buffer as it stands: a staging copy, mapped and read row by row. */
+    [[nodiscard]] FrameCapture read_back_buffer() {
+        D3D11_TEXTURE2D_DESC description{};
+        back_buffer->GetDesc(&description);
+        description.Usage = D3D11_USAGE_STAGING;
+        description.BindFlags = 0U;
+        description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        description.MiscFlags = 0U;
+        ComPtr<ID3D11Texture2D> staging;
+        require_hresult(device->CreateTexture2D(&description, nullptr, &staging),
+                        "capture staging texture creation");
+        context->CopyResource(staging.Get(), back_buffer.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        require_hresult(context->Map(staging.Get(), 0U, D3D11_MAP_READ, 0U, &mapped),
+                        "capture map");
+        FrameCapture frame{description.Width, description.Height, {}};
+        frame.rgba.resize(static_cast<std::size_t>(frame.width) * frame.height * 4U);
+        for (std::uint32_t row = 0U; row < frame.height; ++row) {
+            std::memcpy(frame.rgba.data() + static_cast<std::size_t>(row) * frame.width * 4U,
+                        static_cast<const std::uint8_t*>(mapped.pData) +
+                            static_cast<std::size_t>(row) * mapped.RowPitch,
+                        static_cast<std::size_t>(frame.width) * 4U);
+        }
+        context->Unmap(staging.Get(), 0U);
+        // The swap chain holds premultiplied-free opaque frames: alpha says nothing here.
+        for (std::size_t texel = 3U; texel < frame.rgba.size(); texel += 4U)
+            frame.rgba[texel] = 255U;
+        return frame;
+    }
+
+    bool capture_requested = false;
+    std::optional<FrameCapture> capture;
     HWND window = nullptr;
     bool owns_com = false;
     bool vsync = true;
@@ -246,6 +283,14 @@ void Renderer::release_layer(const std::string_view id) noexcept {
 
 bool Renderer::end_frame() {
     return impl_->end_frame();
+}
+
+void Renderer::capture_next_frame() noexcept {
+    impl_->capture_requested = true;
+}
+
+std::optional<FrameCapture> Renderer::take_capture() {
+    return std::exchange(impl_->capture, std::nullopt);
 }
 
 void Renderer::render(const host::RenderPacket& packet) {

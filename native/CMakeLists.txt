@@ -926,11 +926,13 @@ if(WIN32 AND STRATA_BUILD_DESKTOP)
         desktop/main.cpp
         desktop/preview.cpp
         desktop/window_placement.cpp
+        headless/png.cpp
         headless/scenario.cpp
     )
     target_include_directories(
         strata_desktop
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/apps/showcase ${CMAKE_CURRENT_SOURCE_DIR}/desktop
+                ${CMAKE_CURRENT_SOURCE_DIR}/headless
     )
     target_link_libraries(
         strata_desktop

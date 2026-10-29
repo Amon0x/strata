@@ -283,7 +283,7 @@ void Renderer::Impl::rasterize(const std::span<const RasterWork> batch, const do
                                                  art->y,
                                                  art->width,
                                                  art->height,
-                                                 0.0F};
+                                                 art->segments ? 1.0F : 0.0F};
                 art_values.insert(art_values.end(), head.begin(), head.end());
                 art_values.insert(art_values.end(), art->parameters.begin(), art->parameters.end());
                 // A glow and its line run one program on one canvas: their points are the same,
@@ -291,10 +291,9 @@ void Renderer::Impl::rasterize(const std::span<const RasterWork> batch, const do
                 const auto same =
                     std::find_if(art_sources.begin(), art_sources.end(), [&](const auto& source) {
                         const host::RasterArt& other = *source.first;
-                        return other.count == art->count && other.closed == art->closed &&
-                               other.x == art->x && other.y == art->y &&
-                               other.width == art->width && other.height == art->height &&
-                               other.parameters == art->parameters && other.source == art->source;
+                        return other.count == art->count && other.width == art->width &&
+                               other.height == art->height && other.parameters == art->parameters &&
+                               other.source == art->source;
                     });
                 if (same != art_sources.end()) {
                     values.points_base = same->second;
@@ -399,7 +398,10 @@ void Renderer::Impl::rasterize(const std::span<const RasterWork> batch, const do
                 return 0U;
             if (!stroked)
                 return art->count;
-            return (art->closed ? art->count : art->count - 1U) * shaders::stroke_parts;
+            return (art->segments ? art->count / 2U
+                    : art->closed ? art->count
+                                  : art->count - 1U) *
+                   shaders::stroke_parts;
         });
         plan(raster_pipelines[stroked ? 5U : 6U], false, work);
     }
@@ -444,7 +446,7 @@ void Renderer::Impl::rasterize(const std::span<const RasterWork> batch, const do
     reserve_raster_buffer(raster_output,
                           std::max<std::size_t>(output_total, 1U) * sizeof(std::uint32_t), false);
     reserve_raster_buffer(raster_points,
-                          std::max<std::size_t>(point_total, 1U) * 2U * sizeof(float), false);
+                          std::max<std::size_t>(point_total, 1U) * 4U * sizeof(float), false);
 
     auto& pools = frame().raster_pools;
     auto& pool_index = frame().raster_pool_index;

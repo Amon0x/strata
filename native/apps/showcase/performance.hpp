@@ -41,15 +41,16 @@ struct PerformanceScrollStep final {
 struct PerformanceKeyStep final {
     std::string key;
 };
+/** Saves the next frame Strata presents, read from its swap chain, to a PNG under the output root.
+ */
+struct PerformanceCaptureStep final {
+    std::string file;
+};
 
-using PerformanceStep = std::variant<
-    PerformanceFramesStep,
-    PerformanceClickStep,
-    PerformanceMoveStep,
-    PerformanceDragStep,
-    PerformanceScrollStep,
-    PerformanceKeyStep
->;
+using PerformanceStep =
+    std::variant<PerformanceFramesStep, PerformanceClickStep, PerformanceMoveStep,
+                 PerformanceDragStep, PerformanceScrollStep, PerformanceKeyStep,
+                 PerformanceCaptureStep>;
 
 struct PerformancePhase final {
     std::string name;

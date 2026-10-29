@@ -96,9 +96,18 @@ typedef struct strata_widget_shape {
  * coverage, closing it when flags has STRATA_WIDGET_ART_CLOSED, and draws it again every frame. Art
  * is opt-in and GPU-only: nothing on the CPU sees its geometry (hit testing sees `bounds`), the
  * software renderer leaves it out, and a program that fails to compile draws nothing and is
- * reported once on stderr.
+ * reported once on stderr. The program may call artSetWeight(weight) in artPoint to scale, from
+ * 0 to 1, the coverage of the stroke piece that point starts, so lines fade one by one; a piece
+ * of weight 0 is skipped. Changing parameters every frame (a pointer's place, say) rewrites the
+ * art's own atlas slot rather than making new art.
  */
 #define STRATA_WIDGET_ART_CLOSED UINT32_C(8)
+/*
+ * Art whose points pair off: points 2i and 2i + 1 are a line of their own, capped at both ends,
+ * rather than one outline through every point (STRATA_WIDGET_ART_CLOSED is then ignored). A
+ * pair whose points meet is a dot under a round or square cap. Stroked only.
+ */
+#define STRATA_WIDGET_ART_SEGMENTS UINT32_C(16)
 
 typedef struct strata_widget_art {
     size_t struct_size;

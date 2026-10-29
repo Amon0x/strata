@@ -355,6 +355,16 @@ const std::array<float, 1> speed{1.5F};
 present.art(bounds, rose, 720U, speed, rgba(244U, 114U, 182U));
 ```
 
+Points join one way or another (`ArtPath`): one closed or open outline, or `segments`, where
+points 2i and 2i + 1 are a line of their own, capped at both ends; a pair whose points meet is a
+dot under a round cap. Inside `artPoint` a program may call `artSetWeight(w)`: the stroke piece
+that point starts adds only that fraction of its coverage, so lines fade one by one, and a piece
+of weight 0 is skipped. Parameters may change every frame, a pointer's place say: art whose
+parameters change in consecutive updates rewrites its own atlas slots instead of making new art.
+A canvas larger than an atlas page (a whole page's background) rasterizes in tiles that share one
+set of points. Together these make a particle network that reaches for the pointer, the showcase's
+MENU page, a few dozen lines of HLSL whose only CPU work is reporting where the pointer is.
+
 Art is opt-in and decorative, with three consequences to accept. Nothing on the CPU sees its
 geometry: hit testing and the inspector see only its bounds. It is GPU-only: the software
 renderer, and so pixel tests against it, leave it out. And the program compiles in the background

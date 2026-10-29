@@ -233,7 +233,8 @@ struct PreparationCache final {
     struct VolatileShape final {
         std::uint64_t changed = 0U;
         std::uint64_t previously_changed = 0U;
-        std::array<std::optional<font::RasterSlot>, 2U> slots;
+        /** A slot each mask the draw rasterizes: a part's, or each tile of art's. */
+        std::vector<std::optional<font::RasterSlot>> slots;
     };
     mutable std::unordered_map<std::uint32_t, VolatileShape> volatile_shapes;
     /** Counts incremental updates, which mark the draws they replan. */

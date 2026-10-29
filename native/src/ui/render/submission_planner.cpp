@@ -608,6 +608,8 @@ constexpr double mask_flatness = 0.03;
 
 /** The largest mask edge, in device pixels, kept below an atlas page with its gutter. */
 constexpr double maximum_mask_extent = 1000.0;
+/** Art larger than a mask rasterizes in tiles of this many device pixels a side. */
+constexpr double art_tile = 960.0;
 /**
  * Larger shapes rasterize in tiles of this many device pixels a side, each with a one-pixel apron
  * of real coverage so sampling across a seam reads its neighbour's pixels. Empty tiles take
@@ -1341,23 +1343,17 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
  * canvas whose raster job carries the art's program instead of edges, drawn with the part's paint
  * as a shape's mask is. The mask is cached by everything it depends on but the time, so the CPU
  * plans it once while the backend draws it again every frame. A stroke under a scale that differs
- * by axis is left out (the backend's pen is round). Returns false when there is no shape atlas or
- * the canvas exceeds a page.
+ * by axis is left out (the backend's pen is round). A canvas larger than a page rasterizes in
+ * tiles. Returns false when there is no shape atlas or the canvas is too large even for tiles.
  */
-[[nodiscard]] bool append_art_masks(
-    std::vector<PlannedItem>& output,
-    const PathRenderCommand& command,
-    const std::uint32_t source_order,
-    const Transform& transform,
-    const Rect clip,
-    const std::vector<SubmissionRoundedClip>& rounded_clips,
-    const double opacity,
-    const std::uint32_t group,
-    const SubmissionContext& context,
-    std::size_t& skipped_draws,
-    font::GlyphAtlas* const atlas,
-    const std::span<const GroupRasterScale> group_scales
-) {
+[[nodiscard]] bool
+append_art_masks(std::vector<PlannedItem>& output, const PathRenderCommand& command,
+                 const std::uint32_t source_order, const Transform& transform, const Rect clip,
+                 const std::vector<SubmissionRoundedClip>& rounded_clips, const double opacity,
+                 const std::uint32_t group, const SubmissionContext& context,
+                 std::size_t& skipped_draws, font::GlyphAtlas* const atlas,
+                 const std::span<const GroupRasterScale> group_scales,
+                 PreparationCache::VolatileShape* const animated) {
     const ArtOutline& outline = *command.art;
     const PathShape& shape = command.shape;
     const Rect bounds = command.bounds;
@@ -1390,6 +1386,7 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
     program.add(outline.source.size());
     program.add(outline.count);
     program.add(outline.closed);
+    program.add(outline.segments);
     program.add(outline.parameters);
     program.add(shape.fill_rule);
     program.add(bounds.width);
@@ -1400,15 +1397,20 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
     struct Piece final {
         const Part* part = nullptr;
         font::GlyphAtlasEntry entry;
+        /** The device pixels the piece draws, and their texels. */
+        font::RasterPlaneBounds core;
+        TextureRegion uv;
     };
     std::vector<Piece> pieces;
-    for (const Part& part : parts) {
+    std::size_t slot_index = 0U;
+    for (std::size_t part_index = 0U; part_index < parts.size(); ++part_index) {
+        const Part& part = parts[part_index];
         const double reach = part.pen.has_value() ? host::raster_stroke_reach(*part.pen) : 0.0;
-        const double left = std::min(canvas_x, canvas_x + canvas_width) - reach - 1.0;
-        const double right = std::max(canvas_x, canvas_x + canvas_width) + reach + 1.0;
-        const double top = std::min(canvas_y, canvas_y + canvas_height) - reach - 1.0;
-        const double bottom = std::max(canvas_y, canvas_y + canvas_height) + reach + 1.0;
-        if (right - left > maximum_mask_extent || bottom - top > maximum_mask_extent)
+        const double left = std::floor(std::min(canvas_x, canvas_x + canvas_width) - reach - 1.0);
+        const double right = std::ceil(std::max(canvas_x, canvas_x + canvas_width) + reach + 1.0);
+        const double top = std::floor(std::min(canvas_y, canvas_y + canvas_height) - reach - 1.0);
+        const double bottom = std::ceil(std::max(canvas_y, canvas_y + canvas_height) + reach + 1.0);
+        if (right - left > maximum_tiled_extent || bottom - top > maximum_tiled_extent)
             return false;
         MaskHash hash = program;
         hash.add(part.stroke);
@@ -1418,47 +1420,94 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
             hash.add(style.join);
             hash.add(style.miter_limit);
         }
-        char key[40];
-        std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(hash.value()));
-        const std::optional<font::GlyphAtlasEntry> entry = atlas->request_raster(
-            key, font::GlyphRasterMode::coverage,
-            [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
-                const double x0 = std::floor(left);
-                const double y0 = std::floor(top);
-                const auto width = static_cast<std::uint32_t>(std::ceil(right) - x0);
-                const auto height = static_cast<std::uint32_t>(std::ceil(bottom) - y0);
-                host::RasterArt art;
-                art.source = outline.source;
-                art.count = outline.count;
-                art.closed = outline.closed;
-                art.stroked = part.stroke;
-                art.x = static_cast<float>(canvas_x - x0);
-                art.y = static_cast<float>(canvas_y - y0);
-                art.width = static_cast<float>(canvas_width);
-                art.height = static_cast<float>(canvas_height);
-                art.parameters = outline.parameters;
-                host::RasterJobBuilder builder(width, height);
-                builder.add_art_layer(shape.fill_rule == PathFillRule::evenodd
-                                          ? host::RasterFill::even_odd
-                                          : host::RasterFill::nonzero,
-                                      host::RasterLayer{}, part.pen.value_or(host::RasterStroke{}),
-                                      std::move(art));
-                return font::RasterRequest{builder.encode(gutter, gutter), width, height,
-                                           font::RasterPlaneBounds{x0, y0 + height, x0 + width, y0}};
-            });
-        if (!entry.has_value())
-            return false;
-        pieces.push_back(Piece{&part, *entry});
+        // A canvas larger than a page (a whole page's background, say) rasterizes in tiles, each
+        // the same program over its own part of the canvas, with a one-pixel apron of real
+        // coverage around its core so sampling across a seam reads its neighbour's pixels.
+        const bool whole =
+            right - left <= maximum_mask_extent && bottom - top <= maximum_mask_extent;
+        const double step = whole ? std::max(right - left, bottom - top) : art_tile;
+        const double apron = whole ? 0.0 : 1.0;
+        for (double tile_top = top; tile_top < bottom; tile_top += step) {
+            for (double tile_left = left; tile_left < right; tile_left += step) {
+                const double core_right = std::min(tile_left + step, right);
+                const double core_bottom = std::min(tile_top + step, bottom);
+                const double x0 = tile_left - apron;
+                const double y0 = tile_top - apron;
+                const auto width = static_cast<std::uint32_t>(core_right + apron - x0);
+                const auto height = static_cast<std::uint32_t>(core_bottom + apron - y0);
+                MaskHash tile_hash = hash;
+                tile_hash.add(tile_left - left);
+                tile_hash.add(tile_top - top);
+                char key[40];
+                std::snprintf(key, sizeof(key), "%016llx",
+                              static_cast<unsigned long long>(tile_hash.value()));
+                const auto request =
+                    [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
+                    host::RasterArt art;
+                    art.source = outline.source;
+                    art.count = outline.count;
+                    art.closed = outline.closed;
+                    art.segments = outline.segments && part.stroke;
+                    art.stroked = part.stroke;
+                    art.x = static_cast<float>(canvas_x - x0);
+                    art.y = static_cast<float>(canvas_y - y0);
+                    art.width = static_cast<float>(canvas_width);
+                    art.height = static_cast<float>(canvas_height);
+                    art.parameters = outline.parameters;
+                    host::RasterJobBuilder builder(width, height);
+                    builder.add_art_layer(shape.fill_rule == PathFillRule::evenodd
+                                              ? host::RasterFill::even_odd
+                                              : host::RasterFill::nonzero,
+                                          host::RasterLayer{},
+                                          part.pen.value_or(host::RasterStroke{}), std::move(art));
+                    return font::RasterRequest{
+                        builder.encode(gutter, gutter), width, height,
+                        font::RasterPlaneBounds{x0, y0 + height, x0 + width, y0}};
+                };
+                std::optional<font::GlyphAtlasEntry> entry;
+                if (animated != nullptr) {
+                    // Parameters that change every update (a pointer's place, say): the art
+                    // rewrites its own slots, rather than making new art each time.
+                    std::optional<font::RasterRequest> next = request(atlas->gutter());
+                    if (!next.has_value())
+                        return false;
+                    if (animated->slots.size() <= slot_index)
+                        animated->slots.resize(slot_index + 1U);
+                    std::optional<font::RasterSlot>& slot = animated->slots[slot_index];
+                    if (!slot.has_value() ||
+                        !atlas->raster_slot_fits(*slot, next->width, next->height)) {
+                        slot = atlas->reserve_raster_slot(next->width, next->height,
+                                                          font::GlyphRasterMode::coverage);
+                        if (!slot.has_value() ||
+                            !atlas->raster_slot_fits(*slot, next->width, next->height)) {
+                            return false;
+                        }
+                    }
+                    entry = atlas->write_raster_slot(*slot, std::move(*next));
+                } else {
+                    entry = atlas->request_raster(key, font::GlyphRasterMode::coverage, request);
+                }
+                ++slot_index;
+                if (!entry.has_value())
+                    return false;
+                // The core's texels: the apron stays outside the quad.
+                const double inset_u = entry->uv_width * apron / static_cast<double>(width);
+                const double inset_v = entry->uv_height * apron / static_cast<double>(height);
+                pieces.push_back(
+                    Piece{&part, *entry,
+                          font::RasterPlaneBounds{tile_left, core_bottom, core_right, tile_top},
+                          TextureRegion{entry->u + inset_u, entry->v + inset_v,
+                                        entry->uv_width - 2.0 * inset_u,
+                                        entry->uv_height - 2.0 * inset_v}});
+            }
+        }
     }
     for (const Piece& piece : pieces) {
         const Part& part = *piece.part;
         std::optional<MaskGradient> gradient;
         if (const Gradient* paint_gradient = part.paint->gradient(); paint_gradient != nullptr)
             gradient = mask_gradient(*paint_gradient, bounds);
-        const auto [quad, uv] =
-            mask_quad(*grid, transform, bounds, piece.entry.plane_bounds_layout_pixels,
-                      TextureRegion{piece.entry.u, piece.entry.v, piece.entry.uv_width,
-                                    piece.entry.uv_height});
+        const auto [quad, uv] = mask_quad(*grid, transform, bounds, piece.core, piece.uv);
         append_draw(output,
                     PreparedCommand{std::make_shared<const PreparedMask>(
                         PreparedMask{quad, uv, part.paint->representative(), piece.entry.texture,
@@ -1496,7 +1545,8 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
 ) {
     if (command.art.has_value()) {
         return append_art_masks(output, command, source_order, transform, clip, rounded_clips,
-                                opacity, group, context, skipped_draws, atlas, group_scales);
+                                opacity, group, context, skipped_draws, atlas, group_scales,
+                                animated);
     }
     if (!command.joined.empty()) {
         return append_joined_masks(output, command, source_order, transform, clip, rounded_clips,
@@ -1708,6 +1758,8 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
                 std::optional<font::RasterRequest> next = request(atlas->gutter());
                 if (!next.has_value())
                     return false;
+                if (animated->slots.size() <= part_index)
+                    animated->slots.resize(part_index + 1U);
                 std::optional<font::RasterSlot>& slot = animated->slots[part_index];
                 if (!slot.has_value() ||
                     !atlas->raster_slot_fits(*slot, next->width, next->height)) {

@@ -2,8 +2,10 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "d3d11/render_context.hpp"
 
@@ -25,6 +27,13 @@ struct RendererInfo final {
     std::uint32_t device_id = 0U;
     std::uint64_t dedicated_video_memory = 0U;
     bool vsync = true;
+};
+
+/** A presented frame's pixels: straight RGBA8 rows, top first. */
+struct FrameCapture final {
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+    std::vector<std::uint8_t> rgba;
 };
 
 /** Win32 fidelity renderer for the backend-ready native render submission protocol. */
@@ -61,6 +70,12 @@ class Renderer final {
     void release_layer(std::string_view id) noexcept;
     /** Presents and returns false when DXGI reports the window as occluded. */
     [[nodiscard]] bool end_frame();
+    /**
+     * Keeps the next frame end_frame presents, read back from the swap chain before it is
+     * presented (so nothing else on screen can show up in it); take_capture hands it over.
+     */
+    void capture_next_frame() noexcept;
+    [[nodiscard]] std::optional<FrameCapture> take_capture();
     void render(const host::RenderPacket& packet);
     [[nodiscard]] RendererInfo info() const;
 

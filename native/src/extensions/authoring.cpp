@@ -845,7 +845,7 @@ void Present::polygon(const std::span<const Point> points, const std::optional<C
 
 void Present::art(const Rect bounds, const std::string_view hlsl, const std::uint32_t count,
                   const std::span<const float> parameters, const std::optional<Color> fill,
-                  const std::optional<Color> outline, const Stroke& style, const bool closed,
+                  const std::optional<Color> outline, const Stroke& style, const ArtPath path,
                   const bool even_odd) {
     const strata_widget_api& api = detail::widget_api();
     if (api.struct_size < offsetof(strata_widget_api, render_art) + sizeof(api.render_art) ||
@@ -857,7 +857,8 @@ void Present::art(const Rect bounds, const std::string_view hlsl, const std::uin
     art.bounds = strata_rect{bounds.x, bounds.y, bounds.width, bounds.height};
     art.source = strata_string_view{hlsl.data(), hlsl.size()};
     art.point_count = count;
-    art.flags = (closed ? STRATA_WIDGET_ART_CLOSED : 0U) |
+    art.flags = (path == ArtPath::closed ? STRATA_WIDGET_ART_CLOSED : 0U) |
+                (path == ArtPath::segments ? STRATA_WIDGET_ART_SEGMENTS : 0U) |
                 (even_odd ? STRATA_WIDGET_SHAPE_EVEN_ODD : 0U);
     if (fill.has_value()) {
         art.flags |= STRATA_WIDGET_SHAPE_FILL;

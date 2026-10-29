@@ -34,6 +34,7 @@
 #include <strata/strata.h>
 
 #include "data/json.hpp"
+#include "png.hpp"
 
 namespace strata::desktop {
 namespace {
@@ -210,6 +211,8 @@ void require_object(const JsonValue& value, const std::string_view label) {
         return result;
     }
     if (operation == "key") return PerformanceKeyStep{text(argument, "key")};
+    if (operation == "capture")
+        return PerformanceCaptureStep{text(argument, "capture")};
     throw std::invalid_argument(std::string(label) + " has unknown operation '" + operation + "'");
 }
 
@@ -679,6 +682,18 @@ struct PerformanceRunner::Impl final {
         for (std::uint32_t index = 0U; index < step.count; ++index) {
             run_frame(measured, phase, iteration, "frame");
         }
+    }
+
+    void execute(const PerformanceCaptureStep& step, const bool, PhaseResult*,
+                 const std::uint32_t) {
+        // The next frame, read from the swap chain before it is presented: Strata's pixels only.
+        host.capture_next_frame();
+        run_frame(false, nullptr, 0U, "capture");
+        const std::optional<FrameCapture> frame = host.take_capture();
+        if (!frame.has_value())
+            throw std::runtime_error("capture found no presented frame");
+        std::filesystem::create_directories(output_root);
+        headless::write_png(output_root / step.file, frame->width, frame->height, frame->rgba);
     }
 
     void execute(

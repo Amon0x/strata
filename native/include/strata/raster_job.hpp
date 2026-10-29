@@ -38,7 +38,8 @@ struct RasterPoint final {
  * each point of an outline in the canvas's 0-1 space, which the backend strokes or fills itself,
  * so a picture that moves every frame costs the CPU nothing. Art is decorative and GPU-only: the
  * reference rasterizer leaves an art layer empty, and backends keep art jobs live, running them
- * again each frame they render with the time, `artTime()`, in seconds.
+ * again each frame they render with the time, `artTime()`, in seconds. A program may weight each
+ * point (`artSetWeight`), scaling the coverage of the stroke piece it starts.
  *
  * A job for an R8 atlas has one coverage layer. A job for an RGBA8 atlas has painted layers,
  * front first, composited by area: a layer takes what the layers in front leave uncovered at its
@@ -109,6 +110,8 @@ struct RasterArt final {
     std::uint32_t count = 0U;
     /** Whether the last point joins the first. */
     bool closed = false;
+    /** Whether points pair off into lines of their own, each capped (stroked only). */
+    bool segments = false;
     /** Stroked with the layer's stroke, or filled by the layer's fill rule. */
     bool stroked = false;
     /** The canvas in content pixels: a point (u, v) lies at (x + u width, y + v height). */

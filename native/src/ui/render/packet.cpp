@@ -250,6 +250,7 @@ void command_payload(Bytes& output, const RenderCommand& command) {
                 text(output, value.art->source);
                 integer(output, value.art->count);
                 boolean(output, value.art->closed);
+                boolean(output, value.art->segments);
                 for (const float parameter : value.art->parameters)
                     number(output, static_cast<double>(parameter));
             }

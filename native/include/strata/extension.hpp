@@ -660,6 +660,17 @@ class ClipScope final {
     strata_widget_render_context* context_;
 };
 
+/** How an art program's points join (Present::art). */
+enum class ArtPath {
+    /** One outline through every point, the last joined to the first. */
+    closed,
+    /** One outline through every point, capped at both ends. */
+    open,
+    /** Points 2i and 2i + 1 are a line of their own, capped at both ends; a pair that meets is a
+       dot. */
+    segments,
+};
+
 /** Presentation capability of one widget content or overlay pass. */
 class Present final {
   public:
@@ -756,12 +767,13 @@ class Present final {
     /**
      * Art (see strata_widget_art): `count` points that `hlsl`'s
      * `float2 artPoint(uint index, uint count)` generates on the GPU in `bounds`' 0-1 space,
-     * redrawn every frame with artTime() at no CPU cost. Decorative and GPU-only.
+     * redrawn every frame with artTime() at no CPU cost. Decorative and GPU-only. `path` says how
+     * the points join: one closed or open outline, or pairs that are lines of their own.
      */
     void art(Rect bounds, std::string_view hlsl, std::uint32_t count,
              std::span<const float> parameters, std::optional<Color> fill,
              std::optional<Color> outline = std::nullopt, const Stroke& style = {},
-             bool closed = true, bool even_odd = false);
+             ArtPath path = ArtPath::closed, bool even_odd = false);
 
   private:
     strata_widget_render_context* context_;

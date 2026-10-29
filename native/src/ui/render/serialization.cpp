@@ -432,10 +432,12 @@ JsonValue render_command_json(const RenderCommand& command) {
                 }
                 if (value.art.has_value()) {
                     fields.emplace_back(
-                        "art", object({
-                                   {"closed", JsonValue(value.art->closed)},
-                                   {"count", JsonValue(static_cast<std::int64_t>(value.art->count))},
-                               }));
+                        "art",
+                        object({
+                            {"closed", JsonValue(value.art->closed)},
+                            {"count", JsonValue(static_cast<std::int64_t>(value.art->count))},
+                            {"segments", JsonValue(value.art->segments)},
+                        }));
                 }
                 std::ranges::sort(fields, {}, &JsonValue::ObjectEntry::first);
                 fields.insert(fields.begin(), JsonValue::ObjectEntry{"kind", JsonValue("path")});

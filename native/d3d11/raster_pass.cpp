@@ -231,11 +231,13 @@ struct WorkBuffer final {
     }
 };
 
-/** Whether two art layers' programs make the same points: same program, inputs and canvas. */
+/**
+ * Whether two art layers' programs make the same points: same program, inputs and canvas size
+ * (points are canvas-relative, so a glow and its line, or one art's tiles, share them).
+ */
 [[nodiscard]] bool same_points(const host::RasterArt& a, const host::RasterArt& b) {
-    return a.count == b.count && a.closed == b.closed && a.x == b.x && a.y == b.y &&
-           a.width == b.width && a.height == b.height && a.parameters == b.parameters &&
-           a.source == b.source;
+    return a.count == b.count && a.width == b.width && a.height == b.height &&
+           a.parameters == b.parameters && a.source == b.source;
 }
 
 } // namespace
@@ -266,7 +268,7 @@ struct RasterPass::Impl final {
         finish = create(device, code[4]);
         art_stroke = create(device, code[5]);
         art_fill = create(device, code[6]);
-        positions.stride = sizeof(float) * 2U;
+        positions.stride = sizeof(float) * 4U;
         D3D11_BUFFER_DESC descriptor{};
         descriptor.ByteWidth = sizeof(shaders::Dispatch);
         descriptor.Usage = D3D11_USAGE_DYNAMIC;
@@ -429,7 +431,7 @@ struct RasterPass::Impl final {
                                                      art->y,
                                                      art->width,
                                                      art->height,
-                                                     0.0F};
+                                                     art->segments ? 1.0F : 0.0F};
                     art_data.insert(art_data.end(), head.begin(), head.end());
                     art_data.insert(art_data.end(), art->parameters.begin(), art->parameters.end());
                     // A glow and its line run one program on one canvas: their points are the
@@ -499,7 +501,10 @@ struct RasterPass::Impl final {
                     return 0U;
                 if (!stroked)
                     return art->count;
-                return (art->closed ? art->count : art->count - 1U) * shaders::stroke_parts;
+                return (art->segments ? art->count / 2U
+                        : art->closed ? art->count
+                                      : art->count - 1U) *
+                       shaders::stroke_parts;
             });
             plan(stroked ? art_stroke.Get() : art_fill.Get(), nullptr, false, work);
         }

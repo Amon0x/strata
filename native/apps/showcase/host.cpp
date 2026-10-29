@@ -1963,6 +1963,14 @@ const DesktopFrameSample& Host::last_frame_sample() const noexcept {
     return impl_->last_performance_sample;
 }
 
+void Host::capture_next_frame() noexcept {
+    impl_->renderer.capture_next_frame();
+}
+
+std::optional<FrameCapture> Host::take_capture() {
+    return impl_->renderer.take_capture();
+}
+
 DesktopHostInfo Host::performance_info() const {
     const RendererInfo renderer = impl_->renderer.info();
     return DesktopHostInfo{

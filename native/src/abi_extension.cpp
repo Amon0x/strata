@@ -2165,7 +2165,8 @@ void render_widget_art(strata_widget_render_context* const context,
     strata::ui::ArtOutline outline;
     outline.source.assign(art->source.data, art->source.size);
     outline.count = art->point_count;
-    outline.closed = (art->flags & STRATA_WIDGET_ART_CLOSED) != 0U;
+    outline.segments = (art->flags & STRATA_WIDGET_ART_SEGMENTS) != 0U;
+    outline.closed = !outline.segments && (art->flags & STRATA_WIDGET_ART_CLOSED) != 0U;
     for (std::size_t index = 0U; index < art->parameter_count; ++index) {
         if (!std::isfinite(art->parameters[index]))
             return;

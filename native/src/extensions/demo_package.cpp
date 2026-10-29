@@ -20,6 +20,9 @@ constexpr auto pulse_open = retained<boolean>("demo.pulse.popup-open");
 constexpr auto disclosure_expanded = retained<boolean>("demo.disclosure.expanded");
 constexpr auto pulse_step = parameter<number>("step", 1.0);
 constexpr auto canvas_kind = parameter<text>("kind");
+constexpr auto particles_pointer_x = retained<number>("demo.particles.pointer-x");
+constexpr auto particles_pointer_y = retained<number>("demo.particles.pointer-y");
+constexpr auto particles_count = parameter<number>("particles", 110.0);
 
 constexpr Color chrome_fill = rgba(31U, 39U, 54U);
 constexpr Color chrome_line = rgba(93U, 109U, 137U);
@@ -349,17 +352,18 @@ float2 artPoint(uint index, uint count) {
 /** One art figure twice: a soft wide stroke under a thin bright one. */
 void glowing(Present& present, const Rect area, const std::string_view program,
              const std::uint32_t count, const std::span<const float> parameters, const double turns,
-             const double glow_width, const double line_width, const bool closed = true) {
+             const double glow_width, const double line_width,
+             const ArtPath path = ArtPath::closed) {
     Stroke glow;
     glow.width = glow_width;
     glow.join = Join::round;
     glow.cap = Cap::round;
-    present.art(area, program, count, parameters, std::nullopt, hue(turns, 1.0, 54U), glow, closed);
+    present.art(area, program, count, parameters, std::nullopt, hue(turns, 1.0, 54U), glow, path);
     Stroke line;
     line.width = line_width;
     line.join = Join::round;
     line.cap = Cap::round;
-    present.art(area, program, count, parameters, std::nullopt, hue(turns), line, closed);
+    present.art(area, program, count, parameters, std::nullopt, hue(turns), line, path);
 }
 
 /** The GPU art gallery: each figure generated entirely on the GPU, every frame. */
@@ -377,7 +381,7 @@ void gallery(Present& present, const Rect area, const std::string_view kind) {
     } else if (kind == "tesseract") {
         glowing(present, area, tesseract_art, 32U, {}, 0.09, 7.0, 1.6);
     } else if (kind == "harmonograph") {
-        glowing(present, area, harmonograph_art, 4000U, {}, 0.63, 3.0, 0.6, false);
+        glowing(present, area, harmonograph_art, 4000U, {}, 0.63, 3.0, 0.6, ArtPath::open);
     } else if (kind == "supershape") {
         // Largest first, each over the last: a translucent body under a bright edge.
         constexpr std::array<std::array<float, 4U>, 3U> layers{{
@@ -394,7 +398,7 @@ void gallery(Present& present, const Rect area, const std::string_view kind) {
                         edge);
         }
     } else {
-        glowing(present, area, tunnel_art, 340U, {}, 0.52, 3.0, 0.8, false);
+        glowing(present, area, tunnel_art, 340U, {}, 0.52, 3.0, 0.8, ArtPath::open);
     }
 }
 
@@ -473,6 +477,120 @@ void present_canvas(Present& present) {
         gallery(present, area, kind);
 }
 
+/**
+ * A particle network: particles drifting and bouncing off the canvas's edges, a line between
+ * every two closer than parameter 4 pixels that fades as they part, and lines from the pointer
+ * (parameters 0 and 1, the canvas's 0-1 space; parameter 2, whether it is there) to every
+ * particle within parameter 5 pixels, which it draws gently toward it. Parameter 3 is the
+ * particle count, and parameter 6 picks the layer: 0 the lines, 1 the particles. All of it is
+ * the GPU's: the CPU only says where the pointer is.
+ */
+constexpr std::string_view particles_art = R"hlsl(
+float particleHash(float n) {
+    return frac(sin(n * 91.3458) * 47453.5453);
+}
+
+/** Back and forth across 0 to 1 at an even pace: a particle bouncing between two walls. */
+float bounce(float x) {
+    return 1.0 - abs(2.0 * frac(x * 0.5) - 1.0);
+}
+
+/** Particle `index`'s place, in canvas pixels. */
+float2 particle(uint index) {
+    float2 size = artSize();
+    float n = float(index);
+    float heading = particleHash(n * 1.7 + 0.3) * 6.28318531;
+    float speed = 12.0 + 26.0 * particleHash(n * 3.1 + 1.9);
+    float2 travel = float2(cos(heading), sin(heading)) * speed * artTime() / size;
+    float2 start = float2(particleHash(n * 5.3 + 2.7), particleHash(n * 7.7 + 4.1)) * 2.0;
+    float2 place = float2(bounce(start.x + travel.x), bounce(start.y + travel.y)) * size;
+    // Drawn toward the pointer, the more the closer it is.
+    float2 toward = float2(artParameter(0), artParameter(1)) * size - place;
+    float pull = artParameter(2) * saturate(1.0 - length(toward) / artParameter(5));
+    return place + toward * 0.22 * pull * pull;
+}
+
+float2 artPoint(uint index, uint count) {
+    float2 size = artSize();
+    uint n = uint(artParameter(3));
+    uint segment = index / 2;
+    bool second = (index & 1) != 0;
+    float2 pointer = float2(artParameter(0), artParameter(1)) * size;
+    float grab = artParameter(5);
+    if (artParameter(6) > 0.5) {
+        // A particle: a line that does not move, so a dot; brighter near the pointer.
+        float2 place = particle(segment);
+        artSetWeight(0.55 + 0.45 * artParameter(2) * saturate(1.0 - length(pointer - place) / grab));
+        return place / size;
+    }
+    uint pairs = n * (n - 1) / 2;
+    float2 from;
+    float2 to;
+    float reach;
+    float strength;
+    if (segment < pairs) {
+        // The segment-th pair (i, j), i < j, counted row by row.
+        float pair = float(segment);
+        float total = float(n);
+        uint i = uint(total - 2.0 - floor(sqrt(-8.0 * pair + 4.0 * total * (total - 1.0) - 7.0) * 0.5 - 0.5));
+        uint j = uint(int(segment) + int(i) + 1 - int(pairs) + int((n - i) * (n - i - 1) / 2));
+        from = particle(i);
+        to = particle(j);
+        reach = artParameter(4);
+        strength = 0.75;
+    } else {
+        from = particle(segment - pairs);
+        to = pointer;
+        reach = grab;
+        strength = artParameter(2);
+    }
+    float fade = saturate(1.0 - length(to - from) / reach);
+    artSetWeight(strength * fade);
+    return (second ? to : from) / size;
+}
+)hlsl";
+
+/** A particle network container: the pointer's place over it, kept for its art. */
+bool track_particles_pointer(Input& input, const Pointer& pointer) {
+    if (pointer.kind == Pointer::Kind::move && pointer.has_local_position) {
+        input.set(particles_pointer_x, pointer.local_x);
+        input.set(particles_pointer_y, pointer.local_y);
+    }
+    // The pointer still reaches whatever it is over.
+    return false;
+}
+
+void present_particles(Present& present) {
+    const Rect bounds = present.bounds();
+    present.rect(bounds, rgba(5U, 8U, 17U));
+    if (bounds.width <= 0.0 || bounds.height <= 0.0)
+        return;
+    const auto count =
+        static_cast<std::uint32_t>(std::clamp(present.get(particles_count), 2.0, 160.0));
+    const bool here = present.hovered();
+    std::array<float, 7U> values{
+        static_cast<float>(present.get(particles_pointer_x) / bounds.width),
+        static_cast<float>(present.get(particles_pointer_y) / bounds.height),
+        here ? 1.0F : 0.0F,
+        static_cast<float>(count),
+        150.0F,
+        210.0F,
+        0.0F,
+    };
+    const std::uint32_t pairs = count * (count - 1U) / 2U;
+    Stroke line;
+    line.width = 1.1;
+    line.cap = Cap::round;
+    present.art(bounds, particles_art, (pairs + count) * 2U, values, std::nullopt,
+                rgba(132U, 186U, 255U), line, ArtPath::segments);
+    values[6] = 1.0F;
+    Stroke dot;
+    dot.width = 3.6;
+    dot.cap = Cap::round;
+    present.art(bounds, particles_art, count * 2U, values, std::nullopt, rgba(226U, 236U, 255U),
+                dot, ArtPath::segments);
+}
+
 } // namespace
 
 std::unique_ptr<Package> demo_package() {
@@ -520,6 +638,17 @@ std::unique_ptr<Package> demo_package() {
         .depends_on_motion()
         .present(&present_canvas);
 
+    auto particles = widget("DemoParticles")
+                         .parameter(particles_count)
+                         .children()
+                         .clip()
+                         .intrinsic_size(640.0, 400.0)
+                         .retained(particles_pointer_x)
+                         .retained(particles_pointer_y)
+                         .depends_on_status()
+                         .on_pointer(&track_particles_pointer)
+                         .present(&present_particles);
+
     auto picker = behavior("demo.inspector-pick")
         .on_pointer(&inspect_pointer)
         .emits(ActionContract{
@@ -534,6 +663,7 @@ std::unique_ptr<Package> demo_package() {
     created->widget(std::move(pulse))
         .widget(std::move(expander))
         .widget(std::move(canvas))
+        .widget(std::move(particles))
         .behavior(std::move(picker));
     return created;
 }
