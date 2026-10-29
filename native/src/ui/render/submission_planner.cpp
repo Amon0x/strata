@@ -505,18 +505,41 @@ void append_draw(
 /** FNV-1a over raw bytes: mask identities hash everything their pixels depend on. */
 class MaskHash final {
   public:
+    /** Adds a value's bytes eight at a time: a path of a thousand segments hashes each frame. */
     template <typename Value>
     void add(const Value& value) noexcept {
         static_assert(std::is_trivially_copyable_v<Value>);
         const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
-        for (std::size_t index = 0U; index < sizeof(Value); ++index) {
-            state_ ^= bytes[index];
-            state_ *= 1099511628211ULL;
+        std::size_t index = 0U;
+        for (; index + 8U <= sizeof(Value); index += 8U) {
+            std::uint64_t word;
+            std::memcpy(&word, bytes + index, 8U);
+            mix(word);
+        }
+        if constexpr (sizeof(Value) % 8U != 0U) {
+            std::uint64_t word = 0U;
+            std::memcpy(&word, bytes + index, sizeof(Value) - index);
+            mix(word ^ (std::uint64_t{sizeof(Value) % 8U} << 56U));
         }
     }
-    [[nodiscard]] std::uint64_t value() const noexcept { return state_; }
+    /** The state through a finalizer, so every input bit reaches every output bit. */
+    [[nodiscard]] std::uint64_t value() const noexcept {
+        std::uint64_t result = state_;
+        result ^= result >> 33U;
+        result *= 0xFF51AFD7ED558CCDULL;
+        result ^= result >> 33U;
+        result *= 0xC4CEB9FE1A85EC53ULL;
+        result ^= result >> 33U;
+        return result;
+    }
 
   private:
+    void mix(const std::uint64_t word) noexcept {
+        state_ ^= word;
+        state_ *= 0x9E3779B97F4A7C15ULL;
+        state_ ^= state_ >> 29U;
+    }
+
     std::uint64_t state_ = 1469598103934665603ULL;
 };
 
@@ -1414,10 +1437,12 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
         parts.push_back(Part{true, &*shape.stroke});
     std::vector<Piece> pieces;
     std::optional<font::GlyphAtlasEntry> solid;
+    // The path is hashed once for every part drawn from it.
+    MaskHash path_hash;
+    for (const PathSegment& segment : shape.path.segments())
+        path_hash.add(segment);
     for (const Part& part : parts) {
-        MaskHash hash;
-        for (const PathSegment& segment : shape.path.segments())
-            hash.add(segment);
+        MaskHash hash = path_hash;
         hash.add(part.stroke);
         hash.add(shape.fill_rule);
         if (part.stroke) {
