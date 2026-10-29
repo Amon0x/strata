@@ -294,14 +294,42 @@ bool compose_groups(const std::span<const RenderGroup> relative, std::vector<Ren
                 self(self, static_cast<std::size_t>(found - next.begin()));
             RenderGroup& group = next[at];
             const RenderGroup local = group;
-            group.translate_x = parent.scale_x * local.translate_x +
-                                parent.shear_x * local.translate_y + parent.translate_x;
-            group.translate_y = parent.shear_y * local.translate_x +
-                                parent.scale_y * local.translate_y + parent.translate_y;
-            group.scale_x = parent.scale_x * local.scale_x + parent.shear_x * local.shear_y;
-            group.scale_y = parent.shear_y * local.shear_x + parent.scale_y * local.scale_y;
-            group.shear_x = parent.scale_x * local.shear_x + parent.shear_x * local.scale_y;
-            group.shear_y = parent.shear_y * local.scale_x + parent.scale_y * local.shear_y;
+            if (parent.project_x == 0.0 && parent.project_y == 0.0 && local.project_x == 0.0 &&
+                local.project_y == 0.0) {
+                group.translate_x = parent.scale_x * local.translate_x +
+                                    parent.shear_x * local.translate_y + parent.translate_x;
+                group.translate_y = parent.shear_y * local.translate_x +
+                                    parent.scale_y * local.translate_y + parent.translate_y;
+                group.scale_x = parent.scale_x * local.scale_x + parent.shear_x * local.shear_y;
+                group.scale_y = parent.shear_y * local.shear_x + parent.scale_y * local.scale_y;
+                group.shear_x = parent.scale_x * local.shear_x + parent.shear_x * local.scale_y;
+                group.shear_y = parent.shear_y * local.scale_x + parent.scale_y * local.shear_y;
+            } else {
+                // Either turns in depth: the product of the two homographies, last term one.
+                const std::array<double, 9U> p{
+                    parent.scale_x,   parent.shear_x,   parent.translate_x,
+                    parent.shear_y,   parent.scale_y,   parent.translate_y,
+                    parent.project_x, parent.project_y, 1.0};
+                const std::array<double, 9U> l{local.scale_x,   local.shear_x,   local.translate_x,
+                                               local.shear_y,   local.scale_y,   local.translate_y,
+                                               local.project_x, local.project_y, 1.0};
+                std::array<double, 9U> h{};
+                for (int row = 0; row < 3; ++row) {
+                    for (int column = 0; column < 3; ++column) {
+                        for (int k = 0; k < 3; ++k)
+                            h[row * 3 + column] += p[row * 3 + k] * l[k * 3 + column];
+                    }
+                }
+                const double w = h[8] != 0.0 ? h[8] : 1.0;
+                group.scale_x = h[0] / w;
+                group.shear_x = h[1] / w;
+                group.translate_x = h[2] / w;
+                group.shear_y = h[3] / w;
+                group.scale_y = h[4] / w;
+                group.translate_y = h[5] / w;
+                group.project_x = h[6] / w;
+                group.project_y = h[7] / w;
+            }
             group.opacity *= parent.opacity;
             // Tone replaces rather than multiplies: the nearest group that sets one owns it.
             if (group.tone < 0.0)
@@ -397,6 +425,8 @@ encode_packet(const RenderSubmission& submission, const std::uint64_t frame_inde
         output.number(group.tone);
         output.number(group.shear_x);
         output.number(group.shear_y);
+        output.number(group.project_x);
+        output.number(group.project_y);
     }
     // Resource operations preserve atlas order, and every release precedes the texture creations
     // that may reuse a Surface-scoped host id.
@@ -472,8 +502,8 @@ const std::vector<std::uint8_t>& HostRenderPacketCache::encode(
             return std::exp2(std::round(std::log2(value) * 4.0) / 4.0);
         };
         for (const RenderGroup& group : composed) {
-            if (group.shear_x != 0.0 || group.shear_y != 0.0 || !(group.scale_x > 0.0) ||
-                !(group.scale_y > 0.0)) {
+            if (group.shear_x != 0.0 || group.shear_y != 0.0 || group.project_x != 0.0 ||
+                group.project_y != 0.0 || !(group.scale_x > 0.0) || !(group.scale_y > 0.0)) {
                 continue;
             }
             const auto previous =

@@ -545,6 +545,45 @@ Panel(style: style(width: 24, height: 24, radius: 12, border: { width: 3, color:
       enter: Spin)
 ```
 
+### Turning in depth
+
+`rotateX` and `rotateY` turn a node in depth by degrees about its `transformOrigin`, seen from
+`perspective` logical pixels away (800 by default; smaller is stronger), as CSS's `perspective()
+rotateX() rotateY()` does: positive `rotateX` tips the top away, positive `rotateY` turns the right
+side away. They compose with `scale`, `rotate` and the translations, animate like them, and the
+node is hit within its projected shape, so the controls on a tilted card stay clickable. A node
+turned in depth renders as a presentation group: the GPU applies its perspective to every vertex,
+and text, images and shapes inside it interpolate perspective-correctly.
+
+```strata
+Panel(style: style(Card, rotateY: open ? 0 : -60, perspective: 600),
+      animateChanges: { properties: ["rotateY"], policy: "bouncy" })
+```
+
+### Following the pointer
+
+The `strata.pointer` behavior tells a node where the pointer is over it. Its action receives an
+object as the pointer moves over the node or any of its descendants: `inside` (true), `x` and `y` in
+the node's own logical coordinates, `u` and `v` as fractions of its box, and its `width` and
+`height`; once the pointer leaves, `{ inside: false }`. Kept in state, it drives anything an
+expression can: a card that tilts toward the pointer, a button that leans in.
+
+```strata
+component TiltCard() {
+  state tilt = { inside: false, x: 0, y: 0, u: 0.5, v: 0.5, width: 0, height: 0 };
+  Panel(
+    style: style(Card, rotateX: tilt.inside ? (tilt.v - 0.5) * -24 : 0,
+                       rotateY: tilt.inside ? (tilt.u - 0.5) * 24 : 0),
+    animateChanges: { properties: ["rotateX", "rotateY"], policy: "snappy" },
+    behaviors: [{ id: "strata.pointer", action: action("state.setFromEvent", name: "tilt") }]
+  ) { Slot(name: "content") }
+}
+```
+
+For light that follows the pointer, a material reads it directly on the GPU instead (see
+`materialPointer` under [Authored materials](#authored-materials)): nothing in the interface
+changes as the pointer moves.
+
 ### Anchored portals
 
 A portal is absolutely positioned in the root application-surface plane, measured against the root
@@ -783,7 +822,12 @@ surrounding prelude supplies `materialSize`, `materialOpacity`, `materialTime`, 
 `materialDistance`, `materialCoverage`, `materialFloat`, `materialFloat2` and `materialFloat4` —
 `materialDistance` and `materialCoverage` give the shape's own rounded silhouette, so a material
 never restates the geometry it was applied to, and `materialTime` returns seconds since the surface
-began presenting, for materials that animate.
+began presenting, for materials that animate. `materialPointer(input)` returns where the pointer is
+in the shape's own logical coordinates (`xy`, its top-left being 0, 0) and in `z` 1 while the
+pointer is over the surface, else 0. It is mapped through the shape's own screen-space derivatives,
+so it holds under scale, rotation and perspective, and it costs nothing on the CPU: a spotlight or
+an edge glow that follows the pointer (the showcase's `demo:spotlight`) redraws with no change to
+the interface, even reaching across neighbouring cards.
 
 The declaration is backend-neutral: a host compiles the source key it implements and reports the
 rest as approximations. The Win32 desktop and headless D3D11 hosts implement `hlsl`; a backend that
@@ -1064,6 +1108,29 @@ Panel(disclosure: { expanded: expanded, collapsedExtent: 32, policy: "standard" 
 Panel(contentKey: selectedId, contentTransition: ContentMotion) { SelectedDetails() }
 Button(label: "Details", onClick: action("layer.push", name: "details", transition: ContentMotion))
 ```
+
+Between `from` and `to`, an animation may set keyframes at any offset, written as a number
+between 0 and 1 before a block. Each keyframe sets some of the properties `from` and `to` animate,
+and every property interpolates through the keyframes that set it:
+
+```strata
+animation Heartbeat {
+  duration: 1100ms; repeat: "forever";
+  from { scale: 1 }
+  0.14 { scale: 1.24 }
+  0.28 { scale: 1 }
+  0.42 { scale: 1.14 }
+  to { scale: 1 }
+}
+```
+
+`easing` takes a named curve (`linear`, `ease`, `ease-in`, `ease-out`, `cubic-in`, `cubic-out`,
+`cubic-in-out`), any CSS curve as `"cubic-bezier(x1, y1, x2, y2)"` (x1 and x2 within 0..1, y free,
+so it can overshoot), or a spring: `"spring(stiffness, damping)"` (unit mass) or one of the named
+springs `spring` (gentle), `bouncy` (overshoots and rings) and `snappy` (quick, barely over). A
+spring runs its own motion over its settling time, scaled to the animation's duration, and lands
+exactly on its target. The default motion policy has the same three springs as policies, so
+`animateChanges` and value `motions` can use them: `policy: "bouncy"`.
 
 Animation timing properties, triggers, and animatable values are catalog-derived in the generated
 reference. `transition` plays one timeline forward on insertion and backward on removal, reversing

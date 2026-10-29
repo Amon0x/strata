@@ -260,6 +260,14 @@ inherit one tone, animated with the wallpaper over 250 ms. Bright wallpaper deta
 just one control to a different scheme. Accent/lit controls and wallpaper swatches retain their
 own colors; toolbar and navigation surfaces follow the selected Regular, Clear or Frosted material.
 
+### Pointer observation
+
+`strata.pointer` reports where the pointer is over a node (see
+[Following the pointer](strata-language.md#following-the-pointer)): `x`/`y`, `u`/`v`, `width`/`height`
+and `inside` as it moves, and `{ inside: false }` when it leaves. The router sends it from the hover
+path, so a node hears about the pointer over its descendants too, and a button inside a tracking
+panel stays a button.
+
 ### Scroll observation
 
 Every built-in scroll viewport—`Scroll`, `Repeater`, `VirtualList`, `ItemGrid`, `Table`, and

@@ -407,6 +407,11 @@ class InputRouter final {
      * that no longer exist or no longer observe are ignored.
      */
     void observe_backdrop(std::uint64_t probe, double luminance, InputOperationResult& result);
+    /**
+     * `strata.pointer`: every hovered node that observes the pointer receives where it is over
+     * the node, and one it has left (or the pointer leaving the surface) receives that it is gone.
+     */
+    void track_pointer(const PointerInputEvent& event, InputOperationResult& result);
     /** Constrains all focus acquisition and traversal to one retained subtree; null clears it. */
     [[nodiscard]] bool set_focus_containment(std::optional<std::string_view> key,
                                              InputOperationResult& result);
@@ -821,6 +826,8 @@ class InputRouter final {
     std::optional<std::string> focus_containment_key_;
     std::optional<std::uint64_t> focus_before_containment_;
     std::set<std::uint64_t> hovered_;
+    /** Nodes `strata.pointer` last told the pointer was over them. */
+    std::set<std::uint64_t> pointer_trackers_;
     std::optional<Point> hover_position_;
     /** What the last post-layout hover refresh saw; a refresh with the same key is skipped. */
     struct HoverRefreshKey final {

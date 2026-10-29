@@ -285,6 +285,11 @@ bool Renderer::end_frame() {
     return impl_->end_frame();
 }
 
+void Renderer::set_pointer(
+    const std::optional<std::array<double, 2U>> framebuffer_position) noexcept {
+    impl_->renderer->set_pointer(framebuffer_position);
+}
+
 void Renderer::capture_next_frame() noexcept {
     impl_->capture_requested = true;
 }

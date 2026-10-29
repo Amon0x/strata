@@ -600,7 +600,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         const std::optional<double> tone = local_presentation_tone(node, motion);
         std::uint32_t group = 0U;
         if (!isolates_content && !isolates_descendants && record->kind != LayoutKind::portal &&
-            (tone.has_value() || motion_presentation_group(node, motion))) {
+            (tone.has_value() || motion_presentation_group(node, motion) ||
+             presentation_in_depth(node, motion))) {
             group = implementation_->acquire_group(node.identity());
         }
         if (group != 0U) {
@@ -610,7 +611,8 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                             effective_transform.scale_y, effective_transform.translate_x,
                             effective_transform.translate_y, descendant_opacity,
                             tone.value_or(-1.0), effective_transform.shear_x,
-                            effective_transform.shear_y});
+                            effective_transform.shear_y, effective_transform.project_x,
+                            effective_transform.project_y});
             effective_transform = MotionTransform{};
             descendant_opacity = 1.0;
         }

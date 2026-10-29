@@ -187,7 +187,7 @@ struct RenderEngine::Impl final {
         if (computed == nullptr)
             return result;
         for (const auto& [property, value] : computed->values) {
-            if (property >= MotionProperty::opacity && property <= MotionProperty::rotate)
+            if (property >= MotionProperty::opacity && property <= MotionProperty::perspective)
                 continue;
             result.values.emplace_back(property, value);
         }

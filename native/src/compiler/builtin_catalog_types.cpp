@@ -35,23 +35,25 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                               DeclaredType{.kind = DeclaredTypeKind::lambda,
                                            .parameter = declared_type_reference("any"),
                                            .returns = declared_type_reference("boolean")})},
-        DeclaredNamedType{.id = "itemFunction",
-                          .definition = declared_type(
-                              DeclaredType{.kind = DeclaredTypeKind::lambda,
-                                           .parameter = declared_type_reference("any"),
-                                           .returns = declared_type_reference("any")})},
+        DeclaredNamedType{
+            .id = "itemFunction",
+            .definition = declared_type(DeclaredType{.kind = DeclaredTypeKind::lambda,
+                                                     .parameter = declared_type_reference("any"),
+                                                     .returns = declared_type_reference("any")})},
         DeclaredNamedType{.id = "color",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::color})},
         DeclaredNamedType{.id = "duration",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::duration})},
-        DeclaredNamedType{.id = "easingEnum",
-                          .definition = declared_type(
-                              DeclaredType{.kind = DeclaredTypeKind::enumeration,
-                                           .label = "one of",
-                                           .values = {"cubic-in", "cubic-in-out", "cubic-out",
-                                                      "ease", "ease-in", "ease-out", "linear"}})},
+        // A named curve, "cubic-bezier(x1, y1, x2, y2)", "spring(stiffness, damping)", or one of
+        // the named springs; the compiler checks the string (validate_easing).
+        DeclaredNamedType{
+            .id = "easingEnum",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::string,
+                .label = "easing: a named curve, spring, bouncy, snappy, "
+                         "cubic-bezier(x1, y1, x2, y2) or spring(stiffness, damping)"})},
         DeclaredNamedType{.id = "fillModeEnum",
                           .definition = declared_type(
                               DeclaredType{.kind = DeclaredTypeKind::enumeration,
@@ -246,6 +248,11 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
                                                          .label = "strata.hoverable options",
+                                                         .value = declared_type_reference("any")})},
+        DeclaredNamedType{.id = "strataPointerOptions",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::map,
+                                                         .label = "strata.pointer options",
                                                          .value = declared_type_reference("any")})},
         DeclaredNamedType{
             .id = "movableOptions",
@@ -669,11 +676,11 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
                                                          .label = "one of",
                                                          .values = {"CHARACTER", "NONE", "WORD"}})},
-        DeclaredNamedType{.id = "timersList",
-                          .definition = declared_type(DeclaredType{
-                              .kind = DeclaredTypeKind::list,
-                              .element = declared_type_reference("timer"),
-                              .maximum_items = std::size_t{16U}})},
+        DeclaredNamedType{
+            .id = "timersList",
+            .definition = declared_type(DeclaredType{.kind = DeclaredTypeKind::list,
+                                                     .element = declared_type_reference("timer"),
+                                                     .maximum_items = std::size_t{16U}})},
         DeclaredNamedType{
             .id = "timer",
             .definition = declared_type(DeclaredType{
@@ -921,6 +928,7 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                           declared_type_reference("strataFocusableBehavior"),
                                           declared_type_reference("strataHoverableBehavior"),
                                           declared_type_reference("strataMovableBehavior"),
+                                          declared_type_reference("strataPointerBehavior"),
                                           declared_type_reference("strataReorderTargetBehavior"),
                                           declared_type_reference("strataResizeBehavior"),
                                           declared_type_reference("strataScaleBehavior"),
@@ -1087,6 +1095,33 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
                                                          .literal = "strata.hoverable"})},
+        DeclaredNamedType{
+            .id = "strataPointerBehavior",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::map,
+                .label = "strata.pointer behavior",
+                .fields =
+                    {DeclaredTypeField{.name = "action",
+                                       .type = declared_type_reference("action"),
+                                       .required = false,
+                                       .nullable = true},
+                     DeclaredTypeField{.name = "enabled",
+                                       .type = declared_type_reference("boolean"),
+                                       .required = false,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "id",
+                                       .type = declared_type_reference("literalStrataPointer"),
+                                       .required = true,
+                                       .nullable = false},
+                     DeclaredTypeField{.name = "options",
+                                       .type = declared_type_reference("strataPointerOptions"),
+                                       .required = false,
+                                       .nullable = false}},
+                .value = declared_type_reference("any")})},
+        DeclaredNamedType{.id = "literalStrataPointer",
+                          .definition =
+                              declared_type(DeclaredType{.kind = DeclaredTypeKind::string_literal,
+                                                         .literal = "strata.pointer"})},
         DeclaredNamedType{
             .id = "strataMovableBehavior",
             .definition = declared_type(DeclaredType{
@@ -1595,12 +1630,11 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                            .options = {declared_type_reference("color"),
                                                        declared_type_reference("gradient")}})},
         DeclaredNamedType{.id = "shapeKind",
-                          .definition = declared_type(
-                              DeclaredType{.kind = DeclaredTypeKind::enumeration,
-                                           .label = "shape kind",
-                                           .values = {"arc", "circle", "ellipse", "image", "line",
-                                                      "path", "polygon", "polyline", "rect", "ring",
-                                                      "sector"}})},
+                          .definition = declared_type(DeclaredType{
+                              .kind = DeclaredTypeKind::enumeration,
+                              .label = "shape kind",
+                              .values = {"arc", "circle", "ellipse", "image", "line", "path",
+                                         "polygon", "polyline", "rect", "ring", "sector"}})},
         DeclaredNamedType{.id = "strokeCap",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
@@ -1811,11 +1845,11 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                 .values = {"CROSSHAIR", "DEFAULT", "GRAB", "GRABBING", "HELP", "MOVE", "NONE",
                            "NOT_ALLOWED", "POINTER", "PROGRESS", "RESIZE_EW", "RESIZE_NESW",
                            "RESIZE_NS", "RESIZE_NWSE", "TEXT", "WAIT"}})},
-        DeclaredNamedType{.id = "colorList",
-                          .definition = declared_type(DeclaredType{
-                              .kind = DeclaredTypeKind::list,
-                              .element = declared_type_reference("color"),
-                              .maximum_items = std::size_t{256U}})},
+        DeclaredNamedType{
+            .id = "colorList",
+            .definition = declared_type(DeclaredType{.kind = DeclaredTypeKind::list,
+                                                     .element = declared_type_reference("color"),
+                                                     .maximum_items = std::size_t{256U}})},
         DeclaredNamedType{.id = "modalSide",
                           .definition = declared_type(DeclaredType{
                               .kind = DeclaredTypeKind::enumeration,
@@ -1844,27 +1878,27 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                                              .required = true,
                                              .nullable = false}},
                 .value = declared_type_reference("any")})},
-        DeclaredNamedType{.id = "chartValues",
-                          .definition = declared_type(DeclaredType{
-                              .kind = DeclaredTypeKind::list,
-                              .element = declared_type_reference("number"),
-                              .maximum_items = std::size_t{100000U},
-                              .element_nullable = true})},
+        DeclaredNamedType{
+            .id = "chartValues",
+            .definition = declared_type(DeclaredType{.kind = DeclaredTypeKind::list,
+                                                     .element = declared_type_reference("number"),
+                                                     .maximum_items = std::size_t{100000U},
+                                                     .element_nullable = true})},
         DeclaredNamedType{.id = "chartSeriesList",
-                          .definition = declared_type(DeclaredType{
-                              .kind = DeclaredTypeKind::list,
-                              .element = declared_type_reference("chartSeries"),
-                              .maximum_items = std::size_t{64U}})},
-        DeclaredNamedType{.id = "numberList",
-                          .definition = declared_type(DeclaredType{
-                              .kind = DeclaredTypeKind::list,
-                              .element = declared_type_reference("number")})},
+                          .definition = declared_type(
+                              DeclaredType{.kind = DeclaredTypeKind::list,
+                                           .element = declared_type_reference("chartSeries"),
+                                           .maximum_items = std::size_t{64U}})},
+        DeclaredNamedType{
+            .id = "numberList",
+            .definition = declared_type(DeclaredType{
+                .kind = DeclaredTypeKind::list, .element = declared_type_reference("number")})},
         DeclaredNamedType{.id = "radiusUnion",
-                          .definition = declared_type(DeclaredType{
-                              .kind = DeclaredTypeKind::union_value,
-                              .label = "radius",
-                              .options = {declared_type_reference("number"),
-                                          declared_type_reference("cornerRadii")}})},
+                          .definition = declared_type(
+                              DeclaredType{.kind = DeclaredTypeKind::union_value,
+                                           .label = "radius",
+                                           .options = {declared_type_reference("number"),
+                                                       declared_type_reference("cornerRadii")}})},
         DeclaredNamedType{
             .id = "cornerRadii",
             .definition = declared_type(
@@ -1929,27 +1963,26 @@ void add_builtin_types(BuiltinCatalog& catalog) {
                 .kind = DeclaredTypeKind::enumeration,
                 .label = "text decoration",
                 .values = {"LINE_THROUGH", "NONE", "UNDERLINE", "UNDERLINE_LINE_THROUGH"}})},
-        DeclaredNamedType{
-            .id = "imageFit",
-            .definition = declared_type(DeclaredType{
-                .kind = DeclaredTypeKind::enumeration,
-                .label = "image fit",
-                .values = {"CONTAIN", "COVER", "FILL", "NONE", "SCALE_DOWN"}})},
+        DeclaredNamedType{.id = "imageFit",
+                          .definition = declared_type(DeclaredType{
+                              .kind = DeclaredTypeKind::enumeration,
+                              .label = "image fit",
+                              .values = {"CONTAIN", "COVER", "FILL", "NONE", "SCALE_DOWN"}})},
         DeclaredNamedType{.id = "calendarSelection",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
                                                          .label = "calendar selection",
                                                          .values = {"RANGE", "SINGLE"}})},
         DeclaredNamedType{.id = "scrollSnap",
-                          .definition =
-                              declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
-                                                         .label = "scroll snap",
-                                                         .values = {"CENTER", "END", "NONE", "START"}})},
-        DeclaredNamedType{.id = "layoutPosition",
-                          .definition =
-                              declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
-                                                         .label = "layout position",
-                                                         .values = {"ABSOLUTE", "FLOW", "STICKY"}})},
+                          .definition = declared_type(
+                              DeclaredType{.kind = DeclaredTypeKind::enumeration,
+                                           .label = "scroll snap",
+                                           .values = {"CENTER", "END", "NONE", "START"}})},
+        DeclaredNamedType{
+            .id = "layoutPosition",
+            .definition = declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,
+                                                     .label = "layout position",
+                                                     .values = {"ABSOLUTE", "FLOW", "STICKY"}})},
         DeclaredNamedType{.id = "anchorAlignment",
                           .definition =
                               declared_type(DeclaredType{.kind = DeclaredTypeKind::enumeration,

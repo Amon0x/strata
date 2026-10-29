@@ -51,6 +51,8 @@ struct FrameOptions final {
     TargetLoadAction load_action = TargetLoadAction::preserve;
     std::array<float, 4> clear_color{};
     double time_seconds = 0;
+    /** The pointer over the target in framebuffer pixels, or nothing (materialPointer). */
+    std::optional<std::array<double, 2>> pointer;
 };
 struct RenderLayerTelemetry final {
     std::uint64_t blur_passes = 0;

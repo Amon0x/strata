@@ -15,6 +15,12 @@ namespace strata::ui {
  * event whenever it changes, so `state.setFromEvent` adapts it into authored state.
  */
 inline constexpr std::string_view backdrop_behavior_id = "strata.backdrop";
+/**
+ * `strata.pointer` lets a node follow the pointer over it: its action receives an object event
+ * as the pointer moves (`inside` true, `x`/`y` in the node's logical coordinates, `u`/`v` as
+ * fractions of its box, `width`/`height`) and `{inside: false}` once it leaves.
+ */
+inline constexpr std::string_view pointer_behavior_id = "strata.pointer";
 /** Retained reading: true while the node's backdrop is light. Absent until the first report. */
 inline constexpr std::string_view backdrop_light_value = "strata.backdrop.light";
 /** The luma that produced the retained reading. */

@@ -562,8 +562,11 @@ void append_texture_regions(const RenderPacket& packet,
         group.tone = input.number();
         group.shear_x = input.number();
         group.shear_y = input.number();
+        group.project_x = input.number();
+        group.project_y = input.number();
         if (!std::isfinite(group.scale_x) || !std::isfinite(group.scale_y) ||
             !std::isfinite(group.shear_x) || !std::isfinite(group.shear_y) ||
+            !std::isfinite(group.project_x) || !std::isfinite(group.project_y) ||
             !std::isfinite(group.translate_x) || !std::isfinite(group.translate_y) ||
             !std::isfinite(group.opacity) || group.opacity < 0.0 || group.opacity > 1.0 ||
             !std::isfinite(group.tone) || group.tone < 0.0 || group.tone > 1.0) {

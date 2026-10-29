@@ -101,10 +101,14 @@ struct PixelRect final {
     Vertex result;
     const double x = read_float(bytes, base);
     const double y = read_float(bytes, base + 4U);
-    result.x = static_cast<float>((group.scale_x * x + group.shear_x * y) * scale_x +
-                                  std::round(group.translate_x * scale_x));
-    result.y = static_cast<float>((group.shear_y * x + group.scale_y * y) * scale_y +
-                                  std::round(group.translate_y * scale_y));
+    // A group turned in depth divides by its w; the reference interpolates in screen space.
+    const double w = group.place_w(x, y);
+    result.x = static_cast<float>(((group.scale_x * x + group.shear_x * y) * scale_x +
+                                   std::round(group.translate_x * scale_x)) /
+                                  w);
+    result.y = static_cast<float>(((group.shear_y * x + group.scale_y * y) * scale_y +
+                                   std::round(group.translate_y * scale_y)) /
+                                  w);
     result.u = read_float(bytes, base + 12U);
     result.v = read_float(bytes, base + 16U);
     result.color = Color{

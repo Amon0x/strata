@@ -870,6 +870,38 @@
   "materials": {
     "definitions": [
       {
+        "id": "demo:spotlight",
+        "blendMode": "straight_alpha",
+        "fallback": "strata:rounded_rect",
+        "parameters": [
+          {
+            "name": "reach",
+            "materialType": "FLOAT",
+            "type": {
+              "kind": "number"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          },
+          {
+            "name": "glow",
+            "materialType": "COLOR",
+            "type": {
+              "kind": "color"
+            },
+            "required": true,
+            "nullable": false,
+            "aliases": [],
+            "default": null
+          }
+        ],
+        "shaders": {
+          "hlsl": "assets/strata/shaders/materials/spotlight.hlsl"
+        }
+      },
+      {
         "id": "demo:aurora",
         "blendMode": "straight_alpha",
         "fallback": "strata:rounded_rect",

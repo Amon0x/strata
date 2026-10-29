@@ -1228,7 +1228,7 @@ void validate_compiled_motion(const CompiledMotion& motion, const bool require_n
         throw std::invalid_argument("theme animation requires tracks");
     std::set<MotionProperty> properties;
     for (const MotionTrack& track : motion.tracks) {
-        if (track.property > MotionProperty::rotate) {
+        if (track.property > MotionProperty::perspective) {
             throw std::invalid_argument("theme animation property is invalid");
         }
         if (!properties.insert(track.property).second || track.keyframes.empty()) {
@@ -1553,7 +1553,7 @@ void ThemeAnimationSet::validate() const {
         }
     }
     for (const ThemeMotionValueChannel& channel : value_channels) {
-        if (channel.property > MotionProperty::rotate) {
+        if (channel.property > MotionProperty::perspective) {
             throw std::invalid_argument("theme motion value channel property is invalid");
         }
         validate_motion_reference(channel.id, "theme motion value channel id");
@@ -1578,7 +1578,7 @@ void ThemeAnimationSet::validate() const {
         }
         std::set<MotionProperty> properties;
         for (const MotionProperty property : resolved_properties->properties) {
-            if (property > MotionProperty::rotate) {
+            if (property > MotionProperty::perspective) {
                 throw std::invalid_argument("theme resolved-property motion property is invalid");
             }
             if (!properties.insert(property).second) {
@@ -1694,6 +1694,35 @@ ThemeMotionPolicy::ThemeMotionPolicy()
                                         120'000'000,
                                         0,
                                         "cubic-out",
+                                        {},
+                                        false,
+                                        MotionFillMode::both,
+                                    }},
+                                   // Springs: each settles over its duration, overshooting as
+                                   // its damping allows (MotionEasingKind::spring).
+                                   {"spring",
+                                    MotionTiming{
+                                        520'000'000,
+                                        0,
+                                        "spring",
+                                        {},
+                                        false,
+                                        MotionFillMode::both,
+                                    }},
+                                   {"bouncy",
+                                    MotionTiming{
+                                        760'000'000,
+                                        0,
+                                        "bouncy",
+                                        {},
+                                        false,
+                                        MotionFillMode::both,
+                                    }},
+                                   {"snappy",
+                                    MotionTiming{
+                                        280'000'000,
+                                        0,
+                                        "snappy",
                                         {},
                                         false,
                                         MotionFillMode::both,

@@ -29,6 +29,8 @@ struct ValidatedAnimationTrack final {
     std::string property;
     ValidatedAnimationValue from;
     ValidatedAnimationValue to;
+    /** Keyframes between `from` and `to`, by ascending offset in (0, 1). */
+    std::vector<std::pair<double, ValidatedAnimationValue>> stops;
 };
 
 enum class ValidatedAnimationRepeatKind { none, forever, count };

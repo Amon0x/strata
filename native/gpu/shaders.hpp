@@ -9,7 +9,8 @@ cbuffer FrameData : register(b0) {
     float2 logicalSize;
     float2 framebufferSize;
     float frameSeconds;
-    float3 frameReserved;
+    /** The pointer over the surface in framebuffer pixels, and 1 while it is there (else 0). */
+    float3 framePointer;
 };
 
 /**
@@ -21,6 +22,8 @@ cbuffer FrameData : register(b0) {
 struct PresentationGroup {
     float4 transform;
     float4 opacity;
+    /** xy: a group turned in depth divides by w = dot(projection.xy, position) + 1. */
+    float4 projection;
 };
 
 cbuffer PresentationGroups : register(b2) {
@@ -68,11 +71,14 @@ PixelInput main(VertexInput input) {
     float2 translation = round(group.transform.zw * devicePixels) / devicePixels;
     float2 position = input.position.xy * group.transform.xy +
                       input.position.yx * group.opacity.zw + translation;
+    // A group turned in depth: the projected position is position / w, which the rasterizer
+    // divides by itself, so every attribute interpolates perspective-correctly.
+    float w = max(dot(group.projection.xy, input.position.xy) + 1.0, 1.0e-4);
     output.position = float4(
-        position.x * 2.0 / logicalSize.x - 1.0,
-        1.0 - position.y * 2.0 / logicalSize.y,
+        position.x * 2.0 / logicalSize.x - w,
+        w - position.y * 2.0 / logicalSize.y,
         0.0,
-        1.0
+        w
     );
     output.uv = input.uv;
     // Tone belongs to ink: fills, borders, shapes and text. An image (mode 1) keeps its own colours
@@ -110,7 +116,8 @@ cbuffer FrameData : register(b0) {
     float2 logicalSize;
     float2 framebufferSize;
     float frameSeconds;
-    float3 frameReserved;
+    /** The pointer over the surface in framebuffer pixels, and 1 while it is there (else 0). */
+    float3 framePointer;
 };
 
 struct PixelInput {
@@ -454,6 +461,20 @@ float materialOpacity(PixelInput input) { return input.drawData3.w; }
 
 /** Seconds since the surface began presenting, for materials that animate. */
 float materialTime() { return frameSeconds; }
+
+/**
+ * Where the pointer is, in the drawn shape's own logical coordinates (its top-left is 0, 0, its
+ * bottom-right materialSize), and in `z` 1 while the pointer is over the surface, else 0. It is
+ * mapped through the shape's own screen-space derivatives, so it holds under any scale, rotation
+ * or shear, and it costs nothing on the CPU: a spotlight or a glow that follows the pointer
+ * redraws without the interface changing.
+ */
+float3 materialPointer(PixelInput input) {
+    float2 local = input.uv * materialSize(input);
+    float2 toward = framePointer.xy - input.position.xy;
+    float2 place = local + ddx(local) * toward.x + ddy(local) * toward.y;
+    return float3(place, framePointer.z);
+}
 
 /** The drawn shape's corner radii, in the order top-left, top-right, bottom-right, bottom-left. */
 float4 materialRadii(PixelInput input) { return max(input.drawData1, 0.0); }

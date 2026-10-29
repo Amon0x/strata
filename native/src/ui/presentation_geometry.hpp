@@ -19,6 +19,9 @@ struct PresentationStatics final {
     std::optional<double> translate_x;
     std::optional<double> translate_y;
     std::optional<double> rotate;
+    std::optional<double> rotate_x;
+    std::optional<double> rotate_y;
+    std::optional<double> perspective;
     std::optional<double> opacity;
     std::optional<double> tone;
     double origin_x = 0.5;
@@ -50,6 +53,14 @@ struct PresentationStatics final {
  */
 [[nodiscard]] bool motion_presentation_group(const RetainedNode& node,
                                              const MotionRuntime& motion) noexcept;
+
+/**
+ * True while the node turns in depth (rotateX or rotateY, set or animated). Perspective cannot be
+ * baked into its plane commands, so such a node always renders as a presentation group, whose
+ * homography the GPU applies to every vertex it draws.
+ */
+[[nodiscard]] bool presentation_in_depth(const RetainedNode& node,
+                                         const MotionRuntime& motion) noexcept;
 
 /**
  * The tone this node sets for itself and its subtree: the animated value while a tone channel has

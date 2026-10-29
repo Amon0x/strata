@@ -1,7 +1,10 @@
 #include <algorithm>
+#include <cctype>
+#include <charconv>
 #include <cmath>
 #include <limits>
 #include <set>
+#include <system_error>
 #include <utility>
 
 #include "compiler/semantic/analysis.hpp"
@@ -28,6 +31,7 @@ public:
         std::vector<const AnimationFrame*> to_frames;
         std::map<std::string, const Property*, std::less<>> timing;
         std::map<const Property*, std::optional<ValidatedAnimationValue>> frame_literals;
+        std::vector<const AnimationFrame*> stop_frames;
 
         for (const AnimationEntry& entry : animation.entries) {
             if (const auto* timing_entry = std::get_if<AnimationProperty>(&entry)) {
@@ -54,6 +58,40 @@ public:
                 continue;
             }
             const AnimationFrame& frame = std::get<AnimationFrame>(entry);
+            if (frame.phase == AnimationFramePhase::at) {
+                if (!(frame.offset > 0.0 && frame.offset < 1.0)) {
+                    report("STRATA.DSL.SEMANTIC_ANIMATION_FRAME_OFFSET",
+                           "A keyframe between from and to needs an offset strictly between 0 "
+                           "and 1.",
+                           frame.span, path, "a number between 0 and 1");
+                } else if (std::ranges::any_of(stop_frames, [&frame](const AnimationFrame* other) {
+                               return other->offset == frame.offset;
+                           })) {
+                    report("STRATA.DSL.SEMANTIC_DUPLICATE_ANIMATION_FRAME",
+                           "Animation '" + animation.name + "' declares two keyframes at " +
+                               std::to_string(frame.offset) + ".",
+                           frame.span, path, "one keyframe per offset");
+                } else {
+                    stop_frames.push_back(&frame);
+                }
+                for (const Property& property : frame.properties) {
+                    const SchemaParameter* schema = registry.animation_property(property.name);
+                    if (schema == nullptr) {
+                        report("STRATA.DSL.SEMANTIC_UNKNOWN_PROPERTY",
+                               "Animation frame property '" + property.name +
+                                   "' is not supported." +
+                                   did_you_mean(property.name, registry.animation_property_names()),
+                               property.span, path + "/at",
+                               expected_names(registry.animation_property_names()));
+                        check_value_(*property.value, path + "/at." + property.name);
+                    } else {
+                        validate_expected_(*property.value, *schema->type, false,
+                                           path + "/at." + property.name);
+                        frame_literals.emplace(&property, frame_literal(property, path + "/at"));
+                    }
+                }
+                continue;
+            }
             auto& frames = frame.phase == AnimationFramePhase::from ? from_frames : to_frames;
             frames.push_back(&frame);
             if (frames.size() > 1U) {
@@ -149,12 +187,8 @@ public:
                 validated.delay_nanos = *value;
         }
         if (const Property* property = timing_property("easing")) {
-            if (const auto value =
-                    string_literal(*property, path + ".easing",
-                                   {"cubic-in", "cubic-in-out", "cubic-out", "ease", "ease-in",
-                                    "ease-out", "linear"})) {
+            if (const auto value = easing_curve(*property, path + ".easing"))
                 validated.easing = *value;
-            }
         }
         if (const Property* property = timing_property("fillMode")) {
             if (const auto value = string_literal(*property, path + ".fillMode",
@@ -186,6 +220,16 @@ public:
             if (const auto value = repeat(*property, path + ".repeat")) validated.repeat = *value;
         }
 
+        for (const AnimationFrame* stop : stop_frames) {
+            for (const Property& property : stop->properties) {
+                if (!from_properties.contains(property.name)) {
+                    report("STRATA.DSL.SEMANTIC_ANIMATION_FRAME_MISMATCH",
+                           "Animation '" + animation.name + "' keyframe property '" +
+                               property.name + "' is not animated by its from and to frames.",
+                           property.span, path + "/at", "a property its from and to frames set");
+                }
+            }
+        }
         if (paired && from_properties.size() == to_properties.size()) {
             for (const Property& from : from_frames.front()->properties) {
                 const auto matching = to_properties.find(from.name);
@@ -194,11 +238,25 @@ public:
                 const auto to_value = frame_literals.find(matching->second);
                 if (from_value != frame_literals.end() && from_value->second.has_value() &&
                     to_value != frame_literals.end() && to_value->second.has_value()) {
-                    validated.tracks.push_back(ValidatedAnimationTrack{
+                    ValidatedAnimationTrack track{
                         from.name,
                         *from_value->second,
                         *to_value->second,
-                    });
+                        {},
+                    };
+                    // Keyframes between from and to that set this property, by offset.
+                    for (const AnimationFrame* stop : stop_frames) {
+                        for (const Property& property : stop->properties) {
+                            const auto value = frame_literals.find(&property);
+                            if (property.name == from.name && value != frame_literals.end() &&
+                                value->second.has_value()) {
+                                track.stops.emplace_back(stop->offset, *value->second);
+                            }
+                        }
+                    }
+                    std::ranges::sort(track.stops, {},
+                                      &std::pair<double, ValidatedAnimationValue>::first);
+                    validated.tracks.push_back(std::move(track));
                 }
             }
         }
@@ -293,6 +351,73 @@ private:
             return std::nullopt;
         }
         return string->value;
+    }
+
+    /**
+     * An easing: a named curve, a named spring, "cubic-bezier(x1, y1, x2, y2)" with x1 and x2 in
+     * [0, 1], or "spring(stiffness, damping)" with a positive stiffness and a damping of zero or
+     * more.
+     */
+    [[nodiscard]] std::optional<std::string> easing_curve(const Property& property,
+                                                          const std::string& path) {
+        static const std::set<std::string, std::less<>> names{
+            "bouncy",  "cubic-in", "cubic-in-out", "cubic-out", "ease",
+            "ease-in", "ease-out", "linear",       "snappy",    "spring"};
+        const std::string expected =
+            expected_names(std::vector<std::string>(names.begin(), names.end())) +
+            ", cubic-bezier(x1, y1, x2, y2), spring(stiffness, damping)";
+        const LiteralExpression* literal = static_literal(*property.value);
+        const auto* string =
+            literal != nullptr ? std::get_if<StringLiteral>(&literal->value) : nullptr;
+        if (string == nullptr) {
+            report("STRATA.DSL.SEMANTIC_ANIMATION_LITERAL_REQUIRED",
+                   "Animation timing property 'easing' must be a string literal.",
+                   property.value->span, path, expected);
+            return std::nullopt;
+        }
+        if (names.contains(string->value))
+            return string->value;
+        const auto call = [&](const std::string_view name) -> std::optional<std::vector<double>> {
+            std::string_view text = string->value;
+            if (!text.starts_with(name) || text.size() < name.size() + 2U || text.back() != ')')
+                return std::nullopt;
+            text = text.substr(name.size());
+            if (text.front() != '(')
+                return std::nullopt;
+            text = text.substr(1U, text.size() - 2U);
+            std::vector<double> numbers;
+            while (true) {
+                const std::size_t comma = text.find(',');
+                std::string piece(text.substr(0U, comma));
+                std::erase_if(piece, [](const unsigned char c) { return std::isspace(c) != 0; });
+                double value = 0.0;
+                const auto [end, error] =
+                    std::from_chars(piece.data(), piece.data() + piece.size(), value);
+                if (piece.empty() || error != std::errc{} || end != piece.data() + piece.size() ||
+                    !std::isfinite(value)) {
+                    return std::nullopt;
+                }
+                numbers.push_back(value);
+                if (comma == std::string_view::npos)
+                    break;
+                text.remove_prefix(comma + 1U);
+            }
+            return numbers;
+        };
+        if (const auto bezier = call("cubic-bezier"); bezier.has_value() && bezier->size() == 4U &&
+                                                      (*bezier)[0] >= 0.0 && (*bezier)[0] <= 1.0 &&
+                                                      (*bezier)[2] >= 0.0 && (*bezier)[2] <= 1.0) {
+            return string->value;
+        }
+        if (const auto spring = call("spring"); spring.has_value() && spring->size() == 2U &&
+                                                (*spring)[0] > 0.0 && (*spring)[0] <= 1.0e6 &&
+                                                (*spring)[1] >= 0.0 && (*spring)[1] <= 1.0e4) {
+            return string->value;
+        }
+        report("STRATA.DSL.SEMANTIC_ANIMATION_SCHEMA_VALUE",
+               "Animation timing property 'easing' has unsupported value '" + string->value + "'.",
+               property.value->span, path, expected);
+        return std::nullopt;
     }
 
     [[nodiscard]] std::optional<ValidatedAnimationRepeat> repeat(const Property& property,

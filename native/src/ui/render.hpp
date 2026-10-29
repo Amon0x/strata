@@ -418,6 +418,9 @@ struct RenderGroup final {
     /** The off-diagonal terms of a rotated group: x' += shear_x * y and y' += shear_y * x. */
     double shear_x = 0.0;
     double shear_y = 0.0;
+    /** A group turned in depth divides by w = project_x * x + project_y * y + 1. */
+    double project_x = 0.0;
+    double project_y = 0.0;
     [[nodiscard]] friend bool operator==(const RenderGroup&, const RenderGroup&) = default;
 };
 

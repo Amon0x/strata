@@ -45,6 +45,11 @@ class RenderContext final {
                              std::string_view hlsl_source);
     void consume_resources(const host::RenderPacket& packet);
     void begin_frame(std::optional<std::array<float, 4U>> clear_color, double frame_seconds);
+    /**
+     * Where the pointer is over the target, in framebuffer pixels, or nothing once it has left:
+     * materials read it (materialPointer) from the next frame on.
+     */
+    void set_pointer(std::optional<std::array<double, 2U>> framebuffer_position) noexcept;
     [[nodiscard]] RenderLayerTelemetry render_layer(std::string_view id,
                                                     const host::RenderPacket& packet);
     /**

@@ -2,8 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
+#include <charconv>
 #include <cmath>
 #include <stdexcept>
+#include <system_error>
+#include <vector>
 
 #include "base/utf8.hpp"
 
@@ -54,6 +58,9 @@ constexpr std::array property_names{
     PropertyName{MotionProperty::scale_y, "scaleY"},
     PropertyName{MotionProperty::tone, "tone"},
     PropertyName{MotionProperty::rotate, "rotate"},
+    PropertyName{MotionProperty::rotate_x, "rotateX"},
+    PropertyName{MotionProperty::rotate_y, "rotateY"},
+    PropertyName{MotionProperty::perspective, "perspective"},
     PropertyName{MotionProperty::shapes, "shapes"},
     PropertyName{MotionProperty::data, "data"},
 };
@@ -160,7 +167,7 @@ bool MotionComputedValues::affects_layout() const noexcept {
 
 bool MotionTransform::identity() const noexcept {
     return translate_x == 0.0 && translate_y == 0.0 && scale_x == 1.0 && scale_y == 1.0 &&
-           shear_x == 0.0 && shear_y == 0.0;
+           shear_x == 0.0 && shear_y == 0.0 && project_x == 0.0 && project_y == 0.0;
 }
 
 std::optional<MotionProperty> motion_property(const std::string_view name) noexcept {
@@ -302,8 +309,100 @@ MotionValue interpolate_motion_value(
     return t < 1.0 ? from : to;
 }
 
+namespace {
+
+/**
+ * The numbers of `name(a, b, ...)` when `text` is that call, else nothing: the curve strings
+ * `cubic-bezier(x1, y1, x2, y2)` and `spring(stiffness, damping)`.
+ */
+[[nodiscard]] std::optional<std::vector<double>> easing_call(std::string_view text,
+                                                             const std::string_view name) {
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+        text.remove_prefix(1U);
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+        text.remove_suffix(1U);
+    if (!text.starts_with(name) || text.size() < name.size() + 2U || text.back() != ')')
+        return std::nullopt;
+    std::string_view rest = text.substr(name.size());
+    while (!rest.empty() && std::isspace(static_cast<unsigned char>(rest.front())))
+        rest.remove_prefix(1U);
+    if (rest.empty() || rest.front() != '(')
+        return std::nullopt;
+    rest = rest.substr(1U, rest.size() - 2U);
+    std::vector<double> numbers;
+    while (true) {
+        const std::size_t comma = rest.find(',');
+        std::string piece(rest.substr(0U, comma));
+        std::erase_if(piece, [](const unsigned char c) { return std::isspace(c) != 0; });
+        if (piece.empty())
+            return std::nullopt;
+        double value = 0.0;
+        const auto [end, error] = std::from_chars(piece.data(), piece.data() + piece.size(), value);
+        if (error != std::errc{} || end != piece.data() + piece.size() || !std::isfinite(value))
+            return std::nullopt;
+        numbers.push_back(value);
+        if (comma == std::string_view::npos)
+            break;
+        rest.remove_prefix(comma + 1U);
+    }
+    return numbers;
+}
+
+/** Where a released spring of stiffness k and damping c (unit mass) has settled to. */
+[[nodiscard]] double spring_settle_time(const double k, const double c) noexcept {
+    const double omega = std::sqrt(k);
+    const double zeta = c / (2.0 * omega);
+    // The slowest decaying part of the response, to within a thousandth of the travel.
+    const double rate = zeta < 1.0 ? zeta * omega : omega * (zeta - std::sqrt(zeta * zeta - 1.0));
+    return std::log(1000.0) / std::max(rate, 1.0e-3);
+}
+
+/** A released spring's position, from 0 at rest toward 1, at time t. */
+[[nodiscard]] double spring_position(const double k, const double c, const double t) noexcept {
+    const double omega = std::sqrt(k);
+    const double zeta = c / (2.0 * omega);
+    if (zeta < 1.0) {
+        const double damped = omega * std::sqrt(1.0 - zeta * zeta);
+        return 1.0 - std::exp(-zeta * omega * t) *
+                         (std::cos(damped * t) + zeta * omega / damped * std::sin(damped * t));
+    }
+    if (zeta == 1.0)
+        return 1.0 - std::exp(-omega * t) * (1.0 + omega * t);
+    const double root = omega * std::sqrt(zeta * zeta - 1.0);
+    const double fast = -zeta * omega - root;
+    const double slow = -zeta * omega + root;
+    return 1.0 + (slow * std::exp(fast * t) - fast * std::exp(slow * t)) / (fast - slow);
+}
+
+} // namespace
+
 MotionEasing::MotionEasing(const std::string_view name) {
+    if (const auto curve = easing_call(name, "cubic-bezier"); curve.has_value()) {
+        if (curve->size() != 4U)
+            throw std::invalid_argument("cubic-bezier easing takes four numbers");
+        *this = cubic_bezier((*curve)[0], (*curve)[1], (*curve)[2], (*curve)[3]);
+        return;
+    }
+    if (const auto curve = easing_call(name, "spring"); curve.has_value()) {
+        if (curve->size() != 2U)
+            throw std::invalid_argument("spring easing takes a stiffness and a damping");
+        *this = spring((*curve)[0], (*curve)[1]);
+        return;
+    }
     const std::string normalized_kind = normalized_easing(name);
+    // Springs with names: gentle, bouncy (overshoots and rings), snappy (quick, barely over).
+    if (normalized_kind == "spring") {
+        *this = spring(170.0, 20.0);
+        return;
+    }
+    if (normalized_kind == "bouncy") {
+        *this = spring(220.0, 11.0);
+        return;
+    }
+    if (normalized_kind == "snappy") {
+        *this = spring(420.0, 34.0);
+        return;
+    }
     if (normalized_kind == "linear") this->kind = MotionEasingKind::linear;
     else if (normalized_kind == "cubicin") this->kind = MotionEasingKind::cubic_in;
     else if (normalized_kind == "cubicout") this->kind = MotionEasingKind::cubic_out;
@@ -337,11 +436,24 @@ MotionEasing MotionEasing::cubic_bezier(
     return result;
 }
 
+MotionEasing MotionEasing::spring(const double stiffness, const double damping) {
+    MotionEasing result;
+    result.kind = MotionEasingKind::spring;
+    result.x1 = stiffness;
+    result.y1 = damping;
+    result.x2 = 1.0;
+    result.y2 = 1.0;
+    result.validate();
+    return result;
+}
+
 void MotionEasing::validate() const {
-    if (kind > MotionEasingKind::cubic_bezier || !std::isfinite(x1) || !std::isfinite(y1) ||
+    if (kind > MotionEasingKind::spring || !std::isfinite(x1) || !std::isfinite(y1) ||
         !std::isfinite(x2) || !std::isfinite(y2) ||
         (kind == MotionEasingKind::cubic_bezier &&
-         (x1 < 0.0 || x1 > 1.0 || x2 < 0.0 || x2 > 1.0))) {
+         (x1 < 0.0 || x1 > 1.0 || x2 < 0.0 || x2 > 1.0)) ||
+        (kind == MotionEasingKind::spring &&
+         (!(x1 > 0.0) || x1 > 1.0e6 || y1 < 0.0 || y1 > 1.0e4))) {
         throw std::invalid_argument("motion easing is invalid");
     }
 }
@@ -364,6 +476,8 @@ std::string motion_easing_name(const MotionEasing& easing) {
         return "cubic-bezier(" + std::to_string(easing.x1) + "," +
                std::to_string(easing.y1) + "," + std::to_string(easing.x2) + "," +
                std::to_string(easing.y2) + ")";
+    case MotionEasingKind::spring:
+        return "spring(" + std::to_string(easing.x1) + "," + std::to_string(easing.y1) + ")";
     }
     return "linear";
 }
@@ -382,6 +496,13 @@ double motion_easing(const MotionEasing& easing, const double fraction) noexcept
     }
     if (easing.kind == MotionEasingKind::cubic_bezier) {
         return cubic_bezier(t, easing.x1, easing.y1, easing.x2, easing.y2);
+    }
+    if (easing.kind == MotionEasingKind::spring) {
+        // The spring's own motion over its settling time; the animation's duration sets how
+        // long that takes, and it lands exactly at its end.
+        if (t >= 1.0)
+            return 1.0;
+        return spring_position(easing.x1, easing.y1, t * spring_settle_time(easing.x1, easing.y1));
     }
     return t;
 }

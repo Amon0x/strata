@@ -467,6 +467,11 @@ void ApplicationHost::pointer(const std::uint32_t kind, const std::int32_t butto
     event.button = button;
     event.x = framebuffer_x / impl_->scale;
     event.y = framebuffer_y / impl_->scale;
+    // Materials follow the pointer on the GPU (materialPointer), with no frame of the interface.
+    impl_->renderer.set_pointer(
+        kind == STRATA_INPUT_POINTER_CANCEL
+            ? std::nullopt
+            : std::optional(std::array<double, 2U>{framebuffer_x, framebuffer_y}));
     if (kind == STRATA_INPUT_POINTER_MOVE) {
         impl_->pending_pointer_move = event;
         return;

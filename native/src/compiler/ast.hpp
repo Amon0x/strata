@@ -263,12 +263,15 @@ struct ForStatement final {
 enum class AnimationFramePhase {
     from,
     to,
+    /** A keyframe between them: `0.4 { ... }`, at `offset` of the way through. */
+    at,
 };
 
 struct AnimationFrame final {
     AnimationFramePhase phase;
     std::vector<Property> properties;
     SourceSpan span;
+    double offset = 0.0;
 };
 
 struct AnimationFrameStatement final {

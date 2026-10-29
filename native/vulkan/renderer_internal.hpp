@@ -25,7 +25,8 @@ struct FrameData {
     float logical[2];
     float framebuffer[2];
     float seconds;
-    float padding[3]{};
+    /** The pointer in framebuffer pixels, and 1 while it is there. */
+    float pointer[3]{};
 };
 struct BlurData {
     float texel[2]{};
@@ -219,6 +220,7 @@ struct Renderer::Impl {
     std::vector<LiveArt> live_art;
     bool poisoned = false;
     double logical_width{}, logical_height{}, seconds{};
+    std::optional<std::array<double, 2>> pointer;
     RenderLayerTelemetry telemetry;
 
     explicit Impl(Device d) : device(d) {}

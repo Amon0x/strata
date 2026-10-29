@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstddef>
 #include <deque>
 #include <functional>
@@ -11,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -370,6 +372,10 @@ StatementPtr Parser::parse_statement(const BodyKind kind) {
             (match(TokenType::from) || match(TokenType::to))) {
             return parse_animation_frame_statement(previous_token());
         }
+        if (kind == BodyKind::animation && check(TokenType::number) &&
+            check_next(TokenType::left_brace)) {
+            return parse_animation_frame_statement(advance());
+        }
         if (widget_name()) return parse_widget_statement();
         if (match(TokenType::semicolon)) return nullptr;
         if (match(TokenType::error)) {
@@ -559,14 +565,27 @@ StatementPtr Parser::parse_for_statement(const Token& keyword) {
 
 StatementPtr Parser::parse_animation_frame_statement(const Token& keyword) {
     auto [properties, body_span] = parse_property_block();
-    const AnimationFramePhase phase =
-        keyword.type == TokenType::from ? AnimationFramePhase::from : AnimationFramePhase::to;
+    const AnimationFramePhase phase = keyword.type == TokenType::from ? AnimationFramePhase::from
+                                      : keyword.type == TokenType::to ? AnimationFramePhase::to
+                                                                      : AnimationFramePhase::at;
+    // A keyframe between `from` and `to` is introduced by its offset, a plain number.
+    double offset = -1.0;
+    if (phase == AnimationFramePhase::at) {
+        const NumberLiteral literal = number_literal(keyword);
+        std::string digits = literal.raw;
+        std::erase(digits, '_');
+        double value = 0.0;
+        const auto [end, failure] =
+            std::from_chars(digits.data(), digits.data() + digits.size(), value);
+        if (!literal.unit.has_value() && failure == std::errc{} &&
+            end == digits.data() + digits.size()) {
+            offset = value;
+        }
+    }
     const SourceSpan span = covering(keyword.span, body_span);
     return make_statement(
         next_node_id_,
-        AnimationFrameStatement{AnimationFrame{phase, std::move(properties), span}},
-        span
-    );
+        AnimationFrameStatement{AnimationFrame{phase, std::move(properties), span, offset}}, span);
 }
 
 std::pair<std::vector<Property>, SourceSpan> Parser::parse_property_block() {

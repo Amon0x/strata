@@ -1034,19 +1034,26 @@ private:
             if (track == animation.tracks.end()) {
                 throw std::logic_error("validated animation track disappeared during lowering");
             }
+            std::vector<JsonValue> keyframes;
+            keyframes.push_back(object({
+                {"easing", null()},
+                {"offset", JsonValue(0.0)},
+                {"value", animation_value(track->from)},
+            }));
+            for (const auto& [offset, value] : track->stops) {
+                keyframes.push_back(object({
+                    {"easing", null()},
+                    {"offset", JsonValue(offset)},
+                    {"value", animation_value(value)},
+                }));
+            }
+            keyframes.push_back(object({
+                {"easing", null()},
+                {"offset", JsonValue(1.0)},
+                {"value", animation_value(track->to)},
+            }));
             tracks.push_back(object({
-                {"keyframes", array({
-                    object({
-                        {"easing", null()},
-                        {"offset", JsonValue(0.0)},
-                        {"value", animation_value(track->from)},
-                    }),
-                    object({
-                        {"easing", null()},
-                        {"offset", JsonValue(1.0)},
-                        {"value", animation_value(track->to)},
-                    }),
-                })},
+                {"keyframes", array(std::move(keyframes))},
                 {"property", JsonValue(name)},
             }));
         }

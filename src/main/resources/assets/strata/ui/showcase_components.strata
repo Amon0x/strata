@@ -495,6 +495,63 @@ style ContentSlot extends Transparent {
   gap: 8;
 }
 
+style SpotCard {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: 120;
+  padding: 16;
+  gap: 6;
+  radius: 14;
+  background: #11161FFF;
+  border: { width: 1, color: #2A3342FF };
+}
+
+style TiltSurface {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: 190;
+  padding: 18;
+  gap: 8;
+  radius: 18;
+  justifyContent: "END";
+  border: { width: 1, color: #FFFFFF2A };
+}
+
+style CarouselCard {
+  kind: "COLUMN";
+  width: 150;
+  height: 190;
+  padding: 14;
+  radius: 16;
+  justifyContent: "END";
+  border: { width: 1, color: #FFFFFF30 };
+}
+
+style RaceTrack extends Transparent {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: 34;
+  gap: 10;
+  alignItems: "CENTER";
+}
+
+style RaceDot {
+  width: 26;
+  height: 26;
+  radius: 13;
+}
+
+style CardTitle {
+  font: "strata:fonts/default-medium";
+  pixelSize: 17;
+  color: #F4F7FBFF;
+}
+
+style CardNote {
+  pixelSize: 12;
+  color: #9AA7BAFF;
+}
+
 style MenuField extends Transparent {
   kind: "COLUMN";
   width: { weight: 1 };
@@ -1165,6 +1222,8 @@ component PageViewport(selectedPage: string) {
       Scroll(key: "targets.page.scroll.data", persistenceKey: "showcase.page.scroll.data", vertical: true, horizontal: false, style: PageScroll) { DataPage() }
     } else if selectedPage == "MENU" {
       MenuPage()
+    } else if selectedPage == "INTERACT" {
+      Scroll(key: "targets.page.scroll.interact", persistenceKey: "showcase.page.scroll.interact", vertical: true, horizontal: false, style: PageScroll) { InteractPage() }
     } else if selectedPage == "DRAW" {
       Scroll(key: "targets.page.scroll.draw", persistenceKey: "showcase.page.scroll.draw", vertical: true, horizontal: false, style: PageScroll) { DrawPage() }
     } else if selectedPage == "SHELL" {
@@ -1185,6 +1244,7 @@ component ShowcaseHeader(selectedPage: Binding<string>) {
       key: "targets.navigation",
       tabs: [
         { id: "MENU", label: "MENU" },
+        { id: "INTERACT", label: "INTERACT" },
         { id: "EXTEND", label: "EXTEND" },
         { id: "DRAW", label: "DRAW" },
         { id: "STATE", label: "STATE" },
@@ -1430,6 +1490,133 @@ component DataPage() {
         Panel(variant: "secondary", layout: { gridColumn: 1, gridRow: 0, columnSpan: 2, padding: 8 }) { Text(text: "Weighted main track spans two columns") }
         Panel(variant: "secondary", layout: { gridColumn: 1, gridRow: 1, padding: 8 }) { Text(text: "Content") }
         Panel(variant: "secondary", layout: { gridColumn: 2, gridRow: 1, padding: 8 }) { Text(text: "Fixed 120") }
+      }
+    }
+  }
+}
+
+animation Heartbeat {
+  duration: 1100ms;
+  repeat: "forever";
+  easing: "ease-out";
+  from { scale: 1 }
+  0.14 { scale: 1.24 }
+  0.28 { scale: 1 }
+  0.42 { scale: 1.14 }
+  0.62 { scale: 1 }
+  to { scale: 1 }
+}
+
+animation RaceLinear { duration: 900ms; easing: "linear"; from { translateX: 0 } to { translateX: 360 } }
+animation RaceEase { duration: 900ms; easing: "ease"; from { translateX: 0 } to { translateX: 360 } }
+animation RaceOvershoot { duration: 900ms; easing: "cubic-bezier(0.34, 1.56, 0.64, 1)"; from { translateX: 0 } to { translateX: 360 } }
+animation RaceSnappy { duration: 900ms; easing: "snappy"; from { translateX: 0 } to { translateX: 360 } }
+animation RaceBouncy { duration: 900ms; easing: "bouncy"; from { translateX: 0 } to { translateX: 360 } }
+animation RaceSpring { duration: 900ms; easing: "spring(120, 6)"; from { translateX: 0 } to { translateX: 360 } }
+
+component SpotlightCard(title: string, note: string) {
+  Panel(style: SpotCard, material: material("demo:spotlight", reach: 230, glow: #8FB4FFFF)) {
+    Text(text: title, style: CardTitle)
+    Text(text: note, style: CardNote, wrapMode: "WORD")
+  }
+}
+
+component TiltCard(title: string, note: string, tint: color) {
+  state tilt = { inside: false, x: 0, y: 0, u: 0.5, v: 0.5, width: 0, height: 0 };
+  Panel(
+    style: style(TiltSurface, background: tint,
+                 rotateX: tilt.inside ? (tilt.v - 0.5) * -26 : 0,
+                 rotateY: tilt.inside ? (tilt.u - 0.5) * 26 : 0,
+                 scale: tilt.inside ? 1.04 : 1,
+                 perspective: 650),
+    animateChanges: { properties: ["rotateX", "rotateY", "scale"], policy: "snappy" },
+    behaviors: [{ id: "strata.pointer", action: action("state.setFromEvent", name: "tilt") }]
+  ) {
+    Text(text: title, style: CardTitle)
+    Text(text: note, style: CardNote, wrapMode: "WORD")
+  }
+}
+
+component RaceLane(label: string, running: boolean, motion: animation, tint: color) {
+  Panel(style: RaceTrack) {
+    Text(text: label, style: CardNote, layout: { width: 170 })
+    Panel(style: style(RaceDot, background: tint), motions: [{ id: "race", target: running, animation: motion }])
+  }
+}
+
+component InteractPage() {
+  state racing = false;
+  state selected = 2;
+  state magnet = { inside: false, x: 0, y: 0, u: 0.5, v: 0.5, width: 0, height: 0 };
+  Panel(style: PageColumn) {
+    Card(title: "SPOTLIGHT: A MATERIAL THAT SEES THE POINTER") {
+      Panel(style: ActionRow) {
+        SpotlightCard(title: "Spotlight", note: "Light pools under the pointer.")
+        SpotlightCard(title: "Rim light", note: "Edges glow from across the grid.")
+        SpotlightCard(title: "Zero CPU", note: "materialPointer() runs on the GPU.")
+      }
+      Panel(style: ActionRow) {
+        SpotlightCard(title: "Any shape", note: "Follows rotation and scale exactly.")
+        SpotlightCard(title: "No relayout", note: "The interface never re-runs for it.")
+        SpotlightCard(title: "One line", note: "material(\"demo:spotlight\", ...)")
+      }
+    }
+    Card(title: "3D: CARDS THAT TILT TOWARD THE POINTER") {
+      Panel(style: ActionRow) {
+        TiltCard(title: "Aurora", note: "rotateX and rotateY follow strata.pointer", tint: #3B2F8CFF)
+        TiltCard(title: "Lagoon", note: "with real perspective, not a skew", tint: #0E5A6BFF)
+        TiltCard(title: "Ember", note: "eased back flat on a snappy spring", tint: #7A2E2EFF)
+      }
+      Panel(style: ActionRow) {
+        Button(key: "interact.carousel.prev", label: "Previous", onClick: action("state.set", name: "selected", value: selected > 0 ? selected - 1 : 0))
+        Button(key: "interact.carousel.next", label: "Next", onClick: action("state.set", name: "selected", value: selected < 4 ? selected + 1 : 4))
+        Text(text: format("Card {0} of 5, on a bouncy spring", selected + 1), style: CardNote)
+      }
+      Panel(style: style(ActionRow, justifyContent: "CENTER", gap: 4, wrap: false)) {
+        for index in [0, 1, 2, 3, 4] {
+          Panel(
+            key: format("interact.carousel.{0}", index),
+            style: style(CarouselCard,
+                         background: index == selected ? #5B4BD6FF : #263044FF,
+                         rotateY: index == selected ? 0 : (index < selected ? 48 : -48),
+                         scale: index == selected ? 1.08 : 0.88,
+                         perspective: 520),
+            animateChanges: { properties: ["rotateY", "scale", "background"], policy: "bouncy" }
+          ) {
+            Text(text: format("{0}", index + 1), style: CardTitle)
+          }
+        }
+      }
+    }
+    Card(title: "MAGNETIC: A BUTTON THAT LEANS IN") {
+      Panel(
+        style: style(ActionRow, height: 160, justifyContent: "CENTER", alignItems: "CENTER", wrap: false),
+        behaviors: [{ id: "strata.pointer", action: action("state.setFromEvent", name: "magnet") }]
+      ) {
+        Button(
+          key: "interact.magnet",
+          label: magnet.inside ? "Come closer" : "Hover near me",
+          layout: { width: 200 },
+          style: style(translateX: magnet.inside ? (magnet.x - magnet.width / 2) * 0.3 : 0,
+                       translateY: magnet.inside ? (magnet.y - magnet.height / 2) * 0.3 : 0),
+          animateChanges: { properties: ["translateX", "translateY"], policy: "spring" }
+        )
+      }
+    }
+    Card(title: "EASING: SPRINGS, BEZIERS AND KEYFRAMES") {
+      Panel(style: ActionRow) {
+        Toggle(key: "interact.race", label: "Race", checked: racing, onChange: action("state.setFromEvent", name: "racing"))
+        Text(text: "Each lane runs the same 900 ms; only the curve differs.", style: CardNote)
+      }
+      RaceLane(label: "linear", running: racing, motion: RaceLinear, tint: #6B7A90FF)
+      RaceLane(label: "ease", running: racing, motion: RaceEase, tint: #4C8DFFFF)
+      RaceLane(label: "cubic-bezier overshoot", running: racing, motion: RaceOvershoot, tint: #39C0A8FF)
+      RaceLane(label: "snappy spring", running: racing, motion: RaceSnappy, tint: #F2B33DFF)
+      RaceLane(label: "bouncy spring", running: racing, motion: RaceBouncy, tint: #F25C8AFF)
+      RaceLane(label: "spring(120, 6)", running: racing, motion: RaceSpring, tint: #B07CFFFF)
+      Panel(style: style(ActionRow, height: 110, justifyContent: "CENTER", alignItems: "CENTER")) {
+        Panel(style: style(width: 64, height: 64, radius: 32, background: #F2416BFF), enter: Heartbeat)
+        Text(text: "A five-keyframe heartbeat: from, 0.14, 0.28, 0.42, 0.62, to", style: CardNote)
       }
     }
   }
@@ -2026,6 +2213,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "Selection and pick update outlines/metadata without activating the underlying target. Coalesce shows PASS with +23. The no-GPU probe reports two frames, one activation, and one node. Dynamic probe reports UNHANDLED with a source-aware diagnostic.", wrapMode: "WORD")
   } else if selectedPage == "DATA" {
     Text(text: "Tree expansion never reconciles collapsed descendants; keyboard/range/typeahead and drag positions emit stable keys. Table sort is a host request, widths/order persist, and sticky/pinned regions align. Grid marquee, 2D arrows, stationary edge scroll, and sticky push-off stay current.", wrapMode: "WORD")
+  } else if selectedPage == "INTERACT" {
+    Text(text: "Spotlight cards light up under the pointer, and their rims glow from across the grid: the material reads the pointer on the GPU (materialPointer). Tilt cards turn in 3D toward it (strata.pointer drives rotateX and rotateY, perspective is real). The carousel springs between cards, the race compares easings from linear to bouncy springs, and the heart beats on a five-keyframe animation.", wrapMode: "WORD")
   } else if selectedPage == "MENU" {
     Text(text: "Particles drift and bounce behind the menu, joined by lines that fade as they part. Move the pointer over it: nearby particles reach for it and lean toward it, under the buttons too. The GPU draws all of it every frame; the CPU only reports where the pointer is.", wrapMode: "WORD")
   } else if selectedPage == "DRAW" {

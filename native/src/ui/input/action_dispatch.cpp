@@ -37,6 +37,66 @@ std::size_t InputOperationResult::reserve(JsonValue event) {
     return index;
 }
 
+void InputRouter::track_pointer(const PointerInputEvent& event, InputOperationResult& result) {
+    using Fields = std::vector<std::pair<std::string, runtime::Value>>;
+    const auto observer = [](const RetainedNode& node) -> const DescriptionBehavior* {
+        for (const DescriptionBehavior& behavior : node.description().behaviors) {
+            if (behavior.enabled && behavior.id == pointer_behavior_id)
+                return &behavior;
+        }
+        return nullptr;
+    };
+    if (tree_ == nullptr)
+        return;
+    const bool present = event.type != PointerEventType::cancel;
+    // Nodes the pointer has left, or every one when it has left the surface.
+    for (auto tracked = pointer_trackers_.begin(); tracked != pointer_trackers_.end();) {
+        if (present && hovered_.contains(*tracked)) {
+            ++tracked;
+            continue;
+        }
+        const std::uint64_t identity = *tracked;
+        tracked = pointer_trackers_.erase(tracked);
+        RetainedNode* const node = tree_->find_identity(identity);
+        const DescriptionBehavior* const behavior = node != nullptr ? observer(*node) : nullptr;
+        if (behavior == nullptr)
+            continue;
+        BehaviorInputScope scope(*this, *node, *behavior, InputEventPhase::target, result);
+        static_cast<void>(
+            scope.emit("pointer-left", runtime::Value(Fields{{"inside", runtime::Value(false)}})));
+    }
+    if (!present || layout_ == nullptr)
+        return;
+    prepare_pointer_geometry();
+    // Where the pointer is over each hovered observer, in its own logical coordinates and as a
+    // fraction of its box: the node's hit bounds as it shows, transforms included.
+    const std::vector<std::uint64_t> route(hovered_.begin(), hovered_.end());
+    for (const std::uint64_t identity : route) {
+        RetainedNode* const node = tree_->find_identity(identity);
+        const DescriptionBehavior* const behavior = node != nullptr ? observer(*node) : nullptr;
+        const auto entry = pointer_hit_index_.find(identity);
+        if (behavior == nullptr || entry == pointer_hit_index_.end())
+            continue;
+        const PointerHitEntry& hit = pointer_hit_entries_[entry->second];
+        if (!(hit.bounds.width > 0.0) || !(hit.bounds.height > 0.0))
+            continue;
+        const double u = (event.position.x - hit.bounds.x) / hit.bounds.width;
+        const double v = (event.position.y - hit.bounds.y) / hit.bounds.height;
+        pointer_trackers_.insert(identity);
+        BehaviorInputScope scope(*this, *node, *behavior, InputEventPhase::target, result);
+        static_cast<void>(
+            scope.emit("pointer-moved", runtime::Value(Fields{
+                                            {"inside", runtime::Value(true)},
+                                            {"x", runtime::Value(u * hit.local_bounds.width)},
+                                            {"y", runtime::Value(v * hit.local_bounds.height)},
+                                            {"u", runtime::Value(u)},
+                                            {"v", runtime::Value(v)},
+                                            {"width", runtime::Value(hit.local_bounds.width)},
+                                            {"height", runtime::Value(hit.local_bounds.height)},
+                                        })));
+    }
+}
+
 void InputRouter::observe_backdrop(const std::uint64_t probe, const double luminance,
                                    InputOperationResult& result) {
     RetainedNode* const node = tree_ != nullptr ? tree_->find_identity(probe) : nullptr;

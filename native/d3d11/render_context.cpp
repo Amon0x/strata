@@ -591,9 +591,9 @@ struct RenderContext::Impl final {
             static_cast<float>(width),
             static_cast<float>(height),
             static_cast<float>(frame_seconds),
-            0.0F,
-            0.0F,
-            0.0F,
+            pointer.has_value() ? static_cast<float>((*pointer)[0]) : 0.0F,
+            pointer.has_value() ? static_cast<float>((*pointer)[1]) : 0.0F,
+            pointer.has_value() ? 1.0F : 0.0F,
         };
         std::memcpy(mapped.pData, frame_values.data(), sizeof(frame_values));
         context->Unmap(viewport_buffer.Get(), 0U);
@@ -776,6 +776,7 @@ struct RenderContext::Impl final {
     double logical_width = 0.0;
     double logical_height = 0.0;
     double current_frame_seconds = 0.0;
+    std::optional<std::array<double, 2U>> pointer;
     std::map<std::string, GeometryBuffers, std::less<>> geometry;
     std::array<ComPtr<ID3D11BlendState>, host::draw_blend_count> blends;
     /** The current layer's material table resolved to pixel shaders (see resolve_materials). */
@@ -843,6 +844,11 @@ void RenderContext::consume_resources(const host::RenderPacket& packet) {
 void RenderContext::begin_frame(const std::optional<std::array<float, 4U>> clear_color,
                                 const double frame_seconds) {
     impl_->begin_frame(clear_color, frame_seconds);
+}
+
+void RenderContext::set_pointer(
+    const std::optional<std::array<double, 2U>> framebuffer_position) noexcept {
+    impl_->pointer = framebuffer_position;
 }
 
 RenderLayerTelemetry RenderContext::render_layer(const std::string_view id,

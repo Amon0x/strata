@@ -53,6 +53,12 @@ enum class MotionProperty {
     tone,
     /** Degrees clockwise about the transform origin. */
     rotate,
+    /** Degrees about the horizontal axis through the origin: positive tips the top away. */
+    rotate_x,
+    /** Degrees about the vertical axis through the origin: positive turns the right side away. */
+    rotate_y,
+    /** The viewer's distance in logical pixels for rotate_x and rotate_y (smaller, stronger). */
+    perspective,
     /** A Draw's shapes, as their numbers (shape_numbers in ui/path.hpp). */
     shapes,
     /** The numbers a widget publishes as `$motionData` for its own data to animate (a Chart's). */
@@ -74,7 +80,12 @@ enum class MotionDirection { forward, reverse, to_target, expand, collapse };
 enum class MotionInteraction { hover, pressed, focus, focus_visible };
 enum class MotionFillMode { none, forwards, backwards, both };
 enum class MotionRepeatKind { none, count, forever };
-enum class MotionEasingKind { linear, cubic_in, cubic_out, cubic_in_out, cubic_bezier };
+/**
+ * cubic_bezier uses (x1, y1, x2, y2) as CSS does; spring is a damped spring of stiffness x1 and
+ * damping y1 (unit mass) released from rest, run over its settling time, so it overshoots and
+ * rings when lightly damped and still ends exactly at 1.
+ */
+enum class MotionEasingKind { linear, cubic_in, cubic_out, cubic_in_out, cubic_bezier, spring };
 
 struct MotionEasing final {
     MotionEasingKind kind = MotionEasingKind::linear;
@@ -88,6 +99,7 @@ struct MotionEasing final {
     MotionEasing(std::string_view name);
     MotionEasing(const char* name) : MotionEasing(std::string_view(name != nullptr ? name : "")) {}
     [[nodiscard]] static MotionEasing cubic_bezier(double x1, double y1, double x2, double y2);
+    [[nodiscard]] static MotionEasing spring(double stiffness, double damping);
     void validate() const;
     [[nodiscard]] friend bool operator==(const MotionEasing&, const MotionEasing&) = default;
     friend bool operator==(const MotionEasing& value, std::string_view name) noexcept;
@@ -180,8 +192,11 @@ struct MotionComputedValues final {
 };
 
 /**
- * A 2D affine presentation transform: x' = scale_x * x + shear_x * y + translate_x and
- * y' = shear_y * x + scale_y * y + translate_y. The shears are zero unless something rotates.
+ * A plane presentation transform, a homography: with w = project_x * x + project_y * y + 1,
+ * x' = (scale_x * x + shear_x * y + translate_x) / w and
+ * y' = (shear_y * x + scale_y * y + translate_y) / w. The shears are zero unless something rotates
+ * in the plane, and the projection terms zero unless it turns in depth (rotateX/rotateY), when the
+ * plane is seen in perspective.
  */
 struct MotionTransform final {
     double translate_x = 0.0;
@@ -190,9 +205,17 @@ struct MotionTransform final {
     double scale_y = 1.0;
     double shear_x = 0.0;
     double shear_y = 0.0;
+    double project_x = 0.0;
+    double project_y = 0.0;
     [[nodiscard]] bool identity() const noexcept;
-    /** Whether it keeps rectangles axis-aligned: no rotation or skew. */
-    [[nodiscard]] bool axis_aligned() const noexcept { return shear_x == 0.0 && shear_y == 0.0; }
+    /** Whether it keeps rectangles axis-aligned: no rotation, skew or perspective. */
+    [[nodiscard]] bool axis_aligned() const noexcept {
+        return shear_x == 0.0 && shear_y == 0.0 && project_x == 0.0 && project_y == 0.0;
+    }
+    /** Whether it keeps parallel lines parallel: no perspective. */
+    [[nodiscard]] bool affine() const noexcept {
+        return project_x == 0.0 && project_y == 0.0;
+    }
     [[nodiscard]] friend bool operator==(const MotionTransform&, const MotionTransform&) = default;
 };
 

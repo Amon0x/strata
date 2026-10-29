@@ -26,6 +26,7 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
     logical_width = output.logical_width;
     logical_height = output.logical_height;
     seconds = options.time_seconds;
+    pointer = options.pointer;
     telemetry = {};
     ++render_count;
     begin();
@@ -63,7 +64,10 @@ RenderLayerTelemetry Renderer::Impl::render(const host::RenderPacket& packet,
         const FrameData frame{
             {static_cast<float>(logical_width), static_cast<float>(logical_height)},
             {static_cast<float>(target.width), static_cast<float>(target.height)},
-            static_cast<float>(seconds)};
+            static_cast<float>(seconds),
+            {pointer.has_value() ? static_cast<float>((*pointer)[0]) : 0.0F,
+             pointer.has_value() ? static_cast<float>((*pointer)[1]) : 0.0F,
+             pointer.has_value() ? 1.0F : 0.0F}};
         const auto constants = arena->upload(&frame, sizeof(frame));
         if (packet.groups.empty()) {
             groups = Slice{identity_groups->buffer, 0, sizeof(packed_groups.values)};

@@ -1471,6 +1471,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
 
     if (event.type == PointerEventType::press) {
         hover_route(hover_target);
+        track_pointer(event, result);
         dismiss_transient_popups(target, result);
         if (target == nullptr) {
             if (!route_scrollbar_pointer(event, result, scrollbar_hit_target)) {
@@ -1525,6 +1526,7 @@ InputOperationResult InputRouter::pointer(const PointerInputEvent event) {
                                         ? tree_->find_identity(pressed->second.identity)
                                         : target;
     hover_route(hover_target);
+    track_pointer(event, result);
     InputDispatchState dispatch = route_pointer_event(dispatch_target, hover_target, event, result);
     pressed = pressed_pointer_targets_.find(event.pointer_id);
     const bool gesture_claimed = pressed != pressed_pointer_targets_.end() &&

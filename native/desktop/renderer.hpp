@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -75,6 +76,8 @@ class Renderer final {
      * presented (so nothing else on screen can show up in it); take_capture hands it over.
      */
     void capture_next_frame() noexcept;
+    /** The pointer over the window in framebuffer pixels, or nothing once it left (materials). */
+    void set_pointer(std::optional<std::array<double, 2U>> framebuffer_position) noexcept;
     [[nodiscard]] std::optional<FrameCapture> take_capture();
     void render(const host::RenderPacket& packet);
     [[nodiscard]] RendererInfo info() const;
