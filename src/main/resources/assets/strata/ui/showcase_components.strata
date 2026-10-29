@@ -3735,10 +3735,11 @@ component FormatsCard() {
   Panel(
     style: ContentSlot,
     timers: [
+      { id: "content.opened", every: 1ms, repeat: false, action: then(action("clock.now"),
+          action("state.setFromEvent", name: "opened", field: "now")) },
       { id: "content.clock", every: 1s, action: then(action("clock.now"), sequence(
           action("state.setFromEvent", name: "now", field: "now"),
-          action("state.setFromEvent", name: "offset", field: "utcOffsetMinutes"),
-          action("state.set", name: "opened", value: opened == 0 ? now : opened))) }
+          action("state.setFromEvent", name: "offset", field: "utcOffsetMinutes"))) }
     ]
   ) {
     Card(title: "FORMATS: NUMBERS, MONEY, BYTES, DURATIONS AND RELATIVE TIME") {
