@@ -285,16 +285,21 @@ void draw_content(WidgetRenderScope& scope) {
     if (scope.visual().background.has_value()) {
         scope.rounded_rect(scope.layout().bounds, *scope.visual().background);
     }
+    // Runs of outlines between images draw together, so outlines that meet leave no seam.
+    std::vector<PathShape> run;
     for (const runtime::Value& value : shapes->values) {
         if (const runtime::Value* kind = value.field("kind");
             kind != nullptr && kind->string() != nullptr && *kind->string() == "image") {
+            scope.shapes(scope.layout().bounds, std::move(run));
+            run.clear();
             image_shape(scope, value);
             continue;
         }
-        const std::optional<PathShape> shape = path_shape_from_value(&value);
+        std::optional<PathShape> shape = path_shape_from_value(&value);
         if (shape.has_value())
-            scope.shape(scope.layout().bounds, *shape);
+            run.push_back(std::move(*shape));
     }
+    scope.shapes(scope.layout().bounds, std::move(run));
 }
 
 void menu_overlay(WidgetRenderScope& scope) {

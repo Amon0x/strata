@@ -199,6 +199,39 @@ namespace {
     return PathJoin::miter;
 }
 
+/** One SVG path as a shape normalized to `frame`, with its paints. */
+[[nodiscard]] PathShape svg_shape(const svg::DrawCommand& command, const Rect frame,
+                                  const RenderColor tint, const double opacity) {
+    PathShape shape;
+    shape.path = path(command.path, frame);
+    if (command.paint.has_fill) {
+        shape.fill = Paint(color(
+            command.paint.fill,
+            command.paint.fill_uses_current_color,
+            tint,
+            opacity * command.paint.opacity * command.paint.fill_opacity
+        ));
+    }
+    if (command.paint.has_stroke && command.paint.stroke_width > 0.0) {
+        shape.stroke = Paint(color(
+            command.paint.stroke,
+            command.paint.stroke_uses_current_color,
+            tint,
+            opacity * command.paint.opacity * command.paint.stroke_opacity
+        ));
+        shape.stroke_style = StrokeStyle{
+            command.paint.stroke_width,
+            path_cap(command.paint.line_cap),
+            path_join(command.paint.line_join),
+            command.paint.miter_limit,
+        };
+    }
+    shape.fill_rule = command.paint.fill_rule == svg::FillRule::evenodd
+        ? PathFillRule::evenodd
+        : PathFillRule::nonzero;
+    return shape;
+}
+
 } // namespace
 
 void validate_svg_image_geometry(const svg::Document& document) {
@@ -223,6 +256,7 @@ void validate_svg_image_geometry(const svg::Document& document) {
     for (const RenderCommand& command : commands) {
         const auto* path_command = std::get_if<PathRenderCommand>(&command);
         if (path_command == nullptr) continue;
+        validated_paths += path_command->joined.size();
         // Paths draw from coverage masks, which take any outline, so only the geometry's range is
         // checked: every flattened point must stay finite at the drawn size.
         const Size size{path_command->bounds.width, path_command->bounds.height};
@@ -263,6 +297,14 @@ void append_svg_image(
     const svg::AffineTransform viewport = viewport_transform(document, full_viewport);
     if (!finite(viewport)) return;
     output.emplace_back(ClipPushRenderCommand{bounds});
+    // Paths under one transform that meet along an edge (the pieces of an icon) draw as one
+    // picture, so no hairline of what is behind shows between them.
+    struct Piece final {
+        const svg::DrawCommand* command = nullptr;
+        svg::AffineTransform transform;
+        Rect bounds;
+    };
+    std::vector<Piece> pieces;
     for (const svg::DrawCommand& command : document.commands) {
         if (command.path.empty() || (!command.paint.has_fill && !command.paint.has_stroke)) {
             continue;
@@ -270,45 +312,65 @@ void append_svg_image(
         const svg::AffineTransform transform = multiply(viewport, command.transform);
         const Rect local_bounds = path_bounds(command.path, command.paint);
         if (!finite(transform) || !finite(local_bounds) || local_bounds.empty()) continue;
-        PathShape shape;
-        shape.path = path(command.path, local_bounds);
-        if (command.paint.has_fill) {
-            shape.fill = Paint(color(
-                command.paint.fill,
-                command.paint.fill_uses_current_color,
-                tint,
-                opacity * command.paint.opacity * command.paint.fill_opacity
-            ));
+        pieces.push_back(Piece{&command, transform, local_bounds});
+    }
+    const auto same_transform = [](const svg::AffineTransform& left,
+                                   const svg::AffineTransform& right) {
+        return left.a == right.a && left.b == right.b && left.c == right.c && left.d == right.d &&
+               left.e == right.e && left.f == right.f;
+    };
+    const auto push = [&output](const svg::AffineTransform& transform) {
+        output.emplace_back(TransformPushRenderCommand{
+            transform.a,
+            transform.c,
+            transform.e,
+            transform.b,
+            transform.d,
+            transform.f,
+        });
+    };
+    for (std::size_t first = 0U; first < pieces.size();) {
+        std::size_t end = first + 1U;
+        while (end < pieces.size() && same_transform(pieces[end].transform, pieces[first].transform))
+            ++end;
+        const svg::AffineTransform& transform = pieces[first].transform;
+        if (end - first >= 2U) {
+            Rect frame = pieces[first].bounds;
+            for (std::size_t index = first + 1U; index < end; ++index) {
+                const Rect next = pieces[index].bounds;
+                const double right = std::max(frame.right(), next.right());
+                const double bottom = std::max(frame.bottom(), next.bottom());
+                frame.x = std::min(frame.x, next.x);
+                frame.y = std::min(frame.y, next.y);
+                frame.width = right - frame.x;
+                frame.height = bottom - frame.y;
+            }
+            std::vector<PathShape> joined;
+            for (std::size_t index = first; index < end; ++index) {
+                PathShape shape = svg_shape(*pieces[index].command, frame, tint, opacity);
+                if (shape.fill.has_value() || shape.stroke.has_value())
+                    joined.push_back(std::move(shape));
+            }
+            if (joined.size() >= 2U && shapes_share_edges(joined, Size{frame.width, frame.height})) {
+                push(transform);
+                PathShape lead = std::move(joined.front());
+                joined.erase(joined.begin());
+                output.emplace_back(PathRenderCommand{frame, std::move(lead), std::move(joined)});
+                output.emplace_back(TransformPopRenderCommand{});
+                first = end;
+                continue;
+            }
         }
-        if (command.paint.has_stroke && command.paint.stroke_width > 0.0) {
-            shape.stroke = Paint(color(
-                command.paint.stroke,
-                command.paint.stroke_uses_current_color,
-                tint,
-                opacity * command.paint.opacity * command.paint.stroke_opacity
-            ));
-            shape.stroke_style = StrokeStyle{
-                command.paint.stroke_width,
-                path_cap(command.paint.line_cap),
-                path_join(command.paint.line_join),
-                command.paint.miter_limit,
-            };
+        for (std::size_t index = first; index < end; ++index) {
+            PathShape shape =
+                svg_shape(*pieces[index].command, pieces[index].bounds, tint, opacity);
+            if (shape.fill.has_value() || shape.stroke.has_value()) {
+                push(transform);
+                output.emplace_back(PathRenderCommand{pieces[index].bounds, std::move(shape)});
+                output.emplace_back(TransformPopRenderCommand{});
+            }
         }
-        shape.fill_rule = command.paint.fill_rule == svg::FillRule::evenodd
-            ? PathFillRule::evenodd
-            : PathFillRule::nonzero;
-        if (shape.fill.has_value() || shape.stroke.has_value()) {
-            output.emplace_back(TransformPushRenderCommand{
-                transform.a,
-                transform.c,
-                transform.e,
-                transform.b,
-                transform.d,
-                transform.f,
-            });
-            output.emplace_back(PathRenderCommand{local_bounds, std::move(shape)});
-            output.emplace_back(TransformPopRenderCommand{});
-        }
+        first = end;
     }
     output.emplace_back(ClipPopRenderCommand{});
 }

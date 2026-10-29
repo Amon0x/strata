@@ -648,11 +648,6 @@ void stroke_polyline(WidgetRenderScope& scope, const std::vector<Point>& points,
     scope.polyline(points, Paint(color), style);
 }
 
-void fill_polygon(WidgetRenderScope& scope, const std::vector<Point>& points,
-                  const RenderColor color) {
-    scope.polygon(points, Paint(color));
-}
-
 void dot(WidgetRenderScope& scope, const Point center, const double radius,
          const RenderColor fill, const std::optional<RenderColor> ring = std::nullopt) {
     StrokeStyle style;
@@ -847,28 +842,43 @@ void cartesian_content(WidgetRenderScope& scope, ChartState& state, ChartProject
             }
         }
     } else {
+        // Areas draw first and together: stacked ones meet along the series between them.
+        std::vector<PathShape> areas;
+        for (std::size_t index = 0U; index < state.series.size(); ++index) {
+            const ChartSeries& series = state.series[index];
+            if (series.hidden || state.kind != ChartKind::area || plot.width <= 0.0 ||
+                plot.height <= 0.0) {
+                continue;
+            }
+            for (const std::vector<Point>& run : runs(state, projection, index)) {
+                if (run.size() < 2U)
+                    continue;
+                // Filled down to the series below it when stacked, else to zero.
+                std::vector<Point> outline = run;
+                for (auto point = run.rbegin(); point != run.rend(); ++point) {
+                    double base = zero;
+                    if (state.stacked) {
+                        const auto category = static_cast<std::size_t>(std::lround(
+                            (point->x - plot.x) / projection.bands.front().width - 0.5));
+                        const auto& points = projection.points[category];
+                        const auto found = std::ranges::find(points, index, &ChartPoint::series);
+                        if (found != points.end())
+                            base = scale.y(found->base, plot);
+                    }
+                    outline.push_back(Point{point->x, base});
+                }
+                for (Point& point : outline)
+                    point = Point{(point.x - plot.x) / plot.width, (point.y - plot.y) / plot.height};
+                areas.push_back(PathShape{Path::polyline(outline, true),
+                                          Paint(with_alpha(series.color, 0.22))});
+            }
+        }
+        scope.shapes(plot, std::move(areas));
         for (std::size_t index = 0U; index < state.series.size(); ++index) {
             const ChartSeries& series = state.series[index];
             if (series.hidden)
                 continue;
             for (const std::vector<Point>& run : runs(state, projection, index)) {
-                if (state.kind == ChartKind::area && run.size() >= 2U) {
-                    // Filled down to the series below it when stacked, else to zero.
-                    std::vector<Point> outline = run;
-                    for (auto point = run.rbegin(); point != run.rend(); ++point) {
-                        double base = zero;
-                        if (state.stacked) {
-                            const auto category = static_cast<std::size_t>(std::lround(
-                                (point->x - plot.x) / projection.bands.front().width - 0.5));
-                            const auto& points = projection.points[category];
-                            const auto found = std::ranges::find(points, index, &ChartPoint::series);
-                            if (found != points.end())
-                                base = scale.y(found->base, plot);
-                        }
-                        outline.push_back(Point{point->x, base});
-                    }
-                    fill_polygon(scope, outline, with_alpha(series.color, 0.22));
-                }
                 if (state.kind != ChartKind::scatter)
                     stroke_polyline(scope, run, series.color, 2.0);
                 if (state.kind == ChartKind::scatter || state.points || run.size() == 1U) {

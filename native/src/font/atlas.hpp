@@ -118,11 +118,13 @@ class GlyphAtlas final {
      * A coverage mask that is not a glyph (a shape's fill or stroke), cached under `key`, which must
      * name everything the mask's pixels depend on. A miss calls `rasterize` for an 8-bit coverage
      * bitmap and packs it like a glyph. Returns nothing when `rasterize` does, or when the pages are
-     * full until the next safe frame reclaims them.
+     * full until the next safe frame reclaims them. A `GlyphRasterMode::msdf` mask is four channels
+     * on the RGBA pages instead of coverage.
      */
     [[nodiscard]] std::optional<GlyphAtlasEntry>
     request_mask(std::string_view key,
-                 const std::function<std::optional<GlyphRasterBitmap>()>& rasterize);
+                 const std::function<std::optional<GlyphRasterBitmap>()>& rasterize,
+                 GlyphRasterMode mode = GlyphRasterMode::coverage);
     /**
      * Rasterizes and packs a unique request set before draw planning. Expensive cache misses run
      * concurrently, while deterministic page allocation and host-operation construction remain

@@ -836,23 +836,34 @@ void geometry(
                 text_geometry(output, draw, *command, data, batch_base_vertex, context);
             }
         } else if constexpr (std::is_same_v<Type, PathRenderCommand>) {
-            if (analytic_shape_geometry(output, draw, command, data, batch_base_vertex, context))
-                return;
-            const double transform_scale = std::max(
-                std::hypot(draw.transform.m00, draw.transform.m10),
-                std::hypot(draw.transform.m01, draw.transform.m11)
-            );
-            // The geometry fallback, for shapes no mask could take. Its sweep has work limits; a
-            // shape past them is left out rather than failing the frame it is in.
-            PaintMesh mesh;
-            try {
-                mesh = tessellate_shape(command.shape,
-                                        Size{command.bounds.width, command.bounds.height},
-                                        context.scale * std::max(transform_scale, 0.1));
-            } catch (const std::invalid_argument&) {
-                return;
+            // Joined shapes no mask could take draw one by one, as they would apart.
+            const auto one = [&](const PathRenderCommand& single) {
+                if (analytic_shape_geometry(output, draw, single, data, batch_base_vertex,
+                                            context))
+                    return;
+                const double transform_scale = std::max(
+                    std::hypot(draw.transform.m00, draw.transform.m10),
+                    std::hypot(draw.transform.m01, draw.transform.m11)
+                );
+                // The geometry fallback, for shapes no mask could take. Its sweep has work
+                // limits; a shape past them is left out rather than failing its frame.
+                PaintMesh mesh;
+                try {
+                    mesh = tessellate_shape(single.shape,
+                                            Size{single.bounds.width, single.bounds.height},
+                                            context.scale * std::max(transform_scale, 0.1));
+                } catch (const std::invalid_argument&) {
+                    return;
+                }
+                paint_mesh_geometry(output, draw, single.bounds, mesh, data, batch_base_vertex);
+            };
+            if (command.joined.empty()) {
+                one(command);
+            } else {
+                one(PathRenderCommand{command.bounds, command.shape});
+                for (const PathShape& shape : command.joined)
+                    one(PathRenderCommand{command.bounds, shape});
             }
-            paint_mesh_geometry(output, draw, command.bounds, mesh, data, batch_base_vertex);
         } else if constexpr (std::is_same_v<Type, CustomMeshRenderCommand>) {
             custom_mesh_geometry(output, draw, command, data, batch_base_vertex);
         } else if constexpr (std::is_same_v<Type, ShadowRenderCommand>) {

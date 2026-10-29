@@ -788,6 +788,25 @@ void WidgetRenderScope::path(const Path& outline, std::optional<Paint> fill,
     shape(frame, std::move(value));
 }
 
+void WidgetRenderScope::shapes(const Rect bounds, std::vector<PathShape> values) {
+    if (values.empty())
+        return;
+    if (values.size() < 2U || !shapes_share_edges(values, Size{bounds.width, bounds.height})) {
+        for (PathShape& value : values)
+            shape(bounds, std::move(value));
+        return;
+    }
+    for (PathShape& value : values) {
+        if (value.fill.has_value())
+            value.fill->multiply_alpha(alpha());
+        if (value.stroke.has_value())
+            value.stroke->multiply_alpha(alpha());
+    }
+    PathShape first = std::move(values.front());
+    values.erase(values.begin());
+    output_.emplace_back(PathRenderCommand{bounds, std::move(first), std::move(values)});
+}
+
 std::optional<Size> WidgetRenderScope::image_size(const std::string_view image) const {
     if (svg_images_ == nullptr)
         return std::nullopt;

@@ -572,6 +572,13 @@ class MaskHash final {
     return result;
 }
 
+/**
+ * How far, in device pixels, a flattened curve may stray from the true one. Chords lie inside a
+ * curve, so this is area lost along every curved edge: a thirtieth of a pixel keeps a masked
+ * circle within a few hundredths of a percent of its area.
+ */
+constexpr double mask_flatness = 0.03;
+
 /** The largest mask edge, in device pixels, kept below an atlas page with its gutter. */
 constexpr double maximum_mask_extent = 1000.0;
 /**
@@ -585,6 +592,335 @@ constexpr double maximum_mask_tiles = 1024.0;
 constexpr double maximum_tiled_extent = 16384.0;
 /** Tile classes kept before the record starts over. */
 constexpr std::size_t maximum_tile_classes = 16384U;
+
+/** Where a draw's masks are rasterized: the device grid and the shape's position on it. */
+struct MaskGrid final {
+    bool aligned = true;
+    double scale_x = 1.0;
+    double scale_y = 1.0;
+    /** Device pixels per local pixel along the shape's own axes. */
+    double device_x = 1.0;
+    double device_y = 1.0;
+    /** The shape's origin: its whole device pixel and the sub-pixel phase in sixteenths. */
+    Point whole;
+    Point phase;
+};
+
+/**
+ * Device pixels per local pixel. An axis-aligned draw is rasterized on the device grid itself; a
+ * rotated or skewed one in its own axes at device density, its quad turned with it. A group settled
+ * at another scale (whose translation lands on whole device pixels) is rasterized at its density
+ * too. Nothing for a degenerate transform.
+ */
+[[nodiscard]] std::optional<MaskGrid> mask_grid(const Transform& transform, const Rect bounds,
+                                                const SubmissionContext& context,
+                                                const std::uint32_t group,
+                                                const std::span<const GroupRasterScale> group_scales) {
+    double group_x = 1.0;
+    double group_y = 1.0;
+    if (const auto found = std::ranges::lower_bound(group_scales, group, {}, &GroupRasterScale::group);
+        found != group_scales.end() && found->group == group) {
+        group_x = found->x;
+        group_y = found->y;
+    }
+    MaskGrid grid;
+    grid.scale_x = context.scale * group_x;
+    grid.scale_y = context.scale * group_y;
+    grid.aligned = transform.axis_aligned();
+    grid.device_x = grid.aligned ? transform.m00 * grid.scale_x
+                                 : std::hypot(transform.m00, transform.m10) * grid.scale_x;
+    grid.device_y = grid.aligned ? transform.m11 * grid.scale_y
+                                 : std::hypot(transform.m01, transform.m11) * grid.scale_y;
+    if (!(std::abs(grid.device_x) > 1.0e-6) || !(std::abs(grid.device_y) > 1.0e-6))
+        return std::nullopt;
+    const Point origin =
+        grid.aligned ? Point{(bounds.x * transform.m00 + transform.m02) * grid.scale_x,
+                             (bounds.y * transform.m11 + transform.m12) * grid.scale_y}
+                     : Point{0.0, 0.0};
+    // Sub-pixel position in sixteenths, so a moving shape reuses a handful of masks.
+    grid.whole = Point{std::floor(origin.x), std::floor(origin.y)};
+    grid.phase = Point{std::round((origin.x - grid.whole.x) * 16.0) / 16.0,
+                       std::round((origin.y - grid.whole.y) * 16.0) / 16.0};
+    return grid;
+}
+
+/**
+ * A mask's device box back in the draw's local space, and its texels turned to match: through the
+ * transform's own axes when it is axis-aligned, and in the shape's axes otherwise.
+ */
+[[nodiscard]] std::pair<Rect, TextureRegion> mask_quad(const MaskGrid& grid,
+                                                       const Transform& transform,
+                                                       const Rect bounds,
+                                                       const font::RasterPlaneBounds& box,
+                                                       TextureRegion uv) {
+    Rect quad;
+    if (grid.aligned) {
+        const double left =
+            ((grid.whole.x + box.left) / grid.scale_x - transform.m02) / transform.m00;
+        const double right =
+            ((grid.whole.x + box.right) / grid.scale_x - transform.m02) / transform.m00;
+        const double top =
+            ((grid.whole.y + box.top) / grid.scale_y - transform.m12) / transform.m11;
+        const double bottom =
+            ((grid.whole.y + box.bottom) / grid.scale_y - transform.m12) / transform.m11;
+        quad = Rect{std::min(left, right), std::min(top, bottom), std::abs(right - left),
+                    std::abs(bottom - top)};
+    } else {
+        quad = Rect{bounds.x + box.left / grid.device_x, bounds.y + box.top / grid.device_y,
+                    (box.right - box.left) / grid.device_x, (box.bottom - box.top) / grid.device_y};
+    }
+    if (grid.aligned && transform.m00 < 0.0) {
+        uv.u += uv.width;
+        uv.width = -uv.width;
+    }
+    if (grid.aligned && transform.m11 < 0.0) {
+        uv.v += uv.height;
+        uv.height = -uv.height;
+    }
+    return {quad, uv};
+}
+
+/** Adds a paint to a mask identity: its colour, or everything its gradient is made of. */
+void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
+    hash.add(paint.has_value());
+    if (!paint.has_value())
+        return;
+    if (const runtime::ColorValue* color = paint->color(); color != nullptr) {
+        hash.add(*color);
+        return;
+    }
+    const Gradient& gradient = *paint->gradient();
+    hash.add(gradient.kind);
+    hash.add(gradient.extend);
+    hash.add(gradient.start);
+    hash.add(gradient.end);
+    hash.add(gradient.angle_degrees.value_or(std::numeric_limits<double>::quiet_NaN()));
+    hash.add(gradient.center);
+    hash.add(gradient.radius_x);
+    hash.add(gradient.radius_y);
+    for (const GradientStop& stop : gradient.stops) {
+        hash.add(stop.offset);
+        hash.add(stop.color);
+    }
+}
+
+/**
+ * Draws joined shapes (PathRenderCommand::joined) as one picture: every part of every shape is
+ * rasterized to exact coverage on one device grid, then composited front to back by area into one
+ * colour mask. Each shape takes what is left of a pixel, so shapes meeting along an edge split
+ * its pixels between them and nothing behind shows through, while a shape over another covers it
+ * as it would drawn alone (a translucent one lets the one below show through by its alpha). Paints
+ * are evaluated per pixel. Returns false, drawing nothing, when there is no shape atlas or the
+ * picture is larger than a page; the shapes then draw one by one.
+ */
+[[nodiscard]] bool append_joined_masks(
+    std::vector<PlannedItem>& output,
+    const PathRenderCommand& command,
+    const std::uint32_t source_order,
+    const Transform& transform,
+    const Rect clip,
+    const std::vector<SubmissionRoundedClip>& rounded_clips,
+    const double opacity,
+    const std::uint32_t group,
+    const SubmissionContext& context,
+    std::size_t& skipped_draws,
+    font::GlyphAtlas* const atlas,
+    const std::span<const GroupRasterScale> group_scales
+) {
+    const Rect bounds = command.bounds;
+    if (atlas == nullptr || bounds.width <= 0.0 || bounds.height <= 0.0)
+        return false;
+    const std::optional<MaskGrid> grid = mask_grid(transform, bounds, context, group, group_scales);
+    if (!grid.has_value())
+        return false;
+    std::vector<const PathShape*> shapes{&command.shape};
+    for (const PathShape& shape : command.joined)
+        shapes.push_back(&shape);
+    const double tolerance = mask_flatness / std::max(std::min(std::abs(grid->device_x),
+                                                               std::abs(grid->device_y)),
+                                                      1.0e-3);
+
+    MaskHash hash;
+    hash.add(std::uint32_t{0x4A4F494EU});
+    for (const PathShape* shape : shapes) {
+        hash.add(shape->path.segments().size());
+        for (const PathSegment& segment : shape->path.segments())
+            hash.add(segment);
+        hash.add(shape->fill_rule);
+        hash_paint(hash, shape->fill);
+        hash_paint(hash, shape->stroke);
+        const StrokeStyle style = shape->stroke_style.value_or(StrokeStyle{});
+        hash.add(style.width);
+        hash.add(style.cap);
+        hash.add(style.join);
+        hash.add(style.miter_limit);
+        hash.add(style.dash_offset);
+        for (const double dash : style.dash)
+            hash.add(dash);
+    }
+    hash.add(bounds.width);
+    hash.add(bounds.height);
+    hash.add(grid->device_x);
+    hash.add(grid->device_y);
+    hash.add(grid->phase);
+    char key[40];
+    std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(hash.value()));
+
+    const std::optional<font::GlyphAtlasEntry> entry = atlas->request_mask(
+        key,
+        [&]() -> std::optional<font::GlyphRasterBitmap> {
+            // Every part's outline in device pixels relative to the whole-pixel origin, with the
+            // paint it carries; parts are listed back to front.
+            struct Layer final {
+                std::vector<std::vector<font::CoveragePoint>> polygons;
+                bool even_odd = false;
+                const Paint* paint = nullptr;
+            };
+            std::vector<Layer> layers;
+            double left = std::numeric_limits<double>::infinity();
+            double top = std::numeric_limits<double>::infinity();
+            double right = -std::numeric_limits<double>::infinity();
+            double bottom = -std::numeric_limits<double>::infinity();
+            const auto device = [&](const std::vector<PathContour>& outline) {
+                std::vector<std::vector<font::CoveragePoint>> polygons;
+                polygons.reserve(outline.size());
+                for (const PathContour& contour : outline) {
+                    std::vector<font::CoveragePoint> polygon;
+                    polygon.reserve(contour.points.size());
+                    for (const Point point : contour.points) {
+                        const font::CoveragePoint at{grid->phase.x + point.x * grid->device_x,
+                                                     grid->phase.y + point.y * grid->device_y};
+                        left = std::min(left, at.x);
+                        top = std::min(top, at.y);
+                        right = std::max(right, at.x);
+                        bottom = std::max(bottom, at.y);
+                        polygon.push_back(at);
+                    }
+                    polygons.push_back(std::move(polygon));
+                }
+                return polygons;
+            };
+            for (const PathShape* shape : shapes) {
+                std::vector<PathContour> centrelines =
+                    flatten_path(shape->path, Size{bounds.width, bounds.height}, tolerance);
+                for (PathContour& contour : centrelines) {
+                    for (Point& point : contour.points) {
+                        point.x *= bounds.width;
+                        point.y *= bounds.height;
+                    }
+                }
+                if (shape->fill.has_value() && !shape->fill->transparent()) {
+                    std::vector<PathContour> outline;
+                    for (const PathContour& contour : centrelines) {
+                        if (contour.points.size() >= 3U)
+                            outline.push_back(PathContour{contour.points, true});
+                    }
+                    layers.push_back(Layer{device(outline),
+                                           shape->fill_rule == PathFillRule::evenodd,
+                                           &*shape->fill});
+                }
+                const StrokeStyle style = shape->stroke_style.value_or(StrokeStyle{});
+                if (shape->stroke.has_value() && !shape->stroke->transparent() && style.width > 0.0) {
+                    layers.push_back(Layer{device(stroke_outline(centrelines, style, tolerance)),
+                                           false, &*shape->stroke});
+                }
+            }
+            if (!std::isfinite(left) || right - left > maximum_mask_extent ||
+                bottom - top > maximum_mask_extent) {
+                return std::nullopt;
+            }
+            const double x0 = std::floor(left) - 1.0;
+            const double y0 = std::floor(top) - 1.0;
+            const auto width = static_cast<std::uint32_t>(std::ceil(right) + 1.0 - x0);
+            const auto height = static_cast<std::uint32_t>(std::ceil(bottom) + 1.0 - y0);
+            const std::size_t pixels = static_cast<std::size_t>(width) * height;
+            // Front to back: `area` is how much of the pixel shapes in front already cover and
+            // `alpha` how opaque they make it, so a shape takes the uncovered rest at full strength
+            // and what it shares with them through their transparency.
+            std::vector<float> red(pixels, 0.0F);
+            std::vector<float> green(pixels, 0.0F);
+            std::vector<float> blue(pixels, 0.0F);
+            std::vector<float> alpha(pixels, 0.0F);
+            std::vector<float> area(pixels, 0.0F);
+            for (auto layer = layers.rbegin(); layer != layers.rend(); ++layer) {
+                const std::optional<std::vector<std::uint8_t>> coverage = font::rasterize_polygons(
+                    layer->polygons, width, height, layer->even_odd, font::CoveragePoint{x0, y0});
+                if (!coverage.has_value())
+                    return std::nullopt;
+                const Gradient* gradient = layer->paint->gradient();
+                const runtime::ColorValue solid = layer->paint->representative();
+                for (std::uint32_t row = 0U; row < height; ++row) {
+                    for (std::uint32_t column = 0U; column < width; ++column) {
+                        const std::size_t at = static_cast<std::size_t>(row) * width + column;
+                        const float covered = static_cast<float>((*coverage)[at]) / 255.0F;
+                        if (covered <= 0.0F || alpha[at] >= 1.0F)
+                            continue;
+                        runtime::ColorValue paint = solid;
+                        if (gradient != nullptr) {
+                            const Point local{
+                                (x0 + column + 0.5 - grid->phase.x) / grid->device_x,
+                                (y0 + row + 0.5 - grid->phase.y) / grid->device_y};
+                            paint = gradient->sample(gradient_parameter(
+                                *gradient,
+                                Point{local.x / bounds.width, local.y / bounds.height},
+                                Size{bounds.width, bounds.height}));
+                        }
+                        const float exposed = std::min(covered, 1.0F - area[at]);
+                        const float shared = covered - exposed;
+                        const float through =
+                            area[at] > 0.0F
+                                ? std::clamp((area[at] - alpha[at]) / area[at], 0.0F, 1.0F)
+                                : 1.0F;
+                        const float weight =
+                            static_cast<float>(paint.alpha) / 255.0F * (exposed + shared * through);
+                        red[at] += static_cast<float>(paint.red) * weight;
+                        green[at] += static_cast<float>(paint.green) * weight;
+                        blue[at] += static_cast<float>(paint.blue) * weight;
+                        alpha[at] = std::min(1.0F, alpha[at] + weight);
+                        area[at] = std::min(1.0F, area[at] + exposed);
+                    }
+                }
+            }
+            font::GlyphRasterBitmap bitmap;
+            bitmap.width = width;
+            bitmap.height = height;
+            bitmap.mode = font::GlyphRasterMode::msdf;
+            bitmap.bytes.resize(pixels * 4U);
+            // Straight colour, as images are drawn.
+            for (std::size_t at = 0U; at < pixels; ++at) {
+                const float covered = alpha[at];
+                std::uint8_t* texel = bitmap.bytes.data() + at * 4U;
+                if (covered <= 0.0F) {
+                    texel[0] = texel[1] = texel[2] = texel[3] = 0U;
+                    continue;
+                }
+                const auto channel = [covered](const float premultiplied) {
+                    return static_cast<std::uint8_t>(
+                        std::clamp(premultiplied / covered + 0.5F, 0.0F, 255.0F));
+                };
+                texel[0] = channel(red[at]);
+                texel[1] = channel(green[at]);
+                texel[2] = channel(blue[at]);
+                texel[3] = static_cast<std::uint8_t>(std::clamp(covered * 255.0F + 0.5F, 0.0F, 255.0F));
+            }
+            bitmap.plane_bounds_layout_pixels =
+                font::RasterPlaneBounds{x0, y0 + height, x0 + width, y0};
+            return bitmap;
+        },
+        font::GlyphRasterMode::msdf);
+    if (!entry.has_value())
+        return false;
+    const auto [quad, uv] = mask_quad(*grid, transform, bounds, entry->plane_bounds_layout_pixels,
+                                      TextureRegion{entry->u, entry->v, entry->uv_width,
+                                                    entry->uv_height});
+    append_draw(output,
+                PreparedCommand{std::make_shared<const PreparedMask>(PreparedMask{
+                    quad, uv, RenderColor{255U, 255U, 255U, 255U}, entry->texture, std::nullopt,
+                    true})},
+                source_order, transform, clip, rounded_clips, std::nullopt, opacity, group,
+                context, skipped_draws);
+    return true;
+}
 
 /**
  * Draws a path's fill and stroke from exact coverage masks in the shape atlas, as text draws its
@@ -609,42 +945,25 @@ constexpr std::size_t maximum_tile_classes = 16384U;
     std::unordered_map<std::uint64_t, std::uint8_t>& tile_classes,
     const std::span<const GroupRasterScale> group_scales
 ) {
+    if (!command.joined.empty()) {
+        return append_joined_masks(output, command, source_order, transform, clip, rounded_clips,
+                                   opacity, group, context, skipped_draws, atlas, group_scales);
+    }
     const PathShape& shape = command.shape;
     const Rect bounds = command.bounds;
     if (atlas == nullptr || bounds.width <= 0.0 || bounds.height <= 0.0 ||
         analytic_shape(shape, Size{bounds.width, bounds.height})) {
         return false;
     }
-    // Device pixels per local pixel. An axis-aligned draw is rasterized on the device grid itself;
-    // a rotated or skewed one in its own axes at device density, its quad turned with it. A group
-    // settled at another scale (whose translation lands on whole device pixels) is rasterized at
-    // its density too.
-    double group_x = 1.0;
-    double group_y = 1.0;
-    if (const auto found = std::ranges::lower_bound(group_scales, group, {}, &GroupRasterScale::group);
-        found != group_scales.end() && found->group == group) {
-        group_x = found->x;
-        group_y = found->y;
-    }
-    const double scale_x = context.scale * group_x;
-    const double scale_y = context.scale * group_y;
-    const bool aligned = transform.axis_aligned();
-    const double device_x = aligned ? transform.m00 * scale_x
-                                    : std::hypot(transform.m00, transform.m10) * scale_x;
-    const double device_y = aligned ? transform.m11 * scale_y
-                                    : std::hypot(transform.m01, transform.m11) * scale_y;
-    if (!(std::abs(device_x) > 1.0e-6) || !(std::abs(device_y) > 1.0e-6))
+    const std::optional<MaskGrid> grid = mask_grid(transform, bounds, context, group, group_scales);
+    if (!grid.has_value())
         return false;
-    const Point origin = aligned ? Point{(bounds.x * transform.m00 + transform.m02) * scale_x,
-                                         (bounds.y * transform.m11 + transform.m12) * scale_y}
-                                 : Point{0.0, 0.0};
-    // Sub-pixel position in sixteenths, so a moving shape reuses a handful of masks.
-    const Point whole{std::floor(origin.x), std::floor(origin.y)};
-    const Point phase{std::round((origin.x - whole.x) * 16.0) / 16.0,
-                      std::round((origin.y - whole.y) * 16.0) / 16.0};
+    const double device_x = grid->device_x;
+    const double device_y = grid->device_y;
+    const Point phase = grid->phase;
     const StrokeStyle style = shape.stroke_style.value_or(StrokeStyle{});
     const double tolerance =
-        0.15 / std::max(std::min(std::abs(device_x), std::abs(device_y)), 1.0e-3);
+        mask_flatness / std::max(std::min(std::abs(device_x), std::abs(device_y)), 1.0e-3);
 
     std::optional<std::vector<PathContour>> centrelines;
     const auto local_contours = [&]() -> const std::vector<PathContour>& {
@@ -951,39 +1270,12 @@ constexpr std::size_t maximum_tile_classes = 16384U;
     std::optional<MaskGradient> gradients[2];
     for (const Piece& piece : pieces) {
         const Part& part = *piece.part;
-        const font::RasterPlaneBounds& box = piece.box;
-        // The device box back in the draw's local space: through the transform's own axes when it
-        // is axis-aligned, and in the shape's axes otherwise.
-        Rect quad;
-        if (aligned) {
-            const double left = ((whole.x + box.left) / scale_x - transform.m02) /
-                                transform.m00;
-            const double right = ((whole.x + box.right) / scale_x - transform.m02) /
-                                 transform.m00;
-            const double top = ((whole.y + box.top) / scale_y - transform.m12) /
-                               transform.m11;
-            const double bottom = ((whole.y + box.bottom) / scale_y - transform.m12) /
-                                  transform.m11;
-            quad = Rect{std::min(left, right), std::min(top, bottom), std::abs(right - left),
-                        std::abs(bottom - top)};
-        } else {
-            quad = Rect{bounds.x + box.left / device_x, bounds.y + box.top / device_y,
-                        (box.right - box.left) / device_x, (box.bottom - box.top) / device_y};
-        }
         std::optional<MaskGradient>& gradient = gradients[part.stroke ? 1 : 0];
         if (const Gradient* paint_gradient = part.paint->gradient();
             paint_gradient != nullptr && !gradient.has_value()) {
             gradient = mask_gradient(*paint_gradient, bounds);
         }
-        TextureRegion uv = piece.uv;
-        if (aligned && transform.m00 < 0.0) {
-            uv.u += uv.width;
-            uv.width = -uv.width;
-        }
-        if (aligned && transform.m11 < 0.0) {
-            uv.v += uv.height;
-            uv.height = -uv.height;
-        }
+        const auto [quad, uv] = mask_quad(*grid, transform, bounds, piece.box, piece.uv);
         append_draw(output,
                     PreparedCommand{std::make_shared<const PreparedMask>(
                         PreparedMask{quad, uv, part.paint->representative(), piece.texture,
@@ -1421,7 +1713,8 @@ std::string_view default_material_id(const PreparedCommand& command) {
             return value.material.has_value() ? std::string_view(value.material->id)
                                               : std::string_view("strata:custom_mesh");
         } else if constexpr (std::is_same_v<Type, PreparedMaskPtr>) {
-            return "strata:coverage_mask";
+            return value != nullptr && value->colored ? "strata:textured"
+                                                      : "strata:coverage_mask";
         } else {
             static_assert(std::is_same_v<Type, ShadowRenderCommand>);
             return "strata:shadow";

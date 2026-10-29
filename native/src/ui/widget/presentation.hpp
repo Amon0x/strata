@@ -137,6 +137,12 @@ class WidgetRenderScope final {
                     RenderColor tint = RenderColor{255U, 255U, 255U, 255U});
     /** Draws one authored vector shape inside `bounds`, in that rectangle's normalized space. */
     void shape(Rect bounds, PathShape shape);
+    /**
+     * Draws shapes in one frame, in order. Shapes that share an edge (pie slices, tiles, stacked
+     * areas, the pieces of an icon) are drawn as one picture, so their seams show nothing of what
+     * is behind them; others draw one by one.
+     */
+    void shapes(Rect bounds, std::vector<PathShape> shapes);
 
     /*
      * The painter: vector drawing in the widget's logical pixels. Each shape picks its own way to

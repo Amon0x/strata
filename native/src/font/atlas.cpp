@@ -323,7 +323,8 @@ GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& fon
 
 std::optional<GlyphAtlasEntry>
 GlyphAtlas::request_mask(const std::string_view key,
-                         const std::function<std::optional<GlyphRasterBitmap>()>& rasterize) {
+                         const std::function<std::optional<GlyphRasterBitmap>()>& rasterize,
+                         const GlyphRasterMode mode) {
     if (key.empty())
         throw std::invalid_argument("a mask atlas key must not be empty");
     // A leading '$' keeps mask keys apart from every font id.
@@ -333,7 +334,7 @@ GlyphAtlas::request_mask(const std::string_view key,
         0U,
         0U,
         std::bit_cast<std::uint64_t>(display_scale_),
-        GlyphRasterMode::coverage,
+        mode,
         SubpixelPhase{},
         generation_,
     };
@@ -347,7 +348,7 @@ GlyphAtlas::request_mask(const std::string_view key,
         bitmap->width > config_.page_size || bitmap->height > config_.page_size) {
         return std::nullopt;
     }
-    bitmap->mode = GlyphRasterMode::coverage;
+    bitmap->mode = mode;
     try {
         return insert_bitmap(cache_key, *bitmap);
     } catch (const FontError&) {

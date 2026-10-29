@@ -68,7 +68,14 @@ Ground rules:
       seams. SVG import no longer tessellates to validate, so its sweep limits no longer reject
       icons; the sweep remains only as the fallback for a shape no mask can take (past 1,024
       tiles or 65,535 outline points), which is left out rather than failing the frame.
-- [ ] Adjacent shapes that share an edge (pie slices, tiles) meet without a halo or a gap.
+- [x] Adjacent shapes that share an edge (pie slices, tiles) meet without a halo or a gap: shapes
+      that share a stretch of outline (`shapes_share_edges`) are joined into one command and
+      composited front to back by area into one colour mask, so a seam pixel is split between
+      them instead of letting the background through; overlapping shapes still cover each other
+      as they would apart, translucent ones included. `Draw`, SVG images and stacked chart areas
+      join their shapes; shapes that only touch at a point, or are apart, draw as before. Mask
+      curves now flatten to a thirtieth of a pixel, so a masked circle loses under 0.1% of its
+      area to its chords.
 
 ## Phase 3: change and animation cost
 

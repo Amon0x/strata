@@ -99,7 +99,7 @@ constexpr double box = 120.0;
     };
     std::vector<Measured> measured;
     source = "overlay Shapes {\n  root Panel(style: { background: null, border: null }, "
-             "layout: { kind: \"PANEL\", width: 600, height: 600 }) {\n";
+             "layout: { kind: \"PANEL\", width: 600, height: 720 }) {\n";
     for (std::size_t index = 0U; index < shapes.size(); ++index) {
         const double x = static_cast<double>(index % 5U) * box;
         const double y = static_cast<double>(index / 5U) * box;
@@ -180,6 +180,28 @@ constexpr double box = 120.0;
     masked("stroked rounded rect shape", 4.0, 4.0,
            R"({ kind: "rect", x: 0.1, y: 0.1, width: 0.8, height: 0.8, radius: 0.2, fill: #000000, stroke: #FFFFFF, strokeStyle: { width: 6 } })",
            (102.0 * 102.0 - (4.0 - pi) * 27.0 * 27.0) - (90.0 * 90.0 - (4.0 - pi) * 21.0 * 21.0));
+    // Shapes that meet along an edge cover exactly what the whole shape would: drawn one over the
+    // other, each seam pixel would let a share of the black behind show through.
+    std::string triangles;
+    const char* const corners[] = {"{ x: 0.1, y: 0.1 }", "{ x: 0.9, y: 0.1 }", "{ x: 0.9, y: 0.9 }",
+                                   "{ x: 0.1, y: 0.9 }"};
+    for (int side = 0; side < 4; ++side) {
+        triangles += std::string(side == 0 ? "" : ", ") +
+                     "{ kind: \"polygon\", points: [{ x: 0.5, y: 0.5 }, " + corners[side] + ", " +
+                     corners[(side + 1) % 4] + "], fill: #FFFFFF }";
+    }
+    masked("square of four triangles", 0.0, 5.0, triangles, 96.0 * 96.0);
+    std::string slices;
+    for (int slice = 0; slice < 24; ++slice) {
+        slices += std::string(slice == 0 ? "" : ", ") +
+                  "{ kind: \"sector\", center: { x: 0.5, y: 0.5 }, radius: 0.4, start: " +
+                  std::to_string(slice * 15) + ", sweep: 15, fill: #FFFFFF }";
+    }
+    masked("pie of 24 touching slices", 1.0, 5.0, slices, pi * 48.0 * 48.0);
+    // Two colours meeting on a diagonal: red keeps exactly its half where green meets it.
+    masked("red and green halves", 2.0, 5.0,
+           R"({ kind: "polygon", points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.1, y: 0.9 }], fill: #FF0000 }, { kind: "polygon", points: [{ x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }], fill: #00FF00 })",
+           96.0 * 96.0 / 2.0);
     source += "  }\n}\n";
     return measured;
 }
@@ -197,7 +219,7 @@ struct Scene final {
     Scene scene;
     scene.shapes = layout_shapes(scene.source);
     scene.width = 600.0;
-    scene.height = 600.0;
+    scene.height = 720.0;
     return scene;
 }
 

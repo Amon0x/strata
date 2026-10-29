@@ -104,6 +104,13 @@ struct PathShape final {
 [[nodiscard]] std::optional<PathShape> path_shape_from_value(const runtime::Value* value);
 
 /**
+ * Whether two of `shapes`, drawn in one frame of `size` logical pixels, share part of an edge: a
+ * stretch of outline lying along the same line, at least half a pixel long. Such shapes leave a
+ * hairline of whatever is behind them where they meet unless they are drawn as one picture.
+ */
+[[nodiscard]] bool shapes_share_edges(std::span<const PathShape> shapes, Size size);
+
+/**
  * The numbers authored shapes carry (coordinates, radii, angles, widths, dash lengths and colour
  * channels) in a fixed traversal order, led by a signature of everything else: kinds and other
  * strings, booleans, list lengths and field names. Two shape lists with the same structure give

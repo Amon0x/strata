@@ -1,6 +1,7 @@
 #include "ui/path.hpp"
 
 #include <algorithm>
+#include <map>
 #include <array>
 #include <cctype>
 #include <cmath>
@@ -390,6 +391,67 @@ void collect_shape_numbers(const runtime::Value& value, std::vector<double>& num
 }
 
 } // namespace
+
+bool shapes_share_edges(const std::span<const PathShape> shapes, const Size size) {
+    if (shapes.size() < 2U || !(size.width > 0.0) || !(size.height > 0.0))
+        return false;
+    // Each edge files under its line, a direction and a distance from the origin rounded to a
+    // twentieth of a pixel, with its extent along that line; two shapes' edges on one line that
+    // overlap by half a pixel are shared.
+    struct Extent final {
+        std::size_t shape = 0U;
+        double from = 0.0;
+        double to = 0.0;
+    };
+    std::map<std::pair<std::int64_t, std::int64_t>, std::vector<Extent>> lines;
+    for (std::size_t index = 0U; index < shapes.size(); ++index) {
+        const PathShape& shape = shapes[index];
+        if (!shape.fill.has_value())
+            continue;
+        std::vector<PathContour> contours;
+        try {
+            contours = flatten_path(shape.path, size, 0.25);
+        } catch (const std::exception&) {
+            continue;
+        }
+        for (const PathContour& contour : contours) {
+            const std::size_t count = contour.points.size();
+            if (count < 2U)
+                continue;
+            for (std::size_t at = 0U; at < count; ++at) {
+                const Point a = contour.points[at];
+                const Point b = contour.points[(at + 1U) % count];
+                const Point from{a.x * size.width, a.y * size.height};
+                const Point to{b.x * size.width, b.y * size.height};
+                const double length = std::hypot(to.x - from.x, to.y - from.y);
+                if (!(length >= 0.5))
+                    continue;
+                double dx = (to.x - from.x) / length;
+                double dy = (to.y - from.y) / length;
+                if (dx < 0.0 || (dx == 0.0 && dy < 0.0)) {
+                    dx = -dx;
+                    dy = -dy;
+                }
+                const double offset = dx * from.y - dy * from.x;
+                const auto key = std::pair{static_cast<std::int64_t>(std::llround(
+                                               std::atan2(dy, dx) * 1.0e4)),
+                                           static_cast<std::int64_t>(std::llround(offset * 20.0))};
+                const double t0 = dx * from.x + dy * from.y;
+                const double t1 = dx * to.x + dy * to.y;
+                std::vector<Extent>& extents = lines[key];
+                for (const Extent& other : extents) {
+                    if (other.shape != index &&
+                        std::min(other.to, std::max(t0, t1)) -
+                                std::max(other.from, std::min(t0, t1)) >= 0.5) {
+                        return true;
+                    }
+                }
+                extents.push_back(Extent{index, std::min(t0, t1), std::max(t0, t1)});
+            }
+        }
+    }
+    return false;
+}
 
 std::vector<double> shape_numbers(const runtime::Value& shapes) {
     std::vector<double> numbers{0.0};

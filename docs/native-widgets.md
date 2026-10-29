@@ -326,7 +326,8 @@ The shapes arrive through the widget table's `render_shape` member, added in
 `STRATA_WIDGET_API_VERSION_2` with the plain-C `strata_widget_shape` description; against an older
 table they draw nothing. Native widgets inside the engine have the same painter on
 `WidgetRenderScope` (`circle`, `ellipse`, `sector`, `arc`, `line`, `polyline`, `polygon` and
-`path`), which also takes gradient paints; `Chart` draws through it. A custom mesh remains the tool
+`path`), which also takes gradient paints, and `shapes`, which draws a list in one frame and joins
+those that share an edge so they meet without a seam; `Chart` draws through it. A custom mesh remains the tool
 for geometry that is not an outline: textured or per-vertex-coloured triangles, and materials.
 
 ## Canvas transforms and virtual geometry

@@ -276,6 +276,12 @@ struct CustomMeshRenderCommand final {
 struct PathRenderCommand final {
     Rect bounds;
     PathShape shape;
+    /**
+     * Further shapes in the same frame, drawn after `shape` as one picture with it: where their
+     * edges meet, each pixel is split between them by area, so nothing behind shows through the
+     * seam (WidgetRenderScope::shapes joins shapes that share an edge).
+     */
+    std::vector<PathShape> joined;
     [[nodiscard]] friend bool operator==(const PathRenderCommand&,
                                          const PathRenderCommand&) = default;
 };

@@ -93,6 +93,8 @@ struct PreparedMask final {
     RenderColor color;
     std::string texture;
     std::optional<MaskGradient> gradient;
+    /** Joined shapes: the mask holds their colours (straight RGBA) and draws as an image. */
+    bool colored = false;
     [[nodiscard]] friend bool operator==(const PreparedMask&, const PreparedMask&) = default;
 };
 

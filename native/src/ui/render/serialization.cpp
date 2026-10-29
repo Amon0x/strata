@@ -426,6 +426,10 @@ JsonValue render_command_json(const RenderCommand& command) {
                             {"width", JsonValue(style.width)},
                         }));
                 }
+                if (!value.joined.empty()) {
+                    fields.emplace_back(
+                        "joined", JsonValue(static_cast<std::int64_t>(value.joined.size())));
+                }
                 std::ranges::sort(fields, {}, &JsonValue::ObjectEntry::first);
                 fields.insert(fields.begin(), JsonValue::ObjectEntry{"kind", JsonValue("path")});
                 fields.emplace_back("hitTest", JsonValue{});
