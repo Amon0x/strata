@@ -12,6 +12,7 @@
 #include <variant>
 #include <vector>
 
+#include <strata/raster_job.hpp>
 #include <strata/strata.h>
 
 namespace strata {
@@ -29,6 +30,11 @@ inline constexpr std::uint32_t resource_upload = 1U;
 inline constexpr std::uint32_t resource_release = 2U;
 /** Image creation: decoded, straight-alpha RGBA8 rows (see strata.h). */
 inline constexpr std::uint32_t resource_image = 3U;
+/**
+ * A region of an atlas rasterized by the backend from a raster job (raster_job.hpp): every texel
+ * of the region is replaced, as an upload of the same region would replace it.
+ */
+inline constexpr std::uint32_t resource_raster = 4U;
 inline constexpr std::uint32_t packet_flag_geometry_payload = 1U;
 inline constexpr std::uint32_t packet_flag_geometry_patches = 2U;
 /**
@@ -64,6 +70,8 @@ struct ResourceOperation final {
     std::uint32_t width = 0U;
     std::uint32_t height = 0U;
     std::vector<std::uint8_t> bytes;
+    /** A raster operation's job, validated against its region and format by the decoder. */
+    RasterJob raster;
 };
 
 struct Scissor final {

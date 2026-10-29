@@ -143,7 +143,7 @@ class Reader final {
         input.exhausted("image");
         return result;
     }
-    if (kind > 2U)
+    if (kind > 2U && kind != resource_raster)
         throw std::invalid_argument("render packet resource kind is unknown");
     result.format = input.u32();
     if (result.format > texture_format_r8_filtered)
@@ -166,6 +166,10 @@ class Reader final {
             throw std::invalid_argument("atlas upload byte count does not match its region");
         }
         result.bytes.assign(bytes.begin(), bytes.end());
+    }
+    if (kind == resource_raster) {
+        const std::span<const std::uint8_t> bytes = input.raw(input.count());
+        result.raster = decode_raster_job(bytes, result.width, result.height, result.format);
     }
     input.exhausted("atlas resource");
     return result;
@@ -420,7 +424,7 @@ using TextureChanges = std::map<std::string, std::vector<std::array<double, 4U>>
     TextureChanges result;
     for (const ResourceOperation& operation : operations) {
         std::vector<std::array<double, 4U>>& rectangles = result[operation.texture];
-        if (operation.kind == resource_upload) {
+        if (operation.kind == resource_upload || operation.kind == resource_raster) {
             const auto size = sizes.find(operation.texture);
             if (size != sizes.end()) {
                 const double width = size->second[0U];
@@ -827,7 +831,7 @@ const RenderPacket& RenderPacketDecoder::decode(const std::span<const std::uint8
     const std::span<const std::uint8_t> magic = input.raw(8U);
     if (std::string_view(reinterpret_cast<const char*>(magic.data()), magic.size()) != "STRATARP" ||
         input.u32() != STRATA_RENDER_PACKET_VERSION_CURRENT) {
-        throw std::invalid_argument("render packet decoder requires protocol v14");
+        throw std::invalid_argument("render packet decoder requires protocol v16");
     }
     const std::uint32_t resource_count = input.count();
     const std::uint32_t batch_count = input.count();

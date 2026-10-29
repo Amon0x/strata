@@ -85,6 +85,13 @@ void Renderer::Impl::resources(const host::RenderPacket& packet) {
         }
         if (operation.kind == host::resource_create)
             continue;
+        if (operation.kind == host::resource_raster) {
+            auto it = textures.find(id);
+            if (it == textures.end())
+                throw std::invalid_argument("raster job references missing texture: " + id);
+            rasterize(operation, *it->second);
+            continue;
+        }
         if (operation.kind != host::resource_upload && operation.kind != host::resource_image)
             throw std::invalid_argument("unknown Vulkan resource operation");
         auto it = textures.find(id);

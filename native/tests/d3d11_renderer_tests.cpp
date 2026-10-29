@@ -5,7 +5,9 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -14,12 +16,16 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <strata/d3d11.hpp>
 #include <strata/render_packet.hpp>
 
 #include "d3d11/effect_pass.hpp"
+#include "d3d11/raster_pass.hpp"
+#include <strata/raster_job.hpp>
 
 namespace {
 
@@ -241,10 +247,170 @@ void test_image_texels_are_sampled_as_uploaded() {
           "an RGBA8 image texture was not sampled as uploaded");
 }
 
+/** A polygon of `count` points on an ellipse, its radius modulated by `wobble` lobes. */
+[[nodiscard]] std::vector<host::RasterPoint> blob(const double x, const double y, const double radius,
+                                                  const std::size_t count, const double wobble) {
+    std::vector<host::RasterPoint> points;
+    for (std::size_t index = 0U; index < count; ++index) {
+        const double angle = 6.283185307179586 * static_cast<double>(index) / count;
+        const double r = radius * (1.0 + 0.25 * std::sin(angle * wobble));
+        points.push_back(host::RasterPoint{x + std::cos(angle) * r, y + std::sin(angle) * r * 0.8});
+    }
+    return points;
+}
+
+/**
+ * Raster jobs rasterized by compute shaders match the reference rasterizer texel for texel:
+ * coverage exactly, and colour composites exactly but for gradients, whose parameter is float.
+ */
+void test_raster_jobs_match_the_reference(const D3D_DRIVER_TYPE driver, const std::string_view name) {
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    if (FAILED(D3D11CreateDevice(nullptr, driver, nullptr, 0U, nullptr, 0U, D3D11_SDK_VERSION,
+                                 &device, nullptr, &context))) {
+        std::cout << "  " << name << " device unavailable; raster parity skipped\n";
+        return;
+    }
+    using host::RasterPoint;
+    constexpr std::uint32_t width = 150U;
+    constexpr std::uint32_t height = 110U;
+    constexpr std::uint32_t region_width = width + 2U;
+    constexpr std::uint32_t region_height = height + 2U;
+    const std::vector<std::vector<RasterPoint>> star{{{75.0, 4.0}, {112.0, 104.0},
+                                                      {16.0, 42.0}, {134.0, 42.0},
+                                                      {38.0, 104.0}}};
+    // Reaching past every side of the content, with edges far longer than a piece.
+    const std::vector<std::vector<RasterPoint>> outside{{{-40.0, -30.0}, {190.0, 20.0},
+                                                         {160.0, 150.0}, {-20.0, 90.0}}};
+    const std::vector<std::vector<RasterPoint>> thin{{{10.2, 100.1}, {140.7, 8.3},
+                                                      {141.1, 8.9}, {10.6, 100.7}}};
+    const std::vector<std::vector<RasterPoint>> wobbly{blob(70.3, 55.7, 41.0, 700U, 7.0),
+                                                       blob(82.1, 50.2, 18.0, 90U, 3.0)};
+    const auto read = [&](ID3D11Texture2D* const texture, const std::uint32_t channels) {
+        D3D11_TEXTURE2D_DESC descriptor{};
+        texture->GetDesc(&descriptor);
+        descriptor.Usage = D3D11_USAGE_STAGING;
+        descriptor.BindFlags = 0U;
+        descriptor.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ComPtr<ID3D11Texture2D> staging;
+        check(SUCCEEDED(device->CreateTexture2D(&descriptor, nullptr, &staging)),
+              "could not create the raster readback texture");
+        context->CopyResource(staging.Get(), texture);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        check(SUCCEEDED(context->Map(staging.Get(), 0U, D3D11_MAP_READ, 0U, &mapped)),
+              "could not read the raster atlas back");
+        std::vector<std::uint8_t> result(static_cast<std::size_t>(region_width) * region_height *
+                                         channels);
+        for (std::uint32_t row = 0U; row < region_height; ++row) {
+            std::memcpy(result.data() + static_cast<std::size_t>(row) * region_width * channels,
+                        static_cast<const std::uint8_t*>(mapped.pData) + row * mapped.RowPitch,
+                        static_cast<std::size_t>(region_width) * channels);
+        }
+        context->Unmap(staging.Get(), 0U);
+        return result;
+    };
+    const auto rasterize = [&](const host::RasterJobBuilder& builder, const bool rgba) {
+        const std::uint32_t channels = rgba ? 4U : 1U;
+        const std::uint32_t format = rgba ? host::texture_format_rgba8
+                                          : host::texture_format_r8_filtered;
+        const host::RasterJob job =
+            host::decode_raster_job(builder.encode(1U, 1U), region_width, region_height, format);
+        std::vector<std::uint8_t> reference(static_cast<std::size_t>(region_width) * region_height *
+                                            channels);
+        host::rasterize_job(job, format, region_width, region_height, reference,
+                            static_cast<std::size_t>(region_width) * channels);
+        D3D11_TEXTURE2D_DESC descriptor{};
+        descriptor.Width = region_width;
+        descriptor.Height = region_height;
+        descriptor.MipLevels = 1U;
+        descriptor.ArraySize = 1U;
+        descriptor.Format = rgba ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R8_UNORM;
+        descriptor.SampleDesc.Count = 1U;
+        descriptor.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+        ComPtr<ID3D11Texture2D> texture;
+        ComPtr<ID3D11UnorderedAccessView> writer;
+        check(SUCCEEDED(device->CreateTexture2D(&descriptor, nullptr, &texture)) &&
+                  SUCCEEDED(device->CreateUnorderedAccessView(texture.Get(), nullptr, &writer)),
+              "could not create the raster atlas");
+        d3d11::RasterPass pass(device.Get(), context.Get());
+        // Twice: the second run must find the work buffers cleared by the first.
+        pass.run(job, rgba, writer.Get(), 0U, 0U, region_width, region_height);
+        pass.run(job, rgba, writer.Get(), 0U, 0U, region_width, region_height);
+        return std::pair{read(texture.Get(), channels), reference};
+    };
+
+    for (const auto& [label, polygons, fill] :
+         {std::tuple{"star", star, host::RasterFill::nonzero},
+          std::tuple{"even-odd star", star, host::RasterFill::even_odd},
+          std::tuple{"clipped quad", outside, host::RasterFill::nonzero},
+          std::tuple{"thin line", thin, host::RasterFill::nonzero},
+          std::tuple{"wobbly blobs", wobbly, host::RasterFill::even_odd}}) {
+        host::RasterJobBuilder builder(width, height);
+        builder.add_layer(fill, host::RasterLayer{}, polygons, RasterPoint{0.25, -0.375});
+        const auto [gpu, reference] = rasterize(builder, false);
+        std::size_t differing = 0U;
+        std::size_t covered = 0U;
+        for (std::size_t index = 0U; index < gpu.size(); ++index) {
+            differing += gpu[index] != reference[index] ? 1U : 0U;
+            covered += reference[index] != 0U ? 1U : 0U;
+        }
+        std::cout << "  " << name << " " << label << ": " << differing << " of " << covered
+                  << " covered texels differ\n";
+        check(covered > 0U && differing == 0U,
+              std::string(name) + " compute coverage differs from the reference: " + label);
+    }
+
+    // Colour: an opaque star in front of a translucent blob, over gradients.
+    host::RasterLayer opaque;
+    opaque.paint = host::RasterPaint::solid;
+    opaque.color = 0xFF2080F0U;
+    host::RasterLayer translucent;
+    translucent.paint = host::RasterPaint::solid;
+    translucent.color = 0x8040C020U;
+    host::RasterLayer linear;
+    linear.paint = host::RasterPaint::linear;
+    linear.parameters = {0.0071F, 0.0023F, -0.1F, 0.0F, 0.0F, 0.0F};
+    linear.extend = host::RasterExtend::repeat;
+    host::RasterLayer radial;
+    radial.paint = host::RasterPaint::radial;
+    radial.parameters = {0.013F, 0.0F, -0.9F, 0.0F, 0.017F, -0.8F};
+    radial.extend = host::RasterExtend::mirror;
+    for (host::RasterLayer* layer : {&linear, &radial}) {
+        layer->lut.resize(host::raster_lut_size);
+        for (std::uint32_t index = 0U; index < host::raster_lut_size; ++index)
+            layer->lut[index] = (255U << 24U) | (index << 16U) | ((255U - index) << 8U) | 40U;
+    }
+    for (const bool gradients : {false, true}) {
+        host::RasterJobBuilder builder(width, height);
+        builder.add_layer(host::RasterFill::nonzero, opaque, star, RasterPoint{});
+        builder.add_layer(host::RasterFill::even_odd, translucent, wobbly, RasterPoint{});
+        if (gradients) {
+            builder.add_layer(host::RasterFill::nonzero, linear, outside, RasterPoint{});
+            builder.add_layer(host::RasterFill::nonzero, radial, thin, RasterPoint{});
+        } else {
+            builder.add_layer(host::RasterFill::nonzero, translucent, outside, RasterPoint{});
+        }
+        const auto [gpu, reference] = rasterize(builder, true);
+        int largest = 0;
+        std::size_t differing = 0U;
+        for (std::size_t index = 0U; index < gpu.size(); ++index) {
+            const int difference = std::abs(int{gpu[index]} - int{reference[index]});
+            largest = std::max(largest, difference);
+            differing += difference != 0 ? 1U : 0U;
+        }
+        std::cout << "  " << name << (gradients ? " gradient" : " solid") << " composite: "
+                  << differing << " channels differ, largest by " << largest << "\n";
+        check(gradients ? largest <= 2 : differing == 0U,
+              std::string(name) + " compute composite differs from the reference");
+    }
+}
+
 } // namespace
 
 int main() {
     try {
+        test_raster_jobs_match_the_reference(D3D_DRIVER_TYPE_WARP, "WARP");
+        test_raster_jobs_match_the_reference(D3D_DRIVER_TYPE_HARDWARE, "hardware");
         test_geometry_after_a_failed_frame();
         test_target_is_validated_on_its_own();
         test_unused_effect_samples_are_evicted();

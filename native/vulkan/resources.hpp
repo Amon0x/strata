@@ -29,7 +29,9 @@ struct Buffer final {
     VkDeviceMemory memory{};
     void* mapped = nullptr;
     VkDeviceSize size{};
-    Buffer(Device d, VkDeviceSize bytes, VkBufferUsageFlags usage) : device(d.device), size(bytes) {
+    /** A host-visible, mapped buffer; or GPU memory only, unmapped, when `device_local`. */
+    Buffer(Device d, VkDeviceSize bytes, VkBufferUsageFlags usage, bool device_local = false)
+        : device(d.device), size(bytes) {
         try {
             VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
             info.size = bytes;
@@ -39,13 +41,16 @@ struct Buffer final {
             vkGetBufferMemoryRequirements(device, buffer, &requirements);
             VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
             allocation.allocationSize = requirements.size;
-            allocation.memoryTypeIndex = memory_type(d, requirements.memoryTypeBits,
-                                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            allocation.memoryTypeIndex =
+                memory_type(d, requirements.memoryTypeBits,
+                            device_local ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                                         : VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
             check(vkAllocateMemory(device, &allocation, nullptr, &memory),
                   "allocate buffer memory");
             check(vkBindBufferMemory(device, buffer, memory, 0), "bind buffer memory");
-            check(vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &mapped), "map buffer");
+            if (!device_local)
+                check(vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &mapped), "map buffer");
         } catch (...) {
             destroy();
             throw;
@@ -157,7 +162,8 @@ class UploadArena final {
     explicit UploadArena(Device d) : device_(d) {
         VkPhysicalDeviceProperties p{};
         vkGetPhysicalDeviceProperties(d.physical_device, &p);
-        alignment_ = std::max<VkDeviceSize>(256, p.limits.minUniformBufferOffsetAlignment);
+        alignment_ = std::max<VkDeviceSize>({256, p.limits.minUniformBufferOffsetAlignment,
+                                              p.limits.minStorageBufferOffsetAlignment});
     }
     void reset() {
         active_ = 0;
@@ -174,7 +180,8 @@ class UploadArena final {
             buffers_.push_back(std::make_unique<Buffer>(
                 device_, std::max<VkDeviceSize>(4 * 1024 * 1024, bytes),
                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT));
+                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT));
         auto& buffer = *buffers_[active_];
         if (size)
             std::memcpy(static_cast<char*>(buffer.mapped) + offset_, data, size);

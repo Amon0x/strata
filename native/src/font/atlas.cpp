@@ -328,13 +328,12 @@ GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& fon
     return insert_bitmap(key, bitmap->value());
 }
 
-std::optional<GlyphAtlasEntry>
-GlyphAtlas::request_mask(const std::string_view key,
-                         const std::function<std::optional<GlyphRasterBitmap>()>& rasterize,
-                         const GlyphRasterMode mode) {
+std::optional<GlyphAtlasEntry> GlyphAtlas::request_raster(
+    const std::string_view key, const GlyphRasterMode mode,
+    const std::function<std::optional<RasterRequest>(std::uint32_t)>& encode) {
     if (key.empty())
-        throw std::invalid_argument("a mask atlas key must not be empty");
-    // A leading '$' keeps mask keys apart from every font id.
+        throw std::invalid_argument("a raster atlas key must not be empty");
+    // A leading '$' keeps raster keys apart from every font id.
     Key cache_key{
         "$mask:" + std::string(key),
         0U,
@@ -352,14 +351,28 @@ GlyphAtlas::request_mask(const std::string_view key,
             pages_[found->second.page_index].used_preparation = preparation_serial_;
         return found->second;
     }
-    std::optional<GlyphRasterBitmap> bitmap = rasterize();
-    if (!bitmap.has_value() || bitmap->width == 0U || bitmap->height == 0U ||
-        bitmap->width > config_.page_size || bitmap->height > config_.page_size) {
+    std::optional<RasterRequest> request = encode(config_.gutter_pixels);
+    const std::uint64_t gutter = config_.gutter_pixels;
+    if (!request.has_value() || request->width == 0U || request->height == 0U ||
+        request->width + gutter * 2U > config_.page_size ||
+        request->height + gutter * 2U > config_.page_size) {
         return std::nullopt;
     }
-    bitmap->mode = mode;
     try {
-        return insert_bitmap(cache_key, *bitmap);
+        const Allocation allocation = place(cache_key, request->width, request->height, mode);
+        Page& page = pages_.at(allocation.page);
+        page.used_preparation = preparation_serial_;
+        operations_.push_back(AtlasOperation{
+            AtlasOperationKind::raster,
+            page.texture,
+            format_for(mode, config_.filtered_coverage),
+            allocation.upload,
+            std::move(request->job),
+        });
+        GlyphAtlasEntry entry =
+            entry_for(cache_key, allocation, request->plane_bounds, 1.0, 1.0, mode);
+        cache_.emplace(cache_key, entry);
+        return entry;
     } catch (const FontError&) {
         // Full pages: the shape draws another way until reclamation runs on a safe frame.
         return std::nullopt;
@@ -643,7 +656,8 @@ GlyphAtlas::Allocation GlyphAtlas::create_page_and_allocate(const std::uint32_t 
     page.texture = texture;
     page.index = index;
     page.mode = mode;
-    page.pixels.resize(static_cast<std::size_t>(page_pixels) * channels, 0U);
+    if (!config_.backend_rasterized)
+        page.pixels.resize(static_cast<std::size_t>(page_pixels) * channels, 0U);
     pages_.push_back(std::move(page));
     operations_.push_back(AtlasOperation{
         AtlasOperationKind::create,
@@ -705,8 +719,21 @@ GlyphAtlasEntry GlyphAtlas::insert(const Key& key, const GlyphRasterBitmap& bitm
     }
     if (!frame_preparation_active_)
         flush_page_upload(allocation.page);
+    GlyphAtlasEntry entry = entry_for(key, allocation, bitmap.plane_bounds_layout_pixels,
+                                      bitmap.atlas_pixel_range, bitmap.layout_pixel_range,
+                                      bitmap.mode);
+    cache_.emplace(key, entry);
+    return entry;
+}
+
+GlyphAtlasEntry GlyphAtlas::entry_for(const Key& key, const Allocation& allocation,
+                                      const RasterPlaneBounds& plane_bounds,
+                                      const double atlas_pixel_range,
+                                      const double layout_pixel_range,
+                                      const GlyphRasterMode mode) const {
+    const Page& page = pages_.at(allocation.page);
     const double page_size = static_cast<double>(config_.page_size);
-    GlyphAtlasEntry entry{
+    return GlyphAtlasEntry{
         page.texture,
         page.index,
         generation_,
@@ -714,39 +741,42 @@ GlyphAtlasEntry GlyphAtlas::insert(const Key& key, const GlyphRasterBitmap& bitm
         static_cast<double>(allocation.content.y) / page_size,
         static_cast<double>(allocation.content.width) / page_size,
         static_cast<double>(allocation.content.height) / page_size,
-        bitmap.plane_bounds_layout_pixels,
-        bitmap.atlas_pixel_range,
-        bitmap.layout_pixel_range,
-        bitmap.mode,
+        plane_bounds,
+        atlas_pixel_range,
+        layout_pixel_range,
+        mode,
         key.phase,
     };
-    cache_.emplace(key, entry);
-    return entry;
 }
 
 GlyphAtlasEntry GlyphAtlas::insert_bitmap(Key& key, const GlyphRasterBitmap& bitmap) {
+    const Allocation allocation = place(key, bitmap.width, bitmap.height, bitmap.mode);
+    return insert(key, bitmap, allocation);
+}
+
+GlyphAtlas::Allocation GlyphAtlas::place(Key& key, const std::uint32_t width,
+                                         const std::uint32_t height, const GlyphRasterMode mode) {
     if (cache_.size() >= config_.maximum_cached_glyphs) {
         if (!recycle_for_capacity(key)) {
             throw FontError(
                 "glyph atlas cache limit reached; reclamation is scheduled for a safe frame");
         }
     }
-    std::optional<Allocation> allocation = allocate(bitmap.width, bitmap.height, bitmap.mode);
+    std::optional<Allocation> allocation = allocate(width, height, mode);
     if (!allocation.has_value() && pages_.size() >= config_.maximum_pages)
-        allocation = reuse_unretained_page(bitmap.width, bitmap.height, bitmap.mode);
+        allocation = reuse_unretained_page(width, height, mode);
     if (!allocation.has_value()) {
         if (pages_.size() >= config_.maximum_pages) {
             if (!recycle_for_capacity(key)) {
                 throw FontError(
                     "glyph atlas pages are full; reclamation is scheduled for a safe frame");
             }
-            allocation = allocate(bitmap.width, bitmap.height, bitmap.mode);
+            allocation = allocate(width, height, mode);
         }
-        if (!allocation.has_value()) {
-            allocation = create_page_and_allocate(bitmap.width, bitmap.height, bitmap.mode);
-        }
+        if (!allocation.has_value())
+            allocation = create_page_and_allocate(width, height, mode);
     }
-    return insert(key, bitmap, *allocation);
+    return *allocation;
 }
 
 void GlyphAtlas::flush_page_upload(const std::size_t page_index) {
@@ -820,9 +850,11 @@ std::optional<GlyphAtlas::Allocation> GlyphAtlas::reuse_unretained_page(
                                "/" + std::to_string(preparation_serial_) +
                                (mode == GlyphRasterMode::coverage ? "/coverage" : "/msdf");
                 page.mode = mode;
-                page.pixels.assign(static_cast<std::size_t>(config_.page_size) *
-                                       config_.page_size * bytes_per_pixel(mode),
-                                   0U);
+                if (!config_.backend_rasterized) {
+                    page.pixels.assign(static_cast<std::size_t>(config_.page_size) *
+                                           config_.page_size * bytes_per_pixel(mode),
+                                       0U);
+                }
                 page.dirty.reset();
                 operations_.push_back(AtlasOperation{
                     AtlasOperationKind::create,

@@ -1794,9 +1794,10 @@ typedef struct strata_surface_frame_info {
 } strata_surface_frame_info;
 
 /*
- * Packet v14 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
+ * Packet v16 is little-endian and tightly encoded (no native padding). Numbers are IEEE-754 f64
  * bit patterns, strings are a u32 byte count followed by UTF-8, and each resource/batch record is
- * [u32 kind, u32 payload byte count, payload]:
+ * [u32 kind, u32 payload byte count, payload]. Resource kinds are 0 atlas create, 1 atlas upload,
+ * 2 release, 3 image creation and 4 atlas raster:
  *
  *   bytes[8] "STRATARP", u32 version, u32 resource count, u32 batch count,
  *   u64 frame index, u64 geometry epoch, u32 flags, u32 vertex byte count, u32 index count,
@@ -1835,9 +1836,12 @@ typedef struct strata_surface_frame_info {
  * source 0 and probe 0. Content-end carries only the common prefix. Rounded clip stacks are
  * limited to sixteen entries; authored CONTENT effect isolation is limited to four layers.
  *
- * Resource payloads begin with a texture-id string. Atlas create/upload then carry u32 format (0 =
- * R8, 1 = RGBA8) and u32 x/y/width/height; upload adds u32 byte count and raw texels. Release has
- * no additional fields. Image creation carries u32 sampling, u32 width/height, a u32 byte count and
+ * Resource payloads begin with a texture-id string. Atlas create/upload/raster then carry u32
+ * format (0 = R8, 1 = RGBA8, 2 = R8 sampled bilinearly) and u32 x/y/width/height; upload adds u32
+ * byte count and raw texels; raster adds a u32 byte count and a raster job, which the backend
+ * rasterizes into every texel of the region (<strata/raster_job.hpp> decodes it and holds the
+ * reference rasterizer the bundled GPU backends reproduce exactly). Release has no additional
+ * fields. Image creation carries u32 sampling, u32 width/height, a u32 byte count and
  * width * height * 4 bytes of top-down, tightly packed RGBA8 rows with straight (unpremultiplied)
  * alpha, encoded as the source image stored them (no colour-space conversion). The core decodes
  * every image; hosts need no codec.
@@ -1854,7 +1858,7 @@ typedef struct strata_surface_frame_info {
  *
  * C++ backends should prefer <strata/render_packet.hpp>, whose stateful decoder validates record
  * framing, ranges, resources, and retained epochs. STRATA_RENDER_COMMAND_* and
- * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v14 records.
+ * STRATA_RENDER_VALUE_* describe the optional canonical frame-JSON projection, not v16 records.
  */
 #define STRATA_RENDER_PACKET_VERSION_1 UINT32_C(1)
 #define STRATA_RENDER_PACKET_VERSION_2 UINT32_C(2)
@@ -1872,7 +1876,12 @@ typedef struct strata_surface_frame_info {
 #define STRATA_RENDER_PACKET_VERSION_14 UINT32_C(14)
 /* Version 15 adds each presentation group's two shear terms, so groups can rotate. */
 #define STRATA_RENDER_PACKET_VERSION_15 UINT32_C(15)
-#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_15
+/*
+ * Version 16 adds raster resource records: an atlas region the backend rasterizes from outlines
+ * (a raster job, <strata/raster_job.hpp>) instead of receiving its texels.
+ */
+#define STRATA_RENDER_PACKET_VERSION_16 UINT32_C(16)
+#define STRATA_RENDER_PACKET_VERSION_CURRENT STRATA_RENDER_PACKET_VERSION_16
 #define STRATA_RENDER_PACKET_VERTEX_STRIDE UINT32_C(88)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PAYLOAD UINT32_C(1)
 #define STRATA_RENDER_PACKET_FLAG_GEOMETRY_PATCHES UINT32_C(2)

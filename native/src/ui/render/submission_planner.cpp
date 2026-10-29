@@ -18,6 +18,8 @@
 #include <variant>
 #include <vector>
 
+#include <strata/raster_job.hpp>
+
 #include "font/raster.hpp"
 #include "ui/render/path_geometry.hpp"
 #include "ui/text.hpp"
@@ -705,15 +707,199 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
     }
 }
 
+/** A closed outline on the device grid, in device pixels from the shape's whole pixel. */
+using DevicePolygons = std::vector<std::vector<host::RasterPoint>>;
+
+/** The device box of an outline; empty until something is included. */
+struct DeviceBox final {
+    double left = std::numeric_limits<double>::infinity();
+    double top = std::numeric_limits<double>::infinity();
+    double right = -std::numeric_limits<double>::infinity();
+    double bottom = -std::numeric_limits<double>::infinity();
+
+    void include(const DevicePolygons& polygons) noexcept {
+        for (const std::vector<host::RasterPoint>& polygon : polygons) {
+            for (const host::RasterPoint point : polygon) {
+                left = std::min(left, point.x);
+                top = std::min(top, point.y);
+                right = std::max(right, point.x);
+                bottom = std::max(bottom, point.y);
+            }
+        }
+    }
+    [[nodiscard]] bool empty() const noexcept { return !(left <= right && top <= bottom); }
+    [[nodiscard]] bool meets(const DeviceBox& other) const noexcept {
+        return !empty() && left <= other.right && right >= other.left && top <= other.bottom &&
+               bottom >= other.top;
+    }
+};
+
+/**
+ * Whether an edge of the outline passes through `box`, or within a quantum of it: when none does,
+ * every pixel of the box is covered alike.
+ */
+[[nodiscard]] bool edges_cross(const DevicePolygons& polygons, const DeviceBox& box) noexcept {
+    constexpr double margin = 1.0 / 64.0;
+    const double left = box.left - margin;
+    const double top = box.top - margin;
+    const double right = box.right + margin;
+    const double bottom = box.bottom + margin;
+    for (const std::vector<host::RasterPoint>& polygon : polygons) {
+        for (std::size_t index = 0U; index < polygon.size(); ++index) {
+            const host::RasterPoint a = polygon[index];
+            const host::RasterPoint b = polygon[(index + 1U) % polygon.size()];
+            if (std::max(a.x, b.x) < left || std::min(a.x, b.x) > right ||
+                std::max(a.y, b.y) < top || std::min(a.y, b.y) > bottom) {
+                continue;
+            }
+            // The part of the edge inside the box, if any (Liang-Barsky).
+            double enter = 0.0;
+            double leave = 1.0;
+            const auto clip = [&](const double p, const double q) {
+                if (p == 0.0)
+                    return q >= 0.0;
+                const double r = q / p;
+                if (p < 0.0) {
+                    if (r > leave)
+                        return false;
+                    enter = std::max(enter, r);
+                } else {
+                    if (r < enter)
+                        return false;
+                    leave = std::min(leave, r);
+                }
+                return true;
+            };
+            const double dx = b.x - a.x;
+            const double dy = b.y - a.y;
+            if (clip(-dx, a.x - left) && clip(dx, right - a.x) && clip(-dy, a.y - top) &&
+                clip(dy, bottom - a.y) && enter <= leave) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/** Whether the outline covers a point, under its fill rule. */
+[[nodiscard]] bool covers(const DevicePolygons& polygons, const host::RasterFill fill,
+                          const double x, const double y) noexcept {
+    int winding = 0;
+    for (const std::vector<host::RasterPoint>& polygon : polygons) {
+        for (std::size_t index = 0U; index < polygon.size(); ++index) {
+            const host::RasterPoint a = polygon[index];
+            const host::RasterPoint b = polygon[(index + 1U) % polygon.size()];
+            if ((a.y <= y) == (b.y <= y))
+                continue;
+            if (a.x + (y - a.y) * (b.x - a.x) / (b.y - a.y) < x)
+                winding += b.y > a.y ? 1 : -1;
+        }
+    }
+    return fill == host::RasterFill::even_odd ? (winding & 1) != 0 : winding != 0;
+}
+
+/** A colour as a raster job packs it: straight RGBA8, red in the low byte. */
+[[nodiscard]] std::uint32_t packed_color(const runtime::ColorValue color) noexcept {
+    return std::uint32_t{color.red} | (std::uint32_t{color.green} << 8U) |
+           (std::uint32_t{color.blue} << 16U) | (std::uint32_t{color.alpha} << 24U);
+}
+
+/**
+ * A paint as a raster layer whose content's top-left is `origin` on the device grid: its colour,
+ * or its gradient's parameter as a function of the content pixel and its colours as a table.
+ */
+[[nodiscard]] host::RasterLayer raster_paint(const Paint& paint, const MaskGrid& grid,
+                                             const Rect bounds, const host::RasterPoint origin) {
+    host::RasterLayer layer;
+    const Gradient* gradient = paint.gradient();
+    if (gradient == nullptr) {
+        layer.paint = host::RasterPaint::solid;
+        layer.color = packed_color(*paint.color());
+        return layer;
+    }
+    // The shape's normalized position at content pixel x: x * scale + offset, per axis.
+    const double scale_x = 1.0 / (grid.device_x * bounds.width);
+    const double scale_y = 1.0 / (grid.device_y * bounds.height);
+    const double offset_x = (origin.x - grid.phase.x) * scale_x;
+    const double offset_y = (origin.y - grid.phase.y) * scale_y;
+    std::array<double, 6U> parameters{};
+    if (gradient->kind == GradientKind::linear) {
+        layer.paint = host::RasterPaint::linear;
+        const auto [start, end] = gradient->axis(Size{bounds.width, bounds.height});
+        const double dx = end.x - start.x;
+        const double dy = end.y - start.y;
+        const double length_squared = dx * dx + dy * dy;
+        if (length_squared > 0.0) {
+            parameters[0] = scale_x * dx / length_squared;
+            parameters[1] = scale_y * dy / length_squared;
+            parameters[2] =
+                ((offset_x - start.x) * dx + (offset_y - start.y) * dy) / length_squared;
+        }
+    } else {
+        layer.paint = host::RasterPaint::radial;
+        parameters[0] = scale_x / gradient->radius_x;
+        parameters[2] = (offset_x - gradient->center.x) / gradient->radius_x;
+        parameters[4] = scale_y / gradient->radius_y;
+        parameters[5] = (offset_y - gradient->center.y) / gradient->radius_y;
+    }
+    for (std::size_t index = 0U; index < parameters.size(); ++index)
+        layer.parameters[index] = static_cast<float>(parameters[index]);
+    layer.extend = static_cast<host::RasterExtend>(gradient->extend);
+    // The table spans offsets 0 to 1; the job applies the extend before reading it.
+    Gradient clamped = *gradient;
+    clamped.extend = GradientExtend::clamp;
+    layer.lut.resize(host::raster_lut_size);
+    for (std::uint32_t index = 0U; index < host::raster_lut_size; ++index) {
+        layer.lut[index] = packed_color(clamped.sample(
+            static_cast<double>(index) / static_cast<double>(host::raster_lut_size - 1U)));
+    }
+    return layer;
+}
+
+/** The corners of a `width` x `height` rectangle at the origin, as one polygon. */
+[[nodiscard]] DevicePolygons rectangle(const double width, const double height) {
+    return {{host::RasterPoint{0.0, 0.0}, host::RasterPoint{width, 0.0},
+             host::RasterPoint{width, height}, host::RasterPoint{0.0, height}}};
+}
+
+/**
+ * A 4 x 4 texel of one colour (or of full coverage), which tiles nothing crosses draw from: the
+ * colour packed as `rgba` (red highest) for a picture, or nothing for coverage.
+ */
+[[nodiscard]] std::optional<font::GlyphAtlasEntry> solid_texel(font::GlyphAtlas& atlas,
+                                                              const std::optional<std::uint32_t> rgba) {
+    char key[24];
+    if (rgba.has_value())
+        std::snprintf(key, sizeof(key), "solid-%08x", *rgba);
+    else
+        std::snprintf(key, sizeof(key), "solid");
+    return atlas.request_raster(
+        key, rgba.has_value() ? font::GlyphRasterMode::msdf : font::GlyphRasterMode::coverage,
+        [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
+            host::RasterJobBuilder builder(4U, 4U);
+            host::RasterLayer layer;
+            if (rgba.has_value()) {
+                layer.paint = host::RasterPaint::solid;
+                layer.color = ((*rgba >> 24U) & 0xFFU) | (((*rgba >> 16U) & 0xFFU) << 8U) |
+                              (((*rgba >> 8U) & 0xFFU) << 16U) | ((*rgba & 0xFFU) << 24U);
+            }
+            const DevicePolygons square = rectangle(4.0, 4.0);
+            builder.add_layer(host::RasterFill::nonzero, layer, square, host::RasterPoint{});
+            return font::RasterRequest{builder.encode(gutter, gutter), 4U, 4U,
+                                       font::RasterPlaneBounds{0.0, 4.0, 4.0, 0.0}};
+        });
+}
+
 /**
  * Draws joined shapes (PathRenderCommand::joined) as one picture: every part of every shape is
  * rasterized to exact coverage on one device grid, then composited front to back by area into one
  * colour mask. Each shape takes what is left of a pixel, so shapes meeting along an edge split
  * its pixels between them and nothing behind shows through, while a shape over another covers it
  * as it would drawn alone (a translucent one lets the one below show through by its alpha). Paints
- * are evaluated per pixel. A picture larger than a page draws in tiles, as a single shape's mask
- * does. Returns false, drawing nothing, when there is no shape atlas or the picture is too large
- * even for tiles; the shapes then draw one by one.
+ * are evaluated per pixel. The backend rasterizes the picture from its outlines (a raster job). A
+ * picture larger than a page draws in tiles, as a single shape's mask does. Returns false, drawing
+ * nothing, when there is no shape atlas or the picture is too large even for tiles; the shapes
+ * then draw one by one.
  */
 [[nodiscard]] bool append_joined_masks(
     std::vector<PlannedItem>& output,
@@ -805,17 +991,13 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
     const double box_top = std::min(y_a, y_b) - 1.0;
     const double box_bottom = std::max(y_a, y_b) + 1.0;
 
-    // Every part's outline in device pixels relative to the whole-pixel origin, with the paint
-    // it carries, back to front; made once, when a mask is missing.
+    // Every part's outline on the device grid with the paint it carries, front to back; made once,
+    // when a picture is missing.
     struct Layer final {
-        std::vector<std::vector<font::CoveragePoint>> polygons;
-        bool even_odd = false;
+        DevicePolygons polygons;
+        host::RasterFill fill = host::RasterFill::nonzero;
         const Paint* paint = nullptr;
-        /** The outline's device box. */
-        double left = 0.0;
-        double top = 0.0;
-        double right = 0.0;
-        double bottom = 0.0;
+        DeviceBox box;
     };
     std::optional<std::vector<Layer>> made;
     const auto layers = [&]() -> const std::vector<Layer>& {
@@ -823,14 +1005,14 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
             return *made;
         made.emplace();
         const auto device = [&](const std::vector<PathContour>& outline) {
-            std::vector<std::vector<font::CoveragePoint>> polygons;
+            DevicePolygons polygons;
             polygons.reserve(outline.size());
             for (const PathContour& contour : outline) {
-                std::vector<font::CoveragePoint> polygon;
+                std::vector<host::RasterPoint> polygon;
                 polygon.reserve(contour.points.size());
                 for (const Point point : contour.points)
-                    polygon.push_back(font::CoveragePoint{grid->phase.x + point.x * grid->device_x,
-                                                          grid->phase.y + point.y * grid->device_y});
+                    polygon.push_back(host::RasterPoint{grid->phase.x + point.x * grid->device_x,
+                                                        grid->phase.y + point.y * grid->device_y});
                 polygons.push_back(std::move(polygon));
             }
             return polygons;
@@ -850,159 +1032,44 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
                     if (contour.points.size() >= 3U)
                         outline.push_back(PathContour{contour.points, true});
                 }
-                made->push_back(Layer{device(outline), shape->fill_rule == PathFillRule::evenodd,
-                                      &*shape->fill});
+                made->push_back(Layer{device(outline),
+                                      shape->fill_rule == PathFillRule::evenodd
+                                          ? host::RasterFill::even_odd
+                                          : host::RasterFill::nonzero,
+                                      &*shape->fill, {}});
             }
             const StrokeStyle style = shape->stroke_style.value_or(StrokeStyle{});
             if (shape->stroke.has_value() && !shape->stroke->transparent() && style.width > 0.0) {
-                made->push_back(Layer{device(stroke_outline(centrelines, style, tolerance)), false,
-                                      &*shape->stroke});
+                made->push_back(Layer{device(stroke_outline(centrelines, style, tolerance)),
+                                      host::RasterFill::nonzero, &*shape->stroke, {}});
             }
         }
-        for (Layer& layer : *made) {
-            layer.left = std::numeric_limits<double>::infinity();
-            layer.top = std::numeric_limits<double>::infinity();
-            layer.right = -std::numeric_limits<double>::infinity();
-            layer.bottom = -std::numeric_limits<double>::infinity();
-            for (const std::vector<font::CoveragePoint>& polygon : layer.polygons) {
-                for (const font::CoveragePoint point : polygon) {
-                    layer.left = std::min(layer.left, point.x);
-                    layer.top = std::min(layer.top, point.y);
-                    layer.right = std::max(layer.right, point.x);
-                    layer.bottom = std::max(layer.bottom, point.y);
-                }
-            }
-        }
+        std::ranges::reverse(*made);
+        for (Layer& layer : *made)
+            layer.box.include(layer.polygons);
         return *made;
     };
 
-    // The picture over a `width` x `height` region whose top-left is `origin`, as straight RGBA.
-    // Front to back: `area` is how much of the pixel shapes in front already cover and `alpha` how
-    // opaque they make it, so a shape takes the uncovered rest at full strength and what it shares
-    // with them through their transparency.
-    const auto composite = [&](const std::uint32_t width, const std::uint32_t height,
-                               const font::CoveragePoint origin) {
-        std::vector<std::uint8_t> texels(static_cast<std::size_t>(width) * height * 4U, 0U);
-        const std::vector<Layer>& parts = layers();
-        const auto clamp_to = [](const double value, const std::uint32_t limit) {
-            return static_cast<std::uint32_t>(std::clamp(value, 0.0, static_cast<double>(limit)));
-        };
-        // Each layer's part of the region, and the part any layer reaches: only that is worked.
-        struct Span final {
-            std::uint32_t x0 = 0U;
-            std::uint32_t y0 = 0U;
-            std::uint32_t x1 = 0U;
-            std::uint32_t y1 = 0U;
-        };
-        std::vector<Span> spans(parts.size());
-        Span reach{width, height, 0U, 0U};
-        for (std::size_t index = 0U; index < parts.size(); ++index) {
-            const Layer& layer = parts[index];
-            if (!std::isfinite(layer.left))
+    // The picture over a `width` x `height` region whose top-left is `origin`, as a raster job.
+    const auto picture = [&](const std::uint32_t width, const std::uint32_t height,
+                             const host::RasterPoint origin, const std::uint32_t gutter) {
+        host::RasterJobBuilder builder(width, height);
+        const DeviceBox region{origin.x, origin.y, origin.x + width, origin.y + height};
+        bool any = false;
+        for (const Layer& layer : layers()) {
+            if (!layer.box.meets(region))
                 continue;
-            Span& span = spans[index];
-            span.x0 = clamp_to(std::floor(layer.left - origin.x) - 1.0, width);
-            span.y0 = clamp_to(std::floor(layer.top - origin.y) - 1.0, height);
-            span.x1 = clamp_to(std::ceil(layer.right - origin.x) + 1.0, width);
-            span.y1 = clamp_to(std::ceil(layer.bottom - origin.y) + 1.0, height);
-            if (span.x1 <= span.x0 || span.y1 <= span.y0)
-                continue;
-            reach.x0 = std::min(reach.x0, span.x0);
-            reach.y0 = std::min(reach.y0, span.y0);
-            reach.x1 = std::max(reach.x1, span.x1);
-            reach.y1 = std::max(reach.y1, span.y1);
+            builder.add_layer(layer.fill, raster_paint(*layer.paint, *grid, bounds, origin),
+                              layer.polygons, origin);
+            any = true;
         }
-        if (reach.x1 <= reach.x0 || reach.y1 <= reach.y0)
-            return texels;
-        const std::uint32_t reach_width = reach.x1 - reach.x0;
-        // Premultiplied colour, opacity and covered area of each reached pixel.
-        struct Sum final {
-            float red = 0.0F;
-            float green = 0.0F;
-            float blue = 0.0F;
-            float alpha = 0.0F;
-            float area = 0.0F;
-        };
-        std::vector<Sum> sums(static_cast<std::size_t>(reach_width) * (reach.y1 - reach.y0));
-        for (std::size_t index = parts.size(); index-- > 0U;) {
-            const Layer& layer = parts[index];
-            const Span span = spans[index];
-            if (span.x1 <= span.x0 || span.y1 <= span.y0)
-                continue;
-            const std::uint32_t span_width = span.x1 - span.x0;
-            const std::optional<std::vector<std::uint8_t>> coverage = font::rasterize_polygons(
-                layer.polygons, span_width, span.y1 - span.y0, layer.even_odd,
-                font::CoveragePoint{origin.x + span.x0, origin.y + span.y0});
-            if (!coverage.has_value())
-                continue;
-            const Gradient* gradient = layer.paint->gradient();
-            const runtime::ColorValue solid = layer.paint->representative();
-            // A solid paint over a pixel it covers whole with nothing yet in front.
-            const float solid_alpha = static_cast<float>(solid.alpha) / 255.0F;
-            const Sum solid_sum{static_cast<float>(solid.red) * solid_alpha,
-                                static_cast<float>(solid.green) * solid_alpha,
-                                static_cast<float>(solid.blue) * solid_alpha, solid_alpha, 1.0F};
-            for (std::uint32_t row = span.y0; row < span.y1; ++row) {
-                const std::uint8_t* covers =
-                    coverage->data() + static_cast<std::size_t>(row - span.y0) * span_width;
-                Sum* line = sums.data() + static_cast<std::size_t>(row - reach.y0) * reach_width +
-                            (span.x0 - reach.x0);
-                for (std::uint32_t column = 0U; column < span_width; ++column) {
-                    if (covers[column] == 0U)
-                        continue;
-                    Sum& sum = line[column];
-                    if (sum.area <= 0.0F && covers[column] == 255U && gradient == nullptr) {
-                        sum = solid_sum;
-                        continue;
-                    }
-                    if (sum.alpha >= 1.0F)
-                        continue;
-                    const float covered = static_cast<float>(covers[column]) * (1.0F / 255.0F);
-                    runtime::ColorValue paint = solid;
-                    if (gradient != nullptr) {
-                        const double x = origin.x + span.x0 + column + 0.5;
-                        const double y = origin.y + row + 0.5;
-                        const Point local{(x - grid->phase.x) / grid->device_x,
-                                          (y - grid->phase.y) / grid->device_y};
-                        paint = gradient->sample(gradient_parameter(
-                            *gradient, Point{local.x / bounds.width, local.y / bounds.height},
-                            Size{bounds.width, bounds.height}));
-                    }
-                    const float exposed = std::min(covered, 1.0F - sum.area);
-                    const float shared = covered - exposed;
-                    const float through =
-                        sum.area > 0.0F ? std::clamp((sum.area - sum.alpha) / sum.area, 0.0F, 1.0F)
-                                        : 1.0F;
-                    const float weight =
-                        static_cast<float>(paint.alpha) / 255.0F * (exposed + shared * through);
-                    sum.red += static_cast<float>(paint.red) * weight;
-                    sum.green += static_cast<float>(paint.green) * weight;
-                    sum.blue += static_cast<float>(paint.blue) * weight;
-                    sum.alpha = std::min(1.0F, sum.alpha + weight);
-                    sum.area = std::min(1.0F, sum.area + exposed);
-                }
-            }
+        if (!any) {
+            host::RasterLayer clear;
+            clear.paint = host::RasterPaint::solid;
+            clear.color = 0U;
+            builder.add_layer(host::RasterFill::nonzero, clear, {}, origin);
         }
-        for (std::uint32_t row = reach.y0; row < reach.y1; ++row) {
-            const Sum* line = sums.data() + static_cast<std::size_t>(row - reach.y0) * reach_width;
-            std::uint8_t* texel =
-                texels.data() + (static_cast<std::size_t>(row) * width + reach.x0) * 4U;
-            for (std::uint32_t column = 0U; column < reach_width; ++column, texel += 4) {
-                const Sum& sum = line[column];
-                if (sum.alpha <= 0.0F)
-                    continue;
-                const float scale = 1.0F / sum.alpha;
-                const auto channel = [scale](const float premultiplied) {
-                    return static_cast<std::uint8_t>(
-                        std::clamp(premultiplied * scale + 0.5F, 0.0F, 255.0F));
-                };
-                texel[0] = channel(sum.red);
-                texel[1] = channel(sum.green);
-                texel[2] = channel(sum.blue);
-                texel[3] = static_cast<std::uint8_t>(std::clamp(sum.alpha * 255.0F + 0.5F, 0.0F, 255.0F));
-            }
-        }
-        return texels;
+        return builder.encode(gutter, gutter);
     };
 
     const auto draw = [&](const font::GlyphAtlasEntry& entry, const font::RasterPlaneBounds& box,
@@ -1019,23 +1086,17 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
     if (box_right - box_left <= maximum_mask_extent && box_bottom - box_top <= maximum_mask_extent) {
         char key[40];
         std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(hash.value()));
-        const std::optional<font::GlyphAtlasEntry> entry = atlas->request_mask(
-            key,
-            [&]() -> std::optional<font::GlyphRasterBitmap> {
+        const std::optional<font::GlyphAtlasEntry> entry = atlas->request_raster(
+            key, font::GlyphRasterMode::msdf,
+            [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
                 const double x0 = std::floor(box_left);
                 const double y0 = std::floor(box_top);
                 const auto width = static_cast<std::uint32_t>(std::ceil(box_right) - x0);
                 const auto height = static_cast<std::uint32_t>(std::ceil(box_bottom) - y0);
-                font::GlyphRasterBitmap bitmap;
-                bitmap.width = width;
-                bitmap.height = height;
-                bitmap.mode = font::GlyphRasterMode::msdf;
-                bitmap.bytes = composite(width, height, font::CoveragePoint{x0, y0});
-                bitmap.plane_bounds_layout_pixels =
-                    font::RasterPlaneBounds{x0, y0 + height, x0 + width, y0};
-                return bitmap;
-            },
-            font::GlyphRasterMode::msdf);
+                return font::RasterRequest{picture(width, height, host::RasterPoint{x0, y0}, gutter),
+                                           width, height,
+                                           font::RasterPlaneBounds{x0, y0 + height, x0 + width, y0}};
+            });
         if (!entry.has_value())
             return false;
         draw(*entry, entry->plane_bounds_layout_pixels,
@@ -1043,8 +1104,8 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
         return true;
     }
 
-    // Tiles over the device box, each with a one-pixel apron of the picture around its core; a row
-    // of tiles composites once, when any of its tiles is missing.
+    // Tiles over the device box, each with a one-pixel apron of the picture around its core. A
+    // tile no edge crosses is empty or the front-most covering shape's colour throughout.
     const double tile = static_cast<double>(mask_tile);
     const auto first_x = static_cast<std::int64_t>(std::floor(box_left / tile));
     const auto last_x = static_cast<std::int64_t>(std::floor(box_right / tile));
@@ -1058,27 +1119,6 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
     if (tile_classes.size() > maximum_tile_classes)
         tile_classes.clear();
     constexpr std::uint32_t side = mask_tile + 2U;
-    const auto band_width = static_cast<std::uint32_t>(last_x - first_x + 1) * mask_tile + 2U;
-    // A tile of one opaque colour draws from one shared texel of it.
-    const auto solid = [&](const std::uint32_t rgba) -> std::optional<font::GlyphAtlasEntry> {
-        char key[24];
-        std::snprintf(key, sizeof(key), "solid-%08x", rgba);
-        return atlas->request_mask(
-            key,
-            [rgba]() -> std::optional<font::GlyphRasterBitmap> {
-                font::GlyphRasterBitmap bitmap;
-                bitmap.width = 4U;
-                bitmap.height = 4U;
-                bitmap.mode = font::GlyphRasterMode::msdf;
-                for (int texel = 0; texel < 16; ++texel) {
-                    for (int shift = 24; shift >= 0; shift -= 8)
-                        bitmap.bytes.push_back(static_cast<std::uint8_t>(rgba >> shift));
-                }
-                bitmap.plane_bounds_layout_pixels = font::RasterPlaneBounds{0.0, 4.0, 4.0, 0.0};
-                return bitmap;
-            },
-            font::GlyphRasterMode::msdf);
-    };
     // Every tile is found before any draws, so a picture that cannot fit draws whole the other way.
     struct Placed final {
         font::GlyphAtlasEntry entry;
@@ -1087,7 +1127,6 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
     };
     std::vector<Placed> placed;
     for (std::int64_t tile_y = first_y; tile_y <= last_y; ++tile_y) {
-        std::optional<std::vector<std::uint8_t>> band;
         for (std::int64_t tile_x = first_x; tile_x <= last_x; ++tile_x) {
             MaskHash tile_hash = hash;
             tile_hash.add(tile_x);
@@ -1103,67 +1142,57 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
                 if ((known->second & 0xFFU) == 2U)
                     uniform = static_cast<std::uint32_t>(known->second >> 8U);
             }
-            if (uniform.has_value()) {
-                const std::optional<font::GlyphAtlasEntry> texel = solid(*uniform);
-                if (!texel.has_value())
-                    return false;
-                placed.push_back(Placed{*texel, core,
-                                        TextureRegion{texel->u + texel->uv_width * 0.5,
-                                                      texel->v + texel->uv_height * 0.5, 0.0, 0.0}});
-                continue;
-            }
-            char key[48];
-            std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(identity));
             bool empty = false;
-            const std::optional<font::GlyphAtlasEntry> entry = atlas->request_mask(
-                key,
-                [&]() -> std::optional<font::GlyphRasterBitmap> {
-                    if (!band.has_value()) {
-                        band = composite(band_width, side,
-                                         font::CoveragePoint{static_cast<double>(first_x) * tile - 1.0,
-                                                             static_cast<double>(tile_y) * tile - 1.0});
-                    }
-                    const std::size_t offset =
-                        static_cast<std::size_t>(tile_x - first_x) * mask_tile * 4U;
-                    font::GlyphRasterBitmap bitmap;
-                    bitmap.width = side;
-                    bitmap.height = side;
-                    bitmap.mode = font::GlyphRasterMode::msdf;
-                    bitmap.bytes.resize(static_cast<std::size_t>(side) * side * 4U);
-                    bool covered = false;
-                    for (std::uint32_t row = 0U; row < side; ++row) {
-                        const std::uint8_t* source =
-                            band->data() + static_cast<std::size_t>(row) * band_width * 4U + offset;
-                        std::uint8_t* target =
-                            bitmap.bytes.data() + static_cast<std::size_t>(row) * side * 4U;
-                        std::memcpy(target, source, static_cast<std::size_t>(side) * 4U);
-                        for (std::uint32_t column = 0U; column < side && !covered; ++column)
-                            covered = target[column * 4U + 3U] != 0U;
-                    }
-                    if (!covered) {
-                        empty = true;
-                        return std::nullopt;
-                    }
-                    if (bitmap.bytes[3] == 255U &&
-                        std::ranges::equal(std::span(bitmap.bytes).subspan(4U),
-                                           std::span(bitmap.bytes).first(bitmap.bytes.size() - 4U))) {
-                        uniform = (std::uint32_t{bitmap.bytes[0]} << 24U) |
-                                  (std::uint32_t{bitmap.bytes[1]} << 16U) |
-                                  (std::uint32_t{bitmap.bytes[2]} << 8U) | bitmap.bytes[3];
-                        return std::nullopt;
-                    }
-                    bitmap.plane_bounds_layout_pixels = font::RasterPlaneBounds{
-                        core.left - 1.0, core.bottom + 1.0, core.right + 1.0, core.top - 1.0};
-                    return bitmap;
-                },
-                font::GlyphRasterMode::msdf);
-            if (empty) {
-                tile_classes[identity] = 0U;
-                continue;
+            std::optional<font::GlyphAtlasEntry> entry;
+            if (!uniform.has_value()) {
+                char key[48];
+                std::snprintf(key, sizeof(key), "%016llx",
+                              static_cast<unsigned long long>(identity));
+                entry = atlas->request_raster(
+                    key, font::GlyphRasterMode::msdf,
+                    [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
+                        const host::RasterPoint origin{core.left - 1.0, core.top - 1.0};
+                        const DeviceBox region{origin.x, origin.y, origin.x + side, origin.y + side};
+                        const bool crossed = std::ranges::any_of(layers(), [&](const Layer& layer) {
+                            return layer.box.meets(region) && edges_cross(layer.polygons, region);
+                        });
+                        if (!crossed) {
+                            const double x = origin.x + side * 0.5;
+                            const double y = origin.y + side * 0.5;
+                            const Layer* front = nullptr;
+                            for (const Layer& layer : layers()) {
+                                if (layer.box.meets(region) &&
+                                    covers(layer.polygons, layer.fill, x, y)) {
+                                    front = &layer;
+                                    break;
+                                }
+                            }
+                            if (front == nullptr) {
+                                empty = true;
+                                return std::nullopt;
+                            }
+                            if (const runtime::ColorValue* color = front->paint->color();
+                                color != nullptr && color->alpha == 255U) {
+                                uniform = (std::uint32_t{color->red} << 24U) |
+                                          (std::uint32_t{color->green} << 16U) |
+                                          (std::uint32_t{color->blue} << 8U) | color->alpha;
+                                return std::nullopt;
+                            }
+                        }
+                        return font::RasterRequest{
+                            picture(side, side, origin, gutter), side, side,
+                            font::RasterPlaneBounds{core.left - 1.0, core.bottom + 1.0,
+                                                    core.right + 1.0, core.top - 1.0}};
+                    });
+                if (empty) {
+                    tile_classes[identity] = 0U;
+                    continue;
+                }
+                if (uniform.has_value())
+                    tile_classes[identity] = (std::uint64_t{*uniform} << 8U) | 2U;
             }
             if (uniform.has_value()) {
-                tile_classes[identity] = (std::uint64_t{*uniform} << 8U) | 2U;
-                const std::optional<font::GlyphAtlasEntry> texel = solid(*uniform);
+                const std::optional<font::GlyphAtlasEntry> texel = solid_texel(*atlas, *uniform);
                 if (!texel.has_value())
                     return false;
                 placed.push_back(Placed{*texel, core,
@@ -1189,11 +1218,12 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
 
 /**
  * Draws a path's fill and stroke from exact coverage masks in the shape atlas, as text draws its
- * glyphs: the outline is flattened and (for a stroke) expanded at device resolution, rasterized
- * by area into a mask placed on the device pixel grid at the shape's own sub-pixel position, and
- * drawn with the paint: its colour, or its gradient evaluated per pixel. A shape larger than a
- * page is drawn in tiles. Returns false, drawing nothing, when the shape draws analytically or as
- * geometry instead: no shape atlas, full pages, or a shape too large even for tiles.
+ * glyphs: the outline is flattened and (for a stroke) expanded at device resolution, and the
+ * backend rasterizes it by area (a raster job) into a mask placed on the device pixel grid at the
+ * shape's own sub-pixel position, drawn with the paint: its colour, or its gradient evaluated per
+ * pixel. A shape larger than a page is drawn in tiles. Returns false, drawing nothing, when the
+ * shape draws analytically or as geometry instead: no shape atlas, full pages, or a shape too
+ * large even for tiles.
  */
 [[nodiscard]] bool append_shape_masks(
     std::vector<PlannedItem>& output,
@@ -1287,6 +1317,7 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
     if (shape.stroke.has_value() && !shape.stroke->transparent() && style.width > 0.0)
         parts.push_back(Part{true, &*shape.stroke});
     std::vector<Piece> pieces;
+    std::optional<font::GlyphAtlasEntry> solid;
     for (const Part& part : parts) {
         MaskHash hash;
         for (const PathSegment& segment : shape.path.segments())
@@ -1308,9 +1339,9 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
         hash.add(device_y);
         hash.add(phase);
 
-        // The part's outline in device pixels relative to the whole-pixel origin, made once.
-        std::optional<std::vector<std::vector<font::CoveragePoint>>> device_outline;
-        const auto outline_polygons = [&]() -> const std::vector<std::vector<font::CoveragePoint>>& {
+        // The part's outline on the device grid, made once.
+        std::optional<DevicePolygons> device_outline;
+        const auto outline_polygons = [&]() -> const DevicePolygons& {
             if (!device_outline.has_value()) {
                 const std::vector<PathContour>& contours = local_contours();
                 std::vector<PathContour> outline;
@@ -1322,21 +1353,30 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
                             outline.push_back(PathContour{contour.points, true});
                     }
                 }
-                std::vector<std::vector<font::CoveragePoint>> polygons;
+                DevicePolygons polygons;
                 polygons.reserve(outline.size());
                 for (const PathContour& contour : outline) {
-                    std::vector<font::CoveragePoint> polygon;
+                    std::vector<host::RasterPoint> polygon;
                     polygon.reserve(contour.points.size());
                     for (const Point point : contour.points)
-                        polygon.push_back(font::CoveragePoint{phase.x + point.x * device_x,
-                                                              phase.y + point.y * device_y});
+                        polygon.push_back(host::RasterPoint{phase.x + point.x * device_x,
+                                                            phase.y + point.y * device_y});
                     polygons.push_back(std::move(polygon));
                 }
                 device_outline = std::move(polygons);
             }
             return *device_outline;
         };
-        const bool even_odd = !part.stroke && shape.fill_rule == PathFillRule::evenodd;
+        const host::RasterFill fill = !part.stroke && shape.fill_rule == PathFillRule::evenodd
+                                          ? host::RasterFill::even_odd
+                                          : host::RasterFill::nonzero;
+        // The part's coverage over a `width` x `height` region whose top-left is `origin`.
+        const auto mask = [&](const std::uint32_t width, const std::uint32_t height,
+                              const host::RasterPoint origin, const std::uint32_t gutter) {
+            host::RasterJobBuilder builder(width, height);
+            builder.add_layer(fill, host::RasterLayer{}, outline_polygons(), origin);
+            return builder.encode(gutter, gutter);
+        };
 
         // A conservative device box: the control points, a stroke's reach past them, a pixel.
         double reach = 0.0;
@@ -1361,46 +1401,27 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
             char key[40];
             std::snprintf(key, sizeof(key), "%016llx",
                           static_cast<unsigned long long>(hash.value()));
-            const std::optional<font::GlyphAtlasEntry> entry = atlas->request_mask(
-                key, [&]() -> std::optional<font::GlyphRasterBitmap> {
-                    const auto& polygons = outline_polygons();
-                    double outline_left = std::numeric_limits<double>::infinity();
-                    double outline_top = std::numeric_limits<double>::infinity();
-                    double outline_right = -std::numeric_limits<double>::infinity();
-                    double outline_bottom = -std::numeric_limits<double>::infinity();
-                    for (const std::vector<font::CoveragePoint>& polygon : polygons) {
-                        for (const font::CoveragePoint point : polygon) {
-                            outline_left = std::min(outline_left, point.x);
-                            outline_top = std::min(outline_top, point.y);
-                            outline_right = std::max(outline_right, point.x);
-                            outline_bottom = std::max(outline_bottom, point.y);
-                        }
-                    }
-                    if (!std::isfinite(outline_left) ||
-                        outline_right - outline_left > maximum_mask_extent ||
-                        outline_bottom - outline_top > maximum_mask_extent) {
+            const std::optional<font::GlyphAtlasEntry> entry = atlas->request_raster(
+                key, font::GlyphRasterMode::coverage,
+                [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
+                    DeviceBox outline;
+                    outline.include(outline_polygons());
+                    if (outline.empty() || outline.right - outline.left > maximum_mask_extent ||
+                        outline.bottom - outline.top > maximum_mask_extent) {
                         return std::nullopt;
                     }
                     // One clear pixel around the outline, so linear sampling never reaches a
                     // neighbour in the atlas.
-                    const double x0 = std::floor(outline_left) - 1.0;
-                    const double y0 = std::floor(outline_top) - 1.0;
+                    const double x0 = std::floor(outline.left) - 1.0;
+                    const double y0 = std::floor(outline.top) - 1.0;
                     const auto width =
-                        static_cast<std::uint32_t>(std::ceil(outline_right) + 1.0 - x0);
+                        static_cast<std::uint32_t>(std::ceil(outline.right) + 1.0 - x0);
                     const auto height =
-                        static_cast<std::uint32_t>(std::ceil(outline_bottom) + 1.0 - y0);
-                    std::optional<std::vector<std::uint8_t>> coverage = font::rasterize_polygons(
-                        polygons, width, height, even_odd, font::CoveragePoint{x0, y0});
-                    if (!coverage.has_value())
-                        return std::nullopt;
-                    font::GlyphRasterBitmap bitmap;
-                    bitmap.width = width;
-                    bitmap.height = height;
-                    bitmap.bytes = std::move(*coverage);
+                        static_cast<std::uint32_t>(std::ceil(outline.bottom) + 1.0 - y0);
                     // The mask's device-pixel box relative to the whole-pixel origin.
-                    bitmap.plane_bounds_layout_pixels =
-                        font::RasterPlaneBounds{x0, y0 + height, x0 + width, y0};
-                    return bitmap;
+                    return font::RasterRequest{
+                        mask(width, height, host::RasterPoint{x0, y0}, gutter), width, height,
+                        font::RasterPlaneBounds{x0, y0 + height, x0 + width, y0}};
                 });
             if (!entry.has_value())
                 return false;
@@ -1411,7 +1432,7 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
             continue;
         }
 
-        // Tiles over the device box.
+        // Tiles over the device box. A tile no edge crosses is empty or full throughout.
         const double tile = static_cast<double>(mask_tile);
         const auto first_x = static_cast<std::int64_t>(std::floor(left / tile));
         const auto last_x = static_cast<std::int64_t>(std::floor(right / tile));
@@ -1424,23 +1445,8 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
         }
         if (tile_classes.size() > maximum_tile_classes)
             tile_classes.clear();
-        std::optional<font::GlyphAtlasEntry> solid;
         constexpr std::uint32_t side = mask_tile + 2U;
-        const auto band_width =
-            static_cast<std::uint32_t>(last_x - first_x + 1) * mask_tile + 2U;
         for (std::int64_t tile_y = first_y; tile_y <= last_y; ++tile_y) {
-            // The row of tiles rasterizes once, aprons included, when any of its tiles is missing;
-            // each tile is then cut from it.
-            std::optional<std::vector<std::uint8_t>> band;
-            const auto band_coverage = [&]() -> const std::vector<std::uint8_t>& {
-                if (!band.has_value()) {
-                    band = font::rasterize_polygons(
-                        outline_polygons(), band_width, side, even_odd,
-                        font::CoveragePoint{static_cast<double>(first_x) * tile - 1.0,
-                                            static_cast<double>(tile_y) * tile - 1.0});
-                }
-                return *band;
-            };
             for (std::int64_t tile_x = first_x; tile_x <= last_x; ++tile_x) {
                 MaskHash tile_hash = hash;
                 tile_hash.add(tile_x);
@@ -1459,38 +1465,23 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
                     std::snprintf(key, sizeof(key), "%016llx",
                                   static_cast<unsigned long long>(identity));
                     std::optional<std::uint8_t> found_class;
-                    const std::optional<font::GlyphAtlasEntry> entry = atlas->request_mask(
-                        key, [&]() -> std::optional<font::GlyphRasterBitmap> {
-                            const std::vector<std::uint8_t>& rows = band_coverage();
-                            const std::size_t offset =
-                                static_cast<std::size_t>(tile_x - first_x) * mask_tile;
-                            std::optional<std::vector<std::uint8_t>> coverage(
-                                std::in_place, static_cast<std::size_t>(side) * side);
-                            for (std::uint32_t row = 0U; row < side; ++row) {
-                                std::memcpy(coverage->data() + static_cast<std::size_t>(row) * side,
-                                            rows.data() + static_cast<std::size_t>(row) * band_width +
-                                                offset,
-                                            side);
-                            }
-                            if (std::ranges::all_of(*coverage,
-                                                    [](const std::uint8_t value) { return value == 0U; })) {
-                                found_class = std::uint8_t{0U};
+                    const std::optional<font::GlyphAtlasEntry> entry = atlas->request_raster(
+                        key, font::GlyphRasterMode::coverage,
+                        [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
+                            const host::RasterPoint origin{core.left - 1.0, core.top - 1.0};
+                            const DeviceBox region{origin.x, origin.y, origin.x + side,
+                                                   origin.y + side};
+                            if (!edges_cross(outline_polygons(), region)) {
+                                found_class = covers(outline_polygons(), fill,
+                                                     origin.x + side * 0.5, origin.y + side * 0.5)
+                                                  ? std::uint8_t{1U}
+                                                  : std::uint8_t{0U};
                                 return std::nullopt;
                             }
-                            if (std::ranges::all_of(*coverage, [](const std::uint8_t value) {
-                                    return value == 255U;
-                                })) {
-                                found_class = std::uint8_t{1U};
-                                return std::nullopt;
-                            }
-                            font::GlyphRasterBitmap bitmap;
-                            bitmap.width = side;
-                            bitmap.height = side;
-                            bitmap.bytes = std::move(*coverage);
-                            bitmap.plane_bounds_layout_pixels = font::RasterPlaneBounds{
-                                core.left - 1.0, core.bottom + 1.0, core.right + 1.0,
-                                core.top - 1.0};
-                            return bitmap;
+                            return font::RasterRequest{
+                                mask(side, side, origin, gutter), side, side,
+                                font::RasterPlaneBounds{core.left - 1.0, core.bottom + 1.0,
+                                                        core.right + 1.0, core.top - 1.0}};
                         });
                     if (found_class.has_value()) {
                         tile_classes[identity] = *found_class;
@@ -1501,8 +1492,8 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
                         return false;
                     } else {
                         // The core's texels: the apron stays outside the quad.
-                        const double inset_u = entry->uv_width / static_cast<double>(mask_tile + 2U);
-                        const double inset_v = entry->uv_height / static_cast<double>(mask_tile + 2U);
+                        const double inset_u = entry->uv_width / static_cast<double>(side);
+                        const double inset_v = entry->uv_height / static_cast<double>(side);
                         pieces.push_back(Piece{
                             &part, core,
                             TextureRegion{entry->u + inset_u, entry->v + inset_v,
@@ -1514,14 +1505,7 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
                 }
                 // A full tile samples one solid texel.
                 if (!solid.has_value()) {
-                    solid = atlas->request_mask("solid", []() -> std::optional<font::GlyphRasterBitmap> {
-                        font::GlyphRasterBitmap bitmap;
-                        bitmap.width = 4U;
-                        bitmap.height = 4U;
-                        bitmap.bytes.assign(16U, 255U);
-                        bitmap.plane_bounds_layout_pixels = font::RasterPlaneBounds{0.0, 4.0, 4.0, 0.0};
-                        return bitmap;
-                    });
+                    solid = solid_texel(*atlas, std::nullopt);
                     if (!solid.has_value())
                         return false;
                 }

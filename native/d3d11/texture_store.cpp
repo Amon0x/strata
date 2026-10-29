@@ -16,6 +16,7 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 
+#include "raster_pass.hpp"
 #include <strata/render_packet.hpp>
 
 namespace strata::d3d11 {
@@ -38,6 +39,8 @@ struct Texture final {
     ComPtr<ID3D11Texture2D> texture;
     ComPtr<ID3D11ShaderResourceView> view;
     ComPtr<ID3D11SamplerState> sampler;
+    /** Shape atlases (formats 1 and 2), which raster jobs write from compute shaders. */
+    ComPtr<ID3D11UnorderedAccessView> writer;
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
     std::uint32_t width = 0U;
     std::uint32_t height = 0U;
@@ -81,7 +84,8 @@ struct TextureStore::Impl final {
     [[nodiscard]] Texture create_texture(const std::uint32_t width, const std::uint32_t height,
                                          const DXGI_FORMAT format, const std::uint32_t sampling,
                                          const void* const pixels = nullptr,
-                                         const std::uint32_t row_pitch = 0U) const {
+                                         const std::uint32_t row_pitch = 0U,
+                                         const bool writable = false) const {
         D3D11_TEXTURE2D_DESC descriptor{};
         descriptor.Width = width;
         descriptor.Height = height;
@@ -91,6 +95,8 @@ struct TextureStore::Impl final {
         descriptor.SampleDesc.Count = 1U;
         descriptor.Usage = D3D11_USAGE_DEFAULT;
         descriptor.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        if (writable)
+            descriptor.BindFlags |= D3D11_BIND_UNORDERED_ACCESS;
         const D3D11_SUBRESOURCE_DATA initial{pixels, row_pitch, 0U};
         Texture result;
         require_hresult(device->CreateTexture2D(&descriptor, pixels == nullptr ? nullptr : &initial,
@@ -99,6 +105,11 @@ struct TextureStore::Impl final {
         require_hresult(
             device->CreateShaderResourceView(result.texture.Get(), nullptr, &result.view),
             "texture view creation");
+        if (writable) {
+            require_hresult(
+                device->CreateUnorderedAccessView(result.texture.Get(), nullptr, &result.writer),
+                "texture writer creation");
+        }
         result.sampler = create_sampler(sampling);
         result.format = format;
         result.width = width;
@@ -115,7 +126,8 @@ struct TextureStore::Impl final {
             textures.insert_or_assign(operation.texture,
                                       create_texture(operation.width, operation.height,
                                                      atlas_format(operation.format),
-                                                     operation.format == 0U ? 0U : 1U));
+                                                     operation.format == 0U ? 0U : 1U, nullptr,
+                                                     0U, operation.format != 0U));
             // Glyph pages (format 0) sample texel-exact; shape masks (2) and MSDF (1) bilinearly.
             return;
         }
@@ -135,6 +147,15 @@ struct TextureStore::Impl final {
         const std::uint64_t bottom = static_cast<std::uint64_t>(operation.y) + operation.height;
         if (right > destination.width || bottom > destination.height) {
             throw std::invalid_argument("atlas upload exceeds its live texture");
+        }
+        if (operation.kind == host::resource_raster) {
+            if (destination.writer == nullptr)
+                throw std::invalid_argument("raster job targets an atlas compute cannot write");
+            if (raster == nullptr)
+                raster = std::make_unique<RasterPass>(device.Get(), context.Get());
+            raster->run(operation.raster, operation.format == 1U, destination.writer.Get(),
+                        operation.x, operation.y, operation.width, operation.height);
+            return;
         }
         const std::uint32_t bytes_per_pixel = operation.format == 1U ? 4U : 1U;
         const D3D11_BOX box{
@@ -161,6 +182,8 @@ struct TextureStore::Impl final {
     ComPtr<ID3D11DeviceContext> context;
     std::map<std::string, Texture, std::less<>> textures;
     Texture white;
+    /** Made on the first raster job, so a stream without shapes compiles no compute shaders. */
+    std::unique_ptr<RasterPass> raster;
 };
 
 TextureStore::TextureStore(ID3D11Device* const device, ID3D11DeviceContext* const context)

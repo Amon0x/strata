@@ -396,6 +396,26 @@ void SoftwareRenderer::apply(const host::ResourceOperation& operation) {
                                                       });
         return;
     }
+    if (operation.kind == host::resource_raster) {
+        // The reference rasterizer, which the GPU backends reproduce texel for texel.
+        auto found = textures_.find(operation.texture);
+        if (found == textures_.end())
+            throw std::invalid_argument("headless raster job has no live texture");
+        Texture& texture = found->second;
+        const std::uint32_t channels = operation.format == 1U ? 4U : 1U;
+        if (texture.channels != channels ||
+            static_cast<std::uint64_t>(operation.x) + operation.width > texture.width ||
+            static_cast<std::uint64_t>(operation.y) + operation.height > texture.height) {
+            throw std::invalid_argument("headless raster job differs from its texture descriptor");
+        }
+        const std::size_t row_bytes = static_cast<std::size_t>(texture.width) * channels;
+        const std::size_t origin =
+            static_cast<std::size_t>(operation.y) * row_bytes +
+            static_cast<std::size_t>(operation.x) * channels;
+        host::rasterize_job(operation.raster, operation.format, operation.width, operation.height,
+                            std::span(texture.pixels).subspan(origin), row_bytes);
+        return;
+    }
     if (operation.kind != 1U) {
         throw std::invalid_argument("headless renderer received an unknown resource operation");
     }

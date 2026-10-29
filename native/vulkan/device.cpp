@@ -6,6 +6,8 @@ Renderer::Impl::~Impl() {
         release_frame(slot);
         for (auto pool : slot.pools)
             vkDestroyDescriptorPool(device.device, pool, nullptr);
+        for (auto pool : slot.raster_pools)
+            vkDestroyDescriptorPool(device.device, pool, nullptr);
         if (slot.commands)
             vkDestroyCommandPool(device.device, slot.commands, nullptr);
         if (slot.fence)
@@ -15,6 +17,14 @@ Renderer::Impl::~Impl() {
         (void)key;
         vkDestroyPipeline(device.device, pipeline, nullptr);
     }
+    for (auto pipeline : raster_pipelines) {
+        if (pipeline)
+            vkDestroyPipeline(device.device, pipeline, nullptr);
+    }
+    if (raster_layout)
+        vkDestroyPipelineLayout(device.device, raster_layout, nullptr);
+    if (raster_descriptors)
+        vkDestroyDescriptorSetLayout(device.device, raster_descriptors, nullptr);
     if (pipeline_cache)
         vkDestroyPipelineCache(device.device, pipeline_cache, nullptr);
     for (auto& [key, pass] : render_passes) {
@@ -189,6 +199,9 @@ void Renderer::Impl::begin() {
     release_frame(slot);
     for (auto pool : slot.pools)
         check(vkResetDescriptorPool(device.device, pool, 0), "reset descriptor pool");
+    for (auto pool : slot.raster_pools)
+        check(vkResetDescriptorPool(device.device, pool, 0), "reset descriptor pool");
+    slot.raster_pool_index = 0;
     check(vkResetCommandPool(device.device, slot.commands, 0), "reset command pool");
     slot.arena->reset();
     slot.pool_index = 0;

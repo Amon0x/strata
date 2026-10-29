@@ -7,6 +7,10 @@
 #include <optional>
 #include <fstream>
 #include <stdexcept>
+#include <tuple>
+#include <utility>
+#include <vector>
+#include <strata/raster_job.hpp>
 #include <strata/render_packet.hpp>
 #include <strata/strata.hpp>
 #include <strata/vulkan.h>
@@ -62,10 +66,113 @@ void near(std::array<int, 4> actual, std::array<int, 4> expected, const char* me
             throw std::runtime_error(message);
         }
 }
+/**
+ * Raster jobs rasterized by the compute kernels match the reference rasterizer: an atlas filled by
+ * a job is drawn 1:1 into the target and read back. Coverage must match exactly; a colour
+ * composite of solid layers too (its atlas samples bilinearly, at texel centres).
+ */
+void test_raster_jobs_match_the_reference(vulkan::detail::Offscreen& context) {
+    constexpr std::uint32_t width = 150, height = 110, region_width = width + 2,
+                            region_height = height + 2;
+    context.resize(region_width, region_height);
+    vulkan::Renderer renderer(context.device);
+    std::vector<host::RasterPoint> wobbly;
+    for (int index = 0; index < 600; ++index) {
+        const double angle = 6.283185307179586 * index / 600.0;
+        const double r = 41.0 * (1.0 + 0.25 * std::sin(angle * 7.0));
+        wobbly.push_back({70.3 + std::cos(angle) * r, 55.7 + std::sin(angle) * r * 0.8});
+    }
+    const std::vector<std::vector<host::RasterPoint>> star{
+        {{75.0, 4.0}, {112.0, 104.0}, {16.0, 42.0}, {134.0, 42.0}, {38.0, 104.0}}};
+    const std::vector<std::vector<host::RasterPoint>> outside{
+        {{-40.0, -30.0}, {190.0, 20.0}, {160.0, 150.0}, {-20.0, 90.0}}};
+    const std::vector<std::vector<host::RasterPoint>> blob{wobbly};
+    const auto draw = [&](const host::RasterJobBuilder& builder, const bool rgba) {
+        const std::uint32_t format = rgba ? host::texture_format_rgba8 : host::texture_format_r8;
+        host::RenderPacket packet;
+        packet.full_geometry_payload = true;
+        packet.geometry_epoch = 1;
+        host::ResourceOperation create;
+        create.kind = host::resource_create;
+        create.texture = "test.raster";
+        create.format = format;
+        create.width = region_width;
+        create.height = region_height;
+        host::ResourceOperation raster = create;
+        raster.kind = host::resource_raster;
+        raster.raster =
+            host::decode_raster_job(builder.encode(1U, 1U), region_width, region_height, format);
+        packet.resources = {create, raster};
+        packet.vertices.resize(4 * 88);
+        const std::array<std::array<float, 2>, 4> corners{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
+        for (std::size_t i = 0; i < 4; ++i) {
+            put(packet, i, 0, corners[i][0] * region_width);
+            put(packet, i, 4, corners[i][1] * region_height);
+            put(packet, i, 12, corners[i][0]);
+            put(packet, i, 16, corners[i][1]);
+            const std::array<std::uint8_t, 4> white{255, 255, 255, 255};
+            std::memcpy(packet.vertices.data() + i * 88 + 20, white.data(), 4);
+            put(packet, i, 80, 1); // textured
+            put(packet, i, 84, 1);
+        }
+        packet.indices = {0, 1, 2, 0, 2, 3};
+        host::DrawBatch batch;
+        batch.scissor = {0, 0, region_width, region_height};
+        packet.materials = {"strata:unified_ui"};
+        batch.material = 0;
+        batch.blend = host::DrawBlend::opaque;
+        batch.clip_coverage = host::ClipCoverage::hard;
+        batch.index_count = 6;
+        batch.texture = "test.raster";
+        packet.batches.emplace_back(batch);
+        (void)renderer.render("raster", packet, context.target(region_width, region_height),
+                              {vulkan::TargetLoadAction::clear, {0, 0, 0, 0}, 0});
+        std::vector<std::uint8_t> reference(static_cast<std::size_t>(region_width) *
+                                            region_height * (rgba ? 4U : 1U));
+        host::rasterize_job(raster.raster, format, region_width, region_height, reference,
+                            region_width * (rgba ? 4U : 1U));
+        return std::pair{context.pixels(), reference};
+    };
+    for (const auto& [label, polygons, fill] :
+         {std::tuple{"star", star, host::RasterFill::nonzero},
+          std::tuple{"even-odd star", star, host::RasterFill::even_odd},
+          std::tuple{"clipped quad", outside, host::RasterFill::nonzero},
+          std::tuple{"wobbly blob", blob, host::RasterFill::nonzero}}) {
+        host::RasterJobBuilder builder(width, height);
+        builder.add_layer(fill, host::RasterLayer{}, polygons, host::RasterPoint{0.25, -0.375});
+        const auto [pixels, reference] = draw(builder, false);
+        std::size_t differing = 0, covered = 0;
+        for (std::size_t index = 0; index < reference.size(); ++index) {
+            differing += pixels[index * 4] != reference[index] ? 1U : 0U;
+            covered += reference[index] != 0 ? 1U : 0U;
+        }
+        std::cout << "  Vulkan " << label << ": " << differing << " of " << covered
+                  << " covered texels differ\n";
+        require(covered > 0 && differing == 0, "Vulkan compute coverage differs from the reference");
+    }
+    host::RasterLayer opaque;
+    opaque.paint = host::RasterPaint::solid;
+    opaque.color = 0xFF2080F0U;
+    host::RasterLayer translucent;
+    translucent.paint = host::RasterPaint::solid;
+    translucent.color = 0x8040C020U;
+    host::RasterJobBuilder builder(width, height);
+    builder.add_layer(host::RasterFill::nonzero, opaque, star, {});
+    builder.add_layer(host::RasterFill::even_odd, translucent, blob, {});
+    builder.add_layer(host::RasterFill::nonzero, translucent, outside, {});
+    const auto [pixels, reference] = draw(builder, true);
+    int largest = 0;
+    for (std::size_t index = 0; index < reference.size(); ++index)
+        largest = std::max(largest, std::abs(int{pixels[index]} - int{reference[index]}));
+    std::cout << "  Vulkan solid composite: largest difference " << largest << "\n";
+    require(largest == 0, "Vulkan compute composite differs from the reference");
+}
+
 void run() {
     vulkan::detail::Offscreen context(true);
-    context.resize(32, 32);
     std::cout << "Vulkan device: " << context.device_name << "\n";
+    test_raster_jobs_match_the_reference(context);
+    context.resize(32, 32);
     {
         vulkan::Renderer renderer(context.device);
         auto render = [&](const host::RenderPacket& packet, bool clear = true) {

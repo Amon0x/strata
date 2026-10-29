@@ -695,8 +695,10 @@ sectors and rings, arcs stroked with butt or round caps, lines, and rects whose 
 circular on screen, all in a solid color without dashes, are evaluated analytically by the pixel
 stage, so they stay exact while they animate and a stroke thinner than a pixel draws
 proportionally lighter rather than a pixel wide. Every other outline (polygons, polylines, paths,
-dashed or gradient-painted shapes, and imported SVG icons) is rasterized once into a coverage
-mask the way text glyphs are, at the shape's device size and sub-pixel position, and cached. Fills
+dashed or gradient-painted shapes, and imported SVG icons) becomes a coverage mask the way text
+glyphs are, at the shape's device size and sub-pixel position, and cached; the GPU rasterizes it
+from the outline's edges in compute shaders, so a shape that changes every frame costs the CPU
+only its outline. Fills
 follow their fill rule, strokes are a union, so a translucent stroke stays one even alpha where it
 crosses itself, and shapes larger than an atlas page are drawn in seamless tiles. Gradient paints
 are evaluated per pixel over the mask: every stop, `extend` mode and radial distance is exact.
@@ -878,7 +880,7 @@ the window's.
 The D3D11 desktop and headless hosts execute the full pass program. The reference software backend
 executes declared blur passes, ignores authored shader stages, and then applies the same rounded
 mask, opacity, and backdrop/content composition. This approximation is intentionally deterministic
-rather than a claim of shader fidelity. Packet v15 carries ordered backdrop/content batches,
+rather than a claim of shader fidelity. Packet v16 carries ordered backdrop/content batches,
 current/surface backdrop selection, active rounded-clip geometry, effect refresh-rate policy, a
 backdrop probe token, and a bounded sixteen-float parameter block; presentation groups carry tone
 beside their transform and opacity.

@@ -120,21 +120,4 @@ struct MsdfRasterConfig final {
     std::uint32_t font_style_flags = 0U
 );
 
-/** A polygon vertex in bitmap pixels: x right, y down, (0, 0) the bitmap's top-left corner. */
-struct CoveragePoint final {
-    double x = 0.0;
-    double y = 0.0;
-};
-
-/**
- * The exact area each pixel of a `width` x `height` bitmap shares with closed polygons, as 8-bit
- * coverage: what text glyphs get, for any outline. Overlapping polygons combine by the nonzero
- * rule (a union, when they wind the same way) or by even-odd. The bitmap's top-left corner sits at
- * `origin` in the polygons' space, so one outline rasterizes tile by tile; edges outside the bitmap
- * cost only their crossing of its rows. Any number of points is taken.
- */
-[[nodiscard]] std::optional<std::vector<std::uint8_t>>
-rasterize_polygons(std::span<const std::vector<CoveragePoint>> contours, std::uint32_t width,
-                   std::uint32_t height, bool even_odd, CoveragePoint origin = {});
-
 } // namespace strata::font

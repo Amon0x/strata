@@ -25,4 +25,21 @@ std::vector<std::uint32_t> compile_hlsl(std::string_view source, bool vertex,
         throw std::runtime_error("Vulkan HLSL compilation failed: " + result.GetErrorMessage());
     return {result.cbegin(), result.cend()};
 }
+std::vector<std::uint32_t> compile_hlsl_compute(std::string_view source, std::string_view entry,
+                                                std::string_view name) {
+    shaderc::Compiler compiler;
+    shaderc::CompileOptions options;
+    options.SetSourceLanguage(shaderc_source_language_hlsl);
+    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1);
+    options.SetHlslIoMapping(true);
+    options.SetHlslOffsets(true);
+    options.AddMacroDefinition("STRATA_VULKAN");
+    options.SetOptimizationLevel(shaderc_optimization_level_performance);
+    const auto result = compiler.CompileGlslToSpv(source.data(), source.size(),
+                                                  shaderc_compute_shader, std::string(name).c_str(),
+                                                  std::string(entry).c_str(), options);
+    if (result.GetCompilationStatus() != shaderc_compilation_status_success)
+        throw std::runtime_error("Vulkan HLSL compilation failed: " + result.GetErrorMessage());
+    return {result.cbegin(), result.cend()};
+}
 } // namespace strata::vulkan::detail

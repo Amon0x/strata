@@ -3,7 +3,7 @@
 `strata_headless` is a deterministic host for complete `.strata` applications. It is not a second
 UI runtime and it contains no widget-specific test hooks. The tool uses the public C ABI to compile
 and activate an application, create a normal `Surface`, enqueue ordinary input, frame it against a
-caller-owned clock, and consume render packet v15.
+caller-owned clock, and consume render packet v16.
 
 Each capture contains both views needed by automated testing:
 
@@ -261,7 +261,8 @@ The reference renderer is an oracle only for what it implements the same way as 
 - every packet blend (`DrawBlend`) and rounded-clip coverage mode (`ClipCoverage`), applied exactly
   as the packet states them, and the GPU's 1/256 subpixel vertex snap;
 - blur batches and the blur passes of effect programs, including downsampled blur;
-- decoded RGBA8 images and atlas uploads, sampled nearest or bilinear as declared;
+- decoded RGBA8 images, atlas uploads and raster jobs (by the reference rasterizer the GPU
+  backends reproduce exactly), sampled nearest or bilinear as declared;
 - effect-sample retention: it reuses a sample exactly when a GPU backend would (the decoder's
   `sample_revision` and the refresh interval).
 

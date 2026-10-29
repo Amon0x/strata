@@ -22,10 +22,13 @@ enum class AtlasTextureFormat : std::uint8_t {
     r8_filtered,
 };
 
+/** Numbered as the render packet numbers its resource records. */
 enum class AtlasOperationKind : std::uint8_t {
-    create,
-    upload,
-    release,
+    create = 0U,
+    upload = 1U,
+    release = 2U,
+    /** A region the backend rasterizes from the raster job in `bytes` (strata/raster_job.hpp). */
+    raster = 4U,
 };
 
 struct AtlasPixelRect final {
@@ -58,6 +61,15 @@ struct GlyphAtlasEntry final {
     SubpixelPhase phase;
 };
 
+/** A raster job (strata/raster_job.hpp) and the content it fills. */
+struct RasterRequest final {
+    std::vector<std::uint8_t> job;
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+    /** The content's place on the device grid. */
+    RasterPlaneBounds plane_bounds;
+};
+
 struct GlyphAtlasConfig final {
     std::uint32_t page_size = 1'024U;
     std::uint32_t maximum_pages = 8U;
@@ -72,6 +84,11 @@ struct GlyphAtlasConfig final {
      * texel-exact sampling.
      */
     bool filtered_coverage = false;
+    /**
+     * Pages filled only by raster jobs (request_raster), which the backend rasterizes: no copy of
+     * their texels is kept on the CPU.
+     */
+    bool backend_rasterized = false;
     CoverageRasterConfig coverage;
     MsdfRasterConfig msdf;
 };
@@ -124,23 +141,23 @@ class GlyphAtlas final {
             GlyphRasterMode mode = GlyphRasterMode::coverage);
 
     /**
-     * A coverage mask that is not a glyph (a shape's fill or stroke), cached under `key`, which must
-     * name everything the mask's pixels depend on. A miss calls `rasterize` for an 8-bit coverage
-     * bitmap and packs it like a glyph. Returns nothing when `rasterize` does, or when the pages are
-     * full until the next safe frame reclaims them. A `GlyphRasterMode::msdf` mask is four channels
-     * on the RGBA pages instead of coverage.
-     */
-    /**
      * The pages something still drawn uses, given before planning a frame. With it, a full atlas
      * resets one page outside this set that nothing has used this preparation and packs into it,
      * instead of recycling every page (and every plan that draws from them). Without it, as for
      * glyphs, a full atlas recycles.
      */
     void retain_pages(std::span<const std::string> textures);
+    /**
+     * A picture that is not a glyph (a shape's coverage, or joined shapes' colour), cached under
+     * `key`, which must name everything its texels depend on. A miss calls `encode` with the
+     * content's offset within its packed region (the gutter) for the raster job the backend
+     * rasterizes there, and packs a region for its content. Coverage is R8 and
+     * `GlyphRasterMode::msdf` RGBA8. Returns nothing when `encode` does, when the content exceeds
+     * a page, or when the pages are full until the next safe frame reclaims them.
+     */
     [[nodiscard]] std::optional<GlyphAtlasEntry>
-    request_mask(std::string_view key,
-                 const std::function<std::optional<GlyphRasterBitmap>()>& rasterize,
-                 GlyphRasterMode mode = GlyphRasterMode::coverage);
+    request_raster(std::string_view key, GlyphRasterMode mode,
+                   const std::function<std::optional<RasterRequest>(std::uint32_t)>& encode);
     /**
      * Rasterizes and packs a unique request set before draw planning. Expensive cache misses run
      * concurrently, while deterministic page allocation and host-operation construction remain
@@ -190,6 +207,13 @@ class GlyphAtlas final {
     [[nodiscard]] GlyphAtlasEntry insert(const Key& key, const GlyphRasterBitmap& bitmap,
                                          const Allocation& allocation);
     [[nodiscard]] GlyphAtlasEntry insert_bitmap(Key& key, const GlyphRasterBitmap& bitmap);
+    /** Room for a `width` x `height` region: packed, on a reused page, or after a recycle. */
+    [[nodiscard]] Allocation place(Key& key, std::uint32_t width, std::uint32_t height,
+                                   GlyphRasterMode mode);
+    [[nodiscard]] GlyphAtlasEntry entry_for(const Key& key, const Allocation& allocation,
+                                            const RasterPlaneBounds& plane_bounds,
+                                            double atlas_pixel_range, double layout_pixel_range,
+                                            GlyphRasterMode mode) const;
     [[nodiscard]] std::optional<GlyphAtlasEntry>
     request_mode(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
                  double pixel_size, SubpixelPhase phase, GlyphRasterMode mode,

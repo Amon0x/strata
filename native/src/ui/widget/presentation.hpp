@@ -148,7 +148,7 @@ class WidgetRenderScope final {
      * The painter: vector drawing in the widget's logical pixels. Each shape picks its own way to
      * draw, both exact (include/strata/render_shapes.hpp): circles, ellipses, ring sectors, arcs,
      * lines and rounded rects are evaluated analytically by the pixel stage, and every other
-     * outline is rasterized once into a cached coverage mask. Angles are degrees clockwise from
+     * outline becomes a cached coverage mask the GPU rasterizes. Angles are degrees clockwise from
      * +x. A gradient paint is laid out across the shape's own bounding box.
      */
     void ellipse(Point center, double radius_x, double radius_y, std::optional<Paint> fill,

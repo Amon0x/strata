@@ -314,6 +314,26 @@ set_target_properties(
 strata_target_defaults(strata_svg)
 target_compile_features(strata_svg PUBLIC cxx_std_23)
 
+# Raster jobs: the outline pictures the core sends and every backend rasterizes, with the CPU
+# reference. The engine encodes them and the render host decodes them, so both link this alone.
+add_library(strata_raster STATIC host/raster_job.cpp)
+add_library(Strata::raster ALIAS strata_raster)
+target_include_directories(
+    strata_raster
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+)
+set_target_properties(
+    strata_raster
+    PROPERTIES
+        EXPORT_NAME raster
+        POSITION_INDEPENDENT_CODE ON
+        STRATA_PUBLIC_HEADERS raster_job.hpp
+)
+strata_target_defaults(strata_raster)
+target_compile_features(strata_raster PUBLIC cxx_std_23)
+
 add_library(
     strata_render_host
     STATIC
@@ -333,6 +353,7 @@ set_target_properties(
         EXPORT_NAME render_host
         POSITION_INDEPENDENT_CODE ON
 )
+target_link_libraries(strata_render_host PUBLIC Strata::raster)
 strata_target_defaults(strata_render_host)
 
 # Extension loading, module and resource paths, and system fonts for every native host. The
@@ -380,7 +401,7 @@ strata_add_layer(strata_font DIRECTORIES font PUBLIC strata_resource PRIVATE fre
 strata_add_layer(
     strata_ui
     DIRECTORIES ui
-    PUBLIC strata_runtime strata_font strata_geometry Strata::svg
+    PUBLIC strata_runtime strata_font strata_geometry Strata::svg Strata::raster
 )
 strata_precompile_standard_headers(strata_ui)
 strata_add_layer(strata_core DIRECTORIES core PUBLIC strata_ui)
@@ -559,6 +580,7 @@ if(STRATA_BUILD_VULKAN)
         vulkan/textures.cpp
         vulkan/pipeline.cpp
         vulkan/effects.cpp
+        vulkan/raster.cpp
         vulkan/shader.cpp
         vulkan/presenter.cpp
         vulkan/presenter_abi.cpp)
@@ -585,6 +607,7 @@ if(WIN32)
             d3d11/effect_pass.cpp
             d3d11/presenter.cpp
             d3d11/presenter_abi.cpp
+            d3d11/raster_pass.cpp
             d3d11/render_context.cpp
             d3d11/renderer.cpp
             d3d11/texture_store.cpp
@@ -1567,6 +1590,7 @@ install(
         strata_host_cpp
         strata_extensions
         strata_render_host
+        strata_raster
         strata_svg
         strata_base
         strata_host_support

@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include <strata/raster_job.hpp>
 #include <strata/render_packet.hpp>
 #include <strata/svg.hpp>
 
@@ -458,24 +459,28 @@ void test_full_mask_atlas_reuses_a_page_of_the_other_kind() {
     config.page_size = 64U;
     config.maximum_pages = 2U;
     config.filtered_coverage = true;
+    config.backend_rasterized = true;
     strata::font::GlyphAtlas atlas("ui-test-mask-page-kinds", config);
     const auto mask = [](const strata::font::GlyphRasterMode mode) {
-        return [mode]() -> std::optional<strata::font::GlyphRasterBitmap> {
-            strata::font::GlyphRasterBitmap bitmap;
-            bitmap.width = 60U;
-            bitmap.height = 60U;
-            bitmap.mode = mode;
-            bitmap.bytes.assign(60U * 60U * (mode == strata::font::GlyphRasterMode::msdf ? 4U : 1U),
-                                255U);
-            bitmap.plane_bounds_layout_pixels = strata::font::RasterPlaneBounds{0.0, 60.0, 60.0, 0.0};
-            return bitmap;
+        return [mode](const std::uint32_t gutter) -> std::optional<strata::font::RasterRequest> {
+            strata::host::RasterJobBuilder builder(60U, 60U);
+            strata::host::RasterLayer layer;
+            if (mode == strata::font::GlyphRasterMode::msdf)
+                layer.paint = strata::host::RasterPaint::solid;
+            const std::vector<std::vector<strata::host::RasterPoint>> square{
+                {{0.0, 0.0}, {60.0, 0.0}, {60.0, 60.0}, {0.0, 60.0}}};
+            builder.add_layer(strata::host::RasterFill::nonzero, layer, square, {});
+            return strata::font::RasterRequest{builder.encode(gutter, gutter), 60U, 60U,
+                                               strata::font::RasterPlaneBounds{0.0, 60.0, 60.0, 0.0}};
         };
     };
     using strata::font::GlyphRasterMode;
     static_cast<void>(atlas.begin_frame_preparation());
     atlas.retain_pages({});
-    const auto coverage = atlas.request_mask("coverage", mask(GlyphRasterMode::coverage));
-    const auto colour = atlas.request_mask("colour", mask(GlyphRasterMode::msdf), GlyphRasterMode::msdf);
+    const auto coverage =
+        atlas.request_raster("coverage", GlyphRasterMode::coverage, mask(GlyphRasterMode::coverage));
+    const auto colour =
+        atlas.request_raster("colour", GlyphRasterMode::msdf, mask(GlyphRasterMode::msdf));
     atlas.end_frame_preparation();
     check(coverage.has_value() && colour.has_value() && coverage->texture != colour->texture,
           "mask atlas did not give each kind its own page");
@@ -485,16 +490,15 @@ void test_full_mask_atlas_reuses_a_page_of_the_other_kind() {
     static_cast<void>(atlas.begin_frame_preparation());
     const std::vector<std::string> drawn{colour->texture};
     atlas.retain_pages(drawn);
-    const auto next = atlas.request_mask("next colour", mask(GlyphRasterMode::msdf),
-                                         GlyphRasterMode::msdf);
+    const auto next =
+        atlas.request_raster("next colour", GlyphRasterMode::msdf, mask(GlyphRasterMode::msdf));
     bool rasterized_again = false;
-    const auto kept = atlas.request_mask(
-        "colour",
-        [&]() -> std::optional<strata::font::GlyphRasterBitmap> {
+    const auto kept = atlas.request_raster(
+        "colour", GlyphRasterMode::msdf,
+        [&](std::uint32_t) -> std::optional<strata::font::RasterRequest> {
             rasterized_again = true;
             return std::nullopt;
-        },
-        GlyphRasterMode::msdf);
+        });
     atlas.end_frame_preparation();
     check(atlas.generation() == generation,
           "full mask atlas started over instead of remaking a page nothing draws from");

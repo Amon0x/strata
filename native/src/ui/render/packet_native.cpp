@@ -80,7 +80,8 @@ class Writer final {
     output.integer(operation.region.y);
     output.integer(operation.region.width);
     output.integer(operation.region.height);
-    if (operation.kind == font::AtlasOperationKind::upload) {
+    if (operation.kind == font::AtlasOperationKind::upload ||
+        operation.kind == font::AtlasOperationKind::raster) {
         if (operation.bytes.size() > std::numeric_limits<std::uint32_t>::max()) {
             throw std::length_error("native atlas upload exceeds uint32");
         }

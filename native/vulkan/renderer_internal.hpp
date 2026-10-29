@@ -96,6 +96,9 @@ struct Renderer::Impl {
         std::unique_ptr<UploadArena> arena;
         std::vector<VkDescriptorPool> pools;
         std::size_t pool_index = 0;
+        /** Storage-buffer sets of raster jobs, in pools of their own. */
+        std::vector<VkDescriptorPool> raster_pools;
+        std::size_t raster_pool_index = 0;
         std::vector<VkFramebuffer> framebuffers;
         std::vector<std::unique_ptr<Image>> retired_images;
         std::vector<std::unique_ptr<Buffer>> retired_buffers;
@@ -186,6 +189,15 @@ struct Renderer::Impl {
     std::vector<Scratch> scratch;
     std::uint64_t scratch_frame = 0;
     std::vector<std::uint32_t> vertex, fullscreen;
+    /**
+     * Raster job kernels (gpu/raster_shaders.hpp), made on the first raster job: accumulate,
+     * resolve_coverage, resolve_composite and finish, over five storage buffers.
+     */
+    VkDescriptorSetLayout raster_descriptors{};
+    VkPipelineLayout raster_layout{};
+    std::array<VkPipeline, 4U> raster_pipelines{};
+    /** GPU-only work buffers the kernels leave zeroed, and the region they write. */
+    std::unique_ptr<Buffer> raster_cells, raster_sums, raster_output;
     bool poisoned = false;
     double logical_width{}, logical_height{}, seconds{};
     RenderLayerTelemetry telemetry;
@@ -217,6 +229,11 @@ struct Renderer::Impl {
     /** A target-sized copy of `source` holding only `region`, which is all its reader samples. */
     Image& capture(Target& source, host::Scissor region);
     void resources(const host::RenderPacket& packet);
+    /** Rasterizes a raster operation's job into its region of `image` (vulkan/raster.cpp). */
+    void rasterize(const host::ResourceOperation& operation, Image& image);
+    void create_raster_kernels();
+    /** A zeroed GPU-only storage buffer of at least `bytes`, replacing `buffer` if smaller. */
+    void reserve_raster_buffer(std::unique_ptr<Buffer>& buffer, VkDeviceSize bytes, bool zeroed);
     VkRenderPass render_pass(VkFormat format);
     VkPipeline pipeline(std::string_view program, Blend blend, VkFormat format, bool full);
     VkDescriptorSet descriptor_set(Slice constants, const gpu::RoundedClipConstants& clips,
