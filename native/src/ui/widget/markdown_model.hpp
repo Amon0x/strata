@@ -50,6 +50,8 @@ struct MarkdownBlock final {
     int level = 0;
     /** A code block's text, verbatim. */
     std::string code;
+    /** A fenced code block's language: the first word of its info string ("```rust"). */
+    std::string language;
     bool ordered = false;
     /** An ordered list's first number. */
     int start = 1;

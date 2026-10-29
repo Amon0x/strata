@@ -3368,6 +3368,137 @@ overlay Formats {
     check(text("formats.wall") == "read", "clock.now did not answer then() with the wall clock");
 }
 
+void test_paint_rotate_spins_a_gradient_border(const std::filesystem::path& resources) {
+    const std::string source = R"(
+animation BorderSpin { duration: 1000ms; easing: "linear"; repeat: "forever"; from { paintRotate: 0 } to { paintRotate: 360 } }
+overlay Spin {
+  root Panel(key: "spin.root", layout: { kind: "COLUMN", width: 300, height: 200 }) {
+    Panel(key: "spin.card", enter: BorderSpin, style: style(width: 200, height: 100, radius: 16, background: #101010FF,
+      border: { width: 3, paint: { kind: "conic", stops: [ { color: #FF0000FF }, { color: #0000FFFF } ] } }))
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("paint-rotate", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Spin", 300.0, 200.0, false);
+    const auto rotation = [&]() -> std::optional<double> {
+        for (const ui::RenderCommand& command : surface->render_commands().commands()) {
+            if (const auto* rect = std::get_if<ui::RoundedRectRenderCommand>(&command);
+                rect != nullptr && rect->border.has_value() && rect->border->paint.is_gradient()) {
+                return rect->border->paint.gradient()->rotation_degrees;
+            }
+            if (const auto* border = std::get_if<ui::BorderRenderCommand>(&command);
+                border != nullptr && border->border.paint.is_gradient()) {
+                return border->border.paint.gradient()->rotation_degrees;
+            }
+        }
+        return std::nullopt;
+    };
+    static_cast<void>(surface->frame(1'000'000));
+    const std::optional<double> first = rotation();
+    static_cast<void>(surface->frame(251'000'000));
+    const std::optional<double> second = rotation();
+    static_cast<void>(surface->frame(1'501'000'000));
+    const std::optional<double> third = rotation();
+    check(first.has_value() && second.has_value() && third.has_value(),
+          "a gradient border was not drawn with its paint");
+    check(std::abs(*second - *first - 90.0) < 2.0,
+          "paintRotate did not turn the border's gradient as the animation ran");
+    check(std::abs(*third - 180.0) < 2.0, "a repeating paintRotate animation did not loop");
+}
+
+void test_code_view_highlights_numbers_and_copies(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Code {
+  state wrapped = false;
+  root Panel(key: "code.root", layout: { kind: "COLUMN", width: 600, height: 600 }) {
+    CodeView(key: "code.view", text: "fn main() {\n\tlet x = 42; // answer\n}\n", language: "rust",
+             highlightLines: [2], wrap: wrapped, layout: { height: 200 },
+             style: style(syntax: { comment: #00FF00FF }))
+    Markdown(key: "code.md", text: "Before\n\n```python\nprint(\"hi\")\n```")
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("code-view", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Code", 600.0, 600.0, false);
+    std::int64_t now = 1'000'000;
+    for (int frame = 0; frame < 4; ++frame)
+        static_cast<void>(surface->frame(now += 16'000'000));
+    const auto node = [&](const std::string_view key) {
+        const ui::RetainedNode* found = surface->tree().find_key(key);
+        check(found != nullptr, "code view fixture is missing " + std::string(key));
+        return found;
+    };
+    const auto property = [](const ui::RetainedNode* found, const std::string_view name) {
+        const auto value = found->description().properties.find(name);
+        return value != found->description().properties.end() ? value->second.value() : nullptr;
+    };
+    // Three rows: line 1, the highlighted line 2 alone, and line 3; the final newline ends line
+    // 3 rather than starting a fourth, and the tab became spaces.
+    const ui::RetainedNode* second = node("code.view.r1.t");
+    const runtime::Value* second_text = property(second, "text");
+    check(second_text != nullptr && second_text->string() != nullptr &&
+              *second_text->string() == "    let x = 42; // answer",
+          "a CodeView row did not hold its line with its tab expanded");
+    check(surface->tree().find_key("code.view.r3.t") == nullptr,
+          "a final newline started a line of its own");
+    const runtime::Value* row_background = property(node("code.view.r1"), "background");
+    check(row_background != nullptr && row_background->color() != nullptr,
+          "a highlighted line did not draw its band");
+    const runtime::Value* numbers = property(node("code.view.r0.n"), "text");
+    check(numbers != nullptr && numbers->string() != nullptr && *numbers->string() == "1",
+          "the gutter did not number its line");
+    // Tokens are coloured spans: the theme's keyword colour, and the author's comment colour.
+    const runtime::Value* spans = property(second, "spans");
+    check(spans != nullptr && spans->list() != nullptr, "a CodeView row had no spans");
+    std::optional<runtime::ColorValue> keyword;
+    std::optional<runtime::ColorValue> comment;
+    for (const runtime::Value& span : spans->list()->values) {
+        const runtime::Value* text = span.field("text");
+        const runtime::Value* color = span.field("color");
+        if (text == nullptr || text->string() == nullptr || color == nullptr ||
+            color->color() == nullptr)
+            continue;
+        if (*text->string() == "let")
+            keyword = *color->color();
+        if (text->string()->starts_with("//"))
+            comment = *color->color();
+    }
+    check(keyword.has_value() && comment.has_value(),
+          "a CodeView's spans did not resolve their colours");
+    check(*comment == runtime::ColorValue{0U, 255U, 0U, 255U},
+          "an authored syntax colour did not reach its tokens");
+    check(*keyword != *comment, "keywords and comments shared one colour");
+
+    // Selecting all of the code and copying it gives the text back, across its rows.
+    const ui::Rect code_bounds = surface->layout().find(second->identity())->bounds;
+    const ui::Point inside{code_bounds.x + 10.0, code_bounds.y + code_bounds.height * 0.5};
+    std::vector<ui::SurfaceInputEvent> copy;
+    copy.emplace_back(ui::PointerInputEvent{inside, ui::PointerEventType::press, 5, 0});
+    copy.emplace_back(ui::PointerInputEvent{inside, ui::PointerEventType::release, 5, 0});
+    copy.emplace_back(ui::KeyInputEvent{"a", ui::KeyModifiers{false, true, false, false}});
+    copy.emplace_back(ui::KeyInputEvent{"c", ui::KeyModifiers{false, true, false, false}});
+    static_cast<void>(surface->input().enqueue(std::move(copy)));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    static_cast<void>(surface->frame(now += 16'000'000));
+    const std::optional<std::string_view> copied = surface->input().clipboard_text();
+    check(copied.has_value() && *copied == "fn main() {\n    let x = 42; // answer\n}",
+          "copying a CodeView's selection did not give back its lines: [" +
+              std::string(copied.value_or("<none>")) + "]");
+
+    // A fenced block in Markdown is a CodeView in its fence's language.
+    const ui::RetainedNode* fenced = node("code.md.1");
+    check(fenced->description().type == "CodeView",
+          "a fenced Markdown block was not drawn by a CodeView");
+    const runtime::Value* fenced_language = property(fenced, "language");
+    check(fenced_language != nullptr && fenced_language->string() != nullptr &&
+              *fenced_language->string() == "python",
+          "a fenced block lost its fence's language");
+}
+
 void test_rotation_draws_and_hits_the_turned_shape(const std::filesystem::path& resources) {
     const std::string source = R"(
 overlay Rotated {
@@ -4322,6 +4453,8 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_per_corner_radius_rounds_each_corner(resources);
         test_text_list_and_math_helpers(resources);
         test_number_bytes_duration_and_relative_time_formats(resources);
+        test_paint_rotate_spins_a_gradient_border(resources);
+        test_code_view_highlights_numbers_and_copies(resources);
         test_rotation_draws_and_hits_the_turned_shape(resources);
         test_delayed_and_clipboard_actions(resources);
         test_scroll_snaps_to_the_nearest_child(resources);

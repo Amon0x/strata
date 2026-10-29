@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "application": {
+    "id": "code.headless",
+    "module": "assets/strata/samples/code.strata",
+    "root": "CodeGallery",
+    "actions": []
+  },
+  "surface": {
+    "id": "code.headless",
+    "role": "overlay",
+    "backend": "reference",
+    "width": 760,
+    "height": 600,
+    "scale": 1,
+    "reducedMotion": false,
+    "clearColor": "#090b0fff",
+    "fonts": [
+      {
+        "id": "strata:fonts/default-medium",
+        "resource": "assets/strata/fonts/medium.ttf"
+      },
+      {
+        "id": "strata:fonts/default",
+        "resource": "assets/strata/fonts/default.ttf"
+      },
+      {
+        "id": "strata:fonts/mono",
+        "resource": "assets/strata/fonts/mono.ttf"
+      }
+    ],
+    "images": []
+  },
+  "snapshots": [],
+  "steps": [
+    {"advance": {"milliseconds": 100, "frames": 6}},
+    {"capture": "initial"},
+    {"scroll": {"x": 300, "y": 120, "deltaY": -2600}},
+    {"advance": {"milliseconds": 1200, "frames": 40}},
+    {"capture": "scrolled"}
+  ]
+}

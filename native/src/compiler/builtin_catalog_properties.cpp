@@ -195,6 +195,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredProperty{.name = "radius", .type = declared_type_reference("radiusUnion")},
         DeclaredProperty{.name = "rowSpan", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "stackBelow", .type = declared_type_reference("number")},
+        DeclaredProperty{.name = "syntax", .type = declared_type_reference("syntaxTheme")},
         DeclaredProperty{.name = "rotate", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "rotateX", .type = declared_type_reference("number")},
         DeclaredProperty{.name = "rotateY", .type = declared_type_reference("number")},

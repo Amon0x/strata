@@ -1,0 +1,27 @@
+// Highlighted code: a bounded CodeView over a long generated file (virtualized rows, a pinned
+// gutter, highlighted lines), a wrapping one, and Markdown whose fenced blocks use the same
+// highlighter.
+
+style Root {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: { weight: 1 };
+  padding: 16;
+  gap: 12;
+  background: #10131AFF;
+}
+
+style Bounded {
+  width: { weight: 1 };
+  height: 220;
+}
+
+overlay CodeGallery {
+  derived file = join(map(range(1, 601), n -> "const value" + formatNumber(n, 0) + " = { id: " + formatNumber(n, 0) + ", name: \"item " + formatNumber(n, 0) + "\", ok: " + (n % 3 == 0 ? "true" : "false") + " }; // row " + formatNumber(n, 0)), "\n")
+  root Panel(key: "code.root", style: Root) {
+    Text(key: "code.caption", text: "A long file in a bounded view: only the rows in view are realized.")
+    CodeView(key: "code.file", text: file, language: "javascript", highlightLines: [2, 3], style: Bounded)
+    CodeView(key: "code.wrapped", text: "def wrap(text: str, width: int = 72) -> list[str]:\n    \"\"\"Splits text into lines no wider than width, breaking long words as needed.\"\"\"\n    return [text[i:i + width] for i in range(0, len(text), width)]  # simple", language: "python", wrap: true, highlightLines: [2], layout: { width: 420 })
+    Markdown(key: "code.markdown", text: "Fenced code takes its fence's language:\n\n```rust\nfn main() { println!(\"{}\", 6 * 7); }\n```")
+  }
+}

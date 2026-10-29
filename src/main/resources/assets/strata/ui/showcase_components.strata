@@ -1290,6 +1290,8 @@ component PageViewport(selectedPage: string, chrome: Binding<string>) {
       Scroll(key: "targets.page.scroll.net", persistenceKey: "showcase.page.scroll.net", vertical: true, horizontal: false, style: PageScroll) { NetPage() }
     } else if selectedPage == "LOTTIE" {
       Scroll(key: "targets.page.scroll.lottie", persistenceKey: "showcase.page.scroll.lottie", vertical: true, horizontal: false, style: PageScroll) { LottiePage() }
+    } else if selectedPage == "CONTENT" {
+      Scroll(key: "targets.page.scroll.content", persistenceKey: "showcase.page.scroll.content", vertical: true, horizontal: false, style: PageScroll) { ContentPage() }
     } else if selectedPage == "SYSTEM" {
       Scroll(key: "targets.page.scroll.system", persistenceKey: "showcase.page.scroll.system", vertical: true, horizontal: false, style: PageScroll) { SystemPage(chrome: chrome) }
     } else if selectedPage == "DESKTOP" {
@@ -1331,7 +1333,8 @@ component ShowcaseHeader(selectedPage: Binding<string>, chrome: Binding<string>)
         { id: "MEDIA", label: "MEDIA" },
         { id: "DESKTOP", label: "DESKTOP" },
         { id: "NET", label: "NET" },
-        { id: "LOTTIE", label: "LOTTIE" }
+        { id: "LOTTIE", label: "LOTTIE" },
+        { id: "CONTENT", label: "CONTENT" }
       ],
       selectedId: selectedPage,
       layout: { width: { weight: 1 }, height: 34 },
@@ -3621,6 +3624,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "Run python tools/net/demo_server.py first. Fetch GETs a JSON list over HTTP (WinHTTP, on a worker: the frame never waits) and shows it; POST echo sends JSON and shows what came back. Connect opens a WebSocket: Send and Send JSON reach the server, which echoes to everyone connected and says the time every ten seconds; /bye makes it close. Write, Append, Read and List work in a temp folder; Watch reports every change there as it happens, and Trash note moves the note to the recycle bin. Click plays a short sound each press, overlapping when fast; Chime, and a music loop you can pause, speed up and mute.", wrapMode: "WORD")
   } else if selectedPage == "LOTTIE" {
     Text(text: "Six After Effects animations, written as Lottie JSON, play on their own: trim paths on a gradient stroke, a bouncy overshoot, a repeater burst, a morphing path, masks (add, subtract, expansion), alpha and luma track mattes inside a time-remapped precomposition, round corners, dashes and merged paths. Each frame is drawn as vector paths, crisp at any size. Pause stops where it is and the slider follows; drag the slider to scrub, playing or paused, and Play carries on from there. Speed plays it slower, faster or backwards. Switch plays the toggle's on or off segment once and counts each completion.", wrapMode: "WORD")
+  } else if selectedPage == "CONTENT" {
+    Text(text: "The wheel, pie and checker are conic gradients; the radar and both cards below spin theirs with paintRotate on an endless linear animation, while the GPU draws the same sweep the reference renderer does. Borders take any paint and keep every corner's rounding. Pick a language: the code is tokenized once and stays selectable; the 4,000-line file scrolls without stalling and the line numbers stay pinned as it scrolls sideways. The Markdown's fenced blocks use the same highlighter. The formats table ticks with the wall clock every second.", wrapMode: "WORD")
   } else if selectedPage == "SYSTEM" {
     Text(text: "Drag files from Explorer onto the drop box: it lights up as they arrive and lists them when dropped. Open files, pick a folder or save: the dialogs are Windows' own, and their answers land in state. Send a notification from the tray icon; open a folder or link in its default app. Mica, Acrylic and Tabbed turn the header into the title bar (drag to move, double-click to maximize, buttons at its right) over the system backdrop. Paste an image from the clipboard and copy it back.", wrapMode: "WORD")
   } else if selectedPage == "DESKTOP" {
@@ -3629,5 +3634,301 @@ component ExpectedText(selectedPage: string) {
     Text(text: "Menus, toolbars, command-bound controls, shortcut tooltips, and the palette resolve one live command definition. Disabled and checked states update everywhere. Palette search ranks prefix and word-boundary matches, Enter executes, Escape restores focus. Toasts stack without blocking input; breadcrumbs, disclosure, and chips emit typed events.", wrapMode: "WORD")
   } else {
     Text(text: "The native widget activates from its glyphs or empty interior, owns its popup, and exposes a focus ring. Behaviors compose on Panels. The square checkbox and animated Material boolean are pure .strata skins. The typed host payload compiles and arrives intact.", wrapMode: "WORD")
+  }
+}
+
+// CONTENT: conic gradients, gradient borders, highlighted code, Markdown code and formatted values.
+
+style ConicSwatch {
+  width: 132;
+  height: 96;
+  radius: 16;
+}
+
+style BorderTile {
+  kind: "COLUMN";
+  width: 172;
+  height: 104;
+  radius: 18;
+  padding: 14;
+  gap: 4;
+  justifyContent: "END";
+  background: #121722FF;
+}
+
+style SpinCard {
+  kind: "COLUMN";
+  width: 300;
+  height: 132;
+  radius: 22;
+  padding: 18;
+  gap: 6;
+  justifyContent: "END";
+  background: #0E1219FF;
+  border: { width: 3, paint: { kind: "conic", stops: [
+    { color: #FF2D75FF }, { color: #FFB800FF }, { color: #3DFFA2FF },
+    { color: #23B5FFFF }, { color: #A04BFFFF }, { color: #FF2D75FF } ] } };
+}
+
+style CometCard {
+  kind: "COLUMN";
+  width: 300;
+  height: 132;
+  radius: 22;
+  padding: 18;
+  gap: 6;
+  justifyContent: "END";
+  background: #0B1016FF;
+  border: { width: 3, paint: { kind: "conic", stops: [
+    { color: #7CFFDA00 }, { color: #7CFFDA00, offset: 0.35 }, { color: #7CFFDA90, offset: 0.85 },
+    { color: #F4FFFBFF, offset: 1 } ] } };
+}
+
+style CodeFrame {
+  width: { weight: 1 };
+  height: 380;
+  border: { width: 1, color: #2B3445FF };
+}
+
+style FormatLabel {
+  font: "strata:fonts/mono";
+  pixelSize: 12;
+  color: #8E9BB0FF;
+}
+
+style FormatValue {
+  font: "strata:fonts/mono";
+  pixelSize: 13;
+  color: #E8EDF5FF;
+}
+
+style FormatRowStyle extends Transparent {
+  kind: "ROW";
+  width: { weight: 1 };
+  height: "content";
+  gap: 12;
+  alignItems: "CENTER";
+}
+
+style FormatColumn extends Transparent {
+  kind: "COLUMN";
+  width: { weight: 1 };
+  height: "content";
+  gap: 5;
+}
+
+animation BorderSpin { duration: 4s; easing: "linear"; repeat: "forever"; from { paintRotate: 0 } to { paintRotate: 360 } }
+animation CometSpin { duration: 2200ms; easing: "linear"; repeat: "forever"; from { paintRotate: 0 } to { paintRotate: 360 } }
+
+component FormatRow(label: string, value: string) {
+  Panel(style: FormatRowStyle) {
+    Text(text: label, style: FormatLabel, layout: { width: 260 }, maxLines: 1)
+    Text(text: value, style: FormatValue, maxLines: 1)
+  }
+}
+
+component FormatsCard() {
+  // The wall clock, read once a second, so every relative time below moves on its own.
+  state now = 0;
+  state offset = 0;
+  state opened = 0;
+  Panel(
+    style: ContentSlot,
+    timers: [
+      { id: "content.clock", every: 1s, action: then(action("clock.now"), sequence(
+          action("state.setFromEvent", name: "now", field: "now"),
+          action("state.setFromEvent", name: "offset", field: "utcOffsetMinutes"),
+          action("state.set", name: "opened", value: opened == 0 ? now : opened))) }
+    ]
+  ) {
+    Card(title: "FORMATS: NUMBERS, MONEY, BYTES, DURATIONS AND RELATIVE TIME") {
+      Panel(style: style(ActionRow, gap: 28, wrap: false)) {
+        Panel(style: FormatColumn) {
+          FormatRow(label: "formatNumber(1234567.891)", value: formatNumber(1234567.891))
+          FormatRow(label: "… 0, grouping: true", value: formatNumber(1234567.891, 0, true))
+          FormatRow(label: "… currency: \"USD\"", value: formatNumber(1234.5, currency: "USD"))
+          FormatRow(label: "… currency: \"EUR\", separators", value: formatNumber(1234.5, currency: "EUR", groupSeparator: ".", decimalSeparator: ","))
+          FormatRow(label: "… currency: \"JPY\"", value: formatNumber(1234.5, currency: "JPY"))
+          FormatRow(label: "… currency: \"TRY\"", value: formatNumber(-98765.4321, currency: "TRY"))
+          FormatRow(label: "… compact: true", value: formatNumber(1234, compact: true) + "  " + formatNumber(3400000, compact: true) + "  " + formatNumber(7250000000, compact: true))
+          FormatRow(label: "… percent: true", value: formatNumber(0.256, percent: true) + "  " + formatNumber(0.256, 1, percent: true))
+          FormatRow(label: "… signDisplay: \"always\"", value: formatNumber(5, signDisplay: "always") + "  " + formatNumber(-5, signDisplay: "always"))
+        }
+        Panel(style: FormatColumn) {
+          FormatRow(label: "formatBytes(512)", value: formatBytes(512))
+          FormatRow(label: "formatBytes(1500000)", value: formatBytes(1500000))
+          FormatRow(label: "formatBytes(3.25e9, 2)", value: formatBytes(3250000000, 2))
+          FormatRow(label: "formatBytes(1536, binary: true)", value: formatBytes(1536, binary: true))
+          FormatRow(label: "formatDuration(3909000)", value: formatDuration(3909000))
+          FormatRow(label: "… \"short\" / \"long\"", value: formatDuration(3909000, "short") + "  ·  " + formatDuration(3909000, "long"))
+          FormatRow(label: "since this card opened", value: now == 0 ? "…" : formatDuration(now - opened))
+          FormatRow(label: "formatDate(now, …, offset)", value: now == 0 ? "…" : formatDate(now, "EEE d MMM yyyy, HH:mm:ss", offset))
+        }
+      }
+      Panel(style: style(ActionRow, gap: 28, wrap: false)) {
+        Panel(style: FormatColumn) {
+          FormatRow(label: "timeAgo(opened, now)", value: now == 0 ? "…" : timeAgo(opened, now))
+          FormatRow(label: "timeAgo(now - 42s, now)", value: timeAgo(now - 42000, now))
+          FormatRow(label: "timeAgo(now - 3.5 min, now)", value: timeAgo(now - 210000, now))
+          FormatRow(label: "timeAgo(now - 5 h, now)", value: timeAgo(now - 18000000, now))
+        }
+        Panel(style: FormatColumn) {
+          FormatRow(label: "timeAgo(now + 2 d, now)", value: timeAgo(now + 172800000, now))
+          FormatRow(label: "timeAgo(now - 9 d, now)", value: timeAgo(now - 777600000, now))
+          FormatRow(label: "timeAgo(now - 400 d, now)", value: timeAgo(now - 34560000000, now))
+          FormatRow(label: "… style: \"short\"", value: timeAgo(now - 18000000, now, "short") + "  " + timeAgo(now + 172800000, now, "short"))
+        }
+      }
+      Text(text: "The clock is the wall clock: a one-second timer runs then(clock.now, state.setFromEvent), and every relative time and duration here follows it.", style: CardNote, wrapMode: "WORD")
+    }
+  }
+}
+
+component CodeCard() {
+  state language = "rust";
+  state numbers = true;
+  state wrapped = false;
+  derived rustSample = "use std::collections::HashMap;\n\n/// Counts how often each word appears, ignoring case.\n#[derive(Debug, Default)]\npub struct Tally<'a> {\n    counts: HashMap<&'a str, usize>,\n}\n\nimpl<'a> Tally<'a> {\n    pub fn add(&mut self, text: &'a str) -> usize {\n        let words = text.split_whitespace().filter(|w| !w.is_empty());\n        for word in words {\n            *self.counts.entry(word).or_insert(0) += 1;\n        }\n        self.counts.len()\n    }\n}\n\nfn main() {\n    let mut tally = Tally::default();\n    let unique = tally.add(\"to be or not to be\");\n    println!(\"{unique} unique words, r#raw = {}\", 0x2A_u8 as f64 * 1.5e-3);\n}"
+  derived pythonSample = "from dataclasses import dataclass\nimport math\n\n\n@dataclass(frozen=True)\nclass Point:\n    \"\"\"A point in the plane.\"\"\"\n    x: float\n    y: float\n\n    def distance(self, other: \"Point\") -> float:\n        # Euclidean distance, rounded for display\n        return round(math.hypot(self.x - other.x, self.y - other.y), 3)\n\n\nif __name__ == \"__main__\":\n    a, b = Point(0, 0), Point(3, 4)\n    print(f\"distance = {a.distance(b)}\", len([n for n in range(10) if n % 2]))\n    flags = {\"ok\": True, \"missing\": None, \"ratio\": 0.75}"
+  derived typescriptSample = "import { readFile } from \"node:fs/promises\";\n\ninterface User {\n  id: number;\n  name: string;\n  tags?: readonly string[];\n}\n\n/** Loads users and greets the active ones. */\nexport async function greet(path: string): Promise<string[]> {\n  const users: User[] = JSON.parse(await readFile(path, \"utf8\"));\n  const pattern = /^[a-z]+$/i;\n  return users\n    .filter((user) => user.tags?.includes(\"active\") ?? false)\n    .map((user) => `Hello, ${user.name.trim()} (#${user.id})!`)\n    .filter((line) => pattern.test(line) || line.length > 0);\n}\n\nconst total = 42 * 1.5e3 / 7; // a comment\nconsole.log(total, null, undefined, true);"
+  derived javascriptSample = "const express = require(\"express\");\nconst app = express();\n\n// Count visits per path, in memory.\nconst visits = new Map();\n\napp.get(\"/:page\", (req, res) => {\n  const page = req.params.page;\n  visits.set(page, (visits.get(page) ?? 0) + 1);\n  res.json({ page, visits: visits.get(page), at: new Date().toISOString() });\n});\n\napp.listen(3000, () => console.log(`listening on ${3000}`));"
+  derived cSample = "#include <stdio.h>\n#include <stdlib.h>\n\n#define MAX_ITEMS 64\n\ntypedef struct {\n    int id;\n    double weight;\n} Item;\n\n/* Sums the weights of the first n items. */\nstatic double total(const Item *items, size_t n) {\n    double sum = 0.0;\n    for (size_t i = 0; i < n; ++i) {\n        sum += items[i].weight;\n    }\n    return sum;\n}\n\nint main(void) {\n    Item items[MAX_ITEMS] = {{1, 0.5}, {2, 1.25f}};\n    printf(\"total: %.2f\\n\", total(items, 2));\n    return EXIT_SUCCESS;\n}"
+  derived cppSample = "#include <algorithm>\n#include <string_view>\n#include <vector>\n\nnamespace demo {\n\ntemplate <typename T>\nclass Ring final {\n  public:\n    explicit Ring(std::size_t size) : items_(size) {}\n\n    void push(T value) noexcept {\n        items_[next_++ % items_.size()] = std::move(value);\n    }\n\n    [[nodiscard]] bool contains(const T& value) const {\n        return std::ranges::find(items_, value) != items_.end();\n    }\n\n  private:\n    std::vector<T> items_;\n    std::size_t next_ = 0U;\n};\n\n} // namespace demo\n\nconstexpr auto greeting = R\"(raw \"text\")\";\nstatic_assert(sizeof(int) >= 4, \"int is too small\");"
+  derived csharpSample = "using System;\nusing System.Linq;\n\nnamespace Demo;\n\n[Serializable]\npublic sealed record Order(int Id, decimal Total);\n\npublic static class Program\n{\n    public static void Main(string[] args)\n    {\n        var orders = Enumerable.Range(1, 5)\n            .Select(i => new Order(i, i * 9.99m))\n            .Where(o => o.Total > 10m)\n            .ToList();\n        string path = @\"C:\\data\\orders.csv\";\n        Console.WriteLine($\"{orders.Count} orders over ten, saved to {path}\");\n#if DEBUG\n        Console.WriteLine(\"debug build\");\n#endif\n    }\n}"
+  derived goSample = "package main\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\n// Shout returns s in capitals with an exclamation mark.\nfunc Shout(s string) string {\n\treturn strings.ToUpper(s) + \"!\"\n}\n\ntype Greeter interface {\n\tGreet(name string) (string, error)\n}\n\nfunc main() {\n\tnames := []string{\"ada\", \"grace\"}\n\tfor i, name := range names {\n\t\tfmt.Println(i, Shout(name), len(name), nil == nil)\n\t}\n\traw := `no \\escapes here`\n\t_ = raw\n}"
+  derived cssSample = "@import url(\"theme.css\");\n\n:root {\n  --accent: #7c6bff;\n}\n\n/* Cards lift when hovered. */\n.card > .title,\n#main .card:hover {\n  color: var(--accent);\n  padding: 12px 1.5rem;\n  transition: transform 180ms ease-out !important;\n  transform: translateY(-2px) scale(1.02);\n}\n\n@media (max-width: 600px) {\n  .card { width: 100%; }\n}"
+  derived htmlSample = "<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\">\n    <title>Strata &amp; friends</title>\n    <style>\n      body { margin: 0; font-family: system-ui; }\n    </style>\n  </head>\n  <body>\n    <!-- The whole page is one button. -->\n    <button id=\"go\" class=\"primary\" disabled>Go</button>\n    <script>\n      document.getElementById(\"go\").addEventListener(\"click\", () => alert(1));\n    </script>\n  </body>\n</html>"
+  derived xmlSample = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<catalog xmlns:media=\"urn:example:media\">\n  <!-- Two entries -->\n  <book id=\"bk101\" media:format=\"paper\">\n    <title>XML Developer's Guide</title>\n    <price currency=\"EUR\">44.95</price>\n  </book>\n  <book id=\"bk102\">\n    <description><![CDATA[Uses <tags> & entities freely.]]></description>\n  </book>\n</catalog>"
+  derived jsonSample = "{\n  \"name\": \"strata-demo\",\n  \"version\": \"1.4.0\",\n  \"private\": true,\n  \"ratio\": 0.75,\n  \"exponent\": -1.2e-3,\n  \"homepage\": null,\n  \"keywords\": [\"ui\", \"gpu\", \"native\"],\n  \"engines\": { \"node\": \">=20\" }\n}"
+  derived markdownSample = "# Release notes\n\n## 1.4.0\n\n- **Conic** gradients and *gradient* borders\n- `CodeView` with [syntax highlighting](https://example.com)\n1. Numbers, bytes and durations\n\n> Quoted text stays quiet.\n\n```json\n{ \"fenced\": true, \"highlighted\": 1 }\n```\n\n---"
+  derived shellSample = "#!/usr/bin/env bash\nset -euo pipefail\n\n# Build every preset and report how long it took.\nSTART=$(date +%s)\nfor preset in windows-x64 linux-x64; do\n  echo \"building ${preset}...\"\n  cmake --build --preset \"$preset\" --parallel 4 || exit 1\ndone\nexport ELAPSED=$(( $(date +%s) - START ))\nprintf 'done in %ss\\n' \"$ELAPSED\" | tee -a build.log"
+  derived sqlSample = "-- Monthly revenue per customer, newest first\nSELECT c.id,\n       c.name AS \"Customer\",\n       DATE_TRUNC('month', o.created_at) AS month,\n       SUM(o.total) AS revenue,\n       COUNT(*) FILTER (WHERE o.total > 100) AS large_orders\nFROM customers c\nINNER JOIN orders o ON o.customer_id = c.id\nWHERE o.status IN ('paid', 'shipped')\n  AND o.created_at >= NOW() - INTERVAL '1 year'\nGROUP BY c.id, c.name, month\nHAVING SUM(o.total) > 1000.50\nORDER BY month DESC\nLIMIT 50;"
+  derived strataSample = "import \"theme.strata\";\n\nstyle GlowCard {\n  radius: 16;\n  background: #141A2BFF;\n  border: { width: 2, paint: { kind: \"conic\", stops: [ { color: #7CFFDA00 }, { color: #7CFFDAFF } ] } };\n}\n\nanimation BorderSpin { duration: 3s; easing: \"linear\"; repeat: \"forever\"; from { paintRotate: 0 } to { paintRotate: 360 } }\n\ncomponent Counter(label: string) {\n  state count = 0;\n  Panel(style: GlowCard, enter: BorderSpin) {\n    Text(text: format(\"{0}: {1}\", label, count), style: style(pixelSize: 14, color: theme.foreground))\n    Button(label: \"Add\", onClick: action(\"state.adjust\", name: \"count\", amount: 1))\n  }\n}"
+  // A few thousand generated lines, to show a long file stays fast: tokenized once, laid out in
+  // chunks, and only the visible chunks drawn.
+  derived largeSample = join(map(range(1, 4001), n -> "export const row" + formatNumber(n, 0) + " = { id: " + formatNumber(n, 0) + ", label: \"Row " + formatNumber(n, 0) + "\", weight: " + formatNumber(n * 0.37, 2) + ", even: " + (n % 2 == 0 ? "true" : "false") + " }; // generated"), "\n")
+  derived sample = language == "rust" ? rustSample
+    : language == "python" ? pythonSample
+    : language == "typescript" ? typescriptSample
+    : language == "javascript" ? javascriptSample
+    : language == "c" ? cSample
+    : language == "cpp" ? cppSample
+    : language == "csharp" ? csharpSample
+    : language == "go" ? goSample
+    : language == "css" ? cssSample
+    : language == "html" ? htmlSample
+    : language == "xml" ? xmlSample
+    : language == "json" ? jsonSample
+    : language == "markdown" ? markdownSample
+    : language == "shell" ? shellSample
+    : language == "sql" ? sqlSample
+    : language == "strata" ? strataSample
+    : largeSample
+  Card(title: "CODE: HIGHLIGHTED IN SIXTEEN LANGUAGES, NUMBERED, SELECTABLE") {
+    Panel(style: style(ActionRow, alignItems: "CENTER")) {
+      Select(
+        key: "content.language",
+        options: [
+          { id: "rust", label: "Rust" },
+          { id: "python", label: "Python" },
+          { id: "typescript", label: "TypeScript" },
+          { id: "javascript", label: "JavaScript" },
+          { id: "c", label: "C" },
+          { id: "cpp", label: "C++" },
+          { id: "csharp", label: "C#" },
+          { id: "go", label: "Go" },
+          { id: "css", label: "CSS" },
+          { id: "html", label: "HTML" },
+          { id: "xml", label: "XML" },
+          { id: "json", label: "JSON" },
+          { id: "markdown", label: "Markdown" },
+          { id: "shell", label: "Shell" },
+          { id: "sql", label: "SQL" },
+          { id: "strata", label: "Strata" },
+          { id: "large", label: "4,000 lines (TypeScript)" }
+        ],
+        bind: language,
+        layout: { width: 240 }
+      )
+      Toggle(key: "content.numbers", label: "Line numbers", checked: numbers, onChange: action("state.setFromEvent", name: "numbers"))
+      Toggle(key: "content.wrap", label: "Wrap", checked: wrapped, onChange: action("state.setFromEvent", name: "wrapped"))
+    }
+    CodeView(
+      key: "content.code",
+      text: sample,
+      language: language == "large" ? "typescript" : language,
+      lineNumbers: numbers,
+      wrap: wrapped,
+      highlightLines: [4, 5],
+      style: CodeFrame
+    )
+    Text(text: "Select text across lines and copy it; scroll sideways under the pinned line numbers. Each language has its own tokenizer, run once per text change; a long file is laid out in chunks of eighty lines and only the chunks in view are drawn.", style: CardNote, wrapMode: "WORD")
+  }
+}
+
+component ContentPage() {
+  Panel(style: PageColumn) {
+    Card(title: "CONIC GRADIENTS: SWEPT AROUND A CENTRE, STEPPED, TURNED") {
+      Panel(style: ActionRow) {
+        Panel(key: "content.conic.wheel", style: style(ConicSwatch, background: { kind: "conic", stops: [
+          { color: #FF2D75FF }, { color: #FFB800FF }, { color: #3DFFA2FF }, { color: #23B5FFFF },
+          { color: #A04BFFFF }, { color: #FF2D75FF } ] }))
+        Panel(key: "content.conic.pie", style: style(ConicSwatch, radius: 48, width: 96, background: { kind: "conic", angle: 0, stops: [
+          { color: #FF5F6DFF, offset: 0 }, { color: #FF5F6DFF, offset: 0.42 },
+          { color: #FFC371FF, offset: 0.42 }, { color: #FFC371FF, offset: 0.7 },
+          { color: #4FD1C5FF, offset: 0.7 }, { color: #4FD1C5FF, offset: 1 } ] }))
+        Panel(key: "content.conic.checker", style: style(ConicSwatch, background: { kind: "conic", center: { x: 0.35, y: 0.6 }, angle: 30, stops: [
+          { color: #F1F4F8FF, offset: 0 }, { color: #F1F4F8FF, offset: 0.25 },
+          { color: #1D2330FF, offset: 0.25 }, { color: #1D2330FF, offset: 0.5 },
+          { color: #F1F4F8FF, offset: 0.5 }, { color: #F1F4F8FF, offset: 0.75 },
+          { color: #1D2330FF, offset: 0.75 }, { color: #1D2330FF, offset: 1 } ] }))
+        Panel(key: "content.conic.radar", enter: CometSpin, style: style(ConicSwatch, background: { kind: "conic", stops: [
+          { color: #07131200 }, { color: #0B302A00, offset: 0.7 }, { color: #3DFFA2FF, offset: 1 } ] }))
+        Draw(key: "content.conic.ring", layout: { width: 96, height: 96 }, shapes: [
+          { kind: "ring", center: { x: 0.5, y: 0.5 }, radius: 0.46, innerRadius: 0.3,
+            fill: { kind: "conic", angle: 180, stops: [ { color: #23B5FFFF }, { color: #A04BFFFF }, { color: #FF2D75FF } ] } },
+          { kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.2,
+            fill: { kind: "conic", stops: [ { color: #FFB800FF }, { color: #3DFFA2FF }, { color: #FFB800FF } ] } }
+        ])
+      }
+      Text(text: "kind: \"conic\" sweeps its stops clockwise about center from angle (0 is up), measured in the shape's own pixels. Hard stops make a pie and a checker; paintRotate spins the radar on an animation, and Draw shapes evaluate the sweep per pixel.", style: CardNote, wrapMode: "WORD")
+    }
+    Card(title: "GRADIENT BORDERS: ANY PAINT ON A ROUNDED EDGE") {
+      Panel(style: ActionRow) {
+        Panel(key: "content.border.linear", style: style(BorderTile, border: { width: 4, paint: { kind: "linear", angle: 90, stops: [ { color: #FF5F6DFF }, { color: #6E8BFFFF } ] } })) {
+          Text(text: "linear", style: SectionText)
+          Text(text: "angle 90", style: CardNote)
+        }
+        Panel(key: "content.border.radial", style: style(BorderTile, border: { width: 5, paint: { kind: "radial", center: { x: 0.2, y: 0.1 }, radius: 1.1, stops: [ { color: #FFFFFFFF }, { color: #23B5FF30 } ] } })) {
+          Text(text: "radial", style: SectionText)
+          Text(text: "lit from a corner", style: CardNote)
+        }
+        Panel(key: "content.border.conic", style: style(BorderTile, border: { width: 3, paint: { kind: "conic", stops: [
+          { color: #FF2D75FF }, { color: #FFB800FF }, { color: #3DFFA2FF }, { color: #23B5FFFF }, { color: #FF2D75FF } ] } })) {
+          Text(text: "conic", style: SectionText)
+          Text(text: "a still rainbow", style: CardNote)
+        }
+        Panel(key: "content.border.glass", style: style(BorderTile, radius: { topLeft: 28, bottomRight: 28, topRight: 6, bottomLeft: 6 }, background: #3A4560FF, border: { width: 6, paint: { kind: "conic", stops: [
+          { color: #FFFFFF18 }, { color: #FFFFFFA0 }, { color: #FFFFFF18 } ] } })) {
+          Text(text: "translucent", style: SectionText)
+          Text(text: "per-corner radii", style: CardNote)
+        }
+      }
+      Panel(style: ActionRow) {
+        Panel(key: "content.border.spin", style: SpinCard, enter: BorderSpin) {
+          Text(text: "Spinning conic border", style: CardTitle)
+          Text(text: "paintRotate 0 → 360 on a linear, endless animation", style: CardNote)
+        }
+        Panel(key: "content.border.comet", style: CometCard, enter: CometSpin) {
+          Text(text: "Comet", style: CardTitle)
+          Text(text: "a fading conic tail chasing round the edge", style: CardNote)
+        }
+      }
+    }
+    CodeCard()
+    Card(title: "MARKDOWN: FENCED CODE USES THE SAME HIGHLIGHTER") {
+      Markdown(key: "content.markdown", text: "Fenced blocks name their language after the fence and are drawn by a **CodeView**:\n\n```rust\nfn main() {\n    let answer: u32 = 42; // the answer\n    println!(\"{answer}\");\n}\n```\n\n```python\ndef greet(name: str) -> str:\n    return f\"Hello, {name}!\"  # formatted\n```\n\n```json\n{ \"highlighted\": true, \"languages\": 16, \"ratio\": 0.5 }\n```\n\nInline `code` stays monospace without colour.")
+    }
+    FormatsCard()
   }
 }

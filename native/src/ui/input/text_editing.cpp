@@ -786,6 +786,17 @@ bool InputRouter::select_all_static_text(RetainedNode& owner, InputOperationResu
         frame_invalidator_();
     text_navigation_.erase(owner.identity());
     set_static_text_selection(owner, 0U, text->size(), result);
+    // In a selection container, all of it: every text that shares the container, so a document
+    // split across many texts (a code view's rows) selects and copies whole.
+    if (container.has_value()) {
+        for (RetainedNode* member : static_text_nodes(*container)) {
+            if (member == &owner)
+                continue;
+            const std::optional<std::string_view> member_text = static_text_value(*member);
+            if (member_text.has_value())
+                set_static_text_selection(*member, 0U, member_text->size(), result);
+        }
+    }
     static_text_selection_ = StaticTextSelectionSession{
         owner.identity(),
         0U,

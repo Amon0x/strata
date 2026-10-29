@@ -39,6 +39,13 @@
 namespace strata::desktop {
 namespace {
 
+/**
+ * The frame JSON selectors resolve against is the engine's own, and it carries every glyph the
+ * frame draws: a page showing a few thousand lines of text outgrows the limits untrusted input
+ * is held to.
+ */
+const data::JsonLimits frame_limits{512U * 1024U * 1024U, 256U, 64'000'000U, 64U * 1024U * 1024U};
+
 using data::JsonValue;
 using Clock = std::chrono::steady_clock;
 
@@ -675,7 +682,7 @@ struct PerformanceRunner::Impl final {
 
     [[nodiscard]] std::pair<double, double> resolve(const host::Selector& selector) {
         const DesktopHostInfo info = host.performance_info();
-        const JsonValue frame = data::parse_json(host.performance_frame_json());
+        const JsonValue frame = data::parse_json(host.performance_frame_json(), frame_limits);
         try {
             return host::BrowserModel::build(
                 frame, info.logical_width, info.logical_height
@@ -692,7 +699,7 @@ struct PerformanceRunner::Impl final {
         const host::Selector& selector
     ) {
         const DesktopHostInfo info = host.performance_info();
-        const JsonValue frame = data::parse_json(host.performance_frame_json());
+        const JsonValue frame = data::parse_json(host.performance_frame_json(), frame_limits);
         try {
             return host::BrowserModel::build(
                 frame, info.logical_width, info.logical_height

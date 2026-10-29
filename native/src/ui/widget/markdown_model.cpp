@@ -9,6 +9,7 @@
 #include "runtime/expression.hpp"
 #include "ui/theme.hpp"
 #include "ui/tree.hpp"
+#include "ui/widget/code_view_model.hpp"
 #include "ui/widget/description.hpp"
 #include "ui/widget/presentation.hpp"
 #include "ui/widget/registry.hpp"
@@ -535,6 +536,10 @@ struct ListMarker final {
         if (const auto opened = fence(line); opened.has_value()) {
             MarkdownBlock code;
             code.kind = MarkdownBlockKind::code;
+            // The info string after the fence names the language: its first word.
+            const std::string_view info =
+                trim(trim(line).substr(run_length(trim(line), 0U, opened->first)));
+            code.language = std::string(info.substr(0U, info.find_first_of(" \t{")));
             const std::size_t indent = indentation(line);
             ++index;
             std::vector<std::string> body;
@@ -691,6 +696,20 @@ class MarkdownBuilder final {
             if (name == "pixelSize" && value.number() != nullptr && *value.number() > 0.0)
                 base_size_ = *value.number();
         }
+        // Syntax colours the author gives the Markdown reach its code blocks.
+        for (const std::string_view container : {"style", "$layout", "textStyle"}) {
+            const runtime::Value* style = scope.property(container);
+            const runtime::Value* syntax =
+                style != nullptr && style->object() != nullptr ? style->field("syntax") : nullptr;
+            if (syntax != nullptr && syntax->object() != nullptr) {
+                syntax_ = *syntax;
+                break;
+            }
+        }
+        for (const auto& [name, value] : text_style_) {
+            if (name == "color")
+                code_color_ = value;
+        }
         const runtime::Value* code_font = scope.property("codeFont");
         code_font_ = code_font != nullptr && code_font->string() != nullptr ? *code_font->string()
                                                                               : "strata:fonts/mono";
@@ -731,25 +750,37 @@ class MarkdownBuilder final {
                                {"margin", spacing(4.0, 0.0, 4.0, 0.0)},
                                {"width", widget_fill()}});
         case MarkdownBlockKind::code: {
+            // A code block is a CodeView, highlighted in the language its fence names and
+            // scrolling sideways rather than wrapping, on the Markdown's quiet tint.
             std::vector<std::pair<std::string, runtime::Value>> style = text_style_;
-            std::erase_if(style, [](const auto& entry) { return entry.first == "font"; });
+            std::erase_if(style, [](const auto& entry) {
+                return entry.first == "font" || entry.first == "color";
+            });
             style.emplace_back("font", runtime::Value(code_font_));
-            DescriptionNode::Properties properties{
-                {"text", runtime::ExpressionValue(runtime::Value(block.code))},
-                {"textStyle", runtime::ExpressionValue(object(std::move(style)))},
-                {"$layout", runtime::ExpressionValue(object({{"height", runtime::Value("content")},
-                                                             {"width", widget_fill()},
-                                                             {"wrapMode", runtime::Value("NONE")}}))},
-            };
+            if (syntax_.kind() != runtime::ValueKind::null_value)
+                style.emplace_back("syntax", syntax_);
+            if (code_color_.kind() != runtime::ValueKind::null_value)
+                style.emplace_back("color", code_color_);
+            DescriptionNode::Properties properties = widget_transparent_properties();
+            properties.insert_or_assign("text",
+                                        runtime::ExpressionValue(runtime::Value(block.code)));
+            properties.insert_or_assign("language",
+                                        runtime::ExpressionValue(runtime::Value(block.language)));
+            properties.insert_or_assign("lineNumbers",
+                                        runtime::ExpressionValue(runtime::Value(false)));
+            properties.insert_or_assign("textStyle", runtime::ExpressionValue(object(style)));
+            properties.insert_or_assign("background", runtime::ExpressionValue(tint(36U)));
+            properties.insert_or_assign("radius", runtime::ExpressionValue(runtime::Value(6.0)));
+            properties.insert_or_assign(
+                "$layout", runtime::ExpressionValue(object({{"clip", runtime::Value(true)},
+                                                            {"height", runtime::Value("content")},
+                                                            {"kind", runtime::Value("COLUMN")},
+                                                            {"radius", runtime::Value(6.0)},
+                                                            {"width", widget_fill()}})));
+            std::vector<std::shared_ptr<const DescriptionNode>> children =
+                expand_code_view(scope_, key, properties);
             scope_.synthesized();
-            return panel(key,
-                         {{"background", tint(36U)},
-                          {"clip", runtime::Value(true)},
-                          {"kind", runtime::Value("COLUMN")},
-                          {"padding", spacing(10.0, 12.0, 10.0, 12.0)},
-                          {"radius", runtime::Value(6.0)},
-                          {"width", widget_fill()}},
-                         {scope_.node("Text", key + ".code", std::move(properties))});
+            return scope_.node("CodeView", key, std::move(properties), std::move(children));
         }
         case MarkdownBlockKind::quote: {
             std::vector<std::shared_ptr<const DescriptionNode>> children = blocks(block.children, key);
@@ -977,6 +1008,8 @@ class MarkdownBuilder final {
     std::vector<std::pair<std::string, runtime::Value>> text_style_;
     double base_size_ = 12.0;
     std::string code_font_;
+    runtime::Value syntax_;
+    runtime::Value code_color_;
     runtime::ExpressionValue link_action_;
     std::size_t list_depth_ = 0U;
 };

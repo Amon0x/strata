@@ -246,6 +246,7 @@ each token's kind where it is used:
 | `theme.foreground`, `theme.mutedForeground` | color |
 | `theme.accent`, `theme.danger`, `theme.focus` | color |
 | `theme.spacingUnit`, `theme.radius`, `theme.density` | number |
+| Code: `theme.codeBackground`, `theme.codeLineNumber`, `theme.codeLineHighlight` and the syntax colours `theme.syntaxKeyword`, `theme.syntaxType`, `theme.syntaxBuiltin`, `theme.syntaxFunction`, `theme.syntaxString`, `theme.syntaxNumber`, `theme.syntaxComment`, `theme.syntaxOperator`, `theme.syntaxPunctuation`, `theme.syntaxConstant`, `theme.syntaxProperty`, `theme.syntaxTag`, `theme.syntaxAttribute`, `theme.syntaxVariable`, `theme.syntaxHeading`, `theme.syntaxEmphasis`, `theme.syntaxLink`, `theme.syntaxMeta` | color |
 | Palette: `theme.popupSurface`, `theme.tooltipSurface`, `theme.paletteSurface`, `theme.link`, `theme.disabledForeground`, `theme.matchHighlight`, `theme.insertionIndicator`, `theme.shadow`, `theme.severityError`, `theme.severityWarning`, `theme.severityInfo`, `theme.severitySuccess`, `theme.tokenFill`, `theme.tokenActive`, `theme.tokenActiveBorder`, `theme.marqueeFill`, `theme.marqueeStroke`, `theme.compositionSelection`, `theme.compositionUnderline`, `theme.tableRowDivider`, `theme.tableColumnDivider`, `theme.tablePinnedDivider` | color |
 | Custom tokens the application schemas declare | as declared |
 
@@ -565,7 +566,49 @@ Markdown(text: release.notes, style: { pixelSize: 14 },
 ```
 
 The links are ordinary `RichText` link spans. Any span can carry an `href`: the action its `action`
-names receives the `href` as its event value.
+names receives the `href` as its event value. A fenced block names its language after the fence
+(```` ```rust ````) and is drawn by a `CodeView` highlighting that language, without line numbers, so
+the Markdown's code reads like the rest of the app's; a `syntax` in the Markdown's style reaches
+its blocks.
+
+### Code view
+
+`CodeView` shows source code in a monospace face, highlighted by a real tokenizer for its
+`language`: `json`, `javascript`, `typescript`, `python`, `c`, `cpp`, `csharp`, `rust`, `go`,
+`css`, `html`, `xml`, `markdown`, `shell`, `sql` and `strata`, each also by its usual aliases and file
+extensions (`js`, `tsx`, `py`, `c++`, `hpp`, `cs`, `rs`, `golang`, `scss`, `svg`, `md`, `bash`,
+`postgres`, ...). Block comments, multi-line and template strings, an HTML page's script and style,
+and a Markdown file's fenced blocks all carry across lines, because the whole text is tokenized at
+once, and only again when it changes. An unknown language shows plain text.
+
+```strata
+CodeView(text: source, language: "rust", lineNumbers: true, wrap: false, highlightLines: [12, 13],
+         style: style(height: 360, syntax: { keyword: #FF79C6FF, comment: theme.mutedForeground }))
+```
+
+`lineNumbers` (on by default) puts numbers in a gutter that stays at the left edge while the code
+scrolls sideways under it; `firstLine` numbers from another line. `wrap` (off by default) breaks
+long lines instead, each keeping its number beside its first row. `highlightLines` bands the lines
+it lists. `tabSize` (4) expands tabs to columns. The text is selectable (`selectable: false` turns
+that off): a drag selects across lines, Ctrl+A selects all of it, and a copy gives back the lines
+joined by newlines. Its font is `strata:fonts/mono` at 13 pixels unless its style sets `font`,
+`pixelSize`, `color` or `lineHeightMultiplier`.
+
+The colours come from the theme's palette (`syntaxKeyword`, `syntaxType`, `syntaxBuiltin`,
+`syntaxFunction`, `syntaxString`, `syntaxNumber`, `syntaxComment`, `syntaxOperator`,
+`syntaxPunctuation`, `syntaxConstant`, `syntaxProperty`, `syntaxTag`, `syntaxAttribute`,
+`syntaxVariable`, `syntaxHeading`, `syntaxEmphasis`, `syntaxLink`, `syntaxMeta`, and
+`codeBackground`, `codeLineNumber` and `codeLineHighlight` for its chrome), with light and dark
+defaults like every palette token. A style's `syntax` map overrides any of them for one view by the
+same names without the prefix (`keyword`, `string`, ..., `plain` for untokenized text,
+`lineNumber`, `lineHighlight`, and `gutter` for the numbers' background, which is the view's own
+background unless set).
+
+A view with a height of its own (fixed, a weight or a fraction) scrolls inside it and realizes only
+the rows in view: lines are laid out in rows of eighty (a highlighted line is a row of its own), so a
+file of many thousands of lines lays out, shapes and draws just what is on screen, and scrolling it
+lays out nothing new until a row enters view. A view sized to its content shows every line, so
+give a long file a height. A selection and a copy reach the rows that are realized.
 
 ### Drawers and sheets
 

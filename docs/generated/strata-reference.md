@@ -325,6 +325,48 @@ Children: `false` · Capabilities: —
 
 Retained state entries: 1 · Binding shorthands: 1
 
+### `CodeView`
+
+Children: `false` · Capabilities: —
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `text` | string | true | false | — |
+| `key` | key | false | false | — |
+| `language` | string | false | false | — |
+| `lineNumbers` | boolean | false | false | — |
+| `wrap` | boolean | false | false | — |
+| `highlightLines` | list of number | false | false | — |
+| `firstLine` | number | false | false | — |
+| `tabSize` | number | false | false | — |
+| `selectable` | boolean | false | false | — |
+| `layout` | layout | false | false | — |
+| `variant` | "compact" \| "danger" \| "default" \| "primary" \| "rail" \| "secondary" \| "subtle" | false | false | — |
+| `style` | style | false | false | — |
+| `visualStyle` | style | false | false | — |
+| `effect` | effect | false | false | — |
+| `material` | material | false | false | — |
+| `transition` | animation | false | false | — |
+| `enter` | animation | false | false | — |
+| `exit` | animation | false | false | — |
+| `move` | animation | false | false | — |
+| `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
+| `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
+| `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
+| `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
+| `contentKey` | key | false | false | — |
+| `contentTransition` | animation | false | false | — |
+| `contentTransitionMode` | "OUT_IN" \| "TOGETHER" | false | false | — |
+| `stagger` | duration | false | false | — |
+| `semantics` | { checked?: boolean, decorative?: boolean, description?: string, expanded?: boolean, label?: string, liveRegion?: "ASSERTIVE" \| "OFF" \| "POLITE", role?: "ALERT" \| "APPLICATION" \| "BUTTON" \| "CHECKBOX" \| "COLUMN_HEADER" \| "COMBO_BOX" \| "DIALOG" \| "FIELD" \| "FORM" \| "GRID" \| "GRID_CELL" \| "GROUP" \| "IMAGE" \| "LINK" \| "LIST" \| "LIST_ITEM" \| "MENU" \| "MENU_ITEM" \| "PROGRESS_BAR" \| "RADIO" \| "RADIO_GROUP" \| "ROW" \| "SEPARATOR" \| "SLIDER" \| "STATUS" \| "SWITCH" \| "TAB" \| "TABLE" \| "TAB_LIST" \| "TEXT" \| "TEXT_FIELD" \| "TREE" \| "TREE_ITEM", selected?: boolean, valueText?: string } | false | false | — |
+| `textStyle` | style | false | false | — |
+| `textVisualStyle` | style | false | false | — |
+| `animation` | animation | false | false | — |
+| `behaviors` | list of ({ action?: action, enabled?: boolean, id: stringLiteral, options?: { button?: "LEFT" \| "MIDDLE" \| "RIGHT", clickCount?: number, includeDescendants?: boolean, longPress?: duration, modifiers?: list of ("ALT" \| "CONTROL" \| "SHIFT" \| "SUPER"), policy?: "KEYBOARD_ONLY" \| "POINTER_AND_KEYBOARD" \| "POINTER_ONLY" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { dark?: number, dwell?: number, light?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { files?: list of string, move?: boolean, text?: string } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { emitMoves?: boolean, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), payload?: any, payloadType: string, preview?: { maxHeight?: number, maxWidth?: number, offsetX?: number, offsetY?: number, opacity?: number }, slop?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { acceptedTypes: list of string, allowedOperations?: list of ("COPY" \| "LINK" \| "MOVE"), insertionAxis?: "HORIZONTAL" \| "VERTICAL" } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: string, bounds?: movable bounds, clampToBounds?: boolean, enabled?: boolean, fling?: boolean, friction?: number, handleKey?: key, rubberBand?: boolean, snap?: { distance?: number, enabled?: boolean, gap?: number, guides?: any, margin?: number, siblings?: boolean }, snapPoints?: list of any, snapX?: list of number, snapY?: list of number, spring?: string, step?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { axis?: "HORIZONTAL" \| "VERTICAL", payloadType: string } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { horizontal?: boolean, maxHeight?: number, maxWidth?: number, minHeight?: number, minWidth?: number, vertical?: boolean } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { anchor?: { x?: number, y?: number }, enabled?: boolean, includeDescendants?: boolean, max?: number, min?: number, step?: number, targetKey?: key, value?: number } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: { paneKey: key } } \| { action?: action, enabled?: boolean, id: stringLiteral, options?: map of any }) | false | false | — |
+
+Retained state entries: 0 · Binding shorthands: 0
+
 ### `ColorPicker`
 
 Children: `false` · Capabilities: —
@@ -3511,6 +3553,7 @@ Toggle an item in a keyed tree Payload: `strata.action-payload/tree.toggle@1`. D
 | `radius` | number \| { all?: number, bottom?: number, bottomLeft?: number, bottomRight?: number, left?: number, right?: number, top?: number, topLeft?: number, topRight?: number } |
 | `rowSpan` | number |
 | `stackBelow` | number |
+| `syntax` | { attribute?: color, builtin?: color, comment?: color, constant?: color, emphasis?: color, function?: color, gutter?: color, heading?: color, keyword?: color, lineHighlight?: color, lineNumber?: color, link?: color, meta?: color, number?: color, operator?: color, plain?: color, property?: color, punctuation?: color, string?: color, tag?: color, type?: color, variable?: color } |
 | `rotate` | number |
 | `rotateX` | number |
 | `rotateY` | number |

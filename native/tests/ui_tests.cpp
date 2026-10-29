@@ -33,6 +33,7 @@
 #include "runtime/value.hpp"
 #include "ui/behavior/input.hpp"
 #include "ui/behavior/registry.hpp"
+#include "ui/code_highlight.hpp"
 #include "ui/collection/model.hpp"
 #include "ui/description.hpp"
 #include "ui/inspection.hpp"
@@ -1662,6 +1663,205 @@ void test_conic_gradients_rotation_and_gradient_borders() {
     check(faded_border.paint.is_gradient() &&
               faded_border.paint.gradient()->stops.front().color.alpha == 127U,
           "opacity did not reach a gradient border's stops");
+}
+
+/** The kind of the syntax span covering the `occurrence`th appearance of `token` in `source`. */
+strata::ui::SyntaxKind syntax_kind_at(const std::string_view source,
+                                      const std::string_view language, const std::string_view token,
+                                      const std::size_t occurrence = 0U) {
+    std::size_t at = source.find(token);
+    for (std::size_t skip = 0U; skip < occurrence && at != std::string_view::npos; ++skip)
+        at = source.find(token, at + 1U);
+    check(at != std::string_view::npos, "syntax fixture is missing its token");
+    for (const strata::ui::SyntaxSpan& span : strata::ui::highlight_syntax(source, language)) {
+        if (span.start <= at && at + token.size() <= span.start + span.length)
+            return span.kind;
+    }
+    return strata::ui::SyntaxKind::plain;
+}
+
+void test_syntax_highlighting_tokenizes_each_language() {
+    using strata::ui::SyntaxKind;
+    const auto expect = [](const std::string_view source, const std::string_view language,
+                           const std::string_view token, const SyntaxKind kind,
+                           const std::string_view what, const std::size_t occurrence = 0U) {
+        if (syntax_kind_at(source, language, token, occurrence) != kind) {
+            throw std::runtime_error(std::string(language) + ": " + std::string(what) + " ('" +
+                                     std::string(token) + "' was " +
+                                     std::string(strata::ui::syntax_kind_name(
+                                         syntax_kind_at(source, language, token, occurrence))) +
+                                     ")");
+        }
+    };
+    check(strata::ui::syntax_language("JS") == "javascript" &&
+              strata::ui::syntax_language("c++") == "cpp" &&
+              strata::ui::syntax_language(".tsx") == "typescript" &&
+              strata::ui::syntax_language("bash") == "shell" &&
+              strata::ui::syntax_language("C#") == "csharp" &&
+              strata::ui::syntax_language("klingon").empty(),
+          "language names did not resolve to their canonical languages");
+    check(strata::ui::highlight_syntax("let x = 1;", "klingon").empty(),
+          "an unknown language was highlighted");
+
+    const std::string_view json =
+        R"({ "name": "strata", "count": -1.5e3, "ok": true, "none": null })";
+    expect(json, "json", "\"name\"", SyntaxKind::property, "a key is a property");
+    expect(json, "json", "\"strata\"", SyntaxKind::string, "a value is a string");
+    expect(json, "json", "1.5e3", SyntaxKind::number, "a number keeps its exponent");
+    expect(json, "json", "true", SyntaxKind::constant, "true is a constant");
+
+    const std::string_view script =
+        "// note\nconst re = /a[/]b/g; let total = 4 / 2;\nconst s = `x ${user.name} y`;\n"
+        "async function load(id) { return await fetch(id); }\nclass Store {}";
+    expect(script, "javascript", "// note", SyntaxKind::comment, "a line comment");
+    expect(script, "javascript", "/a[/]b/g", SyntaxKind::string, "a regex literal");
+    expect(script, "javascript", "/", SyntaxKind::operator_symbol, "division after a name", 5U);
+    expect(script, "javascript", "`x ", SyntaxKind::string, "a template's text");
+    expect(script, "javascript", "user", SyntaxKind::plain, "code inside a template");
+    expect(script, "javascript", "load", SyntaxKind::function, "a declared function");
+    expect(script, "javascript", "Store", SyntaxKind::type, "a declared class");
+    expect(script, "javascript", "await", SyntaxKind::keyword, "a keyword");
+    expect("let n: number = 1; interface A {}", "typescript", "number", SyntaxKind::type,
+           "a TypeScript type");
+
+    const std::string_view python =
+        "@dataclass\nclass P:\n    \"\"\"Doc\nstring\"\"\"\n    def go(self, x=None):\n"
+        "        return f\"{x}\"  # done\n";
+    expect(python, "python", "@dataclass", SyntaxKind::meta, "a decorator");
+    expect(python, "python", "string\"\"\"", SyntaxKind::string, "a triple-quoted string's lines");
+    expect(python, "python", "go", SyntaxKind::function, "a def's name");
+    expect(python, "python", "None", SyntaxKind::constant, "None");
+    expect(python, "python", "f\"{x}\"", SyntaxKind::string, "an f-string with its prefix");
+    expect(python, "python", "# done", SyntaxKind::comment, "a hash comment");
+
+    const std::string_view c = "#include <stdio.h>\n/* block\ncomment */ int main(void) { "
+                               "return 0x1F + 'a'; }";
+    expect(c, "c", "#include <stdio.h>", SyntaxKind::meta, "a directive");
+    expect(c, "c", "comment */", SyntaxKind::comment, "a block comment's second line");
+    expect(c, "c", "int", SyntaxKind::type, "a C type");
+    expect(c, "c", "main", SyntaxKind::function, "a call or definition");
+    expect(c, "c", "0x1F", SyntaxKind::number, "a hexadecimal number");
+    expect(c, "c", "'a'", SyntaxKind::string, "a character literal");
+    expect("auto s = R\"(raw \"q\")\"; std::vector<int> v;", "cpp", "R\"(raw \"q\")\"",
+           SyntaxKind::string, "a raw string");
+    expect("namespace demo { template <typename T> class Box {}; }", "cpp", "Box", SyntaxKind::type,
+           "a C++ class");
+
+    const std::string_view csharp = "var p = @\"C:\\dir\"; string s = $\"{p}\";\n#region x\n";
+    expect(csharp, "csharp", "@\"C:\\dir\"", SyntaxKind::string, "a verbatim string");
+    expect(csharp, "csharp", "$\"{p}\"", SyntaxKind::string, "an interpolated string");
+    expect(csharp, "csharp", "string", SyntaxKind::type, "a C# type");
+    expect(csharp, "csharp", "#region x", SyntaxKind::meta, "a region directive");
+
+    const std::string_view rust = "#[derive(Debug)]\nstruct S<'a> { v: Vec<&'a str> }\nfn main() { "
+                                  "println!(\"{}\", r#\"raw\"#); "
+                                  "let c = 'x'; for i in 0..10 {} }";
+    expect(rust, "rust", "#[derive(Debug)]", SyntaxKind::meta, "an attribute");
+    expect(rust, "rust", "'a", SyntaxKind::meta, "a lifetime");
+    expect(rust, "rust", "println!", SyntaxKind::function, "a macro");
+    expect(rust, "rust", "r#\"raw\"#", SyntaxKind::string, "a raw string");
+    expect(rust, "rust", "'x'", SyntaxKind::string, "a character");
+    expect(rust, "rust", "0..10", SyntaxKind::plain, "a range is not one number");
+    expect(rust, "rust", "Vec", SyntaxKind::type, "a standard type");
+
+    const std::string_view go =
+        "package main\nfunc Shout(s string) error { raw := `a\nb`; return nil }";
+    expect(go, "go", "Shout", SyntaxKind::function, "a func's name");
+    expect(go, "go", "error", SyntaxKind::type, "a Go type");
+    expect(go, "go", "b`", SyntaxKind::string, "a raw string across lines");
+    expect(go, "go", "nil", SyntaxKind::constant, "nil");
+
+    const std::string_view css =
+        "@media (max-width: 600px) { .card > #main:hover { color: #fff !important; width: 50%; "
+        "transform: scale(1.5); } }";
+    expect(css, "css", "@media", SyntaxKind::keyword, "an at-rule");
+    expect(css, "css", ".card", SyntaxKind::type, "a class selector");
+    expect(css, "css", "#main", SyntaxKind::constant, "an id selector");
+    expect(css, "css", "hover", SyntaxKind::keyword, "a pseudo-class");
+    expect(css, "css", "color", SyntaxKind::property, "a property");
+    expect(css, "css", "#fff", SyntaxKind::number, "a colour value");
+    expect(css, "css", "!important", SyntaxKind::keyword, "!important");
+    expect(css, "css", "50%", SyntaxKind::number, "a percentage");
+    expect(css, "css", "scale", SyntaxKind::function, "a function value");
+
+    const std::string_view html =
+        "<!DOCTYPE html>\n<!-- note -->\n<a href=\"/x\" disabled>Tom &amp; Jerry</a>\n"
+        "<script>const n = 1;</script><style>p { color: red; }</style>";
+    expect(html, "html", "<!DOCTYPE html>", SyntaxKind::meta, "a doctype");
+    expect(html, "html", "<!-- note -->", SyntaxKind::comment, "a comment");
+    expect(html, "html", "a", SyntaxKind::tag, "a tag name");
+    expect(html, "html", "href", SyntaxKind::attribute, "an attribute");
+    expect(html, "html", "\"/x\"", SyntaxKind::string, "an attribute value");
+    expect(html, "html", "&amp;", SyntaxKind::constant, "an entity");
+    expect(html, "html", "const", SyntaxKind::keyword, "script content as JavaScript");
+    expect(html, "html", "color", SyntaxKind::property, "style content as CSS");
+    expect("<?xml version=\"1.0\"?><a><![CDATA[x < y]]></a>", "xml", "<![CDATA[x < y]]>",
+           SyntaxKind::string, "CDATA");
+
+    const std::string_view markdown =
+        "# Title\n\n- item with `code` and **bold** and [link](http://x)\n\n```python\ndef f(): "
+        "pass\n```\n> quote";
+    expect(markdown, "markdown", "# Title", SyntaxKind::heading, "a heading");
+    expect(markdown, "markdown", "`code`", SyntaxKind::string, "inline code");
+    expect(markdown, "markdown", "**bold**", SyntaxKind::heading, "strong text");
+    expect(markdown, "markdown", "link", SyntaxKind::link, "a link's text");
+    expect(markdown, "markdown", "```python", SyntaxKind::meta, "a fence");
+    expect(markdown, "markdown", "def", SyntaxKind::keyword, "fenced code in its language");
+    expect(markdown, "markdown", "-", SyntaxKind::keyword, "a list marker");
+
+    const std::string_view shell =
+        "#!/bin/bash\nNAME=world\nif [ -n \"$NAME\" ]; then echo \"hi ${NAME}\" | tee -a log; fi";
+    expect(shell, "shell", "#!/bin/bash", SyntaxKind::comment, "a shebang");
+    expect(shell, "shell", "NAME", SyntaxKind::variable, "an assignment");
+    expect(shell, "shell", "if", SyntaxKind::keyword, "if");
+    expect(shell, "shell", "-n", SyntaxKind::attribute, "an option");
+    expect(shell, "shell", "$NAME", SyntaxKind::variable, "a variable inside a string");
+    expect(shell, "shell", "echo", SyntaxKind::builtin, "a builtin command");
+    expect(shell, "shell", "tee", SyntaxKind::function, "a command after a pipe");
+
+    const std::string_view sql =
+        "-- monthly\nselect c.name AS \"Customer\", COUNT(*) FROM orders WHERE total > 10.5 "
+        "AND status = 'paid';";
+    expect(sql, "sql", "-- monthly", SyntaxKind::comment, "a SQL comment");
+    expect(sql, "sql", "select", SyntaxKind::keyword, "a lower-case keyword");
+    expect(sql, "sql", "\"Customer\"", SyntaxKind::property, "a quoted identifier");
+    expect(sql, "sql", "COUNT", SyntaxKind::function, "a function");
+    expect(sql, "sql", "'paid'", SyntaxKind::string, "a string");
+
+    const std::string_view strata_source =
+        "style Card { background: #141A2BFF; radius: 8; }\ncomponent Row(label: string) {\n"
+        "  state count = 0;\n  Panel(style: Card, timers: [{ every: 250ms }]) { Text(text: label) "
+        "}\n}";
+    expect(strata_source, "strata", "style", SyntaxKind::keyword, "style");
+    expect(strata_source, "strata", "background", SyntaxKind::property, "a style field");
+    expect(strata_source, "strata", "#141A2BFF", SyntaxKind::constant, "a colour");
+    expect(strata_source, "strata", "Row", SyntaxKind::type, "a component name");
+    expect(strata_source, "strata", "Panel", SyntaxKind::function, "a widget call");
+    expect(strata_source, "strata", "250ms", SyntaxKind::number, "a duration");
+
+    // Spans are ordered and never overlap, whatever the language nests.
+    for (const std::string_view language : {"html", "markdown", "javascript"}) {
+        const std::vector<strata::ui::SyntaxSpan> spans =
+            strata::ui::highlight_syntax(language == "html"       ? html
+                                         : language == "markdown" ? markdown
+                                                                  : script,
+                                         language);
+        for (std::size_t index = 1U; index < spans.size(); ++index) {
+            check(spans[index - 1U].start + spans[index - 1U].length <= spans[index].start,
+                  "syntax spans overlapped or went out of order");
+        }
+    }
+
+    // A long file tokenizes in linear time: forty thousand lines well within a second.
+    std::string large;
+    for (int line = 0; line < 40000; ++line)
+        large += "const value" + std::to_string(line) + " = { id: " + std::to_string(line) +
+                 ", name: \"item\" }; // row\n";
+    const auto started = std::chrono::steady_clock::now();
+    const std::vector<strata::ui::SyntaxSpan> spans = strata::ui::highlight_syntax(large, "js");
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    check(spans.size() > 40000U * 8U, "a long file was not tokenized throughout");
+    check(elapsed < std::chrono::seconds(1), "tokenizing a long file was not linear");
 }
 
 void test_gradient_paint_authoring_and_tessellation() {
@@ -9091,6 +9291,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_shadow_submission_extends_beyond_the_source_shape();
         test_gradient_paint_authoring_and_tessellation();
         test_conic_gradients_rotation_and_gradient_borders();
+        test_syntax_highlighting_tokenizes_each_language();
         test_vector_shape_tessellation();
         test_svg_image_projection_and_compound_fill();
         test_full_mask_atlas_reuses_a_page_of_the_other_kind();

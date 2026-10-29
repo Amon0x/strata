@@ -1,6 +1,7 @@
 #include "ui/widget/registry.hpp"
 
 #include "ui/widget/chart_model.hpp"
+#include "ui/widget/code_view_model.hpp"
 #include "ui/widget/color_picker_model.hpp"
 #include "ui/widget/date_picker_model.hpp"
 #include "ui/widget/description.hpp"
@@ -92,6 +93,7 @@ WidgetRegistry::WidgetRegistry() {
     register_builtin_widget_subtargets(*this);
     register_chart_widget(*this);
     register_markdown_widget(*this);
+    register_code_view_widget(*this);
     register_date_picker_widget(*this);
     register_range_slider_widget(*this);
     register_zoom_view_widget(*this);
