@@ -322,14 +322,30 @@ void Renderer::Impl::rasterize(const host::ResourceOperation& operation, Image& 
         values.miter_limit = layer.stroke.miter_limit;
         values.tolerance = layer.stroke.tolerance;
         dispatch(0U, layer.segment_count);
-        dispatch(1U, layer.piece_count);
+        for (std::uint32_t start = 0U; start < layer.piece_count;
+             start += shaders::pieces_per_dispatch) {
+            values.first_piece = layer.first_piece + start;
+            values.piece_count = std::min(shaders::pieces_per_dispatch, layer.piece_count - start);
+            dispatch(1U, values.piece_count * shaders::stroke_parts);
+        }
         if (layer.art.has_value()) {
             if (const VkPipeline kernel = art_kernel(layer.art->source, layer.art->stroked);
                 kernel != VK_NULL_HANDLE) {
                 values.art_base = art_bases[index];
                 const std::uint32_t count = layer.art->count;
-                dispatch_with(kernel, layer.art->stroked ? (layer.art->closed ? count : count - 1U)
-                                                         : count);
+                if (!layer.art->stroked) {
+                    dispatch_with(kernel, count);
+                } else {
+                    // Segments in place of pieces, `first_piece` the first.
+                    const std::uint32_t art_segments = layer.art->closed ? count : count - 1U;
+                    for (std::uint32_t start = 0U; start < art_segments;
+                         start += shaders::pieces_per_dispatch) {
+                        values.first_piece = start;
+                        values.piece_count =
+                            std::min(shaders::pieces_per_dispatch, art_segments - start);
+                        dispatch_with(kernel, values.piece_count * shaders::stroke_parts);
+                    }
+                }
             }
         }
         // A group of threads a row.

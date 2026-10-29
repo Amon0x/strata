@@ -4,8 +4,10 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <format>
 #include <numbers>
+#include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -210,9 +212,7 @@ float2 artPoint(uint index, uint count) {
     float below = floor(turns);
     float2 curve = lerp(hypotrochoid(t, below, pen), hypotrochoid(t, below + 1.0, pen),
                         smoothstep(0.0, 1.0, turns - below));
-    float2 size = artSize();
-    float scale = min(size.x, size.y) * 0.46;
-    return float2(0.5 + curve.x * scale / size.x, 0.5 + curve.y * scale / size.y);
+    return artCentred(curve, 0.92);
 }
 )hlsl";
 
@@ -227,6 +227,172 @@ void spirograph(Present& present, const Rect area) {
     line.width = 1.25;
     line.join = Join::round;
     present.art(area, spirograph_art, 1400U, turns_per_second, std::nullopt, hue(0.91), line);
+}
+
+/**
+ * A Maurer rose: the rose r = sin(6a) visited every `step` degrees and joined by straight lines,
+ * a web that refolds as the step drifts, over the rose itself (parameter 0 at 1: a step of one
+ * degree). A step between two whole degrees is the blend of their two webs, so the web closes.
+ */
+constexpr std::string_view maurer_art = R"hlsl(
+float2 roseAt(float index, float step, float spin) {
+    float angle = index * step * 0.0174532925;
+    float radius = sin(6.0 * angle);
+    return radius * float2(cos(angle + spin), sin(angle + spin));
+}
+
+float2 artPoint(uint index, uint count) {
+    float spin = artTime() * 0.08;
+    if (artParameter(0) > 0.5)
+        return artCentred(roseAt(float(index), 1.0, spin), 0.92);
+    float step = 50.0 + 21.0 * sin(artTime() * 0.448799);
+    float below = floor(step);
+    return artCentred(lerp(roseAt(float(index), below, spin), roseAt(float(index), below + 1.0, spin),
+                           smoothstep(0.0, 1.0, step - below)),
+                      0.92);
+}
+)hlsl";
+
+/** A wire globe: a line winding round a sphere from pole to pole and back, turning in 3D. */
+constexpr std::string_view globe_art = R"hlsl(
+float2 artPoint(uint index, uint count) {
+    float time = artTime();
+    float along = float(index) / float(count);
+    float latitude = 3.14159265 * (0.5 - 0.5 * cos(6.28318531 * along));
+    float longitude = 6.28318531 * 21.0 * along;
+    float3 p = float3(sin(latitude) * cos(longitude), cos(latitude), sin(latitude) * sin(longitude));
+    float spin = time * 0.45;
+    p = float3(p.x * cos(spin) + p.z * sin(spin), p.y, p.z * cos(spin) - p.x * sin(spin));
+    float tilt = 0.55 + 0.3 * sin(time * 0.27);
+    p = float3(p.x, p.y * cos(tilt) - p.z * sin(tilt), p.y * sin(tilt) + p.z * cos(tilt));
+    return artCentred(p.xy * (3.4 / (3.4 + p.z)), 0.82);
+}
+)hlsl";
+
+/**
+ * A tesseract turning through the fourth dimension, in perspective twice: its 32 edges are one
+ * closed walk (each corner has four, so a walk can cross every edge once and come home).
+ */
+constexpr std::string_view tesseract_art = R"hlsl(
+static const uint tesseractWalk[32] = {0, 8, 10, 2, 6, 14, 10, 11, 3, 7, 15, 11, 9, 1, 5, 13,
+                                       9, 8, 12, 14, 15, 13, 12, 4, 6, 7, 5, 4, 0, 2, 3, 1};
+
+float2 artPoint(uint index, uint count) {
+    float time = artTime();
+    uint corner = tesseractWalk[index % 32];
+    float4 p = float4(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1, (corner >> 3) & 1) * 2.0 - 1.0;
+    float a = time * 0.45;
+    float b = time * 0.31;
+    p = float4(p.x * cos(a) - p.w * sin(a), p.y * cos(b) - p.z * sin(b),
+               p.y * sin(b) + p.z * cos(b), p.x * sin(a) + p.w * cos(a));
+    float3 q = p.xyz * (2.6 / (3.6 - p.w));
+    float spin = time * 0.2;
+    q = float3(q.x * cos(spin) + q.z * sin(spin), q.y, q.z * cos(spin) - q.x * sin(spin));
+    q = float3(q.x, q.y * cos(0.5) - q.z * sin(0.5), q.y * sin(0.5) + q.z * cos(0.5));
+    return artCentred(q.xy * (4.5 / (4.5 + q.z)), 0.38);
+}
+)hlsl";
+
+/**
+ * A harmonograph: two damped pendulums a hair out of tune, swinging out from the centre and back
+ * into it, so neither end is left hanging; their phases drift, so the figure turns over.
+ */
+constexpr std::string_view harmonograph_art = R"hlsl(
+float2 artPoint(uint index, uint count) {
+    float drift = artTime() * 0.25;
+    float t = (float(index) / float(count - 1) * 2.0 - 1.0) * 90.0;
+    float decay = exp(-0.022 * abs(t));
+    float x = sin(2.0 * t + drift) * 0.55 + sin(3.003 * t + 1.1 + drift * 0.6) * 0.45;
+    float y = sin(3.0 * t + 0.4) * 0.55 + sin(2.002 * t + 2.3 - drift * 0.8) * 0.45;
+    return artCentred(decay * float2(x, y), 0.82);
+}
+)hlsl";
+
+/**
+ * Gielis's superformula: with symmetry `m` (parameter 0), a shape that breathes between a star
+ * and a round polygon. Parameters 1 to 3: its spin, size and phase. Its radius peaks at one.
+ */
+constexpr std::string_view supershape_art = R"hlsl(
+float2 artPoint(uint index, uint count) {
+    float time = artTime();
+    float angle = float(index) / float(count) * 6.28318531;
+    float m = artParameter(0);
+    float offset = artParameter(3);
+    float n = 0.95 + 0.7 * sin(time * 0.37 + offset * 2.1);
+    float n1 = 0.75 + 0.4 * sin(time * 0.29 + offset * 1.3);
+    float lobes = pow(abs(cos(m * angle / 4.0)), n) + pow(abs(sin(m * angle / 4.0)), n);
+    float radius = pow(max(lobes, 1.0e-6), -1.0 / n1) * artParameter(2);
+    float turned = angle + time * artParameter(1);
+    return artCentred(radius * float2(cos(turned), sin(turned)), 0.92);
+}
+)hlsl";
+
+/**
+ * A hexagonal spiral that twists as it shrinks, flying in forever: it moves outward by one turn
+ * each cycle, and a spiral one turn on is the same spiral, so the loop has no seam. Its outer end
+ * lies past the canvas's corners.
+ */
+constexpr std::string_view tunnel_art = R"hlsl(
+float2 artPoint(uint index, uint count) {
+    float time = artTime();
+    float twist = 0.09 + 0.04 * sin(time * 0.31);
+    float along = float(index) + (1.0 - frac(time * 0.4)) * 6.0;
+    float angle = along * (1.04719755 + twist);
+    float radius = 2.6 * exp(-along * 0.017);
+    return artCentred(radius * float2(cos(angle), sin(angle)), 0.92);
+}
+)hlsl";
+
+/** One art figure twice: a soft wide stroke under a thin bright one. */
+void glowing(Present& present, const Rect area, const std::string_view program,
+             const std::uint32_t count, const std::span<const float> parameters, const double turns,
+             const double glow_width, const double line_width, const bool closed = true) {
+    Stroke glow;
+    glow.width = glow_width;
+    glow.join = Join::round;
+    glow.cap = Cap::round;
+    present.art(area, program, count, parameters, std::nullopt, hue(turns, 1.0, 54U), glow, closed);
+    Stroke line;
+    line.width = line_width;
+    line.join = Join::round;
+    line.cap = Cap::round;
+    present.art(area, program, count, parameters, std::nullopt, hue(turns), line, closed);
+}
+
+/** The GPU art gallery: each figure generated entirely on the GPU, every frame. */
+void gallery(Present& present, const Rect area, const std::string_view kind) {
+    if (kind == "rose") {
+        const std::array<float, 1U> web{0.0F};
+        const std::array<float, 1U> rose{1.0F};
+        Stroke thread;
+        thread.width = 0.7;
+        thread.join = Join::round;
+        present.art(area, maurer_art, 360U, web, std::nullopt, hue(0.5, 1.0, 150U), thread);
+        glowing(present, area, maurer_art, 360U, rose, 0.47, 5.0, 1.4);
+    } else if (kind == "globe") {
+        glowing(present, area, globe_art, 1200U, {}, 0.36, 4.0, 1.0);
+    } else if (kind == "tesseract") {
+        glowing(present, area, tesseract_art, 32U, {}, 0.09, 7.0, 1.6);
+    } else if (kind == "harmonograph") {
+        glowing(present, area, harmonograph_art, 4000U, {}, 0.63, 3.0, 0.6, false);
+    } else if (kind == "supershape") {
+        // Largest first, each over the last: a translucent body under a bright edge.
+        constexpr std::array<std::array<float, 4U>, 3U> layers{{
+            {6.0F, 0.15F, 1.0F, 0.0F},
+            {10.0F, -0.22F, 0.7F, 1.0F},
+            {4.0F, 0.31F, 0.4F, 2.0F},
+        }};
+        for (std::size_t layer = 0U; layer < layers.size(); ++layer) {
+            Stroke edge;
+            edge.width = 1.0;
+            edge.join = Join::round;
+            const double turns = 0.78 + 0.08 * static_cast<double>(layer);
+            present.art(area, supershape_art, 720U, layers[layer], hue(turns, 1.0, 72U), hue(turns),
+                        edge);
+        }
+    } else {
+        glowing(present, area, tunnel_art, 340U, {}, 0.52, 3.0, 0.8, false);
+    }
 }
 
 /** Gauges sweeping on concentric tracks, planets orbiting them and a spinning pie at the hub. */
@@ -298,8 +464,10 @@ void present_canvas(Present& present) {
         orbits(present, area, phase);
     else if (kind == "waves")
         waves(present, area, phase);
-    else
+    else if (kind == "spirograph")
         spirograph(present, area);
+    else
+        gallery(present, area, kind);
 }
 
 } // namespace

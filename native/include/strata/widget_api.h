@@ -89,12 +89,14 @@ typedef struct strata_widget_shape {
  * Art (render_art): an outline a GPU program generates, for decoration that moves every frame at
  * no CPU cost. `source` is HLSL defining `float2 artPoint(uint index, uint count)`, which returns
  * each of `point_count` points in `bounds`' 0-1 space; it may call artTime() (seconds),
- * artParameter(index) (one of `parameters`, at most 16) and artSize() (the canvas in device
- * pixels). The backend fills (STRATA_WIDGET_SHAPE_FILL, by STRATA_WIDGET_SHAPE_EVEN_ODD) and
- * strokes (STRATA_WIDGET_SHAPE_STROKE) the outline with exact coverage, closing it when flags has
- * STRATA_WIDGET_ART_CLOSED, and draws it again every frame. Art is opt-in and GPU-only: nothing
- * on the CPU sees its geometry (hit testing sees `bounds`), the software renderer leaves it out,
- * and a program that fails to compile draws nothing and is reported once on stderr.
+ * artParameter(index) (one of `parameters`, at most 16), artSize() (the canvas in device
+ * pixels) and artCentred(unit, reach) (a figure drawn round the origin in -1 to 1, centred to
+ * span `reach` of the canvas's shorter side). The backend fills (STRATA_WIDGET_SHAPE_FILL, by
+ * STRATA_WIDGET_SHAPE_EVEN_ODD) and strokes (STRATA_WIDGET_SHAPE_STROKE) the outline with exact
+ * coverage, closing it when flags has STRATA_WIDGET_ART_CLOSED, and draws it again every frame. Art
+ * is opt-in and GPU-only: nothing on the CPU sees its geometry (hit testing sees `bounds`), the
+ * software renderer leaves it out, and a program that fails to compile draws nothing and is
+ * reported once on stderr.
  */
 #define STRATA_WIDGET_ART_CLOSED UINT32_C(8)
 

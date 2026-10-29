@@ -337,7 +337,9 @@ for geometry that is not an outline: textured or per-vertex-coloured triangles, 
 For decoration that moves every frame, `present.art` hands the outline itself to the GPU. The
 widget passes a small HLSL program defining `float2 artPoint(uint index, uint count)`, which
 returns each point in the bounds' 0-1 space and may call `artTime()` (seconds), `artParameter(i)`
-(up to sixteen values the widget passes) and `artSize()` (the canvas in device pixels). The
+(up to sixteen values the widget passes), `artSize()` (the canvas in device pixels) and
+`artCentred(unit, reach)`, which places a figure drawn round the origin in -1 to 1 so it spans
+`reach` of the canvas's shorter side, centred and round whatever the canvas's shape. The
 backend fills or strokes the outline with the same exact coverage as any shape and draws it again
 every frame, so the figure moves while the widget neither repaints nor plans anything:
 

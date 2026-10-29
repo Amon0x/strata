@@ -1421,6 +1421,19 @@ component DrawPage() {
       }
       Text(text: "A native extension draws these through Present: a 1,400-point spirograph the GPU generates itself every frame as art (Present.art: no CPU work at all), sweeping gauges, orbiting dots and a spinning pie, and translucent swells. Arcs, circles and slices are exact analytic shapes; the swells are rasterized to exact coverage masks each frame.", wrapMode: "WORD")
     }
+    Card(title: "GPU ART: FIGURES THAT DRAW THEMSELVES") {
+      Panel(style: ActionRow) {
+        DemoCanvas(key: "draw.art.rose", kind: "rose", layout: { width: { weight: 1 }, height: 210 })
+        DemoCanvas(key: "draw.art.globe", kind: "globe", layout: { width: { weight: 1 }, height: 210 })
+        DemoCanvas(key: "draw.art.tesseract", kind: "tesseract", layout: { width: { weight: 1 }, height: 210 })
+      }
+      Panel(style: ActionRow) {
+        DemoCanvas(key: "draw.art.harmonograph", kind: "harmonograph", layout: { width: { weight: 1 }, height: 210 })
+        DemoCanvas(key: "draw.art.supershape", kind: "supershape", layout: { width: { weight: 1 }, height: 210 })
+        DemoCanvas(key: "draw.art.tunnel", kind: "tunnel", layout: { width: { weight: 1 }, height: 210 })
+      }
+      Text(text: "Each figure is a few lines of HLSL the GPU runs every frame: a Maurer rose whose web refolds, a wire globe, a tesseract turning through the fourth dimension, a harmonograph's two damped pendulums, Gielis supershapes breathing between star and polygon, and a hexagonal tunnel flying in forever. The canvases never repaint; the CPU does nothing for them after the first frame.", wrapMode: "WORD")
+    }
     Card(title: "DATA THAT MORPHS: animateChanges") {
       Panel(style: ActionRow) {
         Button(key: "draw.shuffle", label: "Shuffle data", onClick: action("state.set", name: "step", value: step + 1))

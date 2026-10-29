@@ -48,6 +48,16 @@ static_assert(sizeof(Constants) == 128U);
 /** Threads per group of every kernel: one segment or one row each. */
 inline constexpr std::uint32_t group_size = 64U;
 
+/**
+ * Threads a stroke piece is dispatched as. One thread walks every cell its polygons' edges cross,
+ * one after another, so a long piece alone keeps a thread busy while the rest of the GPU idles;
+ * cut across into slices, its threads walk it together. The kernels' `stroke_parts` matches.
+ */
+inline constexpr std::uint32_t stroke_parts = 16U;
+
+/** The most pieces one stroke dispatch takes: a dispatch has at most 65,535 groups a side. */
+inline constexpr std::uint32_t pieces_per_dispatch = 65535U * group_size / stroke_parts;
+
 /** The kernels, in the order backends keep them. */
 inline constexpr std::array<const char*, 5U> entries{"accumulate", "stroke", "resolve_coverage",
                                                      "resolve_composite", "finish"};
@@ -404,29 +414,43 @@ Polygon cap_of(float2 position, float2 outward) {
     return fan_of(position, across, sweep);
 }
 
-/** One stroke piece's band, join and caps, accumulated into the cells. */
-void stroke_piece(StrokePiece piece) {
+/** Threads a stroke piece is dispatched as (the C++ `stroke_parts`). */
+static const uint stroke_parts = 16;
+
+/**
+ * Slice `part` of one stroke piece: its band cut across into up to stroke_parts butt-ended slices
+ * of about 16 pixels, the first with the start cap and the last with the join and end cap. The
+ * slices tile the band, and the edge two share is walked once each way, so it cancels.
+ */
+void stroke_piece(StrokePiece piece, uint part) {
     float radius = raster.half_width;
-    // A piece's polygons are closed and lie within its reach: one that misses the content adds
-    // nothing to it.
-    float reach = radius * max(max(1.0, raster.join == 0 ? raster.miter_limit : 1.0),
-                               raster.cap == 2 ? 1.4142136 : 1.0) + 1.0;
-    float2 low = min(piece.p0, piece.p1) - reach;
-    float2 high = max(piece.p0, piece.p1) + reach;
-    if (any(high < 0.0) || low.x > float(raster.content_width) ||
-        low.y > float(raster.content_height))
-        return;
     float2 d = piece.p1 - piece.p0;
     float length_value = length(d);
     if (!(length_value > 1.0e-6) || !(radius > 0.0))
+        return;
+    uint parts = clamp(uint(ceil(length_value / 16.0)), 1u, stroke_parts);
+    if (part >= parts)
+        return;
+    bool first = part == 0;
+    bool last = part + 1 == parts;
+    float2 from = first ? piece.p0 : piece.p0 + d * (float(part) / float(parts));
+    float2 to = last ? piece.p1 : piece.p0 + d * (float(part + 1) / float(parts));
+    // A slice's polygons are closed and lie within its reach: one that misses the content adds
+    // nothing to it.
+    float reach = radius * max(max(1.0, raster.join == 0 ? raster.miter_limit : 1.0),
+                               raster.cap == 2 ? 1.4142136 : 1.0) + 1.0;
+    float2 low = min(from, to) - reach;
+    float2 high = max(from, to) + reach;
+    if (any(high < 0.0) || low.x > float(raster.content_width) ||
+        low.y > float(raster.content_height))
         return;
     float2 along = d / length_value;
     float2 side = float2(-along.y, along.x) * radius;
     // The band; the join with the next piece, on the side the path turns away from (the bands
     // overlap on the other); the caps of a run's ends.
-    Polygon band = corners(piece.p0 + side, piece.p1 + side, piece.p1 - side, piece.p0 - side, 4);
+    Polygon band = corners(from + side, to + side, to - side, from - side, 4);
     Polygon join = no_polygon();
-    if ((piece.flags & 1) != 0) {
+    if (last && (piece.flags & 1) != 0) {
         float2 e = piece.p2 - piece.p1;
         float next_length = length(e);
         if (next_length > 1.0e-6) {
@@ -459,10 +483,10 @@ void stroke_piece(StrokePiece piece) {
         }
     }
     Polygon start = no_polygon();
-    if ((piece.flags & 2) != 0)
+    if (first && (piece.flags & 2) != 0)
         start = cap_of(piece.p0, -along);
     Polygon end = no_polygon();
-    if ((piece.flags & 4) != 0)
+    if (last && (piece.flags & 4) != 0)
         end = cap_of(piece.p1, along);
     [loop] for (int shape = 0; shape < 4; ++shape) {
         Polygon polygon = band;
@@ -494,9 +518,10 @@ void stroke_piece(StrokePiece piece) {
 
 [numthreads(64, 1, 1)]
 void stroke(uint3 id : SV_DispatchThreadID) {
-    if (id.x >= raster.piece_count)
+    uint index = id.x / stroke_parts;
+    if (index >= raster.piece_count)
         return;
-    stroke_piece(pieces[raster.first_piece + id.x]);
+    stroke_piece(pieces[raster.first_piece + index], id.x % stroke_parts);
 }
 
 int resolved(int cover, int area) {
@@ -692,6 +717,14 @@ float artTime() { return art_values[raster.art_base + 0]; }
 float artParameter(uint index) { return index < 16 ? art_values[raster.art_base + 8 + index] : 0.0; }
 /** The canvas's size in device pixels. */
 float2 artSize() { return float2(art_values[raster.art_base + 5], art_values[raster.art_base + 6]); }
+/**
+ * `unit`, a point of a figure drawn round the origin with -1 to 1 spanning `reach` of the canvas's
+ * shorter side, in the canvas's 0-1 space: centred, and round whatever the canvas's shape.
+ */
+float2 artCentred(float2 unit, float reach) {
+    float2 size = artSize();
+    return 0.5 + unit * (min(size.x, size.y) * 0.5 * reach) / max(size, 1.0);
+}
 )hlsl";
 
 /** The art entry points, after the program, which defines artPoint(index, count). */
@@ -706,23 +739,25 @@ bool art_finite(float2 value) {
 }
 
 [numthreads(64, 1, 1)]
+// A dispatch takes `piece_count` segments from `first_piece` on, stroke_parts threads each.
 void art_stroke(uint3 id : SV_DispatchThreadID) {
     uint count = uint(art_values[raster.art_base + 1]);
     bool closed = art_values[raster.art_base + 2] > 0.5;
     uint segments = closed ? count : count - 1;
-    if (id.x >= segments)
+    uint segment = raster.first_piece + id.x / stroke_parts;
+    if (id.x / stroke_parts >= raster.piece_count || segment >= segments)
         return;
-    bool joined = closed || id.x + 2 < count;
+    bool joined = closed || segment + 2 < count;
     StrokePiece piece;
-    piece.p0 = art_position(id.x, count);
-    piece.p1 = art_position((id.x + 1) % count, count);
-    piece.p2 = joined ? art_position((id.x + 2) % count, count) : piece.p1;
-    piece.flags = (joined ? 1 : 0) | (!closed && id.x == 0 ? 2 : 0) |
-                  (!closed && id.x + 1 == segments ? 4 : 0);
+    piece.p0 = art_position(segment, count);
+    piece.p1 = art_position((segment + 1) % count, count);
+    piece.p2 = joined ? art_position((segment + 2) % count, count) : piece.p1;
+    piece.flags = (joined ? 1 : 0) | (!closed && segment == 0 ? 2 : 0) |
+                  (!closed && segment + 1 == segments ? 4 : 0);
     piece.reserved = 0;
     if (!art_finite(piece.p0) || !art_finite(piece.p1) || !art_finite(piece.p2))
         return;
-    stroke_piece(piece);
+    stroke_piece(piece, id.x % stroke_parts);
 }
 
 [numthreads(64, 1, 1)]
