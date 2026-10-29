@@ -3827,6 +3827,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -4055,6 +4063,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -4306,6 +4322,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -4643,6 +4667,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -5006,6 +5038,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -5296,6 +5336,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -5582,6 +5630,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -5864,6 +5920,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -6224,6 +6288,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -6556,6 +6628,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -6811,6 +6891,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -7091,6 +7179,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -7421,6 +7517,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -7663,6 +7767,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -8008,6 +8120,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -8272,6 +8392,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -8497,6 +8625,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -8756,6 +8892,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -9047,6 +9191,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -9378,6 +9530,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -9660,6 +9820,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -9912,6 +10080,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -10215,6 +10391,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -10461,6 +10645,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -10721,6 +10913,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -11025,6 +11225,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -11259,6 +11467,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -11507,6 +11723,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -11777,6 +12001,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -12030,6 +12262,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -12362,6 +12602,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -12664,6 +12912,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -12890,6 +13146,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -13241,6 +13505,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -13515,6 +13787,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -13861,6 +14141,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -14194,6 +14482,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -14440,6 +14736,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -14720,6 +15024,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -14958,6 +15270,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -15411,6 +15731,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -15769,6 +16097,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -16007,6 +16343,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -16379,6 +16723,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -16784,6 +17136,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -17095,6 +17455,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -17344,6 +17712,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -17621,6 +17997,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -17879,6 +18263,14 @@
         {
           "aliases": [],
           "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
           "name": "animateChanges",
           "nullable": true,
           "required": false,
@@ -18133,6 +18525,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -18499,6 +18899,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],
@@ -18929,6 +19337,14 @@
           "nullable": false,
           "required": false,
           "type": "list of ({ animation: animation, id: string, target: boolean } | { animation: animation, id: string, interaction: \"FOCUS\" | \"FOCUS_VISIBLE\" | \"HOVER\" | \"PRESSED\" } | { id: string, policy?: string, property: string, target: numeric or color target })"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "timers",
+          "nullable": false,
+          "required": false,
+          "type": "list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean }"
         },
         {
           "aliases": [],

@@ -1406,7 +1406,13 @@ component DataPage() {
 
 component DrawPage() {
   state step = 0;
-  Panel(style: PageColumn) {
+  state autoplay = true;
+  Panel(
+    style: PageColumn,
+    timers: [
+      { id: "draw.autoplay", every: 2200ms, running: autoplay, action: action("state.set", name: "step", value: step + 1) }
+    ]
+  ) {
     Card(title: "LIVE VECTOR ART: NATIVE PAINTER, EVERY FRAME") {
       Panel(style: ActionRow) {
         DemoCanvas(key: "draw.canvas.spirograph", kind: "spirograph", animation: CanvasClock, layout: { width: { weight: 1 }, height: 230 })
@@ -1418,7 +1424,8 @@ component DrawPage() {
     Card(title: "DATA THAT MORPHS: animateChanges") {
       Panel(style: ActionRow) {
         Button(key: "draw.shuffle", label: "Shuffle data", onClick: action("state.set", name: "step", value: step + 1))
-        Text(text: format("Data set {0} of 4. Charts animate by default; Draw shapes with animateChanges: properties [\"shapes\"].", step % 4 + 1), wrapMode: "WORD", layout: { width: { weight: 1 } })
+        Toggle(key: "draw.autoplay", label: "Auto", checked: autoplay, onChange: action("state.setFromEvent", name: "autoplay"))
+        Text(text: format("Data set {0} of 4, advanced every 2.2 s by a timer while Auto is on. Charts animate by default; Draw shapes with animateChanges: properties [\"shapes\"].", step % 4 + 1), wrapMode: "WORD", layout: { width: { weight: 1 } })
       }
       Panel(style: ActionRow) {
         Chart(key: "draw.chart.donut", kind: "DONUT", labels: ["Chrome", "Safari", "Firefox", "Other"], values: [[64, 19, 6, 11], [25, 25, 25, 25], [10, 40, 30, 20], [45, 15, 30, 10]][step % 4], valueSuffix: "%", layout: { width: { weight: 1 }, height: 240 })
@@ -1959,7 +1966,7 @@ component ExpectedText(selectedPage: string) {
   } else if selectedPage == "DATA" {
     Text(text: "Tree expansion never reconciles collapsed descendants; keyboard/range/typeahead and drag positions emit stable keys. Table sort is a host request, widths/order persist, and sticky/pinned regions align. Grid marquee, 2D arrows, stationary edge scroll, and sticky push-off stay current.", wrapMode: "WORD")
   } else if selectedPage == "DRAW" {
-    Text(text: "The three canvases move every frame. Shuffle data morphs the charts, gauge, sunburst and blob over the standard motion policy; the sunburst's slices meet with no seam. The loops turn and breathe without blurring an edge. Reduced motion snaps the data and stops the loops.", wrapMode: "WORD")
+    Text(text: "The three canvases move every frame. A timer advances the data every 2.2 s while Auto is on, and Shuffle data steps it at once; either morphs the charts, gauge, sunburst and blob over the standard motion policy; the sunburst's slices meet with no seam. The loops turn and breathe without blurring an edge. Reduced motion snaps the data and stops the loops.", wrapMode: "WORD")
   } else if selectedPage == "SHELL" {
     Text(text: "Menus, toolbars, command-bound controls, shortcut tooltips, and the palette resolve one live command definition. Disabled and checked states update everywhere. Palette search ranks prefix and word-boundary matches, Enter executes, Escape restores focus. Toasts stack without blocking input; breadcrumbs, disclosure, and chips emit typed events.", wrapMode: "WORD")
   } else {

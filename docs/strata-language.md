@@ -1011,6 +1011,25 @@ Button(label: "Save", onClick: sequence(
 ))
 ```
 
+`timers` runs actions on a clock, from the node that declares them, for as long as it is in the
+tree. Each timer has a literal `id`, an `every` interval and an `action`; it fires once an interval
+has passed and again each interval after, or only once with `repeat: false`. `running: false`
+pauses it, and when it runs again (or its interval changes) the interval starts over. The action
+is the node's current one, so `value: step + 1` counts on from wherever `step` is. A frame that
+arrives late fires a timer once, never a burst of the intervals it missed, and a timer stops when
+its node leaves the tree.
+
+```strata
+state step = 0;
+state playing = true;
+Panel(timers: [
+  { id: "advance", every: 2s, running: playing, action: action("state.set", name: "step", value: step + 1) },
+  { id: "hint", every: 10s, repeat: false, action: action("state.set", name: "hintShown", value: true) }
+]) {
+  Chart(kind: "BAR", series: [{ name: "Sales", values: datasets[step % 4] }])
+}
+```
+
 `clipboard.copy(text:)` writes text to the host clipboard (or the surface's local clipboard when the
 host installs none), where a paste reads it.
 

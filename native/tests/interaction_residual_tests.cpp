@@ -3386,6 +3386,53 @@ overlay Nested {
     check(shadow, "a theme token inside a shadow list did not resolve to the theme's colour");
 }
 
+void test_timers_fire_on_their_interval(const std::filesystem::path& resources) {
+    const std::string source = R"(
+overlay Ticks {
+  state count = 0;
+  state once = 0;
+  state paused = 0;
+  root Panel(
+    key: "ticks.root",
+    layout: { kind: "COLUMN", width: 200, height: 100 },
+    timers: [
+      { id: "count", every: 100ms, action: action("state.set", name: "count", value: count + 1) },
+      { id: "once", every: 250ms, repeat: false, action: action("state.set", name: "once", value: once + 1) },
+      { id: "paused", every: 50ms, running: false, action: action("state.set", name: "paused", value: paused + 1) }
+    ]
+  ) {
+    Text(key: "ticks.count", text: format("{0}", count))
+    Text(key: "ticks.once", text: format("{0}", once))
+    Text(key: "ticks.paused", text: format("{0}", paused))
+  }
+}
+)";
+    const auto bundle = runtime::ApplicationBundle::create();
+    runtime::ApplicationContext application("timers", bundle);
+    std::unique_ptr<ui::Surface> surface =
+        compiled_surface(application, resources, source, "Ticks", 200.0, 100.0);
+    const auto shown = [&](const std::string_view key) {
+        const ui::RetainedNode* node = surface->tree().find_key(key);
+        const auto found = node->description().properties.find("text");
+        return found->second.value() != nullptr && found->second.value()->string() != nullptr
+                   ? *found->second.value()->string()
+                   : std::string{};
+    };
+    std::int64_t now = 1'000'000;
+    static_cast<void>(surface->frame(now));
+    // A second at twenty milliseconds a frame: ten intervals of the repeating timer.
+    for (int frame = 0; frame < 50; ++frame)
+        static_cast<void>(surface->frame(now += 20'000'000));
+    check(shown("ticks.count") == "10",
+          "a repeating timer did not fire once each interval: " + shown("ticks.count"));
+    check(shown("ticks.once") == "1", "a one-shot timer did not fire exactly once");
+    check(shown("ticks.paused") == "0", "a timer that is not running fired");
+    // A stalled frame (five intervals at once) fires once, not five times.
+    static_cast<void>(surface->frame(now += 500'000'000));
+    static_cast<void>(surface->frame(now += 1'000'000));
+    check(shown("ticks.count") == "11", "a stalled frame fired a burst of timer actions");
+}
+
 void test_chart_inspects_selects_and_hides_series(const std::filesystem::path& resources) {
     const std::string source = R"(
 overlay Sales {
@@ -3904,6 +3951,7 @@ int strata_test_interaction_residual(const int argument_count, const char* const
         test_image_fit_keeps_the_aspect_ratio();
         test_calendar_picks_days_by_pointer_and_keyboard(resources);
         test_chart_inspects_selects_and_hides_series(resources);
+        test_timers_fire_on_their_interval(resources);
         test_markdown_expands_blocks_and_follows_links(resources);
         test_modal_sides_open_drawers_and_sheets(resources);
         test_date_picker_opens_picks_and_closes(resources);

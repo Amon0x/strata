@@ -295,6 +295,98 @@ void InputRouter::run_due_delays(InputOperationResult& result) {
     }
 }
 
+void InputRouter::run_timers(InputOperationResult& result) {
+    timers_waiting_ = false;
+    if (tree_ == nullptr || tree_->root() == nullptr) {
+        timers_.clear();
+        timer_nodes_.clear();
+        return;
+    }
+    // The nodes that declare timers change only with the tree's generation.
+    if (timer_tree_ != tree_ || timer_generation_ != tree_->generation() ||
+        timer_structure_generation_ != tree_->structure_generation()) {
+        timer_tree_ = tree_;
+        timer_generation_ = tree_->generation();
+        timer_structure_generation_ = tree_->structure_generation();
+        timer_nodes_.clear();
+        const auto visit = [this](const auto& self, const RetainedNode& node) -> void {
+            if (node.description().properties.contains("timers"))
+                timer_nodes_.push_back(node.identity());
+            for (const auto& child : node.children())
+                self(self, *child);
+        };
+        visit(visit, *tree_->root());
+    }
+    std::set<std::pair<std::uint64_t, std::string>> declared;
+    for (const std::uint64_t identity : timer_nodes_) {
+        const RetainedNode* node = tree_->find_identity(identity);
+        if (node == nullptr || node->lifecycle() == RetainedLifecycle::exiting)
+            continue;
+        const auto found = node->description().properties.find("timers");
+        if (found == node->description().properties.end() || found->second.list() == nullptr ||
+            *found->second.list() == nullptr) {
+            continue;
+        }
+        for (const runtime::ExpressionValue& element : (*found->second.list())->values) {
+            if (element.object() == nullptr || *element.object() == nullptr)
+                continue;
+            const runtime::ExpressionObjectValue& timer = **element.object();
+            const auto data = [&timer](const std::string_view name) -> const runtime::Value* {
+                const runtime::ExpressionValue* field = timer.field(name);
+                return field != nullptr ? field->value() : nullptr;
+            };
+            const runtime::Value* id = data("id");
+            const runtime::Value* every = data("every");
+            const runtime::ExpressionValue* action = timer.field("action");
+            if (id == nullptr || id->string() == nullptr || every == nullptr ||
+                every->duration() == nullptr || every->duration()->nanoseconds <= 0 ||
+                action == nullptr || action->action() == nullptr || *action->action() == nullptr) {
+                continue;
+            }
+            const auto flag = [&data](const std::string_view name, const bool fallback) {
+                const runtime::Value* value = data(name);
+                return value != nullptr && value->boolean() != nullptr ? *value->boolean() : fallback;
+            };
+            const std::int64_t interval = every->duration()->nanoseconds;
+            const bool running = flag("running", true);
+            const bool repeat = flag("repeat", true);
+            auto key = std::pair{identity, *id->string()};
+            declared.insert(key);
+            const auto [entry, inserted] = timers_.try_emplace(
+                std::move(key), TimerSchedule{interval, frame_time_nanos_ + interval, false});
+            TimerSchedule& schedule = entry->second;
+            // A paused timer starts its interval over when it runs again, as does a new interval.
+            if (!running || schedule.every_nanos != interval) {
+                schedule = TimerSchedule{interval, frame_time_nanos_ + interval, false};
+                if (!running)
+                    continue;
+            }
+            if (schedule.finished)
+                continue;
+            if (frame_time_nanos_ < schedule.due_nanos) {
+                timers_waiting_ = true;
+                continue;
+            }
+            // Fired once however many intervals passed: a stalled frame never fires a burst.
+            if (repeat) {
+                schedule.due_nanos += interval;
+                if (schedule.due_nanos <= frame_time_nanos_)
+                    schedule.due_nanos = frame_time_nanos_ + interval;
+                timers_waiting_ = true;
+            } else {
+                schedule.finished = true;
+            }
+            const runtime::ActionEvent event{
+                "timer",
+                node->description().key,
+                runtime::Value(*id->string()),
+            };
+            static_cast<void>(execute_action(event, **action->action(), *node, result));
+        }
+    }
+    std::erase_if(timers_, [&declared](const auto& entry) { return !declared.contains(entry.first); });
+}
+
 runtime::ActionDispatchOutcome InputRouter::execute_composition(
     const runtime::ActionEvent& event,
     const runtime::ActionValue& composition,

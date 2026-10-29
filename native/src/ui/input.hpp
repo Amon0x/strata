@@ -861,6 +861,21 @@ class InputRouter final {
     };
     std::vector<PendingDelay> pending_delays_;
     void run_due_delays(InputOperationResult& result);
+    /** One authored timer's schedule: its interval, when it fires next, and whether it is done. */
+    struct TimerSchedule final {
+        std::int64_t every_nanos = 0;
+        std::int64_t due_nanos = 0;
+        bool finished = false;
+    };
+    /** Timers by node and timer id; the nodes that declare any, rescanned when the tree changes. */
+    std::map<std::pair<std::uint64_t, std::string>, TimerSchedule> timers_;
+    std::vector<std::uint64_t> timer_nodes_;
+    const RetainedTree* timer_tree_ = nullptr;
+    std::uint64_t timer_generation_ = ~std::uint64_t{0};
+    std::uint64_t timer_structure_generation_ = ~std::uint64_t{0};
+    /** Whether a running timer is waiting to fire, so frames must keep coming. */
+    bool timers_waiting_ = false;
+    void run_timers(InputOperationResult& result);
     std::optional<std::pair<std::uint64_t, std::string>> hovered_subtarget_;
     std::optional<WidgetSubtargetKind> hovered_subtarget_kind_;
     /** The deepest node of the current hover route. */

@@ -380,6 +380,7 @@ InputOperationResult InputRouter::advance_frame() {
     }
     advance_widget_frames(result);
     run_due_delays(result);
+    run_timers(result);
     route_active_lifecycle_hooks(false, result);
     synchronize_authored_presentations();
     return result;

@@ -299,6 +299,7 @@ void add_builtin_properties(BuiltinCatalog& catalog) {
         DeclaredParameter{.name = "exit", .type = declared_type_reference("animation")},
         DeclaredParameter{.name = "move", .type = declared_type_reference("animation")},
         DeclaredParameter{.name = "motions", .type = declared_type_reference("motionsList")},
+        DeclaredParameter{.name = "timers", .type = declared_type_reference("timersList")},
         DeclaredParameter{.name = "animateChanges",
                           .type = declared_type_reference("resolvedPropertyMotion"),
                           .nullable = true},

@@ -27,6 +27,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -65,6 +66,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -106,6 +108,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -156,6 +159,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -209,6 +213,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -253,6 +258,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -297,6 +303,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -341,6 +348,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -392,6 +400,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -443,6 +452,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -485,6 +495,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -529,6 +540,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -578,6 +590,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -618,6 +631,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -667,6 +681,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -705,6 +720,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -744,6 +760,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -782,6 +799,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -827,6 +845,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -870,6 +889,7 @@ Children: `false` · Capabilities: effective-scroll
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -916,6 +936,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -957,6 +978,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1004,6 +1026,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1045,6 +1068,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1081,6 +1105,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1127,6 +1152,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1166,6 +1192,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1202,6 +1229,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1245,6 +1273,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1282,6 +1311,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1332,6 +1362,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1377,6 +1408,7 @@ Children: `true` · Capabilities: effective-scroll
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1415,6 +1447,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1462,6 +1495,7 @@ Children: `true` · Capabilities: effective-scroll
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1505,6 +1539,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1556,6 +1591,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1605,6 +1641,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1646,6 +1683,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1685,6 +1723,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1725,6 +1764,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1780,6 +1820,7 @@ Children: `false` · Capabilities: effective-scroll
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1837,6 +1878,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1877,6 +1919,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1925,6 +1968,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -1980,6 +2024,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -2027,6 +2072,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -2065,6 +2111,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -2104,6 +2151,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -2146,6 +2194,7 @@ Children: `false` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -2184,6 +2233,7 @@ Children: `true` · Capabilities: —
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -2230,6 +2280,7 @@ Children: `false` · Capabilities: effective-scroll
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
@@ -2297,6 +2348,7 @@ Children: `true` · Capabilities: effective-scroll
 | `exit` | animation | false | false | — |
 | `move` | animation | false | false | — |
 | `motions` | list of ({ animation: animation, id: string, target: boolean } \| { animation: animation, id: string, interaction: "FOCUS" \| "FOCUS_VISIBLE" \| "HOVER" \| "PRESSED" } \| { id: string, policy?: string, property: string, target: numeric or color target }) | false | false | — |
+| `timers` | list of { action: action, every: duration, id: string, repeat?: boolean, running?: boolean } | false | false | — |
 | `animateChanges` | { policy?: string, properties: list of string } | false | true | — |
 | `animateContentSize` | { clip?: boolean, height?: boolean, policy?: string, width?: boolean } | false | true | — |
 | `disclosure` | { collapsedExtent?: number, expanded?: boolean, policy?: string } | false | true | — |
