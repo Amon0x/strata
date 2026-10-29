@@ -36,6 +36,8 @@ struct Phase final {
     std::vector<double> frames;
     /** Section path -> nanoseconds summed over this phase's frames, from each frame's samples. */
     std::map<std::string, double> sections;
+    /** Text counters summed over this phase's frames: how much text work a frame does. */
+    std::map<std::string, double> counters;
 };
 
 /** Adds the sections the surface's latest frame sampled to `phase`. */
@@ -44,6 +46,10 @@ void attribute(const ApplicationHost& host, Phase& phase) {
     for (const strata::ProfilerSection& section : snapshot.sections) {
         if (section.last_sample_frame_index == snapshot.frame_index)
             phase.sections[section.path] += static_cast<double>(section.last_nanoseconds);
+    }
+    for (const strata::ProfilerCounter& counter : snapshot.counters) {
+        if (counter.name.starts_with("text."))
+            phase.counters[counter.name] += static_cast<double>(counter.value);
     }
 }
 
@@ -67,6 +73,12 @@ void breakdown(const Phase& phase) {
     for (std::size_t index = 0U; index < std::min<std::size_t>(ordered.size(), 16U); ++index) {
         std::printf("    %-52s %8.3f ms/frame\n", ordered[index].first.c_str(),
                     ordered[index].second / 1e6 / frames);
+    }
+    for (const auto& [name, total] : phase.counters) {
+        if (name.ends_with("_nanos"))
+            std::printf("    %-52s %8.3f ms/frame\n", name.c_str(), total / 1e6 / frames);
+        else
+            std::printf("    %-52s %8.1f /frame\n", name.c_str(), total / frames);
     }
 }
 
@@ -147,12 +159,16 @@ class Driver final {
 int main(int argc, char** argv) {
     try {
         if (argc < 3) {
-            std::fprintf(stderr, "usage: strata_core_benchmark <resource-root> <scenario.json> [scale]\n");
+            std::fprintf(stderr, "usage: strata_core_benchmark <resource-root> <scenario.json> [scale|cold|switch]\n");
             return 2;
         }
         const std::filesystem::path resources = argv[1];
         const bool cold_only = argc > 3 && std::string_view(argv[3]) == "cold";
-        const int scale = argc > 3 && !cold_only ? std::max(1, std::atoi(argv[3])) : 1;
+        // "switch" measures only tab switching, at length: what profiling the cold path wants.
+        const bool switch_only = argc > 3 && std::string_view(argv[3]) == "switch";
+        const int scale = switch_only ? 10
+                          : argc > 3 && !cold_only ? std::max(1, std::atoi(argv[3]))
+                                                   : 1;
         strata::headless::Scenario scenario = strata::headless::load_scenario(argv[2]);
         scenario.render_backend = "none";
         scenario.steps.clear();
@@ -194,9 +210,10 @@ int main(int argc, char** argv) {
         host.set_capture_frames(false);
 
         Phase idle{"idle", {}};
-        for (int index = 0; index < 300 * scale; ++index)
+        for (int index = 0; index < (switch_only ? 0 : 300 * scale); ++index)
             idle.frames.push_back(driver.frame());
-        report(idle);
+        if (!switch_only)
+            report(idle);
 
         Phase switches{"tab-switch (click frame)", {}};
         Phase switch_settle{"tab-switch (settle)", {}};
@@ -209,6 +226,10 @@ int main(int argc, char** argv) {
         breakdown(switches);
         report(switch_settle);
         breakdown(switch_settle);
+        if (switch_only) {
+            host.close();
+            return 0;
+        }
 
         host.set_capture_frames(true);
         static_cast<void>(driver.frame());

@@ -382,6 +382,11 @@ class ContentSizeTransitions final {
 /** Retained, backend-independent measurement and arrangement engine. */
 class LayoutEngine final {
   public:
+    /**
+     * A node's layout style as parsed from its description, cached on the node until its
+     * description changes. Readers outside layout share it rather than parsing it each time.
+     */
+    [[nodiscard]] static const LayoutStyle& node_style(const RetainedNode& node);
     using IntrinsicMeasure = std::function<Size(const RetainedNode&, const Constraints&)>;
 
     explicit LayoutEngine(IntrinsicMeasure intrinsic_measure = {});
@@ -478,7 +483,7 @@ class LayoutEngine final {
                  LayoutResult& result);
     [[nodiscard]] LayoutStyle resolved_style(const RetainedNode& node) const;
     /** The node's style as parsed from its description, before runtime adjustments. */
-    [[nodiscard]] const ParsedLayout& parsed_layout(const RetainedNode& node) const;
+    [[nodiscard]] static const ParsedLayout& parsed_layout(const RetainedNode& node);
     /**
      * The node's resolved style without a copy when nothing adjusts it at runtime (a scroll
      * offset, a gesture size, a running motion); otherwise resolved into adjusted.

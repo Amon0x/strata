@@ -44,7 +44,7 @@ namespace {
     if (candidate == nullptr || candidate->lifecycle() != RetainedLifecycle::attached) {
         return nullptr;
     }
-    const LayoutStyle candidate_style = layout_style(candidate->description());
+    const LayoutStyle& candidate_style = LayoutEngine::node_style(*candidate);
     return candidate_style.participates && candidate_style.kind != LayoutKind::portal ? candidate
                                                                                       : nullptr;
 }
@@ -608,7 +608,11 @@ bool LayoutEngine::arranged_in_current_pass(const RetainedNode& node) const noex
     return false;
 }
 
-const ParsedLayout& LayoutEngine::parsed_layout(const RetainedNode& node) const {
+const LayoutStyle& LayoutEngine::node_style(const RetainedNode& node) {
+    return parsed_layout(node).style;
+}
+
+const ParsedLayout& LayoutEngine::parsed_layout(const RetainedNode& node) {
     // Parsed once per description change, not on every measure of the node (reconcile drops it).
     if (node.parsed_layout_ == nullptr) {
         node.parsed_layout_ = std::make_shared<const ParsedLayout>(ParsedLayout{

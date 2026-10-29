@@ -48,7 +48,7 @@ std::optional<Point> InputRouter::scroll_limits(const RetainedNode& node) const 
     if (layout == nullptr || layout->kind != LayoutKind::scroll || !layout->viewport.has_value()) {
         return std::nullopt;
     }
-    const LayoutStyle style = layout_style(node.description());
+    const LayoutStyle& style = LayoutEngine::node_style(node);
     return Point{
         style.scroll_horizontal
             ? std::max(0.0, layout->content_size.width - layout->content_bounds.width)
@@ -139,7 +139,7 @@ bool InputRouter::route_scrollbar_pointer(
                                          : nullptr;
         if (owner == nullptr || layout == nullptr) return;
         const std::optional<ScrollbarGeometry> geometry = scrollbar_geometry(
-            *layout, layout_style(owner->description()), drag.axis
+            *layout, LayoutEngine::node_style(*owner), drag.axis
         );
         if (!geometry.has_value()) return;
         const double coordinate = drag.axis == ScrollbarAxis::vertical ? point.y : point.x;
@@ -187,7 +187,7 @@ bool InputRouter::route_scrollbar_pointer(
         if (!input_enabled(*current, behaviors_)) continue;
         const LayoutRecord* layout = layout_->find(current->identity());
         if (layout == nullptr) continue;
-        const LayoutStyle style = layout_style(current->description());
+        const LayoutStyle& style = LayoutEngine::node_style(*current);
         for (const ScrollbarAxis axis : {ScrollbarAxis::vertical, ScrollbarAxis::horizontal}) {
             const std::optional<ScrollbarGeometry> geometry = scrollbar_geometry(
                 *layout, style, axis

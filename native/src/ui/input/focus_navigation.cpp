@@ -190,7 +190,7 @@ void InputRouter::restore_popup_focus(const RetainedNode& popup, InputOperationR
     const WidgetLifecycle* lifecycle = widgets_.find(popup.description().type);
     if (tree_ == nullptr || lifecycle == nullptr || !lifecycle->input.popup_anchored)
         return;
-    const std::string& anchor_key = layout_style(popup.description()).anchor_target;
+    const std::string& anchor_key = LayoutEngine::node_style(popup).anchor_target;
     RetainedNode* const anchor = anchor_key.empty() ? nullptr : tree_->find_key(anchor_key);
     if (anchor == nullptr || !focusable(*anchor))
         return;

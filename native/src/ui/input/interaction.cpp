@@ -92,7 +92,7 @@ void InputRouter::dismiss_transient_popups(const RetainedNode* const target,
         }
         if (!target_within_popup && target != nullptr && lifecycle != nullptr &&
             lifecycle->input.popup_anchored) {
-            const std::string& anchor_key = layout_style(node.description()).anchor_target;
+            const std::string& anchor_key = LayoutEngine::node_style(node).anchor_target;
             const RetainedNode* const anchor =
                 anchor_key.empty() ? nullptr : tree_->find_key(anchor_key);
             target_within_popup = anchor != nullptr && descendant_of(*target, *anchor);

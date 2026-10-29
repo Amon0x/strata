@@ -762,7 +762,7 @@ void Surface::settle_scroll_snaps(const std::int64_t frame_time_nanos) {
         const LayoutRecord* record =
             node != nullptr ? layout_engine_.result().find(node->identity()) : nullptr;
         const ScrollSnap snap =
-            node != nullptr ? layout_style(node->description()).scroll_snap : ScrollSnap::none;
+            node != nullptr ? LayoutEngine::node_style(*node).scroll_snap : ScrollSnap::none;
         if (record == nullptr || snap == ScrollSnap::none) {
             pending = pending_scroll_snaps_.erase(pending);
             continue;

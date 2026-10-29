@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <chrono>
@@ -27,16 +28,39 @@ namespace {
     return found != description.properties.end() ? found->second.value() : nullptr;
 }
 
-[[nodiscard]] const runtime::Value* style_field(const DescriptionNode& description,
-                                                const std::string_view name) noexcept {
-    for (const std::string_view container : {"textStyle", "$layout", "style"}) {
-        if (const runtime::Value* style = property(description, container);
-            style != nullptr && style->object() != nullptr) {
-            if (const runtime::Value* value = style->field(name); value != nullptr)
-                return value;
+/**
+ * A description's style containers found once (textStyle, $layout, style, in that order), so
+ * reading many style fields of one node does not search its properties for them each time.
+ */
+class StyleSource final {
+  public:
+    explicit StyleSource(const DescriptionNode& description) noexcept : description_(description) {
+        for (const std::string_view container : {"textStyle", "$layout", "style"}) {
+            if (const runtime::Value* style = property(description, container);
+                style != nullptr && style->object() != nullptr) {
+                containers_[count_++] = style;
+            }
         }
     }
-    return property(description, name);
+
+    /** A style field: from the first container that has it, else the property itself. */
+    [[nodiscard]] const runtime::Value* field(const std::string_view name) const noexcept {
+        for (std::size_t index = 0U; index < count_; ++index) {
+            if (const runtime::Value* value = containers_[index]->field(name); value != nullptr)
+                return value;
+        }
+        return property(description_, name);
+    }
+
+  private:
+    const DescriptionNode& description_;
+    std::array<const runtime::Value*, 3U> containers_{};
+    std::size_t count_ = 0U;
+};
+
+[[nodiscard]] const runtime::Value* style_field(const DescriptionNode& description,
+                                                const std::string_view name) noexcept {
+    return StyleSource(description).field(name);
 }
 
 [[nodiscard]] double number(const runtime::Value* value, const double fallback) noexcept {
@@ -114,10 +138,22 @@ namespace {
     return flags;
 }
 
-[[nodiscard]] std::string text_option(const DescriptionNode& description,
-                                      const std::string_view name, std::string fallback) {
-    const runtime::Value* value = style_field(description, name);
+[[nodiscard]] std::string text_option(const StyleSource& style, const std::string_view name,
+                                      std::string fallback) {
+    const runtime::Value* value = style.field(name);
     return value != nullptr && value->string() != nullptr ? *value->string() : std::move(fallback);
+}
+
+/** The font a style asks for: a resource id, an image's, or the default. */
+[[nodiscard]] std::string requested_font(const StyleSource& style) {
+    const runtime::Value* value = style.field("font");
+    if (value != nullptr) {
+        if (value->string() != nullptr && !value->string()->empty())
+            return *value->string();
+        if (value->image() != nullptr && !value->image()->id.empty())
+            return value->image()->id;
+    }
+    return "strata:fonts/default";
 }
 
 [[nodiscard]] FontRasterization
@@ -338,7 +374,7 @@ Size TextEngine::measure(const RetainedNode& node, const Constraints& constraint
     if (text_value == nullptr || text_value->string() == nullptr)
         return {};
 
-    const LayoutStyle style = layout_style(description);
+    const LayoutStyle& style = LayoutEngine::node_style(node);
     const bool explicit_width = style.width.kind == LayoutSize::Kind::fixed ||
                                 style.width.kind == LayoutSize::Kind::percent ||
                                 style.width.kind == LayoutSize::Kind::fill ||
@@ -373,14 +409,7 @@ const font::OpenTypeFont& TextEngine::font(const std::string_view id) const noex
 }
 
 std::string TextEngine::requested_font_id(const RetainedNode& node) const {
-    const runtime::Value* value = style_field(node.description(), "font");
-    if (value != nullptr) {
-        if (value->string() != nullptr && !value->string()->empty())
-            return *value->string();
-        if (value->image() != nullptr && !value->image()->id.empty())
-            return value->image()->id;
-    }
-    return "strata:fonts/default";
+    return requested_font(StyleSource(node.description()));
 }
 
 std::string TextEngine::font_id(const RetainedNode& node) const {
@@ -389,14 +418,14 @@ std::string TextEngine::font_id(const RetainedNode& node) const {
 }
 
 double TextEngine::pixel_size(const RetainedNode& node) const noexcept {
-    return std::max(0.001, number(style_field(node.description(), "pixelSize"),
-                                  number(style_field(node.description(), "fontSize"), 12.0)));
+    const StyleSource style(node.description());
+    return std::max(0.001, number(style.field("pixelSize"), number(style.field("fontSize"), 12.0)));
 }
 
 std::uint32_t TextEngine::font_style_flags(const RetainedNode& node) const noexcept {
-    return with_named_font_style(unsigned_flags(style_field(node.description(), "fontStyleFlags")),
-                                 style_field(node.description(), "fontWeight"),
-                                 style_field(node.description(), "fontStyle"));
+    const StyleSource style(node.description());
+    return with_named_font_style(unsigned_flags(style.field("fontStyleFlags")),
+                                 style.field("fontWeight"), style.field("fontStyle"));
 }
 
 std::uint16_t TextEngine::font_weight(const RetainedNode& node) const noexcept {
@@ -459,8 +488,8 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
                                              const std::optional<double> measured_wrap_width,
                                              const TextLayoutOptions* const overrides) const {
     const DescriptionNode& description = node.description();
-    const std::optional<double> authored_wrap =
-        positive_number(style_field(description, "wrapWidth"));
+    const StyleSource style(description);
+    const std::optional<double> authored_wrap = positive_number(style.field("wrapWidth"));
     std::optional<double> resolved_wrap =
         authored_wrap.has_value() ? authored_wrap : measured_wrap_width;
     if (overrides != nullptr && overrides->wrap_width.has_value()) {
@@ -474,30 +503,32 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
                *overrides->fallback_wrap_width > 0.0) {
         resolved_wrap = *overrides->fallback_wrap_width;
     }
+    const runtime::Value* weight = style.field("fontWeight");
     CacheKey result{
         std::string(text),
-        requested_font_id(node),
-        fallback_font_values(style_field(description, "fallbackFonts")),
-        pixel_size(node),
-        positive_number(style_field(description, "lineHeight")),
-        line_height_multiplier(node),
-        letter_spacing(node),
-        font_style_flags(node),
-        font_weight(node),
-        font_rasterization(node),
+        requested_font(style),
+        fallback_font_values(style.field("fallbackFonts")),
+        std::max(0.001, number(style.field("pixelSize"), number(style.field("fontSize"), 12.0))),
+        positive_number(style.field("lineHeight")),
+        std::max(0.001, number(style.field("lineHeightMultiplier"), 1.0)),
+        number(style.field("letterSpacing"), 0.0),
+        with_named_font_style(unsigned_flags(style.field("fontStyleFlags")), weight,
+                              style.field("fontStyle")),
+        numeric_font_weight(weight),
+        font_rasterization_value(style.field("fontRasterization")),
         resolved_wrap,
         overrides != nullptr && overrides->wrap_mode.has_value()
             ? *overrides->wrap_mode
-            : text_option(description, "wrapMode", "WORD"),
+            : text_option(style, "wrapMode", "WORD"),
         overrides != nullptr && overrides->overflow.has_value()
             ? *overrides->overflow
-            : text_option(description, "overflow", "CLIP"),
+            : text_option(style, "overflow", "CLIP"),
         overrides != nullptr && overrides->max_lines.has_value()
             ? std::optional<std::size_t>(std::max<std::size_t>(1U, *overrides->max_lines))
-            : positive_count(style_field(description, "maxLines")),
+            : positive_count(style.field("maxLines")),
         overrides != nullptr && overrides->alignment.has_value()
             ? *overrides->alignment
-            : text_option(description, "alignment", "START"),
+            : text_option(style, "alignment", "START"),
     };
     // Styled runs come from a description's spans, whichever widget authored them.
     const runtime::Value* spans = property(description, "spans");
@@ -512,9 +543,9 @@ TextEngine::CacheKey TextEngine::request_key(const RetainedNode& node, const std
         if (span_text == nullptr || span_text->string() == nullptr)
             continue;
         const std::size_t end = offset + utf16_length(*span_text->string());
-        const runtime::Value* style = span.field("style");
-        const auto run_field = [&span, style](const std::string_view name) {
-            if (const runtime::Value* value = object_field(style, name); value != nullptr) {
+        const runtime::Value* span_style = span.field("style");
+        const auto run_field = [&span, span_style](const std::string_view name) {
+            if (const runtime::Value* value = object_field(span_style, name); value != nullptr) {
                 return value;
             }
             return span.field(name);

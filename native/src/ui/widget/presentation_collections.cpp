@@ -74,7 +74,7 @@ void collection_content(WidgetRenderScope& scope) {
 }
 
 void scrollbars(WidgetRenderScope& scope) {
-    const LayoutStyle style = layout_style(scope.node().description());
+    const LayoutStyle& style = LayoutEngine::node_style(scope.node());
     for (const ScrollbarAxis axis : {ScrollbarAxis::vertical, ScrollbarAxis::horizontal}) {
         const std::optional<ScrollbarGeometry> geometry = scrollbar_geometry(
             scope.layout(), style, axis

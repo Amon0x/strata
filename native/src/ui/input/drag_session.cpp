@@ -297,7 +297,7 @@ bool InputRouter::auto_scroll_drag(DragSession& session, InputOperationResult& r
             !contains(*record->viewport, session.position)) {
             continue;
         }
-        const LayoutStyle style = layout_style(current->description());
+        const LayoutStyle& style = LayoutEngine::node_style(*current);
         Point next = record->scroll_offset;
         if (style.scroll_horizontal) {
             next.x += edge_velocity(session.position.x, record->viewport->x,
