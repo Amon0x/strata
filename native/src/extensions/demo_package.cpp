@@ -5,8 +5,10 @@
 #include <cmath>
 #include <cstddef>
 #include <format>
+#include <numbers>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace strata::extension {
 namespace {
@@ -15,6 +17,7 @@ constexpr auto pulse_count = retained<number>("demo.pulse.count");
 constexpr auto pulse_open = retained<boolean>("demo.pulse.popup-open");
 constexpr auto disclosure_expanded = retained<boolean>("demo.disclosure.expanded");
 constexpr auto pulse_step = parameter<number>("step", 1.0);
+constexpr auto canvas_kind = parameter<text>("kind");
 
 constexpr Color chrome_fill = rgba(31U, 39U, 54U);
 constexpr Color chrome_line = rgba(93U, 109U, 137U);
@@ -162,6 +165,127 @@ bool inspect_pointer(BehaviorInput& input, const Pointer& pointer) {
     return true;
 }
 
+/** A hue in turns, at full saturation and the given brightness, as a colour. */
+[[nodiscard]] Color hue(const double turns, const double value = 1.0,
+                        const unsigned char alpha = 255U) noexcept {
+    const double h = (turns - std::floor(turns)) * 6.0;
+    const double x = 1.0 - std::abs(std::fmod(h, 2.0) - 1.0);
+    double r = 0.0;
+    double g = 0.0;
+    double b = 0.0;
+    if (h < 1.0) { r = 1.0; g = x; }
+    else if (h < 2.0) { r = x; g = 1.0; }
+    else if (h < 3.0) { g = 1.0; b = x; }
+    else if (h < 4.0) { g = x; b = 1.0; }
+    else if (h < 5.0) { r = x; b = 1.0; }
+    else { r = 1.0; b = x; }
+    const auto channel = [value](const double c) {
+        return static_cast<unsigned char>(std::round((0.35 + 0.65 * c) * value * 255.0));
+    };
+    return rgba(channel(r), channel(g), channel(b), alpha);
+}
+
+/**
+ * A hypotrochoid whose inner wheel slowly changes size: a different figure every frame, 1,400
+ * points drawn as a soft wide stroke under a thin bright one.
+ */
+void spirograph(Present& present, const Rect area, const double phase) {
+    const Point centre{area.x + area.width * 0.5, area.y + area.height * 0.5};
+    const double scale = std::min(area.width, area.height) * 0.46;
+    const double ratio = 0.62 + 0.18 * std::sin(phase * 2.0 * std::numbers::pi);
+    const double pen = 0.55 + 0.25 * std::cos(phase * 4.0 * std::numbers::pi);
+    std::vector<Point> points;
+    points.reserve(1400U);
+    for (int index = 0; index < 1400; ++index) {
+        const double t = static_cast<double>(index) / 1399.0 * 2.0 * std::numbers::pi * 13.0;
+        const double x = (1.0 - ratio) * std::cos(t) + pen * ratio * std::cos((1.0 - ratio) / ratio * t);
+        const double y = (1.0 - ratio) * std::sin(t) - pen * ratio * std::sin((1.0 - ratio) / ratio * t);
+        points.push_back(Point{centre.x + x * scale, centre.y + y * scale});
+    }
+    Stroke glow;
+    glow.width = 6.0;
+    glow.cap = Cap::round;
+    glow.join = Join::round;
+    present.polyline(points, hue(phase, 1.0, 46U), glow);
+    Stroke line;
+    line.width = 1.25;
+    line.join = Join::round;
+    present.polyline(points, hue(phase + 0.08), line);
+}
+
+/** Gauges sweeping on concentric tracks, planets orbiting them and a spinning pie at the hub. */
+void orbits(Present& present, const Rect area, const double phase) {
+    const Point centre{area.x + area.width * 0.5, area.y + area.height * 0.5};
+    const double outer = std::min(area.width, area.height) * 0.46;
+    const double turn = phase * 360.0;
+    for (int ring = 0; ring < 4; ++ring) {
+        const double radius = outer - ring * outer * 0.17;
+        Stroke track;
+        track.width = outer * 0.075;
+        track.cap = Cap::round;
+        present.arc(centre, radius, 0.0, 360.0, rgba(36U, 44U, 60U), track);
+        const double sweep =
+            150.0 + 120.0 * std::sin((phase * (ring + 1) + ring * 0.21) * 2.0 * std::numbers::pi);
+        present.arc(centre, radius, turn * (ring % 2 == 0 ? 1.0 : -1.0) + ring * 40.0, sweep,
+                    hue(0.08 + ring * 0.18), track);
+        const double angle = (turn * (1.0 + ring * 0.5) + ring * 90.0) * std::numbers::pi / 180.0;
+        present.circle(Point{centre.x + std::cos(-angle) * radius, centre.y + std::sin(-angle) * radius},
+                       outer * 0.05, rgba(244U, 247U, 251U));
+    }
+    const double hub = outer * 0.34;
+    for (int slice = 0; slice < 6; ++slice) {
+        present.sector(centre, hub, 0.0, turn * 0.5 + slice * 60.0, 60.0,
+                       hue(slice / 6.0 + phase, 0.95));
+    }
+}
+
+/** Three translucent swells over each other, each with a bright crest, rolling across. */
+void waves(Present& present, const Rect area, const double phase) {
+    for (int layer = 0; layer < 3; ++layer) {
+        std::vector<Point> crest;
+        crest.reserve(161U);
+        const double base = area.y + area.height * (0.42 + layer * 0.14);
+        const double amplitude = area.height * (0.16 - layer * 0.035);
+        for (int index = 0; index <= 160; ++index) {
+            const double u = static_cast<double>(index) / 160.0;
+            const double angle = (u * (1.6 + layer * 0.7) + phase * (layer % 2 == 0 ? 2.0 : -3.0)) *
+                                 2.0 * std::numbers::pi;
+            const double y = base + std::sin(angle) * amplitude +
+                             std::sin(angle * 2.3 + layer) * amplitude * 0.35;
+            crest.push_back(Point{area.x + u * area.width, y});
+        }
+        std::vector<Point> body = crest;
+        body.push_back(Point{area.x + area.width, area.y + area.height});
+        body.push_back(Point{area.x, area.y + area.height});
+        present.polygon(body, hue(0.52 + layer * 0.09, 0.9, 96U));
+        Stroke line;
+        line.width = 2.0;
+        line.cap = Cap::round;
+        line.join = Join::round;
+        present.polyline(crest, hue(0.52 + layer * 0.09), line);
+    }
+}
+
+/**
+ * Vector art drawn every frame through the painter, on the clock of a looping animation attached
+ * to the node (`animation:`): its progress is the phase each figure is drawn at.
+ */
+void present_canvas(Present& present) {
+    const Rect bounds = present.bounds();
+    present.rounded_rect(bounds, 10.0, rgba(14U, 19U, 28U), stroke(1.0, rgba(52U, 63U, 84U)));
+    const ClipScope clip = present.clip(bounds);
+    const double phase = present.motion("strata.trigger.animate");
+    const Rect area{bounds.x + 8.0, bounds.y + 8.0, std::max(0.0, bounds.width - 16.0),
+                    std::max(0.0, bounds.height - 16.0)};
+    const std::string kind = present.get(canvas_kind);
+    if (kind == "orbits")
+        orbits(present, area, phase);
+    else if (kind == "waves")
+        waves(present, area, phase);
+    else
+        spirograph(present, area, phase);
+}
+
 } // namespace
 
 std::unique_ptr<Package> demo_package() {
@@ -202,6 +326,13 @@ std::unique_ptr<Package> demo_package() {
         .present(&present_disclosure)
         .hit_bounds(&disclosure_hit_bounds);
 
+    auto canvas = widget("DemoCanvas")
+        .parameter(canvas_kind)
+        .no_children()
+        .intrinsic_size(260.0, 200.0)
+        .depends_on_motion()
+        .present(&present_canvas);
+
     auto picker = behavior("demo.inspector-pick")
         .on_pointer(&inspect_pointer)
         .emits(ActionContract{
@@ -213,7 +344,10 @@ std::unique_ptr<Package> demo_package() {
         });
 
     auto created = package("strata.demo.v1");
-    created->widget(std::move(pulse)).widget(std::move(expander)).behavior(std::move(picker));
+    created->widget(std::move(pulse))
+        .widget(std::move(expander))
+        .widget(std::move(canvas))
+        .behavior(std::move(picker));
     return created;
 }
 

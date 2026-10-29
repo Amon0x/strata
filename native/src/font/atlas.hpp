@@ -17,6 +17,8 @@ namespace strata::font {
 enum class AtlasTextureFormat : std::uint8_t {
     r8,
     rgba8,
+    /** R8 coverage sampled bilinearly (render_packet.hpp texture_format_r8_filtered). */
+    r8_filtered,
 };
 
 enum class AtlasOperationKind : std::uint8_t {
@@ -63,6 +65,12 @@ struct GlyphAtlasConfig final {
      */
     std::uint32_t maximum_generation_recycles_per_preparation = 1U;
     std::uint32_t gutter_pixels = 1U;
+    /**
+     * Coverage pages are sampled bilinearly instead of texel-exact: for shape masks, which a
+     * rotated draw or a scaled presentation group resamples. Glyphs, drawn on whole texels, keep
+     * texel-exact sampling.
+     */
+    bool filtered_coverage = false;
     CoverageRasterConfig coverage;
     MsdfRasterConfig msdf;
 };

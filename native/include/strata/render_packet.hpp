@@ -42,6 +42,11 @@ inline constexpr std::uint32_t maximum_presentation_group = 511U;
 
 inline constexpr std::uint32_t texture_format_r8 = 0U;
 inline constexpr std::uint32_t texture_format_rgba8 = 1U;
+/**
+ * An R8 atlas sampled bilinearly rather than texel-exact: shape coverage masks, which presentation
+ * groups and rotated draws resample. Glyph pages stay texture_format_r8.
+ */
+inline constexpr std::uint32_t texture_format_r8_filtered = 2U;
 inline constexpr std::uint32_t texture_sampling_nearest = 0U;
 inline constexpr std::uint32_t texture_sampling_linear = 1U;
 

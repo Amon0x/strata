@@ -121,9 +121,15 @@ namespace {
     const std::size_t previous_full_geometry_bytes =
         output.vertex_bytes.size() + output.indices.size() * sizeof(std::uint32_t);
     const auto planning_started = std::chrono::steady_clock::now();
+    const std::uint64_t shape_generation =
+        cache.shape_atlas != nullptr ? cache.shape_atlas->generation() : 0U;
     const std::optional<std::vector<std::size_t>> changed_items =
         replan_ranges(commands, ranges, glyph_atlas, text_engine, context, output, cache);
     if (!changed_items.has_value()) return false;
+    // A shape atlas that recycled while these draws planned released every mask the unchanged
+    // draws use too: the whole stream plans again.
+    if (cache.shape_atlas != nullptr && cache.shape_atlas->generation() != shape_generation)
+        return false;
     output.planning_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - planning_started
     ).count();
@@ -259,9 +265,17 @@ void update_cached(
     output.vertex_patches.clear();
     output.index_patches.clear();
     const auto planning_started = std::chrono::steady_clock::now();
+    const std::uint64_t shape_generation =
+        cache.shape_atlas != nullptr ? cache.shape_atlas->generation() : 0U;
     std::vector<PlannedItem> items = plan(
         commands, glyph_atlas, text_engine, context, output, cache
     );
+    // A shape atlas that filled and recycled mid-plan released the masks placed before it: plan
+    // again on its fresh pages. It recycles at most once a frame, so this plans at most twice.
+    if (cache.shape_atlas != nullptr && cache.shape_atlas->generation() != shape_generation) {
+        output.skipped_draws = 0U;
+        items = plan(commands, glyph_atlas, text_engine, context, output, cache);
+    }
     output.planning_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - planning_started
     ).count();

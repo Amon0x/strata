@@ -31,8 +31,11 @@ namespace {
     return std::to_string(owner_id.size()) + ":" + std::string(owner_id);
 }
 
-[[nodiscard]] AtlasTextureFormat format_for(const GlyphRasterMode mode) noexcept {
-    return mode == GlyphRasterMode::coverage ? AtlasTextureFormat::r8 : AtlasTextureFormat::rgba8;
+[[nodiscard]] AtlasTextureFormat format_for(const GlyphRasterMode mode,
+                                            const bool filtered_coverage) noexcept {
+    if (mode != GlyphRasterMode::coverage)
+        return AtlasTextureFormat::rgba8;
+    return filtered_coverage ? AtlasTextureFormat::r8_filtered : AtlasTextureFormat::r8;
 }
 
 [[nodiscard]] std::size_t bytes_per_pixel(const GlyphRasterMode mode) noexcept {
@@ -548,7 +551,7 @@ std::vector<AtlasOperation> GlyphAtlas::plan_terminal_release() const {
         }
     }
     for (const Page& page : pages_) {
-        append_release(page.texture, format_for(page.mode));
+        append_release(page.texture, format_for(page.mode, config_.filtered_coverage));
     }
     return releases;
 }
@@ -639,7 +642,7 @@ GlyphAtlas::Allocation GlyphAtlas::create_page_and_allocate(const std::uint32_t 
     operations_.push_back(AtlasOperation{
         AtlasOperationKind::create,
         texture,
-        format_for(mode),
+        format_for(mode, config_.filtered_coverage),
         AtlasPixelRect{0U, 0U, config_.page_size, config_.page_size},
         {},
     });
@@ -759,7 +762,7 @@ void GlyphAtlas::flush_page_upload(const std::size_t page_index) {
     operations_.push_back(AtlasOperation{
         AtlasOperationKind::upload,
         page.texture,
-        format_for(page.mode),
+        format_for(page.mode, config_.filtered_coverage),
         region,
         std::move(upload),
     });
@@ -791,7 +794,7 @@ void GlyphAtlas::invalidate_pages() {
         operations_.push_back(AtlasOperation{
             AtlasOperationKind::release,
             page.texture,
-            format_for(page.mode),
+            format_for(page.mode, config_.filtered_coverage),
             {},
             {},
         });

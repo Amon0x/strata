@@ -146,7 +146,7 @@ class Reader final {
     if (kind > 2U)
         throw std::invalid_argument("render packet resource kind is unknown");
     result.format = input.u32();
-    if (result.format > 1U)
+    if (result.format > texture_format_r8_filtered)
         throw std::invalid_argument("atlas texture format is unknown");
     result.x = input.count();
     result.y = input.count();
@@ -161,7 +161,7 @@ class Reader final {
     if (kind == 1U) {
         const std::span<const std::uint8_t> bytes = input.raw(input.count());
         const std::uint64_t expected = static_cast<std::uint64_t>(result.width) * result.height *
-                                       (result.format == 0U ? 1U : 4U);
+                                       (result.format == texture_format_rgba8 ? 4U : 1U);
         if (expected != bytes.size()) {
             throw std::invalid_argument("atlas upload byte count does not match its region");
         }

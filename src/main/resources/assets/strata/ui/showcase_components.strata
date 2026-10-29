@@ -549,6 +549,39 @@ style MaterialBooleanOn extends MaterialBoolean {
   indicatorPosition: 1;
 }
 
+animation CanvasClock {
+  from { opacity: 1 }
+  to { opacity: 1 }
+  duration: 9000ms;
+  easing: "linear";
+  repeat: "forever";
+}
+
+animation SpinForever {
+  from { rotate: 0 }
+  to { rotate: 360 }
+  duration: 4000ms;
+  easing: "linear";
+  repeat: "forever";
+}
+
+animation SpinBackward {
+  from { rotate: 360 }
+  to { rotate: 0 }
+  duration: 1800ms;
+  easing: "linear";
+  repeat: "forever";
+}
+
+animation Breathe {
+  from { scale: 0.84, opacity: 0.6 }
+  to { scale: 1.04, opacity: 1 }
+  duration: 1500ms;
+  easing: "cubic-in-out";
+  repeat: "forever";
+  reverse: true;
+}
+
 animation ContentMotion {
   from { opacity: 0, translateY: 10 }
   to { opacity: 1, translateY: 0 }
@@ -1102,6 +1135,8 @@ component PageViewport(selectedPage: string) {
       Scroll(key: "targets.page.scroll.inspect", persistenceKey: "showcase.page.scroll.inspect", vertical: true, horizontal: false, style: PageScroll) { InspectPage() }
     } else if selectedPage == "DATA" {
       Scroll(key: "targets.page.scroll.data", persistenceKey: "showcase.page.scroll.data", vertical: true, horizontal: false, style: PageScroll) { DataPage() }
+    } else if selectedPage == "DRAW" {
+      Scroll(key: "targets.page.scroll.draw", persistenceKey: "showcase.page.scroll.draw", vertical: true, horizontal: false, style: PageScroll) { DrawPage() }
     } else if selectedPage == "SHELL" {
       Scroll(key: "targets.page.scroll.shell", persistenceKey: "showcase.page.scroll.shell", vertical: true, horizontal: false, style: PageScroll) { ShellPage() }
     } else {
@@ -1120,6 +1155,7 @@ component ShowcaseHeader(selectedPage: Binding<string>) {
       key: "targets.navigation",
       tabs: [
         { id: "EXTEND", label: "EXTEND" },
+        { id: "DRAW", label: "DRAW" },
         { id: "STATE", label: "STATE" },
         { id: "CONTROL", label: "CONTROL" },
         { id: "FORMS", label: "FORMS" },
@@ -1364,6 +1400,67 @@ component DataPage() {
         Panel(variant: "secondary", layout: { gridColumn: 1, gridRow: 1, padding: 8 }) { Text(text: "Content") }
         Panel(variant: "secondary", layout: { gridColumn: 2, gridRow: 1, padding: 8 }) { Text(text: "Fixed 120") }
       }
+    }
+  }
+}
+
+component DrawPage() {
+  state step = 0;
+  Panel(style: PageColumn) {
+    Card(title: "LIVE VECTOR ART: NATIVE PAINTER, EVERY FRAME") {
+      Panel(style: ActionRow) {
+        DemoCanvas(key: "draw.canvas.spirograph", kind: "spirograph", animation: CanvasClock, layout: { width: { weight: 1 }, height: 230 })
+        DemoCanvas(key: "draw.canvas.orbits", kind: "orbits", animation: CanvasClock, layout: { width: { weight: 1 }, height: 230 })
+        DemoCanvas(key: "draw.canvas.waves", kind: "waves", animation: CanvasClock, layout: { width: { weight: 1 }, height: 230 })
+      }
+      Text(text: "A native extension draws these through Present: a 1,400-point spirograph that changes shape every frame, sweeping gauges, orbiting dots and a spinning pie, and translucent swells. Arcs, circles and slices are exact analytic shapes; the curves are rasterized to exact coverage masks each frame.", wrapMode: "WORD")
+    }
+    Card(title: "DATA THAT MORPHS: animateChanges") {
+      Panel(style: ActionRow) {
+        Button(key: "draw.shuffle", label: "Shuffle data", onClick: action("state.set", name: "step", value: step + 1))
+        Text(text: format("Data set {0} of 4. Charts animate by default; Draw shapes with animateChanges: properties [\"shapes\"].", step % 4 + 1), wrapMode: "WORD", layout: { width: { weight: 1 } })
+      }
+      Panel(style: ActionRow) {
+        Chart(key: "draw.chart.donut", kind: "DONUT", labels: ["Chrome", "Safari", "Firefox", "Other"], values: [[64, 19, 6, 11], [25, 25, 25, 25], [10, 40, 30, 20], [45, 15, 30, 10]][step % 4], valueSuffix: "%", layout: { width: { weight: 1 }, height: 240 })
+        Chart(key: "draw.chart.bar", kind: "BAR", labels: ["Mon", "Tue", "Wed", "Thu", "Fri"], series: [{ name: "North", values: [[42, 55, 61, 70, 48], [70, 32, 45, 58, 80], [25, 68, 40, 77, 52], [55, 47, 72, 30, 66]][step % 4] }, { name: "South", values: [[30, 44, 52, 38, 60], [50, 62, 30, 41, 36], [64, 28, 55, 33, 47], [38, 59, 44, 70, 25]][step % 4] }], layout: { width: { weight: 1 }, height: 240 })
+        Chart(key: "draw.chart.area", kind: "AREA", stacked: true, labels: ["M", "T", "W", "T", "F", "S", "S"], series: [{ name: "Web", values: [[120, 132, 101, 134, 90, 230, 210], [200, 90, 160, 110, 180, 120, 240], [80, 150, 230, 180, 120, 90, 160], [150, 150, 120, 200, 210, 170, 130]][step % 4] }, { name: "Mobile", values: [[220, 182, 191, 234, 290, 330, 310], [140, 260, 120, 300, 150, 280, 190], [300, 210, 160, 220, 330, 260, 200], [180, 240, 280, 200, 170, 220, 300]][step % 4] }], layout: { width: { weight: 1 }, height: 240 })
+      }
+      Panel(style: ActionRow) {
+        Draw(key: "draw.gauge", animateChanges: { properties: ["shapes"], policy: "standard" }, layout: { width: 220, height: 220 }, shapes: [
+          { kind: "arc", center: { x: 0.5, y: 0.5 }, radius: 0.38, start: 135, sweep: 270, stroke: #1E2738, strokeStyle: { width: 18, cap: "round" } },
+          { kind: "arc", center: { x: 0.5, y: 0.5 }, radius: 0.38, start: 135, sweep: [70.2, 205.2, 140.4, 251.1][step % 4], stroke: { kind: "linear", from: { x: 0.1, y: 0.5 }, to: { x: 0.9, y: 0.5 }, stops: [{ offset: 0, color: #22D3EE }, { offset: 0.5, color: #818CF8 }, { offset: 1, color: #F472B6 }] }, strokeStyle: { width: 18, cap: "round" } },
+          { kind: "line", from: { x: 0.5, y: 0.5 }, to: [{ x: 0.2557, y: 0.385 }, { x: 0.754, y: 0.4085 }, { x: 0.5254, y: 0.2312 }, { x: 0.7425, y: 0.6188 }][step % 4], stroke: #F4F7FB, strokeStyle: { width: 4, cap: "round" } },
+          { kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.05, fill: #F4F7FB }
+        ])
+        Draw(key: "draw.sunburst", animateChanges: { properties: ["shapes"], policy: "standard" }, layout: { width: 220, height: 220 }, shapes: [[{ kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: -90, sweep: 150, fill: #5AA0F8 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: 60, sweep: 120, fill: #F59E0B }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: 180, sweep: 90, fill: #22C55E }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: -90, sweep: 80, fill: #7DB8FF }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: -10, sweep: 60, fill: #3B82F6 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 50, sweep: 90, fill: #FBBF24 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 140, sweep: 70, fill: #4ADE80 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 210, sweep: 60, fill: #A78BFA }], [{ kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: -90, sweep: 90, fill: #5AA0F8 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: 0, sweep: 180, fill: #F59E0B }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: 180, sweep: 90, fill: #22C55E }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: -90, sweep: 40, fill: #7DB8FF }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: -50, sweep: 110, fill: #3B82F6 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 60, sweep: 70, fill: #FBBF24 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 130, sweep: 90, fill: #4ADE80 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 220, sweep: 50, fill: #A78BFA }], [{ kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: -90, sweep: 200, fill: #5AA0F8 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: 110, sweep: 60, fill: #F59E0B }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: 170, sweep: 100, fill: #22C55E }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: -90, sweep: 100, fill: #7DB8FF }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 10, sweep: 50, fill: #3B82F6 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 60, sweep: 50, fill: #FBBF24 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 110, sweep: 100, fill: #4ADE80 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 210, sweep: 60, fill: #A78BFA }], [{ kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: -90, sweep: 120, fill: #5AA0F8 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: 30, sweep: 120, fill: #F59E0B }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.3, innerRadius: 0.13, start: 150, sweep: 120, fill: #22C55E }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: -90, sweep: 60, fill: #7DB8FF }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: -30, sweep: 90, fill: #3B82F6 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 60, sweep: 60, fill: #FBBF24 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 120, sweep: 90, fill: #4ADE80 }, { kind: "sector", center: { x: 0.5, y: 0.5 }, radius: 0.47, innerRadius: 0.3, start: 210, sweep: 60, fill: #A78BFA }]][step % 4])
+        Draw(key: "draw.blob", animateChanges: { properties: ["shapes"], policy: "standard" }, layout: { width: 220, height: 220 }, shapes: [
+          { kind: "polygon", points: [[{ x: 0.85, y: 0.5 }, { x: 0.8267, y: 0.6573 }, { x: 0.7531, y: 0.8173 }, { x: 0.5884, y: 0.8872 }, { x: 0.4549, y: 0.6978 }, { x: 0.379, y: 0.6518 }, { x: 0.2862, y: 0.603 }, { x: 0.25, y: 0.5 }, { x: 0.1171, y: 0.3156 }, { x: 0.2331, y: 0.1653 }, { x: 0.4317, y: 0.2007 }, { x: 0.5652, y: 0.2144 }, { x: 0.6072, y: 0.3656 }, { x: 0.6577, y: 0.4241 }], [{ x: 0.946, y: 0.5 }, { x: 0.795, y: 0.6421 }, { x: 0.5867, y: 0.6087 }, { x: 0.5624, y: 0.7735 }, { x: 0.4154, y: 0.8707 }, { x: 0.2721, y: 0.7858 }, { x: 0.2223, y: 0.6337 }, { x: 0.346, y: 0.5 }, { x: 0.2544, y: 0.3817 }, { x: 0.2126, y: 0.1396 }, { x: 0.4289, y: 0.1885 }, { x: 0.5489, y: 0.2857 }, { x: 0.6462, y: 0.3167 }, { x: 0.7629, y: 0.3734 }], [{ x: 0.7485, y: 0.5 }, { x: 0.7182, y: 0.6051 }, { x: 0.7109, y: 0.7645 }, { x: 0.5829, y: 0.8632 }, { x: 0.4491, y: 0.7229 }, { x: 0.3576, y: 0.6785 }, { x: 0.1013, y: 0.692 }, { x: 0.2099, y: 0.5 }, { x: 0.3692, y: 0.437 }, { x: 0.2396, y: 0.1735 }, { x: 0.4175, y: 0.1387 }, { x: 0.5338, y: 0.3521 }, { x: 0.7034, y: 0.2449 }, { x: 0.858, y: 0.3276 }], [{ x: 0.6394, y: 0.5 }, { x: 0.8974, y: 0.6914 }, { x: 0.6775, y: 0.7225 }, { x: 0.5396, y: 0.6736 }, { x: 0.396, y: 0.9557 }, { x: 0.3671, y: 0.6667 }, { x: 0.283, y: 0.6045 }, { x: 0.0394, y: 0.5 }, { x: 0.3568, y: 0.4311 }, { x: 0.3034, y: 0.2534 }, { x: 0.4061, y: 0.0886 }, { x: 0.5295, y: 0.3708 }, { x: 0.7412, y: 0.1976 }, { x: 0.8236, y: 0.3442 }]][step % 4], fill: { kind: "radial", center: { x: 0.42, y: 0.38 }, radius: 0.55, stops: [{ offset: 0, color: #FDE68A }, { offset: 0.45, color: #F472B6 }, { offset: 1, color: #6D28D9 }] }, stroke: #FFFFFF99, strokeStyle: { width: 2, join: "round" } }
+        ])
+      }
+      Text(text: "The gauge's sweep and needle, the sunburst's slices (its rings meet without a seam) and the gradient blob's outline all interpolate number by number between data sets.", wrapMode: "WORD")
+    }
+    Card(title: "LOOPING MOTION") {
+      Panel(style: ActionRow) {
+        Draw(key: "draw.loop.ring", animation: SpinForever, layout: { width: 170, height: 170 }, shapes: [
+          { kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.4, stroke: { kind: "linear", angle: 90, stops: [{ offset: 0, color: #22D3EE00 }, { offset: 1, color: #22D3EE }] }, strokeStyle: { width: 12 } },
+          { kind: "circle", center: { x: 0.9, y: 0.5 }, radius: 0.06, fill: #E0F2FE }
+        ])
+        Draw(key: "draw.loop.breathe", animation: Breathe, layout: { width: 170, height: 170 }, shapes: [
+          { kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.44, stroke: #F472B655, strokeStyle: { width: 3 } },
+          { kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.34, stroke: #A78BFA99, strokeStyle: { width: 3 } },
+          { kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.24, fill: { kind: "radial", center: { x: 0.5, y: 0.5 }, radius: 0.24, stops: [{ offset: 0, color: #F9A8D4 }, { offset: 1, color: #7C3AED }] } }
+        ])
+        Draw(key: "draw.loop.spinner", animation: SpinBackward, layout: { width: 170, height: 170 }, shapes: [
+          { kind: "arc", center: { x: 0.5, y: 0.5 }, radius: 0.42, start: 0, sweep: 80, stroke: #F59E0B, strokeStyle: { width: 8, cap: "round" } },
+          { kind: "arc", center: { x: 0.5, y: 0.5 }, radius: 0.42, start: 120, sweep: 80, stroke: #22C55E, strokeStyle: { width: 8, cap: "round" } },
+          { kind: "arc", center: { x: 0.5, y: 0.5 }, radius: 0.42, start: 240, sweep: 80, stroke: #3B82F6, strokeStyle: { width: 8, cap: "round" } },
+          { kind: "arc", center: { x: 0.5, y: 0.5 }, radius: 0.28, start: 60, sweep: 240, stroke: #E2E8F0, strokeStyle: { width: 4, cap: "round", dash: [2, 9] } }
+        ])
+        Draw(key: "draw.loop.star", animation: SpinForever, layout: { width: 170, height: 170 }, shapes: [
+          { kind: "polygon", points: [{ x: 0.5, y: 0.06 }, { x: 0.61, y: 0.36 }, { x: 0.93, y: 0.37 }, { x: 0.68, y: 0.56 }, { x: 0.77, y: 0.87 }, { x: 0.5, y: 0.69 }, { x: 0.23, y: 0.87 }, { x: 0.32, y: 0.56 }, { x: 0.07, y: 0.37 }, { x: 0.39, y: 0.36 }], fill: { kind: "linear", angle: 135, stops: [{ offset: 0, color: #FF5F6D }, { offset: 0.5, color: #FFC371 }, { offset: 1, color: #47CF73 }] }, stroke: #FFFFFFCC, strokeStyle: { width: 2.5, join: "round", dash: [8, 5] } }
+        ])
+      }
+      Text(text: "Keyframe loops on Draw: rotation and scale run on the GPU as presentation transforms, and every edge stays exact while it turns.", wrapMode: "WORD")
     }
   }
 }
@@ -1861,6 +1958,8 @@ component ExpectedText(selectedPage: string) {
     Text(text: "Selection and pick update outlines/metadata without activating the underlying target. Coalesce shows PASS with +23. The no-GPU probe reports two frames, one activation, and one node. Dynamic probe reports UNHANDLED with a source-aware diagnostic.", wrapMode: "WORD")
   } else if selectedPage == "DATA" {
     Text(text: "Tree expansion never reconciles collapsed descendants; keyboard/range/typeahead and drag positions emit stable keys. Table sort is a host request, widths/order persist, and sticky/pinned regions align. Grid marquee, 2D arrows, stationary edge scroll, and sticky push-off stay current.", wrapMode: "WORD")
+  } else if selectedPage == "DRAW" {
+    Text(text: "The three canvases move every frame. Shuffle data morphs the charts, gauge, sunburst and blob over the standard motion policy; the sunburst's slices meet with no seam. The loops turn and breathe without blurring an edge. Reduced motion snaps the data and stops the loops.", wrapMode: "WORD")
   } else if selectedPage == "SHELL" {
     Text(text: "Menus, toolbars, command-bound controls, shortcut tooltips, and the palette resolve one live command definition. Disabled and checked states update everywhere. Palette search ranks prefix and word-boundary matches, Enter executes, Escape restores focus. Toasts stack without blocking input; breadcrumbs, disclosure, and chips emit typed events.", wrapMode: "WORD")
   } else {

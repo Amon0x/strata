@@ -245,7 +245,8 @@ struct Scene final {
  * covered tiles and tiles turned with the draw must all leave the area exact.
  */
 [[nodiscard]] Scene large_scene(const std::string& name, const std::string& style,
-                                const std::string& shape, const double area) {
+                                const std::string& shape, const double area,
+                                const double tolerance = 0.004) {
     constexpr double side = 1040.0;
     Scene scene;
     scene.width = side + 20.0;
@@ -256,7 +257,7 @@ struct Scene final {
                    " }) {\n    Draw(style: { " + style + " }, layout: { width: " +
                    std::to_string(side) + ", height: " + std::to_string(side) +
                    ", placement: { x: 10, y: 10 } }, shapes: [" + shape + "])\n  }\n}\n";
-    scene.shapes.push_back(Measured{name, 0.0, 0.0, scene.width, area});
+    scene.shapes.push_back(Measured{name, 0.0, 0.0, scene.width, area, tolerance});
     return scene;
 }
 
@@ -530,6 +531,10 @@ int main(const int argument_count, const char* const* const arguments) {
             large_scene("tiled square of four triangles", "",
                         R"({ kind: "polygon", points: [{ x: 0.5, y: 0.5 }, { x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.5 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.5 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.5 }, { x: 0.1, y: 0.9 }, { x: 0.1, y: 0.1 }], fill: #FFFFFF })",
                         832.0 * 832.0),
+            // Twelve page-sized masks in one frame overflow the shape atlas mid-plan: the masks
+            // placed before it recycled must be placed again, never drawn from released pages.
+            large_scene("atlas recycled mid-frame", "", R"({ kind: "polygon", points: [{ x: 0.5, y: 0.1000 }, { x: 0.9000, y: 0.5 }, { x: 0.5, y: 0.9000 }, { x: 0.1000, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1010 }, { x: 0.8990, y: 0.5 }, { x: 0.5, y: 0.8990 }, { x: 0.1010, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1020 }, { x: 0.8980, y: 0.5 }, { x: 0.5, y: 0.8980 }, { x: 0.1020, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1030 }, { x: 0.8970, y: 0.5 }, { x: 0.5, y: 0.8970 }, { x: 0.1030, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1040 }, { x: 0.8960, y: 0.5 }, { x: 0.5, y: 0.8960 }, { x: 0.1040, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1050 }, { x: 0.8950, y: 0.5 }, { x: 0.5, y: 0.8950 }, { x: 0.1050, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1060 }, { x: 0.8940, y: 0.5 }, { x: 0.5, y: 0.8940 }, { x: 0.1060, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1070 }, { x: 0.8930, y: 0.5 }, { x: 0.5, y: 0.8930 }, { x: 0.1070, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1080 }, { x: 0.8920, y: 0.5 }, { x: 0.5, y: 0.8920 }, { x: 0.1080, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1090 }, { x: 0.8910, y: 0.5 }, { x: 0.5, y: 0.8910 }, { x: 0.1090, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1100 }, { x: 0.8900, y: 0.5 }, { x: 0.5, y: 0.8900 }, { x: 0.1100, y: 0.5 }], fill: #FFFFFF }, { kind: "polygon", points: [{ x: 0.5, y: 0.1110 }, { x: 0.8890, y: 0.5 }, { x: 0.5, y: 0.8890 }, { x: 0.1110, y: 0.5 }], fill: #FFFFFF })",
+                        832.0 * 832.0 / 2.0, 0.006),
             large_scene(
                 "tiled radial gradient", "",
                 R"({ kind: "circle", center: { x: 0.5, y: 0.5 }, radius: 0.4, fill: { kind: "radial", center: { x: 0.5, y: 0.5 }, radius: 0.4, stops: [{ offset: 0, color: #FFFFFF }, { offset: 1, color: #000000 }] } })",

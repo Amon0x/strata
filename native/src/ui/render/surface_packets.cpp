@@ -9,10 +9,21 @@
 #include "ui/surface.hpp"
 
 namespace strata::ui {
+namespace {
+
+/** Shape masks are resampled under rotation and scaled groups, so they are sampled bilinearly. */
+[[nodiscard]] font::GlyphAtlasConfig shape_atlas_config() noexcept {
+    font::GlyphAtlasConfig config;
+    config.filtered_coverage = true;
+    return config;
+}
+
+} // namespace
+
 
 SurfacePackets::SurfacePackets(std::string resource_namespace,
                                std::vector<resource::EncodedTextureResource> static_textures)
-    : glyph_atlas_(resource_namespace), shape_atlas_(resource_namespace + ".shapes"),
+    : glyph_atlas_(resource_namespace), shape_atlas_(resource_namespace + ".shapes", shape_atlas_config()),
       textures_(resource_namespace, std::move(static_textures)) {
     cache_.set_shape_atlas(&shape_atlas_);
 }
