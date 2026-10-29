@@ -167,7 +167,8 @@ bool MotionComputedValues::affects_layout() const noexcept {
 
 bool MotionTransform::identity() const noexcept {
     return translate_x == 0.0 && translate_y == 0.0 && scale_x == 1.0 && scale_y == 1.0 &&
-           shear_x == 0.0 && shear_y == 0.0 && project_x == 0.0 && project_y == 0.0;
+           shear_x == 0.0 && shear_y == 0.0 && project_x == 0.0 && project_y == 0.0 &&
+           project_w == 1.0;
 }
 
 std::optional<MotionProperty> motion_property(const std::string_view name) noexcept {

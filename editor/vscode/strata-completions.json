@@ -593,6 +593,46 @@
     },
     {
       "dispatchPolicy": "framework",
+      "id": "media.set",
+      "parameters": [
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "image",
+          "nullable": false,
+          "required": true,
+          "type": "string"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "muted",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "volume",
+          "nullable": false,
+          "required": false,
+          "type": "number"
+        },
+        {
+          "aliases": [],
+          "enumValues": [],
+          "name": "loop",
+          "nullable": false,
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "payloadContract": "strata.action-payload/media.set@1",
+      "summary": "Mute, set the volume of, or loop a video while it plays"
+    },
+    {
+      "dispatchPolicy": "framework",
       "id": "media.status",
       "parameters": [
         {

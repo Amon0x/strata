@@ -20,11 +20,12 @@
 #include "abi_extension.hpp"
 #include "abi_internal.hpp"
 #include "abi_support.hpp"
-#include "core/diagnostics.hpp"
 #include "base/utf8.hpp"
+#include "core/diagnostics.hpp"
 #include "data/json.hpp"
 #include "font/opentype.hpp"
 #include "resource/image.hpp"
+#include "resource/image_stream.hpp"
 #include "resource/resource.hpp"
 #include "resource/svg_image.hpp"
 #include "ui/frame_snapshot.hpp"
@@ -303,8 +304,8 @@ image_bindings(const strata_surface_config& config) {
     return result;
 }
 
-/** An animated image's frames take at most this much memory, decoded; past it, it stays still. */
-constexpr std::size_t maximum_animation_bytes = 256U * 1024U * 1024U;
+/** Past this much decoded memory an animation streams from its bytes instead of being held. */
+constexpr std::size_t maximum_animation_bytes = 64U * 1024U * 1024U;
 /** Browsers show a GIF frame that asks for under 20 ms for 100 ms instead; so do we. */
 constexpr std::uint32_t minimum_frame_delay_ms = 20U;
 constexpr std::uint32_t short_frame_delay_ms = 100U;
@@ -339,21 +340,53 @@ image_resources(const ResourceLoader& resources,
             const strata::resource::ImageInfo info = strata::resource::inspect_image(bytes);
             const std::string host_id =
                 std::string(host_resource_namespace) + "/static/" + std::to_string(index);
-            // An animation becomes one texture per frame (`<id>#k`), each shown in its turn.
+            // An animation that fits the budget becomes one texture per frame (`<id>#k`), each
+            // shown in its turn; a longer one plays from its bytes, one texture showing each frame.
             std::optional<strata::resource::DecodedImage> animated;
+            std::shared_ptr<strata::resource::ImageStream> stream;
             if (*format != strata::resource::ImageFormat::jpeg) {
-                const std::size_t frame_bytes =
-                    static_cast<std::size_t>(info.dimensions.width) * info.dimensions.height * 4U;
+                strata::resource::DecodedImage collected;
+                collected.width = info.dimensions.width;
+                collected.height = info.dimensions.height;
+                std::size_t held = 0U;
+                bool over = false;
                 try {
-                    strata::resource::DecodedImage decoded = strata::resource::decode_image(
-                        bytes,
-                        static_cast<std::uint32_t>(std::max<std::size_t>(
-                            1U, maximum_animation_bytes / std::max<std::size_t>(frame_bytes, 1U))));
-                    if (decoded.frames.size() > 1U)
-                        animated = std::move(decoded);
+                    collected.loop_count = strata::resource::stream_image(
+                        bytes, [&](std::vector<std::uint8_t>& rgba, const std::uint32_t delay_ms) {
+                            if (held + rgba.size() > maximum_animation_bytes &&
+                                !collected.frames.empty()) {
+                                over = true;
+                                return false;
+                            }
+                            held += rgba.size();
+                            collected.frames.push_back(
+                                strata::resource::ImageFrame{std::move(rgba), delay_ms});
+                            return true;
+                        });
                 } catch (const std::exception&) {
-                    // Too many frames to hold: the image stays on its first.
+                    collected.frames.clear();
                 }
+                if (over) {
+                    strata::resource::ImageFrame first = std::move(collected.frames.front());
+                    stream = std::make_shared<strata::resource::ImageStream>(
+                        std::vector<std::uint8_t>(bytes.begin(), bytes.end()), info.dimensions,
+                        first.rgba, first.delay_ms);
+                    result.textures.push_back(strata::resource::EncodedTextureResource{
+                        binding.id,
+                        host_id,
+                        image_sampling(binding.sampling),
+                        strata::resource::ImageEncoding::rgba8,
+                        info.dimensions,
+                        std::move(first.rgba),
+                        stream,
+                    });
+                    strata::resource::ImageAnimation animation;
+                    animation.stream = std::move(stream);
+                    result.animations.insert_or_assign(binding.id, std::move(animation));
+                    continue;
+                }
+                if (collected.frames.size() > 1U)
+                    animated = std::move(collected);
             }
             if (!animated.has_value()) {
                 result.textures.push_back(strata::resource::EncodedTextureResource{

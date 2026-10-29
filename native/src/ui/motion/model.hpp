@@ -192,11 +192,14 @@ struct MotionComputedValues final {
 };
 
 /**
- * A plane presentation transform, a homography: with w = project_x * x + project_y * y + 1,
+ * A plane presentation transform, a homography: with
+ * w = project_x * x + project_y * y + project_w,
  * x' = (scale_x * x + shear_x * y + translate_x) / w and
  * y' = (shear_y * x + scale_y * y + translate_y) / w. The shears are zero unless something rotates
  * in the plane, and the projection terms zero unless it turns in depth (rotateX/rotateY), when the
- * plane is seen in perspective.
+ * plane is seen in perspective. w is kept as it is rather than scaled to one at the surface's
+ * origin: a node turned in depth far from that origin can have the origin behind the viewer
+ * (w <= 0 there) while all of the node is in front of it (w > 0 over the node).
  */
 struct MotionTransform final {
     double translate_x = 0.0;
@@ -207,14 +210,15 @@ struct MotionTransform final {
     double shear_y = 0.0;
     double project_x = 0.0;
     double project_y = 0.0;
+    double project_w = 1.0;
     [[nodiscard]] bool identity() const noexcept;
     /** Whether it keeps rectangles axis-aligned: no rotation, skew or perspective. */
     [[nodiscard]] bool axis_aligned() const noexcept {
-        return shear_x == 0.0 && shear_y == 0.0 && project_x == 0.0 && project_y == 0.0;
+        return shear_x == 0.0 && shear_y == 0.0 && affine();
     }
     /** Whether it keeps parallel lines parallel: no perspective. */
     [[nodiscard]] bool affine() const noexcept {
-        return project_x == 0.0 && project_y == 0.0;
+        return project_x == 0.0 && project_y == 0.0 && project_w == 1.0;
     }
     [[nodiscard]] friend bool operator==(const MotionTransform&, const MotionTransform&) = default;
 };

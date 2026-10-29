@@ -75,14 +75,17 @@ void validate_canvas(const ImageDimensions dimensions, const char* const format)
 }
 
 FrameSink::FrameSink(const ImageDimensions canvas, const std::uint32_t frame_limit,
-                     const char* const format)
-    : frame_limit_(frame_limit), format_(format) {
+                     const char* const format, const ImageFrameConsumer* const consumer)
+    : frame_limit_(frame_limit), format_(format), consumer_(consumer) {
     validate_canvas(canvas, format);
     image_.width = canvas.width;
     image_.height = canvas.height;
 }
 
 void FrameSink::reserve_next() const {
+    // Frames handed on are not kept: no budget applies to them.
+    if (consumer_ != nullptr)
+        return;
     const std::uint64_t pixels = static_cast<std::uint64_t>(image_.width) * image_.height;
     if (image_.frames.size() >= maximum_image_frames ||
         (image_.frames.size() + 1U) * pixels > maximum_animation_decode_pixels) {
@@ -96,10 +99,21 @@ void FrameSink::push(std::vector<std::uint8_t> rgba, const std::uint32_t delay_m
     reserve_next();
     if (rgba.size() != static_cast<std::size_t>(image_.width) * image_.height * 4U)
         throw std::logic_error("a decoded frame does not fill its canvas");
+    if (consumer_ != nullptr) {
+        ++consumed_;
+        stopped_ = !(*consumer_)(rgba, delay_ms);
+        return;
+    }
     image_.frames.push_back(ImageFrame{std::move(rgba), delay_ms});
 }
 
 DecodedImage FrameSink::finish(const std::uint32_t loop_count) {
+    if (consumer_ != nullptr) {
+        if (consumed_ == 0U && !stopped_)
+            throw std::invalid_argument(std::string(format_) + " decode: the image has no frames");
+        image_.loop_count = consumed_ == 1U ? 1U : loop_count;
+        return std::move(image_);
+    }
     if (image_.frames.empty())
         throw std::invalid_argument(std::string(format_) + " decode: the image has no frames");
     image_.loop_count = image_.frames.size() == 1U ? 1U : loop_count;
@@ -213,6 +227,27 @@ DecodedImage decode_image(const std::span<const std::uint8_t> bytes,
         break;
     }
     return codec::decode_webp(bytes, frame_limit);
+}
+
+std::uint32_t stream_image(const std::span<const std::uint8_t> bytes,
+                           const ImageFrameConsumer& consumer) {
+    const std::optional<ImageFormat> format = sniff_image_format(bytes);
+    if (!format.has_value())
+        throw std::invalid_argument("image is not a PNG, JPEG, GIF or WebP");
+    switch (*format) {
+    case ImageFormat::png:
+        return codec::decode_png(bytes, all_image_frames, &consumer).loop_count;
+    case ImageFormat::jpeg: {
+        DecodedImage still = codec::decode_jpeg(bytes);
+        static_cast<void>(consumer(still.frames.front().rgba, 0U));
+        return 1U;
+    }
+    case ImageFormat::gif:
+        return codec::decode_gif(bytes, all_image_frames, &consumer).loop_count;
+    case ImageFormat::webp:
+        break;
+    }
+    return codec::decode_webp(bytes, all_image_frames, &consumer).loop_count;
 }
 
 std::vector<std::uint8_t> decode_image_rgba8(const std::span<const std::uint8_t> bytes,

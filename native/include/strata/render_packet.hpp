@@ -149,8 +149,8 @@ struct DrawBatch final {
  * current frame. A vertex at (x, y) in the group is placed at
  * (scale_x * x + shear_x * y + translate_x, shear_y * x + scale_y * y + translate_y), with the
  * translation rounded to whole framebuffer pixels; the shears are zero unless the group rotates.
- * A group turned in depth also divides both by w = project_x * x + project_y * y + 1 (perspective,
- * interpolated perspective-correctly).
+ * A group turned in depth also divides both by w = project_x * x + project_y * y + project_w
+ * (perspective, interpolated perspective-correctly).
  * Its material opacity is multiplied by `opacity`. `tone` in [0, 1] mirrors the lightness of the
  * group's light, unsaturated vertex colours toward dark ink (see tone_color); images and shadows
  * are not toned.
@@ -164,13 +164,14 @@ struct PresentationGroup final {
     double tone = 0.0;
     double shear_x = 0.0;
     double shear_y = 0.0;
-    /** A group turned in depth divides by w = project_x * x + project_y * y + 1. */
+    /** A group turned in depth divides by w = project_x * x + project_y * y + project_w. */
     double project_x = 0.0;
     double project_y = 0.0;
+    double project_w = 1.0;
 
     /** The divisor a point of the group's content is projected by: 1 unless turned in depth. */
     [[nodiscard]] constexpr double place_w(const double x, const double y) const noexcept {
-        const double w = project_x * x + project_y * y + 1.0;
+        const double w = project_x * x + project_y * y + project_w;
         return w > 1.0e-6 ? w : 1.0e-6;
     }
     /** Where the group places a point of its content. */

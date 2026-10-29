@@ -1,5 +1,7 @@
 #include "resource/svg_image.hpp"
 
+#include "resource/image_stream.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -11,6 +13,10 @@ namespace strata::resource {
 
 std::string ImageAnimation::frame_texture(const std::string_view id,
                                           const std::int64_t elapsed) const {
+    if (stream != nullptr) {
+        stream->advance();
+        return std::string(id);
+    }
     const std::int64_t duration = duration_nanos();
     if (frame_ends_nanos.size() < 2U || duration <= 0)
         return std::string(id);

@@ -638,7 +638,7 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                             effective_transform.translate_y, descendant_opacity,
                             tone.value_or(-1.0), effective_transform.shear_x,
                             effective_transform.shear_y, effective_transform.project_x,
-                            effective_transform.project_y});
+                            effective_transform.project_y, effective_transform.project_w});
             effective_transform = MotionTransform{};
             descendant_opacity = 1.0;
         }
@@ -747,6 +747,16 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
         }
         const CornerRadii corners =
             corner_radii_value(visual_value(node, "radius")).value_or(CornerRadii{});
+        // A clip shape cuts the node itself, as clip-path does: its shadow, background and
+        // border take the shape too, not only what it contains. Fading edges stay on content.
+        ClipShape own_shape = clip_shape(node);
+        own_shape.fade = {0.0, 0.0, 0.0, 0.0};
+        const bool shaped_self = own_shape.kind != 0U;
+        if (shaped_self) {
+            output.append(ClipPushRenderCommand{layout_clip(record->bounds, effective_transform),
+                                                corners, own_shape});
+            ++counters.commands_emitted;
+        }
         for (const StyleShadow& shadow : style_shadows(style_value("shadows"),
                                                        descendant_opacity)) {
             output.append(ShadowRenderCommand{
@@ -1029,6 +1039,10 @@ RenderEngine::render(const RetainedTree& tree, const LayoutResult& layout, const
                 output.append(ClipPopRenderCommand{});
                 ++counters.commands_emitted;
             }
+        }
+        if (shaped_self) {
+            output.append(ClipPopRenderCommand{});
+            ++counters.commands_emitted;
         }
         if (group == 0U && !transform.identity()) {
             output.append(TransformPopRenderCommand{});

@@ -9,7 +9,14 @@
 #include <mutex>
 #include <set>
 #include <string_view>
+#include <thread>
 #include <utility>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <Windows.h>
+#endif
 
 namespace strata::font {
 namespace {
@@ -78,6 +85,17 @@ constexpr std::string_view general_fonts[] = {"segoeui.ttf", "arial.ttf", "segui
 
 class Catalog final {
   public:
+    /** Lists the font folders on a worker, once, so the first fallback need not wait for it. */
+    void prepare() {
+        const std::scoped_lock lock(mutex_);
+        if (enumerated_ || preparing_.joinable())
+            return;
+        preparing_ = std::jthread([this] {
+            const std::scoped_lock held(mutex_);
+            enumerate();
+        });
+    }
+
     void set_directories(std::vector<std::filesystem::path> directories) {
         const std::scoped_lock lock(mutex_);
         directories_ = std::move(directories);
@@ -205,14 +223,52 @@ class Catalog final {
         return SystemFont{id_of(*path), *face};
     }
 
+    /** A font file mapped into memory, unmapped when its last font goes. */
+    [[nodiscard]] static std::optional<OpenTypeFont> map(const std::filesystem::path& path) {
+#ifdef _WIN32
+        const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return std::nullopt;
+        LARGE_INTEGER size{};
+        const HANDLE mapping =
+            GetFileSizeEx(file, &size) && size.QuadPart > 0 && size.QuadPart <= 64LL * 1024 * 1024
+                ? CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr)
+                : nullptr;
+        CloseHandle(file);
+        if (mapping == nullptr)
+            return std::nullopt;
+        const void* const view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+        CloseHandle(mapping);
+        if (view == nullptr)
+            return std::nullopt;
+        std::shared_ptr<const void> owner(view,
+                                          [](const void* mapped) { UnmapViewOfFile(mapped); });
+        return OpenTypeFont::parse_borrowed(
+            std::move(owner),
+            std::span<const std::uint8_t>(static_cast<const std::uint8_t*>(view),
+                                          static_cast<std::size_t>(size.QuadPart)));
+#else
+        std::optional<resource::ResourceBytes> bytes = read(path);
+        if (!bytes.has_value())
+            return std::nullopt;
+        return OpenTypeFont::parse(std::move(*bytes));
+#endif
+    }
+
     [[nodiscard]] static std::optional<resource::ResourceBytes>
     read(const std::filesystem::path& path) {
+        // One read of the whole file: a stream iterator a byte at a time takes a hundred
+        // milliseconds over a CJK font.
+        std::error_code error;
+        const std::uintmax_t size = std::filesystem::file_size(path, error);
+        if (error || size == 0U || size > 64U * 1024U * 1024U)
+            return std::nullopt;
         std::ifstream input(path, std::ios::binary);
         if (!input)
             return std::nullopt;
-        resource::ResourceBytes bytes((std::istreambuf_iterator<char>(input)),
-                                      std::istreambuf_iterator<char>());
-        if (bytes.empty() || bytes.size() > 64U * 1024U * 1024U)
+        resource::ResourceBytes bytes(static_cast<std::size_t>(size));
+        if (!input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)))
             return std::nullopt;
         return bytes;
     }
@@ -224,10 +280,10 @@ class Catalog final {
         if (coverage_.contains(path) && coverage_.at(path).empty())
             return std::nullopt;
         try {
-            std::optional<resource::ResourceBytes> bytes = read(path);
-            if (!bytes.has_value())
+            std::optional<OpenTypeFont> mapped = map(path);
+            if (!mapped.has_value())
                 throw FontError("unreadable");
-            OpenTypeFont face = OpenTypeFont::parse(std::move(*bytes));
+            OpenTypeFont face = std::move(*mapped);
             loaded_.emplace(path, face);
             return face;
         } catch (const std::exception&) {
@@ -240,11 +296,10 @@ class Catalog final {
     [[nodiscard]] bool summarize(const std::filesystem::path& path,
                                  const std::uint32_t code_point) {
         try {
-            std::optional<resource::ResourceBytes> bytes = read(path);
-            if (!bytes.has_value())
+            const std::optional<OpenTypeFont> face = map(path);
+            if (!face.has_value())
                 throw FontError("unreadable");
-            const OpenTypeFont face = OpenTypeFont::parse(std::move(*bytes));
-            Ranges ranges = face.coverage_ranges();
+            Ranges ranges = face->coverage_ranges();
             const bool covered = covers(ranges, code_point);
             coverage_[path] = std::move(ranges);
             return covered;
@@ -255,6 +310,7 @@ class Catalog final {
     }
 
     std::mutex mutex_;
+    std::jthread preparing_;
     std::vector<std::filesystem::path> directories_;
     std::vector<std::filesystem::path> files_;
     bool enumerated_ = false;
@@ -272,6 +328,10 @@ class Catalog final {
 
 void set_system_font_directories(std::vector<std::filesystem::path> directories) {
     catalog().set_directories(std::move(directories));
+}
+
+void prepare_system_fonts() {
+    catalog().prepare();
 }
 
 std::optional<SystemFont> system_font_for(const std::uint32_t code_point) {

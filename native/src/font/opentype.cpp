@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -515,7 +516,12 @@ void append_utf8(std::string& output, const std::uint32_t code_point) {
 
 struct OpenTypeFont::Impl final {
     explicit Impl(resource::ResourceBytes input, std::vector<double> variation = {})
-        : font_bytes(std::move(input)), font_reader(font_bytes) {
+        : Impl(owned(std::move(input)), std::move(variation)) {}
+
+    /** The font over bytes `owner` keeps alive: a copy it holds, or a mapped file. */
+    Impl(std::pair<std::shared_ptr<const void>, std::span<const std::uint8_t>> source,
+         std::vector<double> variation)
+        : owner(std::move(source.first)), font_bytes(source.second), font_reader(font_bytes) {
         coordinates = std::move(variation);
         parse_directory();
         parse_metrics();
@@ -704,7 +710,15 @@ struct OpenTypeFont::Impl final {
         }
     }
 
-    resource::ResourceBytes font_bytes;
+    [[nodiscard]] static std::pair<std::shared_ptr<const void>, std::span<const std::uint8_t>>
+    owned(resource::ResourceBytes bytes) {
+        auto held = std::make_shared<const resource::ResourceBytes>(std::move(bytes));
+        const std::span<const std::uint8_t> view(*held);
+        return {std::move(held), view};
+    }
+
+    std::shared_ptr<const void> owner;
+    std::span<const std::uint8_t> font_bytes;
     Reader font_reader;
     /** Where the face's table directory starts: 0, or its place in a collection. */
     std::size_t directory = 0U;
@@ -2356,13 +2370,25 @@ OpenTypeFont::OpenTypeFont(std::shared_ptr<const Impl> implementation)
 
 OpenTypeFont OpenTypeFont::parse(resource::ResourceBytes bytes) {
     if (bytes.empty()) throw FontError("OpenType font bytes must not be empty");
+    // Eight bytes a step: a byte-at-a-time hash costs tens of milliseconds over a CJK font.
     const auto content_hash = [](const std::span<const std::uint8_t> content) noexcept {
-        std::uint64_t hash = 1469598103934665603ULL;
-        for (const std::uint8_t byte : content) {
-            hash ^= byte;
-            hash *= 1099511628211ULL;
+        const auto mix = [](std::uint64_t value) noexcept {
+            value ^= value >> 33U;
+            value *= 0xFF51AFD7ED558CCDULL;
+            value ^= value >> 33U;
+            value *= 0xC4CEB9FE1A85EC53ULL;
+            return value ^ (value >> 33U);
+        };
+        std::uint64_t hash = 1469598103934665603ULL ^ content.size();
+        std::size_t offset = 0U;
+        for (; offset + 8U <= content.size(); offset += 8U) {
+            std::uint64_t word = 0U;
+            std::memcpy(&word, content.data() + offset, 8U);
+            hash = (hash ^ mix(word)) * 0x9E3779B97F4A7C15ULL;
         }
-        return hash;
+        for (; offset < content.size(); ++offset)
+            hash = (hash ^ content[offset]) * 1099511628211ULL;
+        return mix(hash);
     };
     struct CachedFont final {
         std::uint64_t hash = 0U;
@@ -2380,7 +2406,7 @@ OpenTypeFont OpenTypeFont::parse(resource::ResourceBytes bytes) {
                 iterator = cache.erase(iterator);
                 continue;
             }
-            if (iterator->hash == hash && existing->font_bytes == bytes) {
+            if (iterator->hash == hash && std::ranges::equal(existing->font_bytes, bytes)) {
                 return OpenTypeFont(existing);
             }
             ++iterator;
@@ -2398,7 +2424,8 @@ OpenTypeFont OpenTypeFont::parse(resource::ResourceBytes bytes) {
                 iterator = cache.erase(iterator);
                 continue;
             }
-            if (iterator->hash == hash && existing->font_bytes == parsed->font_bytes) {
+            if (iterator->hash == hash &&
+                std::ranges::equal(existing->font_bytes, parsed->font_bytes)) {
                 return OpenTypeFont(existing);
             }
             ++iterator;
@@ -2406,6 +2433,16 @@ OpenTypeFont OpenTypeFont::parse(resource::ResourceBytes bytes) {
         cache.push_back(CachedFont{hash, parsed});
     }
     return OpenTypeFont(std::move(parsed));
+}
+
+OpenTypeFont OpenTypeFont::parse_borrowed(std::shared_ptr<const void> owner,
+                                          const std::span<const std::uint8_t> bytes) {
+    if (owner == nullptr || bytes.empty())
+        throw FontError("OpenType font bytes must not be empty");
+    return OpenTypeFont(std::make_shared<const Impl>(
+        std::pair<std::shared_ptr<const void>, std::span<const std::uint8_t>>{std::move(owner),
+                                                                              bytes},
+        std::vector<double>{}));
 }
 
 std::uint16_t OpenTypeFont::units_per_em() const noexcept { return implementation_->units; }
@@ -2523,7 +2560,11 @@ OpenTypeFont::instance(const std::span<const std::pair<std::string, double>> set
     }
     if (!changed)
         return *this;
-    auto varied = std::make_shared<Impl>(font.font_bytes, std::move(coordinates));
+    // The instance shares its font's bytes.
+    auto varied = std::make_shared<Impl>(
+        std::pair<std::shared_ptr<const void>, std::span<const std::uint8_t>>{font.owner,
+                                                                              font.font_bytes},
+        std::move(coordinates));
     varied->design = std::move(design);
     // The instance stands for the weight it was made at, so nothing emboldens it again.
     const auto weight =

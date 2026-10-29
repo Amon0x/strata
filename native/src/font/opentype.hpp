@@ -224,6 +224,12 @@ enum class JoiningForm : std::uint8_t { isolated, initial, medial, final };
 class OpenTypeFont final {
 public:
     [[nodiscard]] static OpenTypeFont parse(resource::ResourceBytes bytes);
+    /**
+     * A font over bytes it does not own, such as a mapped font file, kept alive by `owner`.
+     * Unlike parse, identical bytes from elsewhere are not shared: the caller owns the dedupe.
+     */
+    [[nodiscard]] static OpenTypeFont parse_borrowed(std::shared_ptr<const void> owner,
+                                                     std::span<const std::uint8_t> bytes);
 
     [[nodiscard]] std::uint16_t units_per_em() const noexcept;
     [[nodiscard]] std::int16_t ascender() const noexcept;

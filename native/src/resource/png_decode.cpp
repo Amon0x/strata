@@ -770,11 +770,11 @@ std::vector<std::uint8_t> decode_png_rgba8(const std::span<const std::uint8_t> b
 
 namespace codec {
 
-DecodedImage decode_png(const std::span<const std::uint8_t> bytes,
-                        const std::uint32_t frame_limit) {
+DecodedImage decode_png(const std::span<const std::uint8_t> bytes, const std::uint32_t frame_limit,
+                        const ImageFrameConsumer* const consumer) {
     const Png png = parse(bytes, std::nullopt, true);
     const std::uint32_t width = png.header.width;
-    FrameSink sink(ImageDimensions{width, png.header.height}, frame_limit, "PNG");
+    FrameSink sink(ImageDimensions{width, png.header.height}, frame_limit, "PNG", consumer);
     if (!png.animated) {
         sink.push(decode_pixels(png, png.header, png.idat), 0U);
         return sink.finish(1U);

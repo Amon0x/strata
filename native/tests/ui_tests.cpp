@@ -2553,6 +2553,34 @@ void test_grid_track_change_invalidates_layout() {
     check_near(after->bounds.width, 75.0, "a grid track change did not rerun layout");
 }
 
+// A spring follows a moving target with the velocity it has, instead of starting from rest at each
+// change, and comes to rest exactly on its target.
+void test_spring_target_keeps_velocity() {
+    using namespace strata::ui;
+    const MotionTiming timing{400'000'000, 0,     MotionEasing::spring(170.0, 26.0),
+                              {},          false, MotionFillMode::both};
+    const auto number = [](const motion_detail::TargetSample& sample) {
+        return std::get<double>(sample.value);
+    };
+    motion_detail::TargetPlayer moving;
+    static_cast<void>(moving.advance(0.0, timing, 0, false));
+    static_cast<void>(moving.advance(100.0, timing, 1'000'000, false));
+    const double before = number(moving.advance(100.0, timing, 41'000'000, false));
+    // The target moves on: the spring carries on from where it is, already moving.
+    const double carried = number(moving.advance(110.0, timing, 57'000'000, false)) - before;
+    motion_detail::TargetPlayer rested;
+    static_cast<void>(rested.advance(before, timing, 0, false));
+    static_cast<void>(rested.advance(110.0, timing, 1'000'000, false));
+    const double from_rest = number(rested.advance(110.0, timing, 17'000'000, false)) - before;
+    check(before > 0.0 && before < 100.0 && carried > from_rest * 2.0,
+          "a retargeted spring started again from rest: moved " + std::to_string(carried) +
+              " against " + std::to_string(from_rest) + " from rest");
+    motion_detail::TargetSample settled;
+    for (std::int64_t time = 57'000'000; time < 3'000'000'000; time += 16'000'000)
+        settled = moving.advance(110.0, timing, time, false);
+    check(!settled.running && number(settled) == 110.0, "a spring did not come to rest on target");
+}
+
 void test_layout_motion_preserves_relative_units() {
     using namespace strata;
     using namespace strata::ui;
@@ -8564,6 +8592,7 @@ int strata_test_ui(const int argument_count, const char* const* const arguments)
         test_rows_stack_and_children_hide_by_width();
         test_zero_fill_weight_collapses_without_stealing_space();
         test_layout_motion_preserves_relative_units();
+        test_spring_target_keeps_velocity();
         test_anchored_portal_is_out_of_flow_and_flips();
         test_virtualization_cache_queries_only_observed_keys();
         test_retained_layout_cache_scale_and_invalidation();

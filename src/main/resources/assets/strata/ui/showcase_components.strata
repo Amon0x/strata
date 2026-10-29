@@ -1719,6 +1719,10 @@ component MediaPage() {
         Panel(style: style(MediaTile, clip: true, clipShape: "circle", padding: 0)) {
           Image(image: "demo:media/orbit", layout: { width: 160, height: 160 })
         }
+        Panel(style: MediaTile) {
+          Image(image: "demo:media/tunnel", layout: { width: 320, height: 180 })
+          Text(text: "GIF, 400 frames: 92 MB decoded, played from its bytes", style: CardNote)
+        }
       }
     }
     Card(title: "PHOTOS: JPEG") {
@@ -1731,7 +1735,9 @@ component MediaPage() {
         Button(key: "media.play", label: "Play the clip", onClick: then(
           action("media.play", source: "assets/strata/media/mandelbrot.mp4", image: "video:clip", loop: true, volume: 0.5, muted: muted),
           action("state.setFromEvent", name: "video")))
-        Toggle(key: "media.muted", label: "Muted", checked: muted, onChange: action("state.setFromEvent", name: "muted"))
+        Toggle(key: "media.muted", label: "Muted", checked: muted, onChange: sequence(
+          action("state.setFromEvent", name: "muted"),
+          action("media.set", image: "video:clip", muted: !muted)))
         Button(key: "media.pause", label: "Pause", enabled: video.image != "", onClick: action("media.pause", image: "video:clip"))
         Button(key: "media.resume", label: "Resume", enabled: video.image != "", onClick: action("media.resume", image: "video:clip"))
         Button(key: "media.back", label: "Back 3 s", enabled: video.image != "", onClick: action("media.seek", image: "video:clip", seconds: progress.position - 3))
@@ -1905,7 +1911,7 @@ component TypePage() {
         Panel(style: style(PageColumn, gap: 6)) {
           for index in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30] {
             Panel(key: format("type.fade.row.{0}", index), style: FadeRow) {
-              Text(text: format("Row {0}: content dissolves into the edges instead of being cut", index), style: CardNote)
+              Text(text: format("Row {0}: content dissolves into the edges instead of being cut", padStart(format("{0}", index), 2, "0")), style: CardNote)
             }
           }
         }
@@ -1947,18 +1953,22 @@ component InteractPage() {
       Panel(style: ActionRow) {
         Button(key: "interact.carousel.prev", label: "Previous", onClick: action("state.set", name: "selected", value: selected > 0 ? selected - 1 : 0))
         Button(key: "interact.carousel.next", label: "Next", onClick: action("state.set", name: "selected", value: selected < 4 ? selected + 1 : 4))
-        Text(text: format("Card {0} of 5, on a bouncy spring", selected + 1), style: CardNote)
+        Text(text: format("Card {0} of 5, on a spring", selected + 1), style: CardNote)
       }
-      Panel(style: style(ActionRow, justifyContent: "CENTER", gap: 4, wrap: false)) {
+      // Cover flow: the row slides so the chosen card sits in the middle, in front, facing out;
+      // the others turn away on either side, further back the further off they are.
+      Panel(style: style(ActionRow, height: 230, justifyContent: "CENTER", alignItems: "CENTER", gap: 4, wrap: false)) {
         for index in [0, 1, 2, 3, 4] {
           Panel(
             key: format("interact.carousel.{0}", index),
             style: style(CarouselCard,
                          background: index == selected ? #5B4BD6FF : #263044FF,
-                         rotateY: index == selected ? 0 : (index < selected ? 48 : -48),
-                         scale: index == selected ? 1.08 : 0.88,
+                         translateX: (2 - selected) * 154 + (index < selected ? 34 : (index > selected ? -34 : 0)),
+                         rotateY: index == selected ? 0 : (index < selected ? 55 : -55),
+                         scale: index == selected ? 1.12 : 0.86,
+                         zIndex: 10 - (index > selected ? index - selected : selected - index),
                          perspective: 520),
-            animateChanges: { properties: ["rotateY", "scale", "background"], policy: "bouncy" }
+            animateChanges: { properties: ["translateX", "rotateY", "scale", "background"], policy: "spring" }
           ) {
             Text(text: format("{0}", index + 1), style: CardTitle)
           }

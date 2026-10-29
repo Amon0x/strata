@@ -2729,6 +2729,17 @@ Move a video to a time Payload: `strata.action-payload/media.seek@1`. Dispatch: 
 | `image` | string | true | false | — |
 | `seconds` | number | false | false | — |
 
+### `media.set`
+
+Mute, set the volume of, or loop a video while it plays Payload: `strata.action-payload/media.set@1`. Dispatch: `framework`.
+
+| Name | Type | Required | Nullable | Aliases |
+|---|---|---:|---:|---|
+| `image` | string | true | false | — |
+| `muted` | boolean | false | false | — |
+| `volume` | number | false | false | — |
+| `loop` | boolean | false | false | — |
+
 ### `media.status`
 
 Ask where a video is; then() receives position, duration, paused and ended Payload: `strata.action-payload/media.status@1`. Dispatch: `framework`.

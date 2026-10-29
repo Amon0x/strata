@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -317,10 +318,6 @@ class MediaEvents final : public IMFMediaEngineNotify {
   private:
     std::atomic<ULONG> references_ = 1U;
 };
-
-/** Videos are drawn no larger than this, scaled down to fit: frames cross to the GPU each tick. */
-constexpr UINT maximum_video_width = 1280U;
-constexpr UINT maximum_video_height = 720U;
 
 } // namespace
 
@@ -816,11 +813,8 @@ struct PlatformServices::Impl final {
                 DWORD native_height = 0U;
                 video.engine->GetNativeVideoSize(&native_width, &native_height);
                 if (native_width != 0U && native_height != 0U) {
-                    const double fit =
-                        std::min({1.0, static_cast<double>(maximum_video_width) / native_width,
-                                  static_cast<double>(maximum_video_height) / native_height});
-                    video.width = std::max(1U, static_cast<UINT>(native_width * fit));
-                    video.height = std::max(1U, static_cast<UINT>(native_height * fit));
+                    video.width = native_width;
+                    video.height = native_height;
                     imaging_factory()->CreateBitmap(video.width, video.height,
                                                     GUID_WICPixelFormat32bppBGRA,
                                                     WICBitmapCacheOnLoad, &video.target);
@@ -875,11 +869,13 @@ struct PlatformServices::Impl final {
 
     [[nodiscard]] std::vector<PlatformAnswer> pump() {
         std::deque<Request> due;
+        std::vector<PlatformAnswer> answers;
         {
             const std::scoped_lock lock(mutex);
             due.swap(requests);
+            // Dialogs that closed since the last frame.
+            answers.swap(answered);
         }
-        std::vector<PlatformAnswer> answers;
         for (const Request& request : due) {
             try {
                 run(request, answers);
@@ -895,7 +891,22 @@ struct PlatformServices::Impl final {
     void run(const Request& request, std::vector<PlatformAnswer>& answers) {
         const std::string& kind = request.kind;
         if (kind == "system.openFile" || kind == "system.saveFile") {
-            answers.push_back(answer(request, file_dialog(request, kind == "system.saveFile")));
+            // The dialog runs on a thread of its own: it is modal to the window, while the app
+            // behind it goes on drawing and playing.
+            const bool save = kind == "system.saveFile";
+            dialogs.emplace_back([this, request, save] {
+                const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+                PlatformAnswer finished;
+                try {
+                    finished = answer(request, file_dialog(request, save));
+                } catch (const std::exception& error) {
+                    finished = answer(request, {{"error", JsonValue(std::string(error.what()))}});
+                }
+                if (SUCCEEDED(apartment))
+                    CoUninitialize();
+                const std::scoped_lock lock(mutex);
+                answered.push_back(std::move(finished));
+            });
         } else if (kind == "system.notify") {
             answers.push_back(answer(request, {{"shown", JsonValue(notify(request))}}));
         } else if (kind == "system.open") {
@@ -926,7 +937,24 @@ struct PlatformServices::Impl final {
                                      {"image", JsonValue(text_field(request.payload, "image"))}}));
                 return;
             }
-            if (kind == "media.pause") {
+            if (kind == "media.set") {
+                // Muting, volume and looping change while it plays.
+                if (const JsonValue* muted = request.payload.find("muted");
+                    muted != nullptr && muted->boolean() != nullptr) {
+                    playing->engine->SetMuted(*muted->boolean() ? TRUE : FALSE);
+                }
+                if (const JsonValue* volume = request.payload.find("volume"); volume != nullptr) {
+                    const double level = volume->number() != nullptr ? *volume->number()
+                                         : volume->integer() != nullptr
+                                             ? static_cast<double>(*volume->integer())
+                                             : 1.0;
+                    playing->engine->SetVolume(std::clamp(level, 0.0, 1.0));
+                }
+                if (const JsonValue* loop = request.payload.find("loop");
+                    loop != nullptr && loop->boolean() != nullptr) {
+                    playing->engine->SetLoop(*loop->boolean() ? TRUE : FALSE);
+                }
+            } else if (kind == "media.pause") {
                 playing->engine->Pause();
             } else if (kind == "media.resume") {
                 playing->engine->Play();
@@ -1020,6 +1048,10 @@ struct PlatformServices::Impl final {
     ResourcePath resource_path;
     bool media_started = false;
     std::map<std::string, Video, std::less<>> videos;
+    /** Answers from dialogs that closed on their own threads, waiting for the next pump. */
+    std::vector<PlatformAnswer> answered;
+    /** Declared last: joined first, while everything a dialog thread uses is still alive. */
+    std::vector<std::jthread> dialogs;
     bool ole = false;
     std::mutex mutex;
     std::deque<Request> requests;

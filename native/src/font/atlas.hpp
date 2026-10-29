@@ -116,6 +116,8 @@ struct GlyphAtlasWarmupRequest final {
     SubpixelPhase phase;
     std::uint32_t font_style_flags = 0U;
     GlyphRasterMode mode = GlyphRasterMode::coverage;
+    /** How far beyond its edge an MSDF glyph's distance must reach (see GlyphAtlas::request). */
+    double reach = 0.0;
 };
 
 /**
@@ -255,6 +257,12 @@ class GlyphAtlas final {
     request_mode(std::string_view font_id, const OpenTypeFont& font, std::uint16_t glyph,
                  double pixel_size, SubpixelPhase phase, GlyphRasterMode mode,
                  std::uint32_t font_style_flags, double reach = 0.0);
+    struct Resolved;
+    /** What a glyph request rasterizes as and is cached under; request and warm agree on it. */
+    [[nodiscard]] Resolved resolve(std::string_view font_id, const OpenTypeFont& font,
+                                   std::uint16_t glyph, double pixel_size, SubpixelPhase phase,
+                                   GlyphRasterMode mode, std::uint32_t font_style_flags,
+                                   double reach) const;
     [[nodiscard]] bool recycle_for_capacity(Key& key);
     [[nodiscard]] std::optional<Allocation> reuse_unretained_page(std::uint32_t width,
                                                                   std::uint32_t height,

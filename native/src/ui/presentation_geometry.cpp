@@ -195,9 +195,9 @@ MotionTransform local_presentation_transform(
             1.0, 0.0, center.x + translation_x, 0.0, 1.0, center.y + translation_y, 0.0, 0.0, 1.0};
         const std::array<double, 9U> h =
             multiply(back, multiply(depth, multiply(plane, to_origin)));
-        const double w = h[8] != 0.0 ? h[8] : 1.0;
-        return MotionTransform{h[2] / w, h[5] / w, h[0] / w, h[4] / w,
-                               h[1] / w, h[3] / w, h[6] / w, h[7] / w};
+        // w is one at the node's own origin, in front of the viewer; it is kept, not scaled to
+        // one at the surface's origin, which can lie behind the viewer.
+        return MotionTransform{h[2], h[5], h[0], h[4], h[1], h[3], h[6], h[7], h[8]};
     }
     if (!std::isfinite(degrees) || std::fmod(degrees, 360.0) == 0.0) {
         return MotionTransform{
@@ -248,8 +248,9 @@ Point transform_presentation_point(const Point point, const MotionTransform& tra
     if (transform.affine())
         return Point{x, y};
     // A point at or behind the viewer would flip through infinity: keep it just in front.
-    const double w =
-        std::max(transform.project_x * point.x + transform.project_y * point.y + 1.0, 1.0e-6);
+    const double w = std::max(transform.project_x * point.x + transform.project_y * point.y +
+                                  transform.project_w,
+                              1.0e-6);
     return Point{x / w, y / w};
 }
 
@@ -257,10 +258,12 @@ std::optional<MotionTransform> inverse_presentation_transform(
     const MotionTransform& transform
 ) noexcept {
     if (!transform.affine()) {
-        // The inverse of the 3x3 homography, by cofactors, normalised so its last term is one.
+        // The inverse of the 3x3 homography, by cofactors over the determinant: exactly the
+        // inverse, so a point the transform placed (w > 0) maps back with w > 0 too.
         const double m00 = transform.scale_x, m01 = transform.shear_x, m02 = transform.translate_x;
         const double m10 = transform.shear_y, m11 = transform.scale_y, m12 = transform.translate_y;
-        const double m20 = transform.project_x, m21 = transform.project_y, m22 = 1.0;
+        const double m20 = transform.project_x, m21 = transform.project_y,
+                     m22 = transform.project_w;
         const double c00 = m11 * m22 - m12 * m21;
         const double c01 = m02 * m21 - m01 * m22;
         const double c02 = m01 * m12 - m02 * m11;
@@ -271,10 +274,11 @@ std::optional<MotionTransform> inverse_presentation_transform(
         const double c21 = m01 * m20 - m00 * m21;
         const double c22 = m00 * m11 - m01 * m10;
         const double determinant = m00 * c00 + m01 * c10 + m02 * c20;
-        if (determinant == 0.0 || !std::isfinite(determinant) || c22 == 0.0)
+        if (determinant == 0.0 || !std::isfinite(determinant))
             return std::nullopt;
-        return MotionTransform{c02 / c22, c12 / c22, c00 / c22, c11 / c22,
-                               c01 / c22, c10 / c22, c20 / c22, c21 / c22};
+        const double d = determinant;
+        return MotionTransform{c02 / d, c12 / d, c00 / d, c11 / d, c01 / d,
+                               c10 / d, c20 / d, c21 / d, c22 / d};
     }
     const double determinant =
         transform.scale_x * transform.scale_y - transform.shear_x * transform.shear_y;
@@ -307,13 +311,14 @@ MotionTransform concatenate_presentation_transform(
         };
     }
     if (!parent.affine() || !local.affine()) {
-        // The product of two homographies, normalised so its last term is one.
+        // The product of two homographies, scaled by a positive number only: a scale that could
+        // be negative would turn every w, and with it the whole node, behind the viewer.
         const std::array<double, 9U> p{parent.scale_x,   parent.shear_x,   parent.translate_x,
                                        parent.shear_y,   parent.scale_y,   parent.translate_y,
-                                       parent.project_x, parent.project_y, 1.0};
+                                       parent.project_x, parent.project_y, parent.project_w};
         const std::array<double, 9U> l{local.scale_x,   local.shear_x,   local.translate_x,
                                        local.shear_y,   local.scale_y,   local.translate_y,
-                                       local.project_x, local.project_y, 1.0};
+                                       local.project_x, local.project_y, local.project_w};
         std::array<double, 9U> h{};
         for (int row = 0; row < 3; ++row) {
             for (int column = 0; column < 3; ++column) {
@@ -321,9 +326,9 @@ MotionTransform concatenate_presentation_transform(
                     h[row * 3 + column] += p[row * 3 + k] * l[k * 3 + column];
             }
         }
-        const double w = h[8] != 0.0 ? h[8] : 1.0;
-        return MotionTransform{h[2] / w, h[5] / w, h[0] / w, h[4] / w,
-                               h[1] / w, h[3] / w, h[6] / w, h[7] / w};
+        const double w = std::abs(h[8]) > 1.0e-12 ? std::abs(h[8]) : 1.0;
+        return MotionTransform{h[2] / w, h[5] / w, h[0] / w, h[4] / w, h[1] / w,
+                               h[3] / w, h[6] / w, h[7] / w, h[8] / w};
     }
     return MotionTransform{
         parent.scale_x * local.translate_x + parent.shear_x * local.translate_y +

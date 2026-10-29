@@ -188,6 +188,7 @@ void CommandIndex::rebuild(const RetainedTree& tree) {
         observed_tree_generation_ = tree.generation();
         return;
     }
+    ++generation_;
     entries_.clear();
     declaration_order_.clear();
     observed_declarations_.clear();

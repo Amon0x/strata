@@ -565,7 +565,9 @@ Panel(style: style(Card, rotateY: open ? 0 : -60, perspective: 600),
 A node that clips (`clip: true`, or a `Scroll`'s viewport) can cut its content to a shape other than
 its rounded rectangle and fade it out toward its edges. `clipShape` is `circle` or `ellipse` (filling
 the box), `diamond`, `hexagon` or `polygon` (a regular polygon, `clipSides` sides, a corner up) or
-`star` (`clipSides` points); any other value keeps the rectangle. `fadeEdges` takes `top`, `right`,
+`star` (`clipSides` points); any other value keeps the rectangle. A shape cuts the node itself as
+well, as `clip-path` does: its shadow, background and border take the shape too. `fadeEdges` takes
+`top`, `right`,
 `bottom` and `left` distances in logical pixels over which content fades to nothing, so a list
 dissolves into its edges as it scrolls instead of being cut. Both are evaluated per pixel on the GPU
 with the clip, under any transform.
@@ -609,16 +611,18 @@ Text(text: "Headline", style: style(Title, font: "system:bahnschrift.ttf", fontW
 
 An `Image` showing an animated GIF, APNG or WebP plays it: each frame shows for as long as the file
 says (a GIF frame under 20 ms for 100 ms, as browsers do), and it loops as many times as the file
-asks. Every frame is decoded once, when the Surface is created; an animation whose frames would
-take more than 256 MB stays on its first frame. JPEG, PNG, GIF and WebP images all bind the same
+asks. An animation whose frames fit in 64 MB is decoded once, when the Surface is created, a
+texture per frame; a longer one plays from its bytes, decoded a few frames ahead into one texture,
+so its length costs no memory. JPEG, PNG, GIF and WebP images all bind the same
 way, told apart by their bytes.
 
-Video plays into a runtime image, so any `Image` (clipped, rounded, turned) can show it.
+Video plays into a runtime image at its own size, so any `Image` (clipped, rounded, turned) can
+show it.
 `media.play` (`source`: a resource path, an absolute path or a URL; `image`: the runtime image id
 to play into; `loop`, `muted`, `volume`) starts it with its sound, and `then` receives
 `{ image, width, height, duration, position, paused, ended }` once the video is open.
-`media.pause`, `media.resume`, `media.seek` (`seconds`), `media.status` and `media.stop` take the
-same `image`. With no `source`, `media.play` plays what its event brings: the path a dialog chose,
+`media.pause`, `media.resume`, `media.seek` (`seconds`), `media.set` (`muted`, `volume`, `loop`,
+while it plays), `media.status` and `media.stop` take the same `image`. With no `source`, `media.play` plays what its event brings: the path a dialog chose,
 the first file of a drop.
 
 ```strata
@@ -634,7 +638,7 @@ The Windows desktop host plays video through Media Foundation, in any format Win
 
 A document reaches the operating system through actions. `system.openFile` (`title`, `filters`,
 `multiple`, `folder`) and `system.saveFile` (`title`, `filters`, `name`) show the system's own
-dialogs; filters are `{ name, patterns }` objects or `"Name|*.png;*.jpg"` strings. `system.notify`
+dialogs, modal to the window while the app behind them keeps running; filters are `{ name, patterns }` objects or `"Name|*.png;*.jpg"` strings. `system.notify`
 (`title`, `body`) shows a notification from the app's tray icon, and `system.open` (`target`)
 opens a file, folder or link in its default application. `window.minimize`,
 `window.toggleMaximize` and `window.close` act on the window, and `window.setChrome` (`titleBar`:

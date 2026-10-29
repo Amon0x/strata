@@ -22,7 +22,7 @@ cbuffer FrameData : register(b0) {
 struct PresentationGroup {
     float4 transform;
     float4 opacity;
-    /** xy: a group turned in depth divides by w = dot(projection.xy, position) + 1. */
+    /** xyz: a group turned in depth divides by w = dot(projection.xy, position) + projection.z. */
     float4 projection;
 };
 
@@ -73,7 +73,7 @@ PixelInput main(VertexInput input) {
                       input.position.yx * group.opacity.zw + translation;
     // A group turned in depth: the projected position is position / w, which the rasterizer
     // divides by itself, so every attribute interpolates perspective-correctly.
-    float w = max(dot(group.projection.xy, input.position.xy) + 1.0, 1.0e-4);
+    float w = max(dot(group.projection.xy, input.position.xy) + group.projection.z, 1.0e-4);
     output.position = float4(
         position.x * 2.0 / logicalSize.x - w,
         w - position.y * 2.0 / logicalSize.y,

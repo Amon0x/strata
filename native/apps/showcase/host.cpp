@@ -811,6 +811,7 @@ struct Host::Impl final {
                 {"strata:ui/icons/chevron-up", "assets/strata/images/ui/icons/chevron-up.svg"},
                 // The MEDIA page: animated GIF, APNG and WebP, and a JPEG photo.
                 {"demo:media/orbit", "assets/strata/media/orbit.gif"},
+                {"demo:media/tunnel", "assets/strata/media/tunnel.gif"},
                 {"demo:media/rings", "assets/strata/media/rings.png"},
                 {"demo:media/plasma", "assets/strata/media/plasma.webp"},
                 {"demo:media/sunset", "assets/strata/media/sunset.jpg"},

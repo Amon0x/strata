@@ -322,6 +322,34 @@ void test_surface_textures_decode_every_format(const std::filesystem::path& root
 
 } // namespace
 
+// Streaming hands over exactly the frames decode_image keeps, in order, and stops when asked.
+void test_streamed_frames(const std::filesystem::path& root, const std::vector<Fixture>& fixtures) {
+    for (const Fixture& fixture : fixtures) {
+        const std::vector<std::uint8_t> bytes = read_file(root / fixture.name);
+        const DecodedImage kept = decode_image(bytes);
+        std::vector<strata::resource::ImageFrame> streamed;
+        const std::uint32_t loops = strata::resource::stream_image(
+            bytes, [&streamed](std::vector<std::uint8_t>& rgba, const std::uint32_t delay_ms) {
+                streamed.push_back(strata::resource::ImageFrame{std::move(rgba), delay_ms});
+                return true;
+            });
+        check(loops == kept.loop_count && streamed.size() == kept.frames.size(),
+              fixture.name + ": streaming gave a different frame count or loop count");
+        for (std::size_t index = 0U; index < streamed.size(); ++index) {
+            check(streamed[index].rgba == kept.frames[index].rgba &&
+                      streamed[index].delay_ms == kept.frames[index].delay_ms,
+                  fixture.name + ": streamed frame " + std::to_string(index) + " differs");
+        }
+        if (kept.frames.size() > 1U) {
+            std::size_t taken = 0U;
+            static_cast<void>(strata::resource::stream_image(
+                bytes,
+                [&taken](std::vector<std::uint8_t>&, std::uint32_t) { return ++taken < 1U; }));
+            check(taken == 1U, fixture.name + ": streaming went on after it was told to stop");
+        }
+    }
+}
+
 int strata_test_image_decode(const int argument_count, const char* const* const arguments) {
     try {
         check(argument_count >= 2, "expected the image fixture directory");
@@ -333,6 +361,7 @@ int strata_test_image_decode(const int argument_count, const char* const* const 
         test_bounds();
         test_apng_still_compatibility(root);
         test_surface_textures_decode_every_format(root);
+        test_streamed_frames(root, fixtures);
     } catch (const std::exception& error) {
         std::cerr << "strata_image_decode_tests: " << error.what() << '\n';
         return 1;

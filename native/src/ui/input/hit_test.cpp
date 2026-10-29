@@ -8,6 +8,7 @@
 
 #include "ui/behavior/input.hpp"
 #include "ui/behavior/registry.hpp"
+#include "ui/command.hpp"
 #include "ui/input/detail.hpp"
 #include "ui/motion.hpp"
 #include "ui/presentation_geometry.hpp"
@@ -770,11 +771,13 @@ void InputRouter::prepare_pointer_geometry() const {
     }
     const DirtyGenerationSnapshot dirty = tree_->dirty_generations();
     const std::uint64_t notifications = notifications_.generation();
+    const std::uint64_t command_generation = commands_ != nullptr ? commands_->generation() : 0U;
     if (pointer_geometry_ready_ && pointer_geometry_tree_ == tree_ &&
         pointer_geometry_layout_ == layout_ && pointer_geometry_motion_ == motion_ &&
         pointer_geometry_tree_generation_ == tree_->generation() &&
         pointer_geometry_layout_generation_ == layout_->generation &&
         pointer_geometry_notification_generation_ == notifications &&
+        pointer_geometry_command_generation_ == command_generation &&
         pointer_geometry_generations_match(pointer_geometry_dirty_generations_, dirty)) {
         if (pointer_geometry_dirty_generations_.input != dirty.input) {
             // Hover and press move no hit region, but widgets project subtargets from their
@@ -906,6 +909,7 @@ void InputRouter::prepare_pointer_geometry() const {
     pointer_geometry_tree_generation_ = tree_->generation();
     pointer_geometry_layout_generation_ = layout_->generation;
     pointer_geometry_notification_generation_ = notifications;
+    pointer_geometry_command_generation_ = command_generation;
     pointer_geometry_dirty_generations_ = dirty;
     pointer_geometry_ready_ = true;
     ++pointer_geometry_rebuild_count_;

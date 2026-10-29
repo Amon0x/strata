@@ -32,13 +32,6 @@ struct Contour final {
     double signed_area = 0.0;
 };
 
-struct Distances final {
-    double red = 0.0;
-    double green = 0.0;
-    double blue = 0.0;
-    double monochrome = 0.0;
-};
-
 [[nodiscard]] double distance_squared(const Point left, const Point right) noexcept {
     const double x = left.x - right.x;
     const double y = left.y - right.y;
@@ -253,13 +246,6 @@ void add_edge(std::vector<Edge>& output, const Point from, const Point to, const
     return result;
 }
 
-[[nodiscard]] bool ray_crosses(const Point point, const Edge edge) noexcept {
-    if ((edge.from.y > point.y) == (edge.to.y > point.y)) return false;
-    const double at_y = (edge.to.x - edge.from.x) * (point.y - edge.from.y) /
-                        (edge.to.y - edge.from.y) + edge.from.x;
-    return point.x < at_y;
-}
-
 [[nodiscard]] double edge_distance_squared(const Point point, const Edge edge) noexcept {
     const double x = edge.to.x - edge.from.x;
     const double y = edge.to.y - edge.from.y;
@@ -271,39 +257,6 @@ void add_edge(std::vector<Edge>& output, const Point from, const Point to, const
         1.0
     );
     return distance_squared(point, Point{edge.from.x + x * projection, edge.from.y + y * projection});
-}
-
-[[nodiscard]] Distances signed_distances(
-    const Point point,
-    const std::vector<Contour>& contours
-) {
-    int winding = 0;
-    double red_squared = std::numeric_limits<double>::infinity();
-    double green_squared = red_squared;
-    double blue_squared = red_squared;
-    double mono_squared = red_squared;
-    for (const Contour& contour : contours) {
-        bool inside = false;
-        for (const Edge edge : contour.edges) {
-            if (ray_crosses(point, edge)) inside = !inside;
-            const double distance = edge_distance_squared(point, edge);
-            mono_squared = std::min(mono_squared, distance);
-            if ((edge.channels & red) != 0U) red_squared = std::min(red_squared, distance);
-            if ((edge.channels & green) != 0U) green_squared = std::min(green_squared, distance);
-            if ((edge.channels & blue) != 0U) blue_squared = std::min(blue_squared, distance);
-        }
-        if (inside) winding += contour.signed_area >= 0.0 ? 1 : -1;
-    }
-    if (!std::isfinite(red_squared)) red_squared = mono_squared;
-    if (!std::isfinite(green_squared)) green_squared = mono_squared;
-    if (!std::isfinite(blue_squared)) blue_squared = mono_squared;
-    const double sign = winding != 0 ? 1.0 : -1.0;
-    return Distances{
-        std::sqrt(red_squared) * sign,
-        std::sqrt(green_squared) * sign,
-        std::sqrt(blue_squared) * sign,
-        std::sqrt(mono_squared) * sign,
-    };
 }
 
 [[nodiscard]] std::uint8_t encode_distance(const double pixels, const double range) noexcept {
@@ -428,19 +381,105 @@ std::optional<GlyphRasterBitmap> rasterize_msdf(
     }
     if (contours.empty()) return std::nullopt;
 
+    // A distance past half the range encodes as fully inside or outside, so each sample only
+    // measures the edges within that much of it, and finds which side it is on from the row's
+    // crossings: the same bytes as measuring every edge, without the cost of it.
+    const double cutoff = config.pixel_range * 0.5 / atlas_scale * (1.0 + 1.0e-9);
+    const double cutoff_squared = cutoff * cutoff;
+    struct Nearby final {
+        Edge edge;
+        double left = 0.0;
+        double right = 0.0;
+        double bottom = 0.0;
+        double top = 0.0;
+    };
+    std::vector<Nearby> nearby;
+    bool has_red = false;
+    bool has_green = false;
+    bool has_blue = false;
+    for (const Contour& contour : contours) {
+        for (const Edge edge : contour.edges) {
+            nearby.push_back(Nearby{edge, std::min(edge.from.x, edge.to.x) - cutoff,
+                                    std::max(edge.from.x, edge.to.x) + cutoff,
+                                    std::min(edge.from.y, edge.to.y) - cutoff,
+                                    std::max(edge.from.y, edge.to.y) + cutoff});
+            has_red = has_red || (edge.channels & red) != 0U;
+            has_green = has_green || (edge.channels & green) != 0U;
+            has_blue = has_blue || (edge.channels & blue) != 0U;
+        }
+    }
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(byte_count));
+    std::vector<const Nearby*> row_edges;
+    std::vector<std::vector<double>> crossings(contours.size());
+    std::vector<std::size_t> passed(contours.size());
     for (std::uint32_t y = 0U; y < height; ++y) {
+        const double sample_y =
+            font_bounds.bottom + (static_cast<double>(height - y) - 0.5) / atlas_scale;
+        row_edges.clear();
+        for (const Nearby& candidate : nearby) {
+            if (sample_y >= candidate.bottom && sample_y <= candidate.top)
+                row_edges.push_back(&candidate);
+        }
+        // Where each contour's edges cross this row: a ray to a sample's right crosses those past
+        // it.
+        for (std::size_t index = 0U; index < contours.size(); ++index) {
+            std::vector<double>& row = crossings[index];
+            row.clear();
+            for (const Edge edge : contours[index].edges) {
+                if ((edge.from.y > sample_y) == (edge.to.y > sample_y))
+                    continue;
+                row.push_back((edge.to.x - edge.from.x) * (sample_y - edge.from.y) /
+                                  (edge.to.y - edge.from.y) +
+                              edge.from.x);
+            }
+            std::ranges::sort(row);
+            passed[index] = 0U;
+        }
         for (std::uint32_t x = 0U; x < width; ++x) {
-            const Point sample{
-                font_bounds.left + (static_cast<double>(x) + 0.5) / atlas_scale,
-                font_bounds.bottom + (static_cast<double>(height - y) - 0.5) / atlas_scale,
-            };
-            const Distances distance = signed_distances(sample, contours);
+            const Point sample{font_bounds.left + (static_cast<double>(x) + 0.5) / atlas_scale,
+                               sample_y};
+            int winding = 0;
+            for (std::size_t index = 0U; index < contours.size(); ++index) {
+                const std::vector<double>& row = crossings[index];
+                std::size_t& count = passed[index];
+                while (count < row.size() && row[count] <= sample.x)
+                    ++count;
+                if (((row.size() - count) & 1U) != 0U)
+                    winding += contours[index].signed_area >= 0.0 ? 1 : -1;
+            }
+            double red_squared = cutoff_squared;
+            double green_squared = cutoff_squared;
+            double blue_squared = cutoff_squared;
+            double mono_squared = cutoff_squared;
+            for (const Nearby* candidate : row_edges) {
+                if (sample.x < candidate->left || sample.x > candidate->right)
+                    continue;
+                const double distance = edge_distance_squared(sample, candidate->edge);
+                mono_squared = std::min(mono_squared, distance);
+                const std::uint8_t channels = candidate->edge.channels;
+                if ((channels & red) != 0U)
+                    red_squared = std::min(red_squared, distance);
+                if ((channels & green) != 0U)
+                    green_squared = std::min(green_squared, distance);
+                if ((channels & blue) != 0U)
+                    blue_squared = std::min(blue_squared, distance);
+            }
+            if (!has_red)
+                red_squared = mono_squared;
+            if (!has_green)
+                green_squared = mono_squared;
+            if (!has_blue)
+                blue_squared = mono_squared;
+            const double sign = winding != 0 ? 1.0 : -1.0;
             const std::size_t index = (static_cast<std::size_t>(y) * width + x) * 4U;
-            bytes[index] = encode_distance(distance.red * atlas_scale, config.pixel_range);
-            bytes[index + 1U] = encode_distance(distance.green * atlas_scale, config.pixel_range);
-            bytes[index + 2U] = encode_distance(distance.blue * atlas_scale, config.pixel_range);
-            bytes[index + 3U] = encode_distance(distance.monochrome * atlas_scale, config.pixel_range);
+            const double scale = sign * atlas_scale;
+            bytes[index] = encode_distance(std::sqrt(red_squared) * scale, config.pixel_range);
+            bytes[index + 1U] =
+                encode_distance(std::sqrt(green_squared) * scale, config.pixel_range);
+            bytes[index + 2U] =
+                encode_distance(std::sqrt(blue_squared) * scale, config.pixel_range);
+            bytes[index + 3U] =
+                encode_distance(std::sqrt(mono_squared) * scale, config.pixel_range);
         }
     }
     return GlyphRasterBitmap{

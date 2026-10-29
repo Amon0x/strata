@@ -25,10 +25,12 @@ void validate_canvas(ImageDimensions dimensions, const char* format);
  */
 class FrameSink final {
   public:
-    FrameSink(ImageDimensions canvas, std::uint32_t frame_limit, const char* format);
+    /** `consumer`, when given, takes each frame as it comes (stream_image): nothing is kept. */
+    FrameSink(ImageDimensions canvas, std::uint32_t frame_limit, const char* format,
+              const ImageFrameConsumer* consumer = nullptr);
 
     [[nodiscard]] bool wants_more() const noexcept {
-        return image_.frames.size() < frame_limit_;
+        return consumer_ != nullptr ? !stopped_ : image_.frames.size() < frame_limit_;
     }
     /** Throws when one more frame would pass maximum_image_frames or the pixel budget. */
     void reserve_next() const;
@@ -39,6 +41,9 @@ class FrameSink final {
     DecodedImage image_;
     std::uint32_t frame_limit_ = 0U;
     const char* format_ = "";
+    const ImageFrameConsumer* consumer_ = nullptr;
+    bool stopped_ = false;
+    std::size_t consumed_ = 0U;
 };
 
 /**
@@ -55,7 +60,8 @@ void clear_rect(std::vector<std::uint8_t>& canvas, std::uint32_t canvas_width, s
 // PNG and APNG (png_decode.cpp).
 [[nodiscard]] ImageDimensions inspect_png(std::span<const std::uint8_t> bytes);
 [[nodiscard]] DecodedImage decode_png(std::span<const std::uint8_t> bytes,
-                                      std::uint32_t frame_limit);
+                                      std::uint32_t frame_limit,
+                                      const ImageFrameConsumer* consumer = nullptr);
 
 // JPEG (jpeg_decode.cpp): one frame, EXIF orientation applied.
 [[nodiscard]] ImageDimensions inspect_jpeg(std::span<const std::uint8_t> bytes);
@@ -64,12 +70,14 @@ void clear_rect(std::vector<std::uint8_t>& canvas, std::uint32_t canvas_width, s
 // GIF (gif_decode.cpp).
 [[nodiscard]] ImageDimensions inspect_gif(std::span<const std::uint8_t> bytes);
 [[nodiscard]] DecodedImage decode_gif(std::span<const std::uint8_t> bytes,
-                                      std::uint32_t frame_limit);
+                                      std::uint32_t frame_limit,
+                                      const ImageFrameConsumer* consumer = nullptr);
 
 // WebP container, VP8L and ALPH (webp_decode.cpp).
 [[nodiscard]] ImageDimensions inspect_webp(std::span<const std::uint8_t> bytes);
 [[nodiscard]] DecodedImage decode_webp(std::span<const std::uint8_t> bytes,
-                                       std::uint32_t frame_limit);
+                                       std::uint32_t frame_limit,
+                                       const ImageFrameConsumer* consumer = nullptr);
 
 // VP8 lossy key frames (vp8_decode.cpp), the payload of a WebP 'VP8 ' chunk.
 /** Reads a VP8 key frame's dimensions from its 10-byte header. */

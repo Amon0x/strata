@@ -990,6 +990,8 @@ class InputRouter final {
     mutable std::uint64_t pointer_geometry_tree_generation_ = 0U;
     mutable std::uint64_t pointer_geometry_layout_generation_ = 0U;
     mutable std::uint64_t pointer_geometry_notification_generation_ = 0U;
+    /** Toolbars and menus project their items from the commands: a rebuild redoes them. */
+    mutable std::uint64_t pointer_geometry_command_generation_ = 0U;
     mutable DirtyGenerationSnapshot pointer_geometry_dirty_generations_;
     mutable std::vector<PointerHitEntry> pointer_hit_entries_;
     // Node identity to its entry in pointer_hit_entries_.

@@ -197,6 +197,15 @@ struct CommandTexture final {
            (display_scale * static_cast<double>(divisions));
 }
 
+/** How far beyond its glyphs' edges a run's effects read their distance (0: no such effect). */
+[[nodiscard]] double effect_reach(const TextRunRenderCommand& command) noexcept {
+    return command.effects.distance()
+               ? std::max({command.effects.outline_width, command.effects.glow_radius,
+                           command.effects.shadow_blur}) +
+                     1.0
+               : 0.0;
+}
+
 [[nodiscard]] std::vector<PreparedText> prepare_text(
     const TextRunRenderCommand& command,
     font::GlyphAtlas& atlas,
@@ -217,16 +226,12 @@ struct CommandTexture final {
         const font::SubpixelPhase phase = font::SubpixelPhase::quantize(
             requested_x * display_scale, coverage_subpixel_divisions
         );
-        const std::optional<font::GlyphAtlasEntry> atlas_entry = atlas.request(
-            logical.font_id, text_engine.font(logical.font_id),
-            static_cast<std::uint16_t>(logical.glyph_id), command.pixel_size, phase,
-            logical.font_style_flags, raster_mode(command.font_rasterization),
-            // Text effects read the distance this far beyond the glyph's edge.
-            command.effects.distance()
-                ? std::max({command.effects.outline_width, command.effects.glow_radius,
-                            command.effects.shadow_blur}) +
-                      1.0
-                : 0.0);
+        const std::optional<font::GlyphAtlasEntry> atlas_entry =
+            atlas.request(logical.font_id, text_engine.font(logical.font_id),
+                          static_cast<std::uint16_t>(logical.glyph_id), command.pixel_size, phase,
+                          logical.font_style_flags, raster_mode(command.font_rasterization),
+                          // Text effects read the distance this far beyond the glyph's edge.
+                          effect_reach(command));
         if (!atlas_entry.has_value()) continue;
         const double pen_x = atlas_entry->mode == font::GlyphRasterMode::coverage
             ? quantized_position(requested_x, display_scale, coverage_subpixel_divisions)
@@ -408,12 +413,10 @@ void append_warmup_requests(
             &text_engine.font(logical.font_id),
             static_cast<std::uint16_t>(logical.glyph_id),
             text.pixel_size,
-            font::SubpixelPhase::quantize(
-                requested_x * context.scale,
-                coverage_subpixel_divisions
-            ),
+            font::SubpixelPhase::quantize(requested_x * context.scale, coverage_subpixel_divisions),
             logical.font_style_flags,
             raster_mode(text.font_rasterization),
+            effect_reach(text),
         });
     }
 }

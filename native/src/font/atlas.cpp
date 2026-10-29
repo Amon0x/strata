@@ -390,59 +390,78 @@ GlyphAtlas::request(const std::string_view font_id, const OpenTypeFont& font,
                         font_style_flags, reach);
 }
 
+struct GlyphAtlas::Resolved final {
+    Key key;
+    MsdfRasterConfig msdf;
+};
+
+GlyphAtlas::Resolved GlyphAtlas::resolve(const std::string_view font_id, const OpenTypeFont& font,
+                                         const std::uint16_t glyph, const double pixel_size,
+                                         const SubpixelPhase phase, const GlyphRasterMode mode,
+                                         const std::uint32_t font_style_flags,
+                                         const double reach) const {
+    if (font_id.empty())
+        throw std::invalid_argument("glyph atlas font id must not be empty");
+    // A colour glyph (an emoji) draws its own colours, whatever its text asked for.
+    const GlyphRasterMode effective_mode =
+        !font.color_layers(glyph).empty() ? GlyphRasterMode::color : mode;
+    // The selected face is already part of identity. Collapse known bits supplied intrinsically
+    // by that face, while retaining every opaque/forward-compatible bit exactly.
+    const std::uint32_t realized_style_flags = (font_style_flags & ~known_font_style_flags) |
+                                               synthetic_font_style_flags(font, font_style_flags);
+    Resolved result{
+        Key{
+            std::string(font_id),
+            glyph,
+            realized_style_flags,
+            std::bit_cast<std::uint64_t>(pixel_size),
+            std::bit_cast<std::uint64_t>(effective_mode != GlyphRasterMode::msdf ? display_scale_
+                                                                                 : 1.0),
+            effective_mode,
+            effective_mode == GlyphRasterMode::coverage ? phase : SubpixelPhase{},
+            generation_,
+        },
+        config_.msdf,
+    };
+    // A distance that must reach further than the configured range: the field widened to
+    // cover it on both sides of the edge, with padding to hold it.
+    if (effective_mode == GlyphRasterMode::msdf && reach > 0.0 && std::isfinite(reach)) {
+        MsdfRasterConfig& msdf = result.msdf;
+        result.key.reach = static_cast<std::uint32_t>(std::ceil(std::min(reach, 64.0)));
+        const double oversampling = static_cast<double>(std::max(msdf.oversampling, 1U));
+        msdf.pixel_range = std::max(
+            msdf.pixel_range, 2.0 * (static_cast<double>(result.key.reach) + 1.5) * oversampling);
+        msdf.padding_pixels =
+            std::max(msdf.padding_pixels,
+                     static_cast<std::uint32_t>(std::ceil(msdf.pixel_range * 0.5)) + 2U);
+    }
+    return result;
+}
+
 std::optional<GlyphAtlasEntry>
 GlyphAtlas::request_mode(const std::string_view font_id, const OpenTypeFont& font,
                          const std::uint16_t glyph, const double pixel_size,
                          const SubpixelPhase phase, const GlyphRasterMode mode,
                          const std::uint32_t font_style_flags, const double reach) {
-    if (font_id.empty())
-        throw std::invalid_argument("glyph atlas font id must not be empty");
-    // A colour glyph (an emoji) draws its own colours, whatever its text asked for.
-    const GlyphRasterMode requested_mode = mode;
-    const GlyphRasterMode effective_mode =
-        !font.color_layers(glyph).empty() ? GlyphRasterMode::color : requested_mode;
-    // The selected face is already part of identity. Collapse known bits supplied intrinsically
-    // by that face, while retaining every opaque/forward-compatible bit exactly.
-    const std::uint32_t realized_style_flags = (font_style_flags & ~known_font_style_flags) |
-                                               synthetic_font_style_flags(font, font_style_flags);
-    Key key{
-        std::string(font_id),
-        glyph,
-        realized_style_flags,
-        std::bit_cast<std::uint64_t>(pixel_size),
-        std::bit_cast<std::uint64_t>(effective_mode != GlyphRasterMode::msdf ? display_scale_
-                                                                             : 1.0),
-        effective_mode,
-        effective_mode == GlyphRasterMode::color ? SubpixelPhase{} : phase,
-        generation_,
-    };
-    // A distance that must reach further than the configured range: the field widened to
-    // cover it on both sides of the edge, with padding to hold it.
-    MsdfRasterConfig msdf = config_.msdf;
-    if (effective_mode == GlyphRasterMode::msdf && reach > 0.0 && std::isfinite(reach)) {
-        key.reach = static_cast<std::uint32_t>(std::ceil(std::min(reach, 64.0)));
-        const double oversampling = static_cast<double>(std::max(msdf.oversampling, 1U));
-        msdf.pixel_range =
-            std::max(msdf.pixel_range, 2.0 * (static_cast<double>(key.reach) + 1.5) * oversampling);
-        msdf.padding_pixels =
-            std::max(msdf.padding_pixels,
-                     static_cast<std::uint32_t>(std::ceil(msdf.pixel_range * 0.5)) + 2U);
-    }
+    Resolved resolved =
+        resolve(font_id, font, glyph, pixel_size, phase, mode, font_style_flags, reach);
+    Key& key = resolved.key;
+    const MsdfRasterConfig& msdf = resolved.msdf;
+    const GlyphRasterMode effective_mode = key.mode;
+    const std::uint32_t realized_style_flags = key.font_style_flags;
     if (const auto found = cache_.find(key); found != cache_.end()) {
         if (!frame_preparation_active_)
             flush_pending_uploads();
         return found->second;
     }
     RasterCacheIdentity identity =
-        raster_cache_identity(font, glyph, pixel_size, display_scale_,
-                              effective_mode == GlyphRasterMode::color ? SubpixelPhase{} : phase,
-                              effective_mode, realized_style_flags, config_.coverage, msdf);
+        raster_cache_identity(font, glyph, pixel_size, display_scale_, key.phase, effective_mode,
+                              realized_style_flags, config_.coverage, msdf);
     SharedRaster bitmap = shared_raster_cache().find(identity.key);
     if (bitmap == nullptr) {
         bitmap = std::make_shared<const std::optional<GlyphRasterBitmap>>(
-            rasterize(font, glyph, pixel_size, display_scale_,
-                      effective_mode == GlyphRasterMode::color ? SubpixelPhase{} : phase,
-                      effective_mode, realized_style_flags, config_.coverage, msdf));
+            rasterize(font, glyph, pixel_size, display_scale_, key.phase, effective_mode,
+                      realized_style_flags, config_.coverage, msdf));
         bitmap = shared_raster_cache().insert(std::move(identity), std::move(bitmap));
     }
     if (!bitmap->has_value())
@@ -564,6 +583,7 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
         const OpenTypeFont* font = nullptr;
         RasterCacheIdentity identity;
         SharedRaster raster;
+        MsdfRasterConfig msdf;
     };
     std::vector<Pending> pending;
     pending.reserve(requests.size());
@@ -573,27 +593,15 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
         if (request.font == nullptr || request.font_id.empty()) {
             throw std::invalid_argument("glyph atlas warmup requires a font and non-empty id");
         }
-        const GlyphRasterMode mode = request.mode;
-        const SubpixelPhase phase =
-            mode == GlyphRasterMode::coverage ? request.phase : SubpixelPhase{};
-        const std::uint32_t realized_style_flags =
-            (request.font_style_flags & ~known_font_style_flags) |
-            synthetic_font_style_flags(*request.font, request.font_style_flags);
-        Key key{
-            std::string(request.font_id),
-            request.glyph,
-            realized_style_flags,
-            std::bit_cast<std::uint64_t>(request.pixel_size),
-            std::bit_cast<std::uint64_t>(mode == GlyphRasterMode::coverage ? display_scale_ : 1.0),
-            mode,
-            phase,
-            generation_,
-        };
+        Resolved resolved =
+            resolve(request.font_id, *request.font, request.glyph, request.pixel_size,
+                    request.phase, request.mode, request.font_style_flags, request.reach);
+        Key& key = resolved.key;
         if (cache_.contains(key) || unique.contains(key))
             continue;
         RasterCacheIdentity identity = raster_cache_identity(
-            *request.font, request.glyph, request.pixel_size, display_scale_, phase, mode,
-            realized_style_flags, config_.coverage, config_.msdf);
+            *request.font, request.glyph, request.pixel_size, display_scale_, key.phase, key.mode,
+            key.font_style_flags, config_.coverage, resolved.msdf);
         SharedRaster raster = shared_raster_cache().find(identity.key);
         unique.emplace(key, pending.size());
         pending.push_back(Pending{
@@ -601,6 +609,7 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
             request.font,
             std::move(identity),
             std::move(raster),
+            resolved.msdf,
         });
     }
 
@@ -645,11 +654,11 @@ bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
             for (std::size_t position = first; position < last; ++position) {
                 Pending& item = pending[missing[position]];
                 try {
-                    item.raster = std::make_shared<const std::optional<GlyphRasterBitmap>>(
-                        rasterize(*item.font, item.key.glyph,
-                                  std::bit_cast<double>(item.key.pixel_size), display_scale_,
-                                  item.key.phase, item.key.mode, item.key.font_style_flags,
-                                  config_.coverage, config_.msdf));
+                    item.raster =
+                        std::make_shared<const std::optional<GlyphRasterBitmap>>(rasterize(
+                            *item.font, item.key.glyph, std::bit_cast<double>(item.key.pixel_size),
+                            display_scale_, item.key.phase, item.key.mode,
+                            item.key.font_style_flags, config_.coverage, item.msdf));
                 } catch (...) {
                     {
                         const std::scoped_lock lock(failure_mutex);

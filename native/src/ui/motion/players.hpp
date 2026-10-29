@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "ui/motion/model.hpp"
 
@@ -97,12 +98,29 @@ public:
 private:
     [[nodiscard]] TargetSample sample_at(std::int64_t now_nanos) const;
     void snap(const MotionValue& target, bool reduced_motion);
+    /** A spring timing's step: true when it handled this value (see spring_). */
+    [[nodiscard]] bool advance_spring(const MotionValue& next_target, std::int64_t now_nanos);
 
     std::optional<MotionValue> start_;
     std::optional<MotionValue> target_;
     std::optional<std::int64_t> started_at_nanos_;
     MotionTiming timing_;
     TargetSample sample_;
+    /**
+     * A spring timing moves a real spring rather than a curve: its position and velocity carry
+     * through a change of target, so a target that keeps moving (the pointer) is followed
+     * smoothly instead of each change starting again from rest.
+     */
+    struct Spring final {
+        std::vector<double> position;
+        std::vector<double> velocity;
+        std::vector<double> target;
+        /** How far from the target counts as there, from the distance at the last change. */
+        double rest = 0.0;
+        double travel = 0.0;
+        std::int64_t last_nanos = 0;
+    };
+    std::optional<Spring> spring_;
 };
 
 [[nodiscard]] std::string motion_value_text(const MotionValue& value);

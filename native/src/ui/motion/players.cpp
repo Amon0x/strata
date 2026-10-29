@@ -289,6 +289,146 @@ MotionTimelineSample MotionTimelinePlayer::advance(
 
 const MotionTimelineSample& MotionTimelinePlayer::sample() const noexcept { return sample_; }
 
+namespace {
+
+/** A value's numbers, as a spring moves them; nothing for a value a spring cannot move. */
+[[nodiscard]] std::optional<std::vector<double>> spring_components(const MotionValue& value) {
+    if (const double* number = std::get_if<double>(&value))
+        return std::vector<double>{*number};
+    if (const auto* color = std::get_if<runtime::ColorValue>(&value)) {
+        return std::vector<double>{
+            static_cast<double>(color->red), static_cast<double>(color->green),
+            static_cast<double>(color->blue), static_cast<double>(color->alpha)};
+    }
+    if (const auto* layout = std::get_if<MotionLayoutValue>(&value))
+        return std::vector<double>{layout->value};
+    if (const auto* numbers = std::get_if<MotionNumbers>(&value);
+        numbers != nullptr && numbers->values != nullptr)
+        return *numbers->values;
+    return std::nullopt;
+}
+
+/** The value of `target`'s kind at `components`. */
+[[nodiscard]] MotionValue spring_value(const MotionValue& target,
+                                       const std::vector<double>& components) {
+    if (std::holds_alternative<double>(target))
+        return components[0];
+    if (std::holds_alternative<runtime::ColorValue>(target)) {
+        const auto channel = [&components](const std::size_t index) {
+            return static_cast<std::uint8_t>(std::clamp(std::round(components[index]), 0.0, 255.0));
+        };
+        return runtime::ColorValue{channel(0U), channel(1U), channel(2U), channel(3U)};
+    }
+    if (const auto* layout = std::get_if<MotionLayoutValue>(&target))
+        return MotionLayoutValue{layout->unit, components[0]};
+    return MotionNumbers{std::make_shared<const std::vector<double>>(components)};
+}
+
+/**
+ * Moves one coordinate of a unit-mass spring (stiffness k, damping c) `seconds` on, exactly:
+ * `offset` from its target and `velocity` become what they are then.
+ */
+void spring_step(const double k, const double c, const double seconds, double& offset,
+                 double& velocity) noexcept {
+    const double omega = std::sqrt(k);
+    const double zeta = c / (2.0 * omega);
+    const double x0 = offset;
+    const double v0 = velocity;
+    if (zeta < 1.0) {
+        const double damped = omega * std::sqrt(1.0 - zeta * zeta);
+        const double decay = std::exp(-zeta * omega * seconds);
+        const double cosine = std::cos(damped * seconds);
+        const double sine = std::sin(damped * seconds);
+        offset = decay * (x0 * cosine + (v0 + zeta * omega * x0) / damped * sine);
+        velocity = decay * (v0 * cosine - (zeta * omega * v0 + omega * omega * x0) / damped * sine);
+    } else if (zeta == 1.0) {
+        const double decay = std::exp(-omega * seconds);
+        const double rate = v0 + omega * x0;
+        offset = (x0 + rate * seconds) * decay;
+        velocity = (v0 - omega * rate * seconds) * decay;
+    } else {
+        const double root = omega * std::sqrt(zeta * zeta - 1.0);
+        const double fast = -zeta * omega - root;
+        const double slow = -zeta * omega + root;
+        const double a = (v0 - slow * x0) / (fast - slow);
+        const double b = x0 - a;
+        const double fast_decay = std::exp(fast * seconds);
+        const double slow_decay = std::exp(slow * seconds);
+        offset = a * fast_decay + b * slow_decay;
+        velocity = a * fast * fast_decay + b * slow * slow_decay;
+    }
+}
+
+} // namespace
+
+bool TargetPlayer::advance_spring(const MotionValue& next_target, const std::int64_t now_nanos) {
+    const std::optional<std::vector<double>> goal = spring_components(next_target);
+    // Layout values in different units do not blend: they take the curve, which snaps.
+    const auto* target_layout = std::get_if<MotionLayoutValue>(&next_target);
+    const auto* shown_layout = std::get_if<MotionLayoutValue>(&sample_.value);
+    if (!goal.has_value() || (target_layout != nullptr && shown_layout != nullptr &&
+                              target_layout->unit != shown_layout->unit)) {
+        spring_.reset();
+        return false;
+    }
+    const bool retarget = !spring_.has_value() || spring_->target != *goal ||
+                          !target_.has_value() || *target_ != next_target;
+    if (!spring_.has_value() || spring_->position.size() != goal->size()) {
+        // Starting from where the value shows now, at rest.
+        const std::optional<std::vector<double>> from = spring_components(sample_.value);
+        if (!from.has_value() || from->size() != goal->size()) {
+            spring_.reset();
+            return false;
+        }
+        spring_ = Spring{*from, std::vector<double>(goal->size(), 0.0), *goal, 0.0, 0.0, now_nanos};
+    }
+    Spring& spring = *spring_;
+    if (retarget) {
+        spring.target = *goal;
+        double distance = 0.0;
+        for (std::size_t index = 0U; index < goal->size(); ++index)
+            distance = std::max(distance, std::abs(spring.position[index] - spring.target[index]));
+        spring.travel = std::max(distance, 1.0e-9);
+        spring.rest = std::max(distance, 1.0) * 1.0e-3;
+    }
+    target_ = next_target;
+    start_ = next_target;
+    started_at_nanos_.reset();
+    // Long gaps are stepped in pieces, so a stalled frame cannot wind the spring up.
+    double remaining =
+        static_cast<double>(std::max<std::int64_t>(0, now_nanos - spring.last_nanos)) / 1.0e9;
+    spring.last_nanos = now_nanos;
+    const double k = timing_.easing.x1;
+    // A colour settles without overshoot: past its target it would pass through other hues.
+    const double c = std::holds_alternative<runtime::ColorValue>(next_target)
+                         ? std::max(timing_.easing.y1, 2.0 * std::sqrt(k))
+                         : timing_.easing.y1;
+    while (remaining > 0.0) {
+        const double step = std::min(remaining, 0.05);
+        remaining -= step;
+        for (std::size_t index = 0U; index < goal->size(); ++index) {
+            double offset = spring.position[index] - spring.target[index];
+            spring_step(k, c, step, offset, spring.velocity[index]);
+            spring.position[index] = spring.target[index] + offset;
+        }
+    }
+    double distance = 0.0;
+    double speed = 0.0;
+    for (std::size_t index = 0U; index < goal->size(); ++index) {
+        distance = std::max(distance, std::abs(spring.position[index] - spring.target[index]));
+        speed = std::max(speed, std::abs(spring.velocity[index]));
+    }
+    // At rest within a thousandth of its travel and barely moving: there, exactly.
+    if (distance <= spring.rest && speed <= spring.rest * 10.0) {
+        spring_.reset();
+        sample_ = TargetSample{next_target, next_target, 1.0, false, false};
+        return true;
+    }
+    sample_ = TargetSample{spring_value(next_target, spring.position), next_target,
+                           std::clamp(1.0 - distance / spring.travel, 0.0, 1.0), true, false};
+    return true;
+}
+
 TargetSample TargetPlayer::advance(
     const MotionValue& next_target,
     const MotionTiming& timing,
@@ -305,8 +445,21 @@ TargetSample TargetPlayer::advance(
     }
     if (reduced_motion) {
         timing_ = timing;
+        spring_.reset();
         snap(next_target, true);
         return sample_;
+    }
+    if (timing.easing.kind == MotionEasingKind::spring && timing.delay_nanos == 0) {
+        // A spring already at its target stays at rest until the target moves.
+        if (!spring_.has_value() && *target_ == next_target && timing_ == timing &&
+            !sample_.running) {
+            return sample_;
+        }
+        timing_ = timing;
+        if (advance_spring(next_target, now_nanos))
+            return sample_;
+    } else {
+        spring_.reset();
     }
     if (*target_ != next_target || timing_ != timing) {
         const TargetSample presented = sample_at(now_nanos);
@@ -350,6 +503,7 @@ TargetSample TargetPlayer::sample_at(const std::int64_t now_nanos) const {
 }
 
 void TargetPlayer::snap(const MotionValue& target, const bool reduced_motion) {
+    spring_.reset();
     start_ = target;
     target_ = target;
     started_at_nanos_.reset();

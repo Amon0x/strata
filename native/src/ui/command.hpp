@@ -64,6 +64,10 @@ public:
         std::string persistence_scope = {}
     );
     void rebuild(const RetainedTree& tree);
+    /** Moves whenever a rebuild changes the entries, so what was projected from them is redone. */
+    [[nodiscard]] std::uint64_t generation() const noexcept {
+        return generation_;
+    }
     [[nodiscard]] const CommandSnapshot* find(std::string_view id) const noexcept;
     /** Resolves the lifecycle-declared scalar command binding for an actionable control. */
     [[nodiscard]] std::optional<CommandActivationBinding> activation_binding(
@@ -92,6 +96,7 @@ private:
     runtime::DurableState* durability_ = nullptr;
     std::string persistence_scope_;
     const RetainedTree* observed_tree_ = nullptr;
+    std::uint64_t generation_ = 0U;
     std::uint64_t observed_tree_generation_ = 0U;
     std::uint64_t observed_structure_generation_ = 0U;
     std::uint64_t observed_undo_generation_ = 0U;

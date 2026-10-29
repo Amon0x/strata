@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -30,11 +31,21 @@ struct SvgImageResource final {
  * How an animated image (GIF, APNG, animated WebP) plays: when each frame ends, from the start of
  * a play, and how many plays (0 forever). Frame k is the texture `<id>#k`; frame 0 is `<id>`.
  */
+class ImageStream;
+
 struct ImageAnimation final {
     std::vector<std::int64_t> frame_ends_nanos;
     std::uint32_t loop_count = 0U;
+    /**
+     * An animation too long to hold decoded plays from its bytes instead: one texture, `<id>`,
+     * shows each frame in turn, and the stream keeps its own timing and plays.
+     */
+    std::shared_ptr<ImageStream> stream{};
 
+    /** How long the playback clock runs before it starts over; a stream times itself. */
     [[nodiscard]] std::int64_t duration_nanos() const noexcept {
+        if (stream != nullptr)
+            return std::int64_t{3600} * 1'000'000'000;
         return frame_ends_nanos.empty() ? 0 : frame_ends_nanos.back();
     }
     /** The texture showing `elapsed` into the playback (all plays), for an image `id`. */

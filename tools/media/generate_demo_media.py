@@ -46,6 +46,28 @@ def orbit_gif():
     images[0].save(OUT / "orbit.gif", save_all=True, append_images=images[1:], duration=40, loop=0)
 
 
+def tunnel_gif():
+    """Four hundred frames of a tunnel rushing past: decoded, they take more than an animation is
+    held as (92 MB), so it plays from its bytes."""
+    width, height, frames = 320, 180, 400
+    y, x = np.mgrid[0:height, 0:width]
+    dx, dy = x - width / 2, y - height / 2
+    radius = np.hypot(dx, dy) + 1e-3
+    angle = np.arctan2(dy, dx)
+    colors = [hsv(i / 16, 0.7, 0.35 + 0.65 * (i % 2)) for i in range(16)]
+    palette = [c for color in colors for c in color] + [0] * (768 - 48)
+    images = []
+    for frame in range(frames):
+        t = frame / frames
+        ring = np.floor(1200.0 / radius + t * 40.0).astype(np.int64)
+        sector = np.floor((angle / np.pi + 1.0 + t * 4.0) * 3.0).astype(np.int64)
+        index = ((ring + sector) % 16).astype(np.uint8)
+        image = Image.fromarray(index, "P")
+        image.putpalette(palette)
+        images.append(image)
+    images[0].save(OUT / "tunnel.gif", save_all=True, append_images=images[1:], duration=30, loop=0)
+
+
 def rings_apng():
     """Translucent rings breathing outward: an APNG with real alpha."""
     size, frames = 220, 40
@@ -126,6 +148,7 @@ def clip_mp4():
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     orbit_gif()
+    tunnel_gif()
     rings_apng()
     wave_webp()
     landscape_jpeg()

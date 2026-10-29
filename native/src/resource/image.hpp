@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -36,6 +38,8 @@ struct TextureResourceDescriptor final {
     ) = default;
 };
 
+class ImageStream;
+
 /** Immutable, surface-owned encoded image transferred to a host render adapter. */
 struct EncodedTextureResource final {
     /** Author-facing id referenced by render commands. */
@@ -46,6 +50,8 @@ struct EncodedTextureResource final {
     ImageEncoding encoding = ImageEncoding::png;
     ImageDimensions dimensions;
     std::vector<std::uint8_t> bytes;
+    /** An animation played from its bytes as it goes: the texture shows its frame now. */
+    std::shared_ptr<ImageStream> stream{};
 
     [[nodiscard]] TextureResourceDescriptor descriptor() const {
         if (logical_id.empty() || host_id.empty()) {
@@ -157,6 +163,22 @@ inline constexpr std::uint32_t all_image_frames = 0xFFFFFFFFU;
  */
 [[nodiscard]] DecodedImage decode_image(std::span<const std::uint8_t> bytes,
                                         std::uint32_t frame_limit = all_image_frames);
+
+/**
+ * Receives an image's composited frames one at a time, in order: its pixels (which it may take)
+ * and how long it shows. Returning false stops the decode.
+ */
+using ImageFrameConsumer =
+    std::function<bool(std::vector<std::uint8_t>& rgba, std::uint32_t delay_ms)>;
+
+/**
+ * Decodes like decode_image, but hands each frame to `consumer` as it is made instead of keeping
+ * it, so an animation of any length decodes in the memory of a few frames: no frame or pixel
+ * budget applies. Returns how many times the animation plays (0 forever). Throws
+ * std::invalid_argument for a malformed or unsupported stream.
+ */
+[[nodiscard]] std::uint32_t stream_image(std::span<const std::uint8_t> bytes,
+                                         const ImageFrameConsumer& consumer);
 
 /**
  * Decodes the first frame of an encoded image as decode_png_rgba8 decodes a PNG: RGBA8 rows of

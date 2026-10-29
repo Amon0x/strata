@@ -13,7 +13,7 @@
 namespace strata::ui {
 
 /** Packet format the encoder writes. The C ABI pins it to STRATA_RENDER_PACKET_VERSION_CURRENT. */
-inline constexpr std::uint32_t render_packet_version = 18U;
+inline constexpr std::uint32_t render_packet_version = 19U;
 
 /** A draw batch's clip-adapted blend; the C ABI pins these to STRATA_RENDER_BLEND_*. */
 enum class PacketBlend : std::uint8_t {

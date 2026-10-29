@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "resource/image_stream.hpp"
 #include "ui/render/submission.hpp"
 
 namespace strata::ui {
@@ -16,6 +17,14 @@ SurfaceTextures::SurfaceTextures(std::string host_namespace,
 }
 
 bool SurfaceTextures::sync(const resource::RuntimeImageStore& images) {
+    // A streamed animation that moved to its next frame uploads it.
+    for (std::size_t index = 0U; index < static_.size() && index < sources_.size(); ++index) {
+        const std::shared_ptr<resource::ImageStream>& stream = static_[index].stream;
+        if (stream != nullptr && sources_[index].revision != stream->revision()) {
+            sources_[index] = Source{stream->pixels(), stream->revision(), false};
+            changed_ = true;
+        }
+    }
     if (synced_ && images.generation() == store_generation_)
         return changed_;
     synced_ = true;
@@ -43,6 +52,10 @@ void SurfaceTextures::rebuild() {
     sources_.reserve(static_.size() + runtime_.size());
     for (const resource::EncodedTextureResource& texture : static_) {
         descriptors_.push_back(texture.descriptor());
+        if (texture.stream != nullptr) {
+            sources_.push_back(Source{texture.stream->pixels(), texture.stream->revision(), false});
+            continue;
+        }
         sources_.push_back(
             Source{texture.bytes, 0U, texture.encoding != resource::ImageEncoding::rgba8});
     }

@@ -193,8 +193,10 @@ void image_content(WidgetRenderScope& scope) {
     if (const resource::ImageAnimation* animation = scope.image_animation(*named);
         animation != nullptr) {
         const double progress = scope.motion_progress(image_playback_timeline, 0.0);
-        const double span = static_cast<double>(animation->duration_nanos()) *
-                            (animation->loop_count == 0U ? 1.0 : animation->loop_count);
+        const double span =
+            static_cast<double>(animation->duration_nanos()) *
+            (animation->loop_count == 0U || animation->stream != nullptr ? 1.0
+                                                                         : animation->loop_count);
         frame = animation->frame_texture(*named, static_cast<std::int64_t>(progress * span));
         image = &frame;
     }

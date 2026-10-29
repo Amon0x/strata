@@ -297,6 +297,18 @@ void add_builtin_actions(BuiltinCatalog& catalog) {
                        .payload_contract = "strata.action-payload/media.seek@1",
                        .summary = "Move a video to a time"},
         DeclaredAction{
+            .id = "media.set",
+            .parameters =
+                {DeclaredParameter{.name = "image",
+                                   .type = declared_type_reference("string"),
+                                   .required = true},
+                 DeclaredParameter{.name = "muted", .type = declared_type_reference("boolean")},
+                 DeclaredParameter{.name = "volume", .type = declared_type_reference("number")},
+                 DeclaredParameter{.name = "loop", .type = declared_type_reference("boolean")}},
+            .dispatch_policy = "framework",
+            .payload_contract = "strata.action-payload/media.set@1",
+            .summary = "Mute, set the volume of, or loop a video while it plays"},
+        DeclaredAction{
             .id = "media.status",
             .parameters = {DeclaredParameter{
                 .name = "image", .type = declared_type_reference("string"), .required = true}},

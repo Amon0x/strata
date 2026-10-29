@@ -195,13 +195,13 @@ ImageDimensions inspect_gif(const std::span<const std::uint8_t> bytes) {
     return screen(input).dimensions;
 }
 
-DecodedImage decode_gif(const std::span<const std::uint8_t> bytes,
-                        const std::uint32_t frame_limit) {
+DecodedImage decode_gif(const std::span<const std::uint8_t> bytes, const std::uint32_t frame_limit,
+                        const ImageFrameConsumer* const consumer) {
     Cursor input(bytes);
     const Screen header = screen(input);
     const std::uint32_t canvas_width = header.dimensions.width;
     const std::uint32_t canvas_height = header.dimensions.height;
-    FrameSink sink(header.dimensions, frame_limit, "GIF");
+    FrameSink sink(header.dimensions, frame_limit, "GIF", consumer);
     std::vector<std::uint8_t> canvas(static_cast<std::size_t>(canvas_width) * canvas_height * 4U);
     std::vector<std::uint8_t> saved;
     std::vector<std::uint8_t> data;

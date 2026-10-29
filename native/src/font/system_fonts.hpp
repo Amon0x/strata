@@ -31,6 +31,10 @@ void set_system_font_directories(std::vector<std::filesystem::path> directories)
  */
 [[nodiscard]] std::optional<SystemFont> system_font_for(std::uint32_t code_point);
 
+/** Starts listing the system's fonts in the background; the first fallback then finds them listed.
+ */
+void prepare_system_fonts();
+
 /** The system font with this file name (`bahnschrift.ttf`, any case); nothing when none is. */
 [[nodiscard]] std::optional<SystemFont> system_font_named(std::string_view file);
 

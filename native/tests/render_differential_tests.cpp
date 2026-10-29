@@ -264,8 +264,8 @@ enum class Geometry { complete, patch, retained };
     packet.integer(1U);
     packet.integer(1U);
     // The group moves diagonally, so its quad crosses into the glass.
-    for (const double value :
-         {1.0, 1.0, scene.group_translate, scene.group_translate, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0})
+    for (const double value : {1.0, 1.0, scene.group_translate, scene.group_translate, 1.0, 0.0,
+                               0.0, 0.0, 0.0, 0.0, 1.0})
         packet.number(value);
     if (upload_image) {
         Writer image;

@@ -587,6 +587,7 @@ TextEngine::TextEngine(font::OpenTypeFont control_font, font::OpenTypeFont regul
       }) {}
 
 TextEngine::TextEngine(FontRegistry fonts) : fonts_(std::move(fonts)) {
+    font::prepare_system_fonts();
     if (!fonts_.contains("strata:fonts/default-medium") ||
         !fonts_.contains("strata:fonts/default")) {
         throw std::invalid_argument(

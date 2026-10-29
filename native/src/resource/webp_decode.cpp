@@ -921,8 +921,9 @@ struct Placement final {
     }
 };
 
-[[nodiscard]] DecodedImage decode_animation(const Layout& file, const std::uint32_t frame_limit) {
-    FrameSink sink(file.canvas, frame_limit, "WebP");
+[[nodiscard]] DecodedImage decode_animation(const Layout& file, const std::uint32_t frame_limit,
+                                            const ImageFrameConsumer* const consumer) {
+    FrameSink sink(file.canvas, frame_limit, "WebP", consumer);
     const std::size_t canvas_bytes =
         static_cast<std::size_t>(file.canvas.width) * file.canvas.height * 4U;
     // The canvas after the previous frame and its disposal: what the next frame draws over.
@@ -1022,12 +1023,12 @@ ImageDimensions inspect_webp(const std::span<const std::uint8_t> bytes) {
     return file.canvas;
 }
 
-DecodedImage decode_webp(const std::span<const std::uint8_t> bytes,
-                         const std::uint32_t frame_limit) {
+DecodedImage decode_webp(const std::span<const std::uint8_t> bytes, const std::uint32_t frame_limit,
+                         const ImageFrameConsumer* const consumer) {
     const Layout file = layout(bytes);
     if (file.animated)
-        return decode_animation(file, frame_limit);
-    FrameSink sink(file.canvas, frame_limit, "WebP");
+        return decode_animation(file, frame_limit, consumer);
+    FrameSink sink(file.canvas, frame_limit, "WebP", consumer);
     bool has_alpha = false;
     sink.push(decode_frame(file.still, file.canvas, has_alpha), 0U);
     return sink.finish(1U);

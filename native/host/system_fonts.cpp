@@ -118,8 +118,14 @@ std::optional<std::vector<std::uint8_t>> read_system_font(const std::string_view
     std::vector<std::uint8_t> bytes;
     if (path.empty())
         return bytes;
-    std::ifstream input(path, std::ios::binary);
-    bytes.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    const std::streamsize size = input ? static_cast<std::streamsize>(input.tellg()) : 0;
+    if (size <= 0)
+        return bytes;
+    bytes.resize(static_cast<std::size_t>(size));
+    input.seekg(0);
+    if (!input.read(reinterpret_cast<char*>(bytes.data()), size))
+        bytes.clear();
     return bytes;
 }
 
