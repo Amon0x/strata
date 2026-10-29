@@ -645,16 +645,19 @@ at any size and scale.
 Lottie(source: "assets/app/success.json", loop: false, onComplete: action("state.set", name: "done", value: true))
 Lottie(source: "assets/app/spinner.json", speed: 1.5, fit: "COVER", layout: { width: 48, height: 48 })
 Lottie(source: "assets/app/toggle.json", segment: on ? [0, 30] : [30, 60], loop: false)
-Lottie(source: "assets/app/reveal.json", playing: playing, progress: playing ? null : scrub)
+Lottie(source: "assets/app/reveal.json", playing: playing, progress: scrub,
+       onPause: action("state.setFromEvent", name: "scrub", field: "progress"))
 ```
 
 - `loop` (default `true`) plays the segment over and over; otherwise playback stops on its last
   frame and `onComplete` runs, its event carrying that frame.
 - `autoplay` (default `true`) starts playback; `playing` (when given) plays or pauses it instead,
-  and pausing keeps the playhead where it is. Playing again after the end starts over.
+  and pausing keeps the playhead where it is and runs `onPause` with `{ frame, progress }` where it
+  stopped. Playing again after the end starts over.
 - `speed` (default `1`) scales the composition's frame rate; a negative speed plays backwards.
-- `progress` (0-1, nullable) shows that point of the segment and holds the playhead there, so a
-  `Slider` bound to it scrubs; playback continues from it when `progress` is `null` again.
+- `progress` (0-1) seeks: each new value moves the playhead there, as scrubbing a video does, and
+  playback (if playing) goes on from it. A `Slider` bound to it scrubs; `onPause` setting it to
+  where play stopped keeps the slider with the animation.
 - `segment: [first, last]` plays only those composition frames (`last` exclusive, as a layer's out
   point is); `first > last` plays them backwards. Changing the segment or `source` starts over.
 - `fit` (`CONTAIN` by default, `COVER`, `FILL`, `NONE`, `SCALE_DOWN`) and `alignX`/`alignY` place

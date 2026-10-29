@@ -83,9 +83,10 @@ void lottie_defaults(WidgetLayoutDefaultsScope& scope) {
 
 /**
  * Moves the playhead by the time since the last frame, at `speed` times the composition's frame
- * rate, looping or stopping at the segment's end (`onComplete`). A bound `progress` places it
- * instead; `playing` (or `autoplay` when `playing` is not given) pauses it where it is. Playing
- * again after the end starts over.
+ * rate, looping or stopping at the segment's end (`onComplete`). A `progress` that changes seeks
+ * there, as scrubbing a video does, and play goes on from it; `playing` (or `autoplay` when
+ * `playing` is not given) pauses it where it is and says where (`onPause`). Playing again after
+ * the end starts over.
  */
 void lottie_advance(WidgetInputScope& scope, const WidgetFrameInfo& frame) {
     const runtime::Value* source = scope.property("source");
@@ -112,15 +113,28 @@ void lottie_advance(WidgetInputScope& scope, const WidgetFrameInfo& frame) {
     };
     if (const std::optional<double> progress = finite(scope.property("progress"));
         progress.has_value()) {
-        state.position = std::clamp(*progress, 0.0, 1.0);
-        state.flags &= ~(LottiePlayhead::complete | LottiePlayhead::playing);
-        store();
-        return;
+        const double target = std::clamp(*progress, 0.0, 1.0);
+        if ((state.flags & LottiePlayhead::has_sought) == 0U || state.sought != target) {
+            state.position = target;
+            state.sought = target;
+            state.flags |= LottiePlayhead::has_sought;
+            state.flags &= ~LottiePlayhead::complete;
+        }
     }
     const bool playing = flag(scope.property("playing"), flag(scope.property("autoplay"), true));
     if (!playing) {
+        const bool pausing = (state.flags & LottiePlayhead::playing) != 0U;
         state.flags &= ~LottiePlayhead::playing;
         store();
+        if (pausing) {
+            using Fields = std::vector<std::pair<std::string, runtime::Value>>;
+            scope.value_changed(
+                "onPause", "pause",
+                runtime::Value(Fields{
+                    {"frame", runtime::Value(lottie_frame(segment, state.position))},
+                    {"progress", runtime::Value(state.position)},
+                }));
+        }
         return;
     }
     if ((state.flags & LottiePlayhead::complete) != 0U &&
@@ -162,7 +176,7 @@ void lottie_advance(WidgetInputScope& scope, const WidgetFrameInfo& frame) {
     return *name == "START" ? 0.0 : *name == "END" ? 1.0 : 0.5;
 }
 
-/** Draws the frame the playhead (or a bound `progress`) names, fitted to the content box. */
+/** Draws the frame the playhead names (before it moves, `progress`), fitted to the content box. */
 void lottie_content(WidgetRenderScope& scope) {
     const runtime::Value* source = scope.property("source");
     const std::shared_ptr<const resource::lottie::Animation> parsed =
@@ -173,13 +187,13 @@ void lottie_content(WidgetRenderScope& scope) {
     const LottieSegment segment = lottie_segment(*parsed, scope.property("segment"));
     const double speed = finite(scope.property("speed")).value_or(1.0);
     double position = start_position(speed);
-    if (const std::optional<double> progress = finite(scope.property("progress"));
-        progress.has_value()) {
-        position = std::clamp(*progress, 0.0, 1.0);
-    } else if (const std::optional<LottiePlayhead> state =
-                   read_playhead(scope.node().retained_bytes(playhead_name));
-               state.has_value() && current(*state, source_key(source), segment)) {
+    if (const std::optional<LottiePlayhead> state =
+            read_playhead(scope.node().retained_bytes(playhead_name));
+        state.has_value() && current(*state, source_key(source), segment)) {
         position = state->position;
+    } else if (const std::optional<double> progress = finite(scope.property("progress"));
+               progress.has_value()) {
+        position = std::clamp(*progress, 0.0, 1.0);
     }
     const double frame = lottie_frame(segment, position);
 

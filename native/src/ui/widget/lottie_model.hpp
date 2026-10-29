@@ -20,10 +20,14 @@ struct LottiePlayhead final {
     std::uint64_t source = 0U;
     std::uint32_t flags = 0U;
     std::uint32_t reserved = 0U;
+    /** The `progress` last sought: a new value seeks, an unchanged one leaves the playhead be. */
+    double sought = 0.0;
 
     static constexpr std::uint32_t started = 1U;
     static constexpr std::uint32_t complete = 2U;
     static constexpr std::uint32_t playing = 4U;
+    /** `sought` holds a `progress` that was applied. */
+    static constexpr std::uint32_t has_sought = 8U;
 };
 
 /** The frames a Lottie widget plays: its `segment`, else the whole composition. */

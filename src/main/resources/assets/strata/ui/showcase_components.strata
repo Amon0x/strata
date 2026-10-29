@@ -1743,7 +1743,8 @@ component LottiePage() {
             key: "lottie.player",
             source: "assets/strata/lottie/reveal.json",
             playing: playing,
-            progress: playing ? null : scrub,
+            progress: scrub,
+            onPause: action("state.setFromEvent", name: "scrub", field: "progress"),
             speed: speed == "0.25" ? 0.25 : (speed == "0.5" ? 0.5 : (speed == "2" ? 2 : (speed == "-1" ? -1 : 1))),
             layout: { width: 260, height: 260 }
           )
@@ -1753,7 +1754,7 @@ component LottiePage() {
             Button(key: "lottie.play", label: playing ? "Pause" : "Play", onClick: action("state.toggle", name: "playing"))
             Text(text: playing ? "Playing" : format("Paused at {0}%", round(scrub * 100)), style: CardNote)
           }
-          Slider(key: "lottie.scrub", min: 0, max: 1, step: 0.005, bind: scrub, enabled: !playing, layout: { width: 340 })
+          Slider(key: "lottie.scrub", min: 0, max: 1, step: 0.005, bind: scrub, layout: { width: 340 })
           Select(
             key: "lottie.speed",
             options: [
@@ -3167,7 +3168,7 @@ component ExpectedText(selectedPage: string) {
   } else if selectedPage == "NET" {
     Text(text: "Run python tools/net/demo_server.py first. Fetch GETs a JSON list over HTTP (WinHTTP, on a worker: the frame never waits) and shows it; POST echo sends JSON and shows what came back. Connect opens a WebSocket: Send and Send JSON reach the server, which echoes to everyone connected and says the time every ten seconds; /bye makes it close. Write, Append, Read and List work in a temp folder; Watch reports every change there as it happens, and Trash note moves the note to the recycle bin. Click plays a short sound each press, overlapping when fast; Chime, and a music loop you can pause, speed up and mute.", wrapMode: "WORD")
   } else if selectedPage == "LOTTIE" {
-    Text(text: "Six After Effects animations, written as Lottie JSON, play on their own: trim paths on a gradient stroke, a bouncy overshoot, a repeater burst, a morphing path, masks (add, subtract, expansion), alpha and luma track mattes inside a time-remapped precomposition, round corners, dashes and merged paths. Each frame is drawn as vector paths, crisp at any size. Pause shows the frame the slider names: drag it to scrub, and Play carries on from there. Speed plays it slower, faster or backwards. Switch plays the toggle's on or off segment once and counts each completion.", wrapMode: "WORD")
+    Text(text: "Six After Effects animations, written as Lottie JSON, play on their own: trim paths on a gradient stroke, a bouncy overshoot, a repeater burst, a morphing path, masks (add, subtract, expansion), alpha and luma track mattes inside a time-remapped precomposition, round corners, dashes and merged paths. Each frame is drawn as vector paths, crisp at any size. Pause stops where it is and the slider follows; drag the slider to scrub, playing or paused, and Play carries on from there. Speed plays it slower, faster or backwards. Switch plays the toggle's on or off segment once and counts each completion.", wrapMode: "WORD")
   } else if selectedPage == "SYSTEM" {
     Text(text: "Drag files from Explorer onto the drop box: it lights up as they arrive and lists them when dropped. Open files, pick a folder or save: the dialogs are Windows' own, and their answers land in state. Send a notification from the tray icon; open a folder or link in its default app. Mica, Acrylic and Tabbed turn the header into the title bar (drag to move, double-click to maximize, buttons at its right) over the system backdrop. Paste an image from the clipboard and copy it back.", wrapMode: "WORD")
   } else if selectedPage == "DESKTOP" {

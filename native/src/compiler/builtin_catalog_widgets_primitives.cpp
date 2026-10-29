@@ -314,6 +314,8 @@ void add_builtin_primitive_widgets(BuiltinCatalog& catalog) {
                      DeclaredParameter{.name = "alignY",
                                        .type = declared_type_reference("anchorAlignment")},
                      DeclaredParameter{.name = "onComplete",
+                                       .type = declared_type_reference("action")},
+                     DeclaredParameter{.name = "onPause",
                                        .type = declared_type_reference("action")}},
                 .parameter_order = {"source",
                                     "key",
@@ -350,13 +352,21 @@ void add_builtin_primitive_widgets(BuiltinCatalog& catalog) {
                                     "textVisualStyle",
                                     "animation",
                                     "onComplete",
+                                    "onPause",
                                     "behaviors"},
                 .bindings = {},
                 .events = {DeclaredWidgetEvent{
-                    .name = "completion",
-                    .callback_parameter = "onComplete",
-                    .description = "Emitted when a play that does not loop reaches the end of its "
-                                   "segment; carries the frame it stopped on."}},
+                               .name = "completion",
+                               .callback_parameter = "onComplete",
+                               .description =
+                                   "Emitted when a play that does not loop reaches the end of its "
+                                   "segment; carries the frame it stopped on."},
+                           DeclaredWidgetEvent{
+                               .name = "pause",
+                               .callback_parameter = "onPause",
+                               .description =
+                                   "Emitted when playing stops; carries { frame, progress } "
+                                   "where the playhead stopped."}},
                 .retained_state = {DeclaredRetainedState{
                     .name = "playhead",
                     .description = "Playback position within the segment, and whether it is "
