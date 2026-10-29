@@ -223,6 +223,21 @@ struct PreparationCache final {
      * planning from a const cache may fill it.
      */
     mutable std::unordered_map<std::uint64_t, std::uint64_t> shape_tile_classes;
+    /**
+     * Path draws that changed in consecutive incremental updates: animated shapes. Each part
+     * (fill, stroke) keeps an atlas slot it is rasterized into again each frame, so its draw
+     * keeps its texture, batch and geometry slot, and nothing is hashed or cached for a picture
+     * that will not be drawn again. Keyed by command index; a memo, so planning from a const
+     * cache may fill it.
+     */
+    struct VolatileShape final {
+        std::uint64_t changed = 0U;
+        std::uint64_t previously_changed = 0U;
+        std::array<std::optional<font::RasterSlot>, 2U> slots;
+    };
+    mutable std::unordered_map<std::uint32_t, VolatileShape> volatile_shapes;
+    /** Counts incremental updates, which mark the draws they replan. */
+    std::uint64_t update_serial = 0U;
     /** Groups whose masks rasterize denser than the display, ordered by group. */
     std::vector<GroupRasterScale> group_raster_scales;
     std::uint64_t planned_shape_generation = 0U;
@@ -244,6 +259,7 @@ struct PreparationCache final {
         planned_atlas_generation = 0U;
         planned_shape_generation = 0U;
         shape_tile_classes.clear();
+        volatile_shapes.clear();
         plan_current = false;
     }
 };

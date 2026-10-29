@@ -83,6 +83,13 @@ void retain_drawn_pages(PreparationCache& cache, const std::span<const CommandRa
             }
         }
     };
+    // Animated shapes' slots stay too: their draws are replanned into them this frame.
+    for (const auto& [index, shape] : cache.volatile_shapes) {
+        for (const std::optional<font::RasterSlot>& slot : shape.slots) {
+            if (slot.has_value() && std::ranges::find(drawn, slot->texture) == drawn.end())
+                drawn.push_back(slot->texture);
+        }
+    }
     std::size_t cursor = 0U;
     for (const CommandRange& range : skipped) {
         const CommandPlan& first = cache.command_plans[range.first];
@@ -142,6 +149,23 @@ void retain_drawn_pages(PreparationCache& cache, const std::span<const CommandRa
         covered = range.last + 1U;
     }
     if (ranges.empty()) return false;
+    // A path draw replanned in consecutive updates is animated: it rasterizes into a slot of its
+    // own (see PreparationCache::volatile_shapes). Ones that stopped long ago let theirs go.
+    const std::uint64_t serial = ++cache.update_serial;
+    for (const CommandRange& range : ranges) {
+        if (range.first != range.last ||
+            !std::holds_alternative<PathRenderCommand>(current[range.first])) {
+            continue;
+        }
+        PreparationCache::VolatileShape& shape =
+            cache.volatile_shapes[static_cast<std::uint32_t>(range.first)];
+        shape.previously_changed = shape.changed;
+        shape.changed = serial;
+    }
+    constexpr std::uint64_t volatile_lifetime = 120U;
+    std::erase_if(cache.volatile_shapes, [serial](const auto& entry) {
+        return entry.second.changed + volatile_lifetime < serial;
+    });
     // The changed draws' masks are about to be replaced: only the unchanged draws' pages stay.
     if (cache.shape_atlas != nullptr)
         retain_drawn_pages(cache, ranges);

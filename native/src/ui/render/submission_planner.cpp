@@ -1357,7 +1357,8 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
     std::size_t& skipped_draws,
     font::GlyphAtlas* const atlas,
     std::unordered_map<std::uint64_t, std::uint64_t>& tile_classes,
-    const std::span<const GroupRasterScale> group_scales
+    const std::span<const GroupRasterScale> group_scales,
+    PreparationCache::VolatileShape* const animated
 ) {
     if (!command.joined.empty()) {
         return append_joined_masks(output, command, source_order, transform, clip, rounded_clips,
@@ -1437,28 +1438,36 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
         parts.push_back(Part{true, &*shape.stroke});
     std::vector<Piece> pieces;
     std::optional<font::GlyphAtlasEntry> solid;
-    // The path is hashed once for every part drawn from it.
-    MaskHash path_hash;
-    for (const PathSegment& segment : shape.path.segments())
-        path_hash.add(segment);
-    for (const Part& part : parts) {
-        MaskHash hash = path_hash;
-        hash.add(part.stroke);
-        hash.add(shape.fill_rule);
-        if (part.stroke) {
-            hash.add(style.width);
-            hash.add(style.cap);
-            hash.add(style.join);
-            hash.add(style.miter_limit);
-            hash.add(style.dash_offset);
-            for (const double dash : style.dash)
-                hash.add(dash);
-        }
-        hash.add(bounds.width);
-        hash.add(bounds.height);
-        hash.add(device_x);
-        hash.add(device_y);
-        hash.add(phase);
+    // The path is hashed once, and only for parts drawn from the cache: an animated shape's
+    // parts draw from slots of their own.
+    std::optional<MaskHash> path_hash;
+    for (std::size_t part_index = 0U; part_index < parts.size(); ++part_index) {
+        const Part& part = parts[part_index];
+        const auto part_hash = [&] {
+            if (!path_hash.has_value()) {
+                path_hash.emplace();
+                for (const PathSegment& segment : shape.path.segments())
+                    path_hash->add(segment);
+            }
+            MaskHash hash = *path_hash;
+            hash.add(part.stroke);
+            hash.add(shape.fill_rule);
+            if (part.stroke) {
+                hash.add(style.width);
+                hash.add(style.cap);
+                hash.add(style.join);
+                hash.add(style.miter_limit);
+                hash.add(style.dash_offset);
+                for (const double dash : style.dash)
+                    hash.add(dash);
+            }
+            hash.add(bounds.width);
+            hash.add(bounds.height);
+            hash.add(device_x);
+            hash.add(device_y);
+            hash.add(phase);
+            return hash;
+        };
 
         // The part's outline on the device grid, made once.
         std::optional<DevicePolygons> device_outline;
@@ -1532,12 +1541,7 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
         const double bottom = std::max(y_a, y_b) + 1.0;
 
         if (right - left <= maximum_mask_extent && bottom - top <= maximum_mask_extent) {
-            char key[40];
-            std::snprintf(key, sizeof(key), "%016llx",
-                          static_cast<unsigned long long>(hash.value()));
-            const std::optional<font::GlyphAtlasEntry> entry = atlas->request_raster(
-                key, font::GlyphRasterMode::coverage,
-                [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
+            const auto request = [&](const std::uint32_t gutter) -> std::optional<font::RasterRequest> {
                     DeviceBox outline;
                     if (pen.has_value())
                         outline = stroke_box(stroke_runs_on_device(), pen_reach);
@@ -1559,7 +1563,36 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
                     return font::RasterRequest{
                         mask(width, height, host::RasterPoint{x0, y0}, gutter), width, height,
                         font::RasterPlaneBounds{x0, y0 + height, x0 + width, y0}};
-                });
+            };
+            std::optional<font::GlyphAtlasEntry> entry;
+            if (animated != nullptr) {
+                // Rasterized into the part's own slot: the same texture and place each frame.
+                std::optional<font::RasterRequest> next = request(atlas->gutter());
+                if (!next.has_value())
+                    return false;
+                std::optional<font::RasterSlot>& slot = animated->slots[part_index];
+                if (!slot.has_value() ||
+                    !atlas->raster_slot_fits(*slot, next->width, next->height)) {
+                    // Room to grow, so a shape that swells a little keeps its slot.
+                    const auto room = [](const std::uint32_t size) { return size + size / 4U + 8U; };
+                    slot = atlas->reserve_raster_slot(room(next->width), room(next->height),
+                                                      font::GlyphRasterMode::coverage);
+                    if (!slot.has_value()) {
+                        slot = atlas->reserve_raster_slot(next->width, next->height,
+                                                          font::GlyphRasterMode::coverage);
+                    }
+                    if (!slot.has_value() ||
+                        !atlas->raster_slot_fits(*slot, next->width, next->height)) {
+                        return false;
+                    }
+                }
+                entry = atlas->write_raster_slot(*slot, std::move(*next));
+            } else {
+                char key[40];
+                std::snprintf(key, sizeof(key), "%016llx",
+                              static_cast<unsigned long long>(part_hash().value()));
+                entry = atlas->request_raster(key, font::GlyphRasterMode::coverage, request);
+            }
             if (!entry.has_value())
                 return false;
             pieces.push_back(Piece{&part, entry->plane_bounds_layout_pixels,
@@ -1583,6 +1616,7 @@ using DeviceRuns = std::vector<host::RasterStrokeRun>;
         if (tile_classes.size() > maximum_tile_classes)
             tile_classes.clear();
         constexpr std::uint32_t side = mask_tile + 2U;
+        const MaskHash hash = part_hash();
         for (std::int64_t tile_y = first_y; tile_y <= last_y; ++tile_y) {
             for (std::int64_t tile_x = first_x; tile_x <= last_x; ++tile_x) {
                 MaskHash tile_hash = hash;
@@ -1959,7 +1993,7 @@ class Planner final {
                                            batch_rounded_clips(), opacity_, group_, context_,
                                            skipped_draws_, cache_.shape_atlas,
                                            cache_.shape_tile_classes,
-                                           cache_.group_raster_scales)) {
+                                           cache_.group_raster_scales, animated(source_order))) {
                         return;
                     }
                 }
@@ -1973,6 +2007,16 @@ class Planner final {
     }
 
   private:
+    /** The draw's animated-shape record, when it changed in this update and the one before. */
+    [[nodiscard]] PreparationCache::VolatileShape* animated(const std::uint32_t source_order) const {
+        const auto found = cache_.volatile_shapes.find(source_order);
+        if (found == cache_.volatile_shapes.end() ||
+            found->second.changed != cache_.update_serial ||
+            found->second.previously_changed + 1U != cache_.update_serial) {
+            return nullptr;
+        }
+        return &found->second;
+    }
     // A group restarts transform and opacity: its content is encoded relative to the group.
     struct GroupScope {
         Transform transform;

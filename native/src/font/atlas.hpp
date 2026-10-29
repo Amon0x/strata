@@ -70,6 +70,21 @@ struct RasterRequest final {
     RasterPlaneBounds plane_bounds;
 };
 
+/**
+ * A region of a page held for one animated picture, rasterized again in place each frame rather
+ * than cached under a new key: its texture and place stay, so the draws over it keep their
+ * batches and their geometry slots.
+ */
+struct RasterSlot final {
+    std::string texture;
+    std::size_t page = 0U;
+    /** The page's resets and the atlas's generation when it was reserved: either moving frees it. */
+    std::uint64_t page_epoch = 0U;
+    std::uint64_t generation = 0U;
+    AtlasPixelRect upload;
+    GlyphRasterMode mode = GlyphRasterMode::coverage;
+};
+
 struct GlyphAtlasConfig final {
     std::uint32_t page_size = 1'024U;
     std::uint32_t maximum_pages = 8U;
@@ -158,6 +173,23 @@ class GlyphAtlas final {
     [[nodiscard]] std::optional<GlyphAtlasEntry>
     request_raster(std::string_view key, GlyphRasterMode mode,
                    const std::function<std::optional<RasterRequest>(std::uint32_t)>& encode);
+    /** Pixels of clear border every packed region has around its content. */
+    [[nodiscard]] std::uint32_t gutter() const noexcept { return config_.gutter_pixels; }
+    /**
+     * Reserves a slot for content up to `width` x `height`, packed like a picture but never
+     * cached. Nothing when the pages are full until the next safe frame reclaims them.
+     */
+    [[nodiscard]] std::optional<RasterSlot> reserve_raster_slot(std::uint32_t width,
+                                                                std::uint32_t height,
+                                                                GlyphRasterMode mode);
+    /** Whether a slot still holds its place and fits content of this size. */
+    [[nodiscard]] bool raster_slot_fits(const RasterSlot& slot, std::uint32_t width,
+                                        std::uint32_t height) const noexcept;
+    /**
+     * Rasterizes a request (encoded with gutter()) into a slot that fits it, replacing what the
+     * slot held; the entry draws its content.
+     */
+    [[nodiscard]] GlyphAtlasEntry write_raster_slot(const RasterSlot& slot, RasterRequest request);
     /**
      * Rasterizes and packs a unique request set before draw planning. Expensive cache misses run
      * concurrently, while deterministic page allocation and host-operation construction remain

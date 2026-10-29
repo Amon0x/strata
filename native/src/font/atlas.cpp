@@ -215,6 +215,8 @@ struct GlyphAtlas::Page final {
     std::optional<AtlasPixelRect> dirty;
     /** The preparation that last packed into or drew from this page. */
     std::uint64_t used_preparation = 0U;
+    /** Counts the resets that dropped what the page held, so a slot reserved before one knows. */
+    std::uint64_t epoch = 0U;
 };
 
 struct GlyphAtlas::Allocation final {
@@ -377,6 +379,59 @@ std::optional<GlyphAtlasEntry> GlyphAtlas::request_raster(
         // Full pages: the shape draws another way until reclamation runs on a safe frame.
         return std::nullopt;
     }
+}
+
+std::optional<RasterSlot> GlyphAtlas::reserve_raster_slot(const std::uint32_t width,
+                                                          const std::uint32_t height,
+                                                          const GlyphRasterMode mode) {
+    const std::uint64_t gutter = config_.gutter_pixels;
+    if (width == 0U || height == 0U || width + gutter * 2U > config_.page_size ||
+        height + gutter * 2U > config_.page_size) {
+        return std::nullopt;
+    }
+    Key key{"$slot", 0U, 0U, 0U, std::bit_cast<std::uint64_t>(display_scale_), mode,
+            SubpixelPhase{}, generation_};
+    try {
+        const Allocation allocation = place(key, width, height, mode);
+        Page& page = pages_.at(allocation.page);
+        page.used_preparation = preparation_serial_;
+        return RasterSlot{page.texture, allocation.page, page.epoch, generation_,
+                          allocation.upload, mode};
+    } catch (const FontError&) {
+        return std::nullopt;
+    }
+}
+
+bool GlyphAtlas::raster_slot_fits(const RasterSlot& slot, const std::uint32_t width,
+                                  const std::uint32_t height) const noexcept {
+    const std::uint64_t gutter = config_.gutter_pixels;
+    return slot.generation == generation_ && slot.page < pages_.size() &&
+           pages_[slot.page].texture == slot.texture && pages_[slot.page].epoch == slot.page_epoch &&
+           width + gutter * 2U <= slot.upload.width && height + gutter * 2U <= slot.upload.height;
+}
+
+GlyphAtlasEntry GlyphAtlas::write_raster_slot(const RasterSlot& slot, RasterRequest request) {
+    if (!raster_slot_fits(slot, request.width, request.height))
+        throw std::logic_error("raster slot no longer holds its place or is too small");
+    Page& page = pages_[slot.page];
+    page.used_preparation = preparation_serial_;
+    // The whole slot is written: texels past this frame's content are cleared.
+    operations_.push_back(AtlasOperation{
+        AtlasOperationKind::raster,
+        page.texture,
+        format_for(slot.mode, config_.filtered_coverage),
+        slot.upload,
+        std::move(request.job),
+    });
+    const Allocation allocation{
+        slot.page,
+        slot.upload,
+        AtlasPixelRect{slot.upload.x + config_.gutter_pixels, slot.upload.y + config_.gutter_pixels,
+                       request.width, request.height},
+    };
+    const Key key{"$slot", 0U, 0U, 0U, std::bit_cast<std::uint64_t>(display_scale_), slot.mode,
+                  SubpixelPhase{}, generation_};
+    return entry_for(key, allocation, request.plane_bounds, 1.0, 1.0, slot.mode);
 }
 
 bool GlyphAtlas::warm(const std::span<const GlyphAtlasWarmupRequest> requests) {
@@ -867,6 +922,7 @@ std::optional<GlyphAtlas::Allocation> GlyphAtlas::reuse_unretained_page(
             page.next_x = 0U;
             page.next_y = 0U;
             page.row_height = 0U;
+            ++page.epoch;
             std::optional<Allocation> allocation = allocate(width, height, mode);
             if (allocation.has_value())
                 return allocation;

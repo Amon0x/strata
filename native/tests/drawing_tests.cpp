@@ -338,6 +338,65 @@ struct Area final {
 }
 
 /**
+ * A shape that changes every frame is rasterized again in place, into an atlas slot of its own:
+ * frame after frame its coverage is exactly the new shape's, as it grows past its slot (a new,
+ * larger one) and shrinks inside it (texels the larger frames left behind are cleared).
+ */
+void measure_changing_every_frame(const std::filesystem::path& root, const std::string& backend) {
+    std::filesystem::create_directories(root / "assets" / "drawing");
+    {
+        std::ofstream module(root / "assets" / "drawing" / "changing.strata", std::ios::binary);
+        module << "screen Shapes {\n  root Panel(style: { background: null, border: null }, "
+                  "layout: { kind: \"PANEL\", width: 140, height: 140 }) {\n"
+                  "    Draw(layout: { width: 120, height: 120, placement: { x: 10, y: 10 } }, "
+                  "shapes: [\n"
+                  "      { kind: \"polygon\", points: [{ x: 0.5, y: 0.5 - shape.r }, "
+                  "{ x: 0.5 + shape.r, y: 0.5 }, { x: 0.5, y: 0.5 + shape.r }, "
+                  "{ x: 0.5 - shape.r, y: 0.5 }], fill: #FFFFFF }\n    ])\n"
+                  "  }\n}\n";
+    }
+    const auto values = [](const double r) {
+        return data::JsonValue(data::JsonValue::Object{
+            {"shape", data::JsonValue(data::JsonValue::Object{{"r", data::JsonValue(r)}})}});
+    };
+    headless::Scenario scenario;
+    scenario.application_id = "drawing.tests";
+    scenario.surface_id = "drawing.tests";
+    scenario.module = "assets/drawing/changing.strata";
+    scenario.root = "Shapes";
+    scenario.root_role = "screen";
+    scenario.render_backend = backend;
+    scenario.width = 140.0;
+    scenario.height = 140.0;
+    scenario.scale = 1.0;
+    scenario.reduced_motion = true;
+    scenario.clear_color = {0U, 0U, 0U, 255U};
+    scenario.snapshots.push_back(headless::SnapshotConfig{"drawing.shape", values(0.1)});
+    headless::ApplicationHost host(scenario, root);
+    constexpr std::int64_t frame = 16'666'667;
+    std::int64_t now = 0;
+    host.frame(now);
+    const Area whole{0.0, 0.0, 140.0, 140.0};
+    double worst = 0.0;
+    // Growing well past any slot's room, then shrinking back inside the largest one.
+    std::vector<double> radii;
+    for (int step = 0; step <= 14; ++step)
+        radii.push_back(0.1 + 0.025 * step);
+    for (int step = 13; step >= 0; --step)
+        radii.push_back(0.1 + 0.025 * step);
+    for (const double r : radii) {
+        host.publish(headless::SnapshotConfig{"drawing.shape", values(r)});
+        host.frame(now += frame);
+        const double expected = 2.0 * (r * 120.0) * (r * 120.0);
+        const double area = covered_area(host, whole, 1.0);
+        worst = std::max(worst, std::abs(area - expected) / expected);
+    }
+    std::cout << "  " << backend << " shape changing every frame: largest area error "
+              << worst * 100.0 << "%\n";
+    check(worst < 0.004, backend + ": a shape changing every frame drew stale or wrong coverage");
+}
+
+/**
  * `animateChanges: { properties: ["shapes"] }`: when host data grows a circle's radius, the Draw
  * passes through intermediate circles (an exact circle each frame, so its area lies strictly
  * between) and settles exactly on the new one; a structural change snaps.
@@ -542,6 +601,7 @@ int main(const int argument_count, const char* const* const arguments) {
         };
         for (const std::string& backend : available_backends()) {
             measure_animation(root, backend);
+            measure_changing_every_frame(root, backend);
             measure_group_scale(root, backend);
             measure_tone(root, backend);
             for (const double scale : {1.0, 1.25, 2.0}) {
