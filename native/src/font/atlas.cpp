@@ -213,6 +213,8 @@ struct GlyphAtlas::Page final {
     std::uint32_t row_height = 0U;
     std::vector<std::uint8_t> pixels;
     std::optional<AtlasPixelRect> dirty;
+    /** The preparation that last packed into or drew from this page. */
+    std::uint64_t used_preparation = 0U;
 };
 
 struct GlyphAtlas::Allocation final {
@@ -251,6 +253,8 @@ bool GlyphAtlas::begin_frame_preparation() {
     }
     frame_preparation_active_ = true;
     preparation_recycles_ = 0U;
+    ++preparation_serial_;
+    retention_known_ = false;
     if (!reclamation_pending_)
         return false;
     invalidate_pages();
@@ -344,6 +348,8 @@ GlyphAtlas::request_mask(const std::string_view key,
     if (const auto found = cache_.find(cache_key); found != cache_.end()) {
         if (!frame_preparation_active_)
             flush_pending_uploads();
+        if (found->second.page_index < pages_.size())
+            pages_[found->second.page_index].used_preparation = preparation_serial_;
         return found->second;
     }
     std::optional<GlyphRasterBitmap> bitmap = rasterize();
@@ -685,6 +691,7 @@ GlyphAtlasEntry GlyphAtlas::insert(const Key& key, const GlyphRasterBitmap& bitm
         for (std::uint32_t column = left_gutter + inner; column < allocation.upload.width; ++column)
             std::memcpy(destination + static_cast<std::size_t>(column) * channels, last, channels);
     }
+    page.used_preparation = preparation_serial_;
     if (page.dirty.has_value()) {
         const std::uint32_t left = std::min(page.dirty->x, allocation.upload.x);
         const std::uint32_t top = std::min(page.dirty->y, allocation.upload.y);
@@ -725,6 +732,8 @@ GlyphAtlasEntry GlyphAtlas::insert_bitmap(Key& key, const GlyphRasterBitmap& bit
         }
     }
     std::optional<Allocation> allocation = allocate(bitmap.width, bitmap.height, bitmap.mode);
+    if (!allocation.has_value() && pages_.size() >= config_.maximum_pages)
+        allocation = reuse_unretained_page(bitmap.width, bitmap.height, bitmap.mode);
     if (!allocation.has_value()) {
         if (pages_.size() >= config_.maximum_pages) {
             if (!recycle_for_capacity(key)) {
@@ -773,6 +782,36 @@ void GlyphAtlas::flush_pending_uploads() {
     for (std::size_t page = 0U; page < pages_.size(); ++page) {
         flush_page_upload(page);
     }
+}
+
+void GlyphAtlas::retain_pages(const std::span<const std::string> textures) {
+    retained_pages_.clear();
+    retained_pages_.insert(textures.begin(), textures.end());
+    retention_known_ = true;
+}
+
+std::optional<GlyphAtlas::Allocation> GlyphAtlas::reuse_unretained_page(
+    const std::uint32_t width, const std::uint32_t height, const GlyphRasterMode mode) {
+    if (!retention_known_ || !frame_preparation_active_)
+        return std::nullopt;
+    for (Page& page : pages_) {
+        if (page.mode != mode || page.used_preparation == preparation_serial_ ||
+            retained_pages_.contains(page.texture)) {
+            continue;
+        }
+        // Nothing drawn uses it: forget what it held and pack from its corner again. Its old
+        // texels stay until overwritten; no entry reaches them.
+        std::erase_if(cache_, [&page](const auto& entry) {
+            return entry.second.texture == page.texture;
+        });
+        page.next_x = 0U;
+        page.next_y = 0U;
+        page.row_height = 0U;
+        std::optional<Allocation> allocation = allocate(width, height, mode);
+        if (allocation.has_value())
+            return allocation;
+    }
+    return std::nullopt;
 }
 
 bool GlyphAtlas::recycle_for_capacity(Key& key) {

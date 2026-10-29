@@ -968,14 +968,133 @@ void append_stroke_polyline(std::vector<PathContour>& regions, const std::vector
                       tolerance);
 }
 
+/** Points on the arc around `center` from `center + from` turning `sweep` radians, end included. */
+void append_arc_points(std::vector<Point>& points, const Point center, const Vector from,
+                       const double sweep, const double tolerance) {
+    const double radius = length(from);
+    const double arc_step =
+        tolerance > 0.0 && radius > tolerance
+            ? std::max(2.0 * std::acos(std::clamp(1.0 - tolerance / radius, -1.0, 1.0)), 0.02)
+            : std::numbers::pi / 8.0;
+    const auto segments =
+        static_cast<std::size_t>(std::clamp(std::ceil(std::abs(sweep) / arc_step), 1.0, 4096.0));
+    for (std::size_t step = 1U; step <= segments; ++step) {
+        const double angle = sweep * static_cast<double>(step) / static_cast<double>(segments);
+        const double sine = std::sin(angle);
+        const double cosine = std::cos(angle);
+        points.push_back(center + Vector{from.x * cosine - from.y * sine,
+                                         from.x * sine + from.y * cosine});
+    }
+}
+
+/**
+ * One open stroked run as a single contour, as Skia builds strokes: the offset along one side with
+ * each outer join (round, mitre within its limit, else bevel) and each inner join through its
+ * pivot, the end cap, the other side back, and the start cap. Every piece of the stroke's body is
+ * wound the same way and the inner pivots leave no reversed loop, so under the nonzero rule the
+ * contour covers exactly the union of the stroke's segments, joins and caps, with a fraction of
+ * the edges and none of the per-piece regions.
+ */
+void append_stroke_run(std::vector<PathContour>& regions, const std::vector<Point>& source,
+                       const StrokeStyle& style, const double tolerance) {
+    std::vector<Point> points;
+    points.reserve(source.size());
+    for (const Point point : source) {
+        if (points.empty() || length(point - points.back()) > geometry_epsilon)
+            points.push_back(point);
+    }
+    if (points.size() < 2U)
+        return;
+    const double half_width = style.width * 0.5;
+    std::vector<Vector> directions;
+    directions.reserve(points.size() - 1U);
+    for (std::size_t index = 1U; index < points.size(); ++index)
+        directions.push_back(*normalized(points[index] - points[index - 1U]));
+    std::vector<Point> contour;
+    contour.reserve(points.size() * 4U + 16U);
+    // One side, from the first point to the last, its side vector perpendicular to the travel.
+    const auto side = [&](const std::vector<Point>& along, const std::vector<Vector>& heading) {
+        contour.push_back(along.front() + perpendicular(heading.front()) * half_width);
+        for (std::size_t joint = 1U; joint < along.size() - 1U; ++joint) {
+            const Point pivot = along[joint];
+            const Vector incoming = heading[joint - 1U];
+            const Vector outgoing = heading[joint];
+            const Vector before = perpendicular(incoming) * half_width;
+            const Vector after = perpendicular(outgoing) * half_width;
+            contour.push_back(pivot + before);
+            const double turn = cross(incoming, outgoing);
+            if (std::abs(turn) <= geometry_epsilon && dot(incoming, outgoing) > 0.0)
+                continue;
+            if (turn > 0.0) {
+                // The inner side: through the pivot, so the overlap stays inside the body.
+                contour.push_back(pivot);
+                contour.push_back(pivot + after);
+                continue;
+            }
+            switch (style.join) {
+            case PathJoin::round:
+                append_arc_points(contour, pivot, before,
+                                  std::atan2(cross(before, after), dot(before, after)), tolerance);
+                break;
+            case PathJoin::miter: {
+                const std::optional<Vector> bisector = normalized(before + after);
+                const double cosine =
+                    bisector.has_value() ? dot(*bisector, before) / half_width : 0.0;
+                if (cosine > geometry_epsilon && 1.0 / cosine <= style.miter_limit)
+                    contour.push_back(pivot + *bisector * (half_width / cosine));
+                contour.push_back(pivot + after);
+                break;
+            }
+            case PathJoin::bevel:
+                contour.push_back(pivot + after);
+                break;
+            }
+        }
+        contour.push_back(along.back() + perpendicular(heading.back()) * half_width);
+    };
+    // A cap from `point + side` round to `point - side`, `outward` its direction.
+    const auto cap = [&](const Point point, const Vector outward) {
+        const Vector across = perpendicular(outward) * half_width;
+        switch (style.cap) {
+        case PathCap::butt:
+            break;
+        case PathCap::square:
+            contour.push_back(point + across + outward * half_width);
+            contour.push_back(point + across * -1.0 + outward * half_width);
+            break;
+        case PathCap::round:
+            append_arc_points(contour, point, across, -std::numbers::pi, tolerance);
+            contour.pop_back();
+            break;
+        }
+    };
+    side(points, directions);
+    cap(points.back(), directions.back());
+    std::vector<Point> back(points.rbegin(), points.rend());
+    std::vector<Vector> back_heading;
+    back_heading.reserve(directions.size());
+    for (auto direction = directions.rbegin(); direction != directions.rend(); ++direction)
+        back_heading.push_back(*direction * -1.0);
+    side(back, back_heading);
+    cap(points.front(), directions.front() * -1.0);
+    regions.push_back(PathContour{std::move(contour), true});
+}
+
 } // namespace
 
 std::vector<PathContour> stroke_outline(const std::vector<PathContour>& centrelines,
                                         const StrokeStyle& style, const double tolerance) {
     std::vector<PathContour> regions;
     for (const PathContour& contour : centrelines) {
-        for (const std::vector<Point>& polyline : dashed(contour.points, contour.closed, style))
-            append_stroke_polyline(regions, polyline, style, 0.0, Size{1.0, 1.0}, tolerance);
+        for (const std::vector<Point>& polyline : dashed(contour.points, contour.closed, style)) {
+            // An open run strokes as one contour; a closed loop as its pieces.
+            const bool closed = polyline.size() > 2U &&
+                                length(polyline.back() - polyline.front()) <= geometry_epsilon;
+            if (closed)
+                append_stroke_polyline(regions, polyline, style, 0.0, Size{1.0, 1.0}, tolerance);
+            else
+                append_stroke_run(regions, polyline, style, tolerance);
+        }
     }
     // Every piece wound the same way: under the nonzero rule their overlaps are a union.
     for (PathContour& region : regions) {

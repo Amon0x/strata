@@ -239,6 +239,20 @@ void update_cached(
         if (cache.shape_atlas->begin_frame_preparation())
             cache.plan_current = false;
         preparation.shapes = cache.shape_atlas;
+        // The pages the current plan draws from stay; a full atlas reuses another page rather
+        // than recycling them all, which would plan every draw again.
+        std::vector<std::string> drawn;
+        for (const PlannedItem& item : cache.planned_items) {
+            const auto* draw = std::get_if<PreparedDraw>(&item.value);
+            if (draw == nullptr)
+                continue;
+            if (const auto* mask = std::get_if<PreparedMaskPtr>(&draw->command);
+                mask != nullptr && *mask != nullptr &&
+                std::ranges::find(drawn, (*mask)->texture) == drawn.end()) {
+                drawn.push_back((*mask)->texture);
+            }
+        }
+        cache.shape_atlas->retain_pages(drawn);
     }
     if (update_changed_draws(commands, glyph_atlas, text_engine, context, cache, output)) return;
     output.planned_draws = 0U;

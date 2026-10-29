@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <memory>
@@ -424,7 +425,8 @@ class CoverageAccumulator final {
   public:
     CoverageAccumulator(const std::uint32_t width, const std::uint32_t height)
         : width_(width), height_(height), stride_(static_cast<std::size_t>(width) + 2U),
-          cells_(stride_ * height, 0.0F) {}
+          cells_(stride_ * height, 0.0F), first_(height, std::numeric_limits<std::uint32_t>::max()),
+          last_(height, 0U) {}
 
     /** One edge in bitmap pixels, split where it crosses the bitmap's left and right sides. */
     void edge(double x0, double y0, double x1, double y1) {
@@ -462,21 +464,34 @@ class CoverageAccumulator final {
 
     [[nodiscard]] std::vector<std::uint8_t> coverage(const bool even_odd) const {
         std::vector<std::uint8_t> result(static_cast<std::size_t>(width_) * height_, 0U);
+        const auto level = [even_odd](const float sum) {
+            float value = std::abs(sum);
+            if (even_odd) {
+                value = std::fmod(value, 2.0F);
+                if (value > 1.0F)
+                    value = 2.0F - value;
+            } else {
+                value = std::min(value, 1.0F);
+            }
+            return static_cast<std::uint8_t>(value * 255.0F + 0.5F);
+        };
+        // A row is zero before the first cell an edge touched, and after the last it holds the
+        // sum it reached there.
         for (std::uint32_t row = 0U; row < height_; ++row) {
+            if (first_[row] >= width_)
+                continue;
             const float* cells = cells_.data() + static_cast<std::size_t>(row) * stride_;
             std::uint8_t* output = result.data() + static_cast<std::size_t>(row) * width_;
+            const std::uint32_t last = std::min(last_[row], width_ - 1U);
             float sum = 0.0F;
-            for (std::uint32_t column = 0U; column < width_; ++column) {
+            for (std::uint32_t column = first_[row]; column <= last; ++column) {
                 sum += cells[column];
-                float value = std::abs(sum);
-                if (even_odd) {
-                    value = std::fmod(value, 2.0F);
-                    if (value > 1.0F)
-                        value = 2.0F - value;
-                } else {
-                    value = std::min(value, 1.0F);
-                }
-                output[column] = static_cast<std::uint8_t>(value * 255.0F + 0.5F);
+                output[column] = level(sum);
+            }
+            if (last + 1U < width_) {
+                const std::uint8_t rest = level(sum);
+                if (rest != 0U)
+                    std::memset(output + last + 1U, rest, width_ - last - 1U);
             }
         }
         return result;
@@ -516,6 +531,8 @@ class CoverageAccumulator final {
             const auto left_index = static_cast<std::size_t>(left_floor);
             const double right_ceiling = std::ceil(right);
             const auto right_index = static_cast<std::size_t>(right_ceiling);
+            first_[row] = std::min(first_[row], static_cast<std::uint32_t>(left_index));
+            last_[row] = std::max(last_[row], static_cast<std::uint32_t>(right_index) + 1U);
             if (right_index <= left_index + 1U) {
                 // Within one pixel: the share right of the edge's midpoint stays in it.
                 const float middle = static_cast<float>(0.5 * (left + right) - left_floor);
@@ -552,6 +569,9 @@ class CoverageAccumulator final {
     std::uint32_t height_;
     std::size_t stride_;
     std::vector<float> cells_;
+    /** Per row, the first and last cell an edge touched. */
+    std::vector<std::uint32_t> first_;
+    std::vector<std::uint32_t> last_;
 };
 
 } // namespace

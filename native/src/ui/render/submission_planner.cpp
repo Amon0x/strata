@@ -810,6 +810,11 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
         std::vector<std::vector<font::CoveragePoint>> polygons;
         bool even_odd = false;
         const Paint* paint = nullptr;
+        /** The outline's device box. */
+        double left = 0.0;
+        double top = 0.0;
+        double right = 0.0;
+        double bottom = 0.0;
     };
     std::optional<std::vector<Layer>> made;
     const auto layers = [&]() -> const std::vector<Layer>& {
@@ -853,6 +858,20 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
                                       &*shape->stroke});
             }
         }
+        for (Layer& layer : *made) {
+            layer.left = std::numeric_limits<double>::infinity();
+            layer.top = std::numeric_limits<double>::infinity();
+            layer.right = -std::numeric_limits<double>::infinity();
+            layer.bottom = -std::numeric_limits<double>::infinity();
+            for (const std::vector<font::CoveragePoint>& polygon : layer.polygons) {
+                for (const font::CoveragePoint point : polygon) {
+                    layer.left = std::min(layer.left, point.x);
+                    layer.top = std::min(layer.top, point.y);
+                    layer.right = std::max(layer.right, point.x);
+                    layer.bottom = std::max(layer.bottom, point.y);
+                }
+            }
+        }
         return *made;
     };
 
@@ -870,16 +889,34 @@ void hash_paint(MaskHash& hash, const std::optional<Paint>& paint) {
         std::vector<float> area(pixels, 0.0F);
         const std::vector<Layer>& parts = layers();
         for (auto layer = parts.rbegin(); layer != parts.rend(); ++layer) {
+            // Only the part of the region the layer's box covers.
+            if (!std::isfinite(layer->left))
+                continue;
+            const auto clamp_to = [](const double value, const std::uint32_t limit) {
+                return static_cast<std::uint32_t>(
+                    std::clamp(value, 0.0, static_cast<double>(limit)));
+            };
+            const std::uint32_t x0 = clamp_to(std::floor(layer->left - origin.x) - 1.0, width);
+            const std::uint32_t y0 = clamp_to(std::floor(layer->top - origin.y) - 1.0, height);
+            const std::uint32_t x1 = clamp_to(std::ceil(layer->right - origin.x) + 1.0, width);
+            const std::uint32_t y1 = clamp_to(std::ceil(layer->bottom - origin.y) + 1.0, height);
+            if (x1 <= x0 || y1 <= y0)
+                continue;
+            const std::uint32_t span = x1 - x0;
             const std::optional<std::vector<std::uint8_t>> coverage = font::rasterize_polygons(
-                layer->polygons, width, height, layer->even_odd, origin);
+                layer->polygons, span, y1 - y0, layer->even_odd,
+                font::CoveragePoint{origin.x + x0, origin.y + y0});
             if (!coverage.has_value())
                 continue;
             const Gradient* gradient = layer->paint->gradient();
             const runtime::ColorValue solid = layer->paint->representative();
-            for (std::uint32_t row = 0U; row < height; ++row) {
-                for (std::uint32_t column = 0U; column < width; ++column) {
+            for (std::uint32_t row = y0; row < y1; ++row) {
+                for (std::uint32_t column = x0; column < x1; ++column) {
                     const std::size_t at = static_cast<std::size_t>(row) * width + column;
-                    const float covered = static_cast<float>((*coverage)[at]) / 255.0F;
+                    const float covered =
+                        static_cast<float>(
+                            (*coverage)[static_cast<std::size_t>(row - y0) * span + (column - x0)]) /
+                        255.0F;
                     if (covered <= 0.0F || alpha[at] >= 1.0F)
                         continue;
                     runtime::ColorValue paint = solid;

@@ -242,6 +242,22 @@ int main(int argc, char** argv) {
         }
         report(hover);
         breakdown(hover);
+
+        // The drawing page animates every frame: native canvases, morphs and loops.
+        host.set_capture_frames(true);
+        static_cast<void>(driver.frame());
+        const auto draw = tab("DRAW");
+        host.set_capture_frames(false);
+        Phase draw_open{"draw tab (click frame)", {}};
+        Phase draw_settle{"draw tab (settle)", {}};
+        driver.click(draw, draw_open, draw_settle, 30);
+        Phase drawing{"draw tab (animating)", {}};
+        for (int index = 0; index < 240 * scale; ++index) {
+            drawing.frames.push_back(driver.frame());
+            attribute(host, drawing);
+        }
+        report(drawing);
+        breakdown(drawing);
         host.close();
         return 0;
     } catch (const std::exception& error) {

@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include "font/opentype.hpp"
@@ -129,6 +130,13 @@ class GlyphAtlas final {
      * full until the next safe frame reclaims them. A `GlyphRasterMode::msdf` mask is four channels
      * on the RGBA pages instead of coverage.
      */
+    /**
+     * The pages something still drawn uses, given before planning a frame. With it, a full atlas
+     * resets one page outside this set that nothing has used this preparation and packs into it,
+     * instead of recycling every page (and every plan that draws from them). Without it, as for
+     * glyphs, a full atlas recycles.
+     */
+    void retain_pages(std::span<const std::string> textures);
     [[nodiscard]] std::optional<GlyphAtlasEntry>
     request_mask(std::string_view key,
                  const std::function<std::optional<GlyphRasterBitmap>()>& rasterize,
@@ -187,6 +195,9 @@ class GlyphAtlas final {
                  double pixel_size, SubpixelPhase phase, GlyphRasterMode mode,
                  std::uint32_t font_style_flags);
     [[nodiscard]] bool recycle_for_capacity(Key& key);
+    [[nodiscard]] std::optional<Allocation> reuse_unretained_page(std::uint32_t width,
+                                                                  std::uint32_t height,
+                                                                  GlyphRasterMode mode);
     void flush_pending_uploads();
     void flush_page_upload(std::size_t page_index);
     void invalidate_pages();
@@ -197,6 +208,11 @@ class GlyphAtlas final {
     std::uint64_t generation_ = 1U;
     std::vector<Page> pages_;
     std::map<Key, GlyphAtlasEntry> cache_;
+    /** Pages still drawn from (retain_pages), and whether this preparation was given them. */
+    std::unordered_set<std::string> retained_pages_;
+    bool retention_known_ = false;
+    /** Counts preparations, so a page used during this one is never reset under it. */
+    std::uint64_t preparation_serial_ = 0U;
     std::vector<AtlasOperation> operations_;
     bool frame_preparation_active_ = false;
     bool reclamation_pending_ = false;
