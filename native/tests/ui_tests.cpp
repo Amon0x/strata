@@ -259,6 +259,28 @@ void test_bundled_font_metrics(const std::filesystem::path& resource_root) {
     };
     check(coverage_sum(*darkened_h) > coverage_sum(*undarkened_h),
           "small-pixel optical darkening did not increase stem coverage");
+    // Darkening runs after vertical grid fitting, so it must leave the rows alone: growing the
+    // outline upward lifts each snapped top edge into a faint fringe row above the glyph.
+    const auto inked_rows = [](const strata::font::GlyphRasterBitmap& raster) {
+        std::vector<bool> rows(raster.height, false);
+        for (std::uint32_t row = 0U; row < raster.height; ++row) {
+            for (std::uint32_t column = 0U; column < raster.width; ++column) {
+                if (raster.bytes[static_cast<std::size_t>(row) * raster.width + column] != 0U) {
+                    rows[row] = true;
+                    break;
+                }
+            }
+        }
+        return rows;
+    };
+    check(darkened_h->plane_bounds_layout_pixels.top ==
+                  undarkened_h->plane_bounds_layout_pixels.top &&
+              inked_rows(*darkened_h) == inked_rows(*undarkened_h),
+          "small-pixel optical darkening moved hinted horizontal edges off the pixel grid");
+    const strata::font::CoverageRasterConfig default_coverage;
+    check(default_coverage.hinting == strata::font::GlyphHinting::light &&
+              default_coverage.stem_darkening_pixels == 0.0,
+          "default coverage rasterization no longer fits vertically only without emboldening");
     const std::optional<strata::font::GlyphRasterBitmap> latin_a_msdf =
         strata::font::rasterize_msdf(font, latin_a, 32.0);
     check(latin_a_msdf.has_value(), "native MSDF rasterizer lost Latin A");

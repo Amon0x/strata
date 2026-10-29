@@ -326,15 +326,19 @@ rasterize_coverage(const OpenTypeFont& font, const std::uint16_t glyph, const do
     if (load_error != FT_Err_Ok)
         freetype_error("glyph loading", load_error);
     if (face->glyph->format == FT_GLYPH_FORMAT_OUTLINE) {
+        // The outline is already hinted, so emboldening moves edges after grid fitting. Stems
+        // only grow horizontally, where glyphs are positioned at subpixel phases anyway: growing
+        // vertically too would push each snapped top edge (x-height, cap height, bar tops) a
+        // fraction of a pixel up into a faint extra row, the fringe that reads as grain. Synthetic
+        // bold widens the same way.
         const double darkening = optical_stem_darkening(config, physical_pixel_size);
         const double synthetic_bold =
             style.bold() ? style.bold_strength(physical_pixel_size) : 0.0;
         const FT_Pos x_strength =
             static_cast<FT_Pos>(std::lround((darkening + synthetic_bold) * 64.0));
-        const FT_Pos y_strength = static_cast<FT_Pos>(std::lround(darkening * 64.0));
-        if (x_strength > 0L || y_strength > 0L) {
+        if (x_strength > 0L) {
             const FT_Error embolden_error =
-                FT_Outline_EmboldenXY(&face->glyph->outline, x_strength, y_strength);
+                FT_Outline_EmboldenXY(&face->glyph->outline, x_strength, 0L);
             if (embolden_error != FT_Err_Ok)
                 freetype_error("outline emboldening", embolden_error);
         }

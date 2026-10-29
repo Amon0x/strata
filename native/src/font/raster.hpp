@@ -60,10 +60,23 @@ enum class GlyphHinting : std::uint8_t {
 struct CoverageRasterConfig final {
     std::uint32_t maximum_dimension = 1'024U;
     std::uint32_t padding_pixels = 1U;
-    /** FreeType executes the face's native TrueType instructions for the ordinary UI path. */
-    GlyphHinting hinting = GlyphHinting::full;
-    /** Physical-pixel optical emboldening for small grayscale glyphs. */
-    double stem_darkening_pixels = 0.16;
+    /**
+     * Vertical-only grid fitting (FreeType's light auto-hinter, Skia's "slight"). Glyphs sit at
+     * horizontal subpixel phases, so horizontal hinting would only fight that placement: native
+     * TrueType instructions still move stems sideways in fonts that opt out of FreeType's
+     * backward-compatibility mode (Segoe UI, Arial), and fonts without instructions would get
+     * the full auto-hinter, which snaps stems horizontally as well.
+     */
+    GlyphHinting hinting = GlyphHinting::light;
+    /**
+     * Optional physical-pixel optical emboldening for small grayscale glyphs; off by default. The
+     * draw-time coverage weighting (host::text_coverage) already gives grayscale text the weight
+     * Skia's gamma/contrast preblend does, and emboldening a hinted outline only adds a soft
+     * column beside every stem. When enabled it widens stems only: the outline is already
+     * grid-fitted vertically, and growing it vertically as well would lift every snapped top edge
+     * off the pixel grid into a faint fringe row.
+     */
+    double stem_darkening_pixels = 0.0;
     double stem_darkening_taper_start_physical_pixel_size = 14.0;
     double stem_darkening_taper_end_physical_pixel_size = 28.0;
     /**
