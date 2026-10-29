@@ -8,9 +8,10 @@
 namespace strata::gpu::raster_shaders {
 
 /**
- * Per-dispatch constants of the raster kernels: a D3D11 constant buffer, Vulkan push constants.
- * The content rectangle lies within the operation's region; the region's origin is its place in
- * the atlas (D3D11 writes there; Vulkan writes a region-sized buffer it then copies).
+ * One layer of one raster job, as the kernels read it from the batch's table. The content
+ * rectangle lies within the operation's region; the region's origin is its place in the atlas
+ * (D3D11 writes there; Vulkan writes a region-sized part of a buffer it then copies). A batch
+ * rasterizes many jobs at once, each layer with its own cells, so their bases say where.
  */
 struct Constants final {
     std::uint32_t content_x = 0U;
@@ -41,9 +42,37 @@ struct Constants final {
     float tolerance = 0.03F;
     /** Where an art layer's values begin in the art buffer. */
     std::uint32_t art_base = 0U;
+    /** Where this layer's cells, its job's sums, its art points and its job's output begin. */
+    std::uint32_t cell_base = 0U;
+    std::uint32_t sum_base = 0U;
+    std::uint32_t points_base = 0U;
+    std::uint32_t output_base = 0U;
 };
-/** The most push constant bytes every Vulkan device offers. */
-static_assert(sizeof(Constants) == 128U);
+/** The table's stride in both APIs: float4s on 16-byte boundaries, the whole a multiple of 16. */
+static_assert(sizeof(Constants) == 144U);
+
+/**
+ * One dispatch's constants (a D3D11 constant buffer, Vulkan push constants): its items in the
+ * batch list, and how many threads (or, for a resolve, groups) it covers.
+ */
+struct Dispatch final {
+    std::uint32_t first_item = 0U;
+    std::uint32_t item_count = 0U;
+    std::uint32_t total = 0U;
+    std::uint32_t reserved = 0U;
+};
+
+/**
+ * One item of a dispatch's list: the table entry (`x`) whose indices begin at `y` of the
+ * dispatch's, `z` into the entry's own. A thread (or a group) takes the last item at or before
+ * its index, so items of many layers share a dispatch.
+ */
+struct BatchItem final {
+    std::uint32_t entry = 0U;
+    std::uint32_t first = 0U;
+    std::uint32_t offset = 0U;
+    std::uint32_t reserved = 0U;
+};
 
 /** Threads per group of every kernel: one segment or one row each. */
 inline constexpr std::uint32_t group_size = 64U;
@@ -59,8 +88,9 @@ inline constexpr std::uint32_t stroke_parts = 16U;
 inline constexpr std::uint32_t pieces_per_dispatch = 65535U * group_size / stroke_parts;
 
 /** The kernels, in the order backends keep them. */
-inline constexpr std::array<const char*, 5U> entries{"accumulate", "stroke", "resolve_coverage",
-                                                     "resolve_composite", "finish"};
+inline constexpr std::array<const char*, 7U> entries{
+    "accumulate",        "stroke",         "resolve_coverage", "resolve_composite", "finish",
+    "art_stroke_points", "art_fill_points"};
 
 /**
  * The raster job kernels (strata/raster_job.hpp), a line-for-line port of host/raster_job.cpp's
@@ -72,9 +102,13 @@ inline constexpr std::array<const char*, 5U> entries{"accumulate", "stroke", "re
  *   resolve_coverage   one group a region row, in 64 chunks: cells to coverage, to the R8 atlas
  *   resolve_composite  one group a content row, in 64 chunks: coverage composited into the sums
  *   finish             one thread a texel: the sums to straight RGBA, written to the atlas
+ *   art_stroke_points  an art layer's outline from the points its program wrote, stroked as
+ *                      pieces; art_fill_points the same, its edges accumulated like segments
  *
  * Each resolve clears the cells it reads and finish the sums, so the next job starts from zero.
- * STRATA_VULKAN selects push constants, explicit bindings and a buffer output.
+ * A dispatch may work for many jobs' layers at once: its items say which table entry each index
+ * belongs to (enter). STRATA_VULKAN selects push constants, explicit bindings and a buffer
+ * output.
  */
 constexpr std::string_view source = R"hlsl(
 #ifdef STRATA_VULKAN
@@ -110,6 +144,10 @@ struct RasterData {
     float miter_limit;
     float tolerance;
     uint art_base;
+    uint cell_base;
+    uint sum_base;
+    uint points_base;
+    uint output_base;
 };
 
 struct StrokePiece {
@@ -120,11 +158,18 @@ struct StrokePiece {
     uint reserved;
 };
 
+struct DispatchData {
+    uint first_item;
+    uint item_count;
+    uint total;
+    uint reserved;
+};
+
 #ifdef STRATA_VULKAN
-[[vk::push_constant]] ConstantBuffer<RasterData> raster;
+[[vk::push_constant]] ConstantBuffer<DispatchData> dispatch_data;
 #else
-cbuffer RasterBuffer : register(b0) {
-    RasterData raster;
+cbuffer DispatchBuffer : register(b0) {
+    DispatchData dispatch_data;
 };
 #endif
 
@@ -133,6 +178,36 @@ BIND(1) StructuredBuffer<uint> luts : register(t1);
 BIND(2) RWStructuredBuffer<int> cells : register(u0);
 BIND(3) RWStructuredBuffer<uint> sums : register(u1);
 BIND(5) StructuredBuffer<StrokePiece> pieces : register(t2);
+BIND(6) StructuredBuffer<float> art_values : register(t3);
+BIND(7) RWStructuredBuffer<float2> art_positions : register(u3);
+BIND(8) StructuredBuffer<RasterData> table : register(t4);
+BIND(9) StructuredBuffer<uint4> batch : register(t5);
+
+/** The layer this thread (or group) works for, which enter() loads. */
+static RasterData raster;
+
+/**
+ * Finds the layer `index` (a thread's, or a resolve's group's) of this dispatch works for and
+ * loads it as `raster`, with `local` the index within that layer; false past the dispatch's end.
+ */
+bool enter(uint index, out uint local) {
+    local = 0;
+    if (index >= dispatch_data.total)
+        return false;
+    uint low = dispatch_data.first_item;
+    uint high = low + dispatch_data.item_count - 1;
+    [loop] while (low < high) {
+        uint middle = (low + high + 1) / 2;
+        if (batch[middle].y <= index)
+            low = middle;
+        else
+            high = middle - 1;
+    }
+    uint4 item = batch[low];
+    raster = table[item.x];
+    local = index - item.y + item.z;
+    return true;
+}
 #ifdef STRATA_VULKAN
 BIND(4) RWStructuredBuffer<uint> output : register(u2);
 #elif defined(STRATA_RASTER_RGBA)
@@ -154,7 +229,7 @@ void emit(int column, int row, int xa, int xb, int ya, int yb, int sign) {
         return;
     int left = column * one;
     int height = yb - ya;
-    uint at = (uint(row) * raster.content_width + uint(column)) * 2;
+    uint at = raster.cell_base + (uint(row) * raster.content_width + uint(column)) * 2;
     InterlockedAdd(cells[at], sign * height);
     InterlockedAdd(cells[at + 1], sign * (xa - left + xb - left) * height);
 }
@@ -223,9 +298,10 @@ void walk(int x0, int y0, int x1, int y1, int orientation) {
 
 [numthreads(64, 1, 1)]
 void accumulate(uint3 id : SV_DispatchThreadID) {
-    if (id.x >= raster.segment_count)
+    uint local;
+    if (!enter(id.x, local) || local >= raster.segment_count)
         return;
-    int4 segment = segments[raster.first_segment + id.x];
+    int4 segment = segments[raster.first_segment + local];
     walk(segment.x, segment.y, segment.z, segment.w, 1);
 }
 
@@ -518,10 +594,58 @@ void stroke_piece(StrokePiece piece, uint part) {
 
 [numthreads(64, 1, 1)]
 void stroke(uint3 id : SV_DispatchThreadID) {
-    uint index = id.x / stroke_parts;
-    if (index >= raster.piece_count)
+    uint local;
+    if (!enter(id.x, local) || local / stroke_parts >= raster.piece_count)
         return;
-    stroke_piece(pieces[raster.first_piece + index], id.x % stroke_parts);
+    stroke_piece(pieces[raster.first_piece + local / stroke_parts], local % stroke_parts);
+}
+
+bool art_finite(float2 value) {
+    return all(abs(value) <= 1.0e6);
+}
+
+/**
+ * An art layer's outline stroked from the points its program wrote to art_positions: each
+ * segment stroke_parts threads.
+ */
+[numthreads(64, 1, 1)]
+void art_stroke_points(uint3 id : SV_DispatchThreadID) {
+    uint local;
+    if (!enter(id.x, local))
+        return;
+    uint count = uint(art_values[raster.art_base + 1]);
+    bool closed = art_values[raster.art_base + 2] > 0.5;
+    uint segments = closed ? count : count - 1;
+    uint segment = local / stroke_parts;
+    if (segment >= segments)
+        return;
+    bool joined = closed || segment + 2 < count;
+    uint base = raster.points_base;
+    StrokePiece piece;
+    piece.p0 = art_positions[base + segment];
+    piece.p1 = art_positions[base + (segment + 1) % count];
+    piece.p2 = joined ? art_positions[base + (segment + 2) % count] : piece.p1;
+    piece.flags = (joined ? 1 : 0) | (!closed && segment == 0 ? 2 : 0) |
+                  (!closed && segment + 1 == segments ? 4 : 0);
+    piece.reserved = 0;
+    if (!art_finite(piece.p0) || !art_finite(piece.p1) || !art_finite(piece.p2))
+        return;
+    stroke_piece(piece, local % stroke_parts);
+}
+
+/** An art layer's outline filled from its points: one thread an edge, closed. */
+[numthreads(64, 1, 1)]
+void art_fill_points(uint3 id : SV_DispatchThreadID) {
+    uint local;
+    if (!enter(id.x, local))
+        return;
+    uint count = uint(art_values[raster.art_base + 1]);
+    if (local >= count)
+        return;
+    float2 a = art_positions[raster.points_base + local];
+    float2 b = art_positions[raster.points_base + (local + 1) % count];
+    if (art_finite(a) && art_finite(b))
+        edge(a, b, 1);
 }
 
 int resolved(int cover, int area) {
@@ -540,10 +664,14 @@ uint coverage_byte(int area) {
 
 /** Reads a content cell's cover and area and clears it. */
 int2 take_cell(uint column, uint row) {
-    uint at = (row * raster.content_width + column) * 2;
+    uint at = raster.cell_base + (row * raster.content_width + column) * 2;
     int2 cell = int2(cells[at], cells[at + 1]);
-    cells[at] = 0;
-    cells[at + 1] = 0;
+    // Most cells of a line drawing are never touched: clearing only the touched ones spares the
+    // writes.
+    if (cell.x != 0 || cell.y != 0) {
+        cells[at] = 0;
+        cells[at + 1] = 0;
+    }
     return cell;
 }
 
@@ -557,7 +685,7 @@ groupshared int lane_cover[64];
 int cover_before(uint row, uint begin, uint end, uint lane) {
     int sum = 0;
     [loop] for (uint column = begin; column < end; ++column)
-        sum += cells[(row * raster.content_width + column) * 2];
+        sum += cells[raster.cell_base + (row * raster.content_width + column) * 2];
     lane_cover[lane] = sum;
     GroupMemoryBarrierWithGroupSync();
     int before = 0;
@@ -573,38 +701,65 @@ uint2 lane_chunk(uint width, uint lane) {
     return uint2(begin, min(begin + chunk, width));
 }
 
+/**
+ * A group a region row, walked in tiles of 256 columns, each lane four neighbouring columns: a
+ * tile's cells are read and its texels written as one contiguous run. A scan of the lanes' cover
+ * gives each the cover left of its columns, and the tile's total carries to the next.
+ */
 [numthreads(64, 1, 1)]
 void resolve_coverage(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
-    uint row = group.x;
+    // Every lane of a group finds the same layer, or leaves together.
+    uint row;
+    if (!enter(group.x, row))
+        return;
     uint lane = thread.x;
-    uint2 chunk = lane_chunk(raster.region_width, lane);
     bool content_row = row >= raster.content_y && row < raster.content_y + raster.content_height;
-    // The content columns of this lane's chunk of the region row.
-    uint content_begin = clamp(chunk.x, raster.content_x, raster.content_x + raster.content_width);
-    uint content_end = clamp(chunk.y, raster.content_x, raster.content_x + raster.content_width);
-    int running = cover_before(content_row ? row - raster.content_y : 0,
-                               content_row ? content_begin - raster.content_x : 0,
-                               content_row ? content_end - raster.content_x : 0, lane);
+    uint content_end = raster.content_x + raster.content_width;
+    int carry = 0;
+    [loop] for (uint tile = 0; tile < raster.region_width; tile += 256) {
+        uint first = tile + lane * 4;
+        int2 cell[4];
+        int sum = 0;
+        [unroll] for (uint k = 0; k < 4; ++k) {
+            uint column = first + k;
+            cell[k] = int2(0, 0);
+            if (content_row && column >= raster.content_x && column < content_end)
+                cell[k] = take_cell(column - raster.content_x, row - raster.content_y);
+            sum += cell[k].x;
+        }
+        lane_cover[lane] = sum;
+        GroupMemoryBarrierWithGroupSync();
+        [unroll] for (uint offset = 1; offset < 64; offset <<= 1) {
+            int add = lane >= offset ? lane_cover[lane - offset] : 0;
+            GroupMemoryBarrierWithGroupSync();
+            lane_cover[lane] += add;
+            GroupMemoryBarrierWithGroupSync();
+        }
+        int running = carry + lane_cover[lane] - sum;
+        int total = lane_cover[63];
+        GroupMemoryBarrierWithGroupSync();
 #ifdef STRATA_VULKAN
-    uint packed = 0;
+        uint packed = 0;
 #endif
-    [loop] for (uint column = chunk.x; column < chunk.y; ++column) {
-        uint value = 0;
-        if (content_row && column >= raster.content_x &&
-            column < raster.content_x + raster.content_width) {
-            int2 cell = take_cell(column - raster.content_x, row - raster.content_y);
-            running += cell.x;
-            value = coverage_byte(resolved(running, cell.y));
-        }
+        [unroll] for (uint k = 0; k < 4; ++k) {
+            uint column = first + k;
+            uint value = 0;
+            if (content_row && column >= raster.content_x && column < content_end) {
+                running += cell[k].x;
+                value = coverage_byte(resolved(running, cell[k].y));
+            }
 #ifdef STRATA_VULKAN
-        packed |= value << ((column & 3) * 8);
-        if ((column & 3) == 3 || column + 1 == raster.region_width) {
-            output[row * raster.output_stride + column / 4] = packed;
-            packed = 0;
-        }
+            packed |= value << (k * 8);
 #else
-        output[uint2(raster.region_x + column, raster.region_y + row)] = float(value) / 255.0;
+            if (column < raster.region_width)
+                output[uint2(raster.region_x + column, raster.region_y + row)] = float(value) / 255.0;
 #endif
+        }
+#ifdef STRATA_VULKAN
+        if (first < raster.region_width)
+            output[raster.output_base + row * raster.output_stride + first / 4] = packed;
+#endif
+        carry += total;
     }
 }
 
@@ -630,7 +785,9 @@ uint layer_color(uint column, uint row) {
 
 [numthreads(64, 1, 1)]
 void resolve_composite(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
-    uint row = group.x;
+    uint row;
+    if (!enter(group.x, row))
+        return;
     uint2 chunk = lane_chunk(raster.content_width, thread.x);
     int running = cover_before(row, chunk.x, chunk.y, thread.x);
     [loop] for (uint column = chunk.x; column < chunk.y; ++column) {
@@ -640,7 +797,7 @@ void resolve_composite(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID
         if (covered == 0)
             continue;
         uint color = layer_color(column, row);
-        uint at = (row * raster.content_width + column) * 5;
+        uint at = raster.sum_base + (row * raster.content_width + column) * 5;
         uint red = sums[at];
         uint green = sums[at + 1];
         uint blue = sums[at + 2];
@@ -666,15 +823,16 @@ uint straight_channel(uint premultiplied, uint alpha) {
 
 [numthreads(64, 1, 1)]
 void finish(uint3 id : SV_DispatchThreadID) {
-    if (id.x >= raster.region_width * raster.region_height)
+    uint local;
+    if (!enter(id.x, local) || local >= raster.region_width * raster.region_height)
         return;
-    uint row = id.x / raster.region_width;
-    uint column = id.x - row * raster.region_width;
+    uint row = local / raster.region_width;
+    uint column = local - row * raster.region_width;
     uint texel = 0;
     if (row >= raster.content_y && row < raster.content_y + raster.content_height &&
         column >= raster.content_x && column < raster.content_x + raster.content_width) {
-        uint at = ((row - raster.content_y) * raster.content_width +
-                   (column - raster.content_x)) * 5;
+        uint at = raster.sum_base + ((row - raster.content_y) * raster.content_width +
+                                     (column - raster.content_x)) * 5;
         uint alpha = sums[at + 3];
         if (alpha > 0) {
             texel = straight_channel(sums[at], alpha) |
@@ -689,7 +847,7 @@ void finish(uint3 id : SV_DispatchThreadID) {
         sums[at + 4] = 0;
     }
 #ifdef STRATA_VULKAN
-    output[row * raster.output_stride + column] = texel;
+    output[raster.output_base + row * raster.output_stride + column] = texel;
 #else
     output[uint2(raster.region_x + column, raster.region_y + row)] =
         float4(texel & 0xFF, (texel >> 8) & 0xFF, (texel >> 16) & 0xFF, texel >> 24) / 255.0;
@@ -697,8 +855,11 @@ void finish(uint3 id : SV_DispatchThreadID) {
 }
 )hlsl";
 
-/** The art kernels, compiled once per program. */
-inline constexpr std::array<const char*, 2U> art_entries{"art_stroke", "art_fill"};
+/**
+ * An art program's one kernel, compiled once per program: its points, in content pixels, to
+ * art_positions, which art_stroke_points or art_fill_points then outline.
+ */
+inline constexpr const char* art_entry = "art_points";
 
 /**
  * Values an art kernel reads besides the job's constants, as floats: the time in seconds, the
@@ -709,8 +870,6 @@ inline constexpr std::size_t art_value_count = 24U;
 
 /** What an art program may call, ahead of its source. */
 constexpr std::string_view art_prelude = R"hlsl(
-BIND(6) StructuredBuffer<float> art_values : register(t3);
-
 /** Seconds since the renderer began presenting. */
 float artTime() { return art_values[raster.art_base + 0]; }
 /** One of the sixteen parameters the canvas was drawn with. */
@@ -727,48 +886,21 @@ float2 artCentred(float2 unit, float reach) {
 }
 )hlsl";
 
-/** The art entry points, after the program, which defines artPoint(index, count). */
+/** The art entry point, after the program, which defines artPoint(index, count). */
 constexpr std::string_view art_kernels = R"hlsl(
 float2 art_position(uint index, uint count) {
     float2 position = artPoint(index, count);
     return float2(art_values[raster.art_base + 3], art_values[raster.art_base + 4]) + position * float2(art_values[raster.art_base + 5], art_values[raster.art_base + 6]);
 }
 
-bool art_finite(float2 value) {
-    return all(abs(value) <= 1.0e6);
-}
-
 [numthreads(64, 1, 1)]
-// A dispatch takes `piece_count` segments from `first_piece` on, stroke_parts threads each.
-void art_stroke(uint3 id : SV_DispatchThreadID) {
+void art_points(uint3 id : SV_DispatchThreadID) {
+    uint local;
+    if (!enter(id.x, local))
+        return;
     uint count = uint(art_values[raster.art_base + 1]);
-    bool closed = art_values[raster.art_base + 2] > 0.5;
-    uint segments = closed ? count : count - 1;
-    uint segment = raster.first_piece + id.x / stroke_parts;
-    if (id.x / stroke_parts >= raster.piece_count || segment >= segments)
-        return;
-    bool joined = closed || segment + 2 < count;
-    StrokePiece piece;
-    piece.p0 = art_position(segment, count);
-    piece.p1 = art_position((segment + 1) % count, count);
-    piece.p2 = joined ? art_position((segment + 2) % count, count) : piece.p1;
-    piece.flags = (joined ? 1 : 0) | (!closed && segment == 0 ? 2 : 0) |
-                  (!closed && segment + 1 == segments ? 4 : 0);
-    piece.reserved = 0;
-    if (!art_finite(piece.p0) || !art_finite(piece.p1) || !art_finite(piece.p2))
-        return;
-    stroke_piece(piece, id.x % stroke_parts);
-}
-
-[numthreads(64, 1, 1)]
-void art_fill(uint3 id : SV_DispatchThreadID) {
-    uint count = uint(art_values[raster.art_base + 1]);
-    if (id.x >= count)
-        return;
-    float2 a = art_position(id.x, count);
-    float2 b = art_position((id.x + 1) % count, count);
-    if (art_finite(a) && art_finite(b))
-        edge(a, b, 1);
+    if (local < count)
+        art_positions[raster.points_base + local] = art_position(local, count);
 }
 )hlsl";
 

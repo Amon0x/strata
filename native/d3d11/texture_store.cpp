@@ -132,19 +132,24 @@ struct TextureStore::Impl final {
     }
 
     void run_live(const double seconds) {
+        // Every live job of the frame in one batch.
+        live_batch.clear();
         for (LiveJob& job : live) {
             if (job.seconds == seconds)
                 continue;
             const auto found = textures.find(job.operation.texture);
             if (found == textures.end() || found->second.writer == nullptr)
                 continue;
-            if (raster == nullptr)
-                raster = std::make_unique<RasterPass>(device.Get(), context.Get());
-            raster->run(job.operation.raster, job.operation.format == 1U,
-                        found->second.writer.Get(), job.operation.x, job.operation.y,
-                        job.operation.width, job.operation.height, seconds);
+            live_batch.push_back(RasterPass::Target{
+                &job.operation.raster, job.operation.format == 1U, found->second.writer.Get(),
+                job.operation.x, job.operation.y, job.operation.width, job.operation.height});
             job.seconds = seconds;
         }
+        if (live_batch.empty())
+            return;
+        if (raster == nullptr)
+            raster = std::make_unique<RasterPass>(device.Get(), context.Get());
+        raster->run(live_batch, seconds);
     }
 
     void apply(const ResourceOperation& operation) {
@@ -229,6 +234,7 @@ struct TextureStore::Impl final {
         double seconds = 0.0;
     };
     std::vector<LiveJob> live;
+    std::vector<RasterPass::Target> live_batch;
 };
 
 TextureStore::TextureStore(ID3D11Device* const device, ID3D11DeviceContext* const context)

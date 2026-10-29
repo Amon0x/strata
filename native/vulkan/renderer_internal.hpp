@@ -196,20 +196,19 @@ struct Renderer::Impl {
      */
     VkDescriptorSetLayout raster_descriptors{};
     VkPipelineLayout raster_layout{};
-    std::array<VkPipeline, 5U> raster_pipelines{};
+    std::array<VkPipeline, 7U> raster_pipelines{};
     /** GPU-only work buffers the kernels leave zeroed, and the region they write. */
     std::unique_ptr<Buffer> raster_cells, raster_sums, raster_output;
+    /** The points of the art layer being drawn, its program's output. */
+    std::unique_ptr<Buffer> raster_points;
     /**
-     * Art programs by source hash, a kernel each for stroke and fill: SPIR-V compiling in the
-     * background once a layer needs it, then its pipeline.
+     * Art programs by source hash: SPIR-V compiling in the background once a layer needs it,
+     * then its pipeline, which writes the layer's points.
      */
-    struct ArtKernel {
+    struct ArtProgram {
         std::shared_future<std::vector<std::uint32_t>> code;
         VkPipeline pipeline = VK_NULL_HANDLE;
         bool failed = false;
-    };
-    struct ArtProgram {
-        std::array<ArtKernel, 2U> kernels;
     };
     std::map<std::size_t, ArtProgram> art_programs;
     /** Art jobs, run again each frame; `seconds` is the frame time each last ran at. */
@@ -251,8 +250,15 @@ struct Renderer::Impl {
     void resources(const host::RenderPacket& packet);
     /** Rasterizes a raster operation's job into its region of `image` (vulkan/raster.cpp). */
     void rasterize(const host::ResourceOperation& operation, Image& image, double time = 0.0);
+    /** A raster job and the atlas it fills, one of a batch. */
+    struct RasterWork {
+        const host::ResourceOperation* operation = nullptr;
+        Image* image = nullptr;
+    };
+    /** Rasterizes every job of `batch` at once: each kernel once for all of them. */
+    void rasterize(std::span<const RasterWork> batch, double time);
     /** An art layer's pipelines when they are ready, or null while compiling or when it failed. */
-    VkPipeline art_kernel(const std::string& source, bool stroked);
+    VkPipeline art_kernel(const std::string& source);
     /** Runs every live art job at this frame's time. */
     void run_live_art();
     /** Drops the live art jobs a write over (part of) a texture replaces. */
